@@ -2384,7 +2384,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // `dedup_pin_variant_do_heads` / #qdedupsync+#pushpinaccum,
     // `dedup_free_text_heads` / #qauthorder+#rt83qflood). It keys every
     // prompt-bearing entry by its durable head identity
-    // (`queue_item_state_machine::QueueItemIdentity`) and drives each identity's
+    // (`agent_doc_element_queue::QueueItemIdentity`) and drives each identity's
     // per-item lifecycle SM to its lawful state: re-injecting an identity that
     // already has a lawful representative is a no-op transition, so a
     // stale-CRDT / supervisor re-emit cannot leave a visible duplicate —

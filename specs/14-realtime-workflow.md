@@ -104,8 +104,10 @@ long-term owner of `🚧` semantics.
 | Operator edit | Realtime queue effect | Current turn effect |
 |---|---|---|
 | Edit, insert, delete, or reorder a non-selected queue head | Update the in-memory queue projection and backup/audit state. | Does not change the active turn when the selected head identity is unchanged. |
+| Insert a new queue prompt before the selected head | Preserve the inserted prompt as future queue state unless the same source epoch explicitly retargets the active head. | Does not consume or replace the current turn target; closeout consumes the selected/snapshot head if it still exists, otherwise it no-ops/fails closed. |
 | Edit the selected queue head | Update the queue projection. | Affects the active turn. If the buffer is still being edited, wait/pause; once settled, adopt the edited head as active input. |
 | Edit a non-selected head so auto-DAG/priority recomputation changes the selected head | Recompute and persist the new queue projection. | Affects the active turn because the selected head changed. |
+| Backlog-to-queue sync runs | Recompute id-backed mirror entries and preserve no-id manual queue entries. | Affects the active turn only if the selected head identity changes. Sync must not delete free-text operator queue lines. |
 | Edit backlog/icebox/pending dependency metadata used by auto-DAG | Recompute dependency order from the latest source. | Affects the active turn when the selected head changes; otherwise it updates future queue state only. |
 | Active HEAD set changes for any reason | Move the `🚧` projection to the active HEAD set in the visible document and backup/audit projection. | Affects a turn only when that turn's active HEAD identity changed or other active-turn input changed. |
 | Edit `agent:exchange` | Preserve and merge the exchange update. | Always affects the active turn. Exchange edits are never hidden as future queue-only state, even when the same source epoch also changes non-selected queue heads. |

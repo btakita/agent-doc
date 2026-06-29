@@ -17,9 +17,15 @@ test-support = []
 
 [dependencies]
 agent-doc-core = { path = "../agent-doc-core", version = "0.34.65" }
+agent-doc-controller = { path = "../agent-doc-controller", version = "0.34.65" }
 agent-doc-document = { path = "../agent-doc-document", version = "0.34.65" }
+agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.34.65" }
+agent-doc-element-queue = { path = "../agent-doc-element-queue", version = "0.34.65" }
 agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.65" }
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.65" }
 agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.34.65" }
+agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.34.65" }
+agent-doc-supervisor-process = { path = "../agent-doc-supervisor-process", version = "0.34.65" }
 agent-doc-tmux = { path = "../agent-doc-tmux", version = "0.34.65" }
 agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.34.65" }
 agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.34.65" }

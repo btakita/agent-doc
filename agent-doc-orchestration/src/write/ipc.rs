@@ -319,6 +319,7 @@ pub(crate) fn poll_ack_content_sidecar(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn content_ours_with_pending_from_disk(file: &Path, content_ours: &str) -> String {
     match std::fs::read_to_string(file) {
         Ok(on_disk_content) => splice_pending_component(content_ours, &on_disk_content),
@@ -333,6 +334,7 @@ pub(crate) fn content_ours_with_pending_from_disk(file: &Path, content_ours: &st
     }
 }
 
+#[cfg(test)]
 pub(crate) fn content_ours_merged_with_disk_edits(
     file: &Path,
     baseline: Option<&str>,
@@ -388,6 +390,7 @@ pub(crate) fn content_ours_merged_with_disk_edits(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn normalized_content_ours_fallback(
     file: &Path,
     baseline: Option<&str>,
@@ -517,19 +520,46 @@ impl IpcRepairDecision {
         }
     }
 
-    pub(crate) fn content_ours_prefix_fallback(
+    fn prefix_repair(
         snapshot_content: String,
         bad_state: String,
         normalize_prefix_lines: &[String],
+        snap_source: IpcSnapshotSource,
     ) -> Self {
         Self {
             snapshot_content,
-            snap_source: IpcSnapshotSource::ContentOurs,
+            snap_source,
             disk_repair_reason: Some(IpcDiskRepairReason::PrefixDivergence),
             editor_bad_state: Some(EditorBadStateFingerprint::new(bad_state)),
             normalize_prefix_lines: normalize_prefix_lines.to_vec(),
             redeliver_editor: true,
         }
+    }
+
+    pub(crate) fn ack_content_prefix_repair(
+        snapshot_content: String,
+        bad_state: String,
+        normalize_prefix_lines: &[String],
+    ) -> Self {
+        Self::prefix_repair(
+            snapshot_content,
+            bad_state,
+            normalize_prefix_lines,
+            IpcSnapshotSource::AckContentSidecar,
+        )
+    }
+
+    pub(crate) fn file_read_prefix_repair(
+        snapshot_content: String,
+        bad_state: String,
+        normalize_prefix_lines: &[String],
+    ) -> Self {
+        Self::prefix_repair(
+            snapshot_content,
+            bad_state,
+            normalize_prefix_lines,
+            IpcSnapshotSource::FileRead,
+        )
     }
 
     pub(crate) fn file_read(snapshot_content: String) -> Self {
@@ -1421,7 +1451,7 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
                     lines,
                 );
                 if normalized != repair_decision.snapshot_content {
-                    repair_decision = IpcRepairDecision::content_ours_prefix_fallback(
+                    repair_decision = IpcRepairDecision::file_read_prefix_repair(
                         normalized,
                         current.to_string(),
                         lines,
@@ -1553,44 +1583,48 @@ pub(crate) fn ipc_repair_decision_from_sidecar(
     patch_id: Option<&str>,
     baseline: Option<&str>,
     snap_content: String,
-    content_ours: Option<&str>,
+    _content_ours: Option<&str>,
     normalize_prefix_lines: Option<&[String]>,
 ) -> IpcRepairDecision {
     if let Some(lines) = normalize_prefix_lines
         && !lines.is_empty()
         && !verify_sidecar_normalization(&snap_content, lines)
     {
-        if let Some(ours) = content_ours {
-            let bad_state = snap_content;
-            let fallback = normalized_content_ours_fallback(file, baseline, ours, lines);
-            let (required_prefix_count, observed_prefix_count) =
-                normalization_prefix_observation_counts(&bad_state, lines);
-            let duplicate_prompt_count = duplicate_prompt_line_count(&bad_state);
-            eprintln!(
-                "[write] sidecar normalization diverged — falling back to content_ours ({} bytes)",
-                fallback.len()
-            );
-            crate::ops_log::log_op(
-                file,
-                &format!(
-                    "sidecar_normalization_fallback file={} patch_id={} snap_source=content_ours reason=prefix_divergence bad_len={} bad_hash={} fallback_len={} fallback_hash={} required_prefix_count={} observed_prefix_count={} duplicate_prompt_count={}",
-                    file.display(),
-                    patch_id.unwrap_or("-"),
-                    bad_state.len(),
-                    crate::ops_log::content_hash(&bad_state),
-                    fallback.len(),
-                    crate::ops_log::content_hash(&fallback),
-                    required_prefix_count,
-                    observed_prefix_count,
-                    duplicate_prompt_count
-                ),
-            );
-            return IpcRepairDecision::content_ours_prefix_fallback(fallback, bad_state, lines);
-        }
-
+        let bad_state = snap_content;
+        let normalized = normalize_exchange_prefixes_for_targets(&bad_state, lines);
+        let repaired = repair_duplicate_prompt_artifacts(
+            &normalized,
+            file,
+            DuplicatePromptRepairOptions::new("normalization_sidecar_retry")
+                .with_before(baseline)
+                .preserving(baseline)
+                .without_residue_guard(),
+        )
+        .map(|(repaired, _)| repaired)
+        .unwrap_or(normalized);
+        let (required_prefix_count, observed_prefix_count) =
+            normalization_prefix_observation_counts(&bad_state, lines);
+        let duplicate_prompt_count = duplicate_prompt_line_count(&bad_state);
         eprintln!(
-            "[write] sidecar normalization diverged but no content_ours available — using sidecar"
+            "[write] sidecar normalization diverged — retrying from ACK sidecar ({} bytes)",
+            repaired.len()
         );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "sidecar_normalization_fallback file={} patch_id={} snap_source=ack_content_sidecar reason=prefix_divergence bad_len={} bad_hash={} fallback_len={} fallback_hash={} required_prefix_count={} observed_prefix_count={} duplicate_prompt_count={}",
+                file.display(),
+                patch_id.unwrap_or("-"),
+                bad_state.len(),
+                crate::ops_log::content_hash(&bad_state),
+                repaired.len(),
+                crate::ops_log::content_hash(&repaired),
+                required_prefix_count,
+                observed_prefix_count,
+                duplicate_prompt_count
+            ),
+        );
+        return IpcRepairDecision::ack_content_prefix_repair(repaired, bad_state, lines);
     }
 
     IpcRepairDecision::ack_content(snap_content)
@@ -3262,11 +3296,12 @@ mod ack_content_snapshot_tests {
     }
 
     #[test]
-    fn normalization_fallback_uses_content_ours_when_sidecar_missing_prefix() {
+    fn normalization_fallback_fails_closed_when_sidecar_missing_prefix_without_editor_proof() {
         // When the sidecar is missing a ❯ prefix expected by normalize_prefix_lines,
-        // try_ipc must fall back to content_ours for the snapshot (#jbpfx2).
+        // try_ipc must not fall back to content_ours for the snapshot (#jbpfx2).
         // Simulates the IntelliJ exact-match failure: plugin wrote sidecar without
-        // the ❯ prefix, so content_ours (binary's authoritative state) is used.
+        // the ❯ prefix. The repaired candidate is derived from the ACK sidecar and
+        // must be proven in the editor before closeout can persist it.
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
@@ -3280,7 +3315,7 @@ mod ack_content_snapshot_tests {
 
         let patch = crate::template::PatchBlock::new("exchange", "agent response");
 
-        // content_ours has the ❯ prefix — binary's authoritative state
+        // content_ours has the ❯ prefix, but it is only an agent-owned candidate.
         let content_ours = "---\nsession: test\n---\n\n<!-- agent:exchange -->\n❯ do #jbpfx2\nagent response\n<!-- /agent:exchange -->\n";
         let normalize_prefix_lines = vec!["do #jbpfx2".to_string()];
 
@@ -3345,10 +3380,57 @@ mod ack_content_snapshot_tests {
     }
 
     #[test]
-    fn normalization_fallback_repairs_bare_content_ours_prompt_prefix() {
+    fn normalization_divergence_repair_decision_keeps_ack_sidecar_authoritative() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        std::fs::write(&doc, "disk state\n").unwrap();
+        let sidecar = "\
+<!-- agent:exchange patch=append -->
+do #sidecar
+operator sidecar text
+<!-- /agent:exchange -->
+";
+        let content_ours = "\
+<!-- agent:exchange patch=append -->
+❯ do #sidecar
+agent-owned response
+<!-- /agent:exchange -->
+";
+        let lines = vec!["do #sidecar".to_string()];
+
+        let decision = ipc_repair_decision_from_sidecar(
+            &doc,
+            Some("patch-1"),
+            None,
+            sidecar.to_string(),
+            Some(content_ours),
+            Some(lines.as_slice()),
+        );
+
+        assert_eq!(decision.snap_source, IpcSnapshotSource::AckContentSidecar);
+        assert_eq!(
+            decision.disk_repair_reason,
+            Some(IpcDiskRepairReason::PrefixDivergence)
+        );
+        assert!(
+            decision.snapshot_content.contains("❯ do #sidecar"),
+            "normalization retry may add the missing prefix to the ACK sidecar"
+        );
+        assert!(
+            decision.snapshot_content.contains("operator sidecar text"),
+            "operator-visible sidecar text must be preserved"
+        );
+        assert!(
+            !decision.snapshot_content.contains("agent-owned response"),
+            "normalization retry must not adopt content_ours as repair authority"
+        );
+    }
+
+    #[test]
+    fn normalization_fallback_retries_missing_prompt_prefix_from_ack_sidecar() {
         // Regression for #bppfxstrip: if sidecar verification rejects the plugin
-        // snapshot, the content_ours fallback must still apply normalize_prefix_lines
-        // before saving the snapshot.
+        // snapshot, normalization retry may add normalize_prefix_lines only to the
+        // ACK sidecar candidate and must fail closed without editor proof.
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
@@ -4320,7 +4402,7 @@ agent response
     }
 
     #[test]
-    fn normalization_fallback_preserves_concurrent_comment_deletion() {
+    fn normalization_sidecar_retry_preserves_concurrent_comment_deletion() {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
@@ -4398,7 +4480,7 @@ agent response
             }
         });
 
-        let err = try_ipc(
+        let result = try_ipc(
             &doc,
             &[patch],
             "",
@@ -4408,24 +4490,34 @@ agent response
             Some(normalize_prefix_lines.as_slice()),
             None,
         )
-        .unwrap_err();
-        assert!(
-            err.to_string().contains("refusing direct document write"),
-            "normalization fallback must fail closed instead of repairing disk: {err}"
-        );
+        .unwrap();
+        assert!(result.success);
 
         let disk = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            disk.contains("do #commentdel") && !disk.contains("❯ do #commentdel"),
-            "unproven normalization fallback must not repair the prompt prefix on disk: {disk}"
+            disk.contains("do #commentdel"),
+            "ACK-sidecar-derived retry should preserve the sidecar prompt text: {disk}"
+        );
+        assert!(
+            disk.contains("agent response"),
+            "agent response from the ACK sidecar should be preserved: {disk}"
         );
         assert!(
             !disk.contains("The tmux focus should be snappy."),
-            "editor-visible deletion from the sidecar should remain untouched: {disk}"
+            "operator-visible deletion from the sidecar must not be resurrected from content_ours: {disk}"
         );
+        let snapshot = snapshot::load(&doc)
+            .unwrap()
+            .expect("snapshot should be saved");
         assert!(
-            snapshot::load(&doc).unwrap().is_none(),
-            "unproven normalization fallback must not save a snapshot"
+            !snapshot.contains("The tmux focus should be snappy."),
+            "snapshot must not resurrect content_ours-only comment text: {snapshot}"
+        );
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("snap_source=ack_content_sidecar")
+                && !ops_log.contains("snap_source=content_ours"),
+            "normalization retry must not promote content_ours as snapshot authority:\n{ops_log}"
         );
     }
 
@@ -5318,11 +5410,12 @@ mod core_tests {
         );
     }
     #[test]
-    fn try_editor_converge_skips_wedged_socket_when_latched_degraded() {
+    fn try_editor_converge_skips_wedged_socket_then_uses_detached_disk_when_editorless() {
         // `#fcc0e`: once the de-wedge latch trips degraded (repeated socket ack
         // timeouts) and no live listener can be re-probed, the converger must skip
-        // the wedged socket, try the plugin-owned file-IPC queue, then fail closed
-        // when no file watcher is present. It must not raw-write the document.
+        // the wedged socket, try the plugin-owned file-IPC queue, then use the
+        // guarded detached-disk path when no live editor sidecar owns the document.
+        // It must not take the old raw disk-fallback bypass.
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
@@ -5342,23 +5435,25 @@ mod core_tests {
             "two distinct ack timeouts must trip the degraded latch"
         );
 
-        let err = try_editor_converge(&doc, &target, &source, "queue_consume").unwrap_err();
-        assert!(
-            err.to_string().contains("refused direct disk write"),
-            "a latched-degraded session without file IPC must fail closed: {err}"
+        let written = try_editor_converge(&doc, &target, &source, "queue_consume").unwrap();
+        assert!(written, "editorless degraded socket should converge");
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            target,
+            "editorless degraded socket should write through guarded detached disk"
         );
 
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
             log.contains("ipc_socket_degraded_prefer_file_ipc")
                 && log.contains("transport=queue_consume"),
-            "the degraded skip must prefer file IPC before failing:\n{log}"
+            "the degraded skip must prefer file IPC before detached disk:\n{log}"
         );
         assert!(
             log.contains("queue_consume_writeback")
-                && log.contains("degraded_cause=listener_degraded_no_file_ipc")
-                && log.contains("action=refuse_external_disk_write"),
-            "the degraded skip must be source-labelled in ops.log:\n{log}"
+                && log.contains("transport=disk_detached")
+                && log.contains("reason=listener_degraded_editor_detached"),
+            "the degraded editorless write must be source-labelled as detached disk:\n{log}"
         );
         assert!(
             !log.contains("transport=disk_fallback"),

@@ -38,7 +38,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::merge_control_state_machine::{
-    MergeOwnershipEvent, MergeOwnershipPhase, OwnershipLiveness, ownership_probe,
+    MergeOwnershipEvent, MergeOwnershipPhase, OwnershipLiveness, ownership_liveness_for_file,
+    ownership_probe,
 };
 use crate::state_backbone::{DocumentStateProjection, EventLedger, TransportPatchPhase};
 
@@ -151,11 +152,11 @@ pub fn authority_from_liveness(liveness: &OwnershipLiveness) -> CrdtAuthority {
 
 /// Read the live editor-attachment facts for a document from its plugin-owner
 /// lease sidecar and resolve the CRDT authority. This is the write-path entry
-/// point, mirroring [`OwnershipLiveness::for_file`]: authority is observed fresh
+/// point, mirroring [`ownership_liveness_for_file`]: authority is observed fresh
 /// (no persistent authority phase is stored in this rung — it derives from the
 /// existing facts on demand).
 pub fn authority_for_file(file: &str) -> CrdtAuthority {
-    authority_from_liveness(&OwnershipLiveness::for_file(file))
+    authority_from_liveness(&ownership_liveness_for_file(file))
 }
 
 /// Derive the CRDT authority for a single document from a backbone projection,

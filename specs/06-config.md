@@ -145,7 +145,11 @@ CRDT sidecar state is versioned. The legacy merge engine state lives at `.agent-
 
 **Consistency invariants:**
 - After preflight step 2b: `baseline == snapshot` (minus boundary markers)
-- After `agent-doc write`: `snapshot == baseline + response` (content_ours)
+- After `agent-doc write`: `snapshot` reflects the verified post-apply
+  source-of-truth document. When no operator drift occurred, that may equal the
+  agent-owned `baseline + response` candidate; when operator-visible text
+  changed, the verified state must preserve that operator text or the write
+  fails closed.
 - After `agent-doc commit`: git HEAD and the on-disk snapshot converge to the same clean boundary shape (no `(HEAD)` markers). The working tree and editor buffer preserve `(HEAD)` annotations on response headings
 - The editor buffer may diverge from all three persistent states (unsaved user edits)
 

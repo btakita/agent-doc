@@ -15,9 +15,13 @@ members = [
     "agent-doc-element-unknown",
     "agent-doc-sqlite",
     "agent-doc-document",
+    "agent-doc-document-realtime",
     "agent-doc-turn",
     "agent-doc-turn-executor",
     "agent-doc-turn-executor-tmux",
+    "agent-doc-supervisor",
+    "agent-doc-supervisor-process",
+    "agent-doc-controller",
     "agent-doc-tmux",
     "agent-doc-tmux-commands",
     "agent-doc-tmux-io",
@@ -89,6 +93,7 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_
 [dev-dependencies]
 # Enable orchestration's in-process controller test short-circuits for the CLI
 # shell's own tests (project_controller moved to orchestration in #bz6s).
+agent-doc-element-queue = { path = "agent-doc-element-queue", version = "0.34.65" }
 agent-doc-orchestration = { path = "agent-doc-orchestration", version = "0.34.65", features = ["test-support"] }
 assert_cmd = "2"
 existence = "0.4"

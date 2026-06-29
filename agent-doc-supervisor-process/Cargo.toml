@@ -1,0 +1,15 @@
+[package]
+name = "agent-doc-supervisor-process"
+version = "0.34.65"
+edition = "2024"
+description = "Supervisor process effect boundary for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_supervisor_process"
+
+[dependencies]
+agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.34.65" }
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }

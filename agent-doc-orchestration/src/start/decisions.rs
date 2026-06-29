@@ -12,469 +12,38 @@
 //! idle-queue watch uses (`#clearcontresume` recycle + clear pipeline
 //! simulation), rather than reimplementing the policy in the test harness.
 
-/// Consecutive idle-prompt polls a cleared pane must show a fresh harness prompt
-/// before a lingering manual clear cooldown auto-expires and the active go-mode
-/// queue drain resumes (`#clearcontresume`). At `AUTO_TRIGGER_POLL_INTERVAL`
-/// (500ms) this is ~2s of proven idle pane after the `/clear`, so a resumed drain
-/// never injects into an in-flight clear.
-pub const CLEAR_COOLDOWN_RESUME_IDLE_TICKS: u32 = 4;
-
-/// Decision for the supervisor idle-queue watch
-/// (`#jb-run-agent-doc-busy-queue-dispatch-deadlock`).
-///
-/// When a busy-pane `Run Agent Doc` route enqueues a prompt into `agent:queue
-/// auto` and returns `Ok`, the drain is harness-delegated. A Claude session not
-/// actively running `/loop` has no guaranteed idle-drain trigger, so the queued
-/// head can sit forever (the operator-perceived "deadlock"). The supervisor
-/// already watches the owned pane for an idle harness prompt for the one-shot
-/// restart auto-trigger; this watch reuses that idle signal to drain a live
-/// active-queue head on the busy→idle transition.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IdleQueueDrainDecision {
-    /// Inject the harness-specific drain payload so the next cycle drains the
-    /// active queue head.
-    Dispatch,
-    /// A recent explicit session clear suppresses passive queue dispatch until
-    /// the cooldown expires or an explicit route invocation clears the marker.
-    SkipClearCooldown,
-    /// The pane is still busy on an active turn — never inject (no-inject-into-active-turn).
-    SkipNotIdle,
-    /// The harness Stop/idle hook has not ended the owning pane's turn yet.
-    SkipTurnActive,
-    /// No active `queue_active: true` head remains to drain.
-    SkipNoActiveHead,
-    /// A live editor reports recent typing for this document; the supervisor
-    /// must not read/submit a half-edited queue head.
-    SkipEditorTyping,
-    /// This exact head was already dispatched and has not advanced/drained yet —
-    /// suppress re-firing so a stuck head cannot spin the watch into a hot loop.
-    SkipAlreadyDispatched,
-    /// A manual/editor route command is already submitting into the owned pane.
-    /// Do not add a supervisor reset or drain command until that submit finishes.
-    SkipRouteSubmitInFlight,
-    /// A self-driving harness loop (Claude Code `/loop`) holds a fresh
-    /// drain-owner lease and owns this drain. The supervisor defers so the two
-    /// owners do not both inject `agent-doc <FILE>` into the live input queue
-    /// (#kp5z / #qflood).
-    SkipSelfDrivingLoopOwner,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum IdleQueueContextResetDecision {
-    Reset,
-    SkipNoActiveHead,
-    SkipNotIdle,
-    SkipTurnActive,
-    SkipEditorTyping,
-    SkipRouteSubmitInFlight,
-    SkipAlreadyResetHead,
-    SkipNoResetNeeded,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum IdleQueueContextClearInFlightDecision {
-    Ignore,
-    WaitForIdle,
-    ResubmitPendingClear,
-    WaitForPendingClear,
-    AwaitSettle,
-    Settled,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct IdleQueueContextClearInFlightFacts {
-    pub marker_active: bool,
-    pub prompt_visible: bool,
-    pub turn_active: bool,
-    pub route_submit_in_flight: bool,
-    pub clear_already_pending: Option<bool>,
-    pub already_resubmitted: bool,
-    pub settled_idle_ticks: u32,
-    pub settle_threshold: u32,
-}
-
-/// `#cleandrainsup`: whether the supervisor idle-watch must force a context
-/// `/clear` before dispatching the active queue head because it is a
-/// `[clean-session]` item. A `[clean-session]` tag is an explicit per-item request
-/// for a fresh agent context, so it warrants a `/clear` independent of the global
-/// `agent_doc_queue_context_reset` opt-in (which only governs accretion-driven
-/// pre-emptive clears). It is still suppressed during a clear cooldown so it never
-/// clears into an in-flight `/clear`. Pure so the policy is unit-testable without a
-/// live pane.
-pub(crate) fn clean_session_head_forces_context_reset(
-    active_head_is_clean_session: bool,
-    clear_cooldown_active: bool,
-) -> bool {
-    active_head_is_clean_session && !clear_cooldown_active
-}
-
-pub(crate) fn idle_queue_context_reset_decision(
-    prompt_visible: bool,
-    turn_active: bool,
-    route_submit_in_flight: bool,
-    active_head: Option<&str>,
-    last_context_reset_head: Option<&str>,
-    reset_required: bool,
-) -> IdleQueueContextResetDecision {
-    let Some(head) = active_head else {
-        return IdleQueueContextResetDecision::SkipNoActiveHead;
-    };
-    if !prompt_visible {
-        return IdleQueueContextResetDecision::SkipNotIdle;
-    }
-    if turn_active {
-        return IdleQueueContextResetDecision::SkipTurnActive;
-    }
-    if route_submit_in_flight {
-        return IdleQueueContextResetDecision::SkipRouteSubmitInFlight;
-    }
-    if last_context_reset_head == Some(head) {
-        return IdleQueueContextResetDecision::SkipAlreadyResetHead;
-    }
-    if reset_required {
-        IdleQueueContextResetDecision::Reset
-    } else {
-        IdleQueueContextResetDecision::SkipNoResetNeeded
-    }
-}
-
-pub(crate) fn idle_queue_context_reset_decision_with_editor_typing(
-    prompt_visible: bool,
-    turn_active: bool,
-    route_submit_in_flight: bool,
-    editor_typing_active: bool,
-    active_head: Option<&str>,
-    last_context_reset_head: Option<&str>,
-    reset_required: bool,
-) -> IdleQueueContextResetDecision {
-    if active_head.is_some() && editor_typing_active {
-        return IdleQueueContextResetDecision::SkipEditorTyping;
-    }
-    idle_queue_context_reset_decision(
-        prompt_visible,
-        turn_active,
-        route_submit_in_flight,
-        active_head,
-        last_context_reset_head,
-        reset_required,
-    )
-}
-
-/// Pure idle-queue drain decision. Kept side-effect free so the busy→idle drain
-/// state machine is deterministically testable without a live pane.
-///
-/// `prompt_visible` is the supervisor's idle signal (a dispatch-ready harness
-/// prompt is on screen). `active_head` is the live `queue_active: true` ready
-/// head (`queue_continuation::live_continuation_head`), and `last_dispatched`
-/// is the head this watch last injected a trigger for.
-pub fn idle_queue_drain_decision(
-    clear_cooldown_active: bool,
-    prompt_visible: bool,
-    turn_active: bool,
-    self_driving_loop_active: bool,
-    route_submit_in_flight: bool,
-    active_head: Option<&str>,
-    last_dispatched: Option<&str>,
-) -> IdleQueueDrainDecision {
-    if clear_cooldown_active {
-        return IdleQueueDrainDecision::SkipClearCooldown;
-    }
-    match active_head {
-        // No active head: nothing to drain. The caller clears `last_dispatched`
-        // so a future re-enqueue of the same prompt text fires again.
-        None => IdleQueueDrainDecision::SkipNoActiveHead,
-        // Never inject while the pane is mid-turn — that is the
-        // no-inject-into-active-turn invariant the route busy path enforces.
-        Some(_) if !prompt_visible => IdleQueueDrainDecision::SkipNotIdle,
-        // The renderer can briefly show an idle-looking prompt before the
-        // harness Stop/idle hook has completed the whole turn.
-        Some(_) if turn_active => IdleQueueDrainDecision::SkipTurnActive,
-        // A route command already owns this pane input window. Reset/drain would
-        // otherwise concatenate after its `agent-doc <FILE>` reopen.
-        Some(_) if route_submit_in_flight => IdleQueueDrainDecision::SkipRouteSubmitInFlight,
-        // A self-driving harness loop owns this drain (fresh drain-owner lease):
-        // defer so the supervisor and `/loop` do not both inject the next
-        // `agent-doc <FILE>` trigger and flood the live input queue.
-        Some(_) if self_driving_loop_active => IdleQueueDrainDecision::SkipSelfDrivingLoopOwner,
-        // Dedup against the head we already fired for. A head that is still
-        // present after we dispatched (dispatch failed, or the cycle has not
-        // consumed it yet) must not be re-fired every idle tick.
-        Some(head) if last_dispatched == Some(head) => {
-            IdleQueueDrainDecision::SkipAlreadyDispatched
-        }
-        Some(_) => IdleQueueDrainDecision::Dispatch,
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct IdleQueueDrainDecisionFacts<'a> {
-    pub clear_cooldown_active: bool,
-    pub prompt_visible: bool,
-    pub turn_active: bool,
-    pub self_driving_loop_active: bool,
-    pub route_submit_in_flight: bool,
-    pub editor_typing_active: bool,
-    pub active_head: Option<&'a str>,
-    pub last_dispatched: Option<&'a str>,
-}
-
-pub fn idle_queue_drain_decision_with_editor_typing(
-    facts: IdleQueueDrainDecisionFacts<'_>,
-) -> IdleQueueDrainDecision {
-    if !facts.clear_cooldown_active && facts.active_head.is_some() && facts.editor_typing_active {
-        return IdleQueueDrainDecision::SkipEditorTyping;
-    }
-    idle_queue_drain_decision(
-        facts.clear_cooldown_active,
-        facts.prompt_visible,
-        facts.turn_active,
-        facts.self_driving_loop_active,
-        facts.route_submit_in_flight,
-        facts.active_head,
-        facts.last_dispatched,
-    )
-}
-
-/// Whether a lingering *manual* clear cooldown should be auto-expired so an
-/// active go-mode queue drain resumes (`#clearcontresume`).
-///
-/// The clear cooldown (`queue_continuation::write_clear_cooldown`) is written
-/// after an operator `session clear` / JB `Clear Exchange` / a delivered
-/// deferred clear. Historically it suppressed passive queue dispatch
-/// **indefinitely** — `idle_queue_drain_decision` returns `SkipClearCooldown`
-/// until an explicit `route::run` ("Run Agent Doc") or a deferred-clear
-/// delivery drops the marker. That stalls an active go-mode drain: after a
-/// recycle + clear the operator had to manually restart the queue.
-///
-/// The cooldown's only real job is to avoid dispatching a trigger *into* an
-/// in-flight `/clear` before the pane settles. Once the cleared pane has shown
-/// a fresh idle harness prompt for `resume_threshold` consecutive polls (the
-/// same debounce idea as `STALE_BUSY_RECONCILE_TICKS`), AND there is an active
-/// `queue_active: true` head to drain, AND no operator-deferred clear is still
-/// pending delivery (that path owns its own resume), the marker has served its
-/// purpose. The recycle + clear is then a continuation *step*, not a stop.
-///
-/// Pure so the policy is unit-testable without a live pane. The caller drops
-/// the cooldown marker and lets the next tick dispatch the head normally when
-/// this returns `true`. When there is no active head (a plain operator clear
-/// with no queue), this returns `false` so the cooldown stays
-/// authoritative-until-operator-route, preserving the non-go behavior.
-pub fn clear_cooldown_resume_ready(
-    clear_cooldown_active: bool,
-    has_active_head: bool,
-    prompt_visible: bool,
-    turn_active: bool,
-    deferred_operator_clear_pending: bool,
-    settled_idle_ticks: u32,
-    resume_threshold: u32,
-) -> bool {
-    clear_cooldown_active
-        && has_active_head
-        && prompt_visible
-        && !turn_active
-        && !deferred_operator_clear_pending
-        && settled_idle_ticks >= resume_threshold
-}
-
-/// `#qflood2` — after the idle-queue watch sends a `/clear` (an opt-in context
-/// reset, or a `/clear` queue head), the next drain trigger must NOT be injected
-/// until the cleared pane has shown a fresh idle harness prompt for
-/// `settle_threshold` consecutive polls. Otherwise the trigger lands in the
-/// composer alongside the still-in-flight `/clear` and the harness sees one
-/// concatenated line (the operator-observed `/clear /agent-doc <FILE>`). This is
-/// the same debounce idea as `clear_cooldown_resume_ready`, but for the
-/// supervisor's OWN clears (which never write the manual cooldown marker), so it
-/// is tracked by idle-watch memory and mirrored to a short-lived marker that
-/// survives supervisor recycle/restart. Pure so the settle gate is unit-testable
-/// without a live pane.
-pub fn drain_blocked_awaiting_clear_settle(
-    awaiting_clear_settle: bool,
-    prompt_visible: bool,
-    turn_active: bool,
-    settled_idle_ticks: u32,
-    settle_threshold: u32,
-) -> bool {
-    if !awaiting_clear_settle {
-        return false;
-    }
-    // A pane that is not at a fresh idle prompt has definitely not settled, so
-    // keep blocking regardless of the tick count.
-    if !prompt_visible || turn_active {
-        return true;
-    }
-    settled_idle_ticks < settle_threshold
-}
-
-/// Decide how a restarted idle-queue watcher should honor a persisted
-/// supervisor-owned context clear marker. A visible pending clear is recovered
-/// by one bare submit key, then the watcher waits for the normal settle debounce.
-pub(crate) fn idle_queue_context_clear_in_flight_decision(
-    facts: IdleQueueContextClearInFlightFacts,
-) -> IdleQueueContextClearInFlightDecision {
-    if !facts.marker_active {
-        return IdleQueueContextClearInFlightDecision::Ignore;
-    }
-    if !facts.prompt_visible || facts.turn_active || facts.route_submit_in_flight {
-        return IdleQueueContextClearInFlightDecision::WaitForIdle;
-    }
-    if drain_dispatch_dedup_skip(facts.clear_already_pending) {
-        return if facts.already_resubmitted {
-            IdleQueueContextClearInFlightDecision::WaitForPendingClear
-        } else {
-            IdleQueueContextClearInFlightDecision::ResubmitPendingClear
-        };
-    }
-    if facts.settled_idle_ticks >= facts.settle_threshold {
-        IdleQueueContextClearInFlightDecision::Settled
-    } else {
-        IdleQueueContextClearInFlightDecision::AwaitSettle
-    }
-}
-
-/// `#qflood2` — whether the idle-queue watch should skip injecting the next
-/// drain payload (trigger or `/clear`) because that exact text is already
-/// pending/visible in the owned pane's composer. `payload_already_pending` is
-/// the live pane-capture dedup signal: `Some(true)` = the payload is already in
-/// the composer (re-sending would stack a duplicate, e.g.
-/// `/agent-doc <FILE>/agent-doc <FILE>`); `Some(false)` = proven absent;
-/// `None` = the pane could not be captured. A failed capture must never suppress
-/// a legitimate dispatch, so only a proven positive match dedups.
-pub fn drain_dispatch_dedup_skip(payload_already_pending: Option<bool>) -> bool {
-    matches!(payload_already_pending, Some(true))
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BetweenTurnCommandKind {
-    Clear,
-    AgentDoc,
-}
-
-impl BetweenTurnCommandKind {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Clear => "/clear",
-            Self::AgentDoc => "/agent-doc",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BetweenTurnEnqueuePlan {
-    pub kept: Vec<BetweenTurnCommandKind>,
-    pub deduped: usize,
-}
-
-impl BetweenTurnEnqueuePlan {
-    pub fn kept_labels(&self) -> String {
-        self.kept
-            .iter()
-            .map(|kind| kind.label())
-            .collect::<Vec<_>>()
-            .join(",")
-    }
-}
-
-fn command_occurrences(text: &str, command: &str) -> usize {
-    let command = command.trim();
-    if command.is_empty() {
-        return 0;
-    }
-    text.match_indices(command).count()
-}
-
-/// `#qdedup`: compose supervisor/PCP between-turn enqueues as a set, not an
-/// append-only string. Repeated requests may arrive while the current turn is
-/// still active; when the pane reaches the idle boundary, only one clear command
-/// and one agent-doc trigger should remain, in that order. Counting raw
-/// occurrences also recognizes the historical malformed line
-/// `/clear /agent-doc <FILE>/agent-doc <FILE>` so the duplicate can be measured
-/// and suppressed instead of appended again.
-pub fn between_turn_enqueue_plan<'a>(
-    requested: impl IntoIterator<Item = &'a str>,
-    clear_command: &str,
-    trigger_command: &str,
-) -> BetweenTurnEnqueuePlan {
-    let mut clear_count = 0usize;
-    let mut trigger_count = 0usize;
-    for item in requested {
-        clear_count += command_occurrences(item, clear_command);
-        trigger_count += command_occurrences(item, trigger_command);
-    }
-    let mut kept = Vec::with_capacity(2);
-    if clear_count > 0 {
-        kept.push(BetweenTurnCommandKind::Clear);
-    }
-    if trigger_count > 0 {
-        kept.push(BetweenTurnCommandKind::AgentDoc);
-    }
-    BetweenTurnEnqueuePlan {
-        kept,
-        deduped: clear_count
-            .saturating_add(trigger_count)
-            .saturating_sub(clear_count.min(1).saturating_add(trigger_count.min(1))),
-    }
-}
+#[cfg(test)]
+pub(crate) use agent_doc_turn_executor::idle_queue::idle_queue_context_reset_decision;
+pub use agent_doc_turn_executor::idle_queue::{
+    BetweenTurnCommandKind, BetweenTurnEnqueuePlan, CLEAR_COOLDOWN_RESUME_IDLE_TICKS,
+    IdleQueueDrainDecision, IdleQueueDrainDecisionFacts, between_turn_enqueue_plan,
+    clear_cooldown_resume_ready, drain_blocked_awaiting_clear_settle, drain_dispatch_dedup_skip,
+    idle_queue_drain_decision, idle_queue_drain_decision_with_editor_typing,
+};
+pub(crate) use agent_doc_turn_executor::idle_queue::{
+    IdleQueueContextClearInFlightDecision, IdleQueueContextClearInFlightFacts,
+    IdleQueueContextResetDecision, clean_session_head_forces_context_reset,
+    idle_queue_context_clear_in_flight_decision,
+    idle_queue_context_reset_decision_with_editor_typing,
+};
 
 /// `#ctlrecycle` R3 — what the idle supervisor watch should do about a binary that
 /// no longer matches the installed agent-doc. Pure so the policy is unit-testable.
-#[derive(Debug, PartialEq, Eq)]
-pub enum SupervisorRecycleAction {
-    /// Not stale, or not at a turn boundary — do nothing.
-    None,
-    /// Stale + at a turn boundary but auto-recycle was explicitly opted OUT
-    /// (falsey env/frontmatter/project knob): surface it so the operator restarts
-    /// deliberately. With the `#supselfheal` default-on, this only fires when an
-    /// operator turned self-recycle off.
-    Detect,
-    /// Stale + auto-recycle + a queue head is waiting to drain: recycle NOW so the
-    /// next queue item runs on the fresh binary. The inter-queue-item boundary is the
-    /// deliberate restart point (`#suprecyclequeue`), so the brief-idle debounce that
-    /// guards against transient lulls is bypassed.
-    RecycleImmediate,
-    /// Stale + auto-recycle + no queue head waiting (end of drain, or between
-    /// unrelated turns): recycle once the idle-grace debounce elapses so a momentary
-    /// idle gap never thrashes the live agent child.
-    RecycleDebounced,
-    /// `#supselfheal` Phase 3 (`#supselfheal-reexecescalate`): a stale supervisor
-    /// whose in-place `execve` re-exec already failed (a deleted-inode `ENOENT`
-    /// from a fresh `make install`, or another syscall error) cannot converge onto
-    /// the fresh binary by recycling again — re-trying the same doomed `execve`
-    /// just re-logs `continue_current_binary` forever. Escalate to one bounded
-    /// (`MAX_REEXEC_ESCALATIONS`) kill+relaunch of the harness child so the wedge
-    /// is reclaimed deterministically instead of sitting indefinitely.
-    EscalateKillRelaunch,
-    /// `#midturn-recycle-resume`: the harness reports a turn boundary
-    /// (`prompt_visible && !turn_active`) but an agent-doc cycle is still OPEN —
-    /// `cycle_state.is_open()` (preflight taken, finalize not committed) or an IPC
-    /// ack connection is in flight. An `execve` recycle here would tear down the
-    /// in-flight IPC listener mid-cycle and sever the ack-content round-trip, so the
-    /// next finalize validates its candidate against the pre-recycle preflight
-    /// baseline → `live_prompt_drift_after_preflight` → the `content_ours`
-    /// next-cycle wedge + "no response exists to replay" refusal. Defer the recycle
-    /// (a no-op for this tick that re-evaluates next loop, exactly like
-    /// `!turn_boundary`) so the `execve` only fires at a TRUE quiescent boundary
-    /// once the cycle commits and IPC drains. The `#durablerecycle` checkpoint and
-    /// the in-flight cycle are preserved across the deferral. Wins over every stale
-    /// recycle arm — even `explicit_admin` / `write_wedged` / `reexec_failed` —
-    /// because none of those may `execve` mid-finalize; they wait one cycle boundary
-    /// (sub-second once finalize commits), mirroring the operator-restart
-    /// `AwaitDrain` contract.
-    DeferCycleOpen,
-}
+pub use agent_doc_supervisor::lifecycle::SupervisorRecycleAction;
 
 /// `#supselfheal` Phase 3 — maximum number of times a stale supervisor whose
 /// in-place `execve` re-exec keeps failing may escalate to a kill+relaunch before
 /// the idle watch gives up and continues on the current binary (surfacing the
 /// one-time operator-restart hint). Bounded so a relaunch that itself never clears
 /// the staleness cannot spin the watch into an unbounded kill loop.
-pub const MAX_REEXEC_ESCALATIONS: u32 = 2;
+pub const MAX_REEXEC_ESCALATIONS: u32 = agent_doc_supervisor::lifecycle::MAX_REEXEC_ESCALATIONS;
 
 /// `#supselfheal` Phase 3 — whether a re-exec-failure escalation may still fire,
 /// given how many kill+relaunch escalations have already been attempted this
 /// supervisor lifetime. Pure so the bound is unit-testable without the live
 /// kill/relaunch machinery; the caller increments the counter on each escalation.
 pub fn reexec_escalation_within_bound(attempts: u32, max: u32) -> bool {
-    attempts < max
+    agent_doc_supervisor::lifecycle::reexec_escalation_within_bound(attempts, max)
 }
 
 /// `#midturn-recycle-resume` Phase B — how many CONSECUTIVE idle-watch ticks a
@@ -498,7 +67,8 @@ pub fn reexec_escalation_within_bound(attempts: u32, max: u32) -> bool {
 /// a stale-binary self-recycle or an operator restart — the open cycle's
 /// `#durablerecycle` checkpoint is still on disk, so the genuinely-interrupted turn
 /// is re-dispatched on the fresh boot (see [`boot_resume_action`]).
-pub const MAX_CYCLE_OPEN_DEFER_TICKS: u32 = 40;
+pub const MAX_CYCLE_OPEN_DEFER_TICKS: u32 =
+    agent_doc_supervisor::lifecycle::MAX_CYCLE_OPEN_DEFER_TICKS;
 
 /// `#midturn-recycle-resume` Phase B — whether a consecutive run of cycle-open
 /// recycle deferrals has reached the escalation bound. Pure so the threshold is
@@ -506,7 +76,7 @@ pub const MAX_CYCLE_OPEN_DEFER_TICKS: u32 = 40;
 /// (incrementing on each `DeferCycleOpen` tick, resetting to 0 on any non-defer
 /// tick) and forces the recycle once this returns true.
 pub fn cycle_open_defer_escalates(consecutive_defers: u32, max: u32) -> bool {
-    consecutive_defers >= max
+    agent_doc_supervisor::lifecycle::cycle_open_defer_escalates(consecutive_defers, max)
 }
 
 /// `#midturn-recycle-resume` Phase B — what a fresh supervisor image (born from an
@@ -520,23 +90,7 @@ pub fn cycle_open_defer_escalates(consecutive_defers: u32, max: u32) -> bool {
 /// killed, or the recycle escalated past `MAX_CYCLE_OPEN_DEFER_TICKS` and forced the
 /// `execve` over a wedged cycle). Then the surviving-child resume never happens and
 /// the interrupted turn must be actively re-dispatched from the checkpoint.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BootResumeAction {
-    /// Not a recycle boot (no `ReexecState` in env), or the checkpoint is absent /
-    /// committed / abandoned / already consumed by a prior boot. Nothing to resume.
-    None,
-    /// The adopted harness child survived the recycle and the cycle is still open —
-    /// the child is itself still running the interrupted turn. Adopt it WITHOUT
-    /// re-triggering (the existing `#ctlrecycle` behavior); the surviving child owns
-    /// the resume. This is the idempotency guard against double-running a turn.
-    AdoptSurvivingChild,
-    /// The cycle is open but the harness child did NOT survive the recycle — the
-    /// turn was genuinely interrupted and no surviving child will resume it. Spawn a
-    /// fresh child and re-dispatch the SAME turn (keyed off the checkpoint's
-    /// `queue_task_id` / `prompt_targets`), then mark the checkpoint consumed so a
-    /// second boot cannot re-dispatch again.
-    RedispatchInterruptedTurn,
-}
+pub use agent_doc_supervisor::lifecycle::BootResumeAction;
 
 /// `#midturn-recycle-resume` Phase B — pure boot-resume policy. Decides what a fresh
 /// supervisor image should do with the durable turn checkpoint, given:
@@ -560,20 +114,12 @@ pub fn boot_resume_action(
     child_survived: bool,
     already_consumed: bool,
 ) -> BootResumeAction {
-    if !is_recycle_boot || !cycle_open {
-        return BootResumeAction::None;
-    }
-    if child_survived {
-        // The common Phase-A steady-state: the child is still running the turn.
-        // Adopt it as-is; re-dispatching would double-run the turn.
-        return BootResumeAction::AdoptSurvivingChild;
-    }
-    if already_consumed {
-        // A prior boot already re-dispatched this exact checkpoint; do not stack a
-        // second re-dispatch of the same turn.
-        return BootResumeAction::None;
-    }
-    BootResumeAction::RedispatchInterruptedTurn
+    agent_doc_supervisor::lifecycle::boot_resume_action(
+        is_recycle_boot,
+        cycle_open,
+        child_survived,
+        already_consumed,
+    )
 }
 
 /// `#ctlrecycle` R3 / `#suprecyclequeue` / `#supselfheal` — pure recycle policy for the
@@ -648,75 +194,16 @@ pub fn supervisor_recycle_action(
     reexec_failed: bool,
     cycle_open: bool,
 ) -> SupervisorRecycleAction {
-    // Never drop a live turn — every recycle arm below respects the boundary.
-    if !turn_boundary {
-        return SupervisorRecycleAction::None;
-    }
-    // `#midturn-recycle-resume`: never `execve` while an agent-doc cycle is open
-    // (preflight taken, finalize not committed) or an IPC ack connection is in
-    // flight. Tearing the in-flight IPC listener down mid-cycle severs the
-    // ack-content round-trip and drives `live_prompt_drift_after_preflight` against
-    // the pre-recycle preflight baseline. Defer until the cycle closes.
-    //
-    // `#recycledeadlock`: the defer above assumed the open cycle closes "sub-second"
-    // once finalize commits. That is only true when the binary CAN commit it. When
-    // the supervisor is running a STALE binary AND that staleness is the thing
-    // blocking the commit, deferring forever is the classic recycle deadlock: every
-    // finalize re-fails the editor-IPC proof on the same bad binary
-    // (`supervisor_binary_stale` / `missing_response_probe` / `retry_without_disk_write`),
-    // so the cycle never closes, so `DeferCycleOpen` fires ~2/sec forever and the
-    // fresh binary never hot-reloads — the commit needs the fresh binary, the recycle
-    // needs the cycle closed. Three facts each PROVE the running binary cannot commit
-    // the open cycle, so "wait for it to close" is an infinite wait, not a sub-second
-    // one: an operator/agent explicitly asked to recycle it (`explicit_admin` — the
-    // gentle fix the closeout path itself recommends), the write/converge path proved
-    // it bad (`write_wedged`), or a prior in-place re-exec already failed
-    // (`reexec_failed`). When the binary is stale AND any of those hold, do NOT defer —
-    // fall through to the stale recycle arms so the deadlock breaks. The caller
-    // force-abandons the wedged cycle before the `execve` and the fresh supervisor
-    // re-dispatches its queue head (the restart-interrupted-task contract). A healthy
-    // open cycle — binary current enough to commit, or no admin/wedge/reexec proof of
-    // a bad binary — still defers, preserving the `#midturn-recycle-resume` and
-    // `#wd40` (fresh-binary state flush) guarantees.
-    let cycle_wedged_on_stale_binary = stale && (explicit_admin || write_wedged || reexec_failed);
-    if cycle_open && !cycle_wedged_on_stale_binary {
-        return SupervisorRecycleAction::DeferCycleOpen;
-    }
-    if stale {
-        if reexec_failed {
-            // Phase 3: the in-place re-exec already failed; recycling onto it again is
-            // pointless. Escalate to a bounded kill+relaunch instead of looping
-            // `continue_current_binary`. This wins over every recycle arm below.
-            return SupervisorRecycleAction::EscalateKillRelaunch;
-        }
-        if explicit_admin || write_wedged {
-            // Operator/agent explicit `admin recycle`, or a wedged editor-IPC write —
-            // recycle now, overriding an explicit auto-recycle opt-out. The next turn boundary
-            // is the deliberate restart point; a wedge must never stay `Detect`.
-            return SupervisorRecycleAction::RecycleImmediate;
-        }
-        if !auto_recycle {
-            return SupervisorRecycleAction::Detect;
-        }
-        return if head_pending {
-            SupervisorRecycleAction::RecycleImmediate
-        } else {
-            SupervisorRecycleAction::RecycleDebounced
-        };
-    }
-    // `#wd40` state-flush: the binary is current, so there is nothing to *swap*, but
-    // an explicit operator `admin recycle` is a deliberate request to restart the
-    // supervisor *process* to flush stale in-memory state — e.g. a lagging CRDT
-    // projection (`projection_lag`) that keeps re-pinning a queue head (`#rt83`
-    // phantom-pin churn) even though the installed binary matches. Honor it so
-    // `admin recycle` is never a silent no-op on a fresh binary (the prior behavior
-    // that left the operator unable to flush the lagging projection). A bare wedge on
-    // a fresh binary still stays a no-op — some other transient cause owns the
-    // converge retry — so only the operator's explicit intent forces a fresh flush.
-    if explicit_admin {
-        return SupervisorRecycleAction::RecycleImmediate;
-    }
-    SupervisorRecycleAction::None
+    agent_doc_supervisor::lifecycle::supervisor_recycle_action(
+        stale,
+        auto_recycle,
+        turn_boundary,
+        head_pending,
+        explicit_admin,
+        write_wedged,
+        reexec_failed,
+        cycle_open,
+    )
 }
 
 /// `#wd40` / `#staleloop-recycle-restart` — whether the idle-watch should ask a
@@ -751,7 +238,11 @@ pub fn stale_drain_recycle_yield_requested(
     drain_owner_active: bool,
     turn_boundary: bool,
 ) -> bool {
-    would_recycle_at_boundary && drain_owner_active && !turn_boundary
+    agent_doc_supervisor::lifecycle::stale_drain_recycle_yield_requested(
+        would_recycle_at_boundary,
+        drain_owner_active,
+        turn_boundary,
+    )
 }
 
 /// `#agentreloadrestart` — what the idle/turn-boundary supervisor watch should do
@@ -761,18 +252,7 @@ pub fn stale_drain_recycle_yield_requested(
 /// only act at a quiet dispatch-ready boundary, never mid-turn, and only when the
 /// operator opted in (knob ON, the default). Pure so the boundary policy is
 /// unit-testable without a live pane.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AgentChangeRestartAction {
-    /// No harness change, the knob is off, or nothing to do.
-    None,
-    /// Harness changed + knob on + the pane is at a quiet dispatch-ready prompt —
-    /// restart the agent with the freshly-resolved harness now.
-    Restart,
-    /// Harness changed + knob on, but the pane is not at a quiet boundary yet
-    /// (no prompt visible / mid-turn) — wait for the next boundary; never
-    /// interrupt an in-flight turn.
-    WaitForBoundary,
-}
+pub use agent_doc_supervisor::agent_change::AgentChangeRestartAction;
 
 /// Decide the agent-change-restart action for one watch tick. Restart only when
 /// the harness actually changed, the knob is on, AND the pane is idle at a
@@ -785,13 +265,12 @@ pub fn agent_change_restart_decision(
     prompt_visible: bool,
     turn_active: bool,
 ) -> AgentChangeRestartAction {
-    if !harness_changed || !knob_on {
-        return AgentChangeRestartAction::None;
-    }
-    if !prompt_visible || turn_active {
-        return AgentChangeRestartAction::WaitForBoundary;
-    }
-    AgentChangeRestartAction::Restart
+    agent_doc_supervisor::agent_change::agent_change_restart_decision(
+        harness_changed,
+        knob_on,
+        prompt_visible,
+        turn_active,
+    )
 }
 
 /// `#agentreloadrestart` Phase 1b — does a re-resolved harness binary force a FRESH
@@ -802,7 +281,10 @@ pub fn agent_change_restart_decision(
 /// re-resolution branch is unit-testable, and so the INERTNESS invariant — same
 /// binary ⇒ no fresh-spawn swap — is asserted directly.
 pub fn harness_change_forces_fresh_spawn(running_binary: &str, resolved_binary: &str) -> bool {
-    running_binary != resolved_binary
+    agent_doc_supervisor::agent_change::harness_change_forces_fresh_spawn(
+        running_binary,
+        resolved_binary,
+    )
 }
 
 /// `#supautoinstall` — what the idle supervisor watch should do about agent-doc's OWN
@@ -811,20 +293,7 @@ pub fn harness_change_forces_fresh_spawn(running_binary: &str, resolved_binary: 
 /// unit-testable. This is the install rung that PRECEDES [`supervisor_recycle_action`]:
 /// once the auto-install lands the fresh binary, `process_binary_is_stale` flips true and
 /// the existing recycle path hot-reloads onto it.
-#[derive(Debug, PartialEq, Eq)]
-pub enum SupervisorInstallAction {
-    /// Source not newer than the installed binary, not at a turn boundary, or not an
-    /// agent-doc dogfood session document — do nothing.
-    None,
-    /// Source is newer + at a turn boundary but auto-install is opted OUT:
-    /// surface it once so the operator runs the manual dogfood refresh deliberately.
-    Detect,
-    /// Source is newer + auto-install opt-in + turn boundary: build+install at the next
-    /// idle-grace boundary. The caller always debounces this (a build is heavy, so unlike
-    /// the recycle rung there is no head-pending "immediate" fast path) — a momentary idle
-    /// gap mid-edit must never trip a multi-minute build.
-    Install,
-}
+pub use agent_doc_supervisor::lifecycle::SupervisorInstallAction;
 
 /// `#supautoinstall` — pure auto-install policy for the dogfooding `start` supervisor.
 /// Mirrors [`supervisor_recycle_action`]: only acts at a `turn_boundary`
@@ -837,37 +306,18 @@ pub fn supervisor_install_action(
     auto_install: bool,
     turn_boundary: bool,
 ) -> SupervisorInstallAction {
-    if !source_newer || !turn_boundary {
-        return SupervisorInstallAction::None;
-    }
-    if !auto_install {
-        return SupervisorInstallAction::Detect;
-    }
-    SupervisorInstallAction::Install
+    agent_doc_supervisor::lifecycle::supervisor_install_action(
+        source_newer,
+        auto_install,
+        turn_boundary,
+    )
 }
 
 /// `#supkill-bg` — what an explicit operator `restart-supervisor` (IPC `Restart`)
 /// should do at the supervisor's next idle tick, framed as blue/green
 /// drain-and-supersede. Pure so the policy is unit-testable independent of the live
 /// pty/execve machinery.
-#[derive(Debug, PartialEq, Eq)]
-pub enum SupervisorRestartAction {
-    /// No restart pending — do nothing.
-    None,
-    /// A restart is pending but a turn is still in flight: WAIT for the in-flight
-    /// turn to finish before acting (`#supkill-bg` part 1 — the old supervisor
-    /// drains its last turn instead of being torn down mid-turn). The kill/relaunch
-    /// is suppressed until the boundary.
-    AwaitDrain,
-    /// At a turn boundary with a stale binary: hot-reload in place via `execve`,
-    /// preserving the live harness child + pane (`#supkill-bg` part 2 — in-place
-    /// re-exec drain is the default healthy restart for the stale-build/`#fcc0`
-    /// case). No dropped turn.
-    ReexecInPlace,
-    /// At a turn boundary with a fresh binary: nothing to upgrade, so the normal
-    /// kill-child → relaunch path serves the restart (same binary, same pane).
-    RelaunchChild,
-}
+pub use agent_doc_supervisor::lifecycle::SupervisorRestartAction;
 
 /// `#supkill-bg` — pure drain-and-supersede restart policy for the `start`
 /// supervisor. An explicit `restart-supervisor` is a deliberate operator request, so
@@ -886,17 +336,11 @@ pub fn supervisor_restart_action(
     reexec_intent: bool,
     turn_boundary: bool,
 ) -> SupervisorRestartAction {
-    if !restart_requested {
-        return SupervisorRestartAction::None;
-    }
-    if !turn_boundary {
-        return SupervisorRestartAction::AwaitDrain;
-    }
-    if reexec_intent {
-        SupervisorRestartAction::ReexecInPlace
-    } else {
-        SupervisorRestartAction::RelaunchChild
-    }
+    agent_doc_supervisor::lifecycle::supervisor_restart_action(
+        restart_requested,
+        reexec_intent,
+        turn_boundary,
+    )
 }
 
 /// Post-child-exit dispatch for the `start` supervisor run loop. After the
@@ -904,22 +348,7 @@ pub fn supervisor_restart_action(
 /// priority order before falling back to the normal crash-policy / clean-exit
 /// classification. This pure enum models that decision so the "Stop Agent"
 /// keepalive contract can be unit-tested without a live PTY.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PostChildExitAction {
-    /// Route-owned single-cycle completion: exit the supervisor.
-    RouteOwnedComplete,
-    /// `IpcMethod::Stop` / `stop_requested`: exit the whole supervisor.
-    ExitSupervisor,
-    /// `IpcMethod::StopAgent` / `stop_agent_requested`: keep the supervisor alive
-    /// and land on the restart-or-quit keepalive prompt — never exit, never
-    /// auto-restart, regardless of the harness `clean_exit_behavior`.
-    StopAgentKeepalive,
-    /// `restart_requested`: auto-restart (continue the loop) per the IPC restart.
-    AutoRestart,
-    /// Fall through to the normal crash-policy / clean-exit classification (which
-    /// may itself prompt, auto-restart, or halt).
-    NormalExitClassification,
-}
+pub use agent_doc_supervisor::run_loop::PostChildExitAction;
 
 /// Pure model of the `start` supervisor run loop's post-child-exit flag dispatch.
 ///
@@ -935,129 +364,23 @@ pub fn post_child_exit_action(
     stop_agent_requested: bool,
     restart_requested: bool,
 ) -> PostChildExitAction {
-    if route_owned_completion {
-        return PostChildExitAction::RouteOwnedComplete;
-    }
-    if stop_requested {
-        return PostChildExitAction::ExitSupervisor;
-    }
-    if stop_agent_requested {
-        return PostChildExitAction::StopAgentKeepalive;
-    }
-    if restart_requested {
-        return PostChildExitAction::AutoRestart;
-    }
-    PostChildExitAction::NormalExitClassification
+    agent_doc_supervisor::run_loop::post_child_exit_action(
+        route_owned_completion,
+        stop_requested,
+        stop_agent_requested,
+        restart_requested,
+    )
 }
 
-/// `#suphandoff` — PCP-owned red/green supervisor handoff state.
-///
-/// This models the future two-process replacement path separately from the
-/// already-live `execve` preserve-child hot reload. Until the project controller
-/// commits the lease promotion, the old supervisor remains the only authoritative
-/// owner of the child/pty/session socket; the new supervisor is a private-socket
-/// standby and must not touch live child I/O.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PcpSupervisorHandoffState {
-    /// No handoff is in progress.
-    Idle,
-    /// PCP accepted the request and should launch a replacement supervisor on a
-    /// private socket. The old supervisor remains authoritative.
-    LaunchingStandby,
-    /// Standby process exists; PCP is probing freshness/capabilities/readiness.
-    ProbingStandby,
-    /// Standby is healthy but fenced. Wait for `prompt_visible && !turn_active`.
-    AwaitTurnBoundary,
-    /// Turn boundary reached; PCP is compare-and-swap promoting the lease.
-    PromotingLease,
-    /// Lease promotion committed; the new supervisor may adopt child ownership.
-    TransferringOwnership,
-    /// Child ownership is transferred; stop the old supervisor generation.
-    StoppingOld,
-    /// New supervisor owns the lease and child; handoff is complete.
-    Complete,
-    /// Pre-promotion failure or abort: terminate the standby and keep old active.
-    RollingBack,
-    /// Failure after lease promotion. Do not silently roll back; require repair.
-    BlockedPostPromotion,
-}
-
-impl PcpSupervisorHandoffState {
-    /// Whether the old supervisor is still the authoritative child/pty owner.
-    /// This stays true through standby launch/probe/drain and only flips after
-    /// PCP commits the lease promotion.
-    pub fn old_supervisor_authoritative(self) -> bool {
-        matches!(
-            self,
-            Self::Idle
-                | Self::LaunchingStandby
-                | Self::ProbingStandby
-                | Self::AwaitTurnBoundary
-                | Self::PromotingLease
-                | Self::RollingBack
-        )
-    }
-
-    /// Whether normal code may let the standby touch live child/pty state.
-    /// A private-socket standby is intentionally no-touch before promotion; a
-    /// post-promotion block is repair-only and should not continue normal I/O.
-    pub fn standby_may_touch_child(self) -> bool {
-        matches!(
-            self,
-            Self::TransferringOwnership | Self::StoppingOld | Self::Complete
-        )
-    }
-
-    /// Whether PCP has committed the lease/generation promotion. Past this
-    /// point rollback is no longer the safe automatic response.
-    pub fn lease_promoted(self) -> bool {
-        matches!(
-            self,
-            Self::TransferringOwnership
-                | Self::StoppingOld
-                | Self::Complete
-                | Self::BlockedPostPromotion
-        )
-    }
-}
-
-/// Events consumed by the pure PCP supervisor handoff transition table.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PcpSupervisorHandoffEvent {
-    RequestAccepted,
-    StandbyStarted,
-    StandbyStartFailed,
-    StandbyHealthy,
-    StandbyFailed,
-    TurnBoundaryReached,
-    PromotionCommitted,
-    PromotionFailed,
-    OwnershipTransferred,
-    OldSupervisorStopped,
-    RollbackComplete,
-    AbortRequested,
-}
-
-/// Side effect the PCP runtime must perform after a handoff transition.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PcpSupervisorHandoffAction {
-    None,
-    LaunchStandby,
-    ProbeStandby,
-    WaitTurnBoundary,
-    PromoteLease,
-    TransferChildOwnership,
-    StopOldSupervisor,
-    CompleteHandoff,
-    RollbackStandby,
-    EscalateRepair,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PcpSupervisorHandoffTransition {
-    pub state: PcpSupervisorHandoffState,
-    pub action: PcpSupervisorHandoffAction,
-}
+/// `#suphandoff` — compatibility aliases for the controller-owned red/green
+/// supervisor handoff state. New code should use
+/// `agent_doc_supervisor::handoff::ControllerSupervisorHandoff*`.
+pub use agent_doc_supervisor::handoff::{
+    ControllerSupervisorHandoffAction as PcpSupervisorHandoffAction,
+    ControllerSupervisorHandoffEvent as PcpSupervisorHandoffEvent,
+    ControllerSupervisorHandoffState as PcpSupervisorHandoffState,
+    ControllerSupervisorHandoffTransition as PcpSupervisorHandoffTransition,
+};
 
 /// `#suphandoff` — formal PCP state machine for a future true red/green
 /// supervisor replacement.
@@ -1070,203 +393,21 @@ pub fn pcp_supervisor_handoff_transition(
     state: PcpSupervisorHandoffState,
     event: PcpSupervisorHandoffEvent,
 ) -> PcpSupervisorHandoffTransition {
-    use PcpSupervisorHandoffAction::*;
-    use PcpSupervisorHandoffEvent::*;
-    use PcpSupervisorHandoffState::*;
-
-    let (state, action) = match (state, event) {
-        (Idle, RequestAccepted) => (LaunchingStandby, LaunchStandby),
-
-        (LaunchingStandby, StandbyStarted) => (ProbingStandby, ProbeStandby),
-        (LaunchingStandby, StandbyStartFailed) => (RollingBack, RollbackStandby),
-
-        (ProbingStandby, StandbyHealthy) => (AwaitTurnBoundary, WaitTurnBoundary),
-        (ProbingStandby, StandbyFailed) => (RollingBack, RollbackStandby),
-
-        (AwaitTurnBoundary, TurnBoundaryReached) => (PromotingLease, PromoteLease),
-        (AwaitTurnBoundary, StandbyFailed) => (RollingBack, RollbackStandby),
-
-        (PromotingLease, PromotionCommitted) => (TransferringOwnership, TransferChildOwnership),
-        (PromotingLease, PromotionFailed | StandbyFailed) => (RollingBack, RollbackStandby),
-
-        (TransferringOwnership, OwnershipTransferred) => (StoppingOld, StopOldSupervisor),
-        (TransferringOwnership, StandbyFailed) => (BlockedPostPromotion, EscalateRepair),
-
-        (StoppingOld, OldSupervisorStopped) => (Complete, CompleteHandoff),
-        (StoppingOld, StandbyFailed) => (BlockedPostPromotion, EscalateRepair),
-
-        (RollingBack, RollbackComplete) => (Idle, None),
-
-        (Complete, _) => (Complete, None),
-        (BlockedPostPromotion, _) => (BlockedPostPromotion, EscalateRepair),
-
-        (Idle, AbortRequested) => (Idle, None),
-        (
-            LaunchingStandby | ProbingStandby | AwaitTurnBoundary | PromotingLease,
-            AbortRequested,
-        ) => (RollingBack, RollbackStandby),
-        (TransferringOwnership | StoppingOld, AbortRequested) => {
-            (BlockedPostPromotion, EscalateRepair)
-        }
-
-        (state, _) => (state, None),
-    };
-
-    PcpSupervisorHandoffTransition { state, action }
+    agent_doc_supervisor::handoff::controller_supervisor_handoff_transition(state, event)
 }
-
-pub(crate) const REEXEC_CHILD_PID_ENV: &str = "AGENT_DOC_REEXEC_CHILD_PID";
-pub(crate) const REEXEC_MASTER_FD_ENV: &str = "AGENT_DOC_REEXEC_MASTER_FD";
 
 /// `#ctlrecycle` R3 — state handed from a stale supervisor to its freshly-`execve`'d
 /// self so the new image re-adopts the live harness child instead of spawning a new
 /// one. Marshaled through the environment (preserved across `execve`); the document
 /// argv is preserved by re-exec'ing with the same args, so only the child PID and the
 /// inherited pty master fd need carrying.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct ReexecState {
-    pub(crate) child_pid: u32,
-    pub(crate) master_fd: i32,
-}
-
-impl ReexecState {
-    /// Pure parse of the two handoff values; `None` if either is missing/invalid or
-    /// would not name a live child + inherited fd.
-    fn parse(pid: &str, fd: &str) -> Option<Self> {
-        let child_pid = pid.trim().parse::<u32>().ok()?;
-        let master_fd = fd.trim().parse::<i32>().ok()?;
-        if child_pid == 0 || master_fd < 0 {
-            return None;
-        }
-        Some(Self {
-            child_pid,
-            master_fd,
-        })
-    }
-
-    /// Read the re-entry state from the environment, if this process was launched by
-    /// a supervisor self-`execve`. `None` for a normal start.
-    pub(crate) fn from_env() -> Option<Self> {
-        Self::parse(
-            &std::env::var(REEXEC_CHILD_PID_ENV).ok()?,
-            &std::env::var(REEXEC_MASTER_FD_ENV).ok()?,
-        )
-    }
-
-    /// `#midturn-recycle-resume` Phase B — whether the harness child handed across
-    /// the `execve` recycle still names a LIVE (non-zombie) process the fresh image
-    /// can adopt. `kill(pid, 0)` succeeding (`Ok`) or failing with `EPERM` (the PID
-    /// exists but is owned by another user — impossible here, but treat as alive to
-    /// stay fail-safe toward adoption) means the child survived; `ESRCH` means it
-    /// died across the recycle window and the interrupted turn must be re-dispatched.
-    ///
-    /// NB: a child that exited but is still an UNREAPED zombie also answers `kill 0`
-    /// as alive. That is acceptable here: this image has not yet adopted/`waitpid`'d
-    /// the child, and the `PtySession::adopt` + first read/`try_wait` immediately
-    /// after will observe the EOF/exit and drive the normal child-exit path, so a
-    /// transient zombie does not wrongly suppress a needed re-dispatch for long.
-    #[cfg(unix)]
-    pub(crate) fn child_survived(self) -> bool {
-        let ret = unsafe { libc::kill(self.child_pid as libc::pid_t, 0) };
-        if ret == 0 {
-            return true;
-        }
-        // EPERM: process exists, just not signalable by us — treat as alive.
-        std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-    }
-
-    #[cfg(not(unix))]
-    pub(crate) fn child_survived(self) -> bool {
-        // No `execve` child-preserving recycle on non-unix; the adopt path is never
-        // taken, so a recycle boot always spawns fresh. Report "survived" so the
-        // boot-resume policy adopts the (non-existent) child path as a no-op rather
-        // than re-dispatching on a platform that never severs a child mid-cycle.
-        true
-    }
-
-    /// `(key, value)` env pairs to set before `execve` so the new image re-adopts.
-    pub(crate) fn to_env(self) -> [(String, String); 2] {
-        [
-            (REEXEC_CHILD_PID_ENV.to_string(), self.child_pid.to_string()),
-            (REEXEC_MASTER_FD_ENV.to_string(), self.master_fd.to_string()),
-        ]
-    }
-}
+pub(crate) use agent_doc_supervisor_process::{
+    REEXEC_CHILD_PID_ENV, REEXEC_MASTER_FD_ENV, ReexecState,
+};
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn agent_change_restart_decision_policy() {
-        use AgentChangeRestartAction as A;
-        // Unchanged harness → always None (complete no-op), regardless of boundary.
-        assert_eq!(
-            agent_change_restart_decision(false, true, true, false),
-            A::None
-        );
-        // Knob off → None even when the harness changed at a quiet boundary.
-        assert_eq!(
-            agent_change_restart_decision(true, false, true, false),
-            A::None
-        );
-        // Changed + knob on + quiet dispatch-ready boundary → Restart.
-        assert_eq!(
-            agent_change_restart_decision(true, true, true, false),
-            A::Restart
-        );
-        // Changed + knob on but mid-turn → wait (never interrupt).
-        assert_eq!(
-            agent_change_restart_decision(true, true, true, true),
-            A::WaitForBoundary
-        );
-        // Changed + knob on but no prompt visible yet → wait.
-        assert_eq!(
-            agent_change_restart_decision(true, true, false, false),
-            A::WaitForBoundary
-        );
-    }
-
-    #[test]
-    fn harness_change_forces_fresh_spawn_predicate() {
-        // INERTNESS: same binary ⇒ no fresh-spawn swap (the common same-harness
-        // restart path is byte-identical — run.rs leaves harness/base_args/env and
-        // `pending_adopt` untouched).
-        assert!(!harness_change_forces_fresh_spawn("claude", "claude"));
-        assert!(!harness_change_forces_fresh_spawn("codex", "codex"));
-        assert!(!harness_change_forces_fresh_spawn("opencode", "opencode"));
-        // A real harness change ⇒ force a fresh spawn of the new harness.
-        assert!(harness_change_forces_fresh_spawn("claude", "opencode"));
-        assert!(harness_change_forces_fresh_spawn("claude", "codex"));
-        assert!(harness_change_forces_fresh_spawn("codex", "claude"));
-    }
-
-    #[test]
-    fn restart_action_is_the_phase1b_trigger_value() {
-        // `#agentreloadrestart` Phase 1b wiring contract, modelable WITHOUT a live
-        // PTY: the idle-watch sets `restart_requested` exactly when the pure policy
-        // returns `Restart` (changed + knob on + quiet dispatch-ready boundary).
-        // Every other policy outcome must NOT trigger a restart.
-        use AgentChangeRestartAction as A;
-        let should_request_restart = |d: A| matches!(d, A::Restart);
-        // The boundary case that triggers.
-        assert!(should_request_restart(agent_change_restart_decision(
-            true, true, true, false
-        )));
-        // Mid-turn / no prompt / unchanged / knob-off must NOT trigger.
-        assert!(!should_request_restart(agent_change_restart_decision(
-            true, true, true, true
-        )));
-        assert!(!should_request_restart(agent_change_restart_decision(
-            true, true, false, false
-        )));
-        assert!(!should_request_restart(agent_change_restart_decision(
-            false, true, true, false
-        )));
-        assert!(!should_request_restart(agent_change_restart_decision(
-            true, false, true, false
-        )));
-    }
 
     #[test]
     fn clean_session_head_forces_context_reset_policy() {
@@ -1706,245 +847,6 @@ mod tests {
         assert_eq!(supervisor_restart_action(true, true, true), ReexecInPlace);
         // At the boundary with a fresh binary, the normal child relaunch serves it.
         assert_eq!(supervisor_restart_action(true, false, true), RelaunchChild);
-    }
-
-    #[test]
-    fn post_child_exit_action_priority_and_stop_agent_keepalive() {
-        use PostChildExitAction::*;
-        // Args: (route_owned_completion, stop_requested, stop_agent_requested, restart_requested)
-
-        // No flags → fall through to the normal crash-policy/clean-exit classification.
-        assert_eq!(
-            post_child_exit_action(false, false, false, false),
-            NormalExitClassification
-        );
-
-        // Route-owned completion wins over everything (it's the first check).
-        assert_eq!(
-            post_child_exit_action(true, true, true, true),
-            RouteOwnedComplete
-        );
-
-        // `stop_requested` (Kill Supervisor) exits the supervisor and beats
-        // stop-agent + restart.
-        assert_eq!(
-            post_child_exit_action(false, true, true, true),
-            ExitSupervisor
-        );
-
-        // KEYSTONE: `stop_agent_requested` ⇒ keepalive, and it beats
-        // `restart_requested` so "Stop Agent" NEVER auto-restarts. It is also
-        // independent of any harness clean-exit behavior because this path runs
-        // BEFORE the normal classification.
-        assert_eq!(
-            post_child_exit_action(false, false, true, true),
-            StopAgentKeepalive
-        );
-        assert_eq!(
-            post_child_exit_action(false, false, true, false),
-            StopAgentKeepalive
-        );
-
-        // `restart_requested` alone auto-restarts.
-        assert_eq!(
-            post_child_exit_action(false, false, false, true),
-            AutoRestart
-        );
-
-        // Stop Agent must not exit the supervisor and must not auto-restart:
-        // for every combination where stop_agent is set (and neither route-owned
-        // completion nor a hard stop is requested), the action is the keepalive.
-        for restart in [false, true] {
-            let action = post_child_exit_action(false, false, true, restart);
-            assert_eq!(action, StopAgentKeepalive);
-            assert_ne!(action, ExitSupervisor);
-            assert_ne!(action, AutoRestart);
-        }
-    }
-
-    #[test]
-    fn pcp_supervisor_handoff_happy_path_promotes_only_at_boundary() {
-        use PcpSupervisorHandoffAction::*;
-        use PcpSupervisorHandoffEvent::*;
-        use PcpSupervisorHandoffState::*;
-
-        let mut state = Idle;
-        assert!(state.old_supervisor_authoritative());
-        assert!(!state.standby_may_touch_child());
-        assert!(!state.lease_promoted());
-
-        let transition = pcp_supervisor_handoff_transition(state, RequestAccepted);
-        assert_eq!(transition.action, LaunchStandby);
-        state = transition.state;
-        assert_eq!(state, LaunchingStandby);
-        assert!(state.old_supervisor_authoritative());
-
-        let transition = pcp_supervisor_handoff_transition(state, StandbyStarted);
-        assert_eq!(transition.action, ProbeStandby);
-        state = transition.state;
-        assert_eq!(state, ProbingStandby);
-        assert!(state.old_supervisor_authoritative());
-
-        let transition = pcp_supervisor_handoff_transition(state, StandbyHealthy);
-        assert_eq!(transition.action, WaitTurnBoundary);
-        state = transition.state;
-        assert_eq!(state, AwaitTurnBoundary);
-        assert!(state.old_supervisor_authoritative());
-        assert!(!state.standby_may_touch_child());
-
-        let transition = pcp_supervisor_handoff_transition(state, TurnBoundaryReached);
-        assert_eq!(transition.action, PromoteLease);
-        state = transition.state;
-        assert_eq!(state, PromotingLease);
-        assert!(state.old_supervisor_authoritative());
-        assert!(!state.standby_may_touch_child());
-        assert!(!state.lease_promoted());
-
-        let transition = pcp_supervisor_handoff_transition(state, PromotionCommitted);
-        assert_eq!(transition.action, TransferChildOwnership);
-        state = transition.state;
-        assert_eq!(state, TransferringOwnership);
-        assert!(!state.old_supervisor_authoritative());
-        assert!(state.standby_may_touch_child());
-        assert!(state.lease_promoted());
-
-        let transition = pcp_supervisor_handoff_transition(state, OwnershipTransferred);
-        assert_eq!(transition.action, StopOldSupervisor);
-        state = transition.state;
-        assert_eq!(state, StoppingOld);
-
-        let transition = pcp_supervisor_handoff_transition(state, OldSupervisorStopped);
-        assert_eq!(transition.action, CompleteHandoff);
-        assert_eq!(transition.state, Complete);
-        assert!(transition.state.standby_may_touch_child());
-        assert!(transition.state.lease_promoted());
-    }
-
-    #[test]
-    fn pcp_supervisor_handoff_pre_promotion_failure_rolls_back_to_old_owner() {
-        use PcpSupervisorHandoffAction::*;
-        use PcpSupervisorHandoffEvent::*;
-        use PcpSupervisorHandoffState::*;
-
-        let mut state = pcp_supervisor_handoff_transition(Idle, RequestAccepted).state;
-        state = pcp_supervisor_handoff_transition(state, StandbyStarted).state;
-        state = pcp_supervisor_handoff_transition(state, StandbyHealthy).state;
-        assert_eq!(state, AwaitTurnBoundary);
-
-        let transition = pcp_supervisor_handoff_transition(state, StandbyFailed);
-        assert_eq!(transition.action, RollbackStandby);
-        state = transition.state;
-        assert_eq!(state, RollingBack);
-        assert!(state.old_supervisor_authoritative());
-        assert!(!state.standby_may_touch_child());
-        assert!(!state.lease_promoted());
-
-        let transition = pcp_supervisor_handoff_transition(state, RollbackComplete);
-        assert_eq!(transition.action, None);
-        assert_eq!(transition.state, Idle);
-        assert!(transition.state.old_supervisor_authoritative());
-    }
-
-    #[test]
-    fn pcp_supervisor_handoff_post_promotion_failure_requires_repair() {
-        use PcpSupervisorHandoffAction::*;
-        use PcpSupervisorHandoffEvent::*;
-        use PcpSupervisorHandoffState::*;
-
-        let mut state = Idle;
-        for event in [
-            RequestAccepted,
-            StandbyStarted,
-            StandbyHealthy,
-            TurnBoundaryReached,
-            PromotionCommitted,
-        ] {
-            state = pcp_supervisor_handoff_transition(state, event).state;
-        }
-        assert_eq!(state, TransferringOwnership);
-        assert!(state.lease_promoted());
-
-        let transition = pcp_supervisor_handoff_transition(state, StandbyFailed);
-        assert_eq!(transition.action, EscalateRepair);
-        assert_eq!(transition.state, BlockedPostPromotion);
-        assert!(!transition.state.old_supervisor_authoritative());
-        assert!(!transition.state.standby_may_touch_child());
-        assert!(transition.state.lease_promoted());
-    }
-
-    #[test]
-    fn reexec_state_parses_valid_handoff() {
-        assert_eq!(
-            ReexecState::parse("4242", "7"),
-            Some(ReexecState {
-                child_pid: 4242,
-                master_fd: 7,
-            })
-        );
-        // Whitespace tolerated.
-        assert_eq!(
-            ReexecState::parse(" 9 ", " 12 "),
-            Some(ReexecState {
-                child_pid: 9,
-                master_fd: 12,
-            })
-        );
-    }
-
-    #[test]
-    fn reexec_state_rejects_invalid_handoff() {
-        // pid 0 is not a live child; fd < 0 is not an inherited fd.
-        assert_eq!(ReexecState::parse("0", "7"), None);
-        assert_eq!(ReexecState::parse("4242", "-1"), None);
-        // Non-numeric never re-adopts.
-        assert_eq!(ReexecState::parse("x", "7"), None);
-        assert_eq!(ReexecState::parse("4242", "fd"), None);
-    }
-
-    #[test]
-    fn reexec_state_env_round_trips() {
-        let state = ReexecState {
-            child_pid: 4242,
-            master_fd: 7,
-        };
-        let env = state.to_env();
-        assert_eq!(env[0].0, REEXEC_CHILD_PID_ENV);
-        assert_eq!(env[0].1, "4242");
-        assert_eq!(env[1].0, REEXEC_MASTER_FD_ENV);
-        assert_eq!(env[1].1, "7");
-        // Marshaled values parse back to the same state.
-        assert_eq!(ReexecState::parse(&env[0].1, &env[1].1), Some(state));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn reexec_state_child_survived_distinguishes_live_from_dead_pid() {
-        // `#midturn-recycle-resume` Phase B: a live PID (this test process) reports
-        // survived; a PID that cannot exist reports dead, driving a re-dispatch.
-        let live = ReexecState {
-            child_pid: std::process::id(),
-            master_fd: 7,
-        };
-        assert!(
-            live.child_survived(),
-            "the current process pid must read as a surviving child"
-        );
-
-        // Spawn a child, reap it, and confirm the now-dead pid reads as not-survived.
-        // (A reaped pid answers `kill(pid, 0)` with ESRCH.)
-        let mut child = std::process::Command::new("true")
-            .spawn()
-            .expect("spawn a short-lived child");
-        let dead_pid = child.id();
-        child.wait().expect("reap the child");
-        let dead = ReexecState {
-            child_pid: dead_pid,
-            master_fd: 7,
-        };
-        assert!(
-            !dead.child_survived(),
-            "a reaped child pid must read as not-survived so the turn is re-dispatched"
-        );
     }
 
     // #jb-run-agent-doc-busy-queue-dispatch-deadlock: the supervisor idle-queue

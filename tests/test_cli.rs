@@ -840,6 +840,13 @@ fn realtime_workflow_spec_pins_lazily_backed_authority() {
         "realtime workflow spec must require frontend capability proof before trusting editor mutation delivery"
     );
     assert!(
+        realtime.contains("target the live plugin-owner `editor_id`")
+            && realtime.contains("Untargeted file-IPC\n   fallback is not delivery proof")
+            && spec.contains("Editor delivery must target the live plugin-owner `editor_id`")
+            && spec.contains("untargeted file-IPC fallback is not delivery proof"),
+        "realtime workflow spec must require targeted editor delivery for editor-owned documents"
+    );
+    assert!(
         realtime.contains("## Editor Frontend Hot Path")
             && realtime.contains("The editor text-change callback is a capture boundary, not a convergence worker")
             && realtime.contains("must not perform full-buffer reads")
@@ -1115,7 +1122,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // disk write touches the session doc behind a live JB editor listener.
         // The new `guard_` occurrence is only the `"strip_guard_markers"` source
         // label string — not a new flow guard boundary.
-        ("agent-doc-orchestration/src/git.rs", "guard_") => 19,
+        // +1 (#live-editor-commit-guard): `commit_with_outcome` now routes a
+        // live editor buffer ahead of disk through `log_closeout_guard_event`
+        // with `CloseoutGuardReason::ReplicaDeliveryPending`, blocking stale
+        // already-current/pre-stage commits until editor delivery is proven.
+        ("agent-doc-orchestration/src/git.rs", "guard_") => 20,
         ("agent-doc-orchestration/src/git/normalize.rs", "guard_") => 1,
         // `#pcwcrt`: the legacy post-commit working-tree revert tower
         // (`postcommit_worktree_lost_committed_content` / `send_postcommit_editor_refresh`
@@ -1503,7 +1514,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // merge success path, mirroring the sibling `#fintol2`
         // `reason=independent_concurrent_edit` forward-merge log (an ops_log
         // human-reason, not a new flow-enum outcome).
-        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 18,
+        // 18 -> 19 (#detached-disk-current-file): the degraded-socket editorless
+        // regression now asserts `reason=listener_degraded_editor_detached`,
+        // proving the path tries file IPC first and only then uses guarded
+        // DetachedDisk when no live editor sidecar owns the document.
+        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 19,
         // +1 `guard_` (#fcc0-degraded-file-ipc): `IpcPollOptions::convergence`
         // centralizes the existing committed-cycle file-IPC poll guard for
         // convergence callers; this is a constructor for the existing guard, not
@@ -1575,13 +1590,19 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `reason=editor_capability_missing` converge boundary.
         // 9 -> 11 (#operator-text-authority-refresh): two regression test names
         // contain `capability_guard_`; the production guard boundary is unchanged.
-        ("agent-doc-orchestration/src/write/converge.rs", "guard_") => 11,
+        // +1 (#detached-disk-current-file): the detached-disk convergence path
+        // calls `guard_visible_write_idle_and_current` immediately before the
+        // atomic write, so no editorless fallback writes over a newer file epoch.
+        ("agent-doc-orchestration/src/write/converge.rs", "guard_") => 12,
         // 24 -> 26 (#operator-text-authority-refresh): a missing-authority sidecar
         // now asks the editor to republish a read-only live-buffer proof before
         // failing closed. The two `reason=publish_live_buffer_failed` diagnostics
         // explain the blocked convergence closeout when that refresh cannot prove
         // authority.
-        ("agent-doc-orchestration/src/write/converge.rs", "reason=") => 26,
+        // 26 -> 27 (#detached-disk-current-file): the audited `DetachedDisk`
+        // path logs `transport=disk_detached reason=<...>` after proving no live
+        // editor owner/sidecar and rechecking the current visible file.
+        ("agent-doc-orchestration/src/write/converge.rs", "reason=") => 27,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.
         // +1 for the audited `queue_consume_divergence_reconciled ... reason=crdt_merge_authoritative`
@@ -1638,8 +1659,8 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // converger now short-circuits to the guarded disk fallback when the
         // `#ipcdrift` latch is degraded, mirroring the reposition/finalize socket
         // paths) and +3 test literals (the comment + the `reason=listener_degraded`
-        // / `reason=no_listener` assertions in
-        // `try_editor_converge_skips_wedged_socket_when_latched_degraded`). The
+        // / `reason=no_listener` assertions in the degraded-socket convergence
+        // tests). The
         // socket failure path also now feeds `record_ipc_socket_ack_timeout` /
         // clears via `clear_ipc_socket_ack_timeouts` — no new `reason=` token.
         // 12 -> 11 (#live-drift-visible-repair): the focused file-IPC regression
@@ -3406,6 +3427,48 @@ fn assert_operator_authority_instructions(content: &str, surface: &str) {
         content.contains("fail closed or retry through the editor instead"),
         "{surface} should require fail-closed/editor retry instead of dropping operator text"
     );
+    assert!(
+        !content.contains("content_ours (baseline + response, no user edits) is saved as the snapshot on IPC success"),
+        "{surface} must not describe content_ours as the IPC-success snapshot authority"
+    );
+}
+
+#[test]
+fn root_agents_instructions_preserve_operator_authority() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let content = fs::read_to_string(root.join("AGENTS.md")).unwrap();
+
+    assert_operator_authority_instructions(&content, "root AGENTS.md");
+}
+
+#[test]
+fn docs_do_not_reintroduce_content_ours_snapshot_authority() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let docs = [
+        "AGENTS.md",
+        "README.md",
+        "SPEC.md",
+        "specs/06-config.md",
+        "specs/07-closeout-commands.md",
+        "specs/14-realtime-workflow.md",
+        "specs/pending-system.md",
+        ".claude/skills/agent-doc/SKILL.md",
+    ];
+    let banned = [
+        "content_ours (baseline + response, no user edits) is saved as the snapshot on IPC success",
+        "snapshot == baseline + response",
+        "saves the `content_ours` snapshot (baseline + response)",
+    ];
+
+    for doc in docs {
+        let content = fs::read_to_string(root.join(doc)).unwrap();
+        for phrase in banned {
+            assert!(
+                !content.contains(phrase),
+                "{doc} must not reintroduce content_ours snapshot authority phrase: {phrase}"
+            );
+        }
+    }
 }
 
 #[test]

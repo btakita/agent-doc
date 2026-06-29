@@ -4306,7 +4306,7 @@ fn brtc_reemit_storm_converges_to_one_item_per_identity_and_preserves_operator_p
             .iter()
             .filter(|e| {
                 matches!(e, QueueEntry::Prompt(p) if {
-                    use agent_doc_orchestration::queue_item_state_machine::QueueItemIdentity;
+                    use agent_doc_element_queue::QueueItemIdentity;
                     QueueItemIdentity::from_prompt(&p.text)
                         == QueueItemIdentity::Id(id.to_string())
                 })
@@ -4354,7 +4354,7 @@ fn brtc_reemit_storm_converges_to_one_item_per_identity_and_preserves_operator_p
     let alpha_pos = texts
         .iter()
         .position(|t| {
-            use agent_doc_orchestration::queue_item_state_machine::QueueItemIdentity;
+            use agent_doc_element_queue::QueueItemIdentity;
             QueueItemIdentity::from_prompt(t) == QueueItemIdentity::Id("alpha".into())
         })
         .expect("alpha head present");
@@ -4365,7 +4365,7 @@ fn brtc_reemit_storm_converges_to_one_item_per_identity_and_preserves_operator_p
     let beta_pos = texts
         .iter()
         .position(|t| {
-            use agent_doc_orchestration::queue_item_state_machine::QueueItemIdentity;
+            use agent_doc_element_queue::QueueItemIdentity;
             QueueItemIdentity::from_prompt(t) == QueueItemIdentity::Id("beta".into())
         })
         .expect("beta head present");
@@ -4755,7 +4755,7 @@ fn reconnect_buffer_sim_rereads_stale_then_keeps_user_edits() {
 }
 
 #[test]
-fn editorless_cli_sim_requires_force_disk_and_live_editor_fail_closed() {
+fn editorless_cli_sim_uses_detached_disk_and_live_editor_fail_closed() {
     use agent_doc_orchestration::flow::document_mutation::{
         EditorlessDiskFallbackDecision, decide_editorless_disk_fallback,
     };
@@ -4764,14 +4764,17 @@ fn editorless_cli_sim_requires_force_disk_and_live_editor_fail_closed() {
     let threshold = 3;
 
     // #kcb5 realtime cutover: a CLI-only actor with a connectable controller
-    // socket but no editor endpoint still fails closed unless the operator made
-    // the disk write explicit.
+    // socket but no editor endpoint may use the guarded DetachedDisk path once
+    // repeated no-ACKs prove there is no editor delivery.
     let cli_unforced = decide_editorless_disk_fallback(true, false, threshold, threshold, false);
     assert_eq!(
         cli_unforced,
-        EditorlessDiskFallbackDecision::FailClosed,
-        "an editor-less CLI actor must not silently route finalize to disk"
+        EditorlessDiskFallbackDecision::DetachedDisk,
+        "an editor-less CLI actor with no delivery proof should use the guarded detached disk path"
     );
+    if cli_unforced == EditorlessDiskFallbackDecision::DetachedDisk {
+        world.coverage.editorless_disk_fallbacks += 1;
+    }
 
     let cli = decide_editorless_disk_fallback(true, false, threshold, threshold, true);
     assert_eq!(
@@ -4793,8 +4796,8 @@ fn editorless_cli_sim_requires_force_disk_and_live_editor_fail_closed() {
     );
 
     assert_eq!(
-        world.coverage.editorless_disk_fallbacks, 1,
-        "exactly the editor-less actor should force the disk fallback"
+        world.coverage.editorless_disk_fallbacks, 2,
+        "both editor-less disk-authorized paths should be counted"
     );
 }
 

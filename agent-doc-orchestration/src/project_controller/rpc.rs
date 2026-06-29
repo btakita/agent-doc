@@ -349,27 +349,20 @@ pub fn authoritative_actor_binding(
 ///
 /// Pure decision so the deterministic SimWorld flood repro and the live dispatch
 /// path classify the coalesce condition identically.
-pub fn dispatch_should_coalesce_in_flight(
-    in_flight_same_cycle: bool,
-    operator_driven: bool,
-) -> bool {
-    in_flight_same_cycle && !operator_driven
-}
+pub use agent_doc_controller::dispatch::dispatch_should_coalesce_in_flight;
 
 /// Stable machine marker embedded in the `handle_dispatch` coalesce bail so callers
 /// across the IPC boundary (where the controller error is only a string) can
 /// recognise a benign in-flight dedup and report deduped-success instead of an
 /// exit-1 failure. The marker survives `request_controller`'s `project controller
 /// command \`dispatch\` failed: …` wrapping and the test/`test-support` direct path.
-pub const DISPATCH_COALESCED_IN_FLIGHT_MARKER: &str = "failed_stage=coalesced_in_flight";
+pub use agent_doc_controller::dispatch::DISPATCH_COALESCED_IN_FLIGHT_MARKER;
 
 /// `#qflood2`: classify whether a failed dispatch is the benign in-flight coalesce.
 /// A coalesce means an identical dispatch for this cycle is already in flight, so the
 /// requested work is happening — the caller should skip a redundant re-send (never
 /// reintroduce the flood) yet report success rather than surfacing exit-1.
-pub fn dispatch_error_is_coalesced(message: &str) -> bool {
-    message.contains(DISPATCH_COALESCED_IN_FLIGHT_MARKER)
-}
+pub use agent_doc_controller::dispatch::dispatch_error_is_coalesced;
 
 /// `#anw0` (#supkill-bg part 3): stable machine marker embedded in the
 /// `handle_dispatch` stale-generation bail when the current generation is itself
@@ -379,7 +372,7 @@ pub fn dispatch_error_is_coalesced(message: &str) -> bool {
 /// `generation N is closed` reject. The marker survives `request_controller`'s
 /// `project controller command \`dispatch\` failed: …` IPC wrapping, exactly like
 /// the #qflood coalesce marker.
-pub const DISPATCH_STALE_GENERATION_REDIRECT_MARKER: &str = "stale_generation_redirect";
+pub use agent_doc_controller::dispatch::DISPATCH_STALE_GENERATION_REDIRECT_MARKER;
 
 /// `#jbrestale`: marker a `queue_paused` dispatch bail carries when the pause was
 /// caused by a STALE supervisor re-injecting an already-answered/operator-verify head
@@ -468,7 +461,7 @@ pub fn dispatch_error_supervisor_restart_redirect(message: &str) -> Option<u32> 
 /// Mirrors the `#qpausego` split (pause stops the unattended injector, not the
 /// attended action) on the controller dispatch RPC.
 pub(crate) fn dispatch_command_kind_is_operator_reopen(command_kind: &str) -> bool {
-    matches!(command_kind, "managed_reopen" | "dispatch_only_reopen")
+    agent_doc_controller::dispatch::dispatch_command_kind_is_operator_reopen(command_kind)
 }
 
 /// `#anw0`: classify a failed dispatch as a stale-generation redirect and extract the
@@ -477,13 +470,7 @@ pub(crate) fn dispatch_command_kind_is_operator_reopen(command_kind: &str) -> bo
 /// (a retry cannot help, so that bail carries no redirect marker) — so non-redirect
 /// failures stay terminal and never trigger a self-heal retry.
 pub fn dispatch_error_stale_generation_redirect_target(message: &str) -> Option<u64> {
-    if !message.contains(DISPATCH_STALE_GENERATION_REDIRECT_MARKER) {
-        return None;
-    }
-    message.split("retry_generation=").nth(1).and_then(|rest| {
-        let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-        digits.parse::<u64>().ok()
-    })
+    agent_doc_controller::dispatch::dispatch_error_stale_generation_redirect_target(message)
 }
 
 pub fn authorize_dispatch(
@@ -1280,14 +1267,7 @@ pub(crate) fn resolve_supervisor_auto_recycle(
     frontmatter: Option<bool>,
     project: Option<bool>,
 ) -> bool {
-    if let Some(raw) = env {
-        match raw.trim().to_ascii_lowercase().as_str() {
-            "1" | "true" | "yes" | "on" => return true,
-            "0" | "false" | "no" | "off" => return false,
-            _ => {}
-        }
-    }
-    frontmatter.or(project).unwrap_or(true)
+    agent_doc_supervisor::config::resolve_supervisor_auto_recycle(env, frontmatter, project)
 }
 
 /// `#ctlrecycle` R3 / `#suprecyclequeue` — is supervisor auto-recycle enabled for the
@@ -1315,14 +1295,7 @@ pub(crate) fn resolve_agent_change_restart(
     frontmatter: Option<bool>,
     project: Option<bool>,
 ) -> bool {
-    if let Some(raw) = env {
-        match raw.trim().to_ascii_lowercase().as_str() {
-            "1" | "true" | "yes" | "on" => return true,
-            "0" | "false" | "no" | "off" => return false,
-            _ => {}
-        }
-    }
-    frontmatter.or(project).unwrap_or(true)
+    agent_doc_supervisor::config::resolve_agent_change_restart(env, frontmatter, project)
 }
 
 /// `#agentreloadrestart` — is agent-change-restart enabled for the supervisor

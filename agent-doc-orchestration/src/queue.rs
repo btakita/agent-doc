@@ -28,6 +28,7 @@
 //!
 //! This module is I/O-free. Callers handle reading/writing files.
 
+use agent_doc_element_queue::QueueItemLifecycle;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
@@ -461,9 +462,10 @@ pub fn render(entries: &[QueueEntry]) -> String {
 /// `agent:backlog` / `agent:icebox` (`#backlog-queue-sync-attr`).
 ///
 /// - `Sync` — the queue body is fully regenerated as the active-backlog
-///   `do [#id]` list, in backlog order. Any other queue content (manual
-///   presets, fences, struck items) is dropped. Use this when the queue should
-///   mirror the backlog exactly each cycle.
+///   `do [#id]` list, in backlog order, while preserving no-id manual queue
+///   entries (free-text prompts, fences, prose). Stale id-backed mirror entries
+///   are dropped. Use this when the id-backed queue should mirror the backlog
+///   each cycle without deleting realtime operator-authored queue text.
 /// - `Append` — add `do [#id]` for active backlog ids not already referenced in
 ///   the queue; existing entries and order are preserved. **Default** for a
 ///   bare `queue` attribute.
@@ -622,8 +624,26 @@ pub fn sync_backlog_into_queue(
 
     let new_entries: Vec<QueueEntry> = match mode {
         BacklogQueueSyncMode::Sync => {
-            // Full mirror: queue body becomes exactly the active-backlog do-list.
-            ordered_ids.iter().map(|id| do_prompt_entry(id)).collect()
+            // Mirror backlog-backed directives, but never delete no-id operator
+            // queue text such as a freshly typed `- test`.
+            let mirror = ordered_ids
+                .iter()
+                .map(|id| do_prompt_entry(id))
+                .collect::<Vec<_>>();
+            let mut rebuilt = Vec::with_capacity(entries.len().max(mirror.len()));
+            let mut inserted_mirror = false;
+            for entry in entries {
+                if entry_do_ids(entry).is_empty() {
+                    rebuilt.push(entry.clone());
+                } else if !inserted_mirror {
+                    rebuilt.extend(mirror.iter().cloned());
+                    inserted_mirror = true;
+                }
+            }
+            if !inserted_mirror {
+                rebuilt.extend(mirror);
+            }
+            rebuilt
         }
         BacklogQueueSyncMode::Append => {
             let mut rebuilt = entries.to_vec();
@@ -1908,10 +1928,7 @@ pub fn dedup_free_text_heads(
 /// (`#queuestatemachine2` / `#cgfx`). A `Prompt` is a `Live` head; a `Completed`
 /// (struck) entry is the retired `Struck` state. Non-prompt entries have no
 /// lifecycle.
-fn entry_lifecycle(
-    entry: &QueueEntry,
-) -> Option<agent_doc_core::queue_item_lifecycle::QueueItemLifecycle> {
-    use agent_doc_core::queue_item_lifecycle::QueueItemLifecycle;
+fn entry_lifecycle(entry: &QueueEntry) -> Option<QueueItemLifecycle> {
     match entry {
         QueueEntry::Prompt(_) => Some(QueueItemLifecycle::Live),
         QueueEntry::Completed(_) => Some(QueueItemLifecycle::Struck),
@@ -1964,9 +1981,9 @@ fn head_shape(prompt: &QueuePrompt) -> HeadShape {
 /// Returns `None` for non-prompt entries (fences, presets, dispatch, freeform),
 /// which convergence leaves untouched.
 type ConvergenceKey = (
-    crate::queue_item_state_machine::QueueItemIdentity,
+    agent_doc_element_queue::QueueItemIdentity,
     HeadShape,
-    agent_doc_core::queue_item_lifecycle::QueueItemLifecycle,
+    QueueItemLifecycle,
 );
 
 fn convergence_identity(entry: &QueueEntry) -> Option<ConvergenceKey> {
@@ -1975,23 +1992,23 @@ fn convergence_identity(entry: &QueueEntry) -> Option<ConvergenceKey> {
         _ => return None,
     };
     let lifecycle = entry_lifecycle(entry)?;
-    let identity = crate::queue_item_state_machine::QueueItemIdentity::from_prompt(&prompt.text);
+    let identity = agent_doc_element_queue::QueueItemIdentity::from_prompt(&prompt.text);
     Some((identity, head_shape(prompt), lifecycle))
 }
 
-fn queue_item_identity(
-    entry: &QueueEntry,
-) -> Option<crate::queue_item_state_machine::QueueItemIdentity> {
+fn queue_item_identity(entry: &QueueEntry) -> Option<agent_doc_element_queue::QueueItemIdentity> {
     let prompt = match entry {
         QueueEntry::Prompt(p) | QueueEntry::Completed(p) => p,
         _ => return None,
     };
-    Some(crate::queue_item_state_machine::QueueItemIdentity::from_prompt(&prompt.text))
+    Some(agent_doc_element_queue::QueueItemIdentity::from_prompt(
+        &prompt.text,
+    ))
 }
 
 fn snapshot_struck_representatives(
     snapshot_entries: &[QueueEntry],
-) -> std::collections::HashMap<crate::queue_item_state_machine::QueueItemIdentity, QueueEntry> {
+) -> std::collections::HashMap<agent_doc_element_queue::QueueItemIdentity, QueueEntry> {
     let mut struck = std::collections::HashMap::new();
     for entry in snapshot_entries {
         if !matches!(entry, QueueEntry::Completed(_)) {
@@ -2006,7 +2023,7 @@ fn snapshot_struck_representatives(
 
 fn current_struck_identities(
     entries: &[QueueEntry],
-) -> std::collections::HashSet<crate::queue_item_state_machine::QueueItemIdentity> {
+) -> std::collections::HashSet<agent_doc_element_queue::QueueItemIdentity> {
     entries
         .iter()
         .filter(|entry| matches!(entry, QueueEntry::Completed(_)))
@@ -2105,12 +2122,12 @@ pub fn converge_queue_via_lifecycle(
     entries: &[QueueEntry],
     snapshot_entries: &[QueueEntry],
 ) -> Option<Vec<QueueEntry>> {
-    use crate::queue_item_state_machine::{QueueItemEvent, QueueItemMachine, QueueItemState};
+    use agent_doc_element_queue::{QueueItemEvent, QueueItemMachine, QueueItemState};
 
     let snapshot_struck = snapshot_struck_representatives(snapshot_entries);
     let current_struck = current_struck_identities(entries);
     let mut injected_snapshot_struck =
-        std::collections::HashSet::<crate::queue_item_state_machine::QueueItemIdentity>::new();
+        std::collections::HashSet::<agent_doc_element_queue::QueueItemIdentity>::new();
     let mut lifecycle_changed = false;
     let mut entries_for_convergence = Vec::with_capacity(entries.len());
     for entry in entries {
@@ -2232,16 +2249,14 @@ pub fn converge_queue_via_lifecycle(
         // event for a struck copy is the struck terminal so a re-emit cannot
         // un-retire it (mirrors the CRDT `Struck` lattice join).
         let genesis_event = match lifecycle {
-            agent_doc_core::queue_item_lifecycle::QueueItemLifecycle::Live => {
+            QueueItemLifecycle::Live => {
                 if identity.is_id_backed() {
                     QueueItemEvent::BacklogMirrored
                 } else {
                     QueueItemEvent::OperatorAuthored
                 }
             }
-            agent_doc_core::queue_item_lifecycle::QueueItemLifecycle::Struck => {
-                QueueItemEvent::StruckThrough
-            }
+            QueueItemLifecycle::Struck => QueueItemEvent::StruckThrough,
         };
 
         // Lawful multiplicity for this key (how many copies survive):
@@ -2259,21 +2274,19 @@ pub fn converge_queue_via_lifecycle(
             (shape, identity, lifecycle),
             (
                 HeadShape::BareReference,
-                crate::queue_item_state_machine::QueueItemIdentity::Id(id),
-                agent_doc_core::queue_item_lifecycle::QueueItemLifecycle::Live,
+                agent_doc_element_queue::QueueItemIdentity::Id(id),
+                QueueItemLifecycle::Live,
             ) if directive_ids.contains(id)
         );
         let pin_collapsing = matches!(
             identity,
-            crate::queue_item_state_machine::QueueItemIdentity::Id(id) if pin_collapse_ids.contains(id)
+            agent_doc_element_queue::QueueItemIdentity::Id(id) if pin_collapse_ids.contains(id)
         );
         let allowed = if subsumed_by_directive {
             0
         } else if pin_collapsing {
             1
-        } else if shape == HeadShape::Directive
-            && lifecycle == agent_doc_core::queue_item_lifecycle::QueueItemLifecycle::Live
-        {
+        } else if shape == HeadShape::Directive && lifecycle == QueueItemLifecycle::Live {
             usize::MAX // intentional run-twice: never drop identical directive twins
         } else {
             authored.get(&key).copied().unwrap_or(0).max(1)
@@ -2301,10 +2314,8 @@ pub fn converge_queue_via_lifecycle(
         // First lawful sighting (within authored multiplicity): keep it. Seed the
         // machine at its genesis state so later re-emits see an advanced state.
         let initial = match lifecycle {
-            agent_doc_core::queue_item_lifecycle::QueueItemLifecycle::Struck => {
-                QueueItemState::Struck
-            }
-            agent_doc_core::queue_item_lifecycle::QueueItemLifecycle::Live => {
+            QueueItemLifecycle::Struck => QueueItemState::Struck,
+            QueueItemLifecycle::Live => {
                 if identity.is_id_backed() {
                     QueueItemState::Mirrored
                 } else {
@@ -2700,12 +2711,21 @@ mod tests {
     }
 
     #[test]
-    fn sync_mode_fully_mirrors_backlog_order() {
+    fn sync_mode_mirrors_backlog_order_and_preserves_manual_entries() {
         let entries = parse("- do [#old]\npreset spec\n").unwrap();
         let synced =
             sync_backlog_into_queue(&entries, &ids(&["a", "b"]), BacklogQueueSyncMode::Sync)
                 .expect("queue should change");
-        assert_eq!(render(&synced), "- do [#a]\n- do [#b]\n");
+        assert_eq!(render(&synced), "- do [#a]\n- do [#b]\npreset spec\n");
+    }
+
+    #[test]
+    fn sync_mode_preserves_manual_free_text_queue_edits() {
+        let entries = parse("- test\n- do [#old]\n").unwrap();
+        let synced =
+            sync_backlog_into_queue(&entries, &ids(&["a", "b"]), BacklogQueueSyncMode::Sync)
+                .expect("queue should change");
+        assert_eq!(render(&synced), "- test\n- do [#a]\n- do [#b]\n");
     }
 
     #[test]

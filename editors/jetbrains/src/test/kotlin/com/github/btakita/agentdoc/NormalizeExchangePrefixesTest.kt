@@ -514,6 +514,27 @@ One.
     }
 
     @Test
+    fun `socket reposition honors targeted editor identity before mutating`() {
+        val patchWatcherPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+        ).first { Files.exists(it) }
+        val patchWatcher = Files.readString(patchWatcherPath)
+        val repositionBranch = patchWatcher
+            .substringAfter("\"reposition\" -> {")
+            .substringBefore("\"refresh_content\" -> {")
+
+        val file = repositionBranch.indexOf("val file = extractStringField(json, \"file\")")
+        val editorId = repositionBranch.indexOf("val editorId = extractStringField(json, \"editor_id\")")
+        val targetGuard = repositionBranch.indexOf("targetsThisEditorId(editorId)")
+        val mutate = repositionBranch.indexOf("repositionBoundaryViaDocument(file, boundaryId, preserveHead)")
+
+        assertTrue("socket reposition must parse the target file", file >= 0)
+        assertTrue("socket reposition must parse editor_id", editorId > file)
+        assertTrue("socket reposition must reject foreign editor_id before mutating", targetGuard > editorId && targetGuard < mutate)
+    }
+
+    @Test
     fun `handles line at very start of user region`() {
         // First line of the user region (no leading newline before it)
         val doc = "<!-- agent:exchange patch=append -->\nFirst line.\nSecond line.\n<!-- /agent:exchange -->\n"

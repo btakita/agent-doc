@@ -22,6 +22,9 @@ Notable invariants:
   way to make live documents parse. `agent-doc-document` remains the pure
   document model/projection crate. CRDT merge and document realtime
   apply/verify do not commit; the document turn lifecycle owns commit decisions.
+  Editor delivery must target the live plugin-owner `editor_id` when an owner
+  lease exists; untargeted file-IPC fallback is not delivery proof for an
+  editor-owned document.
   See
   [Real-Time Workflow Authority](specs/14-realtime-workflow.md)
   and [Turn Lifecycle Authority](specs/15-turn-lifecycle.md).

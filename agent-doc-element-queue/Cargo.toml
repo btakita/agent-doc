@@ -11,3 +11,5 @@ name = "agent_doc_element_queue"
 
 [dependencies]
 agent-doc-element = { path = "../agent-doc-element", version = "0.34.65" }
+lazily = "0.13.1"
+serde = { version = "1", features = ["derive"] }

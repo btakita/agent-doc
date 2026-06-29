@@ -512,8 +512,9 @@ fn apply_compacted_document(
     } else {
         // `#w42v`: converge the compacted content through the editor path so it does
         // not diverge from the visible buffer and raise a `File Cache Conflict`.
-        // Missing or unproven editor convergence fails closed instead of writing the
-        // compacted bytes directly to disk.
+        // If no live editor owns the document, `try_editor_converge` may use the
+        // guarded DetachedDisk path, but only after rechecking that the current
+        // visible file still matches the compact input.
         crate::write::try_editor_converge(file, compacted, source_content, "compact")?;
     }
 
@@ -1411,17 +1412,17 @@ mod tests {
         "<!-- /agent:review -->\n",
     );
 
-    fn assert_no_listener_compact_refusal(err: &anyhow::Error, ops_log: &str) {
+    fn assert_stale_compact_source_refusal(err: &anyhow::Error, ops_log: &str) {
         let err = err.to_string();
         assert!(
-            err.contains("editor convergence is unproven") && err.contains("reason=no_listener"),
-            "compact without a live editor listener must fail closed: {err}"
+            err.contains("document changed after the response merge was computed"),
+            "compact must fail closed when the visible file changed after compaction input: {err}"
         );
         assert!(
-            ops_log.contains("compact_writeback")
-                && ops_log.contains("transport=blocked")
-                && ops_log.contains("reason=no_listener"),
-            "no-listener compact refusal should be logged:\n{ops_log}"
+            ops_log.contains("visible_write_deferred_current_changed")
+                && ops_log.contains("source=compact")
+                && !ops_log.contains("transport=disk_detached"),
+            "stale compact-source refusal should be logged without detached disk write:\n{ops_log}"
         );
     }
 
@@ -2034,7 +2035,7 @@ mod tests {
     }
 
     #[test]
-    fn component_compact_without_listener_rejects_late_visible_edit() {
+    fn component_compact_detached_disk_rejects_late_visible_edit() {
         let doc = concat!(
             "---\nagent_doc_session: test-compact-cas\nagent_doc_format: template\n---\n\n",
             "## Exchange\n\n",
@@ -2062,7 +2063,7 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(&file).unwrap(),
             live,
-            "no-listener compact must not overwrite a prompt typed after compaction was computed"
+            "detached-disk compact must not overwrite a prompt typed after compaction was computed"
         );
         assert_eq!(
             snapshot::load(&file).unwrap().unwrap(),
@@ -2070,7 +2071,7 @@ mod tests {
             "failed compact must not advance the snapshot"
         );
         let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert_no_listener_compact_refusal(&err, &ops_log);
+        assert_stale_compact_source_refusal(&err, &ops_log);
     }
 
     #[test]
@@ -2304,7 +2305,7 @@ mod tests {
     }
 
     #[test]
-    fn component_compact_without_listener_rejects_late_post_exchange_scratch_comment() {
+    fn component_compact_detached_disk_rejects_late_post_exchange_scratch_comment() {
         let prompt = "The post-exchange scratch comment was typed while compact exchange was being computed. #spec-test-build-install-commit-push";
         let doc = concat!(
             "---\nagent_doc_session: test-compact-comment-cas\nagent_doc_format: template\n---\n\n",
@@ -2333,7 +2334,7 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(&file).unwrap(),
             live,
-            "no-listener compact must not overwrite scratch comments typed after compaction was computed"
+            "detached-disk compact must not overwrite scratch comments typed after compaction was computed"
         );
         assert_eq!(
             snapshot::load(&file).unwrap().unwrap(),
@@ -2341,7 +2342,7 @@ mod tests {
             "failed compact must not advance the snapshot"
         );
         let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert_no_listener_compact_refusal(&err, &ops_log);
+        assert_stale_compact_source_refusal(&err, &ops_log);
     }
 
     #[test]
@@ -2387,7 +2388,7 @@ mod tests {
         let file_after = std::fs::read_to_string(&file).unwrap();
         assert_eq!(
             file_after, live,
-            "no-listener compact must not overwrite cycle-1779845677327 scratch directives"
+            "detached-disk compact must not overwrite cycle-1779845677327 scratch directives"
         );
         assert_eq!(
             file_after.matches(scratch_prompt).count(),
@@ -2416,7 +2417,7 @@ mod tests {
             "compact race handling must not emit file IPC or fullContent payloads"
         );
         let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert_no_listener_compact_refusal(&err, &ops_log);
+        assert_stale_compact_source_refusal(&err, &ops_log);
         assert!(
             !ops_log.contains("snapshot_absorb"),
             "compact race handling must not silently absorb a shorter disk snapshot:\n{ops_log}"

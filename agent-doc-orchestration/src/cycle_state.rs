@@ -46,15 +46,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum CyclePhase {
-    PreflightStarted,
-    ResponseCaptured,
-    WriteApplied,
-    Committed,
-    Abandoned,
-}
+pub use agent_doc_turn::CyclePhase;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BacklogTargetRequirement {

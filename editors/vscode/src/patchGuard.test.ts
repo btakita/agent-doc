@@ -259,4 +259,19 @@ describe('patchGuard', () => {
         assert.ok(nativeSource.includes('operator_text_authority_v1'));
         assert.ok(nativeSource.includes('agent_doc_document_closed_for_editor'));
     });
+
+    it('filters targeted patches before pure reposition handling', () => {
+        const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
+        const branch = source.slice(
+            source.indexOf('private async onPatchFileCreated('),
+            source.indexOf('const projectRoot = this.patchesDir', source.indexOf('private async onPatchFileCreated(')),
+        );
+
+        const targetGuard = branch.indexOf('this.targetsThisEditor(patch)');
+        const reposition = branch.indexOf('isPureRepositionSignal(patch)');
+
+        assert.ok(targetGuard >= 0, 'VS Code file IPC must filter by editor_id');
+        assert.ok(reposition >= 0, 'VS Code file IPC must handle pure reposition signals');
+        assert.ok(targetGuard < reposition, 'targeted filtering must happen before reposition mutation scheduling');
+    });
 });

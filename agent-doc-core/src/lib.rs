@@ -1,15 +1,11 @@
 //! agent-doc-core — document data layer for agent-doc.
 //!
-//! See `tasks/agent-doc/plan-agent-doc-core-extraction.md` for the wave plan.
-//! Currently extracted: Wave 1 (id, crdt, component, model_tier, pending),
-//! Wave 2 (frontmatter, project_config), Wave 3 (template), Wave 4 (diff
-//! pure half per #rtx6 Option 1 — `ComputeResult`, `compute`,
-//! `compute_with_current`, `wait_for_stable_content`, `run` stay in the main
-//! crate's `diff_io.rs` because they call `snapshot::{load,save,resolve,
-//! path_for}`). Some functions in `frontmatter`, `project_config`, and
-//! `template` take `&Path` and touch the filesystem — they live here for the
-//! convenience of a single move and may be split into orchestration wrappers
-//! in a follow-up tidy.
+//! See `tasks/agent-doc/prd-crate-decomposition.md` for the current extraction
+//! plan.
+//! `agent-doc-core` is a compatibility/data facade during extraction, not the
+//! home for new domain policy. New document semantics should land in focused
+//! crates such as `agent-doc-element-*`, `agent-doc-document`,
+//! `agent-doc-merge`, or a purpose-built pure crate.
 
 pub mod cell_doc;
 pub mod component;

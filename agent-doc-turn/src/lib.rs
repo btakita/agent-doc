@@ -6,6 +6,124 @@
 use lazily::{ThreadSafeContext, ThreadSafeStateMachine};
 use serde::{Deserialize, Serialize};
 
+pub mod drain_stall;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CyclePhase {
+    PreflightStarted,
+    ResponseCaptured,
+    WriteApplied,
+    Committed,
+    Abandoned,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CycleEvent {
+    StartPreflight,
+    ResponseCaptured,
+    WriteApplied,
+    Committed,
+    Abandoned,
+    RecoverablePreflightTimeout,
+    Bookkeeping(CycleBookkeepingEvent),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CycleBookkeepingEvent {
+    ActiveQueueHeads,
+    TurnCheckpoint,
+    PendingMutations,
+    PendingDoneIds,
+    PendingKeptOpenIds,
+    ReapedPendingIds,
+    ExpectDoneOrGateIds,
+    PendingGatedIds,
+    PendingAddedIds,
+    BacklogCaptureRequirement,
+    BacklogTargetRequirements,
+    RequiredExplicitBacklogItemCount,
+    RequiredPlanReferenceCount,
+    OpenCycleProgress,
+    IpcSnapshotAdoptionBlocked,
+    DroppedExchangePrompts,
+    DroppedQueuePrompts,
+    SemanticMergeAcks,
+}
+
+pub struct CyclePhaseMachine {
+    ctx: ThreadSafeContext,
+    machine: ThreadSafeStateMachine<CyclePhase, CycleEvent>,
+}
+
+impl CyclePhaseMachine {
+    pub fn new(initial: CyclePhase) -> Self {
+        let ctx = ThreadSafeContext::new();
+        let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_phase);
+        Self { ctx, machine }
+    }
+
+    pub fn send(&self, event: CycleEvent) -> bool {
+        self.machine.send(&self.ctx, event)
+    }
+
+    pub fn state(&self) -> CyclePhase {
+        self.machine.state(&self.ctx)
+    }
+
+    pub fn transition(initial: CyclePhase, event: CycleEvent) -> Option<CyclePhase> {
+        let machine = Self::new(initial);
+        if machine.send(event) {
+            Some(machine.state())
+        } else {
+            None
+        }
+    }
+}
+
+pub fn transition_phase(current: &CyclePhase, event: &CycleEvent) -> Option<CyclePhase> {
+    match event {
+        CycleEvent::StartPreflight => Some(CyclePhase::PreflightStarted),
+        CycleEvent::ResponseCaptured => match current {
+            CyclePhase::PreflightStarted | CyclePhase::ResponseCaptured => {
+                Some(CyclePhase::ResponseCaptured)
+            }
+            CyclePhase::WriteApplied | CyclePhase::Committed | CyclePhase::Abandoned => None,
+        },
+        CycleEvent::WriteApplied => match current {
+            CyclePhase::PreflightStarted
+            | CyclePhase::ResponseCaptured
+            | CyclePhase::WriteApplied => Some(CyclePhase::WriteApplied),
+            CyclePhase::Committed | CyclePhase::Abandoned => None,
+        },
+        CycleEvent::Committed => match current {
+            CyclePhase::PreflightStarted
+            | CyclePhase::ResponseCaptured
+            | CyclePhase::WriteApplied
+            | CyclePhase::Committed => Some(CyclePhase::Committed),
+            CyclePhase::Abandoned => None,
+        },
+        CycleEvent::Abandoned => match current {
+            CyclePhase::PreflightStarted
+            | CyclePhase::ResponseCaptured
+            | CyclePhase::WriteApplied => Some(CyclePhase::Abandoned),
+            CyclePhase::Committed | CyclePhase::Abandoned => None,
+        },
+        CycleEvent::RecoverablePreflightTimeout => match current {
+            CyclePhase::PreflightStarted
+            | CyclePhase::ResponseCaptured
+            | CyclePhase::WriteApplied => Some(CyclePhase::PreflightStarted),
+            CyclePhase::Committed | CyclePhase::Abandoned => None,
+        },
+        CycleEvent::Bookkeeping(_) => match current {
+            CyclePhase::PreflightStarted
+            | CyclePhase::ResponseCaptured
+            | CyclePhase::WriteApplied => Some(*current),
+            CyclePhase::Committed | CyclePhase::Abandoned => None,
+        },
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnState {
@@ -121,6 +239,69 @@ impl TurnLifecycleMachine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cycle_phase_machine_accepts_normal_closeout_order() {
+        let machine = CyclePhaseMachine::new(CyclePhase::PreflightStarted);
+
+        assert!(machine.send(CycleEvent::ResponseCaptured));
+        assert_eq!(machine.state(), CyclePhase::ResponseCaptured);
+        assert!(machine.send(CycleEvent::WriteApplied));
+        assert_eq!(machine.state(), CyclePhase::WriteApplied);
+        assert!(machine.send(CycleEvent::Committed));
+        assert_eq!(machine.state(), CyclePhase::Committed);
+    }
+
+    #[test]
+    fn cycle_phase_machine_rejects_lower_rank_and_terminal_regressions() {
+        let machine = CyclePhaseMachine::new(CyclePhase::WriteApplied);
+
+        assert!(!machine.send(CycleEvent::ResponseCaptured));
+        assert_eq!(machine.state(), CyclePhase::WriteApplied);
+        assert!(machine.send(CycleEvent::Committed));
+        assert!(!machine.send(CycleEvent::WriteApplied));
+        assert!(!machine.send(CycleEvent::Abandoned));
+        assert_eq!(machine.state(), CyclePhase::Committed);
+    }
+
+    #[test]
+    fn cycle_duplicate_committed_event_is_stable_self_transition() {
+        let machine = CyclePhaseMachine::new(CyclePhase::Committed);
+
+        assert!(machine.send(CycleEvent::Committed));
+        assert_eq!(machine.state(), CyclePhase::Committed);
+    }
+
+    #[test]
+    fn cycle_abandoned_is_terminal() {
+        let machine = CyclePhaseMachine::new(CyclePhase::ResponseCaptured);
+
+        assert!(machine.send(CycleEvent::Abandoned));
+        assert_eq!(machine.state(), CyclePhase::Abandoned);
+        assert!(!machine.send(CycleEvent::Committed));
+        assert!(!machine.send(CycleEvent::Bookkeeping(
+            CycleBookkeepingEvent::PendingDoneIds,
+        )));
+        assert_eq!(machine.state(), CyclePhase::Abandoned);
+    }
+
+    #[test]
+    fn cycle_recoverable_timeout_rewinds_only_open_cycles() {
+        assert_eq!(
+            CyclePhaseMachine::transition(
+                CyclePhase::WriteApplied,
+                CycleEvent::RecoverablePreflightTimeout,
+            ),
+            Some(CyclePhase::PreflightStarted)
+        );
+        assert_eq!(
+            CyclePhaseMachine::transition(
+                CyclePhase::Committed,
+                CycleEvent::RecoverablePreflightTimeout,
+            ),
+            None
+        );
+    }
 
     #[test]
     fn normal_commit_path_crosses_verified_handoff() {

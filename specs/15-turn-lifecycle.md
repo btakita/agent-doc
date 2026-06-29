@@ -198,7 +198,7 @@ for a project. Use `controller` in crate names, not `pcp`. The controller is
 not the supervisor state machine itself; it persists and applies supervisor
 decisions.
 
-Recommended crate names:
+The active crate boundaries are:
 
 - `agent-doc-supervisor`: pure supervisor domain model and realtime state
   machine. It owns states and facts such as `Starting`, `Ready`, `Busy`,

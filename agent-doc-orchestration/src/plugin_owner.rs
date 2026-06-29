@@ -161,6 +161,25 @@ pub fn live_editor_endpoint_attached(file: &str) -> bool {
     editor_endpoint_attached_for_lease(read_plugin_owner_lease(file), pid_is_live)
 }
 
+/// Return the live plugin-owner consumer id for `file` when the lease owner pid
+/// is still alive. This is the editor delivery target for targeted IPC: the
+/// same lease that suppresses non-owner patch application should also decide
+/// which editor id receives file/socket fallback payloads.
+pub fn live_plugin_owner_consumer_id(file: &str) -> Option<String> {
+    live_plugin_owner_consumer_id_for_lease(read_plugin_owner_lease(file), pid_is_live)
+}
+
+/// Testable core of [`live_plugin_owner_consumer_id`].
+pub fn live_plugin_owner_consumer_id_for_lease(
+    lease: Option<PluginOwnerLease>,
+    is_pid_live: impl Fn(u32) -> bool,
+) -> Option<String> {
+    let lease = lease?;
+    is_pid_live(lease.pid)
+        .then_some(lease.consumer_id)
+        .filter(|consumer_id| !consumer_id.trim().is_empty())
+}
+
 /// Test-only: seed a plugin-owner lease for `file` recording the given `pid`,
 /// modelling a real attached editor. Used by write/converge tests to exercise
 /// the fail-closed (live-editor) branch distinctly from the editor-less `#6b5h`
@@ -376,6 +395,23 @@ mod tests {
             Some(stale_but_live),
             |pid| pid == 7
         ));
+    }
+
+    #[test]
+    fn live_plugin_owner_consumer_id_requires_live_pid() {
+        assert_eq!(
+            live_plugin_owner_consumer_id_for_lease(Some(lease_with_pid(4242)), |pid| pid == 4242)
+                .as_deref(),
+            Some("jetbrains-4242-uuid")
+        );
+        assert_eq!(
+            live_plugin_owner_consumer_id_for_lease(Some(lease_with_pid(4242)), |_| false),
+            None
+        );
+        assert_eq!(
+            live_plugin_owner_consumer_id_for_lease(None, |_| true),
+            None
+        );
     }
 
     #[test]

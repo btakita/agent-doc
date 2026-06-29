@@ -2041,6 +2041,38 @@ pub(crate) fn queue_consume_count_for_done_ids(
     count
 }
 
+fn queue_prompt_texts_match_for_consumption(left: &str, right: &str) -> bool {
+    crate::queue::strip_priority_markers(left) == crate::queue::strip_priority_markers(right)
+}
+
+fn mark_first_matching_prompts_completed_by_texts(
+    entries: &[crate::queue::QueueEntry],
+    target_texts: &[String],
+) -> Option<Vec<crate::queue::QueueEntry>> {
+    let mut remaining_targets = target_texts.to_vec();
+    let mut marked = Vec::with_capacity(target_texts.len());
+    let mut result = Vec::with_capacity(entries.len());
+    for entry in entries {
+        if let crate::queue::QueueEntry::Prompt(prompt) = entry
+            && let Some(pos) = remaining_targets
+                .iter()
+                .position(|target| queue_prompt_texts_match_for_consumption(&prompt.text, target))
+        {
+            let mut completed = prompt.clone();
+            completed.text = crate::queue::strip_in_progress_marker(&completed.text);
+            marked.push(remaining_targets.remove(pos));
+            result.push(crate::queue::QueueEntry::Completed(completed));
+            continue;
+        }
+        result.push(entry.clone());
+    }
+    if marked.len() == target_texts.len() {
+        Some(result)
+    } else {
+        None
+    }
+}
+
 pub(crate) fn mark_entries_completed_by_done_ids(
     entries: &[crate::queue::QueueEntry],
     done_ids: &[String],
@@ -2163,6 +2195,44 @@ pub(crate) fn mark_completed_queue_prompts_for_done_ids(
 pub(crate) struct QueuePromptNodeKeys {
     keys: Vec<String>,
     ast_backed: bool,
+}
+
+fn queue_prompt_node_keys_for_texts(
+    content: &str,
+    target_texts: &[String],
+    preferred_node_keys: &[String],
+) -> Result<Option<QueuePromptNodeKeys>> {
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+        .map_err(|err| anyhow::anyhow!("queue consume: failed to derive queue node keys: {err}"))?;
+    let mut selected_indices = std::collections::HashSet::new();
+    let mut keys = Vec::with_capacity(target_texts.len());
+    for (target_index, target_text) in target_texts.iter().enumerate() {
+        let preferred = preferred_node_keys.get(target_index);
+        let preferred_index = preferred.and_then(|preferred_key| {
+            nodes.iter().enumerate().position(|(node_index, node)| {
+                !selected_indices.contains(&node_index)
+                    && !node.item.struck
+                    && node.node_key == *preferred_key
+                    && queue_prompt_texts_match_for_consumption(&node.item.text, target_text)
+            })
+        });
+        let fallback_index = || {
+            nodes.iter().enumerate().position(|(node_index, node)| {
+                !selected_indices.contains(&node_index)
+                    && !node.item.struck
+                    && queue_prompt_texts_match_for_consumption(&node.item.text, target_text)
+            })
+        };
+        let Some(node_index) = preferred_index.or_else(fallback_index) else {
+            return Ok(None);
+        };
+        selected_indices.insert(node_index);
+        keys.push(nodes[node_index].node_key.clone());
+    }
+    Ok(Some(QueuePromptNodeKeys {
+        keys,
+        ast_backed: true,
+    }))
 }
 
 pub(crate) fn queue_prompt_node_keys_for_count(
@@ -2721,67 +2791,17 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
     }
 
     let consume_count = leading_done_consume_count.max(1);
-    let consumed_texts = first_n_queue_prompt_texts(&entries, consume_count);
-    let consumed_text = consumed_texts.first().cloned().ok_or_else(|| {
+    let mut consumed_texts = first_n_queue_prompt_texts(&entries, consume_count);
+    let mut consumed_text = consumed_texts.first().cloned().ok_or_else(|| {
         anyhow::anyhow!(
             "queue consume: queue_active is true but document queue has no prompt to consume"
         )
     })?;
-    if leading_done_consume_count == 0 && !queue_head_is_free_text_prompt(content)? {
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "queue_consume_refused_id_backed_head_without_explicit_signal file={} head={:?}",
-                file.display(),
-                consumed_text
-            ),
-        );
-        return Ok(None);
-    }
-    let consumed_node_keys = queue_prompt_node_keys_for_count(content, consume_count)?;
-    let node_ops = consumed_node_keys
-        .keys
-        .iter()
-        .cloned()
-        .map(|node_key| IpcNodeOp::consume("queue", node_key))
-        .collect::<Vec<_>>();
-
-    let has_auto = crate::queue::has_auto_attr(&comp.attrs);
-    let completed_entries = crate::queue::mark_first_n_prompts_completed(&entries, consume_count);
-    let remaining = crate::queue::prompts(&completed_entries).len();
-    let drained = remaining == 0;
-    let new_entries = if drained {
-        Vec::new()
-    } else {
-        completed_entries
-    };
-    let new_body = crate::queue::render(&new_entries);
-    let mut current = if drained || !consumed_node_keys.ast_backed {
-        comp.replace_content(content, &new_body)
-    } else {
-        consume_queue_nodes_by_key(content, &consumed_node_keys.keys)?
-    };
-
-    if drained {
-        if has_auto {
-            let comps = component::parse(&current)?;
-            if let Some(q) = comps.iter().find(|c| c.name == "queue") {
-                let raw = &current[q.open_start..q.open_end];
-                let new_tag = crate::queue::strip_auto_from_tag(raw);
-                if new_tag != raw {
-                    let mut rebuilt = String::with_capacity(current.len());
-                    rebuilt.push_str(&current[..q.open_start]);
-                    rebuilt.push_str(&new_tag);
-                    rebuilt.push_str(&current[q.open_end..]);
-                    current = rebuilt;
-                }
-            }
-        }
-        current = frontmatter::merge_queue_state(&current, false)?;
-    }
 
     // Update snapshot in sync. Required closeouts must be able to prove the
-    // same head prompt was removed from both the file and the snapshot.
+    // same active turn prompt was removed from both the file and the snapshot.
+    // Load the snapshot before mutating the document so live queue insertions can
+    // be preserved while the pre-turn active head remains the closeout target.
     let snap = snapshot_content.ok_or_else(|| {
         anyhow::anyhow!("queue consume: queue_active is true but snapshot is missing")
     })?;
@@ -2819,24 +2839,13 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
             .map(|t| crate::queue::strip_priority_markers(t))
             .collect::<Vec<_>>()
     };
+    let mut consume_snapshot_head_for_live_addition = false;
     if norm(&snapshot_consumed_texts) != norm(&consumed_texts) {
-        // `#editorbufwin` (Fix A): the document head (read fresh from disk) is the
-        // user's live editor-buffer queue addition; the snapshot/content_ours head
-        // is the OLD head because the live user queue addition is deliberately NOT
-        // absorbed into content_ours (the unproven-live-queue invariant). So a
-        // benign live editor buffer makes these heads disagree and would hard-bail
-        // EVERY cycle. The remaining-queue check below already tolerates exactly
-        // this kind of divergence (`queue_consume_divergence_reconciled
-        // reason=crdt_merge_authoritative`); the head check lacked a matching path.
-        //
-        // Reconcile — but ONLY when the divergence is explained by recorded
-        // live-buffer drift: the document head must be a user ADDITION that the
-        // ipc write path recorded as a dropped queue prompt
-        // (`cycle_state::record_dropped_queue_prompts`, written at write/ipc.rs).
-        // In that case the editor buffer is the source of truth: log and PROCEED
-        // using the DOCUMENT head as authoritative. With NO dropped-queue evidence
-        // the divergence is unexplained (genuine corruption) and we keep the
-        // hard-bail.
+        // A dropped-queue record proves a live editor-buffer addition exists and
+        // must be preserved. It does NOT retarget the active turn. When the
+        // document head is that recorded addition, consume the snapshot active
+        // head wherever it now sits in the current queue and leave the insertion
+        // live for a later turn.
         let dropped_evidence = crate::cycle_state::load(file)
             .ok()
             .flatten()
@@ -2850,16 +2859,7 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
                     .any(|d| crate::queue::strip_priority_markers(d) == doc_norm)
             });
         if doc_head_is_recorded_addition {
-            crate::ops_log::log_op(
-                file,
-                &format!(
-                    "queue_consume_head_divergence_reconciled file={} reason=live_buffer_addition_authoritative consumed={} snap_head={:?} doc_head={:?}",
-                    file.display(),
-                    consume_count,
-                    snapshot_consumed_texts,
-                    consumed_texts
-                ),
-            );
+            consume_snapshot_head_for_live_addition = true;
         } else {
             anyhow::bail!(
                 "queue consume: snapshot head prompts {:?} do not match document head prompts {:?}",
@@ -2867,6 +2867,126 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
                 consumed_texts
             );
         }
+    }
+    let (consumed_node_keys, completed_entries) = if consume_snapshot_head_for_live_addition {
+        if snapshot_consumed_texts
+            .iter()
+            .any(|text| !queue_prompt_text_is_free_text(content, text))
+        {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "queue_consume_refused_id_backed_snapshot_head_without_explicit_signal file={} head={:?} doc_head={:?}",
+                    file.display(),
+                    snapshot_consumed_texts,
+                    consumed_texts
+                ),
+            );
+            return Ok(None);
+        }
+        let Some(node_keys) = queue_prompt_node_keys_for_texts(
+            content,
+            &snapshot_consumed_texts,
+            &snapshot_node_keys.keys,
+        )?
+        else {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "queue_consume_head_divergence_preserved_live_addition file={} reason=snapshot_active_head_missing snap_head={:?} doc_head={:?}",
+                    file.display(),
+                    snapshot_consumed_texts,
+                    consumed_texts
+                ),
+            );
+            return Ok(None);
+        };
+        let Some(completed_entries) =
+            mark_first_matching_prompts_completed_by_texts(&entries, &snapshot_consumed_texts)
+        else {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "queue_consume_head_divergence_preserved_live_addition file={} reason=snapshot_active_head_unrenderable snap_head={:?} doc_head={:?}",
+                    file.display(),
+                    snapshot_consumed_texts,
+                    consumed_texts
+                ),
+            );
+            return Ok(None);
+        };
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "queue_consume_head_divergence_reconciled file={} reason=snapshot_active_head_authoritative_preserved_live_addition consumed={} snap_head={:?} doc_head={:?}",
+                file.display(),
+                consume_count,
+                snapshot_consumed_texts,
+                consumed_texts
+            ),
+        );
+        consumed_texts = snapshot_consumed_texts.clone();
+        consumed_text = consumed_texts.first().cloned().ok_or_else(|| {
+            anyhow::anyhow!(
+                "queue consume: snapshot-selected consume path had no prompt to consume"
+            )
+        })?;
+        (node_keys, completed_entries)
+    } else {
+        if leading_done_consume_count == 0 && !queue_head_is_free_text_prompt(content)? {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "queue_consume_refused_id_backed_head_without_explicit_signal file={} head={:?}",
+                    file.display(),
+                    consumed_text
+                ),
+            );
+            return Ok(None);
+        }
+        (
+            queue_prompt_node_keys_for_count(content, consume_count)?,
+            crate::queue::mark_first_n_prompts_completed(&entries, consume_count),
+        )
+    };
+    let node_ops = consumed_node_keys
+        .keys
+        .iter()
+        .cloned()
+        .map(|node_key| IpcNodeOp::consume("queue", node_key))
+        .collect::<Vec<_>>();
+
+    let has_auto = crate::queue::has_auto_attr(&comp.attrs);
+    let remaining = crate::queue::prompts(&completed_entries).len();
+    let drained = remaining == 0;
+    let new_entries = if drained {
+        Vec::new()
+    } else {
+        completed_entries
+    };
+    let new_body = crate::queue::render(&new_entries);
+    let mut current = if drained || !consumed_node_keys.ast_backed {
+        comp.replace_content(content, &new_body)
+    } else {
+        consume_queue_nodes_by_key(content, &consumed_node_keys.keys)?
+    };
+
+    if drained {
+        if has_auto {
+            let comps = component::parse(&current)?;
+            if let Some(q) = comps.iter().find(|c| c.name == "queue") {
+                let raw = &current[q.open_start..q.open_end];
+                let new_tag = crate::queue::strip_auto_from_tag(raw);
+                if new_tag != raw {
+                    let mut rebuilt = String::with_capacity(current.len());
+                    rebuilt.push_str(&current[..q.open_start]);
+                    rebuilt.push_str(&new_tag);
+                    rebuilt.push_str(&current[q.open_end..]);
+                    current = rebuilt;
+                }
+            }
+        }
+        current = frontmatter::merge_queue_state(&current, false)?;
     }
     let snap_completed_entries =
         crate::queue::mark_first_n_prompts_completed(&snap_entries, consume_count);
@@ -3842,13 +3962,13 @@ mod core_tests {
         );
     }
     #[test]
-    fn queue_consume_head_divergence_reconciles_with_dropped_queue_evidence() {
-        // #editorbufwin (Fix A): the snapshot head is the OLD head; the document
-        // head is the user's live editor-buffer addition (deliberately NOT
-        // absorbed into content_ours). When the ipc write path recorded that
-        // addition as a dropped queue prompt (`record_dropped_queue_prompts`),
-        // consume must RECONCILE using the document head as authoritative instead
-        // of hard-bailing every cycle on a benign live-buffer divergence.
+    fn queue_consume_head_divergence_preserves_dropped_queue_evidence() {
+        // #editorbufwin / realtime-turn split: the snapshot head is the OLD turn
+        // target; the document head is the user's live editor-buffer addition.
+        // Dropped-queue evidence proves the live edit must be preserved, not that
+        // it should replace the turn target. If the old target no longer exists in
+        // the document queue, closeout must no-op rather than consuming/deleting
+        // the operator's new queue item.
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("s.md");
         std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
@@ -3883,31 +4003,87 @@ mod core_tests {
         .unwrap();
 
         let outcome = consume_queue_prompt_force_disk(&doc)
-            .expect("consume must reconcile a head divergence backed by dropped-queue evidence");
-        let outcome = outcome.expect("the document head should be consumed");
-        assert_eq!(
-            outcome.consumed_count, 1,
-            "exactly the document head consumes"
+            .expect("dropped-queue evidence must avoid a hard bail");
+        assert!(
+            outcome.is_none(),
+            "missing snapshot head should not consume the live queue edit"
         );
-        // The document head (live-buffer addition) is authoritative — its single
-        // queue item drains, and the snapshot adopts the reconciled (drained)
-        // document queue rather than retaining the OLD snapshot head.
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            !result.contains("- handle the new live-buffer request"),
-            "the document head must no longer be a live queue item after consume:\n{result}"
+            result.contains("- handle the new live-buffer request"),
+            "the live queue item must stay queued:\n{result}"
         );
         let snap_result = snapshot::load(&doc).unwrap().unwrap();
         assert!(
-            !snap_result.contains("- handle the old request"),
-            "the snapshot must not retain the stale OLD head after reconcile:\n{snap_result}"
+            snap_result.contains("- handle the old request"),
+            "no-consume path leaves the snapshot unchanged for later reconciliation:\n{snap_result}"
         );
         let ops_log =
             std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
-            ops_log.contains("queue_consume_head_divergence_reconciled")
-                && ops_log.contains("reason=live_buffer_addition_authoritative"),
-            "the reconcile must be logged for forensics:\n{ops_log}"
+            ops_log.contains("queue_consume_head_divergence_preserved_live_addition")
+                && ops_log.contains("snapshot_active_head_missing"),
+            "the preserved-live-edit no-op must be logged for forensics:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn queue_consume_preserves_inserted_live_head_and_consumes_snapshot_head() {
+        // A live queue edit is realtime state, not a turn retarget. If the
+        // operator inserts a new free-text head while a turn is closing out, the
+        // inserted head must stay queued and the pre-turn snapshot head must be
+        // the item consumed for this turn.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: handle the old request\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- test\n",
+            "- handle the old request\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        let snap = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: handle the old request\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- handle the old request\n",
+            "<!-- /agent:queue -->\n",
+        );
+        snapshot::save(&doc, snap).unwrap();
+
+        crate::cycle_state::start_preflight(&doc, Some(snap), Some(content)).unwrap();
+        crate::cycle_state::record_dropped_queue_prompts(&doc, &["test".to_string()]).unwrap();
+
+        let outcome = consume_queue_prompt_force_disk(&doc)
+            .expect("consume must preserve the live edit and close the snapshot head")
+            .expect("snapshot head should be consumed");
+        assert_eq!(outcome.consumed_text, "handle the old request");
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            result.contains("- test\n"),
+            "newly typed queue item must stay live:\n{result}"
+        );
+        assert!(
+            !result.contains("- ~~test~~"),
+            "newly typed queue item must not be consumed by the old turn:\n{result}"
+        );
+        assert!(
+            result.contains("- ~~handle the old request~~"),
+            "snapshot head must be consumed in place:\n{result}"
+        );
+        let snap_result = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap_result.contains("- test\n")
+                && snap_result.contains("- ~~handle the old request~~"),
+            "snapshot must adopt the preserved live edit and consumed old head:\n{snap_result}"
         );
     }
 

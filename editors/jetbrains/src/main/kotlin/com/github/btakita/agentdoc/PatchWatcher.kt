@@ -516,6 +516,11 @@ class PatchWatcher(private val project: Project) : Disposable {
             }
             "reposition" -> {
                 val file = extractStringField(json, "file") ?: return APPLY_FAILED
+                val editorId = extractStringField(json, "editor_id")
+                if (!targetsThisEditorId(editorId)) {
+                    LOG.info("[socket] reposition targets editor_id ${editorId ?: "-"}; this editor is ${EditorIdentity.id}")
+                    return APPLY_FAILED
+                }
                 val boundaryId = extractStringField(json, "boundary_id")
                 val preserveHead = extractBooleanField(json, "preserve_head")
                 repositionBoundaryViaDocument(file, boundaryId, preserveHead)
@@ -2079,14 +2084,18 @@ data class IpcPatch(
     val originEditorId: String? = null,
 ) {
     fun targetsThisEditor(): Boolean {
-        if (editorId != null && editorId != EditorIdentity.id) {
-            return false
-        }
-        if (editorId == null && originEditorId == EditorIdentity.id) {
-            return false
-        }
-        return true
+        return targetsThisEditorId(editorId, originEditorId)
     }
+}
+
+private fun targetsThisEditorId(editorId: String?, originEditorId: String? = null): Boolean {
+    if (editorId != null && editorId != EditorIdentity.id) {
+        return false
+    }
+    if (editorId == null && originEditorId == EditorIdentity.id) {
+        return false
+    }
+    return true
 }
 
 data class ComponentPatch(

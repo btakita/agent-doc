@@ -12,4 +12,5 @@ name = "agent_doc_document"
 [dependencies]
 agent-doc-core = { path = "../agent-doc-core", version = "0.34.65" }
 agent-doc-element-registry = { path = "../agent-doc-element-registry", version = "0.34.65" }
+anyhow = "1"
 serde = { version = "1", features = ["derive"] }

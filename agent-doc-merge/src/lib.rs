@@ -5,6 +5,8 @@
 //! editor state, mutate snapshots, or commit changes. Turn lifecycle and realtime
 //! scheduling crates own those responsibilities.
 
+pub mod ownership;
+
 pub use agent_doc_core::cell_doc::{
     CellConflict, CellMergeOutcome, ConflictKind, ConflictPolicy, component_conflict_policy,
     merge_3way as cell_merge_3way,

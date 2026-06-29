@@ -2,6 +2,66 @@
 
 use super::*;
 
+fn live_editor_delivery_target(file: &Path) -> Option<String> {
+    let mut file_keys = Vec::new();
+    if let Ok(canonical) = file.canonicalize() {
+        file_keys.push(canonical.to_string_lossy().to_string());
+    }
+    let raw = file.to_string_lossy().to_string();
+    if !file_keys.iter().any(|key| key == &raw) {
+        file_keys.push(raw);
+    }
+
+    let owner_candidate = file_keys
+        .iter()
+        .find_map(|file_key| crate::plugin_owner::live_plugin_owner_consumer_id(file_key))
+        .map(
+            |editor_id| agent_doc_document_realtime::LiveEditorDeliveryCandidate {
+                editor_id: Some(editor_id),
+                timestamp_ms: u128::MAX,
+                is_live: true,
+                has_operator_text_authority: true,
+            },
+        );
+    let live_buffer_candidates = file_keys
+        .iter()
+        .flat_map(|file_key| crate::debounce::live_buffer_snapshots(file_key))
+        .map(|snapshot| {
+            let is_live = crate::debounce::live_buffer_snapshot_editor_is_live(&snapshot);
+            let has_operator_text_authority =
+                snapshot.has_capability(crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY);
+            agent_doc_document_realtime::LiveEditorDeliveryCandidate {
+                editor_id: snapshot.editor_id,
+                timestamp_ms: snapshot.timestamp_ms,
+                is_live,
+                has_operator_text_authority,
+            }
+        });
+
+    agent_doc_document_realtime::select_live_editor_delivery_target(
+        owner_candidate.into_iter().chain(live_buffer_candidates),
+    )
+}
+
+fn target_payload_to_live_editor(
+    file: &Path,
+    payload: &mut serde_json::Value,
+    transport: &str,
+) -> Option<String> {
+    let editor_id = live_editor_delivery_target(file)?;
+    payload["editor_id"] = serde_json::Value::String(editor_id.clone());
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "ipc_payload_targeted file={} transport={} editor_id={}",
+            file.display(),
+            transport,
+            editor_id
+        ),
+    );
+    Some(editor_id)
+}
+
 pub fn queue_file_ipc_reposition_boundary(
     file: &Path,
     boundary_id: Option<&str>,
@@ -79,6 +139,7 @@ pub fn queue_file_ipc_reposition_boundary(
     if let Ok(live) = std::fs::read_to_string(file) {
         payload["baseline_hash"] = serde_json::Value::String(crate::debounce::content_hash(&live));
     }
+    target_payload_to_live_editor(file, &mut payload, "file_reposition");
 
     atomic_write(&patch_file, &serde_json::to_string_pretty(&payload)?)?;
     crate::ops_log::log_op(
@@ -296,6 +357,7 @@ pub fn try_ipc(
                 );
             }
         }
+        target_payload_to_live_editor(file, &mut socket_payload, "socket_patch");
         crate::ops_log::log_op(
             file,
             &format!(
@@ -782,6 +844,7 @@ pub fn try_ipc(
             );
         }
     }
+    target_payload_to_live_editor(file, &mut ipc_payload, "file_patch");
 
     // Log IPC write details for debugging cross-contamination
     crate::ops_log::log_op(
@@ -1205,12 +1268,16 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
     }
 
     let result = if normalize_prefix_lines.is_empty() {
-        crate::ipc_socket::send_reposition(
-            &project_root,
-            &canonical.to_string_lossy(),
-            boundary_id.as_deref(),
-            true, // preserve (HEAD) in editor buffer
-        )
+        let mut message = serde_json::json!({
+            "type": "reposition",
+            "file": canonical.to_string_lossy(),
+            "preserve_head": true,
+        });
+        if let Some(boundary_id) = boundary_id.as_deref() {
+            message["boundary_id"] = serde_json::Value::String(boundary_id.to_string());
+        }
+        target_payload_to_live_editor(file, &mut message, "socket_reposition");
+        crate::ipc_socket::send_message(&project_root, &message).map(|_| true)
     } else {
         let mut message = serde_json::json!({
             "type": "patch",
@@ -1224,6 +1291,7 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
         if let Some(boundary_id) = boundary_id.as_deref() {
             message["reposition_boundary_id"] = serde_json::Value::String(boundary_id.to_string());
         }
+        target_payload_to_live_editor(file, &mut message, "socket_reposition_patch");
         crate::ipc_socket::send_message(&project_root, &message).map(|_| true)
     };
 
@@ -3806,6 +3874,78 @@ Can you preserve the second paragraph too?
 }
 
 #[cfg(test)]
+mod live_editor_target_tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn ipc_payload_targets_live_editor_sidecar_owner() {
+        let tmp = TempDir::new().unwrap();
+        for subdir in ["live-buffer", "logs"] {
+            fs::create_dir_all(tmp.path().join(".agent-doc").join(subdir)).unwrap();
+        }
+        let doc = tmp.path().join("session.md");
+        fs::write(&doc, "saved").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        crate::debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+            &doc_str,
+            "saved",
+            "jetbrains-test-owner",
+            "jetbrains",
+            "0.2.197",
+            &[crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+        )
+        .unwrap();
+
+        let mut payload = serde_json::json!({});
+        let target = target_payload_to_live_editor(&doc, &mut payload, "test");
+
+        assert_eq!(target.as_deref(), Some("jetbrains-test-owner"));
+        assert_eq!(
+            payload.get("editor_id").and_then(|value| value.as_str()),
+            Some("jetbrains-test-owner")
+        );
+    }
+
+    #[test]
+    fn ipc_payload_prefers_live_plugin_owner_over_newer_sidecar() {
+        let tmp = TempDir::new().unwrap();
+        for subdir in ["live-buffer", "plugin-owner", "logs"] {
+            fs::create_dir_all(tmp.path().join(".agent-doc").join(subdir)).unwrap();
+        }
+        let doc = tmp.path().join("session.md");
+        fs::write(&doc, "saved").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        assert!(crate::plugin_owner::try_acquire_plugin_owner(
+            &doc_str,
+            "jetbrains-owner",
+            std::process::id(),
+        ));
+        crate::debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+            &doc_str,
+            "saved plus newer non-owner buffer",
+            "jetbrains-newer-nonowner",
+            "jetbrains",
+            "0.2.197",
+            &[crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+        )
+        .unwrap();
+
+        let mut payload = serde_json::json!({});
+        let target = target_payload_to_live_editor(&doc, &mut payload, "test");
+
+        assert_eq!(target.as_deref(), Some("jetbrains-owner"));
+        assert_eq!(
+            payload.get("editor_id").and_then(|value| value.as_str()),
+            Some("jetbrains-owner")
+        );
+    }
+}
+
+#[cfg(test)]
 mod late_fallback_patch_guard_tests {
     use super::{
         IpcDiskRepairReason, IpcRepairDecision, IpcSnapshotSource, WriteFlags,
@@ -3912,15 +4052,15 @@ mod late_fallback_patch_guard_tests {
     }
 
     #[test]
-    fn ipc_repair_decision_records_prefix_fallback_bad_state() {
-        let decision = IpcRepairDecision::content_ours_prefix_fallback(
+    fn ipc_repair_decision_records_ack_prefix_repair_bad_state() {
+        let decision = IpcRepairDecision::ack_content_prefix_repair(
             "fixed snapshot".to_string(),
             "bad editor state".to_string(),
             &["bad editor state".to_string()],
         );
 
         assert_eq!(decision.snapshot_content, "fixed snapshot");
-        assert_eq!(decision.snap_source, IpcSnapshotSource::ContentOurs);
+        assert_eq!(decision.snap_source, IpcSnapshotSource::AckContentSidecar);
         assert_eq!(
             decision.disk_repair_reason,
             Some(IpcDiskRepairReason::PrefixDivergence)
@@ -3940,8 +4080,8 @@ mod late_fallback_patch_guard_tests {
     }
 
     #[test]
-    fn ipc_repair_decision_preserves_original_bad_state_when_dedupe_follows_prefix_fallback() {
-        let decision = IpcRepairDecision::content_ours_prefix_fallback(
+    fn ipc_repair_decision_preserves_original_bad_state_when_dedupe_follows_prefix_repair() {
+        let decision = IpcRepairDecision::ack_content_prefix_repair(
             "prefix fallback with duplicate response".to_string(),
             "visible sidecar before fallback".to_string(),
             &["visible sidecar before fallback".to_string()],
@@ -3952,7 +4092,7 @@ mod late_fallback_patch_guard_tests {
         );
 
         assert_eq!(decision.snapshot_content, "deduped snapshot");
-        assert_eq!(decision.snap_source, IpcSnapshotSource::ContentOurs);
+        assert_eq!(decision.snap_source, IpcSnapshotSource::AckContentSidecar);
         assert_eq!(
             decision.disk_repair_reason,
             Some(IpcDiskRepairReason::PrefixDivergenceThenIpcDedupe)

@@ -48,6 +48,7 @@ pub mod project_config;
 pub mod template;
 
 pub use agent_doc_document as document;
+pub use agent_doc_document_realtime as document_realtime;
 pub use agent_doc_tmux as tmux;
 pub use agent_doc_tmux_commands as tmux_commands;
 pub use agent_doc_tmux_io as tmux_io;
@@ -140,7 +141,6 @@ pub mod queue_cmd;
 pub mod queue_command;
 pub mod queue_continuation;
 pub mod queue_edit_owner;
-pub mod queue_item_state_machine;
 pub mod queue_journal;
 pub mod queue_preemption;
 pub mod realtime_model;

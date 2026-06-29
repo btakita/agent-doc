@@ -3,23 +3,6 @@ use agent_doc_controller::dispatch::RoutedDispatchStartProof;
 use std::path::Path;
 use std::time::Duration;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DirectPaneSubmitStatus {
-    Accepted,
-    TimedOut,
-}
-
-pub fn direct_pane_submit_acceptance_timeout() -> Duration {
-    Duration::from_secs(1)
-}
-
-pub fn direct_pane_submit_acceptance_budget() -> Duration {
-    // tmux/control-mode delivery can spend the whole acceptance window plus a
-    // final capture poll before pane input disappears. Keep the budget above
-    // that window so "over_budget" means slower than the path can observe.
-    Duration::from_millis(1500)
-}
-
 pub fn routed_dispatch_start_timeout(test_mode: bool) -> Duration {
     routed_dispatch_start_timeout_for_binary(None, test_mode)
 }
@@ -193,17 +176,6 @@ impl DispatchOnlyReopenDelivery {
             DispatchOnlyReopenDelivery::SupervisorIpcOnce => "supervisor_ipc_once",
             DispatchOnlyReopenDelivery::DirectPaneSubmit => "direct_pane_submit",
         }
-    }
-}
-
-pub fn direct_pane_submit_outcome(
-    status: DirectPaneSubmitStatus,
-    dispatch_start_proof: Option<RoutedDispatchStartProof>,
-) -> &'static str {
-    match (status, dispatch_start_proof) {
-        (DirectPaneSubmitStatus::Accepted, _) => "accepted",
-        (DirectPaneSubmitStatus::TimedOut, Some(_)) => "acceptance_unobserved_dispatch_proven",
-        (DirectPaneSubmitStatus::TimedOut, None) => "acceptance_unobserved",
     }
 }
 
@@ -1185,25 +1157,6 @@ mod tests {
         assert!(message.contains("supervisor_health=no_socket"));
         assert!(message.contains("runtime_actor_state=missing"));
         assert!(message.contains("reason=supervisor health is no_socket"));
-    }
-
-    #[test]
-    fn direct_submit_outcome_separates_acceptance_from_dispatch_proof() {
-        assert_eq!(
-            direct_pane_submit_outcome(DirectPaneSubmitStatus::Accepted, None),
-            "accepted"
-        );
-        assert_eq!(
-            direct_pane_submit_outcome(DirectPaneSubmitStatus::TimedOut, None),
-            "acceptance_unobserved"
-        );
-        assert_eq!(
-            direct_pane_submit_outcome(
-                DirectPaneSubmitStatus::TimedOut,
-                Some(RoutedDispatchStartProof::PaneStateChanged),
-            ),
-            "acceptance_unobserved_dispatch_proven"
-        );
     }
 
     #[test]

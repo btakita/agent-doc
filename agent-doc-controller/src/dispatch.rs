@@ -1,5 +1,7 @@
 //! Pure controller dispatch admission helpers.
 
+use std::time::Duration;
+
 pub const DISPATCH_COALESCED_IN_FLIGHT_MARKER: &str = "failed_stage=coalesced_in_flight";
 pub const DISPATCH_STALE_GENERATION_REDIRECT_MARKER: &str = "stale_generation_redirect";
 pub const DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER: &str = "supervisor_restart_redirect";
@@ -243,6 +245,34 @@ pub fn classify_dispatch_start_proof(
 
 pub fn dispatch_only_dispatch_start_proof_required(_harness_binary: &str) -> bool {
     false
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DirectPaneSubmitStatus {
+    Accepted,
+    TimedOut,
+}
+
+pub fn direct_pane_submit_acceptance_timeout() -> Duration {
+    Duration::from_secs(1)
+}
+
+pub fn direct_pane_submit_acceptance_budget() -> Duration {
+    // tmux/control-mode delivery can spend the whole acceptance window plus a
+    // final capture poll before pane input disappears. Keep the budget above
+    // that window so "over_budget" means slower than the path can observe.
+    Duration::from_millis(1500)
+}
+
+pub fn direct_pane_submit_outcome(
+    status: DirectPaneSubmitStatus,
+    dispatch_start_proof: Option<RoutedDispatchStartProof>,
+) -> &'static str {
+    match (status, dispatch_start_proof) {
+        (DirectPaneSubmitStatus::Accepted, _) => "accepted",
+        (DirectPaneSubmitStatus::TimedOut, Some(_)) => "acceptance_unobserved_dispatch_proven",
+        (DirectPaneSubmitStatus::TimedOut, None) => "acceptance_unobserved",
+    }
 }
 
 /// Decision for the route-dispatch drain retry loop after a mid-drain `repair`
@@ -569,6 +599,37 @@ mod tests {
         assert!(!dispatch_only_dispatch_start_proof_required("codex"));
         assert!(!dispatch_only_dispatch_start_proof_required("opencode"));
         assert!(!dispatch_only_dispatch_start_proof_required("claude"));
+    }
+
+    #[test]
+    fn direct_pane_submit_budget_allows_acceptance_poll_slack() {
+        assert_eq!(
+            direct_pane_submit_acceptance_timeout(),
+            Duration::from_secs(1)
+        );
+        assert_eq!(
+            direct_pane_submit_acceptance_budget(),
+            Duration::from_millis(1500)
+        );
+    }
+
+    #[test]
+    fn direct_pane_submit_outcome_separates_acceptance_from_dispatch_proof() {
+        assert_eq!(
+            direct_pane_submit_outcome(DirectPaneSubmitStatus::Accepted, None),
+            "accepted"
+        );
+        assert_eq!(
+            direct_pane_submit_outcome(DirectPaneSubmitStatus::TimedOut, None),
+            "acceptance_unobserved"
+        );
+        assert_eq!(
+            direct_pane_submit_outcome(
+                DirectPaneSubmitStatus::TimedOut,
+                Some(RoutedDispatchStartProof::HookStateAdvanced),
+            ),
+            "acceptance_unobserved_dispatch_proven"
+        );
     }
 
     #[test]

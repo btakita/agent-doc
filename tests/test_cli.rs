@@ -3684,6 +3684,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub struct DispatchStartProofFacts",
         "pub fn classify_dispatch_start_proof(",
         "pub fn dispatch_only_dispatch_start_proof_required(",
+        "pub enum DirectPaneSubmitStatus",
+        "pub fn direct_pane_submit_acceptance_timeout(",
+        "pub fn direct_pane_submit_acceptance_budget(",
+        "pub fn direct_pane_submit_outcome(",
         "pub fn dispatch_only_busy_should_wait_for_ready(",
         "pub fn dispatch_only_should_probe_active_turn_cue(",
         "pub enum DispatchDrainRetryDecision",
@@ -3700,6 +3704,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn authoritative_actor_dispatch_guard_reason(",
         "fn busy_dispatch_only_should_wait_for_ready(",
         "fn dispatch_only_should_probe_active_turn_cue(",
+        "fn direct_pane_submit_acceptance_timeout(",
+        "fn direct_pane_submit_acceptance_budget(",
+        "fn direct_pane_submit_outcome(",
         "enum DrainRetryDecision",
         "fn classify_drain_retry(",
     ] {
@@ -3717,6 +3724,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub struct DispatchStartProofFacts",
         "pub fn classify_dispatch_start_proof(",
         "pub fn dispatch_only_dispatch_start_proof_required(",
+        "pub enum DirectPaneSubmitStatus",
+        "pub fn direct_pane_submit_acceptance_timeout(",
+        "pub fn direct_pane_submit_acceptance_budget(",
+        "pub fn direct_pane_submit_outcome(",
     ] {
         assert!(
             !flow_routed_reopen_source.contains(forbidden_snippet),
@@ -3729,6 +3740,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("controller_authoritative_actor_dispatch_guard_reason(")
             && route_source.contains("RoutedDispatchStartProof")
             && route_source.contains("classify_dispatch_start_proof")
+            && route_source.contains("DirectPaneSubmitStatus as CommandDispatchStatus")
+            && route_source.contains("direct_pane_submit_outcome")
             && route_source.contains("DispatchActorState")
             && route_source.contains("dispatch_only_busy_should_wait_for_ready(")
             && route_source.contains("dispatch_only_should_probe_active_turn_cue(")

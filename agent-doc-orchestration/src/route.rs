@@ -164,16 +164,15 @@ use crate::flow::routed_reopen::{
     ActorDispatchState, AuthoritativeActorDispatchAction, AuthoritativeActorDispatchActionFacts,
     AuthoritativeActorReadyFacts, AuthoritativePromptReadyBarrierFacts, BusyPaneAutoFixFacts,
     BusyPaneAutoFixOutcome, DegradedAuthoritativeActorDirectSubmit,
-    DegradedAuthoritativeActorFacts, DirectPaneSubmitStatus as CommandDispatchStatus,
-    DispatchOnlyProofOutcomeFacts, DispatchOnlyReopenDelivery, PromptReadyBarrierDecision,
-    ReopenMode, RoutedReopenFacts, RoutedReopenGuardReason, StartingActorLogFacts,
-    accepted_only_dispatch_start_log_message, accepted_only_dispatch_start_refusal_message,
-    actor_dispatch_blocker_reason, actor_recovery_hint, authoritative_actor_ready_retry_budget,
+    DegradedAuthoritativeActorFacts, DispatchOnlyProofOutcomeFacts, DispatchOnlyReopenDelivery,
+    PromptReadyBarrierDecision, ReopenMode, RoutedReopenFacts, RoutedReopenGuardReason,
+    StartingActorLogFacts, accepted_only_dispatch_start_log_message,
+    accepted_only_dispatch_start_refusal_message, actor_dispatch_blocker_reason,
+    actor_recovery_hint, authoritative_actor_ready_retry_budget,
     busy_existing_pane_auto_fix_outcome as flow_busy_existing_pane_auto_fix_outcome,
     busy_projection_repaired_by_ready_prompt, can_use_degraded_authoritative_actor,
     classify_authoritative_actor_dispatch_action, classify_authoritative_prompt_ready_barrier,
     decide_authoritative_reopen, degraded_authoritative_actor_direct_submit_log_message,
-    direct_pane_submit_outcome as flow_direct_pane_submit_outcome,
     dispatch_only_blocked_guard_reason, dispatch_only_focus_only_should_fail_closed,
     dispatch_only_sent_console_message, dispatch_only_sent_log_message,
     dispatch_only_starting_pane_ready_retry_budget,
@@ -186,12 +185,13 @@ use crate::flow::routed_reopen::{
 use crate::harness::HarnessConfig;
 use crate::supervisor::ipc::IpcMethod;
 use agent_doc_controller::dispatch::{
-    AuthoritativeRuntimeFacts, DispatchActorState, DispatchDrainRetryDecision,
-    DispatchRuntimeHealth, DispatchStartProofDecision, DispatchStartProofFacts,
-    RoutedDispatchStartProof,
+    AuthoritativeRuntimeFacts, DirectPaneSubmitStatus as CommandDispatchStatus, DispatchActorState,
+    DispatchDrainRetryDecision, DispatchRuntimeHealth, DispatchStartProofDecision,
+    DispatchStartProofFacts, RoutedDispatchStartProof,
     authoritative_actor_dispatch_guard_reason as controller_authoritative_actor_dispatch_guard_reason,
-    classify_dispatch_start_proof, dispatch_drain_retry_decision,
-    dispatch_only_busy_should_wait_for_ready,
+    classify_dispatch_start_proof, direct_pane_submit_acceptance_budget,
+    direct_pane_submit_acceptance_timeout, direct_pane_submit_outcome,
+    dispatch_drain_retry_decision, dispatch_only_busy_should_wait_for_ready,
     dispatch_only_dispatch_start_proof_required as controller_dispatch_only_dispatch_start_proof_required,
     dispatch_only_should_probe_active_turn_cue,
 };
@@ -472,21 +472,6 @@ const DIRECT_PANE_SUBMIT_ACCEPTANCE_POLL_INTERVAL: Duration = Duration::from_mil
 /// of the old ~500-1000ms floor, while still requiring two consecutive idle
 /// observations to debounce a transient prompt flicker.
 const AGENT_READY_POLL_INTERVAL: Duration = Duration::from_millis(150);
-
-fn direct_pane_submit_acceptance_timeout() -> Duration {
-    crate::flow::routed_reopen::direct_pane_submit_acceptance_timeout()
-}
-
-fn direct_pane_submit_acceptance_budget() -> Duration {
-    crate::flow::routed_reopen::direct_pane_submit_acceptance_budget()
-}
-
-fn direct_pane_submit_outcome(
-    status: CommandDispatchStatus,
-    dispatch_start_proof: Option<RoutedDispatchStartProof>,
-) -> &'static str {
-    flow_direct_pane_submit_outcome(status, dispatch_start_proof)
-}
 
 fn route_latency_message(
     phase: &str,
@@ -7170,15 +7155,6 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
 
     #[test]
     fn direct_pane_submit_budget_allows_acceptance_poll_slack() {
-        assert_eq!(
-            direct_pane_submit_acceptance_timeout(),
-            Duration::from_secs(1)
-        );
-        assert_eq!(
-            direct_pane_submit_acceptance_budget(),
-            Duration::from_millis(1500)
-        );
-
         let message = route_latency_message(
             "direct_pane_submit",
             Duration::from_millis(1180),
@@ -7197,24 +7173,6 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             "{message}"
         );
         assert!(!message.contains("timed_out"), "{message}");
-    }
-    #[test]
-    fn direct_pane_submit_outcome_separates_acceptance_from_dispatch_proof() {
-        assert_eq!(
-            direct_pane_submit_outcome(CommandDispatchStatus::Accepted, None),
-            "accepted"
-        );
-        assert_eq!(
-            direct_pane_submit_outcome(CommandDispatchStatus::TimedOut, None),
-            "acceptance_unobserved"
-        );
-        assert_eq!(
-            direct_pane_submit_outcome(
-                CommandDispatchStatus::TimedOut,
-                Some(RoutedDispatchStartProof::HookStateAdvanced),
-            ),
-            "acceptance_unobserved_dispatch_proven"
-        );
     }
     #[test]
     fn route_submit_observation_marks_prompt_not_submitted_without_prompt_text() {

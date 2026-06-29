@@ -989,6 +989,22 @@ pub fn first_bare_prompt_prefix_target(diff: &str) -> Option<String> {
     None
 }
 
+/// Return the first bare prompt-prefix target before an inserted marker line.
+pub fn first_bare_prompt_prefix_target_before_marker(diff: &str, marker: &str) -> Option<String> {
+    let mut prefix_diff = String::new();
+    for line in diff.lines() {
+        if line
+            .strip_prefix('+')
+            .is_some_and(|added| added.trim() == marker)
+        {
+            break;
+        }
+        prefix_diff.push_str(line);
+        prefix_diff.push('\n');
+    }
+    first_bare_prompt_prefix_target(&prefix_diff)
+}
+
 fn classify_prompt_bearing_changes_from_annotated(
     annotated_diff: &str,
 ) -> Vec<PromptBearingChange> {
@@ -4389,6 +4405,38 @@ Done.\n\
             +### Re: answer — gpt-5\n";
 
         let bare = first_bare_prompt_prefix_target(diff);
+        assert_eq!(bare, None);
+    }
+
+    #[test]
+    fn first_bare_prompt_prefix_target_before_marker_scopes_to_response_insert() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,2 +1,7 @@\n\
+            ctx\n\
+            +❯ Existing question?\n\
+            +Follow-up before the marker.\n\
+            +### Re: answer — gpt-5\n\
+            +❯ A later prompt should not count here.\n\
+            +Follow-up after the marker.\n\
+            +### Re: later answer — gpt-5\n";
+
+        let bare = first_bare_prompt_prefix_target_before_marker(diff, "### Re: answer — gpt-5");
+        assert_eq!(bare.as_deref(), Some("Follow-up before the marker."));
+
+        let bare =
+            first_bare_prompt_prefix_target_before_marker(diff, "### Re: later answer — gpt-5");
+        assert_eq!(bare.as_deref(), Some("Follow-up before the marker."));
+
+        let bare = first_bare_prompt_prefix_target_before_marker(diff, "missing marker");
+        assert_eq!(bare.as_deref(), Some("Follow-up before the marker."));
+
+        let later_only = "--- snapshot\n+++ document\n@@ -1,2 +1,5 @@\n\
+            ctx\n\
+            +### Re: answer — gpt-5\n\
+            +❯ A later prompt should not count here.\n\
+            +Follow-up after the marker.\n";
+
+        let bare =
+            first_bare_prompt_prefix_target_before_marker(later_only, "### Re: answer — gpt-5");
         assert_eq!(bare, None);
     }
 

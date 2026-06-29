@@ -3321,6 +3321,7 @@ fn test_agent_doc_diff_owns_partial_staging_pure_policy() {
         "pub fn is_partial_staging_relevant_path",
         "pub fn partial_staging_paths_look_related",
         "pub fn extract_changed_string_literals",
+        "pub fn first_bare_prompt_prefix_target_before_marker",
     ] {
         assert!(
             diff_source.contains(required),
@@ -3416,6 +3417,19 @@ fn test_project_config_io_tmux_helpers_have_no_config_facade() {
             );
         }
     }
+
+    let closeout_guards = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/closeout_guards.rs"),
+    )
+    .unwrap();
+    assert!(
+        !closeout_guards.contains("pub(crate) fn first_bare_prompt_prefix_target_before_marker"),
+        "session_check closeout guards must not re-own marker-scoped prompt-prefix diff slicing"
+    );
+    assert!(
+        closeout_guards.contains("agent_doc_diff::first_bare_prompt_prefix_target_before_marker"),
+        "session_check closeout guards should call the focused diff helper directly"
+    );
 }
 
 #[test]

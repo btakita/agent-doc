@@ -734,7 +734,7 @@ pub fn detect_bypassed_response_write_between(
         }
         if agent_doc_turn::closeout_signal::is_direct_response_patchback_heading(trimmed) {
             if let Some(bare_target) =
-                first_bare_prompt_prefix_target_before_marker(&diff_text, trimmed)
+                agent_doc_diff::first_bare_prompt_prefix_target_before_marker(&diff_text, trimmed)
             {
                 return Some(format!(
                     "{} (bare prompt target missing `❯ `: {})",
@@ -745,24 +745,6 @@ pub fn detect_bypassed_response_write_between(
         }
     }
     None
-}
-
-pub(crate) fn first_bare_prompt_prefix_target_before_marker(
-    diff_text: &str,
-    marker: &str,
-) -> Option<String> {
-    let mut prefix_diff = String::new();
-    for line in diff_text.lines() {
-        if line
-            .strip_prefix('+')
-            .is_some_and(|added| added.trim() == marker)
-        {
-            break;
-        }
-        prefix_diff.push_str(line);
-        prefix_diff.push('\n');
-    }
-    agent_doc_diff::first_bare_prompt_prefix_target(&prefix_diff)
 }
 
 /// `#prompt-preempts-auto-queue`: snapshot-independent detection of a live

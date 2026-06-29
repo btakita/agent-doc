@@ -24,6 +24,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Queue command/prompt classification moved to `agent-doc-queue`.** The response-contamination guard no longer owns the queue directive-shape classifier or slash-command-reference detector. Those pure queue prompt decisions now live in `agent_doc_queue::queue_command`, and `session_check::response_guards` calls the focused queue API directly.
 
+- **Queue prompt preservation identity moved to `agent-doc-queue`.** Dropped queue prompt recovery now uses focused queue APIs for line normalization, struck/consumed id accounting, and queue component matching. `response_guards` keeps only guard-state and exchange-response adapters, with boundary coverage preventing local queue identity helpers from returning.
+
 - **Supervisor idle-reconcile policy moved to `agent-doc-supervisor`.** The stale busy-over-idle and ready-with-queued-draft reconcile decisions now live in `agent_doc_supervisor::idle_reconcile`. `start` and idle-watch gather pane/harness facts and pass their debounce thresholds directly to the focused policy; boundary coverage prevents the orchestration decision functions from returning.
 
 - **Manual queue-addition compatibility shim deleted.** `agent-doc-queue` now exposes only `operator_authored_prompt_identities` for the operator-added prompt identity path; the unused `annotate_manual_queue_additions` shim is removed and covered by a source guard.

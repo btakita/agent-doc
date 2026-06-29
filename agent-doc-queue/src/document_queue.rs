@@ -734,6 +734,76 @@ pub fn is_agent_prioritized(text: &str) -> bool {
     !is_prioritized(text) && AGENT_PRIORITIZED_MARKERS.iter().any(|m| t.starts_with(m))
 }
 
+fn normalized_prompt_line_for_match(line: &str) -> String {
+    line.trim().trim_start_matches('❯').trim().to_string()
+}
+
+fn strip_queue_bullet(line: &str) -> &str {
+    line.strip_prefix("- ")
+        .or_else(|| line.strip_prefix("* "))
+        .or_else(|| line.strip_prefix("+ "))
+        .unwrap_or(line)
+        .trim()
+}
+
+fn strip_strike_markers(line: &str) -> &str {
+    line.strip_prefix("~~")
+        .and_then(|s| s.strip_suffix("~~"))
+        .or_else(|| line.strip_prefix('~').and_then(|s| s.strip_suffix('~')))
+        .unwrap_or(line)
+}
+
+/// Normalize a queue line for preservation matching.
+///
+/// Queue maintenance may render user-authored queue prompts with markdown list
+/// bullets, strike wrappers after consumption, priority pins, or a leading
+/// `❯`. Those annotations are visible document state, not prompt identity.
+pub fn normalized_queue_line_for_match(line: &str) -> String {
+    let no_bullet = strip_queue_bullet(line.trim());
+    let unstruck = strip_strike_markers(no_bullet);
+    let unpinned = strip_priority_markers(unstruck);
+    normalized_prompt_line_for_match(&unpinned)
+}
+
+/// True when `doc`'s `agent:queue` component contains a line matching `prompt`
+/// after queue-identity normalization.
+pub fn queue_contains_prompt_line(doc: &str, prompt: &str) -> bool {
+    let needle = normalized_queue_line_for_match(prompt);
+    if needle.is_empty() {
+        return true;
+    }
+    let Ok(components) = agent_doc_element::element::parse(doc) else {
+        return false;
+    };
+    let Some(queue) = components.iter().find(|c| c.name == "queue") else {
+        return false;
+    };
+    queue
+        .content(doc)
+        .lines()
+        .any(|line| normalized_queue_line_for_match(line) == needle)
+}
+
+/// Collect `do [#id]` queue ids present in `doc`, including struck/consumed
+/// lines (`~~do [#id]~~`) that no longer count as live heads.
+pub fn queue_ids_including_struck(doc: &str) -> std::collections::HashSet<String> {
+    let mut ids = std::collections::HashSet::new();
+    let Ok(components) = agent_doc_element::element::parse(doc) else {
+        return ids;
+    };
+    let Some(queue) = components.iter().find(|c| c.name == "queue") else {
+        return ids;
+    };
+    for line in queue.content(doc).lines() {
+        let no_bullet = strip_queue_bullet(line.trim());
+        let unstruck = strip_strike_markers(no_bullet);
+        for id in crate::queue_directive::do_directive_target_ids_in_line(unstruck) {
+            ids.insert(id);
+        }
+    }
+    ids
+}
+
 /// Clear all queue in-progress markers, then mark the first live prompt when
 /// requested. Returns `None` when the rendered queue would be unchanged.
 pub fn set_first_prompt_in_progress(
@@ -2553,6 +2623,43 @@ mod tests {
             strip_priority_markers("Should tsift be a hard dependency?"),
             "Should tsift be a hard dependency?"
         );
+    }
+
+    #[test]
+    fn normalized_queue_line_for_match_strips_bullet_strike_pin_and_prompt_prefix() {
+        assert_eq!(
+            normalized_queue_line_for_match("- ~~:round_pushpin: ❯ do [#alpha]~~"),
+            "do [#alpha]"
+        );
+        assert_eq!(
+            normalized_queue_line_for_match("* ~:pushpin: ❯ do [#legacy]~"),
+            "do [#legacy]"
+        );
+    }
+
+    #[test]
+    fn queue_contains_prompt_line_matches_struck_or_pinned_visible_queue_line() {
+        let doc =
+            "<!-- agent:queue -->\n- ~~:round_pushpin: ❯ do [#alpha]~~\n<!-- /agent:queue -->\n";
+
+        assert!(queue_contains_prompt_line(doc, "do [#alpha]"));
+        assert!(queue_contains_prompt_line(doc, "- :pushpin: do [#alpha]"));
+        assert!(!queue_contains_prompt_line(doc, "do [#beta]"));
+    }
+
+    #[test]
+    fn queue_ids_including_struck_reads_consumed_do_ids() {
+        let doc = "<!-- agent:queue -->\n- ~~do [#gscaccess]~~\n- ~:pushpin: do [#legacy]~\n- do [#live]\n<!-- /agent:queue -->\n";
+
+        let ids = queue_ids_including_struck(doc);
+        let expected: std::collections::HashSet<String> = [
+            "gscaccess".to_string(),
+            "legacy".to_string(),
+            "live".to_string(),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(ids, expected);
     }
 
     #[test]

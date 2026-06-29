@@ -3665,10 +3665,17 @@ fn test_agent_doc_queue_has_no_manual_addition_compatibility_shim() {
     let queue_source =
         fs::read_to_string(manifest_dir.join("agent-doc-queue/src/document_queue.rs")).unwrap();
 
-    assert!(
-        queue_source.contains("pub fn operator_authored_prompt_identities("),
-        "agent-doc-queue should expose the focused operator-authored identity API"
-    );
+    for required in [
+        "pub fn operator_authored_prompt_identities(",
+        "pub fn normalized_queue_line_for_match(",
+        "pub fn queue_contains_prompt_line(",
+        "pub fn queue_ids_including_struck(",
+    ] {
+        assert!(
+            queue_source.contains(required),
+            "agent-doc-queue should expose the focused queue identity API: {required}"
+        );
+    }
     for forbidden_snippet in [
         "pub fn annotate_manual_queue_additions(",
         "compatibility shim for older call sites",
@@ -3676,6 +3683,30 @@ fn test_agent_doc_queue_has_no_manual_addition_compatibility_shim() {
         assert!(
             !queue_source.contains(forbidden_snippet),
             "agent-doc-queue must not retain the removed manual-addition compatibility shim: {forbidden_snippet}"
+        );
+    }
+
+    let response_guards = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/response_guards.rs"),
+    )
+    .unwrap();
+    for forbidden in [
+        "pub(crate) fn normalized_queue_line_for_match(",
+        "pub(crate) fn queue_contains_prompt_line(",
+        "pub(crate) fn queue_ids_including_struck(",
+    ] {
+        assert!(
+            !response_guards.contains(forbidden),
+            "response_guards must not re-own queue prompt identity policy: {forbidden}"
+        );
+    }
+    for required in [
+        "agent_doc_queue::document_queue::queue_contains_prompt_line",
+        "agent_doc_queue::document_queue::queue_ids_including_struck",
+    ] {
+        assert!(
+            response_guards.contains(required),
+            "response_guards should call focused queue identity policy directly: {required}"
         );
     }
 }

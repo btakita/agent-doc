@@ -27,91 +27,6 @@ pub(crate) fn exchange_contains_prompt_line(doc: &str, prompt: &str) -> bool {
         .any(|line| normalized_prompt_for_match(line) == needle)
 }
 
-/// True when the committed `doc`'s `agent:queue` still contains the given queue
-/// prompt line (normalized). Used to decide whether a dropped user queue edit
-/// reached HEAD (preserved) so the guard can clear.
-pub(crate) fn normalized_queue_line_for_match(line: &str) -> String {
-    let trimmed = line.trim();
-    let trimmed = trimmed
-        .strip_prefix("- ")
-        .or_else(|| trimmed.strip_prefix("* "))
-        .or_else(|| trimmed.strip_prefix("+ "))
-        .unwrap_or(trimmed)
-        .trim();
-    // #queue-user-edit-overwrite false positive: a consumed queue head is
-    // struck in place (`~~text~~`, legacy `~text~`) and queue maintenance may
-    // pin lines (`:round_pushpin:` / `:pushpin:`), so strip both before
-    // identity matching — a struck or re-pinned line visibly reached the
-    // document and was not silently lost.
-    let unstruck = trimmed
-        .strip_prefix("~~")
-        .and_then(|s| s.strip_suffix("~~"))
-        .or_else(|| trimmed.strip_prefix('~').and_then(|s| s.strip_suffix('~')))
-        .unwrap_or(trimmed);
-    let unpinned = agent_doc_queue::document_queue::strip_priority_markers(unstruck);
-    normalized_prompt_for_match(&unpinned)
-}
-
-pub(crate) fn queue_contains_prompt_line(doc: &str, prompt: &str) -> bool {
-    let needle = normalized_queue_line_for_match(prompt);
-    if needle.is_empty() {
-        return true;
-    }
-    let Ok(components) = agent_doc_element::element::parse(doc) else {
-        return false;
-    };
-    let Some(queue) = components.iter().find(|c| c.name == "queue") else {
-        return false;
-    };
-    queue
-        .content(doc)
-        .lines()
-        .any(|line| normalized_queue_line_for_match(line) == needle)
-}
-
-/// `#queue-user-edit-overwrite` wedge auto-clear: the `[#id]` tokens present in
-/// `doc`'s `agent:queue`, INCLUDING struck/consumed lines (`~~do [#id]~~`).
-///
-/// `committed_queue_head_ids` deliberately skips struck lines because it powers
-/// live-head accounting, but for *loss* detection a struck head visibly reached
-/// the document and was consumed — its id must still count as preserved.
-/// Without this, a dropped prompt recorded as the bare `[#id]` form stays
-/// "missing" forever when HEAD carries the struck `~~do [#id]~~` spelling
-/// (text-identity matching cannot bridge `[#id]` vs `do [#id]`), wedging
-/// `session-check` until a manual supervisor restart / patch surgery. Stripping
-/// the strike wrapper before id extraction lets the guard self-clear instead.
-pub(crate) fn queue_ids_including_struck(doc: &str) -> std::collections::HashSet<String> {
-    let mut ids = std::collections::HashSet::new();
-    let Ok(components) = agent_doc_element::element::parse(doc) else {
-        return ids;
-    };
-    let Some(queue) = components.iter().find(|c| c.name == "queue") else {
-        return ids;
-    };
-    for line in queue.content(doc).lines() {
-        let trimmed = line.trim();
-        let no_bullet = trimmed
-            .strip_prefix("- ")
-            .or_else(|| trimmed.strip_prefix("* "))
-            .or_else(|| trimmed.strip_prefix("+ "))
-            .unwrap_or(trimmed)
-            .trim();
-        let unstruck = no_bullet
-            .strip_prefix("~~")
-            .and_then(|s| s.strip_suffix("~~"))
-            .or_else(|| {
-                no_bullet
-                    .strip_prefix('~')
-                    .and_then(|s| s.strip_suffix('~'))
-            })
-            .unwrap_or(no_bullet);
-        for id in agent_doc_queue::queue_directive::do_directive_target_ids_in_line(unstruck) {
-            ids.insert(id);
-        }
-    }
-    ids
-}
-
 /// `#queue-user-edit-overwrite`: fail closed when this cycle recorded a
 /// user-authored `agent:queue` edit dropped during a `content_ours` IPC adoption
 /// and that queue line is still absent from the committed `HEAD` — unless the
@@ -145,16 +60,16 @@ pub(crate) fn check_dropped_queue_prompt_guard(
     // committed/visible queue in ANY form, including struck/consumed lines. A
     // dropped `[#id]` whose id is present here visibly reached the document and
     // was consumed in some cycle, so it is not a silent loss.
-    let visible_queue_ids = queue_ids_including_struck(&visible);
-    let head_queue_ids = queue_ids_including_struck(head);
+    let visible_queue_ids = agent_doc_queue::document_queue::queue_ids_including_struck(&visible);
+    let head_queue_ids = agent_doc_queue::document_queue::queue_ids_including_struck(head);
     let still_missing: Vec<String> = state
         .dropped_queue_prompts
         .iter()
         .filter(|prompt| {
             // Preserved in the visible/HEAD queue, or answered in the
             // visible/HEAD exchange → kept, not lost.
-            if queue_contains_prompt_line(&visible, prompt)
-                || queue_contains_prompt_line(head, prompt)
+            if agent_doc_queue::document_queue::queue_contains_prompt_line(&visible, prompt)
+                || agent_doc_queue::document_queue::queue_contains_prompt_line(head, prompt)
                 || exchange_contains_prompt_line(&visible, prompt)
                 || exchange_contains_prompt_line(head, prompt)
             {

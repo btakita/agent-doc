@@ -244,7 +244,8 @@ pub(crate) fn precommit_pending_capture_check(file: &Path) -> Result<()> {
         return Ok(());
     }
 
-    let response_text = crate::session_check::response_text_for_guards(&capture.response_body);
+    let response_text =
+        agent_doc_turn::closeout_signal::response_text_for_guards(&capture.response_body);
     if response_text.trim().is_empty() {
         return Ok(());
     }
@@ -425,7 +426,7 @@ pub(crate) fn prewrite_pending_capture_check(
         return Ok(());
     }
 
-    let response_text = crate::session_check::response_text_for_guards(response_body);
+    let response_text = agent_doc_turn::closeout_signal::response_text_for_guards(response_body);
     if response_text.trim().is_empty() {
         return Ok(());
     }
@@ -636,7 +637,8 @@ pub(crate) fn precommit_pending_done_check_with_options(
         return Ok(());
     }
 
-    let response_text = crate::session_check::response_text_for_guards(&capture.response_body);
+    let response_text =
+        agent_doc_turn::closeout_signal::response_text_for_guards(&capture.response_body);
     let malformed = crate::session_check::malformed_tracked_item_refs(file, Some(&response_text))?;
     if !malformed.is_empty() {
         log_closeout_guard(
@@ -737,7 +739,7 @@ pub(crate) fn prewrite_pending_done_check(
         return Ok(());
     }
 
-    let response_text = crate::session_check::response_text_for_guards(response_body);
+    let response_text = agent_doc_turn::closeout_signal::response_text_for_guards(response_body);
     let malformed = crate::session_check::malformed_tracked_item_refs(file, Some(&response_text))?;
     if !malformed.is_empty() {
         log_closeout_guard(
@@ -825,7 +827,7 @@ pub(crate) fn auto_apply_pending_done_if_enabled(
         .unwrap_or_default();
     kept_open_ids.extend(flags.pending_kept_open_ids.clone());
 
-    let response_text = crate::session_check::response_text_for_guards(response_body);
+    let response_text = agent_doc_turn::closeout_signal::response_text_for_guards(response_body);
     let missing = crate::session_check::detect_missing_pending_done_ids(
         file,
         &response_text,

@@ -211,6 +211,41 @@ pub fn text_has_partial_remaining_signal(lower: &str) -> bool {
         .any(|phrase| lower.contains(phrase))
 }
 
+pub fn response_text_for_guards(response: &str) -> String {
+    let Ok((patches, unmatched)) = agent_doc_template::parse_patches(response) else {
+        return response.to_string();
+    };
+
+    let preferred: Vec<String> = patches
+        .iter()
+        .filter(|patch| matches!(patch.name.as_str(), "exchange" | "findings"))
+        .map(|patch| patch.content.trim().to_string())
+        .filter(|text| !text.is_empty())
+        .collect();
+    if !preferred.is_empty() {
+        return preferred.join("\n\n");
+    }
+
+    if !unmatched.trim().is_empty() {
+        return unmatched.trim().to_string();
+    }
+
+    let fallback: Vec<String> = patches
+        .iter()
+        .filter(|patch| {
+            !agent_doc_element::element::is_backlog_component(&patch.name)
+                && !agent_doc_element::element::is_review_component(&patch.name)
+        })
+        .map(|patch| patch.content.trim().to_string())
+        .filter(|text| !text.is_empty())
+        .collect();
+    if !fallback.is_empty() {
+        return fallback.join("\n\n");
+    }
+
+    response.to_string()
+}
+
 pub fn free_text_queue_marker_has_bare_heading_residue(content: &str) -> bool {
     content.contains("<!-- no-free-text-queue-head-guard -->")
         && content.lines().any(|line| line.trim() == "###")
@@ -657,6 +692,35 @@ mod tests {
         assert!(!text_has_partial_remaining_signal(
             "completed the full task with no external validation left"
         ));
+    }
+
+    #[test]
+    fn response_text_for_guards_prefers_exchange_and_findings_patches() {
+        let response = concat!(
+            "<!-- replace:backlog -->\n- [ ] [#later] Follow-up\n<!-- /replace:backlog -->\n\n",
+            "<!-- patch:exchange -->\n  Exchange closeout body.  \n<!-- /patch:exchange -->\n\n",
+            "<!-- patch:findings -->\nFinding body.\n<!-- /patch:findings -->\n",
+        );
+
+        assert_eq!(
+            response_text_for_guards(response),
+            "Exchange closeout body.\n\nFinding body."
+        );
+    }
+
+    #[test]
+    fn response_text_for_guards_falls_back_to_unmatched_or_non_tracking_patch() {
+        let unmatched = "Plain final answer.\n\n<!-- replace:backlog -->\n- [ ] [#later] Follow-up\n<!-- /replace:backlog -->\n";
+        assert_eq!(response_text_for_guards(unmatched), "Plain final answer.");
+
+        let status_only = concat!(
+            "<!-- replace:backlog -->\n- [ ] [#later] Follow-up\n<!-- /replace:backlog -->\n\n",
+            "<!-- patch:status -->\n  Shipped status text.  \n<!-- /patch:status -->\n",
+        );
+        assert_eq!(
+            response_text_for_guards(status_only),
+            "Shipped status text."
+        );
     }
 
     #[test]

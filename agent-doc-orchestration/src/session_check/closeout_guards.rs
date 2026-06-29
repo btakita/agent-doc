@@ -42,7 +42,7 @@ pub(crate) fn check_blocked_closeout_followup_guard(
         return Ok(GuardResult::None);
     }
 
-    let text = response_text_for_guards(&capture.response_body);
+    let text = agent_doc_turn::closeout_signal::response_text_for_guards(&capture.response_body);
     let lower = text.to_ascii_lowercase();
     if !agent_doc_turn::closeout_signal::text_has_blocked_future_action_signal(&lower) {
         return Ok(GuardResult::None);
@@ -312,7 +312,7 @@ pub(crate) fn check_queue_audit_partial_completion_guard(file: &Path) -> Result<
         return Ok(GuardResult::None);
     }
 
-    let text = response_text_for_guards(&capture.response_body);
+    let text = agent_doc_turn::closeout_signal::response_text_for_guards(&capture.response_body);
     let lower = text.to_ascii_lowercase();
     if !agent_doc_turn::closeout_signal::queue_audit_collapses_partial_completion(&lower) {
         return Ok(GuardResult::None);

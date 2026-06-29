@@ -20,6 +20,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Partial-closeout shipped/remaining-work policy moved to `agent-doc-turn`.** The phrase table and shipped-response predicate behind `#do-id-partial-closeout-state` now live in `agent_doc_turn::closeout_signal`. The partial-closeout session-check guard still adapts capture/cycle/backlog state, but calls the focused turn API directly instead of importing phrase helpers through another guard module.
 
+- **Closeout response text normalization moved to `agent-doc-turn`.** The template-patch-aware helper that chooses exchange/findings/unmatched text for closeout guards now lives in `agent_doc_turn::closeout_signal`. Session-check and pre-commit pending checks call the focused turn API directly, and the old `session_check::response_text_for_guards` route is removed.
+
 - **Supervisor idle-reconcile policy moved to `agent-doc-supervisor`.** The stale busy-over-idle and ready-with-queued-draft reconcile decisions now live in `agent_doc_supervisor::idle_reconcile`. `start` and idle-watch gather pane/harness facts and pass their debounce thresholds directly to the focused policy; boundary coverage prevents the orchestration decision functions from returning.
 
 - **Manual queue-addition compatibility shim deleted.** `agent-doc-queue` now exposes only `operator_authored_prompt_identities` for the operator-added prompt identity path; the unused `annotate_manual_queue_additions` shim is removed and covered by a source guard.

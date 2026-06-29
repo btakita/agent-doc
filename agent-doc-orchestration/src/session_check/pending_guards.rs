@@ -33,7 +33,8 @@ pub(crate) fn check_pending_capture_guard(
         return Ok(GuardResult::None);
     }
 
-    let response_text = response_text_for_guards(&capture.response_body);
+    let response_text =
+        agent_doc_turn::closeout_signal::response_text_for_guards(&capture.response_body);
     if response_text.trim().is_empty() {
         return Ok(GuardResult::None);
     }
@@ -295,7 +296,8 @@ pub(crate) fn check_pending_done_guard(
         return Ok(GuardResult::None);
     }
 
-    let response_text = response_text_for_guards(&capture.response_body);
+    let response_text =
+        agent_doc_turn::closeout_signal::response_text_for_guards(&capture.response_body);
     let missing = detect_missing_pending_done_ids(
         file,
         &response_text,
@@ -384,39 +386,4 @@ pub fn detect_missing_pending_done_ids(
         })
         .filter(|id| !recorded_done.contains(id))
         .collect())
-}
-
-pub fn response_text_for_guards(response: &str) -> String {
-    let Ok((patches, unmatched)) = agent_doc_template::parse_patches(response) else {
-        return response.to_string();
-    };
-
-    let preferred: Vec<String> = patches
-        .iter()
-        .filter(|patch| matches!(patch.name.as_str(), "exchange" | "findings"))
-        .map(|patch| patch.content.trim().to_string())
-        .filter(|text| !text.is_empty())
-        .collect();
-    if !preferred.is_empty() {
-        return preferred.join("\n\n");
-    }
-
-    if !unmatched.trim().is_empty() {
-        return unmatched.trim().to_string();
-    }
-
-    let fallback: Vec<String> = patches
-        .iter()
-        .filter(|patch| {
-            !is_backlog_component(&patch.name)
-                && !agent_doc_element::element::is_review_component(&patch.name)
-        })
-        .map(|patch| patch.content.trim().to_string())
-        .filter(|text| !text.is_empty())
-        .collect();
-    if !fallback.is_empty() {
-        return fallback.join("\n\n");
-    }
-
-    response.to_string()
 }

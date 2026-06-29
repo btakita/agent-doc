@@ -2387,6 +2387,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub const PARTIAL_CLOSEOUT_REMAINING_PHRASES",
         "pub fn text_has_shipped_signal",
         "pub fn text_has_partial_remaining_signal",
+        "pub fn response_text_for_guards",
         "pub fn free_text_queue_marker_has_bare_heading_residue",
         "pub fn response_head_plausibly_answers",
         "pub fn response_clearly_completes_pending_id",
@@ -2550,6 +2551,32 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         assert!(
             done_signals.contains(required),
             "done_signals should call focused closeout signal policy directly: {required}"
+        );
+    }
+
+    let pending_guards = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/pending_guards.rs"),
+    )
+    .unwrap();
+    assert!(
+        !pending_guards.contains("pub fn response_text_for_guards"),
+        "pending_guards must not re-own closeout response text normalization"
+    );
+
+    for relative in [
+        "agent-doc-orchestration/src/session_check/pending_guards.rs",
+        "agent-doc-orchestration/src/session_check/closeout_guards.rs",
+        "agent-doc-orchestration/src/session_check/partial_staging.rs",
+        "agent-doc-orchestration/src/write/pending_checks.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("agent_doc_turn::closeout_signal::response_text_for_guards"),
+            "{relative} should call focused closeout response text normalization directly"
+        );
+        assert!(
+            !source.contains("crate::session_check::response_text_for_guards"),
+            "{relative} must not route closeout response text normalization through session_check"
         );
     }
 

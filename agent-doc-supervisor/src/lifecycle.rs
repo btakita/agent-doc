@@ -19,6 +19,21 @@ pub fn reexec_escalation_within_bound(attempts: u32, max: u32) -> bool {
     attempts < max
 }
 
+/// `#supselfheal` Phase 2 (`#supselfheal-wedgetrigger`) — classify the
+/// `write_wedged` evidence input consumed by [`supervisor_recycle_action`].
+///
+/// The editor-IPC write path is wedged when a nominally-active listener refuses
+/// at least `threshold` consecutive writes without proving delivery. Failures
+/// against an inactive listener are missing-listener blocks, not active-listener
+/// wedges.
+pub fn write_wedged_from_ipc_failures(
+    consecutive_failures: u64,
+    listener_nominally_active: bool,
+    threshold: u64,
+) -> bool {
+    listener_nominally_active && consecutive_failures >= threshold
+}
+
 pub const MAX_CYCLE_OPEN_DEFER_TICKS: u32 = 40;
 
 pub fn cycle_open_defer_escalates(consecutive_defers: u32, max: u32) -> bool {
@@ -194,6 +209,29 @@ mod tests {
             supervisor_recycle_action(true, true, true, true, false, false, true, true),
             EscalateKillRelaunch
         );
+    }
+
+    #[test]
+    fn write_wedged_classifier_trips_only_against_active_listener_at_threshold() {
+        let threshold = 3;
+
+        assert!(write_wedged_from_ipc_failures(threshold, true, threshold));
+        assert!(write_wedged_from_ipc_failures(
+            threshold + 1,
+            true,
+            threshold
+        ));
+        assert!(!write_wedged_from_ipc_failures(
+            threshold - 1,
+            true,
+            threshold
+        ));
+        assert!(!write_wedged_from_ipc_failures(
+            threshold + 5,
+            false,
+            threshold
+        ));
+        assert!(!write_wedged_from_ipc_failures(0, true, threshold));
     }
 
     #[test]

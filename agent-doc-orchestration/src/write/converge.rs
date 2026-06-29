@@ -707,25 +707,6 @@ pub(crate) fn log_live_prompt_drift_auto_recovered(
     );
 }
 
-/// `#supselfheal` Phase 2 (`#supselfheal-wedgetrigger`) — pure classifier for the
-/// typed `write_wedged` fact the route-owned supervisor uses as a recycle trigger.
-///
-/// The editor-IPC write path is "wedged" when a *nominally-active* JB listener has
-/// refused a bounded number of consecutive writes (`send_failed`/`no_ack`/
-/// `retry_without_disk_write` ack timeouts) without ever proving delivery — exactly
-/// the `consecutive_timeouts` the `#fcc0e` de-wedge circuit breaker latches
-/// `degraded` on. A failure against a listener that is NOT nominally active is a
-/// fail-closed missing-listener condition, not a wedged active listener, so it
-/// never trips this classifier. Pure so the derivation is unit-testable without
-/// a live socket.
-pub fn write_wedged_from_ipc_failures(
-    consecutive_failures: u64,
-    listener_nominally_active: bool,
-    threshold: u64,
-) -> bool {
-    listener_nominally_active && consecutive_failures >= threshold
-}
-
 /// `#supselfheal` Phase 2 — read the persisted editor-IPC wedge fact for `file` so
 /// the route-owned supervisor idle watch can feed `write_wedged` into
 /// `supervisor_recycle_action`. Returns `true` once the de-wedge circuit breaker
@@ -2477,34 +2458,6 @@ mod core_tests {
             blanked.contains("<!-- agent:queue -->"),
             "queue markers stay"
         );
-    }
-
-    #[test]
-    fn write_wedged_classifier_trips_only_against_active_listener_at_threshold() {
-        // `#supselfheal` Phase 2: the wedge fact trips only when a *nominally
-        // active* listener has refused >= threshold consecutive writes. A failure
-        // against an inactive listener is a missing-listener block, not a wedge.
-        let threshold = IPC_DEWEDGE_TIMEOUT_THRESHOLD;
-        // Active listener at/over threshold → wedged.
-        assert!(write_wedged_from_ipc_failures(threshold, true, threshold));
-        assert!(write_wedged_from_ipc_failures(
-            threshold + 1,
-            true,
-            threshold
-        ));
-        // Active listener under threshold → not yet wedged (transient lull).
-        assert!(!write_wedged_from_ipc_failures(
-            threshold - 1,
-            true,
-            threshold
-        ));
-        // No listener nominally active → never an active-listener wedge.
-        assert!(!write_wedged_from_ipc_failures(
-            threshold + 5,
-            false,
-            threshold
-        ));
-        assert!(!write_wedged_from_ipc_failures(0, true, threshold));
     }
 
     #[test]

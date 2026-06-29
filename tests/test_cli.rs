@@ -3623,6 +3623,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     }
     let supervisor_selfkill_policy =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/selfkill.rs")).unwrap();
+    let supervisor_lifecycle_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/lifecycle.rs")).unwrap();
     for required_snippet in [
         "pub fn supervisor_self_kill_action(",
         "pub fn supervisor_force_kill_decision(",
@@ -3633,6 +3635,23 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             "agent-doc-supervisor should expose pure self-kill policy directly: {required_snippet}"
         );
     }
+    assert!(
+        supervisor_lifecycle_policy.contains("pub fn write_wedged_from_ipc_failures("),
+        "agent-doc-supervisor lifecycle policy should own the write_wedged evidence classifier"
+    );
+    let write_converge =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/converge.rs"))
+            .unwrap();
+    assert!(
+        !write_converge.contains("pub fn write_wedged_from_ipc_failures("),
+        "write::converge must not re-own pure supervisor write-wedge classification"
+    );
+    let write_ipc =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+    assert!(
+        write_ipc.contains("agent_doc_supervisor::lifecycle::write_wedged_from_ipc_failures"),
+        "write::ipc should call focused supervisor write-wedge classification directly"
+    );
     let idle_watch =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
             .unwrap();

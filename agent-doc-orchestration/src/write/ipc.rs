@@ -218,7 +218,11 @@ pub(crate) fn record_ipc_socket_ack_timeout(
         .and_then(|value| value.get("consecutive_timeouts").and_then(|v| v.as_u64()))
         .unwrap_or(0);
     let consecutive_timeouts = prior_timeouts.saturating_add(1);
-    let degraded = consecutive_timeouts >= IPC_DEWEDGE_TIMEOUT_THRESHOLD;
+    let degraded = agent_doc_supervisor::lifecycle::write_wedged_from_ipc_failures(
+        consecutive_timeouts,
+        true,
+        IPC_DEWEDGE_TIMEOUT_THRESHOLD,
+    );
     let value = serde_json::json!({
         "session_id": ipc_dewedge_session_id(file),
         "consecutive_timeouts": consecutive_timeouts,

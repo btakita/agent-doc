@@ -673,8 +673,14 @@ pub(crate) fn send_command_unchecked(
         );
     }
     let trigger = harness.trigger_command(file_path);
-    let payload = routed_trigger_payload(&trigger);
-    validate_routed_trigger_payload(harness, &trigger, &payload)?;
+    let payload = trigger.to_string();
+    if let Some(rejection) = routed_trigger_payload_rejection(RoutedTriggerPayloadFacts {
+        harness_binary: &harness.binary,
+        trigger: &trigger,
+        payload: &payload,
+    }) {
+        anyhow::bail!("{rejection}");
+    }
     let mut existing_draft_diagnostic_path = None;
     let mut protected_prompt_input = None;
     let existing_draft_visible = match sessions::capture_pane(tmux, pane) {
@@ -895,8 +901,14 @@ pub(crate) fn send_command_once_unchecked(
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| file_path.to_string());
     let trigger = harness.trigger_command(file_path);
-    let payload = routed_trigger_payload(&trigger);
-    validate_routed_trigger_payload(harness, &trigger, &payload)?;
+    let payload = trigger.to_string();
+    if let Some(rejection) = routed_trigger_payload_rejection(RoutedTriggerPayloadFacts {
+        harness_binary: &harness.binary,
+        trigger: &trigger,
+        payload: &payload,
+    }) {
+        anyhow::bail!("{rejection}");
+    }
     let flash_msg = format!("⏳ {}", harness.trigger_command(&short_name));
     if let Err(e) = tmux
         .cmd()
@@ -947,8 +959,14 @@ pub(crate) fn dispatch_via_supervisor_ipc_with_mode(
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| file_path.to_string());
     let trigger = harness.trigger_command(file_path);
-    let payload = routed_trigger_payload(&trigger);
-    validate_routed_trigger_payload(harness, &trigger, &payload)?;
+    let payload = trigger.to_string();
+    if let Some(rejection) = routed_trigger_payload_rejection(RoutedTriggerPayloadFacts {
+        harness_binary: &harness.binary,
+        trigger: &trigger,
+        payload: &payload,
+    }) {
+        anyhow::bail!("{rejection}");
+    }
     let flash_msg = format!("⏳ {}", harness.trigger_command(&short_name));
     if let Err(e) = tmux
         .cmd()
@@ -1775,28 +1793,8 @@ pub(crate) struct DirectPaneDispatchOptions {
     pub(crate) print_unproven_progress: bool,
 }
 
-pub(crate) fn routed_trigger_payload(trigger: &str) -> String {
-    trigger.to_string()
-}
-
 pub(crate) fn apply_plain_trigger_override(harness: &mut HarnessConfig) {
     harness.trigger_command_template = "agent-doc {file}".to_string();
-}
-
-pub(crate) fn validate_routed_trigger_payload(
-    harness: &HarnessConfig,
-    trigger: &str,
-    payload: &str,
-) -> Result<()> {
-    if harness.binary == "codex"
-        && (payload != trigger || payload.contains('\n') || payload.contains('\r'))
-    {
-        anyhow::bail!(
-            "internal route bug: Codex reroute payload must stay the bare `agent-doc <FILE>` reopen; refusing to inject {:?}",
-            payload
-        );
-    }
-    Ok(())
 }
 
 #[cfg(test)]

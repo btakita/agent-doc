@@ -32,6 +32,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Direct-pane resubmit proof-line rendering moved to `agent-doc-controller`.** The `route_submit_resubmit` result label and operator-greppable message shape now live with the rest of controller dispatch logging policy. Route still supplies file, pane, harness, editor-attempt, and tmux submit-key facts, but no longer owns the formatting rule.
 
+- **Routed trigger payload admission moved to `agent-doc-controller`.** The Codex-specific guard that rejects non-bare or multiline reroute payloads now lives with controller dispatch admission policy. Route builds the concrete payload and asks the focused controller API directly; the trivial `routed_trigger_payload` wrapper and route-local validator are deleted.
+
 - **Direct-pane acceptance polling moved to `agent-doc-controller`.** The stable-empty-capture window and "visible draft disappeared" acceptance state machine now live beside the direct-pane submit outcome policy in `agent_doc_controller::dispatch`. `route/dispatch.rs` still captures panes and writes diagnostics, but it adapts each poll observation into the focused controller state instead of owning the transition rule.
 
 - **Direct-pane Enter-resubmit policy moved to `agent-doc-controller`.** The default retry cap, visible-draft eligibility, bounded re-submit continuation rule, and existing-draft submit gate now live in `agent_doc_controller::dispatch`. Route keeps the env override and tmux submit-profile adapter, but no longer owns direct-pane re-submit policy wrappers.

@@ -270,6 +270,28 @@ pub fn route_submit_issue_message(facts: RouteSubmitObservationFacts<'_>) -> Opt
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RoutedTriggerPayloadFacts<'a> {
+    pub harness_binary: &'a str,
+    pub trigger: &'a str,
+    pub payload: &'a str,
+}
+
+pub fn routed_trigger_payload_rejection(facts: RoutedTriggerPayloadFacts<'_>) -> Option<String> {
+    if facts.harness_binary == "codex"
+        && (facts.payload != facts.trigger
+            || facts.payload.contains('\n')
+            || facts.payload.contains('\r'))
+    {
+        Some(format!(
+            "internal route bug: Codex reroute payload must stay the bare `agent-doc <FILE>` reopen; refusing to inject {:?}",
+            facts.payload
+        ))
+    } else {
+        None
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DirectPaneResubmitProofFacts<'a> {
     pub file_display: &'a str,
     pub pane: &'a str,
@@ -1331,6 +1353,59 @@ mod tests {
         assert!(
             issue.contains("result=accepted_without_dispatch_start_proof"),
             "{issue}"
+        );
+    }
+
+    #[test]
+    fn routed_trigger_payload_rejection_accepts_bare_codex_reopen() {
+        assert_eq!(
+            routed_trigger_payload_rejection(RoutedTriggerPayloadFacts {
+                harness_binary: "codex",
+                trigger: "agent-doc test.md",
+                payload: "agent-doc test.md",
+            }),
+            None
+        );
+    }
+
+    #[test]
+    fn routed_trigger_payload_rejection_rejects_multiline_codex_payload() {
+        let rejection = routed_trigger_payload_rejection(RoutedTriggerPayloadFacts {
+            harness_binary: "codex",
+            trigger: "agent-doc test.md",
+            payload: "agent-doc test.md\nfollow-up text",
+        })
+        .expect("Codex reroute payload must fail before injecting extra lines");
+        assert!(
+            rejection.contains("bare `agent-doc <FILE>` reopen")
+                && rejection.contains("follow-up text"),
+            "unexpected rejection: {rejection}"
+        );
+    }
+
+    #[test]
+    fn routed_trigger_payload_rejection_rejects_rewritten_codex_payload() {
+        let rejection = routed_trigger_payload_rejection(RoutedTriggerPayloadFacts {
+            harness_binary: "codex",
+            trigger: "agent-doc test.md",
+            payload: "/agent-doc test.md",
+        })
+        .expect("Codex reroute payload must stay the bare reopen");
+        assert!(
+            rejection.contains("refusing to inject \"/agent-doc test.md\""),
+            "unexpected rejection: {rejection}"
+        );
+    }
+
+    #[test]
+    fn routed_trigger_payload_rejection_allows_non_codex_payload_shape() {
+        assert_eq!(
+            routed_trigger_payload_rejection(RoutedTriggerPayloadFacts {
+                harness_binary: "claude",
+                trigger: "agent-doc test.md",
+                payload: "/agent-doc test.md\n",
+            }),
+            None
         );
     }
 

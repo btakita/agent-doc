@@ -192,8 +192,8 @@ use agent_doc_controller::dispatch::{
     DispatchStartProofDecision, DispatchStartProofFacts, MissingCycleAckFacts, RetryBudget,
     RouteLatencyFacts, RouteLatencyStatus, RouteSubmitObservation,
     RouteSubmitObservationFacts as ControllerRouteSubmitObservationFacts, RoutedCycleAckFacts,
-    RoutedDispatchStartProof, STARTING_ACTOR_TIMEOUT_REASON, StartingTimeoutActorFacts,
-    StartupMissRouteFacts, actor_blocked_by_starting_timeout,
+    RoutedDispatchStartProof, RoutedTriggerPayloadFacts, STARTING_ACTOR_TIMEOUT_REASON,
+    StartingTimeoutActorFacts, StartupMissRouteFacts, actor_blocked_by_starting_timeout,
     authoritative_actor_dispatch_guard_reason as controller_authoritative_actor_dispatch_guard_reason,
     authoritative_actor_ready_retry_budget, classify_closeout_block_dispatch,
     classify_dispatch_start_proof, direct_pane_acceptance_poll_status,
@@ -208,10 +208,11 @@ use agent_doc_controller::dispatch::{
     dispatch_only_starting_pane_recovery_retry_budget,
     dispatch_only_starting_pane_recovery_timeout_for_binary, effective_authoritative_actor_state,
     route_latency_message, route_latency_status, route_submit_issue_message,
-    route_submit_observation_message, should_optimistically_accept_missing_cycle_ack,
-    should_require_routed_cycle_ack, starting_timeout_blocked_actor_can_recover,
-    startup_miss_requires_fresh_start, startup_miss_should_fail_closed,
-    startup_miss_should_restart_live_owner, startup_miss_superseded_by_later_open_start,
+    route_submit_observation_message, routed_trigger_payload_rejection,
+    should_optimistically_accept_missing_cycle_ack, should_require_routed_cycle_ack,
+    starting_timeout_blocked_actor_can_recover, startup_miss_requires_fresh_start,
+    startup_miss_should_fail_closed, startup_miss_should_restart_live_owner,
+    startup_miss_superseded_by_later_open_start,
 };
 use agent_doc_frontmatter::frontmatter;
 use tmux_router::Tmux;
@@ -6790,15 +6791,6 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         );
     }
     #[test]
-    fn routed_trigger_payload_keeps_bare_reopen() {
-        let codex_trigger = HarnessConfig::codex().trigger_command("test.md");
-        assert_eq!(routed_trigger_payload(&codex_trigger), "agent-doc test.md");
-        assert_eq!(
-            routed_trigger_payload("/agent-doc test.md"),
-            "/agent-doc test.md"
-        );
-    }
-    #[test]
     fn plain_trigger_override_uses_bare_agent_doc_reopen_for_route() {
         let mut claude = HarnessConfig::claude();
         apply_plain_trigger_override(&mut claude);
@@ -6807,29 +6799,6 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let mut opencode = HarnessConfig::opencode();
         apply_plain_trigger_override(&mut opencode);
         assert_eq!(opencode.trigger_command("test.md"), "agent-doc test.md");
-    }
-    #[test]
-    fn validate_routed_trigger_payload_accepts_bare_codex_reopen() {
-        let harness = HarnessConfig::codex();
-        let trigger = harness.trigger_command("test.md");
-        let payload = routed_trigger_payload(&trigger);
-        validate_routed_trigger_payload(&harness, &trigger, &payload)
-            .expect("bare Codex reopen should remain dispatchable");
-    }
-    #[test]
-    fn validate_routed_trigger_payload_rejects_multiline_codex_payload() {
-        let harness = HarnessConfig::codex();
-        let trigger = harness.trigger_command("test.md");
-        let err = validate_routed_trigger_payload(
-            &harness,
-            &trigger,
-            "agent-doc test.md\nfollow-up text",
-        )
-        .expect_err("Codex reroute payload must fail before injecting extra lines");
-        assert!(
-            err.to_string().contains("bare `agent-doc <FILE>` reopen"),
-            "unexpected error: {err:#}"
-        );
     }
     #[test]
     fn drain_reaps_completed_review_item_across_all_surfaces() {

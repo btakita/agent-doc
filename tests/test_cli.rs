@@ -3744,6 +3744,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub struct RouteSubmitObservationFacts",
         "pub fn route_submit_observation_message(",
         "pub fn route_submit_issue_message(",
+        "pub struct RoutedTriggerPayloadFacts",
+        "pub fn routed_trigger_payload_rejection(",
         "pub struct DirectPaneResubmitProofFacts",
         "pub fn direct_pane_resubmit_proof_line(",
         "pub enum RouteLatencyStatus",
@@ -3891,6 +3893,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("ControllerRouteSubmitObservationFacts")
             && route_source.contains("route_submit_observation_message(")
             && route_source.contains("route_submit_issue_message(")
+            && route_source.contains("RoutedTriggerPayloadFacts")
+            && route_source.contains("routed_trigger_payload_rejection")
             && route_source.contains("DirectPaneResubmitProofFacts")
             && route_source.contains("direct_pane_resubmit_proof_line")
             && route_source.contains("RouteLatencyFacts")
@@ -3915,6 +3919,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn direct_pane_should_await_dispatch_start_proof(",
         "fn resubmit_result_label(",
         "fn route_submit_resubmit_proof_line(",
+        "fn routed_trigger_payload(",
+        "fn validate_routed_trigger_payload(",
     ] {
         assert!(
             !route_dispatch_source.contains(forbidden_snippet),
@@ -3932,7 +3938,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_dispatch_source.contains("DirectPaneDispatchStartProofFacts")
             && route_dispatch_source.contains("direct_pane_should_await_dispatch_start_proof(")
             && route_dispatch_source.contains("DirectPaneResubmitProofFacts")
-            && route_dispatch_source.contains("direct_pane_resubmit_proof_line("),
+            && route_dispatch_source.contains("direct_pane_resubmit_proof_line(")
+            && route_dispatch_source.contains("RoutedTriggerPayloadFacts")
+            && route_dispatch_source.contains("routed_trigger_payload_rejection("),
         "route/dispatch.rs should adapt tmux captures into focused controller direct-pane policy"
     );
     assert!(
@@ -4892,6 +4900,8 @@ fn test_agent_doc_tmux_commands_owns_submit_profile_policy() {
     }
     assert!(
         !route_dispatch_source.contains("fn routed_trigger_submit_diagnostic(")
+            && !route_dispatch_source.contains("fn routed_trigger_payload(")
+            && !route_dispatch_source.contains("fn validate_routed_trigger_payload(")
             && route_dispatch_source.contains("tmux_submit_transform_for_harness(")
             && route_dispatch_source.contains("tmux_submit_key_for_harness("),
         "route dispatch should call focused tmux submit diagnostics directly, without a local wrapper"

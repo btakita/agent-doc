@@ -22,7 +22,7 @@ use agent_doc_element::element::{
     is_backlog_component, is_icebox_component, is_review_component, is_tracked_work_component,
 };
 use agent_doc_element_backlog::backlog;
-use agent_doc_element_review::{ReviewItemView, ReviewListFilter};
+use agent_doc_element_review::{ReviewItemView, ReviewListFilter, UngateTasksReport};
 
 thread_local! {
     static FORCE_DISK_PENDING_WRITE: Cell<bool> = const { Cell::new(false) };
@@ -423,26 +423,6 @@ pub fn icebox_add_back(file: &Path, item: &str) -> Result<String> {
     add_at_to_list(file, item, backlog::AddPosition::Last, TrackedList::Icebox)
 }
 
-/// Summary of an `agent-doc review ungate-tasks` run.
-#[derive(Debug, Default, PartialEq, Eq)]
-pub struct UngateTasksReport {
-    /// Gated review items scanned.
-    pub scanned: usize,
-    /// Review item ids a new backlog ungate task was added for.
-    pub added: Vec<String>,
-    /// Review item ids already covered by an existing ungate task.
-    pub skipped: Vec<String>,
-}
-
-/// Stable body text for a generated ungate backlog task, so re-runs dedup
-/// against their own prior output idempotently.
-fn ungate_task_text(normalized_id: &str) -> String {
-    format!(
-        "[recommended] Ungate review item #{} — validate and move to done",
-        normalized_id
-    )
-}
-
 /// Token-efficient query of gated `agent:review` items (`#review-list-query`).
 ///
 /// Returns one [`ReviewItemView`] per gated item, with extracted hashtags and the
@@ -459,57 +439,11 @@ pub fn list_review_items(file: &Path, filter: &ReviewListFilter) -> Result<Vec<R
 /// backlog is skipped.
 pub fn add_ungate_tasks_for_review(file: &Path) -> Result<UngateTasksReport> {
     let content = std::fs::read_to_string(file)?;
-    let components = agent_doc_element::element::parse(&content)?;
-
-    let gated_review_ids: Vec<String> = components
-        .iter()
-        .filter(|c| agent_doc_element::element::is_review_component(&c.name))
-        .flat_map(|c| {
-            let (_, items, _) = backlog::parse_items(c.content(&content));
-            items
-        })
-        .filter(|item| item.state == backlog::PendingState::Gated)
-        .map(|item| backlog::normalize_pending_id(&item.id))
-        .filter(|id| !id.is_empty())
-        .collect();
-
-    let backlog_text: String = components
-        .iter()
-        .filter(|c| agent_doc_element::element::is_backlog_component(&c.name))
-        .map(|c| c.content(&content).to_string())
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let mut report = UngateTasksReport {
-        scanned: gated_review_ids.len(),
-        ..Default::default()
-    };
-    let mut seen = std::collections::HashSet::new();
-    let mut to_add: Vec<String> = Vec::new();
-    for id in gated_review_ids {
-        if !seen.insert(id.clone()) {
-            continue;
-        }
-        // Dedup against the existing backlog: an ungate task (this command's own
-        // generated text, or any backlog item naming `ungate` + `#id`) counts.
-        let task_text = ungate_task_text(&id);
-        let id_marker = format!("#{}", id);
-        let already_tracked = backlog_text.contains(&task_text)
-            || backlog_text.lines().any(|line| {
-                let lower = line.to_ascii_lowercase();
-                lower.contains("ungate") && line.contains(&id_marker)
-            });
-        if already_tracked {
-            report.skipped.push(id);
-        } else {
-            to_add.push(task_text);
-            report.added.push(id);
-        }
+    let plan = agent_doc_element_review::plan_ungate_tasks_for_review(&content)?;
+    if !plan.task_texts.is_empty() {
+        add_many(file, &plan.task_texts, false)?;
     }
-    if !to_add.is_empty() {
-        add_many(file, &to_add, false)?;
-    }
-    Ok(report)
+    Ok(plan.report)
 }
 
 /// Run lazy backfill over the pending component and write if changed.

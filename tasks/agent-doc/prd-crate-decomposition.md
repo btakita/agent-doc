@@ -36,7 +36,7 @@ make orchestration small enough that it is an adapter rather than a God crate.
 
 | Responsibility | Destination | Current status |
 |---|---|---|
-| Element descriptors and local element models | `agent-doc-element-*` plus `agent-doc-element-registry` | Active. Queue item lifecycle now lives in `agent-doc-element-queue`; review-list projection/filtering now lives in `agent-doc-element-review`; orchestration no longer owns those element state/projection models. |
+| Element descriptors and local element models | `agent-doc-element-*` plus `agent-doc-element-registry` | Active. Queue item lifecycle now lives in `agent-doc-element-queue`; review-list projection/filtering and ungate-task planning now live in `agent-doc-element-review`; orchestration no longer owns those element state/projection models. |
 | Queue syntax, scheduling, and drainability | `agent-doc-queue` | Active. Pure queue parsing, preemption/edit-owner rules, queue-continuation drainability/noise/context-reset policy, and continuation guidance wording live here; orchestration keeps snapshot, marker, controller-state, and file-IO adapters. |
 | Cross-element document projection | `agent-doc-document` | Active for queue projection and element-model composition. |
 | Work graph / Auto-DAG scheduling | `agent-doc-work-graph` | Active. Source-agnostic graph classification and rendering live here so markdown documents, cross-document sources, and external PM adapters can feed the same dependency model. |
@@ -63,7 +63,7 @@ make orchestration small enough that it is an adapter rather than a God crate.
 | Current module | Target crate | Notes |
 |---|---|---|
 | `component.rs` | `agent-doc-element::element` | Extracted. Element parsing is element/document syntax; keep parser pure and file-IO free. |
-| `pending.rs` | `agent-doc-element-backlog` / `agent-doc-tracked-work` | Tracked work parsing and lifecycle should be shared by backlog, review, icebox, and done. Started: review-list projection/filtering moved to `agent-doc-element-review`; orchestration keeps file-backed mutation adapters. |
+| `pending.rs` | `agent-doc-element-backlog` / `agent-doc-tracked-work` | Tracked work parsing and lifecycle should be shared by backlog, review, icebox, and done. Started: review-list projection/filtering and review ungate-task planning moved to `agent-doc-element-review`; orchestration keeps file-backed mutation adapters. |
 | `queue_item_lifecycle.rs` | `agent-doc-element-queue` | Extracted. |
 | `template.rs` | `agent-doc-template` | Extracted. Pure patch parsing, component mutation, boundary repositioning, and repair helpers live in `agent-doc-template`; file-backed config/document IO stays in orchestration adapters. |
 | `replay_guard.rs` | `agent-doc-template` | Extracted. Replay payload shape validation lives beside template patch parsing because patch-bearing replay depends on `parse_patches`. |

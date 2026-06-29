@@ -50,6 +50,88 @@ pub struct ReviewListFilter {
     pub has_next: Option<bool>,
 }
 
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct UngateTasksReport {
+    /// Gated review items scanned.
+    pub scanned: usize,
+    /// Review item ids a new backlog ungate task should be added for.
+    pub added: Vec<String>,
+    /// Review item ids already covered by an existing ungate task.
+    pub skipped: Vec<String>,
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct UngateTasksPlan {
+    pub report: UngateTasksReport,
+    /// Backlog task bodies to append through the caller's document-write adapter.
+    pub task_texts: Vec<String>,
+}
+
+/// Stable body text for a generated ungate backlog task, so re-runs dedup
+/// against their own prior output idempotently.
+fn ungate_task_text(normalized_id: &str) -> String {
+    format!(
+        "[recommended] Ungate review item #{} — validate and move to done",
+        normalized_id
+    )
+}
+
+/// Plan backlog follow-up tasks for gated `agent:review` items.
+///
+/// The returned task bodies are not written here. Callers own document IO and
+/// decide how to apply the additions. The planning is idempotent: a review id
+/// whose generated task or any `ungate` + `#id` backlog line already exists is
+/// reported as skipped instead of added.
+pub fn plan_ungate_tasks_for_review(content: &str) -> Result<UngateTasksPlan> {
+    let components = element::parse(content)?;
+
+    let gated_review_ids: Vec<String> = components
+        .iter()
+        .filter(|c| element::is_review_component(&c.name))
+        .flat_map(|c| {
+            let (_, items, _) = backlog::parse_items(c.content(content));
+            items
+        })
+        .filter(|item| item.state == backlog::PendingState::Gated)
+        .map(|item| backlog::normalize_pending_id(&item.id))
+        .filter(|id| !id.is_empty())
+        .collect();
+
+    let backlog_text: String = components
+        .iter()
+        .filter(|c| element::is_backlog_component(&c.name))
+        .map(|c| c.content(content).to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let mut report = UngateTasksReport {
+        scanned: gated_review_ids.len(),
+        ..Default::default()
+    };
+    let mut seen = std::collections::HashSet::new();
+    let mut task_texts: Vec<String> = Vec::new();
+    for id in gated_review_ids {
+        if !seen.insert(id.clone()) {
+            continue;
+        }
+        let task_text = ungate_task_text(&id);
+        let id_marker = format!("#{id}");
+        let already_tracked = backlog_text.contains(&task_text)
+            || backlog_text.lines().any(|line| {
+                let lower = line.to_ascii_lowercase();
+                lower.contains("ungate") && line.contains(&id_marker)
+            });
+        if already_tracked {
+            report.skipped.push(id);
+        } else {
+            task_texts.push(task_text);
+            report.added.push(id);
+        }
+    }
+
+    Ok(UngateTasksPlan { report, task_texts })
+}
+
 /// Token-efficient projection of gated `agent:review` items.
 ///
 /// Returns one [`ReviewItemView`] per gated item, with extracted hashtags and the
@@ -202,5 +284,50 @@ mod tests {
         let tagged = review_item_views_from_content(content, &f).unwrap();
         assert_eq!(tagged.len(), 1);
         assert_eq!(tagged[0].id, "bb22");
+    }
+
+    #[test]
+    fn plan_ungate_tasks_adds_each_unique_untracked_gated_review_item() {
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep1] unrelated open item\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:review -->\n",
+            "- [/] [#rev1] gated review item one\n",
+            "- [/] [#rev1] duplicate gated review item one\n",
+            "- [/] [#rev2] gated review item two\n",
+            "<!-- /agent:review -->\n",
+        );
+
+        let plan = plan_ungate_tasks_for_review(content).unwrap();
+        assert_eq!(plan.report.scanned, 3);
+        assert_eq!(plan.report.added, vec!["rev1", "rev2"]);
+        assert!(plan.report.skipped.is_empty());
+        assert_eq!(plan.task_texts.len(), 2);
+        assert!(plan.task_texts[0].contains("Ungate review item #rev1"));
+        assert!(plan.task_texts[1].contains("Ungate review item #rev2"));
+    }
+
+    #[test]
+    fn plan_ungate_tasks_skips_existing_generated_or_operator_tasks() {
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#a] [recommended] Ungate review item #rev1 — validate and move to done\n",
+            "- [ ] [#b] ungate #rev2 manually\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:review -->\n",
+            "- [/] [#rev1] gated review item one\n",
+            "- [/] [#rev2] gated review item two\n",
+            "- [/] [#rev3] gated review item three\n",
+            "<!-- /agent:review -->\n",
+        );
+
+        let plan = plan_ungate_tasks_for_review(content).unwrap();
+        assert_eq!(plan.report.scanned, 3);
+        assert_eq!(plan.report.skipped, vec!["rev1", "rev2"]);
+        assert_eq!(plan.report.added, vec!["rev3"]);
+        assert_eq!(plan.task_texts, vec![ungate_task_text("rev3")]);
     }
 }

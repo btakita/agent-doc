@@ -3182,7 +3182,7 @@ fn test_agent_doc_queue_owns_continuation_guidance_policy() {
 }
 
 #[test]
-fn test_agent_doc_element_review_owns_review_list_projection() {
+fn test_agent_doc_element_review_owns_review_projection_and_ungate_planning() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let review_model =
         fs::read_to_string(manifest_dir.join("agent-doc-element-review/src/lib.rs")).unwrap();
@@ -3190,10 +3190,13 @@ fn test_agent_doc_element_review_owns_review_list_projection() {
         "pub struct ReviewItemView",
         "pub struct ReviewListFilter",
         "pub fn review_item_views_from_content",
+        "pub struct UngateTasksReport",
+        "pub struct UngateTasksPlan",
+        "pub fn plan_ungate_tasks_for_review",
     ] {
         assert!(
             review_model.contains(required),
-            "agent-doc-element-review must own review-list projection API"
+            "agent-doc-element-review must own review projection and planning API"
         );
     }
 
@@ -3203,17 +3206,23 @@ fn test_agent_doc_element_review_owns_review_list_projection() {
     for forbidden in [
         "pub struct ReviewItemView",
         "pub struct ReviewListFilter",
+        "pub struct UngateTasksReport",
+        "fn ungate_task_text",
         "fn extract_review_tags",
         "fn extract_review_next",
     ] {
         assert!(
             !pending_cmd.contains(forbidden),
-            "pending_cmd must stay a file-IO adapter, not a review projection facade"
+            "pending_cmd must stay a file-IO adapter, not a review projection/planning facade"
         );
     }
     assert!(
         pending_cmd.contains("agent_doc_element_review::review_item_views_from_content"),
         "pending_cmd should delegate review projection to agent-doc-element-review directly"
+    );
+    assert!(
+        pending_cmd.contains("agent_doc_element_review::plan_ungate_tasks_for_review"),
+        "pending_cmd should delegate review ungate planning to agent-doc-element-review directly"
     );
 
     let cli = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();

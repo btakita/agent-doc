@@ -32,7 +32,7 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Queue continuation guidance moved to `agent-doc-queue`.** The no-stall/recycle-yield guidance constants and pause-aware `continuation_guidance` builder now live beside the pure queue continuation drainability policy; preflight and session-check import `agent_doc_queue::queue_continuation` directly, and orchestration keeps only file/controller/marker adapters. Added a guard so the guidance facade does not return.
 
-- **Review-list projection moved to `agent-doc-element-review`.** `ReviewItemView`, `ReviewListFilter`, and the pure review-item projection/filtering logic now live with the review element model. `pending_cmd` remains only the file-IO adapter, and the CLI constructs filters from `agent_doc_element_review` directly. Added a guard so the projection facade does not return.
+- **Review projection and ungate planning moved to `agent-doc-element-review`.** `ReviewItemView`, `ReviewListFilter`, `UngateTasksReport`, and the pure review-item projection/filtering plus ungate-task planning logic now live with the review element model. `pending_cmd` remains only the file-IO/write adapter, and the CLI constructs filters from `agent_doc_element_review` directly. Added a guard so the projection/planning facade does not return.
 
 ## 0.34.64
 

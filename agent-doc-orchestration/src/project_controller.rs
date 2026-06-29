@@ -1771,11 +1771,12 @@ pub const SUPERVISOR_LEASE_GUARD_STALE_AFTER: Duration = Duration::from_secs(60)
 /// `#xdocsuper0`: does a FRESH lease held by a LIVE *foreign* supervisor still
 /// own this document?
 ///
-/// The claim binding is pane/session-keyed, so `claim::cross_session_decision`
-/// auto-forces (`AcceptStale`) whenever the prior/configured tmux session is
-/// dead — without ever checking whether another live supervisor still holds a
-/// fresh lease on the document. That window lets two supervisors (an old one and
-/// a relaunched one) both believe they own one document, which produces
+/// The claim binding is pane/session-keyed, so
+/// `agent_doc_controller::claim::cross_session_decision` auto-forces
+/// (`AcceptStale`) whenever the prior/configured tmux session is dead — without
+/// ever checking whether another live supervisor still holds a fresh lease on
+/// the document. That window lets two supervisors (an old one and a relaunched
+/// one) both believe they own one document, which produces
 /// stale-CRDT replay, `live_prompt_drift_after_preflight`, and post-commit
 /// worktree corruption.
 ///

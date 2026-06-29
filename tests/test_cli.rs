@@ -3668,6 +3668,38 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         sim_world.contains("agent_doc_controller::dispatch::dispatch_should_coalesce_in_flight"),
         "SimWorld should share the focused controller dispatch classifier directly"
     );
+    let controller_claim =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller/src/claim.rs")).unwrap();
+    for required_snippet in [
+        "pub enum CrossSessionDecision",
+        "pub const CROSS_SESSION_REJECT_MARKER",
+        "pub fn cross_session_reject_marker(",
+        "pub fn cross_session_decision(",
+        "pub fn cross_session_decision_with_lease(",
+    ] {
+        assert!(
+            controller_claim.contains(required_snippet),
+            "agent-doc-controller should own claim admission policy directly: {required_snippet}"
+        );
+    }
+    let claim_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/claim.rs")).unwrap();
+    for forbidden_snippet in [
+        "pub enum CrossSessionDecision",
+        "pub const CROSS_SESSION_REJECT_MARKER",
+        "pub fn cross_session_reject_marker(",
+        "pub fn cross_session_decision(",
+        "pub fn cross_session_decision_with_lease(",
+    ] {
+        assert!(
+            !claim_source.contains(forbidden_snippet),
+            "claim.rs must stay a tmux/file adapter and not re-own controller claim policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        claim_source.contains("use agent_doc_controller::claim::{"),
+        "claim.rs should call focused controller claim policy directly"
+    );
 
     let controller_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-controller/Cargo.toml")).unwrap();

@@ -3676,6 +3676,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-controller/src/dispatch.rs")).unwrap();
     for required_snippet in [
         "pub enum DispatchActorState",
+        "pub enum ActorLifecycleState",
+        "pub fn effective_authoritative_actor_state(",
         "pub enum DispatchRuntimeHealth",
         "pub struct AuthoritativeRuntimeFacts",
         "pub fn authoritative_actor_dispatch_guard_reason(",
@@ -3710,6 +3712,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     }
     for forbidden_snippet in [
         "pub enum ActorRuntimeHealth",
+        "fn effective_authoritative_actor_state(",
         "pub struct AuthoritativeRuntimeFacts",
         "pub fn authoritative_actor_dispatch_guard_reason(",
         "fn busy_dispatch_only_should_wait_for_ready(",
@@ -3731,6 +3734,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     }
     for forbidden_snippet in [
         "pub enum ActorRuntimeHealth",
+        "pub enum ActorLifecycleState",
+        "pub fn effective_authoritative_actor_state(",
         "pub struct AuthoritativeRuntimeFacts",
         "pub fn authoritative_actor_dispatch_guard_reason(",
         "pub enum RoutedDispatchStartProof",
@@ -3760,6 +3765,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     }
     assert!(
         route_source.contains("use agent_doc_controller::dispatch::{")
+            && route_source.contains("ActorLifecycleState")
+            && route_source.contains("effective_authoritative_actor_state")
             && route_source.contains("DispatchRuntimeHealth")
             && route_source.contains("controller_authoritative_actor_dispatch_guard_reason(")
             && route_source.contains("RoutedDispatchStartProof")

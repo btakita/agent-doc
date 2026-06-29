@@ -82,6 +82,29 @@ pub enum DispatchActorState {
     Other,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActorLifecycleState {
+    Starting,
+    Ready,
+    Busy,
+    WaitingInput,
+    Closed,
+    Blocked,
+}
+
+pub fn effective_authoritative_actor_state(
+    record_state: ActorLifecycleState,
+    runtime_state: Option<ActorLifecycleState>,
+) -> ActorLifecycleState {
+    if matches!(
+        record_state,
+        ActorLifecycleState::Blocked | ActorLifecycleState::Closed
+    ) {
+        return record_state;
+    }
+    runtime_state.unwrap_or(record_state)
+}
+
 pub const STARTING_ACTOR_TIMEOUT_REASON: &str = "starting_actor_timeout";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -689,6 +712,35 @@ mod tests {
         assert!(!dispatch_only_dispatch_start_proof_required("codex"));
         assert!(!dispatch_only_dispatch_start_proof_required("opencode"));
         assert!(!dispatch_only_dispatch_start_proof_required("claude"));
+    }
+
+    #[test]
+    fn effective_actor_state_preserves_terminal_record_states() {
+        assert_eq!(
+            effective_authoritative_actor_state(
+                ActorLifecycleState::Blocked,
+                Some(ActorLifecycleState::Ready),
+            ),
+            ActorLifecycleState::Blocked
+        );
+        assert_eq!(
+            effective_authoritative_actor_state(
+                ActorLifecycleState::Closed,
+                Some(ActorLifecycleState::Ready),
+            ),
+            ActorLifecycleState::Closed
+        );
+        assert_eq!(
+            effective_authoritative_actor_state(
+                ActorLifecycleState::Starting,
+                Some(ActorLifecycleState::Ready),
+            ),
+            ActorLifecycleState::Ready
+        );
+        assert_eq!(
+            effective_authoritative_actor_state(ActorLifecycleState::Busy, None),
+            ActorLifecycleState::Busy
+        );
     }
 
     #[test]

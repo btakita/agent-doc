@@ -183,7 +183,8 @@ use crate::flow::routed_reopen::{
 use crate::harness::HarnessConfig;
 use crate::supervisor::ipc::IpcMethod;
 use agent_doc_controller::dispatch::{
-    AuthoritativeRuntimeFacts, DirectPaneSubmitStatus as CommandDispatchStatus, DispatchActorState,
+    ActorLifecycleState, AuthoritativeRuntimeFacts,
+    DirectPaneSubmitStatus as CommandDispatchStatus, DispatchActorState,
     DispatchDrainRetryDecision, DispatchRuntimeHealth, DispatchStartProofDecision,
     DispatchStartProofFacts, RetryBudget, RoutedDispatchStartProof, STARTING_ACTOR_TIMEOUT_REASON,
     StartingTimeoutActorFacts, actor_blocked_by_starting_timeout,
@@ -196,7 +197,7 @@ use agent_doc_controller::dispatch::{
     dispatch_only_should_probe_active_turn_cue,
     dispatch_only_starting_pane_ready_timeout_for_binary,
     dispatch_only_starting_pane_recovery_retry_budget,
-    dispatch_only_starting_pane_recovery_timeout_for_binary,
+    dispatch_only_starting_pane_recovery_timeout_for_binary, effective_authoritative_actor_state,
     starting_timeout_blocked_actor_can_recover,
 };
 use agent_doc_frontmatter::frontmatter;
@@ -380,14 +381,42 @@ pub(crate) struct AuthoritativeActorDispatchTarget {
 
 impl AuthoritativeActorDispatchTarget {
     fn actor_state(&self) -> agent_doc_sqlite::state_store::ActorState {
-        if matches!(
-            self.record.state,
-            agent_doc_sqlite::state_store::ActorState::Blocked
-                | agent_doc_sqlite::state_store::ActorState::Closed
-        ) {
-            return self.record.state;
+        sqlite_actor_state_from_controller(effective_authoritative_actor_state(
+            controller_actor_lifecycle_state(self.record.state),
+            self.runtime
+                .actor_state
+                .map(controller_actor_lifecycle_state),
+        ))
+    }
+}
+
+fn controller_actor_lifecycle_state(
+    state: agent_doc_sqlite::state_store::ActorState,
+) -> ActorLifecycleState {
+    match state {
+        agent_doc_sqlite::state_store::ActorState::Starting => ActorLifecycleState::Starting,
+        agent_doc_sqlite::state_store::ActorState::Ready => ActorLifecycleState::Ready,
+        agent_doc_sqlite::state_store::ActorState::Busy => ActorLifecycleState::Busy,
+        agent_doc_sqlite::state_store::ActorState::WaitingInput => {
+            ActorLifecycleState::WaitingInput
         }
-        self.runtime.actor_state.unwrap_or(self.record.state)
+        agent_doc_sqlite::state_store::ActorState::Closed => ActorLifecycleState::Closed,
+        agent_doc_sqlite::state_store::ActorState::Blocked => ActorLifecycleState::Blocked,
+    }
+}
+
+fn sqlite_actor_state_from_controller(
+    state: ActorLifecycleState,
+) -> agent_doc_sqlite::state_store::ActorState {
+    match state {
+        ActorLifecycleState::Starting => agent_doc_sqlite::state_store::ActorState::Starting,
+        ActorLifecycleState::Ready => agent_doc_sqlite::state_store::ActorState::Ready,
+        ActorLifecycleState::Busy => agent_doc_sqlite::state_store::ActorState::Busy,
+        ActorLifecycleState::WaitingInput => {
+            agent_doc_sqlite::state_store::ActorState::WaitingInput
+        }
+        ActorLifecycleState::Closed => agent_doc_sqlite::state_store::ActorState::Closed,
+        ActorLifecycleState::Blocked => agent_doc_sqlite::state_store::ActorState::Blocked,
     }
 }
 

@@ -785,7 +785,7 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                     return Ok(SessionCheckStatus::Interrupted(format!(
                         "[session-check] INTERRUPTED: cycle `{}` was `{}` ({}), recovered the missing commit boundary from {}, but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: {}",
                         state.cycle_id,
-                        phase_name(state.phase),
+                        state.phase.as_str(),
                         state.last_event,
                         reason,
                         prompt_marker
@@ -794,7 +794,7 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                 return Ok(SessionCheckStatus::Ok(format!(
                     "[session-check] ok — cycle `{}` was `{}` ({}); recovered the missing commit boundary from {}",
                     state.cycle_id,
-                    phase_name(state.phase),
+                    state.phase.as_str(),
                     state.last_event,
                     reason
                 )));
@@ -843,7 +843,7 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                 return Ok(SessionCheckStatus::Interrupted(format!(
                     "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), repaired committed historical {} snapshot drift, but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: {}",
                     state.cycle_id,
-                    phase_name(state.phase),
+                    state.phase.as_str(),
                     state.last_event,
                     reason,
                     prompt_marker
@@ -852,7 +852,7 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
             return Ok(SessionCheckStatus::Ok(format!(
                 "[session-check] ok — cycle `{}` is `{}` ({}); repaired committed historical {} snapshot drift",
                 state.cycle_id,
-                phase_name(state.phase),
+                state.phase.as_str(),
                 state.last_event,
                 reason
             )));
@@ -863,7 +863,7 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                     return Ok(SessionCheckStatus::Interrupted(format!(
                         "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), repaired committed historical {} snapshot drift, but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: {}",
                         state.cycle_id,
-                        phase_name(state.phase),
+                        state.phase.as_str(),
                         state.last_event,
                         reason,
                         prompt_marker
@@ -872,7 +872,7 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                 return Ok(SessionCheckStatus::Ok(format!(
                     "[session-check] ok — cycle `{}` is `{}` ({}); repaired committed historical {} snapshot drift",
                     state.cycle_id,
-                    phase_name(state.phase),
+                    state.phase.as_str(),
                     state.last_event,
                     reason
                 )));
@@ -909,7 +909,7 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
             return Ok(SessionCheckStatus::Interrupted(format!(
                 "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), but the current visible document is missing the latest committed HEAD response `{}`. Preserve any current operator edits, then rerun `agent-doc write --commit {}` so realtime closeout can merge the committed response back into the visible document.",
                 state.cycle_id,
-                phase_name(state.phase),
+                state.phase.as_str(),
                 state.last_event,
                 heading,
                 file.display()
@@ -919,7 +919,7 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
             return Ok(SessionCheckStatus::Interrupted(format!(
                 "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), but the active harness session changed this document after the last committed closeout without reopening the binary-owned write/commit path: {}. Reopen closeout for this turn or let the hook recover it from the final assistant message.",
                 state.cycle_id,
-                phase_name(state.phase),
+                state.phase.as_str(),
                 state.last_event,
                 marker
             )));
@@ -928,7 +928,7 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
             return Ok(SessionCheckStatus::Interrupted(format!(
                 "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), but the document has uncommitted exchange changes beyond the committed snapshot: {}. Run `agent-doc finalize {}` or `agent-doc write --commit {}` to close the cycle before reporting success.",
                 state.cycle_id,
-                phase_name(state.phase),
+                state.phase.as_str(),
                 state.last_event,
                 marker,
                 file.display(),
@@ -939,7 +939,7 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
             return Ok(SessionCheckStatus::Interrupted(format!(
                 "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: {}",
                 state.cycle_id,
-                phase_name(state.phase),
+                state.phase.as_str(),
                 state.last_event,
                 marker
             )));
@@ -947,7 +947,7 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
         return Ok(SessionCheckStatus::Ok(format!(
             "[session-check] ok — cycle `{}` is `{}` ({})",
             state.cycle_id,
-            phase_name(state.phase),
+            state.phase.as_str(),
             state.last_event
         )));
     }
@@ -1139,7 +1139,7 @@ fn blocked_closeout_message(
         "[session-check] INTERRUPTED: closeout blocked by `{}` for cycle `{}` (phase={} last_event={} source={} reason={}{}{}{}).{} The response/patch is retained for editor retry; save or resolve the live editor buffer, then run `{}`. Use `{} --force-disk` only after an explicit operator decision to override the live-editor safety guard.",
         blocked.kind,
         state.cycle_id,
-        phase_name(state.phase),
+        state.phase.as_str(),
         state.last_event,
         blocked.source,
         blocked.reason,
@@ -3236,7 +3236,7 @@ Body\n\
         crate::cycle_state::mark_committed(&doc, "commit", Some("body"), Some("body")).unwrap();
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert!(!state.is_open());
-        assert_eq!(phase_name(state.phase), "committed");
+        assert_eq!(state.phase.as_str(), "committed");
     }
     #[test]
     fn detect_bypassed_response_write_flags_template_heading() {

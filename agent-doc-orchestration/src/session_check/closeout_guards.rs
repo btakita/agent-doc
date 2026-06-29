@@ -355,16 +355,6 @@ pub(crate) fn single_open_review_item_id(file: &Path) -> Result<Option<String>> 
     }
 }
 
-pub(crate) fn phase_name(phase: agent_doc_turn::CyclePhase) -> &'static str {
-    match phase {
-        agent_doc_turn::CyclePhase::PreflightStarted => "preflight_started",
-        agent_doc_turn::CyclePhase::ResponseCaptured => "response_captured",
-        agent_doc_turn::CyclePhase::WriteApplied => "write_applied",
-        agent_doc_turn::CyclePhase::Committed => "committed",
-        agent_doc_turn::CyclePhase::Abandoned => "abandoned",
-    }
-}
-
 pub(crate) fn detect_active_session_post_commit_drift(file: &Path) -> Result<Option<String>> {
     let Some(session) = crate::codex_hook::load_active_session_for_current_file(file)? else {
         return Ok(None);
@@ -566,7 +556,7 @@ pub(crate) fn open_cycle_message(
         return Ok(format!(
             "[session-check] INTERRUPTED: cycle `{}` is still `{}` ({}) — direct invocation did not reach response capture. If the owning pane is now idle but the document still reports busy, reconcile it without killing the pane via `agent-doc session status {}` (or `agent-doc session clear {}`). Otherwise retry from outside the managed pane, restart the owner with `agent-doc start {}`, or abandon the stale cycle only after confirming no response exists.{}",
             state.cycle_id,
-            phase_name(state.phase),
+            state.phase.as_str(),
             state.last_event,
             state.file,
             state.file,
@@ -590,7 +580,7 @@ pub(crate) fn open_cycle_message(
     Ok(format!(
         "[session-check] INTERRUPTED: cycle `{}` is still `{}` ({}) — {}.{}",
         state.cycle_id,
-        phase_name(state.phase),
+        state.phase.as_str(),
         state.last_event,
         detail,
         ipc_hint
@@ -610,7 +600,7 @@ pub(crate) fn open_cycle_manual_patchback_message(
     Ok(Some(format!(
         "[session-check] INTERRUPTED: cycle `{}` is still `{}` ({}) — found visible response patchback {} that is still outside the commit boundary. This looks like a manual repair that stopped before commit; finish it with `agent-doc write --commit {}` if you still have the response body, or commit the repaired document manually once the response is correct.",
         state.cycle_id,
-        phase_name(state.phase),
+        state.phase.as_str(),
         state.last_event,
         marker,
         file.display()

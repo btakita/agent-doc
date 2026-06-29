@@ -514,7 +514,7 @@ fn ensure_cycle_committed(file: &Path) -> Result<()> {
         anyhow::bail!(
             "finalize left cycle `{}` open at `{}` ({})",
             state.cycle_id,
-            cycle_phase_name(state.phase),
+            state.phase.as_str(),
             state.last_event
         );
     }
@@ -543,7 +543,7 @@ pub(crate) fn record_terminal_closeout_proof(file: &Path, did_commit: bool) -> R
             "terminal proof cannot record closeout for {}: cycle `{}` is `{}`",
             file.display(),
             state.cycle_id,
-            cycle_phase_name(state.phase)
+            state.phase.as_str()
         );
     }
     let file_content = std::fs::read_to_string(&canonical)
@@ -579,7 +579,7 @@ pub(crate) fn record_terminal_closeout_proof(file: &Path, did_commit: bool) -> R
     let content_hash = crate::ops_log::content_hash(&format!(
         "cycle_id={}\nphase={}\nlast_event={}\nfile_hash={}\nsnapshot_hash={}\nhead_hash={}\ndid_commit={}\nstate_file_hash_matches={}\nstate_snapshot_hash_matches={}\nagreement={}\n",
         state.cycle_id,
-        cycle_phase_name(state.phase),
+        state.phase.as_str(),
         state.last_event,
         file_hash,
         snapshot_hash,
@@ -599,7 +599,7 @@ pub(crate) fn record_terminal_closeout_proof(file: &Path, did_commit: bool) -> R
             proof_kind: crate::flow::proof_ledger::ProofEvidenceKind::TerminalStateObserved,
             proof: format!(
                 "phase={} last_event={} did_commit={} file_hash={} snapshot_hash={} head_hash={} state_file_hash_matches={} state_snapshot_hash_matches={} capture_id={} response_sha256={} session_check=ok actor_closeout=persisted agreement={}",
-                cycle_phase_name(state.phase),
+                state.phase.as_str(),
                 state.last_event,
                 did_commit,
                 file_hash,
@@ -633,16 +633,6 @@ fn now_millis() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
         .unwrap_or(0)
-}
-
-pub fn cycle_phase_name(phase: agent_doc_turn::CyclePhase) -> &'static str {
-    match phase {
-        agent_doc_turn::CyclePhase::PreflightStarted => "preflight_started",
-        agent_doc_turn::CyclePhase::ResponseCaptured => "response_captured",
-        agent_doc_turn::CyclePhase::WriteApplied => "write_applied",
-        agent_doc_turn::CyclePhase::Committed => "committed",
-        agent_doc_turn::CyclePhase::Abandoned => "abandoned",
-    }
 }
 
 /// Typed closeout recovery state (`#closeout-repair-churn`). Collapses the
@@ -776,7 +766,7 @@ fn open_cycle_recovery_command(file: &Path) -> String {
             "finish the response, then `agent-doc finalize {f}` (or `agent-doc write --commit {f}` to absorb an already-visible response)"
         );
     };
-    let phase = cycle_phase_name(state.phase);
+    let phase = state.phase.as_str();
     let baseline_arg = state
         .baseline_file
         .as_deref()
@@ -1842,14 +1832,6 @@ mod tests {
         assert_eq!(
             event.reason.as_deref(),
             Some("review_done_source_not_reviewed")
-        );
-    }
-
-    #[test]
-    fn cycle_phase_name_matches_persisted_phase_strings() {
-        assert_eq!(
-            cycle_phase_name(agent_doc_turn::CyclePhase::ResponseCaptured),
-            "response_captured"
         );
     }
 

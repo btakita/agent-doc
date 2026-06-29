@@ -3019,6 +3019,11 @@ fn test_agent_doc_turn_cycle_phase_has_no_cycle_state_facade() {
             .contains("use agent_doc_turn::{CycleEvent, CyclePhase, CyclePhaseMachine};"),
         "cycle_state should import the focused turn lifecycle model privately"
     );
+    let turn_source = fs::read_to_string(manifest_dir.join("agent-doc-turn/src/lib.rs")).unwrap();
+    assert!(
+        turn_source.contains("pub const fn as_str(self) -> &'static str"),
+        "agent-doc-turn must own canonical cycle phase labels"
+    );
 
     fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
         for entry in fs::read_dir(dir).unwrap() {
@@ -3044,10 +3049,12 @@ fn test_agent_doc_turn_cycle_phase_has_no_cycle_state_facade() {
             "cycle_state::CyclePhase",
             "agent_doc_orchestration::cycle_state::CyclePhase",
             "use crate::cycle_state::CyclePhase",
+            "fn cycle_phase_name(",
+            "fn phase_name(phase: agent_doc_turn::CyclePhase)",
         ] {
             assert!(
                 !source.contains(forbidden_snippet),
-                "{relative} must call agent_doc_turn::CyclePhase directly, not the cycle_state facade: {forbidden_snippet}"
+                "{relative} must call agent_doc_turn::CyclePhase directly, not re-own turn lifecycle phase policy: {forbidden_snippet}"
             );
         }
     }

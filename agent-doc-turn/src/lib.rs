@@ -24,6 +24,18 @@ pub enum CyclePhase {
     Abandoned,
 }
 
+impl CyclePhase {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::PreflightStarted => "preflight_started",
+            Self::ResponseCaptured => "response_captured",
+            Self::WriteApplied => "write_applied",
+            Self::Committed => "committed",
+            Self::Abandoned => "abandoned",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CycleEvent {
     StartPreflight,
@@ -245,6 +257,15 @@ impl TurnLifecycleMachine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cycle_phase_labels_are_owned_by_turn_lifecycle() {
+        assert_eq!(CyclePhase::PreflightStarted.as_str(), "preflight_started");
+        assert_eq!(CyclePhase::ResponseCaptured.as_str(), "response_captured");
+        assert_eq!(CyclePhase::WriteApplied.as_str(), "write_applied");
+        assert_eq!(CyclePhase::Committed.as_str(), "committed");
+        assert_eq!(CyclePhase::Abandoned.as_str(), "abandoned");
+    }
 
     #[test]
     fn cycle_phase_machine_accepts_normal_closeout_order() {

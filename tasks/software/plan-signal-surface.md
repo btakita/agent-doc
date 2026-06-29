@@ -1,8 +1,8 @@
-# Plan: signal-surface
+# Plan: signal-space
 
 ## Thesis
 
-`signal-surface` is the shared surface layer for live signal graphs. It should
+`signal-space` is the shared surface layer for live signal graphs. It should
 render, inspect, edit, and route signals regardless of whether a node is
 deterministic, learned, or agentic.
 
@@ -11,7 +11,7 @@ The dependency direction should be strict:
 
 ```text
 lazily
-  -> signal-surface
+  -> signal-space
     -> agent-doc
     -> Signal Loops / Patchboard
     -> other apps
@@ -20,52 +20,89 @@ lazily
 Meaning:
 
 - `lazily-*` owns reactive computation, state, sync, and cell/signal runtime.
-- `signal-surface-*` owns graph/timeline/inspector view models and UI intents.
-- `agent-doc` consumes `signal-surface`; `signal-surface` does not depend on
+- `signal-space-*` owns graph/timeline/inspector view models and UI intents.
+- `agent-doc` consumes `signal-space`; `signal-space` does not depend on
   agent-doc.
 - Agent-doc-specific integration belongs in agent-doc, preferably as
-  `agent-doc-signal-surface`.
+  `agent-doc-signal-space`.
 - Agents are optional deliberative decision nodes, not the center of the model.
 
 ## Naming And Repository
 
-Recommended family name: `signal-surface`.
+Recommended family and repository prefix: `signal-space`.
 
-Recommended initial repository: `lazily-hub/signal-surface`.
+Recommended initial repositories:
+
+- `lazily-hub/signal-space-spec`
+- `lazily-hub/signal-space-rs`
+- `lazily-hub/signal-space-js`
+- `lazily-hub/signal-space-py`
+- `lazily-hub/signal-space-zig`
+- `lazily-hub/signal-space-kt`
 
 Do not create a new GitHub org yet. Start under the lazily public namespace so
 the relationship to `lazily-spec`, `lazily-rs`, `lazily-py`, and `lazily-js` is
 obvious. Create a separate `signal-loops` org later only if the product identity
 needs its own home for hosted app code, docs, examples, or commercial adapters.
 
-Initial repo shape:
+Initial repo responsibilities:
 
 ```text
-signal-surface/
-  spec/
-  crates/
-    signal-surface-rs/
-  packages/
-    signal-surface-js/
-    signal-surface-py/
-  bindings/
-    zig/
-    kt/
+signal-space-spec/
+  schemas/
+  fixtures/
+  conformance/
+  docs/
+
+signal-space-rs/
+  Cargo.toml
+  src/
+  tests/conformance/
+
+signal-space-js/
+  package.json
+  src/
   examples/
-    local-patchboard/
+    local-inspector/
+  tests/conformance/
+
+signal-space-py/
+  pyproject.toml
+  src/signal_space/
+  tests/conformance/
+
+signal-space-zig/
+  build.zig
+  src/
+  tests/conformance/
+
+signal-space-kt/
+  settings.gradle.kts
+  build.gradle.kts
+  src/
+  tests/conformance/
 ```
 
-Keep this as one repository until release cadence or versioning pressure proves
-that individual packages need separate repos.
+Keep the spec repo canonical. Implementation repos should pin a version of
+`signal-space-spec`, run the shared conformance fixtures, and publish through
+their native package managers. Split the repos from the start so each language
+binding can keep its own release cadence, tooling, issue tracker, and packaging
+metadata without forcing unrelated version bumps.
+
+Implementation repos should not start as monorepos. Each should start as one
+native library package at the repo root. Introduce an internal workspace only
+after the repo owns multiple publishable artifacts, such as a runtime package,
+CLI, WebAssembly package, code generator, or dedicated test harness.
 
 Language support should mirror lazily over time:
 
-- `signal-surface-rs` depends on `lazily-rs`
-- `signal-surface-js` depends on `lazily-js`
-- `signal-surface-py` depends on `lazily-py`
-- future Zig/Kotlin bindings depend on their matching lazily bindings
+- `signal-space-rs` depends on `lazily-rs`
+- `signal-space-js` depends on `lazily-js`
+- `signal-space-py` depends on `lazily-py`
+- `signal-space-zig` depends on `lazily-zig`
+- `signal-space-kt` depends on `lazily-kt`
 
-There should not be a separate `signal-surface-lazily` package unless a real
+There should not be a separate `signal-space-lazily` package unless a real
 modularity problem appears. The lazily dependency is the runtime contract for
 each implementation. The spec should still make the dependency explicit by
 describing which fields are writable cells, which fields are deterministic
@@ -73,7 +110,7 @@ derived projections, and how Snapshot/Delta mirroring is expected to work.
 
 ## Boundaries
 
-Extract from agent-doc into `signal-surface` only where the concept is generic:
+Extract from agent-doc into `signal-space` only where the concept is generic:
 
 - typed surface descriptors and validation
 - source-to-state projection primitives
@@ -88,7 +125,7 @@ Keep in agent-doc:
 
 - markdown document format
 - typed `agent:*` element parsing and markdown-specific validation
-- document-to-signal-surface projection for `agent:*` elements
+- document-to-signal-space projection for `agent:*` elements
 - read-only/advisory renderers for `agent:graph`, `agent:signals`,
   `agent:perceptron`, and `agent:schedule`
 - git-native audit trail
@@ -98,7 +135,7 @@ Keep in agent-doc:
 - markdown-specific merge and repair policy
 - agent-doc CLI and harness integration
 
-The rule: `signal-surface` may describe possible state changes as structured
+The rule: `signal-space` may describe possible state changes as structured
 intents. It must not bypass the owning system's authority boundary.
 
 ## Core Model
@@ -183,10 +220,10 @@ Use the HumanLayer 12-factor style as the agent contract:
 
 ## Agent-Doc Integration
 
-Agent-doc should own its signal-surface integration. Prefer the package name
-`agent-doc-signal-surface` if it becomes a distinct crate/package.
+Agent-doc should own its signal-space integration. Prefer the package name
+`agent-doc-signal-space` if it becomes a distinct crate/package.
 
-`agent-doc-signal-surface` should project typed markdown elements into the
+`agent-doc-signal-space` should project typed markdown elements into the
 shared graph model, while preserving agent-doc's authority boundary.
 
 Initial projections:
@@ -218,9 +255,10 @@ session-check boundary.
 ## Patchboard Integration
 
 Patchboard or Signal Loops should own product-specific integration against
-`signal-surface`. The `signal-surface` repo can keep fixtures and examples, but
-product-specific adapters should follow the same rule as agent-doc: apps depend
-on `signal-surface`; `signal-surface` does not depend on apps.
+`signal-space`. The `signal-space-spec` repo can keep fixtures and conformance
+examples, but product-specific adapters should follow the same rule as
+agent-doc: apps depend on `signal-space`; `signal-space` does not depend on
+apps.
 
 A patchboard integration should project realtime signal applications into the
 same graph/timeline/inspector model.
@@ -255,7 +293,8 @@ is a sandbox.
 
 ### Phase 0: Spec Skeleton
 
-Create a spec-first repository with schemas for:
+Create `signal-space-spec` as the canonical spec-first repository with schemas
+for:
 
 - `SignalGraph`
 - `SignalNode`
@@ -271,17 +310,19 @@ Acceptance:
 
 - JSON schemas exist
 - example graph fixtures exist for agent-doc and patchboard
+- conformance fixtures have stable names and documented version semantics
 - schemas distinguish observation, recommendation, and action
 - schemas distinguish writable cell state from deterministic derived
   projections
 
 ### Phase 1: Multi-Language Surface Contract
 
-Define the language-binding contract shared by Rust, JavaScript, Python, and
-future Zig/Kotlin implementations.
+Define the language-binding contract shared by Rust, JavaScript, Python, Zig,
+and Kotlin implementations in `signal-space-spec`.
 
 Acceptance:
 
+- each implementation repo declares the supported `signal-space-spec` version
 - each binding depends on the matching lazily binding
 - each binding serializes to the same spec fixtures
 - validation catches invalid ids, edges, schemas, and authority transitions
@@ -289,7 +330,7 @@ Acceptance:
 
 ### Phase 2: Rust Implementation
 
-Implement `signal-surface-rs` on top of `lazily-rs`.
+Create `signal-space-rs` and implement it on top of `lazily-rs`.
 
 Acceptance:
 
@@ -300,7 +341,7 @@ Acceptance:
 
 ### Phase 3: Agent-Doc Integration
 
-Implement `agent-doc-signal-surface` inside the agent-doc ownership boundary.
+Implement `agent-doc-signal-space` inside the agent-doc ownership boundary.
 
 Acceptance:
 
@@ -311,7 +352,8 @@ Acceptance:
 
 ### Phase 4: JavaScript Surface Package
 
-Implement `signal-surface-js` on top of `lazily-js` for browser/editor UIs.
+Create `signal-space-js` and implement it on top of `lazily-js` for
+browser/editor UIs.
 
 Acceptance:
 
@@ -319,7 +361,43 @@ Acceptance:
 - fixtures round-trip with the Rust model
 - a minimal web example can inspect an agent-doc graph
 
-### Phase 5: Patchboard MVP Adapter
+### Phase 5: Python Surface Package
+
+Create `signal-space-py` and implement it on top of `lazily-py`.
+
+Acceptance:
+
+- core graph, timeline, inspector, intent, and authority types are available in
+  Python
+- fixtures round-trip with `signal-space-spec` conformance data
+- validation catches invalid ids, edges, schemas, and authority transitions
+- package metadata and typing policy are documented before publishing
+
+### Phase 6: Zig Surface Package
+
+Create `signal-space-zig` and implement it on top of `lazily-zig`.
+
+Acceptance:
+
+- core graph, node, edge, event, intent, and authority types are available in
+  Zig
+- fixtures round-trip with `signal-space-spec` conformance data
+- validation catches invalid ids, edges, schemas, and authority transitions
+- writable cell state remains separate from deterministic derived projections
+
+### Phase 7: Kotlin Surface Package
+
+Create `signal-space-kt` and implement it on top of `lazily-kt`.
+
+Acceptance:
+
+- core graph, timeline, inspector, intent, and authority types are available in
+  Kotlin
+- fixtures round-trip with `signal-space-spec` conformance data
+- validation catches invalid ids, edges, schemas, and authority transitions
+- JVM or multiplatform packaging is documented before publishing
+
+### Phase 8: Patchboard MVP Adapter
 
 Build the first realtime patchboard adapter against the same surface schema.
 
@@ -330,30 +408,39 @@ Acceptance:
 - one agent node can be triggered by a gated signal packet
 - labels and overrides appear on the timeline
 
-### Phase 6: Productization Split
+### Phase 9: Productization Split
 
 Only after the shared surface model is stable, decide whether Signal Loops needs
 its own repo or org.
 
 Acceptance:
 
-- library and product release cadences diverge enough to justify a split
-- public docs can explain lazily vs signal-surface vs Signal Loops cleanly
+- product identity or hosted app cadence diverges enough to justify a separate
+  Signal Loops repo or org
+- public docs can explain lazily vs signal-space vs Signal Loops cleanly
 - adapter APIs are stable enough for external examples
 
 ## Near-Term Backlog
 
-1. Create `lazily-hub/signal-surface` with `spec/` fixtures and README.
-2. Draft `spec/signal-surface.schema.json` and two example fixtures:
+1. Create `lazily-hub/signal-space-spec` with schemas, fixtures, conformance
+   docs, and README.
+2. Draft `schemas/signal-space.schema.json` and two example fixtures:
    `agent_doc_supervisor.json` and `patchboard_attention_router.json`.
 3. Add a design note documenting authority boundaries and advisory intents.
-4. Implement `signal-surface-rs` structs and schema validation on top of
-   `lazily-rs`.
-5. Add an agent-doc-owned projection spike, `agent-doc-signal-surface`, that
+4. Create `lazily-hub/signal-space-rs` and implement structs plus schema
+   validation on top of `lazily-rs`.
+5. Add an agent-doc-owned projection spike, `agent-doc-signal-space`, that
    reads `agent:graph`, `agent:signals`, `agent:perceptron`, and
    `agent:schedule`.
-6. Add a small JS inspector prototype using fixture data only.
-7. Decide whether the patchboard MVP should start as browser-first or Rust-first
+6. Create `lazily-hub/signal-space-js` with a small inspector prototype using
+   fixture data only.
+7. Create `lazily-hub/signal-space-py` with core types and conformance fixture
+   round-trips on top of `lazily-py`.
+8. Create `lazily-hub/signal-space-zig` with core types and conformance fixture
+   round-trips on top of `lazily-zig`.
+9. Create `lazily-hub/signal-space-kt` with core types and conformance fixture
+   round-trips on top of `lazily-kt`.
+10. Decide whether the patchboard MVP should start as browser-first or Rust-first
    after the schema spike.
 
 ## Open Questions
@@ -362,12 +449,25 @@ Acceptance:
   `PatchGraph`?
 - Should `agent:perceptron` project as a generic deterministic decision node or
   keep a dedicated perceptron node type?
-- How much editor state belongs in `signal-surface` versus an editor-specific
+- How much editor state belongs in `signal-space` versus an editor-specific
   adapter?
-- Should agent-doc name its integration `agent-doc-signal-surface`,
-  `agent_doc_signal_surface`, or keep it as an internal module until publishing?
+- Should agent-doc name its integration `agent-doc-signal-space`,
+  `agent_doc_signal_space`, or keep it as an internal module until publishing?
 - Should model artifacts live behind a generic `DecisionArtifact` contract from
   day one, or wait until the first patchboard MVP?
 - Should small-agent and large-agent nodes share one `AgentDecision` envelope
   with a `model_tier` field, or remain separate modes?
 - What is the minimum approval model for non-agent-doc patchboard effects?
+
+<!-- agent:exchange -->
+### Re: repo layout — gpt-5
+
+No. The signal-space implementation repos should not start with a monorepo shape.
+
+The intended shape is separate repos plus native single-package roots: `signal-space-rs` as one Cargo crate at the root, `signal-space-js` as one npm package at the root, `signal-space-py` as one Python package, `signal-space-zig` as one Zig package, and `signal-space-kt` as one Kotlin package. The canonical shared repo is `signal-space-spec`, which owns schemas, fixtures, conformance data, and docs.
+
+The reason is release/tooling separation without unnecessary internal nesting. Each language binding has different package metadata, CI, publishing, and version pressure, so separate repos make sense. But a monorepo-style `crates/` or `packages/` layout inside each implementation repo adds indirection before there are multiple artifacts to coordinate. The plan now says to introduce an internal workspace only after a repo owns multiple publishable artifacts, such as a runtime package, CLI, WebAssembly package, code generator, or dedicated test harness.
+
+I updated the plan accordingly and also made `signal-space-py`, `signal-space-zig`, and `signal-space-kt` explicit implementation phases with conformance fixture requirements.
+<!-- agent:boundary:0c2b295b -->
+<!-- /agent:exchange -->

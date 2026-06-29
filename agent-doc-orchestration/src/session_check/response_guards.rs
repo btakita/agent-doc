@@ -240,55 +240,6 @@ pub(crate) fn assistant_response_text(exchange_body: &str) -> String {
     out
 }
 
-/// True when a queue prompt's text is a recognized directive / id-bearing prompt
-/// (a legitimate queue entry shape) rather than free-text prose.
-pub(crate) fn is_queue_directive_prompt(text: &str) -> bool {
-    let t = text.trim();
-    let lower = t.to_ascii_lowercase();
-    lower.starts_with("do ")
-        || lower.starts_with("preset ")
-        || lower.starts_with("dispatch ")
-        || lower.starts_with("run ")
-        || t.starts_with('#')
-        || t.contains("[#")
-}
-
-/// True when a queue prompt references a slash command (e.g. `/agent-doc`,
-/// `/clear`, `/compact`, `/loop`) at a token boundary.
-///
-/// `#queue-contamination-guard-false-positive`: such a prompt is a
-/// user-authored instruction, not assistant answer prose copied into the queue.
-/// The contamination guard targets declarative answer prose ("Yes. I drove
-/// ..."), which never leads with slash-command instructions, so a legit user
-/// prompt that mentions `/agent-doc`/`/clear` must not be flagged just because
-/// it shares a verbatim 40-char run with a response that discussed the same
-/// commands. (A leading `/` is also a unix-path shape, which is likewise user
-/// content, not copied answer prose — so this skip stays conservative.)
-pub(crate) fn mentions_slash_command(text: &str) -> bool {
-    let bytes = text.as_bytes();
-    for (i, &b) in bytes.iter().enumerate() {
-        if b != b'/' {
-            continue;
-        }
-        // The slash must begin a token (start of string or after a non-word char)
-        // so `src/agent-doc` (a path segment after a word char) is not matched.
-        let at_token_start = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
-        if !at_token_start {
-            continue;
-        }
-        // Require at least two command-name chars after the slash so a bare
-        // separator `/` is not treated as a command reference.
-        let cmd_len = text[i + 1..]
-            .chars()
-            .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
-            .count();
-        if cmd_len >= 2 && text[i + 1..].starts_with(|c: char| c.is_ascii_alphabetic()) {
-            return true;
-        }
-    }
-    false
-}
-
 /// `#jb-run-agent-doc-response-queue-contamination`: `Run Agent Doc` / queue
 /// synthesis must never enqueue assistant response prose. The live repro added
 /// `- Yes. I drove the already-authenticated Google Ads browser session ...`
@@ -321,13 +272,13 @@ pub(crate) fn check_queue_response_contamination_guard(
     let mut contaminated: Vec<String> = Vec::new();
     for prompt in agent_doc_queue::document_queue::prompts(&entries) {
         let text = prompt.text.trim();
-        if text.is_empty() || is_queue_directive_prompt(text) {
+        if text.is_empty() || agent_doc_queue::queue_command::is_queue_directive_prompt(text) {
             continue;
         }
         // #queue-contamination-guard-false-positive: a queue prompt that
         // references a slash command (/agent-doc, /clear, /compact, ...) is a
         // user instruction, not copied answer prose — skip it.
-        if mentions_slash_command(text) {
+        if agent_doc_queue::queue_command::mentions_slash_command_reference(text) {
             continue;
         }
         // Only treat substantial prose as a contamination candidate; short

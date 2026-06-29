@@ -1331,8 +1331,8 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // (`..._skips_user_prompt_mentioning_slash_command` and
         // `..._still_flags_prose_without_slash_command`) for the slash-command
         // skip that stops the contamination guard from flagging legit user
-        // prompts that mention `/agent-doc`/`/clear`. The skip itself
-        // (`mentions_slash_command`) carries no `guard_` substring.
+        // prompts that mention `/agent-doc`/`/clear`. The skip itself now lives
+        // in `agent_doc_queue::queue_command` and carries no `guard_` substring.
         // +1 (#partial-staging-guard-cross-doc-noise): the
         // `partial_staging_closeout_guard_ignores_cross_document_markdown_noise`
         // regression test-fn name (substring `guard_`). The fix itself drops `md`
@@ -2353,6 +2353,45 @@ fn test_agent_doc_queue_owns_do_directive_target_parsing() {
         assert!(
             !source.contains("crate::session_check::do_directive_target_ids"),
             "{relative} must not route queue directive parsing through session_check"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_queue_owns_queue_command_classification() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let queue_command =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_command.rs")).unwrap();
+    for required in [
+        "pub fn is_queue_directive_prompt",
+        "pub fn mentions_slash_command_reference",
+    ] {
+        assert!(
+            queue_command.contains(required),
+            "agent-doc-queue must own queue command/prompt classification: {required}"
+        );
+    }
+
+    let response_guards = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/response_guards.rs"),
+    )
+    .unwrap();
+    for forbidden in [
+        "pub(crate) fn is_queue_directive_prompt",
+        "pub(crate) fn mentions_slash_command",
+    ] {
+        assert!(
+            !response_guards.contains(forbidden),
+            "response_guards must not re-own queue command/prompt classification: {forbidden}"
+        );
+    }
+    for required in [
+        "agent_doc_queue::queue_command::is_queue_directive_prompt",
+        "agent_doc_queue::queue_command::mentions_slash_command_reference",
+    ] {
+        assert!(
+            response_guards.contains(required),
+            "response_guards should call focused queue command classification directly: {required}"
         );
     }
 }

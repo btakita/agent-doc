@@ -85,7 +85,11 @@ pub(crate) fn malformed_tracked_item_refs_in(
         })
         .filter(|(_, item)| {
             completed_by_response
-                .map(|response| response_clearly_completes_pending_id(response, &item.id))
+                .map(|response| {
+                    agent_doc_turn::closeout_signal::response_clearly_completes_pending_id(
+                        response, &item.id,
+                    )
+                })
                 .unwrap_or(true)
         })
         .map(|(name, item)| format!("{} {}", name, item.reference()))

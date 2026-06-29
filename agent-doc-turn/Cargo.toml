@@ -10,6 +10,7 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_turn"
 
 [dependencies]
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.65" }
 lazily = "0.13.1"
 serde = { version = "1", features = ["derive"] }
 

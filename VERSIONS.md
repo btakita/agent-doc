@@ -38,6 +38,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Id-backed queue directive parsing moved to `agent-doc-queue`.** `do #id` / `do [#id]` / optional bare leading `#id` target extraction now lives in `agent-doc-queue::queue_directive`, backed by ordered tracked-work `#id` scanning in `agent-doc-element-backlog`. Session-check, preflight, and controller callers import the focused queue API directly instead of routing through `session_check`. Added focused parser coverage and a boundary guard so the directive parser does not return to orchestration.
 
+- **Closeout response and done-signal parsing moved to `agent-doc-turn`.** `agent_doc_turn::closeout_signal` now owns response-heading completion detection plus explicit/plain done-signal parsing, reusing the tracked-work id scanner from `agent-doc-element-backlog`. Session-check keeps only file/cycle adapters and calls the focused turn API directly, with boundary coverage preventing the old orchestration-owned parser from returning.
+
 ## 0.34.64
 
 - **`#suprestassoc` — `restart-supervisor` registry re-association is scoped to the requested document, not just the reused session id.** The CLI restart path now resolves registry entries by exact canonical document path first and only keeps the legacy session-id fallback for fileless registry rows; registry keys that explicitly name another document are rejected, so restarting `sampleportal.md` cannot adopt a stale `agent-doc-bugs2.md` pane/session projection that happens to carry the same session id. Coverage: deterministic registry lookup regressions for rejecting a foreign same-session entry and preferring the exact target document entry. Live editor/pane confirmation remains an `[operator-verify]` follow-up.

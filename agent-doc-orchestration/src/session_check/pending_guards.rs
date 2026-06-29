@@ -376,7 +376,12 @@ pub fn detect_missing_pending_done_ids(
     Ok(open_ids
         .into_iter()
         .filter(|id| !kept_open.contains(id))
-        .filter(|id| response_clearly_completes_pending_id(response_text, id))
+        .filter(|id| {
+            agent_doc_turn::closeout_signal::response_clearly_completes_pending_id(
+                response_text,
+                id,
+            )
+        })
         .filter(|id| !recorded_done.contains(id))
         .collect())
 }

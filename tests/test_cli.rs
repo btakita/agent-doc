@@ -2331,9 +2331,11 @@ fn test_agent_doc_queue_owns_do_directive_target_parsing() {
             "session_check must not re-own queue directive parsing: {forbidden}"
         );
     }
+    let closeout_signal =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn/src/closeout_signal.rs")).unwrap();
     assert!(
-        done_signals.contains("agent_doc_element_backlog::backlog::extract_pending_hash_ids"),
-        "done signal parsing should reuse the focused tracked-work #id scanner"
+        closeout_signal.contains("agent_doc_element_backlog::backlog::extract_pending_hash_ids"),
+        "done signal parsing should reuse the focused tracked-work #id scanner from agent-doc-turn"
     );
 
     for relative in [
@@ -2351,6 +2353,81 @@ fn test_agent_doc_queue_owns_do_directive_target_parsing() {
         assert!(
             !source.contains("crate::session_check::do_directive_target_ids"),
             "{relative} must not route queue directive parsing through session_check"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_turn_owns_closeout_signal_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    assert!(
+        manifest_dir
+            .join("agent-doc-turn/src/closeout_signal.rs")
+            .exists(),
+        "closeout response and done-signal policy should live in the focused turn crate"
+    );
+
+    let turn_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn/src/closeout_signal.rs")).unwrap();
+    for required in [
+        "pub fn response_clearly_completes_pending_id",
+        "pub fn response_heading_resolves_to_pending_id",
+        "pub fn explicit_done_signal_ids",
+        "pub fn plain_done_signal",
+    ] {
+        assert!(
+            turn_source.contains(required),
+            "agent-doc-turn must own closeout signal policy: {required}"
+        );
+    }
+    assert!(
+        turn_source.contains("agent_doc_element_backlog::backlog::extract_pending_hash_ids"),
+        "closeout signal policy should reuse tracked-work #id scanning"
+    );
+
+    let done_signals = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/done_signals.rs"),
+    )
+    .unwrap();
+    for forbidden in [
+        "pub(crate) fn response_clearly_completes_pending_id",
+        "pub(crate) fn response_heading_resolves_to_pending_id",
+        "pub(crate) fn explicit_done_signal_ids",
+        "pub(crate) fn plain_done_signal",
+        "pub(crate) fn normalize_done_signal_text",
+        "fn leading_hash_id",
+        "fn extract_bracket_ids",
+        "fn contains_completion_marker",
+        "agent_doc_element_backlog::backlog::extract_pending_hash_ids",
+    ] {
+        assert!(
+            !done_signals.contains(forbidden),
+            "session_check must not re-own closeout signal policy: {forbidden}"
+        );
+    }
+    for required in [
+        "agent_doc_turn::closeout_signal::explicit_done_signal_ids",
+        "agent_doc_turn::closeout_signal::plain_done_signal",
+    ] {
+        assert!(
+            done_signals.contains(required),
+            "done_signals should call focused closeout signal policy directly: {required}"
+        );
+    }
+
+    for relative in [
+        "agent-doc-orchestration/src/session_check/backlog_guards.rs",
+        "agent-doc-orchestration/src/session_check/pending_guards.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source
+                .contains("agent_doc_turn::closeout_signal::response_clearly_completes_pending_id"),
+            "{relative} should call focused closeout signal policy directly"
+        );
+        assert!(
+            !source.contains("session_check::response_clearly_completes_pending_id"),
+            "{relative} must not route closeout signal policy through session_check"
         );
     }
 }

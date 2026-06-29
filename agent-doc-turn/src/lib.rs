@@ -6,6 +6,7 @@
 use lazily::{ThreadSafeContext, ThreadSafeStateMachine};
 use serde::{Deserialize, Serialize};
 
+pub mod closeout_signal;
 pub mod drain_stall;
 pub mod heuristics;
 pub mod op_log;

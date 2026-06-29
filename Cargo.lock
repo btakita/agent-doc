@@ -23,6 +23,7 @@ dependencies = [
 name = "agent-doc"
 version = "0.34.65"
 dependencies = [
+ "agent-doc-controller",
  "agent-doc-debounce",
  "agent-doc-diff",
  "agent-doc-document-realtime",

@@ -2608,6 +2608,82 @@ fn test_agent_doc_debounce_is_sidecar_boundary() {
 }
 
 #[test]
+fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-controller")),
+        "agent-doc-controller must stay a first-class workspace crate"
+    );
+    let root_dependencies = workspace["dependencies"].as_table().unwrap();
+    assert!(
+        root_dependencies.contains_key("agent-doc-controller"),
+        "the CLI shell should call focused controller dispatch helpers directly"
+    );
+
+    let rpc_source = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/project_controller/rpc.rs"),
+    )
+    .unwrap();
+    for forbidden_snippet in [
+        "pub use agent_doc_controller::dispatch",
+        "pub fn dispatch_error_stale_generation_redirect_target",
+        "pub fn dispatch_error_supervisor_restart_redirect",
+        "pub(crate) fn dispatch_command_kind_is_operator_reopen",
+        "pub(crate) fn pause_reason_is_stale_supervisor_churn_stop",
+        "pub(crate) fn stale_supervisor_pid_from_pause_reason",
+        "pub(crate) fn spent_preset_id_from_pause_reason",
+    ] {
+        assert!(
+            !rpc_source.contains(forbidden_snippet),
+            "project_controller::rpc must not re-export or wrap pure controller dispatch helpers: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        rpc_source.contains("use agent_doc_controller::dispatch::{"),
+        "project_controller::rpc should import focused controller dispatch helpers privately"
+    );
+
+    let authoritative_actor = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/route/authoritative_actor.rs"),
+    )
+    .unwrap();
+    assert!(
+        authoritative_actor.contains("agent_doc_controller::dispatch::dispatch_error_is_coalesced"),
+        "route authorization should call the focused controller dispatch classifier directly"
+    );
+    let sim_world = fs::read_to_string(manifest_dir.join("src/sim_world/engine.rs")).unwrap();
+    assert!(
+        sim_world.contains("agent_doc_controller::dispatch::dispatch_should_coalesce_in_flight"),
+        "SimWorld should share the focused controller dispatch classifier directly"
+    );
+
+    let controller_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&controller_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-controller must stay free of core, orchestration, git, editor IPC, sqlite, or tmux crates"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     assert!(

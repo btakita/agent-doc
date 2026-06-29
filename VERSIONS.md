@@ -14,6 +14,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Log timestamp helpers no longer route through `ops_log`.** Orchestration log writers and readers call `agent_doc_log_time::{format_log_timestamp, parse_log_timestamp}` directly, while `ops_log` keeps only operation-log persistence/content concerns. Added a boundary guard so the timestamp facade does not return.
 
+- **Controller dispatch helpers no longer route through `project_controller::rpc` facades.** The RPC adapter imports `agent_doc_controller::dispatch` privately, and route authorization calls the focused coalesced-dispatch classifier directly. Added a boundary guard so pure dispatch admission helpers stay owned by `agent-doc-controller`.
+
 ## 0.34.64
 
 - **`#suprestassoc` — `restart-supervisor` registry re-association is scoped to the requested document, not just the reused session id.** The CLI restart path now resolves registry entries by exact canonical document path first and only keeps the legacy session-id fallback for fileless registry rows; registry keys that explicitly name another document are rejected, so restarting `sampleportal.md` cannot adopt a stale `agent-doc-bugs2.md` pane/session projection that happens to carry the same session id. Coverage: deterministic registry lookup regressions for rejecting a foreign same-session entry and preferring the exact target document entry. Live editor/pane confirmation remains an `[operator-verify]` follow-up.

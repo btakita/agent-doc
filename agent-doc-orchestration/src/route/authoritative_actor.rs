@@ -461,7 +461,9 @@ pub(crate) fn authorize_controller_dispatch(
     };
     match crate::project_controller::authorize_dispatch(&base_dir, dispatch_request()) {
         Ok(_authorization) => Ok(RouteDispatchAuthorization::Authorized),
-        Err(err) if crate::project_controller::dispatch_error_is_coalesced(&err.to_string()) => {
+        Err(err)
+            if agent_doc_controller::dispatch::dispatch_error_is_coalesced(&err.to_string()) =>
+        {
             Ok(RouteDispatchAuthorization::CoalescedDeduped {
                 detail: err.to_string(),
             })
@@ -546,7 +548,9 @@ fn recover_dispatch_via_supervisor_restart(
     );
     match crate::project_controller::authorize_dispatch(base_dir, dispatch_request()) {
         Ok(_authorization) => Ok(RouteDispatchAuthorization::Authorized),
-        Err(err) if crate::project_controller::dispatch_error_is_coalesced(&err.to_string()) => {
+        Err(err)
+            if agent_doc_controller::dispatch::dispatch_error_is_coalesced(&err.to_string()) =>
+        {
             Ok(RouteDispatchAuthorization::CoalescedDeduped {
                 detail: err.to_string(),
             })

@@ -1,6 +1,14 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use agent_doc_controller::dispatch::{
+    DISPATCH_COALESCED_IN_FLIGHT_MARKER, DISPATCH_STALE_GENERATION_REDIRECT_MARKER,
+    DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER, STALE_QUEUE_PAUSE_INVARIANT_ID,
+    STALE_QUEUE_PAUSE_NEXT_ACTION, dispatch_command_kind_is_operator_reopen,
+    dispatch_error_stale_generation_redirect_target, dispatch_should_coalesce_in_flight,
+    pause_reason_is_stale_supervisor_churn_stop, spent_preset_id_from_pause_reason,
+    stale_queue_pause_pid_from_dispatch_error, stale_supervisor_pid_from_pause_reason,
+};
 
 pub(crate) fn connect(project_root: &Path) -> Result<interprocess::local_socket::Stream> {
     connect_path(&socket_path(project_root))
@@ -329,68 +337,8 @@ pub fn authoritative_actor_binding(
     }
 }
 
-/// `#qflood` — decide whether an incoming controller `dispatch` should be
-/// COALESCED (suppressed as a redundant re-fire) rather than admitted again.
-///
-/// The flood the operator hit is an AUTO dispatch path (route auto-start on a
-/// file-change save, idle-queue continuation, `/loop`) re-firing the SAME head
-/// into a pane whose previous dispatch for this cycle is still in flight — not yet
-/// consumed/proven — so the routed trigger piles up in the harness composer while
-/// the agent is mid-turn. Coalesce exactly that case: an in-flight same-cycle
-/// dispatch that is NOT operator-driven.
-///
-/// An OPERATOR dispatch (explicit JB `Run Agent Doc`) always passes — honoring
-/// explicit intent over auto-drain backpressure, per the operator directive "type
-/// while the queue continues — it should not stop, and it should not flood." And a
-/// dispatch once the prior one is consumed (no longer in flight), or for a new
-/// cycle, is not "in flight" so it passes too. This is backpressure, never a queue
-/// stop: it suppresses only the redundant auto re-fire and leaves the queue
-/// draining.
-///
-/// Pure decision so the deterministic SimWorld flood repro and the live dispatch
-/// path classify the coalesce condition identically.
-pub use agent_doc_controller::dispatch::dispatch_should_coalesce_in_flight;
-
-/// Stable machine marker embedded in the `handle_dispatch` coalesce bail so callers
-/// across the IPC boundary (where the controller error is only a string) can
-/// recognise a benign in-flight dedup and report deduped-success instead of an
-/// exit-1 failure. The marker survives `request_controller`'s `project controller
-/// command \`dispatch\` failed: …` wrapping and the test/`test-support` direct path.
-pub use agent_doc_controller::dispatch::DISPATCH_COALESCED_IN_FLIGHT_MARKER;
-
-/// `#qflood2`: classify whether a failed dispatch is the benign in-flight coalesce.
-/// A coalesce means an identical dispatch for this cycle is already in flight, so the
-/// requested work is happening — the caller should skip a redundant re-send (never
-/// reintroduce the flood) yet report success rather than surfacing exit-1.
-pub use agent_doc_controller::dispatch::dispatch_error_is_coalesced;
-
-/// `#anw0` (#supkill-bg part 3): stable machine marker embedded in the
-/// `handle_dispatch` stale-generation bail when the current generation is itself
-/// dispatchable. A racing dispatcher holding a superseded generation handle (the
-/// loser of a recycle/restart supersede race) can then self-heal by retrying
-/// against the current generation instead of failing closed with a terminal
-/// `generation N is closed` reject. The marker survives `request_controller`'s
-/// `project controller command \`dispatch\` failed: …` IPC wrapping, exactly like
-/// the #qflood coalesce marker.
-pub use agent_doc_controller::dispatch::DISPATCH_STALE_GENERATION_REDIRECT_MARKER;
-
-/// `#jbrestale`: marker a `queue_paused` dispatch bail carries when the pause was
-/// caused by a STALE supervisor re-injecting an already-answered/operator-verify head
-/// (a churn-stop). The route dispatch path (`authorize_controller_dispatch`) recognizes
-/// it, restarts the stale supervisor once, lifts the stale-injected pause, and
-/// re-dispatches a single time instead of failing closed and forcing manual recovery.
-/// Like the stale-generation marker it survives `request_controller`'s
-/// `project controller command \`dispatch\` failed: …` IPC wrapping. The bail still
-/// carries the human reason + manual hint, so a `reexec_failed` fallback stays
-/// actionable without pointing routine stale-binary refresh at a destructive force
-/// path.
-pub use agent_doc_controller::dispatch::{
-    DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER, STALE_QUEUE_PAUSE_INVARIANT_ID,
-    STALE_QUEUE_PAUSE_NEXT_ACTION,
-};
-
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StaleQueuePauseRecovery {
+pub(crate) struct StaleQueuePauseRecovery {
     pub stale_pid: u32,
     pub outcome: crate::flow::outcome::BinaryOutcome,
 }
@@ -425,34 +373,10 @@ impl StaleQueuePauseRecovery {
 /// Returns `None` for every other failure so a deliberate operator pause, a
 /// spent-preset pause, or a genuinely-wedged queue stays terminal and never triggers a
 /// restart. Pure and UTF-8 safe.
-pub fn dispatch_error_stale_queue_pause_recovery(message: &str) -> Option<StaleQueuePauseRecovery> {
-    agent_doc_controller::dispatch::stale_queue_pause_pid_from_dispatch_error(message)
-        .map(StaleQueuePauseRecovery::new)
-}
-
-pub fn dispatch_error_supervisor_restart_redirect(message: &str) -> Option<u32> {
-    dispatch_error_stale_queue_pause_recovery(message).map(|recovery| recovery.stale_pid)
-}
-
-/// `#qpauserun`: whether a dispatch `command_kind` represents an EXPLICIT
-/// operator-initiated route reopen (JB `Run Agent Doc` → `managed_reopen` /
-/// `dispatch_only_reopen`), as opposed to unattended auto-dispatch
-/// (`idle_queue_continuation`, `/loop`). A `paused` queue control suppresses the
-/// unattended callers but must not block an explicit operator reopen — the pause
-/// governs auto-draining the queue, not whether the operator can start a cycle.
-/// Mirrors the `#qpausego` split (pause stops the unattended injector, not the
-/// attended action) on the controller dispatch RPC.
-pub(crate) fn dispatch_command_kind_is_operator_reopen(command_kind: &str) -> bool {
-    agent_doc_controller::dispatch::dispatch_command_kind_is_operator_reopen(command_kind)
-}
-
-/// `#anw0`: classify a failed dispatch as a stale-generation redirect and extract the
-/// current (N+1) generation to retry against. Returns `None` for every other failure —
-/// including a *terminal* stale_generation reject whose current actor is Closed/Blocked
-/// (a retry cannot help, so that bail carries no redirect marker) — so non-redirect
-/// failures stay terminal and never trigger a self-heal retry.
-pub fn dispatch_error_stale_generation_redirect_target(message: &str) -> Option<u64> {
-    agent_doc_controller::dispatch::dispatch_error_stale_generation_redirect_target(message)
+pub(crate) fn dispatch_error_stale_queue_pause_recovery(
+    message: &str,
+) -> Option<StaleQueuePauseRecovery> {
+    stale_queue_pause_pid_from_dispatch_error(message).map(StaleQueuePauseRecovery::new)
 }
 
 pub fn authorize_dispatch(
@@ -1533,44 +1457,6 @@ fn run_supervisor_auto_install_with_retry(
     Err(last_err.unwrap_or_else(|| {
         anyhow::anyhow!("auto-install exhausted retries with no recorded error")
     }))
-}
-
-/// `#jbrestale` — seam-isolated classifier (NOT yet wired into the dispatch bail).
-///
-/// Given a stored `queue_paused` pause `reason`, decide whether the pause was caused by a
-/// STALE supervisor re-injecting a head — a churn-stop that recycling the supervisor onto
-/// the freshly-installed binary would clear — as opposed to a deliberate operator pause
-/// (for example a spent prompt-preset pause) or a genuinely-wedged queue.
-///
-/// The dispatch path records whatever reason text was set when the pause was created. A
-/// stale-supervisor churn-stop carries one of the discriminators the churn detector /
-/// operator writes:
-///   - `supervisor_binary_stale`
-///   - `stale supervisor pid…`
-///   - an explicit `needs operator recycle` remedy on a `churn-stop`
-///   - `stale route-owned supervisor…`
-///
-/// When this returns true AND the live supervisor is actually stale (confirmed separately
-/// via [`process_binary_is_stale`] / [`current_binary_identity`]), the dispatch handler may
-/// branch to restart-supervisor + re-dispatch-once instead of failing closed. This is the
-/// pure, testable half of that decision; it must NOT trigger recovery on its own — a
-/// misleading reason string must not start a restart loop without the live staleness
-/// confirmation. Wiring into the dispatch bail is the clean-session remainder of `#jbrestale`.
-pub(crate) fn pause_reason_is_stale_supervisor_churn_stop(reason: &str) -> bool {
-    agent_doc_controller::dispatch::pause_reason_is_stale_supervisor_churn_stop(reason)
-}
-
-/// `#jbrestale` — best-effort extraction of the stale supervisor PID named in a churn-stop
-/// reason (for example `… re-injected by stale supervisor pid1368698 (pre-0.34.0) …`) for the
-/// `route_dispatch_recovery … stale_pid=<pid>` proof line. Returns `None` when no
-/// `pid<N>` / `pid <N>` token is present. Pure and UTF-8 safe (operates on the lowercased
-/// copy and slices only at ASCII boundaries via `split`).
-pub(crate) fn stale_supervisor_pid_from_pause_reason(reason: &str) -> Option<u32> {
-    agent_doc_controller::dispatch::stale_supervisor_pid_from_pause_reason(reason)
-}
-
-pub(crate) fn spent_preset_id_from_pause_reason(reason: &str) -> Option<String> {
-    agent_doc_controller::dispatch::spent_preset_id_from_pause_reason(reason)
 }
 
 fn active_queue_head_is_registered_preset(content: &str, preset_id: &str) -> Result<bool> {
@@ -5445,11 +5331,15 @@ mod tests {
             "project controller command `dispatch` failed: dispatch coalesced for x: a dispatch for generation 66 is already in flight (#qflood); {} receipt_id=3310",
             DISPATCH_COALESCED_IN_FLIGHT_MARKER
         );
-        assert!(dispatch_error_is_coalesced(&wrapped));
-        // A real failure (e.g. a paused queue) must NOT be swallowed as success.
-        assert!(!dispatch_error_is_coalesced(
-            "project controller command `dispatch` failed: dispatch blocked for x: failed_stage=queue_paused"
+        assert!(agent_doc_controller::dispatch::dispatch_error_is_coalesced(
+            &wrapped
         ));
+        // A real failure (e.g. a paused queue) must NOT be swallowed as success.
+        assert!(
+            !agent_doc_controller::dispatch::dispatch_error_is_coalesced(
+                "project controller command `dispatch` failed: dispatch blocked for x: failed_stage=queue_paused"
+            )
+        );
     }
     #[test]
     fn qflood_coalesces_busy_in_flight_redispatch_and_releases_on_ready() {
@@ -5514,11 +5404,13 @@ mod tests {
         // callers can recognise the benign dedup across the IPC boundary and report
         // deduped-success instead of an exit-1 failure.
         assert!(
-            dispatch_error_is_coalesced(&format!("{err:#}")),
+            agent_doc_controller::dispatch::dispatch_error_is_coalesced(&format!("{err:#}")),
             "a coalesce bail must be classifiable as deduped-success: {err:#}"
         );
         assert!(
-            !dispatch_error_is_coalesced("dispatch blocked for x: failed_stage=queue_paused"),
+            !agent_doc_controller::dispatch::dispatch_error_is_coalesced(
+                "dispatch blocked for x: failed_stage=queue_paused"
+            ),
             "an unrelated dispatch failure must NOT classify as a benign coalesce"
         );
         let coalesced: i64 = conn
@@ -5776,7 +5668,7 @@ mod tests {
     }
     #[test]
     fn pause_reason_stale_supervisor_churn_stop_classification() {
-        use super::pause_reason_is_stale_supervisor_churn_stop as c;
+        use agent_doc_controller::dispatch::pause_reason_is_stale_supervisor_churn_stop as c;
         // `#jbrestale` live-repro churn-stop reason → recoverable by recycle.
         assert!(c(
             "churn-stop: do[#c2b6] operator-verify head re-injected by stale supervisor pid1368698 (pre-0.34.0); needs operator recycle, not agent drain"
@@ -5803,7 +5695,7 @@ mod tests {
     }
     #[test]
     fn stale_supervisor_pid_extraction() {
-        use super::stale_supervisor_pid_from_pause_reason as p;
+        use agent_doc_controller::dispatch::stale_supervisor_pid_from_pause_reason as p;
         assert_eq!(
             p("re-injected by stale supervisor pid1368698 (pre-0.34.0)"),
             Some(1368698)
@@ -5822,7 +5714,7 @@ mod tests {
     #[test]
     fn dispatch_error_supervisor_restart_redirect_classification() {
         use super::dispatch_error_stale_queue_pause_recovery as recover;
-        use super::dispatch_error_supervisor_restart_redirect as r;
+        use agent_doc_controller::dispatch::stale_queue_pause_pid_from_dispatch_error as r;
         // `#jbrestale`: a queue_paused bail tagged with the restart-redirect marker is
         // recoverable; the named stale pid is extracted for the proof line.
         let tagged = "project controller command `dispatch` failed: dispatch blocked for x.md: failed_stage=queue_paused reason=churn-stop: stale supervisor pid1368698; needs operator recycle receipt_id=42 supervisor_restart_redirect stale_pid=1368698";
@@ -5836,7 +5728,7 @@ mod tests {
         assert_eq!(tagged_recovery.outcome.invariant_id, "stale_queue_pause");
         assert_eq!(
             tagged_recovery.outcome.proof_marker,
-            super::DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER
+            agent_doc_controller::dispatch::DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER
         );
         assert_eq!(
             tagged_recovery.outcome.next_action,

@@ -1991,7 +1991,7 @@ impl SimWorld {
                 && receipt.session_id == self.route.durable.session_id
                 && receipt.pane_id == pane_id
         });
-        if agent_doc_orchestration::project_controller::dispatch_should_coalesce_in_flight(
+        if agent_doc_controller::dispatch::dispatch_should_coalesce_in_flight(
             in_flight_same_cycle,
             operator_driven,
         ) {

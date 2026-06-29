@@ -5584,12 +5584,13 @@ mod tests {
         );
         assert!(recoverable.contains("failed_stage=queue_paused"));
         assert!(
-            recoverable
-                .contains(crate::project_controller::DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER),
+            recoverable.contains(
+                agent_doc_controller::dispatch::DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER
+            ),
             "stale-supervisor pause must carry the restart-redirect marker: {recoverable}"
         );
         assert_eq!(
-            crate::project_controller::dispatch_error_supervisor_restart_redirect(&recoverable),
+            agent_doc_controller::dispatch::stale_queue_pause_pid_from_dispatch_error(&recoverable),
             Some(1368698)
         );
         assert!(
@@ -5613,12 +5614,13 @@ mod tests {
             paused_dispatch_error("operator paused this queue for manual review");
         assert!(terminal.contains("failed_stage=queue_paused"));
         assert!(
-            !terminal
-                .contains(crate::project_controller::DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER),
+            !terminal.contains(
+                agent_doc_controller::dispatch::DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER
+            ),
             "deliberate operator pause must NOT carry the restart-redirect marker: {terminal}"
         );
         assert_eq!(
-            crate::project_controller::dispatch_error_supervisor_restart_redirect(&terminal),
+            agent_doc_controller::dispatch::stale_queue_pause_pid_from_dispatch_error(&terminal),
             None
         );
         assert!(

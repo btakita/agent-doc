@@ -4853,6 +4853,12 @@ fn test_agent_doc_tmux_commands_owns_submit_profile_policy() {
             "orchestration callers should import tmux submit policy from agent-doc-tmux-commands directly"
         );
     }
+    assert!(
+        !route_dispatch_source.contains("fn routed_trigger_submit_diagnostic(")
+            && route_dispatch_source.contains("tmux_submit_transform_for_harness(")
+            && route_dispatch_source.contains("tmux_submit_key_for_harness("),
+        "route dispatch should call focused tmux submit diagnostics directly, without a local wrapper"
+    );
 
     for forbidden in [
         "agent-doc-core",

@@ -971,7 +971,8 @@ pub(crate) fn send_command_once_unchecked(
         eprintln!("[route] warning: display-message failed: {}", e);
     }
 
-    let (transform, submit_key) = routed_trigger_submit_diagnostic(&harness.binary);
+    let transform = agent_doc_tmux_commands::tmux_submit_transform_for_harness(&harness.binary);
+    let submit_key = agent_doc_tmux_commands::tmux_submit_key_for_harness(&harness.binary);
     crate::input_diag::log_text_submit(
         Some(Path::new(file_path)),
         "route.direct_pane_submit",
@@ -1865,11 +1866,6 @@ pub(crate) fn validate_routed_trigger_payload(
     Ok(())
 }
 
-fn routed_trigger_submit_diagnostic(harness_binary: &str) -> (&'static str, &'static str) {
-    let profile = agent_doc_tmux_commands::tmux_submit_profile_for_harness(harness_binary);
-    (profile.transform(), profile.submit_key())
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(unused_imports)]
@@ -1894,21 +1890,6 @@ mod tests {
         assert!(
             hint.contains("agent-doc start /tmp/session.md"),
             "starting actor hint should name the owner restart recovery: {hint}"
-        );
-    }
-    #[test]
-    fn routed_trigger_submit_diagnostic_names_codex_enter_key() {
-        assert_eq!(
-            routed_trigger_submit_diagnostic("codex"),
-            ("tmux_text_enter", "Enter")
-        );
-        assert_eq!(
-            routed_trigger_submit_diagnostic("opencode"),
-            ("tmux_text_enter", "Enter")
-        );
-        assert_eq!(
-            routed_trigger_submit_diagnostic("claude"),
-            ("tmux_text_enter", "Enter")
         );
     }
     #[test]

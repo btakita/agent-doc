@@ -110,6 +110,11 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   heading exemptions also moved there; session-check keeps only file/cycle/ops-log
   guard adapters.
 
+- **Exchange-tail prompt policy moved to `agent-doc-turn`.** Unresolved
+  exchange-tail prompt detection, prompt-only closeout-tail detection, and
+  tail response-heading detection now live in `agent_doc_turn::exchange_tail`.
+  Session-check keeps only file/context adapters and guard message formatting.
+
 - **Closeout metadata-drift authority moved to `agent-doc-turn`.** The
   `QueueMetadataDrift` / `SidecarVisibleDrift` authoritative-side classifier now
   lives in `agent_doc_turn::closeout_recovery`. Orchestration keeps only HEAD,

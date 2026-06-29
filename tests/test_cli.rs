@@ -2627,9 +2627,17 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
             .exists(),
         "closeout guard vocabulary should live in the focused turn crate"
     );
+    assert!(
+        manifest_dir
+            .join("agent-doc-turn/src/exchange_tail.rs")
+            .exists(),
+        "exchange-tail prompt/response policy should live in the focused turn crate"
+    );
 
     let turn_source =
         fs::read_to_string(manifest_dir.join("agent-doc-turn/src/closeout_signal.rs")).unwrap();
+    let exchange_tail_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn/src/exchange_tail.rs")).unwrap();
     let guard_source =
         fs::read_to_string(manifest_dir.join("agent-doc-turn/src/closeout_guard.rs")).unwrap();
     let recovery_source =
@@ -2790,6 +2798,16 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         turn_source.contains("agent_doc_element_backlog::backlog::extract_pending_hash_ids"),
         "closeout signal policy should reuse tracked-work #id scanning"
     );
+    for required in [
+        "pub fn unresolved_exchange_prompt_in_content",
+        "pub fn exchange_tail_has_response_heading",
+        "pub fn prompt_only_exchange_tail",
+    ] {
+        assert!(
+            exchange_tail_source.contains(required),
+            "agent-doc-turn must own exchange-tail prompt/response policy: {required}"
+        );
+    }
 
     let detect_source = fs::read_to_string(
         manifest_dir.join("agent-doc-orchestration/src/session_check/detect.rs"),
@@ -2855,14 +2873,42 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "agent_doc_turn::closeout_signal::is_direct_response_patchback_heading",
         "agent_doc_turn::closeout_signal::has_new_response_heading_marker",
         "agent_doc_turn::closeout_signal::is_binary_authored_recovery_diagnostic_heading",
-        "agent_doc_turn::closeout_signal::is_queue_continuation_response_heading",
-        "agent_doc_turn::closeout_signal::normalized_prompt_for_match",
     ] {
         assert!(
             closeout_guards.contains(required),
             "closeout_guards should call focused closeout signal policy directly: {required}"
         );
     }
+    for required in [
+        "super::closeout_signal::is_exchange_response_heading",
+        "super::closeout_signal::is_queue_continuation_response_heading",
+        "super::closeout_signal::normalized_prompt_for_match",
+    ] {
+        assert!(
+            exchange_tail_source.contains(required),
+            "exchange_tail should reuse focused closeout signal policy directly: {required}"
+        );
+    }
+    for forbidden in [
+        "pub(crate) fn unresolved_exchange_prompt_in_content",
+        "pub(crate) fn prompt_only_exchange_tail",
+    ] {
+        assert!(
+            !closeout_guards.contains(forbidden),
+            "closeout_guards must not re-own exchange-tail prompt/response policy: {forbidden}"
+        );
+    }
+    assert!(
+        closeout_guards
+            .contains("agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content")
+            && closeout_guards
+                .contains("agent_doc_turn::exchange_tail::exchange_tail_has_response_heading"),
+        "closeout_guards should keep only file adapters over focused exchange-tail policy"
+    );
+    assert!(
+        detect_source.contains("agent_doc_turn::exchange_tail::prompt_only_exchange_tail"),
+        "session_check::detect should call focused prompt-only exchange-tail policy directly"
+    );
 
     let response_guards = fs::read_to_string(
         manifest_dir.join("agent-doc-orchestration/src/session_check/response_guards.rs"),

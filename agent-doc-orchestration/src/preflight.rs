@@ -3875,7 +3875,7 @@ mod tests {
             );
             // The exchange tail is not left as a prompt-only tail.
             assert!(
-                crate::session_check::prompt_only_exchange_tail(&updated).is_none(),
+                agent_doc_turn::exchange_tail::prompt_only_exchange_tail(&updated).is_none(),
                 "dogfood note must not leave a prompt-only exchange tail for {diagnostic}"
             );
         }

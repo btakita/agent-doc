@@ -162,7 +162,7 @@ pub(crate) fn check_prompt_only_exchange_tail_guard(
 ) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): cached document content.
     let content = rc.doc_content();
-    let Some(prompt) = prompt_only_exchange_tail(&content) else {
+    let Some(prompt) = agent_doc_turn::exchange_tail::prompt_only_exchange_tail(&content) else {
         return Ok(GuardResult::None);
     };
     Ok(GuardResult::Error(format!(

@@ -12,6 +12,8 @@ name = "agent_doc_turn"
 [dependencies]
 agent-doc-element = { path = "../agent-doc-element", version = "0.34.65" }
 agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.65" }
+agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.65" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.65" }
 agent-doc-queue = { path = "../agent-doc-queue", version = "0.34.65" }
 agent-doc-template = { path = "../agent-doc-template", version = "0.34.65" }
 lazily = "0.13.1"

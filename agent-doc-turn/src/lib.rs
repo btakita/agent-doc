@@ -10,6 +10,7 @@ pub mod closeout_guard;
 pub mod closeout_recovery;
 pub mod closeout_signal;
 pub mod drain_stall;
+pub mod exchange_tail;
 pub mod heuristics;
 pub mod op_log;
 pub mod response_text;

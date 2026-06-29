@@ -757,101 +757,14 @@ pub fn detect_bypassed_response_write_between(
 /// empty or already answered.
 pub fn unresolved_exchange_prompt(file: &Path) -> Result<Option<String>> {
     let content = std::fs::read_to_string(file)?;
-    Ok(unresolved_exchange_prompt_in_content(&content))
-}
-
-pub(crate) fn unresolved_exchange_prompt_in_content(content: &str) -> Option<String> {
-    let components = agent_doc_element::element::parse(content).ok()?;
-    let exchange = components.iter().find(|c| c.name == "exchange")?;
-    let body = exchange.content(content);
-    let lines: Vec<&str> = body.lines().collect();
-
-    // The latest boundary marks the end of the last committed/answered segment;
-    // everything after it is the new, not-yet-answered tail.
-    let tail_start = lines
-        .iter()
-        .rposition(|line| line.trim().starts_with("<!-- agent:boundary:"))
-        .map(|idx| idx + 1)
-        .unwrap_or(0);
-    let tail = &lines[tail_start..];
-
-    // `#prompt-preempts-auto-queue` / `#queue-continuation-buries-prompt`: a
-    // response heading means the prompt *above it* was answered — but a
-    // queue-continuation response (`### Re: do [#id]` / `### Re: re [#id]`)
-    // answers a queue/backlog item, NOT a free-text user prompt. When the only
-    // response after a free-text prompt is a queue continuation, the prompt is
-    // still unresolved; the queue continuation must not let the boundary bury it.
-    // Scan only the prompt region up to the FIRST response heading so a queue
-    // continuation's own response body is never mistaken for prompt text.
-    let first_response_idx = tail.iter().position(|line| {
-        agent_doc_turn::closeout_signal::is_exchange_response_heading(line.trim())
-    });
-    if let Some(idx) = first_response_idx {
-        let heading = tail[idx].trim();
-        if !agent_doc_turn::closeout_signal::is_queue_continuation_response_heading(heading) {
-            // A genuine free-text answer resolves the prompt.
-            return None;
-        }
-        // Queue-continuation response — does not answer a free-text prompt.
-    }
-    let prompt_region = match first_response_idx {
-        Some(idx) => &tail[..idx],
-        None => tail,
-    };
-
-    let prompt_lines: Vec<String> = prompt_region
-        .iter()
-        .map(|line| line.trim())
-        .filter(|line| {
-            !line.is_empty()
-                && !line.starts_with("<!--")
-                && !line.starts_with("-->")
-                && !agent_doc_turn::closeout_signal::is_exchange_response_heading(line)
-                // `#ipcproofnostall`: a binary-authored interrupted-cycle
-                // IPC-proof recovery diagnostic line (the structured
-                // `ipc_proof_insufficient ... invariant=... recovery=...` event or
-                // its literal self-description) is not a user prompt, even when a
-                // post-commit worktree corruption strips its `### Re:` heading and
-                // fence and leaves the bare line in the exchange tail. Match is
-                // token-specific so a real prompt mentioning IPC/drift is kept.
-                && !agent_doc_diff::line_is_binary_authored_ipc_proof_diagnostic(line)
-                // `#provauth3`: a binary-authored compaction Session Summary line
-                // (heading / archive pointer / archived-topic item) is not a user
-                // prompt, even when an earlier content-inference repair pass stamped
-                // it with a `❯` prefix. Origin is known (the binary authored the
-                // compaction), so it must never INTERRUPT closeout as an unresolved
-                // prompt-only tail.
-                && !agent_doc_diff::line_is_binary_authored_compact_summary(line)
-        })
-        .map(agent_doc_turn::closeout_signal::normalized_prompt_for_match)
-        .filter(|line| !line.is_empty())
-        .collect();
-    if prompt_lines.is_empty() {
-        return None;
-    }
-    Some(prompt_lines.join("\n"))
+    Ok(agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(&content))
 }
 
 pub(crate) fn exchange_tail_has_response_heading(file: &Path) -> bool {
     let Ok(content) = std::fs::read_to_string(file) else {
         return false;
     };
-    let Ok(components) = agent_doc_element::element::parse(&content) else {
-        return false;
-    };
-    let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
-        return false;
-    };
-    let body = exchange.content(&content);
-    let lines: Vec<&str> = body.lines().collect();
-    let tail_start = lines
-        .iter()
-        .rposition(|line| line.trim().starts_with("<!-- agent:boundary:"))
-        .map(|idx| idx + 1)
-        .unwrap_or(0);
-    lines[tail_start..]
-        .iter()
-        .any(|line| agent_doc_turn::closeout_signal::is_exchange_response_heading(line.trim()))
+    agent_doc_turn::exchange_tail::exchange_tail_has_response_heading(&content)
 }
 
 pub fn detect_unstarted_prompt_bearing_diff(file: &Path) -> Result<Option<String>> {
@@ -1006,70 +919,4 @@ pub(crate) fn prompt_target_is_immediately_before_existing_response(
         }
     }
     false
-}
-
-pub(crate) fn prompt_only_exchange_tail(doc: &str) -> Option<String> {
-    let body = agent_doc_frontmatter::frontmatter::parse(doc)
-        .map(|(_, body)| body.to_string())
-        .unwrap_or_else(|_| doc.to_string());
-    let components = agent_doc_element::element::parse(&body).ok()?;
-    let exchange = components
-        .iter()
-        .find(|component| component.name == "exchange")?;
-
-    let mut in_fence: Option<&'static str> = None;
-    let mut prompt_preview: Option<String> = None;
-    let mut in_assistant_response = false;
-    for line in exchange.content(&body).lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("```") {
-            in_fence = match in_fence {
-                Some("```") => None,
-                None => Some("```"),
-                other => other,
-            };
-            continue;
-        }
-        if trimmed.starts_with("~~~") {
-            in_fence = match in_fence {
-                Some("~~~") => None,
-                None => Some("~~~"),
-                other => other,
-            };
-            continue;
-        }
-        if in_fence.is_some() {
-            continue;
-        }
-        if agent_doc_turn::closeout_signal::is_exchange_response_heading(trimmed) {
-            prompt_preview = None;
-            in_assistant_response = true;
-            continue;
-        }
-        if trimmed.starts_with("<!-- agent:boundary:") || trimmed == "## User" {
-            in_assistant_response = false;
-            continue;
-        }
-        if trimmed.is_empty()
-            || trimmed.starts_with("<!--")
-            || trimmed == "(HEAD)"
-            || agent_doc_diff::line_looks_like_plain_response_after_prompt(trimmed)
-        {
-            continue;
-        }
-        if agent_doc_diff::text_line_looks_like_prompt_target(trimmed) {
-            if in_assistant_response && !trimmed.starts_with('❯') {
-                continue;
-            }
-            prompt_preview.get_or_insert_with(|| {
-                trimmed
-                    .trim_start_matches('❯')
-                    .trim()
-                    .chars()
-                    .take(160)
-                    .collect::<String>()
-            });
-        }
-    }
-    prompt_preview
 }

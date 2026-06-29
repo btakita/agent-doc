@@ -2546,7 +2546,10 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
 
-        assert_eq!(prompt_only_exchange_tail(current), None);
+        assert_eq!(
+            agent_doc_turn::exchange_tail::prompt_only_exchange_tail(current),
+            None
+        );
     }
     #[test]
     fn prompt_only_exchange_tail_ignores_assistant_closeout_status_after_response_heading() {
@@ -2561,7 +2564,10 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
 
-        assert_eq!(prompt_only_exchange_tail(current), None);
+        assert_eq!(
+            agent_doc_turn::exchange_tail::prompt_only_exchange_tail(current),
+            None
+        );
     }
     #[test]
     fn committed_without_response_body_guard_fires_on_pending_mutations_no_capture() {
@@ -7217,7 +7223,8 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         assert_eq!(
-            unresolved_exchange_prompt_in_content(content).as_deref(),
+            agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(content)
+                .as_deref(),
             Some("What are #next-steps to complete review items?")
         );
     }
@@ -7231,7 +7238,10 @@ Body\n\
             "new prompt\n### Re: new prompt — gpt-5\n\nAnswered too.\n",
             "<!-- /agent:exchange -->\n",
         );
-        assert_eq!(unresolved_exchange_prompt_in_content(content), None);
+        assert_eq!(
+            agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(content),
+            None
+        );
     }
     #[test]
     fn unresolved_exchange_prompt_none_when_tail_empty_after_boundary() {
@@ -7243,7 +7253,10 @@ Body\n\
             "<!-- agent:boundary:committed -->\n",
             "<!-- /agent:exchange -->\n",
         );
-        assert_eq!(unresolved_exchange_prompt_in_content(content), None);
+        assert_eq!(
+            agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(content),
+            None
+        );
     }
     #[test]
     fn unresolved_exchange_prompt_unmasked_by_queue_continuation_response() {
@@ -7261,7 +7274,8 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         assert_eq!(
-            unresolved_exchange_prompt_in_content(content).as_deref(),
+            agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(content)
+                .as_deref(),
             Some("JB Run Agent Doc on sampleorders.md stalled."),
             "a free-text prompt followed only by a queue-continuation response must stay unresolved"
         );
@@ -7283,7 +7297,7 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         assert_eq!(
-            unresolved_exchange_prompt_in_content(content),
+            agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(content),
             None,
             "a bare binary-authored ipc_proof_insufficient line is not an unresolved user prompt"
         );
@@ -7301,7 +7315,8 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         assert_eq!(
-            unresolved_exchange_prompt_in_content(content).as_deref(),
+            agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(content)
+                .as_deref(),
             Some("The IPC drift keeps breaking finalize — please diagnose and fix the root cause."),
             "a real user prompt mentioning ipc/drift must stay unresolved"
         );
@@ -7344,7 +7359,8 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         assert_eq!(
-            unresolved_exchange_prompt_in_content(content).as_deref(),
+            agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(content)
+                .as_deref(),
             Some("do [#xyz]")
         );
     }

@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use agent_doc_orchestration::flow::operator_clear::OperatorClearInputState;
-use agent_doc_orchestration::sessions::tmux_submit_mode_for_harness;
 use agent_doc_orchestration::startup_miss::{SessionLogStatus, StartupMiss};
 use agent_doc_orchestration::supervisor::ipc::IpcMethod;
 #[cfg(test)]
@@ -12,6 +11,7 @@ use agent_doc_sqlite::state_store::SupervisorLeaseStatus;
 use agent_doc_sqlite::state_store::{
     ActorRecord, ActorState, ActorTransitionStatus, SessionOperatorStatus,
 };
+use agent_doc_tmux_commands::tmux_submit_mode_for_harness;
 use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry, Tmux};
 
 const SUPERVISOR_INJECT_SUBMIT_MODE: &str = "supervisor_normalized_submit";
@@ -1907,7 +1907,7 @@ fn verify_clear_submit_after_delivery(
             "supervisor_ipc_acceptance" => "supervisor_ipc_resubmit_acceptance",
             _ => "direct_pane_resubmit_acceptance",
         };
-        let submit_key = agent_doc_orchestration::sessions::tmux_submit_key_for_harness(harness);
+        let submit_key = agent_doc_tmux_commands::tmux_submit_key_for_harness(harness);
         agent_doc_orchestration::input_diag::log_text_submit(
             Some(file),
             resubmit_source,
@@ -2015,8 +2015,7 @@ fn clear_direct_submit_needs_enter_resubmit(
     harness: &str,
     observation: &ClearDirectSubmitObservation,
 ) -> bool {
-    agent_doc_orchestration::sessions::tmux_submit_profile_for_harness(harness)
-        .pending_draft_enter_resubmit()
+    agent_doc_tmux_commands::tmux_submit_profile_for_harness(harness).pending_draft_enter_resubmit()
         && observation.status == ClearDirectSubmitStatus::TimedOut
         && observation.command_visible
 }
@@ -2086,7 +2085,7 @@ fn clear_direct_submit_resubmit_proof_line(
         ClearDirectSubmitStatus::TimedOut => "still_visible",
         ClearDirectSubmitStatus::CaptureFailed => "capture_failed",
     };
-    let submit_key = agent_doc_orchestration::sessions::tmux_submit_key_for_harness(harness);
+    let submit_key = agent_doc_tmux_commands::tmux_submit_key_for_harness(harness);
     format!(
         "session_clear_submit_resubmit file={} pane={} harness={} action=submit_key key={} result={} elapsed_ms={}",
         file.display(),

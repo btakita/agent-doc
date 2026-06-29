@@ -93,7 +93,7 @@ impl DispatchOnlyReopenDelivery {
         match self {
             DispatchOnlyReopenDelivery::SupervisorIpcOnce => "supervisor_normalized_submit",
             DispatchOnlyReopenDelivery::DirectPaneSubmit => {
-                crate::sessions::tmux_submit_mode_for_harness(harness_binary)
+                agent_doc_tmux_commands::tmux_submit_mode_for_harness(harness_binary)
             }
         }
     }

@@ -44,6 +44,7 @@ dependencies = [
  "agent-doc-sqlite",
  "agent-doc-supervisor",
  "agent-doc-template",
+ "agent-doc-tmux-commands",
  "agent-doc-turn",
  "agent-doc-work-graph",
  "agent-kit",

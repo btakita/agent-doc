@@ -4676,6 +4676,99 @@ fn test_agent_doc_tmux_owns_focus_pane_decision() {
 }
 
 #[test]
+fn test_agent_doc_tmux_commands_owns_submit_profile_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let tmux_commands_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-tmux-commands/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&tmux_commands_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+
+    let tmux_commands_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-tmux-commands/src/lib.rs")).unwrap();
+    for required in [
+        "pub struct TmuxSubmitProfile",
+        "pub const fn tmux_submit_profile_for_harness(",
+        "pub const fn tmux_submit_mode_for_harness(",
+        "pub const fn tmux_submit_transform_for_harness(",
+        "pub const fn tmux_submit_key_for_harness(",
+        "pub fn text_submit_command(",
+        "pub fn text_only_command(",
+    ] {
+        assert!(
+            tmux_commands_source.contains(required),
+            "agent-doc-tmux-commands must own pure tmux submit policy: {required}"
+        );
+    }
+
+    let sessions_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sessions.rs")).unwrap();
+    for forbidden in [
+        "pub struct TmuxSubmitProfile",
+        "pub const fn tmux_submit_profile_for_harness(",
+        "pub const fn tmux_submit_mode_for_harness(",
+        "pub const fn tmux_submit_transform_for_harness(",
+        "pub const fn tmux_submit_key_for_harness(",
+        "fn text_submit_command_args(",
+        "fn text_only_command_args(",
+    ] {
+        assert!(
+            !sessions_source.contains(forbidden),
+            "sessions.rs must execute tmux commands, not re-own submit profile policy: {forbidden}"
+        );
+    }
+    assert!(
+        sessions_source.contains("use agent_doc_tmux_commands::{")
+            && sessions_source.contains("text_submit_command(")
+            && sessions_source.contains("text_only_command(")
+            && sessions_source.contains("tmux_submit_profile_for_harness("),
+        "sessions.rs should call the focused tmux command API directly"
+    );
+
+    let route_dispatch_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch.rs"))
+            .unwrap();
+    let start_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
+    let idle_watch_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
+            .unwrap();
+    let session_actor_source =
+        fs::read_to_string(manifest_dir.join("src/session_actor_cmd.rs")).unwrap();
+    let queue_dispatch_source =
+        fs::read_to_string(manifest_dir.join("src/queue_dispatch.rs")).unwrap();
+    let sim_world_source = fs::read_to_string(manifest_dir.join("src/sim_world.rs")).unwrap();
+    for source in [
+        &route_dispatch_source,
+        &start_source,
+        &idle_watch_source,
+        &session_actor_source,
+        &queue_dispatch_source,
+        &sim_world_source,
+    ] {
+        assert!(
+            !source.contains("crate::sessions::tmux_submit_")
+                && !source.contains("agent_doc_orchestration::sessions::tmux_submit_"),
+            "orchestration callers should import tmux submit policy from agent-doc-tmux-commands directly"
+        );
+    }
+
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-tmux-commands submit policy must stay free of orchestration, git, editor IPC, sqlite, or tmux-router effects"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_document_realtime_owns_authority_boundaries() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let realtime_manifest =

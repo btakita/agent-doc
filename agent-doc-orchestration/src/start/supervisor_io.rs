@@ -15,7 +15,8 @@ pub(crate) fn deliver_ipc_inject(
     diag_op: &str,
 ) -> Result<(), String> {
     if let Some(pane_id) = shared.inject_pane.as_deref() {
-        let profile = crate::sessions::tmux_submit_profile_for_harness(&shared.harness_binary);
+        let profile =
+            agent_doc_tmux_commands::tmux_submit_profile_for_harness(&shared.harness_binary);
         crate::input_diag::log_text_submit(
             None,
             &format!("supervisor.{diag_op}"),

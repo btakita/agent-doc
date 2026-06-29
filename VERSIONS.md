@@ -46,6 +46,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Route latency policy moved to `agent-doc-controller`.** The route latency budget status classifier and structured `route_latency` log formatter now live in `agent_doc_controller::dispatch`. Route still measures elapsed time and emits ops-log/stderr records, but it adapts those timings into the focused controller policy.
 
+- **Tmux submit profile policy moved to `agent-doc-tmux-commands`.** The harness submit profile, submit-mode/key vocabulary, trailing-newline trimming, and text/Enter command builders now live in `agent_doc_tmux_commands`. `sessions` remains the effect adapter that executes tmux commands, while route/start/idle-watch import the focused command policy directly instead of routing through `sessions`.
+
 - **Route-owned reap policy moved to `agent-doc-supervisor`.** The route-owned supervisor completion reap policy, liveness reason vocabulary, and hidden CLI reap-policy parser now live in `agent_doc_supervisor::route_owned`. The start path keeps only document liveness/file adapters and calls the focused supervisor API directly; the CLI shell imports the focused type instead of preserving an orchestration API path.
 
 - **Stale install-artifact policy moved to `agent-doc-supervisor`.** The `#install-stale-guard` grace window and timestamp classifier now live in `agent_doc_supervisor::config` beside auto-install/stale-binary policy. Preflight still discovers artifact mtimes and formats the warning, but calls the focused supervisor API directly instead of owning the staleness rule.

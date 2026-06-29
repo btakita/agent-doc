@@ -86,6 +86,9 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use agent_doc_tmux_commands::{
+    TmuxSubmitProfile, text_only_command, text_submit_command, tmux_submit_profile_for_harness,
+};
 #[cfg(test)]
 use tmux_router::IsolatedTmux;
 use tmux_router::{
@@ -232,135 +235,6 @@ impl Multiplexer for Tmux {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TmuxSubmitProfile {
-    /// When non-zero, send the text and the submit key as **separate**
-    /// `tmux send-keys` calls with this delay between them.
-    ///
-    /// `#opencodeclearnewsubmit`: OpenCode's slash-command autocomplete
-    /// dropdown opens the moment `/` is typed. If the Enter is sent in the
-    /// **same** `tmux send-keys` call as the text, tmux pumps the characters
-    /// and the Enter in rapid succession and the dropdown can swallow the
-    /// Enter (or apply it to the just-opened palette row instead of the
-    /// composer). Splitting the send into "text, sleep, Enter" gives the TUI
-    /// time to settle so the Enter properly confirms the highlighted palette
-    /// row and submits. Other harnesses (Codex, Claude, default) keep `0` —
-    /// the single-call form remains canonical for them.
-    split_text_and_submit_delay_ms: u64,
-}
-
-impl TmuxSubmitProfile {
-    pub const fn new() -> Self {
-        Self {
-            split_text_and_submit_delay_ms: 0,
-        }
-    }
-
-    pub const fn with_split_text_submit_delay(delay_ms: u64) -> Self {
-        Self {
-            split_text_and_submit_delay_ms: delay_ms,
-        }
-    }
-
-    pub const fn mode(self) -> &'static str {
-        "tmux_text_enter"
-    }
-
-    pub const fn transform(self) -> &'static str {
-        "tmux_text_enter"
-    }
-
-    pub const fn submit_key(self) -> &'static str {
-        "Enter"
-    }
-
-    pub const fn pending_draft_enter_resubmit(self) -> bool {
-        true
-    }
-
-    pub const fn split_text_and_submit_delay_ms(self) -> u64 {
-        self.split_text_and_submit_delay_ms
-    }
-}
-
-impl Default for TmuxSubmitProfile {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// `#opencodeclearnewsubmit`: OpenCode needs the split text+Enter send because
-/// its slash-command palette opens on `/` and swallows a same-call Enter.
-/// `const fn`-safe byte compare (str equality is not const).
-const fn harness_is_opencode(harness: &str) -> bool {
-    let b = harness.as_bytes();
-    b.len() == 8
-        && b[0] == b'o'
-        && b[1] == b'p'
-        && b[2] == b'e'
-        && b[3] == b'n'
-        && b[4] == b'c'
-        && b[5] == b'o'
-        && b[6] == b'd'
-        && b[7] == b'e'
-}
-
-pub const fn tmux_submit_profile_for_harness(harness: &str) -> TmuxSubmitProfile {
-    if harness_is_opencode(harness) {
-        TmuxSubmitProfile::with_split_text_submit_delay(80)
-    } else {
-        TmuxSubmitProfile::new()
-    }
-}
-
-pub const fn tmux_submit_mode_for_harness(harness: &str) -> &'static str {
-    tmux_submit_profile_for_harness(harness).mode()
-}
-
-pub const fn tmux_submit_transform_for_harness(harness: &str) -> &'static str {
-    tmux_submit_profile_for_harness(harness).transform()
-}
-
-pub const fn tmux_submit_key_for_harness(harness: &str) -> &'static str {
-    tmux_submit_profile_for_harness(harness).submit_key()
-}
-
-fn submitted_text_without_trailing_line_endings(text: &str) -> &str {
-    text.trim_end_matches(['\r', '\n'])
-}
-
-fn text_submit_command_args(pane_id: &str, text: &str, profile: TmuxSubmitProfile) -> Vec<String> {
-    let text = submitted_text_without_trailing_line_endings(text);
-    let mut args = vec![
-        "send-keys".to_string(),
-        "-t".to_string(),
-        pane_id.to_string(),
-    ];
-    if !text.is_empty() {
-        args.push(text.to_string());
-    }
-    args.push(profile.submit_key().to_string());
-    args
-}
-
-/// `#opencodeclearnewsubmit`: arg list for the text-only half of a split
-/// send — same shape as [`text_submit_command_args`] minus the trailing
-/// submit key. Used when [`TmuxSubmitProfile::split_text_and_submit_delay_ms`]
-/// is non-zero so the harness TUI (OpenCode's slash-command palette) can
-/// settle before the Enter arrives.
-fn text_only_command_args(pane_id: &str, text: &str) -> Vec<String> {
-    let text = submitted_text_without_trailing_line_endings(text);
-    let mut args = vec![
-        "send-keys".to_string(),
-        "-t".to_string(),
-        pane_id.to_string(),
-    ];
-    if !text.is_empty() {
-        args.push(text.to_string());
-    }
-    args
-}
-
 /// Submit text and the named Enter key in one tmux call.
 ///
 /// Keep this as the single live-pane command path for routed reopens, queue
@@ -375,7 +249,7 @@ fn send_text_with_submit_key(
     if split_delay_ms == 0 {
         let status = tmux
             .cmd()
-            .args(text_submit_command_args(pane_id, text, profile))
+            .args(text_submit_command(pane_id, text, profile).into_args())
             .status()
             .context("failed to run tmux send-keys (text + submit key)")?;
         if !status.success() {
@@ -389,7 +263,7 @@ fn send_text_with_submit_key(
     // settles before the Enter confirms the highlighted row and submits.
     let text_status = tmux
         .cmd()
-        .args(text_only_command_args(pane_id, text))
+        .args(text_only_command(pane_id, text).into_args())
         .status()
         .context("failed to run tmux send-keys (text only, split path)")?;
     if !text_status.success() {
@@ -398,10 +272,7 @@ fn send_text_with_submit_key(
     std::thread::sleep(std::time::Duration::from_millis(split_delay_ms));
     let enter_status = tmux
         .cmd()
-        .arg("send-keys")
-        .arg("-t")
-        .arg(pane_id)
-        .arg(profile.submit_key())
+        .args(agent_doc_tmux_commands::send_key(pane_id, profile.submit_key()).into_args())
         .status()
         .context("failed to run tmux send-keys (submit key only, split path)")?;
     if !enter_status.success() {
@@ -1426,103 +1297,6 @@ mod tests {
         assert_eq!(pane_window_with_mux(&mux, "%active").unwrap(), "@7");
         assert!(mux_ref.pane_alive("%active"));
         assert!(mux_ref.session_alive("agent-doc"));
-    }
-
-    #[test]
-    fn submit_profiles_keep_harness_submit_policy_in_one_place() {
-        for harness in ["codex", "claude", "opencode", "unknown-harness"] {
-            assert_eq!(tmux_submit_mode_for_harness(harness), "tmux_text_enter");
-            assert_eq!(
-                tmux_submit_transform_for_harness(harness),
-                "tmux_text_enter"
-            );
-            assert_eq!(tmux_submit_key_for_harness(harness), "Enter");
-            assert_eq!(
-                submitted_text_without_trailing_line_endings("agent-doc plan.md\r\n"),
-                "agent-doc plan.md"
-            );
-            assert_eq!(
-                text_submit_command_args(
-                    "%7",
-                    "agent-doc plan.md\r\n",
-                    tmux_submit_profile_for_harness(harness)
-                ),
-                ["send-keys", "-t", "%7", "agent-doc plan.md", "Enter"]
-                    .into_iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>(),
-                "{harness} must submit tmux text with one named Enter key"
-            );
-            assert_eq!(
-                text_submit_command_args("%7", "\n", tmux_submit_profile_for_harness(harness)),
-                ["send-keys", "-t", "%7", "Enter"]
-                    .into_iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>(),
-                "{harness} empty resubmit must send only the named Enter key"
-            );
-        }
-    }
-
-    /// `#opencodeclearnewsubmit`: OpenCode's slash-command palette opens on
-    /// `/` and can swallow an Enter sent in the same `tmux send-keys` call as
-    /// the text. The harness profile must therefore request a split text +
-    /// Enter send with a non-zero inter-call delay for `opencode` only; every
-    /// other harness keeps the canonical single-call form (delay == 0).
-    #[test]
-    fn tmux_submit_profile_splits_text_and_enter_only_for_opencode() {
-        let opencode = tmux_submit_profile_for_harness("opencode");
-        assert!(
-            opencode.split_text_and_submit_delay_ms() > 0,
-            "opencode must request a split text+Enter send so the slash-command palette can settle before the Enter arrives"
-        );
-        assert_eq!(opencode.submit_key(), "Enter");
-        assert_eq!(opencode.mode(), "tmux_text_enter");
-        assert_eq!(opencode.transform(), "tmux_text_enter");
-        assert!(opencode.pending_draft_enter_resubmit());
-
-        for non_opencode in ["codex", "claude", "claude-code", "default", "", "unknown"] {
-            let profile = tmux_submit_profile_for_harness(non_opencode);
-            assert_eq!(
-                profile.split_text_and_submit_delay_ms(),
-                0,
-                "{non_opencode:?} must keep the single-call text+Enter send (no split)"
-            );
-        }
-    }
-
-    /// `#opencodeclearnewsubmit`: the split path composes two separate
-    /// `tmux send-keys` arg lists — first the text alone, then (after the
-    /// sleep) the submit key alone. Verify the arg builder for the text-only
-    /// half omits the trailing Enter.
-    #[test]
-    fn text_only_command_args_omits_submit_key_for_split_send() {
-        assert_eq!(
-            text_only_command_args("%7", "/new"),
-            ["send-keys", "-t", "%7", "/new"]
-                .into_iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>(),
-            "split-send text step must not include the trailing Enter"
-        );
-        assert_eq!(
-            text_only_command_args("%7", "/new\r\n"),
-            ["send-keys", "-t", "%7", "/new"]
-                .into_iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>(),
-            "split-send text step must strip trailing line endings before sending"
-        );
-        // Empty text becomes a bare send-keys with no payload — the split path
-        // still sends it (no-op) before the Enter, matching the legacy empty
-        // resubmit shape.
-        assert_eq!(
-            text_only_command_args("%7", "\n"),
-            ["send-keys", "-t", "%7"]
-                .into_iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>(),
-        );
     }
 
     #[test]

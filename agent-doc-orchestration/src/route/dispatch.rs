@@ -237,7 +237,8 @@ pub(crate) fn direct_pane_needs_enter_resubmit(
     status: CommandDispatchStatus,
     trigger_visible: bool,
 ) -> bool {
-    crate::sessions::tmux_submit_profile_for_harness(harness_binary).pending_draft_enter_resubmit()
+    agent_doc_tmux_commands::tmux_submit_profile_for_harness(harness_binary)
+        .pending_draft_enter_resubmit()
         && status == CommandDispatchStatus::TimedOut
         && trigger_visible
 }
@@ -259,7 +260,8 @@ pub(crate) fn direct_pane_can_enter_existing_draft(
     harness_binary: &str,
     trigger_visible: bool,
 ) -> bool {
-    crate::sessions::tmux_submit_profile_for_harness(harness_binary).pending_draft_enter_resubmit()
+    agent_doc_tmux_commands::tmux_submit_profile_for_harness(harness_binary)
+        .pending_draft_enter_resubmit()
         && trigger_visible
 }
 
@@ -427,7 +429,7 @@ pub(crate) fn route_submit_resubmit_proof_line(
     elapsed: Duration,
     attempt: usize,
 ) -> String {
-    let submit_key = crate::sessions::tmux_submit_key_for_harness(harness_binary);
+    let submit_key = agent_doc_tmux_commands::tmux_submit_key_for_harness(harness_binary);
     let mut message = format!(
         "route_submit_resubmit file={} pane={} harness={} action=submit_key key={} result={} elapsed_ms={} attempt={}",
         file.display(),
@@ -451,7 +453,7 @@ fn send_direct_pane_enter_resubmit(
     phase: &str,
     attempt: usize,
 ) -> DirectPaneAcceptance {
-    let submit_key = crate::sessions::tmux_submit_key_for_harness(&harness.binary);
+    let submit_key = agent_doc_tmux_commands::tmux_submit_key_for_harness(&harness.binary);
     crate::input_diag::log_text_submit(
         Some(file),
         "route.direct_pane_resubmit",
@@ -1873,7 +1875,7 @@ pub(crate) fn validate_routed_trigger_payload(
 }
 
 fn routed_trigger_submit_diagnostic(harness_binary: &str) -> (&'static str, &'static str) {
-    let profile = crate::sessions::tmux_submit_profile_for_harness(harness_binary);
+    let profile = agent_doc_tmux_commands::tmux_submit_profile_for_harness(harness_binary);
     (profile.transform(), profile.submit_key())
 }
 

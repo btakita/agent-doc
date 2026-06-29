@@ -7073,23 +7073,23 @@ fn simworld_jb_run_and_clear_share_codex_enter_submit_contract() {
     assert_eq!(world.coverage.route_dispatch_acceptances, 1);
     assert_eq!(world.coverage.session_clears, 1);
     assert_eq!(
-        agent_doc_orchestration::sessions::tmux_submit_mode_for_harness("codex"),
+        agent_doc_tmux_commands::tmux_submit_mode_for_harness("codex"),
         "tmux_text_enter"
     );
     assert_eq!(
-        agent_doc_orchestration::sessions::tmux_submit_transform_for_harness("codex"),
+        agent_doc_tmux_commands::tmux_submit_transform_for_harness("codex"),
         "tmux_text_enter"
     );
     assert_eq!(
-        agent_doc_orchestration::sessions::tmux_submit_key_for_harness("codex"),
+        agent_doc_tmux_commands::tmux_submit_key_for_harness("codex"),
         "Enter"
     );
     assert_eq!(
-        agent_doc_orchestration::sessions::tmux_submit_mode_for_harness("claude"),
+        agent_doc_tmux_commands::tmux_submit_mode_for_harness("claude"),
         "tmux_text_enter"
     );
     assert_eq!(
-        agent_doc_orchestration::sessions::tmux_submit_mode_for_harness("opencode"),
+        agent_doc_tmux_commands::tmux_submit_mode_for_harness("opencode"),
         "tmux_text_enter"
     );
 }

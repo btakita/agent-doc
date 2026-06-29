@@ -406,7 +406,8 @@ fn idle_queue_pending_payload_needs_enter_resubmit(
     payload_already_pending: Option<bool>,
     already_resubmitted: bool,
 ) -> bool {
-    crate::sessions::tmux_submit_profile_for_harness(harness_binary).pending_draft_enter_resubmit()
+    agent_doc_tmux_commands::tmux_submit_profile_for_harness(harness_binary)
+        .pending_draft_enter_resubmit()
         && drain_dispatch_dedup_skip(payload_already_pending)
         && !already_resubmitted
 }
@@ -438,7 +439,7 @@ fn idle_queue_resubmit_pending_payload(
     else {
         return AutoTriggerOutcome::SendFailed;
     };
-    let submit_key = crate::sessions::tmux_submit_key_for_harness(&harness.binary);
+    let submit_key = agent_doc_tmux_commands::tmux_submit_key_for_harness(&harness.binary);
     crate::input_diag::log_text_submit(
         Some(file),
         "supervisor.idle_queue_resubmit",

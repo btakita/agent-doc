@@ -496,7 +496,7 @@ fn idle_queue_submit_mode(
     harness: &crate::harness::HarnessConfig,
 ) -> &'static str {
     if shared.inject_pane.is_some() {
-        crate::sessions::tmux_submit_mode_for_harness(&harness.binary)
+        agent_doc_tmux_commands::tmux_submit_mode_for_harness(&harness.binary)
     } else {
         "pty_cr"
     }
@@ -1151,7 +1151,8 @@ fn auto_trigger_inject_command(
     );
     let submitted_text = crate::supervisor::ipc::normalize_submit_text(trigger_cmd);
     if let Some(pane_id) = shared.inject_pane.as_deref() {
-        let profile = crate::sessions::tmux_submit_profile_for_harness(&shared.harness_binary);
+        let profile =
+            agent_doc_tmux_commands::tmux_submit_profile_for_harness(&shared.harness_binary);
         crate::input_diag::log_text_submit(
             None,
             "supervisor.auto_trigger",
@@ -1216,7 +1217,8 @@ fn auto_trigger_clear_command(
     );
     let submitted_text = crate::supervisor::ipc::normalize_submit_text(clear_cmd);
     if let Some(pane_id) = shared.inject_pane.as_deref() {
-        let profile = crate::sessions::tmux_submit_profile_for_harness(&shared.harness_binary);
+        let profile =
+            agent_doc_tmux_commands::tmux_submit_profile_for_harness(&shared.harness_binary);
         crate::input_diag::log_text_submit(
             None,
             "supervisor.auto_trigger_clear",

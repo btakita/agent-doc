@@ -367,41 +367,6 @@ fn wrapped_trigger_starts_at_line(lines: &[&String], start: usize, trigger: &str
     false
 }
 
-/// `accepted` when the re-submit consumed the drafted trigger, `still_visible`
-/// when the bare submit key did not submit either. Kept pure for proof-line tests.
-pub(crate) fn resubmit_result_label(second_status: CommandDispatchStatus) -> &'static str {
-    if second_status == CommandDispatchStatus::Accepted {
-        "accepted"
-    } else {
-        "still_visible"
-    }
-}
-
-/// Build the operator-greppable `route_submit_resubmit` proof line. The live
-/// test asserts on exactly this shape in `ops.log`.
-pub(crate) fn route_submit_resubmit_proof_line(
-    file: &Path,
-    pane: &str,
-    harness_binary: &str,
-    second_status: CommandDispatchStatus,
-    elapsed: Duration,
-    attempt: usize,
-) -> String {
-    let submit_key = agent_doc_tmux_commands::tmux_submit_key_for_harness(harness_binary);
-    let mut message = format!(
-        "route_submit_resubmit file={} pane={} harness={} action=submit_key key={} result={} elapsed_ms={} attempt={}",
-        file.display(),
-        pane,
-        harness_binary,
-        submit_key,
-        resubmit_result_label(second_status),
-        elapsed.as_millis(),
-        attempt
-    );
-    append_editor_route_attempt(&mut message);
-    message
-}
-
 fn send_direct_pane_enter_resubmit(
     tmux: &Tmux,
     pane: &str,
@@ -430,16 +395,20 @@ fn send_direct_pane_enter_resubmit(
         );
     }
     let second = poll_direct_pane_acceptance(tmux, pane, file, harness, trigger, phase);
+    let file_display = file.display().to_string();
+    let editor_attempt_id = editor_route_attempt_id();
     crate::ops_log::log_op(
         file,
-        &route_submit_resubmit_proof_line(
-            file,
+        &direct_pane_resubmit_proof_line(DirectPaneResubmitProofFacts {
+            file_display: &file_display,
             pane,
-            &harness.binary,
-            second.status,
-            second.elapsed,
+            harness_binary: &harness.binary,
+            submit_key,
+            status: second.status,
+            elapsed_ms: second.elapsed.as_millis(),
             attempt,
-        ),
+            editor_attempt_id: editor_attempt_id.as_deref(),
+        }),
     );
     second
 }
@@ -2048,57 +2017,6 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% used
         assert!(
             !direct_pane_existing_draft_visible(different_target, trigger, &harness),
             "relative-path equivalence must not collapse different document names"
-        );
-    }
-    #[test]
-    fn route_submit_resubmit_proof_line_is_operator_greppable_for_both_harnesses() {
-        // #jbcodexsubmit / #jbclaudesubmit: the operator's live test greps ops.log
-        // for `route_submit_resubmit ... action=submit_key key=Enter result=accepted|still_visible`.
-        // Assert the exact shape the binary emits for bounded re-submit attempts on
-        // harnesses that travel the text+Enter submit path.
-        let file = std::path::Path::new("/tmp/plan.md");
-        for harness in ["codex", "claude", "opencode"] {
-            // First re-submit consumed the drafted trigger ⇒ result=accepted.
-            let accepted = route_submit_resubmit_proof_line(
-                file,
-                "%42",
-                harness,
-                CommandDispatchStatus::Accepted,
-                Duration::from_millis(120),
-                1,
-            );
-            assert_eq!(
-                accepted,
-                format!(
-                    "route_submit_resubmit file=/tmp/plan.md pane=%42 harness={harness} action=submit_key key=Enter result=accepted elapsed_ms=120 attempt=1"
-                )
-            );
-            // The submit key still did not submit ⇒ result=still_visible, with the
-            // attempt number telling the operator where the bounded loop ended.
-            let still = route_submit_resubmit_proof_line(
-                file,
-                "%42",
-                harness,
-                CommandDispatchStatus::TimedOut,
-                Duration::from_millis(300),
-                3,
-            );
-            assert!(
-                still.contains("action=submit_key key=Enter result=still_visible"),
-                "unsubmitted re-poll must report still_visible: {still}"
-            );
-            assert!(
-                still.contains("attempt=3"),
-                "unsubmitted re-poll must report the bounded attempt: {still}"
-            );
-        }
-        assert_eq!(
-            resubmit_result_label(CommandDispatchStatus::Accepted),
-            "accepted"
-        );
-        assert_eq!(
-            resubmit_result_label(CommandDispatchStatus::TimedOut),
-            "still_visible"
         );
     }
 }

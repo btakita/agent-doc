@@ -270,6 +270,43 @@ pub fn route_submit_issue_message(facts: RouteSubmitObservationFacts<'_>) -> Opt
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DirectPaneResubmitProofFacts<'a> {
+    pub file_display: &'a str,
+    pub pane: &'a str,
+    pub harness_binary: &'a str,
+    pub submit_key: &'a str,
+    pub status: DirectPaneSubmitStatus,
+    pub elapsed_ms: u128,
+    pub attempt: usize,
+    pub editor_attempt_id: Option<&'a str>,
+}
+
+fn direct_pane_resubmit_result_label(status: DirectPaneSubmitStatus) -> &'static str {
+    if status == DirectPaneSubmitStatus::Accepted {
+        "accepted"
+    } else {
+        "still_visible"
+    }
+}
+
+pub fn direct_pane_resubmit_proof_line(facts: DirectPaneResubmitProofFacts<'_>) -> String {
+    let mut message = format!(
+        "route_submit_resubmit file={} pane={} harness={} action=submit_key key={} result={} elapsed_ms={} attempt={}",
+        facts.file_display,
+        facts.pane,
+        facts.harness_binary,
+        facts.submit_key,
+        direct_pane_resubmit_result_label(facts.status),
+        facts.elapsed_ms,
+        facts.attempt
+    );
+    if let Some(editor_attempt_id) = facts.editor_attempt_id {
+        message.push_str(&format!(" editor_attempt_id={editor_attempt_id}"));
+    }
+    message
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RouteLatencyStatus {
     Ok,
     OverBudget,
@@ -1294,6 +1331,47 @@ mod tests {
         assert!(
             issue.contains("result=accepted_without_dispatch_start_proof"),
             "{issue}"
+        );
+    }
+
+    #[test]
+    fn direct_pane_resubmit_proof_line_is_operator_greppable() {
+        let accepted = direct_pane_resubmit_proof_line(DirectPaneResubmitProofFacts {
+            file_display: "/tmp/plan.md",
+            pane: "%42",
+            harness_binary: "codex",
+            submit_key: "Enter",
+            status: DirectPaneSubmitStatus::Accepted,
+            elapsed_ms: 120,
+            attempt: 1,
+            editor_attempt_id: None,
+        });
+        assert_eq!(
+            accepted,
+            "route_submit_resubmit file=/tmp/plan.md pane=%42 harness=codex action=submit_key key=Enter result=accepted elapsed_ms=120 attempt=1"
+        );
+
+        let still = direct_pane_resubmit_proof_line(DirectPaneResubmitProofFacts {
+            file_display: "/tmp/plan.md",
+            pane: "%42",
+            harness_binary: "claude",
+            submit_key: "Enter",
+            status: DirectPaneSubmitStatus::TimedOut,
+            elapsed_ms: 300,
+            attempt: 3,
+            editor_attempt_id: Some("attempt_1_2"),
+        });
+        assert_eq!(
+            still,
+            "route_submit_resubmit file=/tmp/plan.md pane=%42 harness=claude action=submit_key key=Enter result=still_visible elapsed_ms=300 attempt=3 editor_attempt_id=attempt_1_2"
+        );
+        assert_eq!(
+            direct_pane_resubmit_result_label(DirectPaneSubmitStatus::Accepted),
+            "accepted"
+        );
+        assert_eq!(
+            direct_pane_resubmit_result_label(DirectPaneSubmitStatus::TimedOut),
+            "still_visible"
         );
     }
 

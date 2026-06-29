@@ -30,6 +30,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Direct-pane dispatch-start wait policy moved to `agent-doc-controller`.** The rule that dispatch-only direct-pane sends can skip the optional dispatch-start proof after accepted input, while timed-out or startup sends still await stronger proof, now lives in `agent_doc_controller::dispatch`. Route keeps only its mode flags and tracker/tmux effects.
 
+- **Direct-pane resubmit proof-line rendering moved to `agent-doc-controller`.** The `route_submit_resubmit` result label and operator-greppable message shape now live with the rest of controller dispatch logging policy. Route still supplies file, pane, harness, editor-attempt, and tmux submit-key facts, but no longer owns the formatting rule.
+
 - **Direct-pane acceptance polling moved to `agent-doc-controller`.** The stable-empty-capture window and "visible draft disappeared" acceptance state machine now live beside the direct-pane submit outcome policy in `agent_doc_controller::dispatch`. `route/dispatch.rs` still captures panes and writes diagnostics, but it adapts each poll observation into the focused controller state instead of owning the transition rule.
 
 - **Direct-pane Enter-resubmit policy moved to `agent-doc-controller`.** The default retry cap, visible-draft eligibility, bounded re-submit continuation rule, and existing-draft submit gate now live in `agent_doc_controller::dispatch`. Route keeps the env override and tmux submit-profile adapter, but no longer owns direct-pane re-submit policy wrappers.

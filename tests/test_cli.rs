@@ -3744,6 +3744,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub struct RouteSubmitObservationFacts",
         "pub fn route_submit_observation_message(",
         "pub fn route_submit_issue_message(",
+        "pub struct DirectPaneResubmitProofFacts",
+        "pub fn direct_pane_resubmit_proof_line(",
         "pub enum RouteLatencyStatus",
         "pub struct RouteLatencyFacts",
         "pub fn route_latency_status(",
@@ -3889,6 +3891,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("ControllerRouteSubmitObservationFacts")
             && route_source.contains("route_submit_observation_message(")
             && route_source.contains("route_submit_issue_message(")
+            && route_source.contains("DirectPaneResubmitProofFacts")
+            && route_source.contains("direct_pane_resubmit_proof_line")
             && route_source.contains("RouteLatencyFacts")
             && route_source.contains("RouteLatencyStatus")
             && route_source.contains("route_latency_message(")
@@ -3909,6 +3913,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn direct_pane_can_continue_enter_resubmit(",
         "fn direct_pane_can_enter_existing_draft(",
         "fn direct_pane_should_await_dispatch_start_proof(",
+        "fn resubmit_result_label(",
+        "fn route_submit_resubmit_proof_line(",
     ] {
         assert!(
             !route_dispatch_source.contains(forbidden_snippet),
@@ -3924,7 +3930,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_dispatch_source.contains("DirectPaneExistingDraftSubmitFacts")
             && route_dispatch_source.contains("direct_pane_can_enter_existing_draft(")
             && route_dispatch_source.contains("DirectPaneDispatchStartProofFacts")
-            && route_dispatch_source.contains("direct_pane_should_await_dispatch_start_proof("),
+            && route_dispatch_source.contains("direct_pane_should_await_dispatch_start_proof(")
+            && route_dispatch_source.contains("DirectPaneResubmitProofFacts")
+            && route_dispatch_source.contains("direct_pane_resubmit_proof_line("),
         "route/dispatch.rs should adapt tmux captures into focused controller direct-pane policy"
     );
     assert!(

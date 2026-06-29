@@ -25,7 +25,9 @@ pub(crate) fn check_partial_closeout_state_guard(file: &Path) -> Result<GuardRes
 
     let text = response_text_for_guards(&capture.response_body);
     let lower = text.to_ascii_lowercase();
-    if !(text_has_shipped_signal(&lower) && text_has_partial_remaining_signal(&lower)) {
+    if !(agent_doc_turn::closeout_signal::text_has_shipped_signal(&lower)
+        && agent_doc_turn::closeout_signal::text_has_partial_remaining_signal(&lower))
+    {
         return Ok(GuardResult::None);
     }
 

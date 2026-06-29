@@ -173,6 +173,44 @@ pub fn queue_audit_has_none_complete_claim(lower: &str) -> bool {
     NONE_COMPLETE.is_match(lower)
 }
 
+/// Tight list of "deferred live work" phrases that, combined with a shipped
+/// signal, indicate a `do [#id]` turn shipped a repo phase but left live
+/// deploy / sync / verification / approval work for a later phase
+/// (`#do-id-partial-closeout-state`). Kept narrow to avoid false positives on
+/// ordinary closeout prose.
+pub const PARTIAL_CLOSEOUT_REMAINING_PHRASES: &[&str] = &[
+    "not deployed",
+    "not yet deployed",
+    "deploy remains",
+    "deployment remains",
+    "deploy/",
+    "live verification",
+    "live verify",
+    "live-verify",
+    "external validation remains",
+    "awaiting approval",
+    "awaiting user",
+    "user approval",
+    "sync remains",
+    "feed sync",
+    "merchant center",
+    "live ads",
+    "remains: deploy",
+];
+
+pub fn text_has_shipped_signal(lower: &str) -> bool {
+    (lower.contains("committed")
+        || lower.contains("commit + push")
+        || lower.contains("commit and push"))
+        && lower.contains("push")
+}
+
+pub fn text_has_partial_remaining_signal(lower: &str) -> bool {
+    PARTIAL_CLOSEOUT_REMAINING_PHRASES
+        .iter()
+        .any(|phrase| lower.contains(phrase))
+}
+
 pub fn free_text_queue_marker_has_bare_heading_residue(content: &str) -> bool {
     content.contains("<!-- no-free-text-queue-head-guard -->")
         && content.lines().any(|line| line.trim() == "###")
@@ -604,6 +642,20 @@ mod tests {
         ));
         assert!(!queue_audit_collapses_partial_completion(
             "none of the queue items are complete yet; every row is still blocked on input."
+        ));
+    }
+
+    #[test]
+    fn partial_closeout_policy_detects_shipped_with_remaining_live_work() {
+        let lower = "committed and pushed the repo plus tests. live deploy and live verification remain; not deployed yet.";
+        assert!(text_has_shipped_signal(lower));
+        assert!(text_has_partial_remaining_signal(lower));
+
+        assert!(text_has_shipped_signal("commit + push completed"));
+        assert!(text_has_shipped_signal("commit and push completed"));
+        assert!(!text_has_shipped_signal("committed locally only"));
+        assert!(!text_has_partial_remaining_signal(
+            "completed the full task with no external validation left"
         ));
     }
 

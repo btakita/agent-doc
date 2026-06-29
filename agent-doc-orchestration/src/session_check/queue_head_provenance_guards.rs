@@ -500,44 +500,6 @@ fn committed_queue_contains_active_free_text_head(content: &str, head: &str) -> 
         })
 }
 
-/// Tight list of "deferred live work" phrases that, combined with a shipped
-/// signal, indicate a `do [#id]` turn shipped a repo phase but left live
-/// deploy / sync / verification / approval work for a later phase
-/// (`#do-id-partial-closeout-state`). Kept narrow to avoid false positives on
-/// ordinary closeout prose.
-pub(crate) const PARTIAL_CLOSEOUT_REMAINING_PHRASES: &[&str] = &[
-    "not deployed",
-    "not yet deployed",
-    "deploy remains",
-    "deployment remains",
-    "deploy/",
-    "live verification",
-    "live verify",
-    "live-verify",
-    "external validation remains",
-    "awaiting approval",
-    "awaiting user",
-    "user approval",
-    "sync remains",
-    "feed sync",
-    "merchant center",
-    "live ads",
-    "remains: deploy",
-];
-
-pub(crate) fn text_has_shipped_signal(lower: &str) -> bool {
-    (lower.contains("committed")
-        || lower.contains("commit + push")
-        || lower.contains("commit and push"))
-        && lower.contains("push")
-}
-
-pub(crate) fn text_has_partial_remaining_signal(lower: &str) -> bool {
-    PARTIAL_CLOSEOUT_REMAINING_PHRASES
-        .iter()
-        .any(|phrase| lower.contains(phrase))
-}
-
 /// Open (`[ ]`/gated, not done) ids that currently live in a `review`/gated
 /// component. Used to confirm a directed id gated this cycle is still gated
 /// (not subsequently un-gated or completed) before the blocked-closeout guard

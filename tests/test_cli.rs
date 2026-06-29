@@ -2384,6 +2384,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub const QUEUE_AUDIT_SUBSTEP_COMPLETE_PHRASES",
         "pub fn queue_audit_collapses_partial_completion",
         "pub fn queue_audit_has_none_complete_claim",
+        "pub const PARTIAL_CLOSEOUT_REMAINING_PHRASES",
+        "pub fn text_has_shipped_signal",
+        "pub fn text_has_partial_remaining_signal",
         "pub fn free_text_queue_marker_has_bare_heading_residue",
         "pub fn response_head_plausibly_answers",
         "pub fn response_clearly_completes_pending_id",
@@ -2477,6 +2480,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub(crate) fn blocked_signal_tied_to_id",
         "pub(crate) fn free_text_queue_marker_has_bare_heading_residue",
         "pub(crate) fn response_head_plausibly_answers",
+        "pub(crate) const PARTIAL_CLOSEOUT_REMAINING_PHRASES",
+        "pub(crate) fn text_has_shipped_signal",
+        "pub(crate) fn text_has_partial_remaining_signal",
     ] {
         assert!(
             !provenance_guards.contains(forbidden),
@@ -2490,6 +2496,30 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         assert!(
             provenance_guards.contains(required),
             "queue_head_provenance_guards should call focused closeout signal policy directly: {required}"
+        );
+    }
+
+    let partial_staging = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/partial_staging.rs"),
+    )
+    .unwrap();
+    for forbidden in [
+        "pub(crate) const PARTIAL_CLOSEOUT_REMAINING_PHRASES",
+        "pub(crate) fn text_has_shipped_signal",
+        "pub(crate) fn text_has_partial_remaining_signal",
+    ] {
+        assert!(
+            !partial_staging.contains(forbidden),
+            "partial_staging must not re-own partial closeout signal policy: {forbidden}"
+        );
+    }
+    for required in [
+        "agent_doc_turn::closeout_signal::text_has_shipped_signal",
+        "agent_doc_turn::closeout_signal::text_has_partial_remaining_signal",
+    ] {
+        assert!(
+            partial_staging.contains(required),
+            "partial_staging should call focused closeout signal policy directly: {required}"
         );
     }
 

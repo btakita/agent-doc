@@ -10,6 +10,9 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_controller"
 
 [dependencies]
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.65" }
 agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.34.65" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.65" }
+hex = "0.4"
 serde = { version = "1", features = ["derive"] }
+sha2 = "0.11"

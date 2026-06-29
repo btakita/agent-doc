@@ -1,5 +1,6 @@
 //! Pure controller dispatch admission helpers.
 
+use sha2::{Digest, Sha256};
 use std::time::Duration;
 
 pub const DISPATCH_COALESCED_IN_FLIGHT_MARKER: &str = "failed_stage=coalesced_in_flight";
@@ -454,6 +455,91 @@ pub fn duplicate_pane_policy_error_message(facts: DuplicatePanePolicyErrorFacts<
     }
     lines.push(format!("Then rerun: agent-doc {}", facts.file_path));
     lines.join("\n")
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RouteDispatchBugReportItemFacts<'a> {
+    pub document_display: &'a str,
+    pub document_id: &'a str,
+    pub pane: &'a str,
+    pub phase: &'a str,
+    pub issue: &'a str,
+    pub result: &'a str,
+    pub elapsed_ms: u128,
+    pub actor_generation: Option<u64>,
+    pub editor_attempt_id: Option<&'a str>,
+    pub dispatch_proof_state: Option<&'a str>,
+    pub diagnostic_path: Option<&'a str>,
+    pub ops_log_path: Option<&'a str>,
+}
+
+fn route_dispatch_bug_report_hash(content: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(content.as_bytes());
+    hex::encode(hasher.finalize())
+}
+
+fn route_dispatch_bug_report_field(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+    if out.is_empty() {
+        "none".to_string()
+    } else {
+        out
+    }
+}
+
+pub fn route_dispatch_bug_report_item(
+    facts: RouteDispatchBugReportItemFacts<'_>,
+) -> Result<String, String> {
+    let component = format!("route/{}", route_dispatch_bug_report_field(facts.phase));
+    let content_hash = route_dispatch_bug_report_hash(&format!(
+        "{}:{}:{}",
+        facts.document_id, facts.phase, facts.issue
+    ));
+    let symptom_key = agent_doc_element_backlog::backlog::SymptomDedupeKey::new(
+        "run_agent_doc_route_dispatch_failure",
+        facts.document_id,
+        component,
+        format!("sha256:{content_hash}"),
+    )
+    .map_err(|err| err.to_string())?;
+    let generation = facts
+        .actor_generation
+        .map(|generation| generation.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let editor_attempt = facts.editor_attempt_id.unwrap_or("unknown");
+    let proof = facts.dispatch_proof_state.unwrap_or("none");
+    let diagnostic_path = facts.diagnostic_path.unwrap_or("none");
+    let ops_log_path = facts.ops_log_path.unwrap_or("unknown");
+    let marker = format!(
+        "route_submit_issue(issue={},phase={},result={})",
+        facts.issue,
+        route_dispatch_bug_report_field(facts.phase),
+        route_dispatch_bug_report_field(facts.result)
+    );
+
+    Ok(format!(
+        "JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class={} document={} stage={} pane={} actor_generation={} editor_attempt_id={} dispatch_proof_state={} elapsed_ms={} diagnostic_path={} ops_log_path={} ops_log_marker={} {}",
+        facts.issue,
+        facts.document_display,
+        facts.phase,
+        facts.pane,
+        generation,
+        editor_attempt,
+        proof,
+        facts.elapsed_ms,
+        diagnostic_path,
+        ops_log_path,
+        marker,
+        symptom_key.marker()
+    ))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1659,6 +1745,48 @@ mod tests {
         assert!(rendered.contains("tmux kill-pane -t %42"));
         assert!(rendered.contains("agent-doc tasks/agent-doc/agent-doc-bugs2.md"));
         assert!(rendered.contains("split-window failed alongside pane %42"));
+    }
+
+    #[test]
+    fn route_dispatch_bug_report_item_includes_required_evidence() {
+        let item = route_dispatch_bug_report_item(RouteDispatchBugReportItemFacts {
+            document_display: "/tmp/run-agent-doc.md",
+            document_id: "run-agent-doc",
+            pane: "%7",
+            phase: "dispatch_start_proof",
+            issue: "accepted_without_dispatch_start_proof",
+            result: "accepted_without_dispatch_start_proof",
+            elapsed_ms: 10_000,
+            actor_generation: Some(1),
+            editor_attempt_id: Some("attempt_1"),
+            dispatch_proof_state: None,
+            diagnostic_path: Some("/tmp/.agent-doc/logs/route-submit/snapshot.txt"),
+            ops_log_path: Some("/tmp/.agent-doc/logs/ops.log"),
+        })
+        .unwrap();
+
+        assert!(item.contains("#jbrunautobug"), "{item}");
+        assert!(item.contains("#agent-doc-bug"), "{item}");
+        assert!(
+            item.contains("failure_class=accepted_without_dispatch_start_proof"),
+            "{item}"
+        );
+        assert!(item.contains("stage=dispatch_start_proof"), "{item}");
+        assert!(item.contains("pane=%7"), "{item}");
+        assert!(item.contains("actor_generation=1"), "{item}");
+        assert!(item.contains("dispatch_proof_state=none"), "{item}");
+        assert!(item.contains("diagnostic_path="), "{item}");
+        assert!(item.contains("ops_log_path="), "{item}");
+        assert!(
+            item.contains(
+                "ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof"
+            ),
+            "{item}"
+        );
+        assert!(
+            item.contains("[symptom-key invariant=run_agent_doc_route_dispatch_failure"),
+            "{item}"
+        );
     }
 
     #[test]

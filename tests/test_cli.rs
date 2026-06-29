@@ -3801,6 +3801,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn route_busy_queued_diagnostic_message(",
         "pub struct DuplicatePanePolicyErrorFacts",
         "pub fn duplicate_pane_policy_error_message(",
+        "pub struct RouteDispatchBugReportItemFacts",
+        "pub fn route_dispatch_bug_report_item(",
         "pub struct DispatchOnlyBusyRefusalFacts",
         "pub fn dispatch_only_busy_refusal_message(",
     ] {
@@ -3844,6 +3846,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn busy_route_diagnostic_message(",
         "fn busy_route_queued_diagnostic_message(",
         "fn format_duplicate_pane_policy_error(",
+        "fn route_dispatch_bug_report_item(",
         "fn dispatch_only_busy_refusal_message(",
     ] {
         assert!(
@@ -3963,6 +3966,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("route_busy_diagnostic_message(")
             && route_source.contains("RouteBusyQueuedDiagnosticFacts")
             && route_source.contains("route_busy_queued_diagnostic_message(")
+            && route_source.contains("RouteDispatchBugReportItemFacts")
+            && route_source.contains("route_dispatch_bug_report_item(")
             && route_source.contains("DispatchOnlyBusyRefusalFacts")
             && route_source.contains("controller_dispatch_only_busy_refusal_message(")
             && route_source.contains("DispatchActorState")

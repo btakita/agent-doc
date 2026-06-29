@@ -191,8 +191,8 @@ use agent_doc_controller::dispatch::{
     DispatchActorState, DispatchDrainRetryDecision, DispatchOnlyBusyRefusalFacts,
     DispatchRuntimeHealth, DispatchStartProofDecision, DispatchStartProofFacts,
     DuplicatePanePolicyErrorFacts, MissingCycleAckFacts, RetryBudget, RouteBusyDiagnosticFacts,
-    RouteBusyQueuedDiagnosticFacts, RouteLatencyFacts, RouteLatencyStatus,
-    RouteStartupMissDiagnosticFacts, RouteSubmitObservation,
+    RouteBusyQueuedDiagnosticFacts, RouteDispatchBugReportItemFacts, RouteLatencyFacts,
+    RouteLatencyStatus, RouteStartupMissDiagnosticFacts, RouteSubmitObservation,
     RouteSubmitObservationFacts as ControllerRouteSubmitObservationFacts, RoutedCycleAckFacts,
     RoutedDispatchStartProof, RoutedTriggerPayloadFacts, STARTING_ACTOR_TIMEOUT_REASON,
     StartingTimeoutActorFacts, StartupMissRouteFacts, actor_blocked_by_starting_timeout,
@@ -211,8 +211,8 @@ use agent_doc_controller::dispatch::{
     dispatch_only_starting_pane_recovery_retry_budget,
     dispatch_only_starting_pane_recovery_timeout_for_binary, duplicate_pane_policy_error_message,
     effective_authoritative_actor_state, route_busy_diagnostic_message,
-    route_busy_queued_diagnostic_message, route_latency_message, route_latency_status,
-    route_startup_miss_diagnostic_message, route_submit_issue_message,
+    route_busy_queued_diagnostic_message, route_dispatch_bug_report_item, route_latency_message,
+    route_latency_status, route_startup_miss_diagnostic_message, route_submit_issue_message,
     route_submit_observation_message, routed_trigger_payload_rejection,
     should_optimistically_accept_missing_cycle_ack, should_require_routed_cycle_ack,
     starting_timeout_blocked_actor_can_recover, startup_miss_requires_fresh_start,
@@ -658,58 +658,27 @@ struct RouteDispatchBugReportFacts<'a> {
     diagnostic_path: Option<&'a Path>,
 }
 
-fn route_dispatch_bug_report_item(facts: RouteDispatchBugReportFacts<'_>) -> Result<String> {
-    let doc_id = crate::pending_cmd::doc_id_for(facts.file);
-    let component = format!("route/{}", route_snapshot_field(facts.phase));
-    let content_hash =
-        crate::ops_log::content_hash(&format!("{}:{}:{}", doc_id, facts.phase, facts.issue));
-    let symptom_key = agent_doc_element_backlog::backlog::SymptomDedupeKey::new(
-        "run_agent_doc_route_dispatch_failure",
-        doc_id,
-        component,
-        format!("sha256:{content_hash}"),
-    )?;
-    let generation = route_current_actor_generation(facts.file)
-        .map(|generation| generation.to_string())
-        .unwrap_or_else(|| "unknown".to_string());
-    let editor_attempt = editor_route_attempt_id().unwrap_or_else(|| "unknown".to_string());
-    let proof = facts
-        .proof
-        .map(|proof| proof.dispatch_stage_label().to_string())
-        .unwrap_or_else(|| "none".to_string());
-    let diagnostic_path = facts
-        .diagnostic_path
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|| "none".to_string());
-    let ops_log_path = route_ops_log_path(facts.file)
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|| "unknown".to_string());
-    let marker = format!(
-        "route_submit_issue(issue={},phase={},result={})",
-        facts.issue,
-        route_snapshot_field(facts.phase),
-        route_snapshot_field(facts.result)
-    );
-
-    Ok(format!(
-        "JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class={} document={} stage={} pane={} actor_generation={} editor_attempt_id={} dispatch_proof_state={} elapsed_ms={} diagnostic_path={} ops_log_path={} ops_log_marker={} {}",
-        facts.issue,
-        facts.file.display(),
-        facts.phase,
-        facts.pane,
-        generation,
-        editor_attempt,
-        proof,
-        facts.elapsed.as_millis(),
-        diagnostic_path,
-        ops_log_path,
-        marker,
-        symptom_key.marker()
-    ))
-}
-
 fn file_route_dispatch_bug_report(facts: RouteDispatchBugReportFacts<'_>) {
-    let item = match route_dispatch_bug_report_item(facts) {
+    let document_display = facts.file.display().to_string();
+    let document_id = crate::pending_cmd::doc_id_for(facts.file);
+    let editor_attempt_id = editor_route_attempt_id();
+    let dispatch_proof_state = facts.proof.map(|proof| proof.dispatch_stage_label());
+    let diagnostic_path = facts.diagnostic_path.map(|path| path.display().to_string());
+    let ops_log_path = route_ops_log_path(facts.file).map(|path| path.display().to_string());
+    let item = match route_dispatch_bug_report_item(RouteDispatchBugReportItemFacts {
+        document_display: &document_display,
+        document_id: &document_id,
+        pane: facts.pane,
+        phase: facts.phase,
+        issue: facts.issue,
+        result: facts.result,
+        elapsed_ms: facts.elapsed.as_millis(),
+        actor_generation: route_current_actor_generation(facts.file),
+        editor_attempt_id: editor_attempt_id.as_deref(),
+        dispatch_proof_state,
+        diagnostic_path: diagnostic_path.as_deref(),
+        ops_log_path: ops_log_path.as_deref(),
+    }) {
         Ok(item) => item,
         Err(err) => {
             crate::ops_log::log_op(
@@ -721,8 +690,7 @@ fn file_route_dispatch_bug_report(facts: RouteDispatchBugReportFacts<'_>) {
                     facts.harness.binary,
                     facts.phase,
                     facts.issue,
-                    agent_doc_secret_redact::redact(&err.to_string())
-                        .replace(char::is_whitespace, "_")
+                    agent_doc_secret_redact::redact(&err).replace(char::is_whitespace, "_")
                 ),
             );
             return;
@@ -6951,65 +6919,6 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
         assert!(ops.contains("capture_hash="), "{ops}");
         assert!(ops.contains("snapshot_path="), "{ops}");
     }
-    #[test]
-    fn route_dispatch_bug_report_item_includes_required_evidence() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("run-agent-doc.md");
-        std::fs::write(
-            &doc,
-            "---\nagent_doc_session: test\n---\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n",
-        )
-        .unwrap();
-        crate::session_actor::project_binding_in(
-            dir.path(),
-            doc.to_str().unwrap(),
-            "session-1",
-            "%7",
-            "@1",
-            "test",
-            "route",
-        )
-        .unwrap();
-        let diagnostic = dir.path().join(".agent-doc/logs/route-submit/snapshot.txt");
-        let facts = RouteDispatchBugReportFacts {
-            file: &doc,
-            pane: "%7",
-            harness: &HarnessConfig::codex(),
-            phase: "dispatch_start_proof",
-            issue: "accepted_without_dispatch_start_proof",
-            result: "accepted_without_dispatch_start_proof",
-            elapsed: Duration::from_secs(10),
-            proof: None,
-            diagnostic_path: Some(&diagnostic),
-        };
-
-        let item = route_dispatch_bug_report_item(facts).unwrap();
-
-        assert!(item.contains("#jbrunautobug"), "{item}");
-        assert!(item.contains("#agent-doc-bug"), "{item}");
-        assert!(
-            item.contains("failure_class=accepted_without_dispatch_start_proof"),
-            "{item}"
-        );
-        assert!(item.contains("stage=dispatch_start_proof"), "{item}");
-        assert!(item.contains("pane=%7"), "{item}");
-        assert!(item.contains("actor_generation=1"), "{item}");
-        assert!(item.contains("dispatch_proof_state=none"), "{item}");
-        assert!(item.contains("diagnostic_path="), "{item}");
-        assert!(item.contains("ops_log_path="), "{item}");
-        assert!(
-            item.contains(
-                "ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof"
-            ),
-            "{item}"
-        );
-        assert!(
-            item.contains("[symptom-key invariant=run_agent_doc_route_dispatch_failure"),
-            "{item}"
-        );
-    }
-
     #[test]
     fn route_dispatch_bug_report_dedupes_same_document_stage() {
         let dir = tempfile::tempdir().unwrap();

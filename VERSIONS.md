@@ -64,6 +64,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Duplicate-pane route diagnostic policy moved to `agent-doc-controller`.** The fail-closed message for refusing to provision duplicate route panes now lives in `agent_doc_controller::dispatch`. Route startup still supplies tmux session, file, anchor-pane, and split-failure facts, but the inspection/cleanup command template is no longer owned by orchestration.
 
+- **Route dispatch bug-report item policy moved to `agent-doc-controller`.** The `#jbrunautobug` backlog item template, symptom dedupe marker, route-submit issue marker, and dispatch proof evidence fields now live in `agent_doc_controller::dispatch`. Route still supplies actor generation, editor attempt, diagnostic path, ops-log path, and performs the configured target-document write.
+
 - **Tmux submit profile policy moved to `agent-doc-tmux-commands`.** The harness submit profile, submit-mode/key vocabulary, trailing-newline trimming, and text/Enter command builders now live in `agent_doc_tmux_commands`. `sessions` remains the effect adapter that executes tmux commands, while route/start/idle-watch import the focused command policy directly instead of routing through `sessions`.
 
 - **Route submit diagnostics no longer use an orchestration wrapper.** Route dispatch now calls `agent_doc_tmux_commands::tmux_submit_transform_for_harness` and `tmux_submit_key_for_harness` directly for text-submit diagnostics. The local `routed_trigger_submit_diagnostic` facade is deleted and covered by the tmux command boundary guard.

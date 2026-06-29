@@ -3182,6 +3182,48 @@ fn test_agent_doc_queue_owns_continuation_guidance_policy() {
 }
 
 #[test]
+fn test_agent_doc_element_review_owns_review_list_projection() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let review_model =
+        fs::read_to_string(manifest_dir.join("agent-doc-element-review/src/lib.rs")).unwrap();
+    for required in [
+        "pub struct ReviewItemView",
+        "pub struct ReviewListFilter",
+        "pub fn review_item_views_from_content",
+    ] {
+        assert!(
+            review_model.contains(required),
+            "agent-doc-element-review must own review-list projection API"
+        );
+    }
+
+    let pending_cmd =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/pending_cmd.rs"))
+            .unwrap();
+    for forbidden in [
+        "pub struct ReviewItemView",
+        "pub struct ReviewListFilter",
+        "fn extract_review_tags",
+        "fn extract_review_next",
+    ] {
+        assert!(
+            !pending_cmd.contains(forbidden),
+            "pending_cmd must stay a file-IO adapter, not a review projection facade"
+        );
+    }
+    assert!(
+        pending_cmd.contains("agent_doc_element_review::review_item_views_from_content"),
+        "pending_cmd should delegate review projection to agent-doc-element-review directly"
+    );
+
+    let cli = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
+    assert!(
+        cli.contains("agent_doc_element_review::ReviewListFilter"),
+        "CLI should construct review filters from the focused review crate"
+    );
+}
+
+#[test]
 fn test_focus_no_stash_promote_compatibility_shim_is_removed() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     for relative in [

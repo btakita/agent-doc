@@ -3831,7 +3831,7 @@ fn main() -> anyhow::Result<()> {
                 no_next,
                 json,
             } => {
-                let filter = agent_doc_orchestration::pending_cmd::ReviewListFilter {
+                let filter = agent_doc_element_review::ReviewListFilter {
                     gate_type,
                     tag,
                     has_next: if has_next {

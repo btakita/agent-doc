@@ -31,6 +31,7 @@ dependencies = [
  "agent-doc-element-backlog",
  "agent-doc-element-boundary",
  "agent-doc-element-queue",
+ "agent-doc-element-review",
  "agent-doc-ffi",
  "agent-doc-frontmatter",
  "agent-doc-fs",
@@ -213,6 +214,9 @@ name = "agent-doc-element-review"
 version = "0.34.65"
 dependencies = [
  "agent-doc-element",
+ "agent-doc-element-backlog",
+ "anyhow",
+ "serde",
 ]
 
 [[package]]
@@ -322,6 +326,7 @@ dependencies = [
  "agent-doc-element-backlog",
  "agent-doc-element-boundary",
  "agent-doc-element-queue",
+ "agent-doc-element-review",
  "agent-doc-frontmatter",
  "agent-doc-fs",
  "agent-doc-log-time",

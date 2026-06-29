@@ -22,6 +22,7 @@ use agent_doc_element::element::{
     is_backlog_component, is_icebox_component, is_review_component, is_tracked_work_component,
 };
 use agent_doc_element_backlog::backlog;
+use agent_doc_element_review::{ReviewItemView, ReviewListFilter};
 
 thread_local! {
     static FORCE_DISK_PENDING_WRITE: Cell<bool> = const { Cell::new(false) };
@@ -442,68 +443,6 @@ fn ungate_task_text(normalized_id: &str) -> String {
     )
 }
 
-/// `#jb-run-agent-doc-response-queue-contamination` sibling feature: for each
-/// A token-efficient view of one gated `agent:review` item (`#review-list-query`).
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct ReviewItemView {
-    pub id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub gate_type: Option<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub tags: Vec<String>,
-    /// Extracted `NEXT:` annotation tail, if present (the actionable next step).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next: Option<String>,
-    /// First line of the item text with tags stripped, bounded for a quick scan.
-    pub summary: String,
-}
-
-/// Filter for [`list_review_items`]. `None` fields are unconstrained.
-#[derive(Debug, Clone, Default)]
-pub struct ReviewListFilter {
-    pub gate_type: Option<String>,
-    pub tag: Option<String>,
-    /// `Some(true)` keeps only items with a `NEXT:` annotation, `Some(false)`
-    /// only those without (the stale set to triage), `None` keeps all.
-    pub has_next: Option<bool>,
-}
-
-/// Extract the hashtag tokens (`#foo-bar`) appearing in an item's text.
-fn extract_review_tags(text: &str) -> Vec<String> {
-    let mut tags = Vec::new();
-    for raw in text.split_whitespace() {
-        let tok = raw.trim_matches(|c: char| !(c.is_alphanumeric() || c == '#' || c == '-'));
-        if tok.len() > 1
-            && tok.starts_with('#')
-            && tok[1..].chars().all(|c| c.is_alphanumeric() || c == '-')
-            && !tags.iter().any(|t| t == tok)
-        {
-            tags.push(tok.to_string());
-        }
-    }
-    tags
-}
-
-/// Extract the `NEXT:` annotation tail (case-insensitive), bounded.
-fn extract_review_next(text: &str) -> Option<String> {
-    let lower = text.to_ascii_lowercase();
-    let pos = lower.find("next:")?;
-    let tail = text[pos + "next:".len()..].trim();
-    let tail = tail.lines().next().unwrap_or(tail).trim();
-    if tail.is_empty() {
-        return None;
-    }
-    Some(bounded(tail, 160))
-}
-
-fn bounded(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        return s.to_string();
-    }
-    let truncated: String = s.chars().take(max).collect();
-    format!("{truncated}…")
-}
-
 /// Token-efficient query of gated `agent:review` items (`#review-list-query`).
 ///
 /// Returns one [`ReviewItemView`] per gated item, with extracted hashtags and the
@@ -511,49 +450,7 @@ fn bounded(s: &str, max: usize) -> String {
 /// without reading the whole component. Read-only.
 pub fn list_review_items(file: &Path, filter: &ReviewListFilter) -> Result<Vec<ReviewItemView>> {
     let content = std::fs::read_to_string(file)?;
-    let components = agent_doc_element::element::parse(&content)?;
-    let mut views: Vec<ReviewItemView> = Vec::new();
-    for c in components
-        .iter()
-        .filter(|c| agent_doc_element::element::is_review_component(&c.name))
-    {
-        let (_, items, _) = backlog::parse_items(c.content(&content));
-        for item in items
-            .into_iter()
-            .filter(|i| i.state == backlog::PendingState::Gated)
-        {
-            let id = backlog::normalize_pending_id(&item.id);
-            if id.is_empty() {
-                continue;
-            }
-            let tags = extract_review_tags(&item.text);
-            let next = extract_review_next(&item.text);
-            let first_line = item.text.lines().next().unwrap_or(&item.text).trim();
-            let summary = bounded(first_line, 100);
-            views.push(ReviewItemView {
-                id,
-                gate_type: item.gate_type.clone(),
-                tags,
-                next,
-                summary,
-            });
-        }
-    }
-    if let Some(gt) = filter.gate_type.as_deref() {
-        views.retain(|v| v.gate_type.as_deref() == Some(gt));
-    }
-    if let Some(tag) = filter.tag.as_deref() {
-        let want = if tag.starts_with('#') {
-            tag.to_string()
-        } else {
-            format!("#{tag}")
-        };
-        views.retain(|v| v.tags.iter().any(|t| t == &want));
-    }
-    if let Some(has_next) = filter.has_next {
-        views.retain(|v| v.next.is_some() == has_next);
-    }
-    Ok(views)
+    agent_doc_element_review::review_item_views_from_content(&content, filter)
 }
 
 /// gated item in `agent:review`, ensure a backlog follow-up task exists to drive

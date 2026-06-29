@@ -4106,6 +4106,7 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         "pub enum ProofRetryDecision",
         "pub fn resolve_managed_proof_policy(",
         "pub fn proof_retry_decision(",
+        "pub fn managed_capability_proof_status_message(",
     ] {
         assert!(
             executor_policy.contains(required_snippet),
@@ -4175,6 +4176,7 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         "enum AutoTriggerNoPromptAction",
         "fn auto_trigger_clear_cooldown_action(",
         "fn auto_trigger_no_prompt_action(",
+        "fn managed_capability_proof_status_message(",
     ] {
         assert!(
             !start.contains(forbidden_snippet),
@@ -4184,6 +4186,9 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
     assert!(
         start.contains("agent_doc_turn_executor::capability_proof::resolve_managed_proof_policy")
             && start.contains("agent_doc_turn_executor::capability_proof::proof_retry_decision")
+            && start.contains(
+                "use agent_doc_turn_executor::capability_proof::managed_capability_proof_status_message;"
+            )
             && start.contains("agent_doc_turn_executor::auto_trigger::{"),
         "start should call focused turn-executor policy directly"
     );

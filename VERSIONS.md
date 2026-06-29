@@ -12,6 +12,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Managed capability-proof retry policy moved to `agent-doc-turn-executor`.** The proof retry budget, probe timeout defaults, frontmatter/config precedence, and exponential backoff decision now live in `agent_doc_turn_executor::capability_proof`. The supervisor start path gathers frontmatter/config facts and calls the focused API directly, while `agent::mod` keeps only backend resolution/runtime helpers and no longer owns the policy or retry decision.
 
+- **Managed capability-proof status message policy moved to `agent-doc-turn-executor`.** The operator-facing managed proof status line now lives beside the retry/timeout policy in `agent_doc_turn_executor::capability_proof`. The start supervisor path still handles tmux display and stderr side effects, but it no longer owns the message template.
+
 - **Auto-trigger readiness policy moved to `agent-doc-turn-executor`.** The auto-trigger monitor, clear-cooldown deadline action, no-prompt hard-deadline action, and timeout/cancelled stop outcome now live in `agent_doc_turn_executor::auto_trigger`. The start supervisor thread keeps only sleep, pane inspection, logging, and startup-miss side effects while calling the focused executor API directly.
 
 - **Codex resume launch policy moved to `agent-doc-turn-executor`.** The `codex resume` restart argument transformation now lives in `agent_doc_turn_executor::codex_launch`, including sandbox flag translation, conflicting sandbox rejection, missing-value diagnostics, and `--add-dir` stripping for resume. `harness.rs` keeps only harness selection and calls the focused executor API directly.

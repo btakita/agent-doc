@@ -158,6 +158,7 @@ use agent_doc_turn_executor::auto_trigger::{
     AutoTriggerCooldownAction, AutoTriggerMonitor, AutoTriggerNoPromptAction,
     AutoTriggerStopOutcome, auto_trigger_clear_cooldown_action, auto_trigger_no_prompt_action,
 };
+use agent_doc_turn_executor::capability_proof::managed_capability_proof_status_message;
 
 use crate::{config, project_config_io, sessions};
 
@@ -1880,10 +1881,6 @@ fn spawn_managed_capability_proof_thread(
             }
         })
         .expect("spawn capability proof thread")
-}
-
-fn managed_capability_proof_status_message(harness_binary: &str, event: &str) -> String {
-    format!("[start] managed {harness_binary} capability proof: {event}")
 }
 
 fn display_managed_capability_proof_status(
@@ -3707,18 +3704,6 @@ Done.
             AutoTriggerOutcome::Sent
         );
         assert_eq!(written.lock().unwrap().as_slice(), b"/clear\r");
-    }
-    #[test]
-    fn managed_capability_proof_status_message_names_harness() {
-        let message = managed_capability_proof_status_message(
-            "opencode",
-            "opencode_capability_proof status=proven network=proven",
-        );
-
-        assert_eq!(
-            message,
-            "[start] managed opencode capability proof: opencode_capability_proof status=proven network=proven"
-        );
     }
     #[test]
     fn auto_trigger_inject_command_honors_late_cancel_before_write() {

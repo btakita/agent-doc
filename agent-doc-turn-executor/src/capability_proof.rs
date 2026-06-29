@@ -108,6 +108,10 @@ pub fn proof_retry_decision(
     ProofRetryDecision::Retry { backoff }
 }
 
+pub fn managed_capability_proof_status_message(harness_binary: &str, event: &str) -> String {
+    format!("[start] managed {harness_binary} capability proof: {event}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,6 +182,19 @@ mod tests {
             ProofRetryDecision::Retry {
                 backoff: MAX_MANAGED_PROOF_BACKOFF
             }
+        );
+    }
+
+    #[test]
+    fn managed_capability_proof_status_message_names_harness() {
+        let message = managed_capability_proof_status_message(
+            "opencode",
+            "opencode_capability_proof status=proven network=proven",
+        );
+
+        assert_eq!(
+            message,
+            "[start] managed opencode capability proof: opencode_capability_proof status=proven network=proven"
         );
     }
 }

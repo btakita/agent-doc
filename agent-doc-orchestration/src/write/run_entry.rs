@@ -200,8 +200,8 @@ pub fn run_template(
 
     // Sanitize component tags in patch content and unmatched text to prevent
     // parser corruption and duplicate exchange blocks (#dupeexchangeblock).
-    sanitize_patches(&mut patches);
-    sanitize_unmatched(&mut unmatched);
+    template::sanitize::sanitize_patches(&mut patches);
+    template::sanitize::sanitize_unmatched(&mut unmatched);
 
     let normalized = normalize_backlog_patch_response(
         file,
@@ -502,8 +502,8 @@ pub fn run_stream(
 
     // Sanitize component tags in patch content and unmatched text to prevent
     // parser corruption and duplicate exchange blocks (#dupeexchangeblock).
-    sanitize_patches(&mut patches);
-    sanitize_unmatched(&mut unmatched);
+    template::sanitize::sanitize_patches(&mut patches);
+    template::sanitize::sanitize_unmatched(&mut unmatched);
 
     let normalized = normalize_backlog_patch_response(
         file,
@@ -1149,8 +1149,8 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
 
     // Sanitize component tags in patch content and unmatched text to prevent
     // parser corruption and duplicate exchange blocks (#dupeexchangeblock).
-    sanitize_patches(&mut patches);
-    sanitize_unmatched(&mut unmatched);
+    template::sanitize::sanitize_patches(&mut patches);
+    template::sanitize::sanitize_unmatched(&mut unmatched);
 
     let normalized = normalize_backlog_patch_response(
         file,
@@ -1532,8 +1532,8 @@ pub fn apply_template_from_string_with_options(
 
     // Sanitize component tags in patch content and unmatched text to prevent
     // parser corruption and duplicate exchange blocks (#dupeexchangeblock).
-    sanitize_patches(&mut patches);
-    sanitize_unmatched(&mut unmatched);
+    template::sanitize::sanitize_patches(&mut patches);
+    template::sanitize::sanitize_unmatched(&mut unmatched);
 
     let normalized = normalize_backlog_patch_response(file, &content, patches, unmatched, false)?;
     let patches = normalized.patches;

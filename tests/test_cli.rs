@@ -5453,6 +5453,77 @@ fn test_agent_doc_template_owns_patchback_policy() {
 }
 
 #[test]
+fn test_agent_doc_template_owns_patch_sanitization_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let template_sanitize =
+        fs::read_to_string(manifest_dir.join("agent-doc-template/src/sanitize.rs")).unwrap();
+    for required_snippet in [
+        "pub fn sanitize_component_tags",
+        "pub fn sanitize_patches",
+        "pub fn sanitize_unmatched",
+        "fn utf8_char_len",
+        "fn find_comment_close",
+    ] {
+        assert!(
+            template_sanitize.contains(required_snippet),
+            "agent-doc-template must own template patch sanitization policy: {required_snippet}"
+        );
+    }
+
+    let template_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-template/src/lib.rs")).unwrap();
+    assert!(
+        template_lib.contains("pub mod sanitize;"),
+        "agent-doc-template should expose sanitization through its owning module"
+    );
+    assert!(
+        !template_lib.contains("pub use sanitize"),
+        "agent-doc-template should not add a sanitization root facade"
+    );
+
+    let write_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    for forbidden_snippet in [
+        "pub fn sanitize_component_tags",
+        "pub fn sanitize_patches",
+        "pub fn sanitize_unmatched",
+        "fn utf8_char_len",
+        "fn find_comment_close",
+    ] {
+        assert!(
+            !write_source.contains(forbidden_snippet),
+            "orchestration must not re-own or facade template sanitization policy: {forbidden_snippet}"
+        );
+    }
+
+    let write_run_entry =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/run_entry.rs"))
+            .unwrap();
+    let write_materialize =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/materialize.rs"))
+            .unwrap();
+    let run_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/run.rs")).unwrap();
+    for (source, content) in [
+        (
+            "agent-doc-orchestration/src/write/run_entry.rs",
+            write_run_entry.as_str(),
+        ),
+        (
+            "agent-doc-orchestration/src/write/materialize.rs",
+            write_materialize.as_str(),
+        ),
+        ("agent-doc-orchestration/src/run.rs", run_source.as_str()),
+    ] {
+        assert!(
+            content.contains("agent_doc_template::sanitize")
+                || content.contains("template::sanitize"),
+            "template write adapters should call focused sanitization directly in {source}"
+        );
+    }
+}
+
+#[test]
 fn test_codex_plugin_manifest_omits_invalid_claude_skill_path() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest_path = manifest_dir.join(".codex-plugin/plugin.json");

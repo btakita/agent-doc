@@ -680,8 +680,8 @@ pub fn canonicalize_response_for_capture(file: &Path, response: &str) -> Result<
         return Ok(response.to_string());
     }
 
-    sanitize_patches(&mut patches);
-    sanitize_unmatched(&mut unmatched);
+    template::sanitize::sanitize_patches(&mut patches);
+    template::sanitize::sanitize_unmatched(&mut unmatched);
     let normalized =
         normalize_backlog_patch_response(file, &current_content, patches, unmatched, false)?;
     Ok(normalized

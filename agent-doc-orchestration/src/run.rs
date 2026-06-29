@@ -1861,7 +1861,7 @@ fn apply_template_response(
         .with_context(|| format!("failed to read {}", file.display()))?;
     let (mut patches, unmatched) =
         template::parse_patches(response).context("failed to parse patch blocks from response")?;
-    write::sanitize_patches(&mut patches);
+    agent_doc_template::sanitize::sanitize_patches(&mut patches);
     let normalized =
         write::normalize_backlog_patch_response(file, &current_content, patches, unmatched, false)?;
     let patches = normalized.patches;

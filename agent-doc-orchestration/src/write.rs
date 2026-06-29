@@ -103,9 +103,9 @@
 //!   either concrete execution evidence or a concrete blocker. This is the
 //!   binary-side backstop for the executable-directive contract.
 //!
-//! - `sanitize_component_tags`: escapes `<!-- agent:NAME -->` and
-//!   `<!-- /agent:NAME -->` markers appearing in patch content to prevent the
-//!   component parser from treating them as real delimiters.
+//! - `agent_doc_template::sanitize`: escapes `<!-- agent:NAME -->` and
+//!   `<!-- /agent:NAME -->` markers appearing in patch content before the
+//!   component parser can treat them as real delimiters.
 //!
 //! - `strip_assistant_heading`: strips a leading `## Assistant` heading and/or
 //!   trailing `## User` heading from a response string. Prevents duplicate
@@ -144,7 +144,7 @@
 //! - CRDT snapshots are saved from the merged state (not from `content_ours`)
 //!   so subsequent merges use the correct shared ancestor, preventing
 //!   character-level duplication across cycles.
-//! - `sanitize_component_tags` is applied to every patch block before any
+//! - `agent_doc_template::sanitize` is applied to every patch block before any
 //!   write path applies it, preventing agent-generated examples of component
 //!   syntax from corrupting future parses.
 //!
@@ -3735,100 +3735,6 @@ pub use ipc::*;
 // Internal helpers (same patterns as submit.rs)
 // ---------------------------------------------------------------------------
 
-/// Sanitize component tags in patch block content to prevent parser corruption.
-///
-/// When an agent response mentions component tags like `<!-- agent:NAME -->` in its
-/// text, those raw HTML comments would be matched as real markers on subsequent
-/// operations (compact, write). This escapes them to `&lt;!-- agent:NAME --&gt;`
-/// so the component parser won't match them.
-///
-/// Only sanitizes `<!-- agent:NAME -->` and `<!-- /agent:NAME -->` patterns where
-/// NAME is a valid component name (`[a-zA-Z0-9][a-zA-Z0-9-]*`).
-pub fn sanitize_component_tags(content: &str) -> String {
-    let bytes = content.as_bytes();
-    let len = bytes.len();
-    let mut result = String::with_capacity(len);
-    let mut pos = 0;
-
-    while pos + 4 <= len {
-        if &bytes[pos..pos + 4] != b"<!--" {
-            // Advance by one UTF-8 character (not one byte) to preserve multi-byte sequences
-            let ch_len = utf8_char_len(bytes[pos]);
-            result.push_str(&content[pos..pos + ch_len]);
-            pos += ch_len;
-            continue;
-        }
-
-        // Find closing -->
-        let close = match find_comment_close(bytes, pos + 4) {
-            Some(c) => c, // position after -->
-            None => {
-                result.push_str("<!--");
-                pos += 4;
-                continue;
-            }
-        };
-
-        let inner = &content[pos + 4..close - 3];
-        let trimmed = inner.trim();
-
-        if element::is_agent_marker(trimmed) {
-            // Escape the entire comment: <!-- ... --> -> &lt;!-- ... --&gt;
-            let original = &content[pos..close];
-            result.push_str(&original.replace('<', "&lt;").replace('>', "&gt;"));
-        } else {
-            // Not an agent marker — keep as-is
-            result.push_str(&content[pos..close]);
-        }
-        pos = close;
-    }
-
-    // Append remaining content (as a str slice to preserve UTF-8)
-    if pos < len {
-        result.push_str(&content[pos..]);
-    }
-
-    result
-}
-
-/// Return the byte length of the UTF-8 character starting with `first_byte`.
-fn utf8_char_len(first_byte: u8) -> usize {
-    match first_byte {
-        0x00..=0x7F => 1,
-        0xC0..=0xDF => 2,
-        0xE0..=0xEF => 3,
-        0xF0..=0xFF => 4,
-        _ => 1, // continuation byte — shouldn't happen at a char boundary
-    }
-}
-
-/// Find the end of an HTML comment (position after `-->`), starting search from `start`.
-fn find_comment_close(bytes: &[u8], start: usize) -> Option<usize> {
-    let len = bytes.len();
-    let mut i = start;
-    while i + 3 <= len {
-        if &bytes[i..i + 3] == b"-->" {
-            return Some(i + 3);
-        }
-        i += 1;
-    }
-    None
-}
-
-/// Sanitize the content of each patch block in-place.
-pub fn sanitize_patches(patches: &mut [template::PatchBlock]) {
-    for patch in patches.iter_mut() {
-        patch.content = sanitize_component_tags(&patch.content);
-    }
-}
-
-/// Sanitize unmatched (non-patch) response text so agent-generated
-/// `<!-- agent:NAME -->` markers cannot create duplicate component blocks
-/// when appended to the exchange component.
-pub fn sanitize_unmatched(unmatched: &mut String) {
-    *unmatched = sanitize_component_tags(unmatched);
-}
-
 /// Strip leading `## Assistant` and trailing `## User` headings from response text.
 ///
 /// The `agent-doc write` command adds its own `## Assistant\n\n` prefix and
@@ -7089,104 +6995,6 @@ scratch
             "full-content IPC is disabled and should return false"
         );
     }
-    // --- sanitize_component_tags tests ---
-    #[test]
-    fn sanitize_escapes_open_agent_tag() {
-        let input = "Here is an example: <!-- agent:exchange --> marker.";
-        let result = sanitize_component_tags(input);
-        assert!(
-            result.contains("&lt;!-- agent:exchange --&gt;"),
-            "open agent tag should be escaped, got: {}",
-            result
-        );
-        assert!(
-            !result.contains("<!-- agent:exchange -->"),
-            "raw open agent tag should not remain"
-        );
-    }
-    #[test]
-    fn sanitize_escapes_close_agent_tag() {
-        let input = "End marker: <!-- /agent:pending --> done.";
-        let result = sanitize_component_tags(input);
-        assert!(
-            result.contains("&lt;!-- /agent:pending --&gt;"),
-            "close agent tag should be escaped, got: {}",
-            result
-        );
-        assert!(
-            !result.contains("<!-- /agent:pending -->"),
-            "raw close agent tag should not remain"
-        );
-    }
-    #[test]
-    fn sanitize_does_not_escape_patch_markers() {
-        let input = "<!-- patch:exchange -->\nsome content\n<!-- /patch:exchange -->\n";
-        let result = sanitize_component_tags(input);
-        assert_eq!(result, input, "patch markers must not be escaped");
-    }
-    #[test]
-    fn sanitize_passes_normal_content_through() {
-        let input = "Just some normal markdown content.\n\nWith paragraphs and **bold**.";
-        let result = sanitize_component_tags(input);
-        assert_eq!(
-            result, input,
-            "normal content should pass through unchanged"
-        );
-    }
-    #[test]
-    fn sanitize_preserves_utf8_em_dash() {
-        // Em dash U+2014 is 3 bytes in UTF-8: 0xE2, 0x80, 0x94
-        let input = "This is a test \u{2014} with em dashes \u{2014} in content.";
-        let result = sanitize_component_tags(input);
-        assert_eq!(
-            result, input,
-            "em dashes must survive sanitization unchanged"
-        );
-
-        // Verify at the byte level
-        assert_eq!(
-            result.as_bytes(),
-            input.as_bytes(),
-            "byte-level content must be identical"
-        );
-    }
-    #[test]
-    fn sanitize_preserves_mixed_utf8_and_agent_tags() {
-        // Content with UTF-8 characters AND agent tags that need escaping
-        let input = "Response with \u{2014} em dash and <!-- agent:exchange --> tag reference.";
-        let result = sanitize_component_tags(input);
-        assert!(
-            result.contains("\u{2014}"),
-            "em dash must be preserved, got: {:?}",
-            result
-        );
-        assert!(
-            result.contains("&lt;!-- agent:exchange --&gt;"),
-            "agent tag must be escaped"
-        );
-    }
-    #[test]
-    fn sanitize_preserves_various_unicode() {
-        // Test various multi-byte UTF-8 characters
-        let input = "Caf\u{00E9} \u{2019}quotes\u{2019} \u{2014} \u{2026} \u{1F600}";
-        let result = sanitize_component_tags(input);
-        assert_eq!(result, input, "all unicode must survive sanitization");
-    }
-    #[test]
-    fn sanitize_unmatched_escapes_exchange_markers_in_response() {
-        let mut unmatched =
-            "### Re: deploy\n\nDone.\n\n<!-- agent:exchange -->\nExtra\n<!-- /agent:exchange -->\n"
-                .to_string();
-        sanitize_unmatched(&mut unmatched);
-        assert!(
-            !unmatched.contains("<!-- agent:exchange -->"),
-            "agent exchange markers must be escaped in unmatched text, got: {unmatched}"
-        );
-        assert!(
-            unmatched.contains("&lt;!-- agent:exchange --&gt;"),
-            "escaped markers expected, got: {unmatched}"
-        );
-    }
     #[test]
     fn apply_patches_sanitize_unmatched_prevents_duplicate_exchange_block() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -7203,7 +7011,7 @@ scratch
 
         let unmatched = "### Re: deploy — gpt-5\n\nDeployed.\n\n<!-- agent:exchange -->\nLeaked content\n<!-- /agent:exchange -->\n";
         let mut sanitized_unmatched = unmatched.to_string();
-        sanitize_unmatched(&mut sanitized_unmatched);
+        agent_doc_template::sanitize::sanitize_unmatched(&mut sanitized_unmatched);
 
         let result =
             crate::template_io::apply_patches(doc, &[], &sanitized_unmatched, &file).unwrap();

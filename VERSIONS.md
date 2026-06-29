@@ -2209,6 +2209,11 @@ install --harness codex` writes `[mcp_servers.agent-doc]` into
   helpers so pending `--done` / cross-document add requirements come from one
   typed cycle contract.
 
+- **Template patch sanitization moved into `agent-doc-template`.** Escaping
+  agent component markers inside patch payloads is now owned by
+  `agent_doc_template::sanitize`; orchestration calls that focused module
+  directly and no longer defines write-local sanitization helpers.
+
 - **Routed-reopen FlowCore owns the authoritative actor action slice.** The
   authoritative actor ready-wait facts, retry budgets, recovery hints,
   delivery-action classifier, and dispatch-start proof typing now live in

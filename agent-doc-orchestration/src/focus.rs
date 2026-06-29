@@ -153,12 +153,6 @@ pub fn run_blocking(file: &Path, pane: Option<&str>) -> Result<()> {
     run_with_tmux_blocking(file, pane, &Tmux::default_server())
 }
 
-/// Deprecated compatibility alias for older editor plugins that still pass
-/// `--no-stash-promote`. Default [`run`] now has this behavior.
-pub fn run_no_promote(file: &Path, pane: Option<&str>) -> Result<()> {
-    run(file, pane)
-}
-
 /// Promote a live-owner pane out of the stash window (best-effort) and then
 /// select it, so editor focus surfaces the session in the working agent-doc
 /// layout instead of selecting it in place inside the stash

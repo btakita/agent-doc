@@ -142,9 +142,7 @@ This file covers the session-bound command surface: pane ownership, routing, syn
   on a 1-in/1-out tab switch: the promote joins the incoming pane while the
   reconcile (operating on a stale snapshot, or unable to stash a busy outgoing
   pane) does not remove the displaced pane, growing the `agent-doc` window to an
-  extra pane (the "3 panes for a 2-column editor" symptom). Older callers may
-  still pass `--no-stash-promote`, but it is a deprecated compatibility no-op
-  because fast no-promotion focus is the default. Keep this aligned in
+  extra pane (the "3 panes for a 2-column editor" symptom). Keep this aligned in
   `focus.rs`, the editor `buildFocusCommand`, and this spec.
 - Blocking focus (`#stash-pane-promote-on-focus`): `agent-doc focus <FILE>
   --blocking` (alias `--synchronous`) preserves the previous standalone focus

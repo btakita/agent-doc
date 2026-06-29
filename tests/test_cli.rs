@@ -2529,6 +2529,24 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
 }
 
 #[test]
+fn test_focus_no_stash_promote_compatibility_shim_is_removed() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for relative in [
+        "src/main.rs",
+        "agent-doc-orchestration/src/focus.rs",
+        "specs/07-session-tmux-commands.md",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            !source.contains("no-stash-promote")
+                && !source.contains("no_stash_promote")
+                && !source.contains("run_no_promote"),
+            "{relative} must not keep the removed focus no-promotion compatibility shim"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_document_realtime_owns_authority_boundaries() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let realtime_manifest =

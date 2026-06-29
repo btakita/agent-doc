@@ -937,14 +937,13 @@ old closed actor pane projections. Tests
   visible pane immediately, defers stash surfacing to `sync --no-autostart`, and
   does not perform additive promotion work in the foreground. The previous
   synchronous promote-and-select behavior is still available for manual use as
-  `agent-doc focus <file> --blocking` or `--synchronous`; the older
-  `--no-stash-promote` flag is retained as a hidden compatibility no-op. Current
-  JetBrains and VS Code tab selection now call plain `agent-doc focus <file>`
-  with a short editor-side timeout and leave slow/missing-pane work to the
-  debounced reconciler. This keeps navigation to documents such as
-  `lazily-rs.md` from letting a long-running CLI focus attempt delay the UI
-  handoff. Bumped the JetBrains plugin build version to `0.2.153` and the VS
-  Code extension version to `0.2.23`.
+  `agent-doc focus <file> --blocking` or `--synchronous`. Current JetBrains and
+  VS Code tab selection now call plain `agent-doc focus <file>` with a short
+  editor-side timeout and leave slow/missing-pane work to the debounced
+  reconciler. This keeps navigation to documents such as `lazily-rs.md` from
+  letting a long-running CLI focus attempt delay the UI handoff. Bumped the
+  JetBrains plugin build version to `0.2.153` and the VS Code extension version
+  to `0.2.23`.
 
 - **Structured overlay CRDT is the merge-base authority
   (`#md-ast-crdt-merge-base`).** Template/CRDT merge paths now derive their

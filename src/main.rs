@@ -723,10 +723,6 @@ enum Commands {
         /// promotion before selecting the pane.
         #[arg(long, alias = "synchronous")]
         blocking: bool,
-        /// Deprecated compatibility flag. Fast no-promotion focus is now the
-        /// default; use `--blocking` for the old promote-and-select path.
-        #[arg(long, hide = true)]
-        no_stash_promote: bool,
     },
     /// Arrange tmux panes to mirror editor split layout
     Layout {

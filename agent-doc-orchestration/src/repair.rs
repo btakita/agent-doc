@@ -61,6 +61,7 @@
 //! - recover_replays_capture_without_pending: durable capture with no pending file → run returns Ok(true)
 //! - recover_fails_closed_on_capture_hash_mismatch: durable capture baseline mismatch → run returns Err
 
+use agent_doc_turn::closeout_recovery::CloseoutRecoveryMutationReason;
 use anyhow::{Context, Result};
 use serde::Serialize;
 use std::collections::HashSet;
@@ -1341,7 +1342,7 @@ fn discard_pending_capture_for_manual_repair(file: &Path, current_doc: &str) -> 
             clear_pending_response: true,
             delete_pre_response: true,
             mark_cycle_committed_event: Some("repair_respect_manual_exchange_tail_removal"),
-            reason: crate::flow::closeout::CloseoutRecoveryMutationReason::RespectManualTailRemoval,
+            reason: CloseoutRecoveryMutationReason::RespectManualTailRemoval,
         },
     )?;
     crate::ops_log::log_op(
@@ -1411,8 +1412,7 @@ fn retire_wedged_write_applied_capture_if_drifted(
             clear_pending_response: true,
             delete_pre_response: true,
             mark_cycle_committed_event: Some("repair_retire_wedged_write_applied_capture"),
-            reason:
-                crate::flow::closeout::CloseoutRecoveryMutationReason::RetireWedgedWriteAppliedCapture,
+            reason: CloseoutRecoveryMutationReason::RetireWedgedWriteAppliedCapture,
         },
     )?;
     crate::ops_log::log_op(
@@ -1484,7 +1484,7 @@ fn retire_superseded_captured_only_orphan_if_drifted(
             clear_pending_response: true,
             delete_pre_response: true,
             mark_cycle_committed_event: None,
-            reason: crate::flow::closeout::CloseoutRecoveryMutationReason::RetireSupersededCapturedOnlyOrphan,
+            reason: CloseoutRecoveryMutationReason::RetireSupersededCapturedOnlyOrphan,
         },
     )?;
     crate::ops_log::log_op(

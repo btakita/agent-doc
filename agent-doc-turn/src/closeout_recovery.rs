@@ -16,6 +16,48 @@ pub enum MetadataDriftAuthority {
     Ambiguous,
 }
 
+/// Why the closeout recovery mutation primitive is changing durable state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloseoutRecoveryMutationReason {
+    BenignReplayBaseline,
+    QueueOnlyReplayBaseline,
+    CommitQueueMetadataDrift,
+    ResetFromVisible,
+    RestoreHeadMetadata,
+    RetireWedgedWriteAppliedCapture,
+    RetireSupersededCapturedOnlyOrphan,
+    RespectManualTailRemoval,
+}
+
+impl CloseoutRecoveryMutationReason {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::BenignReplayBaseline => "benign_replay_baseline",
+            Self::QueueOnlyReplayBaseline => "queue_only_replay_baseline",
+            Self::CommitQueueMetadataDrift => "commit_queue_metadata_drift",
+            Self::ResetFromVisible => "reset_from_visible",
+            Self::RestoreHeadMetadata => "restore_head_metadata",
+            Self::RetireWedgedWriteAppliedCapture => "retire_wedged_write_applied_capture",
+            Self::RetireSupersededCapturedOnlyOrphan => "retire_superseded_captured_only_orphan",
+            Self::RespectManualTailRemoval => "respect_manual_tail_removal",
+        }
+    }
+
+    pub const fn capture_refresh_event(self) -> &'static str {
+        match self {
+            Self::QueueOnlyReplayBaseline => "capture_baseline_refreshed_for_queue_only_drift",
+            _ => "capture_baseline_refreshed_for_benign_drift",
+        }
+    }
+
+    pub const fn capture_refresh_message(self) -> &'static str {
+        match self {
+            Self::QueueOnlyReplayBaseline => "queue-only drift detected",
+            _ => "benign drift detected",
+        }
+    }
+}
+
 /// Decide the authoritative side of a content-equal metadata-only drift between
 /// a `local` document string (the candidate to commit) and the committed `head`.
 ///
@@ -82,6 +124,62 @@ mod tests {
         assert_eq!(
             metadata_drift_authority(&local, head),
             MetadataDriftAuthority::Ambiguous
+        );
+    }
+
+    #[test]
+    fn closeout_recovery_mutation_reason_labels_are_stable() {
+        assert_eq!(
+            CloseoutRecoveryMutationReason::BenignReplayBaseline.as_str(),
+            "benign_replay_baseline"
+        );
+        assert_eq!(
+            CloseoutRecoveryMutationReason::QueueOnlyReplayBaseline.as_str(),
+            "queue_only_replay_baseline"
+        );
+        assert_eq!(
+            CloseoutRecoveryMutationReason::CommitQueueMetadataDrift.as_str(),
+            "commit_queue_metadata_drift"
+        );
+        assert_eq!(
+            CloseoutRecoveryMutationReason::ResetFromVisible.as_str(),
+            "reset_from_visible"
+        );
+        assert_eq!(
+            CloseoutRecoveryMutationReason::RestoreHeadMetadata.as_str(),
+            "restore_head_metadata"
+        );
+        assert_eq!(
+            CloseoutRecoveryMutationReason::RetireWedgedWriteAppliedCapture.as_str(),
+            "retire_wedged_write_applied_capture"
+        );
+        assert_eq!(
+            CloseoutRecoveryMutationReason::RetireSupersededCapturedOnlyOrphan.as_str(),
+            "retire_superseded_captured_only_orphan"
+        );
+        assert_eq!(
+            CloseoutRecoveryMutationReason::RespectManualTailRemoval.as_str(),
+            "respect_manual_tail_removal"
+        );
+    }
+
+    #[test]
+    fn closeout_recovery_mutation_reason_owns_capture_refresh_labels() {
+        assert_eq!(
+            CloseoutRecoveryMutationReason::QueueOnlyReplayBaseline.capture_refresh_event(),
+            "capture_baseline_refreshed_for_queue_only_drift"
+        );
+        assert_eq!(
+            CloseoutRecoveryMutationReason::QueueOnlyReplayBaseline.capture_refresh_message(),
+            "queue-only drift detected"
+        );
+        assert_eq!(
+            CloseoutRecoveryMutationReason::BenignReplayBaseline.capture_refresh_event(),
+            "capture_baseline_refreshed_for_benign_drift"
+        );
+        assert_eq!(
+            CloseoutRecoveryMutationReason::BenignReplayBaseline.capture_refresh_message(),
+            "benign drift detected"
         );
     }
 }

@@ -35,6 +35,7 @@
 //! - `validate_replay_rejects_diverged_file_hash`
 //! - `mark_committed_updates_capture_state`
 
+use agent_doc_turn::closeout_recovery::CloseoutRecoveryMutationReason;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -513,7 +514,7 @@ pub fn validate_replay(file: &Path, capture: &CaptureRecord) -> Result<()> {
                 capture,
                 current_file_hash: &current_file_hash,
                 current_snapshot_hash: current_snapshot_hash.as_deref(),
-                reason: crate::flow::closeout::CloseoutRecoveryMutationReason::BenignReplayBaseline,
+                reason: CloseoutRecoveryMutationReason::BenignReplayBaseline,
             },
         )?;
         return Ok(());
@@ -535,8 +536,7 @@ pub fn validate_replay(file: &Path, capture: &CaptureRecord) -> Result<()> {
                 capture,
                 current_file_hash: &current_file_hash,
                 current_snapshot_hash: current_snapshot_hash.as_deref(),
-                reason:
-                    crate::flow::closeout::CloseoutRecoveryMutationReason::QueueOnlyReplayBaseline,
+                reason: CloseoutRecoveryMutationReason::QueueOnlyReplayBaseline,
             },
         )?;
         return Ok(());

@@ -2571,32 +2571,58 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     let recovery_source =
         fs::read_to_string(manifest_dir.join("agent-doc-turn/src/closeout_recovery.rs")).unwrap();
     for required in [
+        "pub enum CloseoutRecoveryMutationReason",
         "pub enum MetadataDriftAuthority",
+        "pub const fn capture_refresh_event",
+        "pub const fn capture_refresh_message",
         "pub fn metadata_drift_authority",
     ] {
         assert!(
             recovery_source.contains(required),
-            "agent-doc-turn must own metadata-drift recovery policy: {required}"
+            "agent-doc-turn must own closeout recovery policy: {required}"
         );
     }
     let closeout_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/closeout.rs"))
             .unwrap();
     for forbidden in [
+        "pub enum CloseoutRecoveryMutationReason",
         "pub enum MetadataDriftAuthority",
+        "impl CloseoutRecoveryMutationReason",
         "pub fn metadata_drift_authority",
     ] {
         assert!(
             !closeout_source.contains(forbidden),
-            "orchestration must not re-own or facade metadata-drift recovery policy: {forbidden}"
+            "orchestration must not re-own or facade closeout recovery policy: {forbidden}"
         );
     }
     assert!(
-        closeout_source.contains(
-            "agent_doc_turn::closeout_recovery::{MetadataDriftAuthority, metadata_drift_authority}"
-        ),
+        closeout_source.contains("use agent_doc_turn::closeout_recovery::{")
+            && closeout_source.contains("CloseoutRecoveryMutationReason")
+            && closeout_source.contains("MetadataDriftAuthority")
+            && closeout_source.contains("metadata_drift_authority"),
         "orchestration closeout recovery should call focused turn policy directly"
     );
+    for (relative, required) in [
+        (
+            "agent-doc-orchestration/src/capture.rs",
+            "use agent_doc_turn::closeout_recovery::CloseoutRecoveryMutationReason;",
+        ),
+        (
+            "agent-doc-orchestration/src/repair.rs",
+            "use agent_doc_turn::closeout_recovery::CloseoutRecoveryMutationReason;",
+        ),
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains(required),
+            "{relative} should use focused closeout recovery reason directly"
+        );
+        assert!(
+            !source.contains("crate::flow::closeout::CloseoutRecoveryMutationReason"),
+            "{relative} must not route focused closeout recovery reason through orchestration"
+        );
+    }
     for required in [
         "pub enum ResponseSource",
         "pub struct ReapedResponseLossInput",

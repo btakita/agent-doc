@@ -61,6 +61,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   snapshot, visible-file loading, git/sidecar mutations, and calls the focused
   recovery policy directly.
 
+- **Closeout recovery mutation reasons moved to `agent-doc-turn`.** The stable
+  closeout recovery reason labels and capture-baseline refresh event/message
+  mapping now live in `agent_doc_turn::closeout_recovery`. Capture, repair, and
+  closeout code import the focused enum directly instead of routing through an
+  orchestration-owned reason table.
+
 - **Bare prompt-prefix diff slicing moved to `agent-doc-diff`.** The
   marker-scoped helper that scans a unified diff before an inserted response
   heading now lives beside the prompt-bearing diff classifier. Session-check

@@ -1,5 +1,7 @@
 use super::types::{CloseoutState, FlowEvent, FlowName, FlowOutcome, FlowStage};
-use agent_doc_turn::closeout_recovery::{MetadataDriftAuthority, metadata_drift_authority};
+use agent_doc_turn::closeout_recovery::{
+    CloseoutRecoveryMutationReason, MetadataDriftAuthority, metadata_drift_authority,
+};
 use anyhow::{Context, Result};
 use std::path::Path;
 
@@ -1292,48 +1294,6 @@ pub fn apply_closeout_recovery(file: &Path) -> Result<RecoveryApplication> {
             reason: "auto-apply withheld — recovery requires a preserved response body or open-cycle resolution, not a metadata operation".to_string(),
             recommended: other.recovery_command(file).unwrap_or_default(),
         }),
-    }
-}
-
-/// Why the closeout recovery mutation primitive is changing durable state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CloseoutRecoveryMutationReason {
-    BenignReplayBaseline,
-    QueueOnlyReplayBaseline,
-    CommitQueueMetadataDrift,
-    ResetFromVisible,
-    RestoreHeadMetadata,
-    RetireWedgedWriteAppliedCapture,
-    RetireSupersededCapturedOnlyOrphan,
-    RespectManualTailRemoval,
-}
-
-impl CloseoutRecoveryMutationReason {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::BenignReplayBaseline => "benign_replay_baseline",
-            Self::QueueOnlyReplayBaseline => "queue_only_replay_baseline",
-            Self::CommitQueueMetadataDrift => "commit_queue_metadata_drift",
-            Self::ResetFromVisible => "reset_from_visible",
-            Self::RestoreHeadMetadata => "restore_head_metadata",
-            Self::RetireWedgedWriteAppliedCapture => "retire_wedged_write_applied_capture",
-            Self::RetireSupersededCapturedOnlyOrphan => "retire_superseded_captured_only_orphan",
-            Self::RespectManualTailRemoval => "respect_manual_tail_removal",
-        }
-    }
-
-    const fn capture_refresh_event(self) -> &'static str {
-        match self {
-            Self::QueueOnlyReplayBaseline => "capture_baseline_refreshed_for_queue_only_drift",
-            _ => "capture_baseline_refreshed_for_benign_drift",
-        }
-    }
-
-    const fn capture_refresh_message(self) -> &'static str {
-        match self {
-            Self::QueueOnlyReplayBaseline => "queue-only drift detected",
-            _ => "benign drift detected",
-        }
     }
 }
 

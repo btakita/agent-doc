@@ -71,7 +71,7 @@ make orchestration small enough that it is an adapter rather than a God crate.
 | `diff.rs` | `agent-doc-diff` | Extracted. Pure prompt-bearing classification, slash/preset/directive extraction, diff annotation, and partial-staging changed-literal/path-relatedness policy live in `agent-doc-diff`; IO remains in orchestration adapters. |
 | `frontmatter.rs` | `agent-doc-frontmatter` | Extracted together with pure project config parsing. File-backed wrappers stay effectful in orchestration adapters. |
 | `op_log.rs`, `turn_scope.rs` | `agent-doc-turn` | Extracted. Operation-log data types, turn-scope manifests, and affectedness classification live with the turn lifecycle model; durable sidecar/sqlite IO stays in orchestration/sqlite adapters. |
-| `heuristics.rs`, closeout response/done-signal parsing | `agent-doc-turn` | Extracted. Pending-capture recommendation detection and closeout response/done-signal parsing are turn closeout policy; orchestration only applies the resulting signal to guards and file/cycle adapters. |
+| `heuristics.rs`, closeout response/done-signal parsing | `agent-doc-turn` | Extracted. Pending-capture recommendation detection, explicit no-follow-up response detection, and closeout response/done-signal parsing are turn closeout policy; orchestration only applies the resulting signal to guards and file/cycle adapters. |
 | `syntax.rs` | `agent-doc-syntax` | Extracted. Editor-facing visual tokenization is pure document syntax; FFI/editor integrations stay as adapters. |
 | `topic.rs` | `agent-doc-topic` | Extracted. Exchange topic section parsing is pure text segmentation shared by compaction/archive flows. |
 | `ffi.rs` | `agent-doc-ffi` | Extracted. C/JNA ABI exports depend on focused crates directly. |

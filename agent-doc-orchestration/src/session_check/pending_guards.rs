@@ -38,7 +38,7 @@ pub(crate) fn check_pending_capture_guard(
         return Ok(GuardResult::None);
     }
     let missing_targets = crate::write::unresolved_backlog_capture_targets(file, &state);
-    if !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+    if !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
         && !missing_targets.is_empty()
     {
         return Ok(GuardResult::Error(format!(
@@ -46,7 +46,7 @@ pub(crate) fn check_pending_capture_guard(
             missing_targets.join(", ")
         )));
     }
-    if !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+    if !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
         && let Some((expected_count, promised_count)) =
             crate::write::promised_backlog_item_inventory_shortfall(&state, &response_text)
     {
@@ -62,7 +62,7 @@ pub(crate) fn check_pending_capture_guard(
                 .join(", ")
         )));
     }
-    if !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+    if !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
         && let Some((expected_count, promised_count)) =
             crate::write::promised_plan_reference_shortfall(file, &state, &response_text)
     {
@@ -73,7 +73,7 @@ pub(crate) fn check_pending_capture_guard(
     }
     let missing_ids =
         crate::write::unresolved_promised_backlog_item_ids(file, &state, &response_text);
-    if !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+    if !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
         && !missing_ids.is_empty()
     {
         return Ok(GuardResult::Error(format!(
@@ -89,7 +89,7 @@ pub(crate) fn check_pending_capture_guard(
     }
     if state.requires_backlog_capture
         && state.required_backlog_targets.is_empty()
-        && !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+        && !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
     {
         return Ok(GuardResult::Error(
             "[session-check] error: committed response came from a prompt that required backlog capture, but this cycle recorded no backlog mutations and did not explicitly state that there were no actionable follow-up items"

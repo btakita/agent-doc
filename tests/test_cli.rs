@@ -2433,6 +2433,50 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
 }
 
 #[test]
+fn test_agent_doc_turn_owns_pending_capture_heuristics() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let heuristics =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn/src/heuristics.rs")).unwrap();
+    for required in [
+        "pub fn detect_uncaptured_recommendations(",
+        "pub fn response_explicitly_has_no_followups(",
+    ] {
+        assert!(
+            heuristics.contains(required),
+            "agent-doc-turn must own pending-capture closeout heuristic: {required}"
+        );
+    }
+
+    let prompt_contract =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/prompt_contract.rs"))
+            .unwrap();
+    for forbidden in [
+        "pub fn response_explicitly_has_no_followups(",
+        "const NO_FOLLOWUP_PHRASES",
+    ] {
+        assert!(
+            !prompt_contract.contains(forbidden),
+            "prompt_contract must not re-own turn closeout no-follow-up policy: {forbidden}"
+        );
+    }
+
+    for relative in [
+        "agent-doc-orchestration/src/session_check/pending_guards.rs",
+        "agent-doc-orchestration/src/write/pending_checks.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("agent_doc_turn::heuristics::response_explicitly_has_no_followups"),
+            "{relative} should call focused no-follow-up heuristic directly"
+        );
+        assert!(
+            !source.contains("crate::prompt_contract::response_explicitly_has_no_followups"),
+            "{relative} must not route no-follow-up policy through prompt_contract"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_turn_owns_drain_stall_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();

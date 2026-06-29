@@ -8,6 +8,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Release publish contract fix for `#suprestassoc`.** Supersedes the unpublished `0.34.64` crate attempt by depending on `lazily 0.13.1`, which publishes the `CellTree` / `SemTree` / `TextCrdt` / reconcile API that `agent-doc-core` already used through the local path dependency. The behavior change remains the `restart-supervisor` document-scoped registry lookup described in `0.34.64`; this version is the publishable release artifact.
 
+- **No-follow-up closeout heuristic moved to `agent-doc-turn`.** Explicit "no actionable follow-up" response detection now lives in `agent_doc_turn::heuristics` beside pending-capture recommendation detection. Session-check and pre-commit guards import the focused turn API directly, and boundary coverage prevents `prompt_contract` from re-owning the phrase policy.
+
 - **Supervisor idle-reconcile policy moved to `agent-doc-supervisor`.** The stale busy-over-idle and ready-with-queued-draft reconcile decisions now live in `agent_doc_supervisor::idle_reconcile`. `start` and idle-watch gather pane/harness facts and pass their debounce thresholds directly to the focused policy; boundary coverage prevents the orchestration decision functions from returning.
 
 - **Manual queue-addition compatibility shim deleted.** `agent-doc-queue` now exposes only `operator_authored_prompt_identities` for the operator-added prompt identity path; the unused `annotate_manual_queue_additions` shim is removed and covered by a source guard.

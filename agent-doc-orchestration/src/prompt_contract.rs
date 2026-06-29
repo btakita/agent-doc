@@ -25,22 +25,6 @@ const BACKLOG_SIGNALS: &[&str] = &[
     "follow up items",
 ];
 
-const NO_FOLLOWUP_PHRASES: &[&str] = &[
-    "no actionable follow-up",
-    "no actionable follow up",
-    "no follow-up items",
-    "no follow up items",
-    "no new backlog item came out of this change",
-    "no new backlog items came out of this change",
-    "nothing to add to the backlog",
-    "nothing new to add to the backlog",
-    "no backlog items to add",
-    "no follow-up work to track",
-    "no follow up work to track",
-    "no new follow-up work",
-    "no new follow up work",
-];
-
 const FORMAT_REQUIREMENT_COMPONENT_SIGNALS: &[&str] = &[
     "backlog", "pending", "todo", "icebox", "exchange", "response",
 ];
@@ -127,13 +111,6 @@ pub fn explicit_backlog_targets(
         }
     }
     Ok(targets)
-}
-
-pub fn response_explicitly_has_no_followups(response_text: &str) -> bool {
-    let lower = response_text.to_ascii_lowercase();
-    NO_FOLLOWUP_PHRASES
-        .iter()
-        .any(|phrase| lower.contains(phrase))
 }
 
 pub fn format_active_format_requirements(content: &str) -> Option<String> {
@@ -800,23 +777,6 @@ mod tests {
             )
             .is_empty()
         );
-    }
-
-    #[test]
-    fn no_followups_detection_accepts_explicit_proof_phrases() {
-        assert!(response_explicitly_has_no_followups(
-            "No new backlog item came out of this change."
-        ));
-        assert!(response_explicitly_has_no_followups(
-            "There were no actionable follow-up items to capture."
-        ));
-    }
-
-    #[test]
-    fn no_followups_detection_ignores_unrelated_prose() {
-        assert!(!response_explicitly_has_no_followups(
-            "I did not find a third issue in this pass."
-        ));
     }
 
     #[test]

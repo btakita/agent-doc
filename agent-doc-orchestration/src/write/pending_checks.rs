@@ -249,7 +249,7 @@ pub(crate) fn precommit_pending_capture_check(file: &Path) -> Result<()> {
         return Ok(());
     }
     let missing_targets = unresolved_backlog_capture_targets(file, &state);
-    if !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+    if !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
         && !missing_targets.is_empty()
     {
         log_closeout_guard(
@@ -268,7 +268,7 @@ pub(crate) fn precommit_pending_capture_check(file: &Path) -> Result<()> {
             missing_targets.join(", ")
         );
     }
-    if !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+    if !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
         && let Some((expected_count, promised_count)) =
             promised_backlog_item_inventory_shortfall(&state, &response_text)
     {
@@ -296,7 +296,7 @@ pub(crate) fn precommit_pending_capture_check(file: &Path) -> Result<()> {
                 .join(", ")
         );
     }
-    if !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+    if !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
         && let Some((expected_count, promised_count)) =
             promised_plan_reference_shortfall(file, &state, &response_text)
     {
@@ -319,7 +319,7 @@ pub(crate) fn precommit_pending_capture_check(file: &Path) -> Result<()> {
         );
     }
     let missing_ids = unresolved_promised_backlog_item_ids(file, &state, &response_text);
-    if !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+    if !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
         && !missing_ids.is_empty()
     {
         log_closeout_guard(
@@ -346,7 +346,7 @@ pub(crate) fn precommit_pending_capture_check(file: &Path) -> Result<()> {
     }
     if state.requires_backlog_capture
         && state.required_backlog_targets.is_empty()
-        && !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+        && !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
     {
         log_closeout_guard(
             file,
@@ -433,7 +433,7 @@ pub(crate) fn prewrite_pending_capture_check(
         .as_ref()
         .map(|state| unresolved_backlog_capture_targets(file, state))
         .unwrap_or_default();
-    if !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+    if !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
         && !missing_targets.is_empty()
     {
         log_closeout_guard(
@@ -452,7 +452,7 @@ pub(crate) fn prewrite_pending_capture_check(
             missing_targets.join(", ")
         );
     }
-    if !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+    if !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
         && let Some((expected_count, promised_count)) = state
             .as_ref()
             .and_then(|state| promised_backlog_item_inventory_shortfall(state, &response_text))
@@ -486,7 +486,7 @@ pub(crate) fn prewrite_pending_capture_check(
                 .unwrap_or_default()
         );
     }
-    if !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+    if !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
         && let Some((expected_count, promised_count)) = state
             .as_ref()
             .and_then(|state| promised_plan_reference_shortfall(file, state, &response_text))
@@ -513,7 +513,7 @@ pub(crate) fn prewrite_pending_capture_check(
         .as_ref()
         .map(|state| unresolved_promised_backlog_item_ids(file, state, &response_text))
         .unwrap_or_default();
-    if !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+    if !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
         && !missing_ids.is_empty()
     {
         log_closeout_guard(
@@ -545,7 +545,7 @@ pub(crate) fn prewrite_pending_capture_check(
     }
     if state.as_ref().is_some_and(|state| {
         state.requires_backlog_capture && state.required_backlog_targets.is_empty()
-    }) && !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
+    }) && !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
     {
         log_closeout_guard(
             file,

@@ -333,7 +333,9 @@ pub(crate) fn check_free_text_queue_head_provenance(
     }
     let content = rc.doc_content();
     if content.contains("<!-- no-free-text-queue-head-guard -->") {
-        if free_text_queue_marker_has_bare_heading_residue(&content) {
+        if agent_doc_turn::closeout_signal::free_text_queue_marker_has_bare_heading_residue(
+            &content,
+        ) {
             crate::ops_log::log_op(
                 file,
                 &format!(
@@ -385,7 +387,10 @@ pub(crate) fn check_free_text_queue_head_provenance(
             continue;
         }
         if crate::write::free_text_head_answered_by_response(&exchange_text, head)
-            || response_head_plausibly_answers(&exchange_text, head)
+            || agent_doc_turn::closeout_signal::response_head_plausibly_answers(
+                &exchange_text,
+                head,
+            )
         {
             response_proven_removed.push(head.clone());
             continue;
@@ -493,44 +498,6 @@ fn committed_queue_contains_active_free_text_head(content: &str, head: &str) -> 
             crate::write::queue_prompt_text_is_free_text(content, text)
                 && normalized_free_text_queue_head_identity(text) == target
         })
-}
-
-pub(crate) fn free_text_queue_marker_has_bare_heading_residue(content: &str) -> bool {
-    content.contains("<!-- no-free-text-queue-head-guard -->")
-        && content.lines().any(|line| line.trim() == "###")
-}
-
-pub(crate) fn response_head_plausibly_answers(content: &str, head: &str) -> bool {
-    let head_words: Vec<&str> = head
-        .split_whitespace()
-        .filter(|w| {
-            w.len() > 3
-                && !matches!(
-                    w.to_ascii_lowercase().as_str(),
-                    "the"
-                        | "this"
-                        | "that"
-                        | "with"
-                        | "from"
-                        | "also"
-                        | "does"
-                        | "what"
-                        | "when"
-                        | "how"
-                )
-        })
-        .collect();
-    if head_words.is_empty() {
-        return false;
-    }
-    let lower = content.to_ascii_lowercase();
-    let mut matched = 0;
-    for word in &head_words {
-        if lower.contains(&word.to_ascii_lowercase()) {
-            matched += 1;
-        }
-    }
-    matched * 2 >= head_words.len()
 }
 
 /// Tight list of "deferred live work" phrases that, combined with a shipped

@@ -2384,6 +2384,8 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub const QUEUE_AUDIT_SUBSTEP_COMPLETE_PHRASES",
         "pub fn queue_audit_collapses_partial_completion",
         "pub fn queue_audit_has_none_complete_claim",
+        "pub fn free_text_queue_marker_has_bare_heading_residue",
+        "pub fn response_head_plausibly_answers",
         "pub fn response_clearly_completes_pending_id",
         "pub fn response_heading_resolves_to_pending_id",
         "pub fn explicit_done_signal_ids",
@@ -2473,10 +2475,21 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub(crate) fn text_has_blocked_future_action_signal",
         "pub(crate) fn text_has_no_followup_justification",
         "pub(crate) fn blocked_signal_tied_to_id",
+        "pub(crate) fn free_text_queue_marker_has_bare_heading_residue",
+        "pub(crate) fn response_head_plausibly_answers",
     ] {
         assert!(
             !provenance_guards.contains(forbidden),
-            "queue_head_provenance_guards must not re-own blocked-followup closeout policy: {forbidden}"
+            "queue_head_provenance_guards must not re-own closeout signal policy: {forbidden}"
+        );
+    }
+    for required in [
+        "agent_doc_turn::closeout_signal::free_text_queue_marker_has_bare_heading_residue",
+        "agent_doc_turn::closeout_signal::response_head_plausibly_answers",
+    ] {
+        assert!(
+            provenance_guards.contains(required),
+            "queue_head_provenance_guards should call focused closeout signal policy directly: {required}"
         );
     }
 

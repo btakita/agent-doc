@@ -173,6 +173,44 @@ pub fn queue_audit_has_none_complete_claim(lower: &str) -> bool {
     NONE_COMPLETE.is_match(lower)
 }
 
+pub fn free_text_queue_marker_has_bare_heading_residue(content: &str) -> bool {
+    content.contains("<!-- no-free-text-queue-head-guard -->")
+        && content.lines().any(|line| line.trim() == "###")
+}
+
+pub fn response_head_plausibly_answers(content: &str, head: &str) -> bool {
+    let head_words: Vec<&str> = head
+        .split_whitespace()
+        .filter(|w| {
+            w.len() > 3
+                && !matches!(
+                    w.to_ascii_lowercase().as_str(),
+                    "the"
+                        | "this"
+                        | "that"
+                        | "with"
+                        | "from"
+                        | "also"
+                        | "does"
+                        | "what"
+                        | "when"
+                        | "how"
+                )
+        })
+        .collect();
+    if head_words.is_empty() {
+        return false;
+    }
+    let lower = content.to_ascii_lowercase();
+    let mut matched = 0;
+    for word in &head_words {
+        if lower.contains(&word.to_ascii_lowercase()) {
+            matched += 1;
+        }
+    }
+    matched * 2 >= head_words.len()
+}
+
 /// Where a directive id's response heading materialized.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ResponseSource {
@@ -566,6 +604,39 @@ mod tests {
         ));
         assert!(!queue_audit_collapses_partial_completion(
             "none of the queue items are complete yet; every row is still blocked on input."
+        ));
+    }
+
+    #[test]
+    fn free_text_queue_marker_residue_requires_marker_and_bare_heading() {
+        assert!(free_text_queue_marker_has_bare_heading_residue(
+            "<!-- no-free-text-queue-head-guard -->\n\n###\n"
+        ));
+        assert!(!free_text_queue_marker_has_bare_heading_residue(
+            "<!-- no-free-text-queue-head-guard -->\n\n### Re: answered\n"
+        ));
+        assert!(!free_text_queue_marker_has_bare_heading_residue(
+            "###\n\nResponse text without the suppression marker.\n"
+        ));
+    }
+
+    #[test]
+    fn response_head_plausibility_requires_half_of_meaningful_words() {
+        assert!(response_head_plausibly_answers(
+            "The churn comes from stale queue convergence.",
+            "Please explain the queue churn"
+        ));
+        assert!(response_head_plausibly_answers(
+            "Stale convergence explains the queue behavior.",
+            "Please explain stale queue convergence"
+        ));
+        assert!(!response_head_plausibly_answers(
+            "A short acknowledgement.",
+            "Please explain stale queue convergence"
+        ));
+        assert!(!response_head_plausibly_answers(
+            "Done.",
+            "how does this work"
         ));
     }
 

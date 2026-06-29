@@ -88,7 +88,6 @@ pub mod harness_prompt;
 pub mod hooks;
 pub mod lint_gate;
 pub mod memory_cmd;
-pub mod merge_control_state_machine;
 pub mod pending_cmd;
 pub mod plugin_owner;
 pub mod preflight;

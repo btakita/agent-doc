@@ -2396,6 +2396,18 @@ fn test_agent_doc_merge_is_pure_workspace_boundary() {
             "orchestration must not re-own pure frontmatter-aware CRDT merge policy: {forbidden_snippet}"
         );
     }
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/merge_control_state_machine.rs")
+            .exists(),
+        "orchestration must not keep a merge-control facade over agent-doc-merge::ownership"
+    );
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("merge_control_state_machine"),
+        "orchestration must not re-export merge-control ownership policy"
+    );
     for forbidden in [
         "agent-doc-core",
         "agent-doc-orchestration",

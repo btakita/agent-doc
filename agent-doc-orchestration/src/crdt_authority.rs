@@ -1,7 +1,7 @@
 //! CRDT-authority state machine (`#crdtauth1`).
 //!
 //! An additive authority layer riding the existing merge-ownership state machine
-//! ([`crate::merge_control_state_machine`], `#mergestatemachine`) and the
+//! ([`agent_doc_merge::ownership`], `#mergestatemachine`) and the
 //! per-document hosting-epoch backbone ([`crate::state_backbone`], `#xdocsuper1/3`,
 //! commit `66ac6c64`). It reframes that SM from *"who may write the buffer now"*
 //! to *"who is the CRDT authority"* — the step-1 rung of the CRDT authority model
@@ -37,11 +37,11 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::merge_control_state_machine::{
-    MergeOwnershipEvent, MergeOwnershipPhase, OwnershipLiveness, ownership_liveness_for_file,
-    ownership_probe,
-};
+use crate::plugin_owner::ownership_liveness_for_file;
 use crate::state_backbone::{DocumentStateProjection, EventLedger, TransportPatchPhase};
+use agent_doc_merge::ownership::{
+    MergeOwnershipEvent, MergeOwnershipPhase, OwnershipLiveness, ownership_probe,
+};
 
 /// Which replica is the CRDT authority for a document, and the durability
 /// semantics that follow from it.
@@ -112,7 +112,7 @@ impl CrdtAuthority {
 /// behind it). This pure mapping treats the raw `Attached` phase as editor-present
 /// — callers that hold liveness facts should resolve the ambiguity first via
 /// [`authority_from_liveness`], which demotes a stale listener to
-/// `GitAuthoritative` exactly as [`crate::merge_control_state_machine::disk_write_permitted_for_file`]
+/// `GitAuthoritative` exactly as [`crate::plugin_owner::disk_write_permitted_for_file`]
 /// routes a stale listener to the disk path.
 pub fn authority_for(phase: MergeOwnershipPhase) -> CrdtAuthority {
     match phase {
@@ -138,7 +138,7 @@ pub fn authority_for(phase: MergeOwnershipPhase) -> CrdtAuthority {
 ///   editor → [`GitAuthoritative`](CrdtAuthority::GitAuthoritative).
 ///
 /// Decision-equivalent to inverting
-/// [`crate::merge_control_state_machine::disk_write_permitted_for_file`]:
+/// [`crate::plugin_owner::disk_write_permitted_for_file`]:
 /// disk-write-permitted (no live editor) ⇔ `GitAuthoritative`.
 pub fn authority_from_liveness(liveness: &OwnershipLiveness) -> CrdtAuthority {
     let resolved = ownership_probe(MergeOwnershipPhase::Attached, liveness);
@@ -263,8 +263,8 @@ pub fn commit_barrier_under_authority(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::merge_control_state_machine::OwnershipLiveness;
     use agent_doc_merge::crdt_sync::ReplicaState;
+    use agent_doc_merge::ownership::OwnershipLiveness;
 
     const ALL_PHASES: [MergeOwnershipPhase; 6] = [
         MergeOwnershipPhase::Detached,
@@ -384,7 +384,7 @@ mod tests {
         // - Committed: GitAuthoritative but terminal (no write), so it does not
         //   permit a write — GitAuthoritative is NOT a sufficient condition for
         //   disk-write-permitted either.
-        use crate::merge_control_state_machine::disk_write_permitted;
+        use agent_doc_merge::ownership::disk_write_permitted;
 
         assert!(disk_write_permitted(MergeOwnershipPhase::Detached));
         assert_eq!(

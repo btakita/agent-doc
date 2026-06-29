@@ -1236,14 +1236,14 @@ fn refuse_unproven_editor_delivery(
     reason: &str,
     patch_id: Option<&str>,
 ) -> Result<bool> {
-    let editor_endpoint = if crate::merge_control_state_machine::disk_write_permitted_for_file(
-        &file.to_string_lossy(),
-    ) && !live_editor_sidecar_present(file)
-    {
-        "absent"
-    } else {
-        "live"
-    };
+    let editor_endpoint =
+        if crate::plugin_owner::disk_write_permitted_for_file(&file.to_string_lossy())
+            && !live_editor_sidecar_present(file)
+        {
+            "absent"
+        } else {
+            "live"
+        };
     crate::ops_log::log_op(
         file,
         &format!(
@@ -1289,7 +1289,7 @@ fn try_detached_disk_write(
     source: &str,
     reason: &str,
 ) -> Result<bool> {
-    if !crate::merge_control_state_machine::disk_write_permitted_for_file(&file.to_string_lossy())
+    if !crate::plugin_owner::disk_write_permitted_for_file(&file.to_string_lossy())
         || live_editor_sidecar_present(file)
     {
         return Ok(false);

@@ -3586,6 +3586,9 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
     let executor_policy =
         fs::read_to_string(manifest_dir.join("agent-doc-turn-executor/src/capability_proof.rs"))
             .unwrap();
+    let executor_auto_trigger =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn-executor/src/auto_trigger.rs"))
+            .unwrap();
     for required_snippet in [
         "pub struct ManagedProofPolicy",
         "pub struct ManagedProofPolicyInputs",
@@ -3596,6 +3599,19 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         assert!(
             executor_policy.contains(required_snippet),
             "agent-doc-turn-executor should own capability-proof policy directly: {required_snippet}"
+        );
+    }
+    for required_snippet in [
+        "pub struct AutoTriggerMonitor",
+        "pub enum AutoTriggerStopOutcome",
+        "pub enum AutoTriggerCooldownAction",
+        "pub enum AutoTriggerNoPromptAction",
+        "pub fn auto_trigger_clear_cooldown_action(",
+        "pub fn auto_trigger_no_prompt_action(",
+    ] {
+        assert!(
+            executor_auto_trigger.contains(required_snippet),
+            "agent-doc-turn-executor should own auto-trigger readiness policy directly: {required_snippet}"
         );
     }
 
@@ -3633,10 +3649,23 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
 
     let start =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
+    for forbidden_snippet in [
+        "struct AutoTriggerMonitor",
+        "enum AutoTriggerCooldownAction",
+        "enum AutoTriggerNoPromptAction",
+        "fn auto_trigger_clear_cooldown_action(",
+        "fn auto_trigger_no_prompt_action(",
+    ] {
+        assert!(
+            !start.contains(forbidden_snippet),
+            "start.rs must not re-own pure auto-trigger readiness policy: {forbidden_snippet}"
+        );
+    }
     assert!(
         start.contains("agent_doc_turn_executor::capability_proof::resolve_managed_proof_policy")
-            && start.contains("agent_doc_turn_executor::capability_proof::proof_retry_decision"),
-        "start should call the focused capability-proof policy directly"
+            && start.contains("agent_doc_turn_executor::capability_proof::proof_retry_decision")
+            && start.contains("agent_doc_turn_executor::auto_trigger::{"),
+        "start should call focused turn-executor policy directly"
     );
     let codex = fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/agent/codex.rs"))
         .unwrap();

@@ -12,6 +12,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Managed capability-proof retry policy moved to `agent-doc-turn-executor`.** The proof retry budget, probe timeout defaults, frontmatter/config precedence, and exponential backoff decision now live in `agent_doc_turn_executor::capability_proof`. The supervisor start path gathers frontmatter/config facts and calls the focused API directly, while `agent::mod` keeps only backend resolution/runtime helpers and no longer owns the policy or retry decision.
 
+- **Auto-trigger readiness policy moved to `agent-doc-turn-executor`.** The auto-trigger monitor, clear-cooldown deadline action, no-prompt hard-deadline action, and timeout/cancelled stop outcome now live in `agent_doc_turn_executor::auto_trigger`. The start supervisor thread keeps only sleep, pane inspection, logging, and startup-miss side effects while calling the focused executor API directly.
+
 - **Stale install-artifact policy moved to `agent-doc-supervisor`.** The `#install-stale-guard` grace window and timestamp classifier now live in `agent_doc_supervisor::config` beside auto-install/stale-binary policy. Preflight still discovers artifact mtimes and formats the warning, but calls the focused supervisor API directly instead of owning the staleness rule.
 
 - **Supervisor prompt/exit-code policy moved to `agent-doc-supervisor`.** Restart/quit prompt input classification and forwarded Ctrl-C clean-exit normalization now live in `agent_doc_supervisor::crash_policy` beside the child crash/restart policy. The start supervisor loop still owns stdin, tty, and child status adapters, but calls the focused supervisor API directly.

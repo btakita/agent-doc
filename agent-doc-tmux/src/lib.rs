@@ -57,6 +57,32 @@ pub enum TmuxObservation {
     SupervisorCrashed,
 }
 
+/// Outcome of reconciling a candidate pane against the document's provably-live
+/// owner pane.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FocusPaneDecision {
+    /// Keep the candidate pane resolved from projection or registry.
+    UseCandidate,
+    /// Focus the pane that currently owns the document instead of the stale
+    /// projection/registry candidate.
+    RepairToLiveOwner(String),
+}
+
+/// Decide whether focus should keep its candidate pane or swap to a provable
+/// live owner pane.
+///
+/// The live owner wins only when it is a different, non-empty pane. When no live
+/// owner is provable, or it matches the candidate, the existing selection is
+/// preserved so the happy path is unchanged.
+pub fn decide_focus_pane(candidate: &str, live_owner: Option<&str>) -> FocusPaneDecision {
+    match live_owner {
+        Some(owner) if !owner.is_empty() && owner != candidate => {
+            FocusPaneDecision::RepairToLiveOwner(owner.to_string())
+        }
+        _ => FocusPaneDecision::UseCandidate,
+    }
+}
+
 pub fn transition_tmux(
     current: &TmuxRealtimeState,
     event: &TmuxObservation,
@@ -127,5 +153,37 @@ mod tests {
         let state = machine.state();
         assert_eq!(state.pane, TmuxPaneActivity::OutputActive);
         assert_eq!(state.last_output_watermark.as_deref(), Some("42"));
+    }
+
+    #[test]
+    fn focus_decision_keeps_candidate_when_no_live_owner() {
+        assert_eq!(
+            decide_focus_pane("%36", None),
+            FocusPaneDecision::UseCandidate
+        );
+    }
+
+    #[test]
+    fn focus_decision_keeps_candidate_when_owner_matches() {
+        assert_eq!(
+            decide_focus_pane("%8", Some("%8")),
+            FocusPaneDecision::UseCandidate
+        );
+    }
+
+    #[test]
+    fn focus_decision_repairs_to_live_owner_when_candidate_is_stale() {
+        assert_eq!(
+            decide_focus_pane("%36", Some("%8")),
+            FocusPaneDecision::RepairToLiveOwner("%8".to_string())
+        );
+    }
+
+    #[test]
+    fn focus_decision_ignores_empty_live_owner() {
+        assert_eq!(
+            decide_focus_pane("%36", Some("")),
+            FocusPaneDecision::UseCandidate
+        );
     }
 }

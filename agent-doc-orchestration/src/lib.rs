@@ -128,7 +128,7 @@ pub mod watch;
 pub mod write;
 pub mod write_queue;
 
-// Core-backed shim for the CRDT merge path (merge -> crdt).
+// Op-capture merge adapter over the focused merge crate.
 pub mod merge;
 
 // Supply side of op-capture / evented-reflection merge (#qnodemerge4wire):

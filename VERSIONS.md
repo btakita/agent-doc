@@ -8,6 +8,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Release publish contract fix for `#suprestassoc`.** Supersedes the unpublished `0.34.64` crate attempt by depending on `lazily 0.13.1`, which publishes the `CellTree` / `SemTree` / `TextCrdt` / reconcile API that `agent-doc-core` already used through the local path dependency. The behavior change remains the `restart-supervisor` document-scoped registry lookup described in `0.34.64`; this version is the publishable release artifact.
 
+- **Focus pane selection moved to `agent-doc-tmux`.** The stale projection/registry vs live-owner pane decision now lives with focused tmux state policy. `focus` imports `agent_doc_tmux::decide_focus_pane` directly and remains only the file/session/tmux adapter; boundary coverage prevents the pure focus decision from returning to orchestration.
+
 - **Merge-control ownership no longer has an orchestration facade.** The pure merge ownership state machine is imported from `agent_doc_merge::ownership` directly, while the runtime plugin-owner lease adapter (`ownership_liveness_for_file`, `disk_write_permitted_for_file`) now lives beside the plugin-owner sidecar code that supplies those facts. Deleted `agent-doc-orchestration/src/merge_control_state_machine.rs` and added a boundary guard so orchestration cannot re-export that focused merge API again.
 
 - **Drain-stall turn policy no longer routes through an orchestration re-export.** `preflight` imports `classify_stall`, `StallFacts`, and `StallVerdict` directly from `agent_doc_turn::drain_stall`; `agent-doc-orchestration::drain_stall` now owns only the one-shot continuation marker sidecar IO. Added a boundary guard to keep the pure classifier in `agent-doc-turn`.

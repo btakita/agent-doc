@@ -65,38 +65,10 @@ use anyhow::{Context, Result};
 use std::path::Path;
 
 use agent_doc_frontmatter::frontmatter;
+use agent_doc_tmux::{FocusPaneDecision, decide_focus_pane};
 use tmux_router::Tmux;
 
 use crate::sessions;
-
-/// Outcome of reconciling the pane `focus` was about to select against the
-/// document's provably-live owner pane.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FocusPaneDecision {
-    /// Keep the candidate pane resolved from the local actor projection or the
-    /// `sessions.json` registry — it is (or is assumed to be) the live owner.
-    UseCandidate,
-    /// The candidate pane is stale (its owner process is gone) but the document
-    /// is still served by a live agent-doc owner in a different pane — focus
-    /// that owner pane instead and let resync repair the registry.
-    RepairToLiveOwner(String),
-}
-
-/// Pure decision: given the pane `focus` resolved from projection/registry and
-/// the document's provably-live owner pane (if one was found), decide whether
-/// to keep the candidate or swap to the live owner.
-///
-/// The live owner wins only when it is a different, non-empty pane. When no
-/// live owner is provable, or it matches the candidate, the existing selection
-/// is preserved so the happy path is unchanged.
-pub fn decide_focus_pane(candidate: &str, live_owner: Option<&str>) -> FocusPaneDecision {
-    match live_owner {
-        Some(owner) if !owner.is_empty() && owner != candidate => {
-            FocusPaneDecision::RepairToLiveOwner(owner.to_string())
-        }
-        _ => FocusPaneDecision::UseCandidate,
-    }
-}
 
 /// Resolve the document's live owner pane, but only return it when it is alive
 /// and differs from `candidate`. This is the stale-projection / stale-registry
@@ -337,40 +309,6 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::env::set_current_dir(&self.prev_cwd);
         }
-    }
-
-    #[test]
-    fn decide_focus_pane_keeps_candidate_when_no_live_owner() {
-        assert_eq!(
-            decide_focus_pane("%36", None),
-            FocusPaneDecision::UseCandidate
-        );
-    }
-
-    #[test]
-    fn decide_focus_pane_keeps_candidate_when_owner_matches() {
-        assert_eq!(
-            decide_focus_pane("%8", Some("%8")),
-            FocusPaneDecision::UseCandidate
-        );
-    }
-
-    #[test]
-    fn decide_focus_pane_repairs_to_live_owner_when_candidate_is_stale() {
-        // The bug: registry/projection points at stale %36 while the live owner
-        // runs in %8 — focus must swap to %8.
-        assert_eq!(
-            decide_focus_pane("%36", Some("%8")),
-            FocusPaneDecision::RepairToLiveOwner("%8".to_string())
-        );
-    }
-
-    #[test]
-    fn decide_focus_pane_ignores_empty_live_owner() {
-        assert_eq!(
-            decide_focus_pane("%36", Some("")),
-            FocusPaneDecision::UseCandidate
-        );
     }
 
     #[test]

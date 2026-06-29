@@ -3524,6 +3524,49 @@ fn test_focus_no_stash_promote_compatibility_shim_is_removed() {
 }
 
 #[test]
+fn test_agent_doc_tmux_owns_focus_pane_decision() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let tmux_manifest = fs::read_to_string(manifest_dir.join("agent-doc-tmux/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&tmux_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+
+    let tmux_source = fs::read_to_string(manifest_dir.join("agent-doc-tmux/src/lib.rs")).unwrap();
+    assert!(
+        tmux_source.contains("pub enum FocusPaneDecision")
+            && tmux_source.contains("pub fn decide_focus_pane("),
+        "agent-doc-tmux must own pure focus pane selection"
+    );
+
+    let focus_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/focus.rs")).unwrap();
+    for forbidden_snippet in ["pub enum FocusPaneDecision", "pub fn decide_focus_pane("] {
+        assert!(
+            !focus_source.contains(forbidden_snippet),
+            "focus.rs must call agent_doc_tmux directly instead of re-owning focus pane policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        focus_source.contains("use agent_doc_tmux::{FocusPaneDecision, decide_focus_pane};"),
+        "focus.rs should import the focused tmux pane decision API directly"
+    );
+
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-tmux focus policy must stay free of orchestration, git, editor IPC, sqlite, or tmux-router effects"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_document_realtime_owns_authority_boundaries() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let realtime_manifest =

@@ -604,7 +604,7 @@ mod tests {
             "slash command must stay literal so the idle-queue classifier sees it:\n{updated}"
         );
         assert_eq!(
-            crate::queue_continuation::live_continuation_head(&doc, &updated).as_deref(),
+            agent_doc_queue::queue_continuation::live_continuation_head(&updated).as_deref(),
             Some("/clear"),
             "queued exchange slash command should be the active literal drain head"
         );
@@ -655,7 +655,7 @@ mod tests {
         assert!(!updated.contains("agent:queue auto"));
         assert!(updated.contains("\n/clear\n"), "{updated}");
         assert_eq!(
-            crate::queue_continuation::live_continuation_head(&doc, &updated).as_deref(),
+            agent_doc_queue::queue_continuation::live_continuation_head(&updated).as_deref(),
             Some("/clear"),
             "bare exchange slash command should be the active literal drain head"
         );

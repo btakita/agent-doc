@@ -7,5 +7,6 @@
 pub mod document_queue;
 pub mod queue;
 pub mod queue_command;
+pub mod queue_continuation;
 pub mod queue_edit_owner;
 pub mod queue_preemption;

@@ -2162,6 +2162,7 @@ fn test_manifest_uses_publishable_dependency_contract() {
         "agent-doc-merge",
         "agent-doc-model-tier",
         "agent-doc-orchestration",
+        "agent-doc-queue",
         "agent-doc-template",
         "agent-doc-turn",
         "agent-doc-work-graph",
@@ -2218,6 +2219,73 @@ fn test_manifest_uses_publishable_dependency_contract() {
         tmux_router.get("version").and_then(toml::Value::as_str),
         Some("0.3.11")
     );
+}
+
+#[test]
+fn test_agent_doc_queue_owns_queue_continuation_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-queue")),
+        "agent-doc-queue must stay a first-class workspace crate"
+    );
+    assert!(
+        manifest_dir
+            .join("agent-doc-queue/src/queue_continuation.rs")
+            .exists(),
+        "queue continuation drainability policy should live in the queue crate"
+    );
+
+    let orchestration_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/queue_continuation.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "pub fn deferred_backlog_ids",
+        "pub(crate) fn deferred_backlog_ids",
+        "pub fn supervisor_deferred_backlog_ids",
+        "fn head_is_drainable",
+        "pub fn is_drainable_queue_head",
+        "pub(crate) fn is_drainable_queue_head",
+        "pub fn is_noise_queue_head",
+        "pub(crate) fn is_noise_queue_head",
+        "pub fn live_drainable_continuation_head",
+        "pub fn drainable_head_count",
+        "pub fn review_phase_routed",
+        "const QUEUE_DIRECTIVE_VERBS",
+    ] {
+        assert!(
+            !orchestration_source.contains(forbidden_snippet),
+            "orchestration must not re-own pure queue continuation policy: {forbidden_snippet}"
+        );
+    }
+
+    let queue_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&queue_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    assert!(dependencies.contains_key("agent-doc-element"));
+    assert!(dependencies.contains_key("agent-doc-element-backlog"));
+    assert!(dependencies.contains_key("agent-doc-element-queue"));
+    assert!(dependencies.contains_key("agent-doc-frontmatter"));
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-queue must stay free of core, orchestration, git, editor IPC, sqlite, or tmux crates"
+        );
+    }
 }
 
 #[test]

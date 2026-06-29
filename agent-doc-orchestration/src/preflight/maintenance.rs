@@ -1245,7 +1245,7 @@ fn queue_prompt_projection_rows(
     content: &str,
     entries: &[agent_doc_queue::document_queue::QueueEntry],
 ) -> Vec<agent_doc_document::queue_projection::QueuePromptRow> {
-    let deferred_ids = crate::queue_continuation::deferred_backlog_ids(content);
+    let deferred_ids = agent_doc_queue::queue_continuation::deferred_backlog_ids(content);
     let preset_supplies_directive = agent_doc_element::element::parse(content)
         .ok()
         .and_then(|components| {
@@ -1262,7 +1262,7 @@ fn queue_prompt_projection_rows(
                 let text = agent_doc_queue::document_queue::strip_in_progress_marker(&prompt.text);
                 let id = queue_prompt_done_id(&text);
                 let projectable_default =
-                    !crate::queue_continuation::is_noise_queue_head(
+                    !agent_doc_queue::queue_continuation::is_noise_queue_head(
                         &text,
                         preset_supplies_directive,
                     ) && !id.as_ref().is_some_and(|id| deferred_ids.contains(id));
@@ -1877,14 +1877,17 @@ pub(crate) fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<Que
         content.clone()
     };
     let queue_drainable_head_count = if activation.active {
-        crate::queue_continuation::drainable_head_count(file, &drainability_content)
+        agent_doc_queue::queue_continuation::drainable_head_count(&drainability_content)
     } else {
         0
     };
     let queue_continuation_required = activation.active && queue_drainable_head_count > 0;
     let queue_supervisor_drainable = activation.active
-        && crate::queue_continuation::live_drainable_continuation_head(file, &drainability_content)
-            .is_some();
+        && agent_doc_queue::queue_continuation::live_drainable_continuation_head(
+            &drainability_content,
+            agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+        )
+        .is_some();
     let selected_queue_prompts = if activation.active {
         active_queue_prompt_projection(
             &drainability_content,
@@ -3464,7 +3467,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         crate::queue_continuation::document_queue_controller_pause_reason(file);
     let queue_paused = queue_pause_reason.is_some();
     let queue_drainable_head_count = if activation.active {
-        crate::queue_continuation::drainable_head_count(file, &content)
+        agent_doc_queue::queue_continuation::drainable_head_count(&content)
     } else {
         0
     };
@@ -3473,7 +3476,11 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // Used to gate the preflight synthetic queue-head diff so an operator-verify-only
     // (or otherwise non-actionable) head stops perpetually reporting `no_changes:false`.
     let queue_supervisor_drainable = activation.active
-        && crate::queue_continuation::live_drainable_continuation_head(file, &content).is_some();
+        && agent_doc_queue::queue_continuation::live_drainable_continuation_head(
+            &content,
+            agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+        )
+        .is_some();
     record_queue_worklist_state(
         file,
         &current_content,
@@ -4327,7 +4334,7 @@ mod tests {
         );
         // ...but the operator-verify head must NOT count as drainable: the loop is
         // safe because only the actionable head is countable.
-        let drainable = crate::queue_continuation::drainable_head_count(&doc, &updated);
+        let drainable = agent_doc_queue::queue_continuation::drainable_head_count(&updated);
         assert_eq!(
             drainable, 1,
             "operator-verify head must be deferred from drainability (#mirrorall keeps the loop \

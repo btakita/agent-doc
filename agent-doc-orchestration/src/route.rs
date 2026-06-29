@@ -2533,7 +2533,7 @@ fn classify_route_closeout_block(
     }
     let active_queue_head = std::fs::read_to_string(file)
         .ok()
-        .and_then(|content| crate::queue_continuation::live_continuation_head(file, &content));
+        .and_then(|content| agent_doc_queue::queue_continuation::live_continuation_head(&content));
     if let Some(head) = active_queue_head {
         return RouteCloseoutBlockDecision::WaitForActiveQueueHead {
             head,
@@ -6018,7 +6018,7 @@ mod tests {
             "route must activate the existing head without duplicating it:\n{updated}"
         );
         assert_eq!(
-            crate::queue_continuation::live_continuation_head(&doc, &updated).as_deref(),
+            agent_doc_queue::queue_continuation::live_continuation_head(&updated).as_deref(),
             Some("shipstationaudit"),
             "activated queue should become drainable by the idle-queue watch"
         );
@@ -6274,7 +6274,7 @@ mod tests {
             "activation must flip the canonical control to start:\n{updated}"
         );
         assert_eq!(
-            crate::queue_continuation::live_continuation_head(&doc, &updated).as_deref(),
+            agent_doc_queue::queue_continuation::live_continuation_head(&updated).as_deref(),
             Some("shipstationaudit"),
             "activated queue should become drainable by the idle-queue watch"
         );

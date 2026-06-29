@@ -371,7 +371,11 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                 // (`[clean-session]` under live IPC, or `[operator-verify]`),
                 // surface a one-line deferred-heads note so the idle queue reads
                 // as deferred work, not a silent stall.
-                let deferred = crate::queue_continuation::deferred_head_count(file);
+                let content = std::fs::read_to_string(file).ok();
+                let deferred = content
+                    .as_deref()
+                    .map(agent_doc_queue::queue_continuation::deferred_head_count)
+                    .unwrap_or(0);
                 // #goqstall2/#freshqueueauth: pre-materialized queue lines that
                 // match the exact non-drainable noise predicate (pasted console
                 // evidence / agent fragments, never ordinary prose reports) are
@@ -379,15 +383,21 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                 // lines to clear", not a silent stall. Fresh drainable operator
                 // prompts remain authoritative and are never classified through
                 // this path.
-                let noise = crate::queue_continuation::queue_stale_noise_lines(file);
+                let noise = content
+                    .as_deref()
+                    .map(agent_doc_queue::queue_continuation::queue_stale_noise_lines)
+                    .unwrap_or(0);
                 // #qfocsup: the in-session loop has no drainable head, but a
                 // `[focused-cycle]` head may still remain that the SUPERVISOR
                 // clear-and-continue path will drain. In this branch the in-session
                 // `detect` already returned None, so a `Some` supervisor head ⟺ a
                 // focused-cycle head — the queue is NOT operator-stalled; the agent
                 // yields and the supervisor force-`/clear`s + re-dispatches it.
-                let supervisor_head = std::fs::read_to_string(file).ok().and_then(|content| {
-                    crate::queue_continuation::live_drainable_continuation_head(file, &content)
+                let supervisor_head = content.as_deref().and_then(|content| {
+                    agent_doc_queue::queue_continuation::live_drainable_continuation_head(
+                        content,
+                        agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+                    )
                 });
                 if let Some(supervisor_head) = supervisor_head {
                     let outcome_fields = crate::flow::outcome::UserFacingOutcome::new(

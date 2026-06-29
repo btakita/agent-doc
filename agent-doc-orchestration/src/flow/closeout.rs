@@ -1483,9 +1483,9 @@ fn log_closeout_recovery_mutation(
 /// response/content drift, so a continuation that exists in HEAD but is gone (or
 /// re-headed) in a metadata-only local drift cannot have been legitimately
 /// consumed — HEAD is authoritative and the local drift is spurious.
-pub fn metadata_drift_authority(file: &Path, local: &str, head: &str) -> MetadataDriftAuthority {
-    let local_head = crate::queue_continuation::live_continuation_head(file, local);
-    let head_head = crate::queue_continuation::live_continuation_head(file, head);
+pub fn metadata_drift_authority(local: &str, head: &str) -> MetadataDriftAuthority {
+    let local_head = agent_doc_queue::queue_continuation::live_continuation_head(local);
+    let head_head = agent_doc_queue::queue_continuation::live_continuation_head(head);
     match (local_head, head_head) {
         // HEAD carries a live continuation that the local side dropped entirely
         // (deactivated / drained / fenced) with no consuming response → HEAD is
@@ -1525,7 +1525,7 @@ fn apply_metadata_drift_recovery(
         });
     };
 
-    match metadata_drift_authority(file, local, head) {
+    match metadata_drift_authority(local, head) {
         MetadataDriftAuthority::Local => {
             // Commit the local side forward. For SidecarVisibleDrift the snapshot
             // is HEAD-equal, so rebuild the sidecars from the visible file first so
@@ -2733,15 +2733,13 @@ mod tests {
         // `#recovery-drift-authoritative-side`: HEAD carries a live `queue_active`
         // continuation that the local (snapshot) side deactivated → HEAD is
         // authoritative (the spurious `queue_active:false` working-drift bug).
-        let dir = tempfile::TempDir::new().unwrap();
-        let file = dir.path().join("doc.md");
         let head = concat!(
             "---\nagent_doc_session: test\nagent_doc_format: template\nqueue_active: true\n---\n\n",
             "<!-- agent:queue -->\n- do [#a]\n- do [#b]\n<!-- /agent:queue -->\n",
         );
         let local = head.replace("queue_active: true", "queue_active: false");
         assert_eq!(
-            metadata_drift_authority(&file, &local, head),
+            metadata_drift_authority(&local, head),
             MetadataDriftAuthority::Head
         );
     }
@@ -2750,15 +2748,13 @@ mod tests {
     fn metadata_drift_authority_local_when_no_live_head_continuation() {
         // Neither side has a live continuation → committing the local side forward
         // loses no continuation → local is authoritative.
-        let dir = tempfile::TempDir::new().unwrap();
-        let file = dir.path().join("doc.md");
         let head = concat!(
             "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
             "<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n",
         );
         let local = head.replace("- do [#a]\n", "- do [#a]\n- do [#b]\n");
         assert_eq!(
-            metadata_drift_authority(&file, &local, head),
+            metadata_drift_authority(&local, head),
             MetadataDriftAuthority::Local
         );
     }
@@ -2767,15 +2763,13 @@ mod tests {
     fn metadata_drift_authority_ambiguous_when_live_heads_diverge() {
         // Both sides carry a live continuation but with different ready heads and
         // (content-equal) no consuming response → genuinely ambiguous.
-        let dir = tempfile::TempDir::new().unwrap();
-        let file = dir.path().join("doc.md");
         let head = concat!(
             "---\nagent_doc_session: test\nagent_doc_format: template\nqueue_active: true\n---\n\n",
             "<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n",
         );
         let local = head.replace("- do [#a]", "- do [#z]");
         assert_eq!(
-            metadata_drift_authority(&file, &local, head),
+            metadata_drift_authority(&local, head),
             MetadataDriftAuthority::Ambiguous
         );
     }

@@ -22,6 +22,7 @@
 //! closeout paths all consult it instead of duplicating the activation
 //! reasoning.
 
+use agent_doc_queue::queue_continuation as queue_policy;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -282,20 +283,15 @@ fn detect_in_content(file: &Path, content: &str) -> Result<Option<QueueContinuat
     // Walk past deferred heads; if every remaining head is deferred, continuation
     // is NOT required so the session does not perpetually re-converge an
     // undrainable queue.
-    let open_backlog = open_backlog_ids_from_content(content);
-    let deferred_ids = deferred_backlog_ids(content);
-    let preset_supplies_directive = queue_component.attrs.contains_key("preset");
-    let head = first_drainable_head(
-        &activation.entries_after,
-        open_backlog.as_ref(),
-        &deferred_ids,
-        preset_supplies_directive,
+    let head = queue_policy::drainable_head_prompt_for_scope(
+        content,
+        queue_policy::DrainScope::InSessionLoop,
     );
     let Some(head) = head else {
         return Ok(None);
     };
-    let head_prompt = head.text.clone();
-    let head_id = extract_head_id(&head_prompt);
+    let head_prompt = head.text;
+    let head_id = queue_policy::extract_head_id(&head_prompt);
     let reason = if has_auto {
         "active `agent:queue auto` still has a ready head prompt after a clean closeout"
     } else {
@@ -307,965 +303,6 @@ fn detect_in_content(file: &Path, content: &str) -> Result<Option<QueueContinuat
         head_id,
         head_prompt,
     }))
-}
-
-/// The set of active backlog ids (lowercase) that are NOT agent-drainable
-/// (`#qcontdrain`): `[operator-verify]` items only. `[clean-session]` is drainable
-/// everywhere now — the in-session `/loop` drains it IN PLACE rather than deferring
-/// to a (possibly-stalled) supervisor, so live editor-IPC state no longer gates the
-/// deferred set. Used to compute queue continuation over the drainable head set only.
-///
-/// `pub(crate)` so `session_check`'s queue-head guards reuse the SAME deferred set
-/// (`#goqueuestall`): a deferred head must not trip the "runnable head remained /
-/// no-response reap-only closeout" guards, exactly as it is excluded here.
-///
-/// Pure (content-only). The supervisor still force-`/clear`s before a
-/// `[clean-session]` head (`#cleandrainsup`, see [`head_requires_clean_session`]),
-/// but that decision is independent of the drainable set computed here.
-pub(crate) fn deferred_backlog_ids(content: &str) -> std::collections::HashSet<String> {
-    deferred_backlog_ids_scoped(content, DrainScope::InSessionLoop)
-}
-
-/// The set of active backlog ids (lowercase) that are NOT drainable by the
-/// SUPERVISOR clear-and-continue idle-watch drain (`#qfocsup`): `[operator-verify]`
-/// items only. Unlike the in-session [`deferred_backlog_ids`], a `[focused-cycle]`
-/// id is NOT in this set — the supervisor force-`/clear`s and re-dispatches it to a
-/// fresh context (see [`head_requires_context_reset`]), so the queue keeps draining
-/// instead of stranding idle. The supervisor head picker
-/// [`live_drainable_continuation_head`] uses this scope; the in-session loop and
-/// `session-check` guards use the narrower in-session scope.
-pub(crate) fn supervisor_deferred_backlog_ids(content: &str) -> std::collections::HashSet<String> {
-    deferred_backlog_ids_scoped(content, DrainScope::Supervisor)
-}
-
-/// Drain scope for computing the deferred (non-drainable) backlog id set.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DrainScope {
-    /// In-session `/loop`: defers `[operator-verify]` AND `[focused-cycle]` — the
-    /// current accreted session cannot give a `[focused-cycle]` item the fresh
-    /// context it requires, so the loop yields it to the supervisor.
-    InSessionLoop,
-    /// Supervisor idle-watch clear-and-continue: defers `[operator-verify]` only.
-    /// `[focused-cycle]` is drained via a forced `/clear` + re-dispatch (`#qfocsup`).
-    Supervisor,
-}
-
-/// Shared core of the deferred-id computation, parameterized by drain scope.
-///
-/// `#qcontdrain` (operator override of `#goqueuestall`/`#cleandrainsup`/`#freshgrant`):
-/// the in-session `/loop` drains `[clean-session]` heads IN PLACE instead of
-/// deferring to the supervisor. `#qfocsup` (operator directive): a `[focused-cycle]`
-/// head is deferred by the in-session loop but DRAINED by the supervisor's
-/// clear-and-continue path, so it never strands the queue idle. Drainability is
-/// owned ENTIRELY by these tags — the agent must never re-derive non-drainability
-/// from item prose.
-fn deferred_backlog_ids_scoped(
-    content: &str,
-    scope: DrainScope,
-) -> std::collections::HashSet<String> {
-    let mut deferred = std::collections::HashSet::new();
-    let Ok(components) = agent_doc_element::element::parse(content) else {
-        return deferred;
-    };
-    for comp in &components {
-        if !matches!(comp.name.as_str(), "backlog" | "icebox" | "pending") {
-            continue;
-        }
-        let body = &content[comp.open_end..comp.close_start];
-        for (id, ctx) in agent_doc_element_backlog::backlog::active_item_execution_contexts(body) {
-            let undrainable = match scope {
-                // `[operator-verify]` needs a human; `[focused-cycle]` needs a
-                // freshly-cleared cycle the in-session loop cannot provide.
-                DrainScope::InSessionLoop => ctx.loop_undrainable(),
-                // The supervisor can clear-and-continue, so only `[operator-verify]`
-                // is undrainable for it.
-                DrainScope::Supervisor => ctx.supervisor_undrainable(),
-            };
-            if undrainable {
-                deferred.insert(id.to_ascii_lowercase());
-            }
-        }
-    }
-    deferred
-}
-
-/// Active backlog ids (lowercase) carrying `[clean-session]` — heads that ask for a
-/// fresh agent context. The supervisor idle-watch force-`/clear`s before dispatching
-/// such a head (`#cleandrainsup`) so it runs in a clean session even when the global
-/// `agent_doc_queue_context_reset` opt-in is off.
-pub fn clean_session_backlog_ids(content: &str) -> std::collections::HashSet<String> {
-    let mut ids = std::collections::HashSet::new();
-    let Ok(components) = agent_doc_element::element::parse(content) else {
-        return ids;
-    };
-    for comp in &components {
-        if !matches!(comp.name.as_str(), "backlog" | "icebox" | "pending") {
-            continue;
-        }
-        let body = &content[comp.open_end..comp.close_start];
-        for (id, ctx) in agent_doc_element_backlog::backlog::active_item_execution_contexts(body) {
-            if ctx.clean_session_required {
-                ids.insert(id.to_ascii_lowercase());
-            }
-        }
-    }
-    ids
-}
-
-/// Active backlog ids (lowercase) carrying `[focused-cycle]` — heads that must be
-/// yielded by the in-session loop but drained by the supervisor after a forced
-/// context reset (`#qfocsup`).
-pub fn focused_cycle_backlog_ids(content: &str) -> std::collections::HashSet<String> {
-    let mut ids = std::collections::HashSet::new();
-    let Ok(components) = agent_doc_element::element::parse(content) else {
-        return ids;
-    };
-    for comp in &components {
-        if !matches!(comp.name.as_str(), "backlog" | "icebox" | "pending") {
-            continue;
-        }
-        let body = &content[comp.open_end..comp.close_start];
-        for (id, ctx) in agent_doc_element_backlog::backlog::active_item_execution_contexts(body) {
-            if ctx.focused_cycle_required {
-                ids.insert(id.to_ascii_lowercase());
-            }
-        }
-    }
-    ids
-}
-
-/// Whether the active queue `head` (an `#id` or raw prompt text) maps to a
-/// `[clean-session]` backlog item (`#cleandrainsup`). The supervisor idle-watch uses
-/// this to force a context `/clear` before dispatching the head, independent of the
-/// global `agent_doc_queue_context_reset` opt-in.
-pub fn head_requires_clean_session(file: &Path, head: &str) -> bool {
-    let Ok(content) = std::fs::read_to_string(file) else {
-        return false;
-    };
-    head_requires_clean_session_in(&content, head)
-}
-
-/// Pure core of [`head_requires_clean_session`] — testable without a file.
-pub fn head_requires_clean_session_in(content: &str, head: &str) -> bool {
-    let ids = clean_session_backlog_ids(content);
-    if ids.is_empty() {
-        return false;
-    }
-    let id = extract_head_id(head)
-        .map(|i| i.to_ascii_lowercase())
-        .unwrap_or_else(|| head.trim().to_ascii_lowercase());
-    ids.contains(&id)
-}
-
-/// Whether the active queue `head` maps to a `[focused-cycle]` backlog item
-/// (`#qfocsup`). Such heads are supervisor-drainable only after a forced context
-/// reset, and the ops log needs the focused-cycle-specific reason instead of the
-/// clean-session reason.
-pub fn head_requires_focused_cycle(file: &Path, head: &str) -> bool {
-    let Ok(content) = std::fs::read_to_string(file) else {
-        return false;
-    };
-    head_requires_focused_cycle_in(&content, head)
-}
-
-/// Pure core of [`head_requires_focused_cycle`] — testable without a file.
-pub fn head_requires_focused_cycle_in(content: &str, head: &str) -> bool {
-    let ids = focused_cycle_backlog_ids(content);
-    if ids.is_empty() {
-        return false;
-    }
-    let id = extract_head_id(head)
-        .map(|i| i.to_ascii_lowercase())
-        .unwrap_or_else(|| head.trim().to_ascii_lowercase());
-    ids.contains(&id)
-}
-
-/// Active backlog ids (lowercase) for which the SUPERVISOR must force a context
-/// `/clear` before dispatching the head: `[clean-session]` OR `[focused-cycle]`
-/// (`#qfocsup`). A `[focused-cycle]` item needs a genuinely fresh context — that is
-/// precisely why it is not in-session-drainable — so the supervisor clears before
-/// re-dispatching it, exactly as it does for `[clean-session]`.
-pub fn context_reset_backlog_ids(content: &str) -> std::collections::HashSet<String> {
-    let mut ids = std::collections::HashSet::new();
-    let Ok(components) = agent_doc_element::element::parse(content) else {
-        return ids;
-    };
-    for comp in &components {
-        if !matches!(comp.name.as_str(), "backlog" | "icebox" | "pending") {
-            continue;
-        }
-        let body = &content[comp.open_end..comp.close_start];
-        for (id, ctx) in agent_doc_element_backlog::backlog::active_item_execution_contexts(body) {
-            if ctx.clean_session_required || ctx.focused_cycle_required {
-                ids.insert(id.to_ascii_lowercase());
-            }
-        }
-    }
-    ids
-}
-
-/// Whether the active queue `head` maps to a backlog item that requires the
-/// supervisor to force a context `/clear` before dispatch — `[clean-session]` OR
-/// `[focused-cycle]` (`#qfocsup`). Superset of [`head_requires_clean_session`].
-pub fn head_requires_context_reset(file: &Path, head: &str) -> bool {
-    let Ok(content) = std::fs::read_to_string(file) else {
-        return false;
-    };
-    head_requires_context_reset_in(&content, head)
-}
-
-/// Pure core of [`head_requires_context_reset`] — testable without a file.
-pub fn head_requires_context_reset_in(content: &str, head: &str) -> bool {
-    let ids = context_reset_backlog_ids(content);
-    if ids.is_empty() {
-        return false;
-    }
-    let id = extract_head_id(head)
-        .map(|i| i.to_ascii_lowercase())
-        .unwrap_or_else(|| head.trim().to_ascii_lowercase());
-    ids.contains(&id)
-}
-
-/// Count of active queue head prompts whose backlog id is deferred
-/// (`#goqueuestall`). Used by `session-check` to surface a "queue idle: N head(s)
-/// deferred" note when continuation is not required because every remaining head
-/// is undrainable in the current session type.
-pub fn deferred_head_count(file: &Path) -> usize {
-    let Ok(content) = std::fs::read_to_string(file) else {
-        return 0;
-    };
-    let Ok(components) = agent_doc_element::element::parse(&content) else {
-        return 0;
-    };
-    let Some(queue_component) = components.iter().find(|c| c.name == "queue") else {
-        return 0;
-    };
-    let body = &content[queue_component.open_end..queue_component.close_start];
-    let Ok(entries) = agent_doc_queue::document_queue::parse(body) else {
-        return 0;
-    };
-    let deferred_ids = deferred_backlog_ids(&content);
-    entries
-        .iter()
-        .filter_map(|entry| match entry {
-            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
-                extract_head_id(&prompt.text)
-            }
-            _ => None,
-        })
-        .filter(|id| deferred_ids.contains(&id.to_ascii_lowercase()))
-        .count()
-}
-
-/// The live auto-queue continuation head of a document **string**, independent
-/// of any snapshot/sidecar. Returns `Some(head_id_or_prompt)` when `content` has
-/// an active queue (`queue_active: true`) whose head is a ready prompt — not a
-/// stop fence or a future time gate — else `None`.
-///
-/// Unlike [`detect`], this performs no snapshot-edit comparison: callers that
-/// already hold two explicit document strings use it to compare continuation
-/// state across snapshot / HEAD / working without a sidecar round-trip. It is the
-/// authoritative-side signal for closeout metadata-drift recovery
-/// (`#recovery-drift-authoritative-side`): a live continuation present in HEAD
-/// but absent (or re-headed) in a metadata-only local drift means HEAD is
-/// authoritative, because legitimate consumption of a queue head always shows up
-/// as response/content drift, never as metadata-only drift.
-pub fn live_continuation_head(file: &Path, content: &str) -> Option<String> {
-    let rc = crate::graph::RunContext::new(file.to_path_buf());
-    let (fm, _) = crate::frontmatter_io::parse_for_file_with_context(content, file, &rc).ok()?;
-    if fm.queue_active != Some(true) {
-        return None;
-    }
-    let components = agent_doc_element::element::parse(content).ok()?;
-    let queue_component = components.iter().find(|c| c.name == "queue")?;
-    let has_auto = agent_doc_queue::document_queue::has_auto_attr(&queue_component.attrs);
-    let body = &content[queue_component.open_end..queue_component.close_start];
-    let entries = agent_doc_queue::document_queue::parse(body).ok()?;
-    let activation =
-        agent_doc_queue::document_queue::resolve_activation(&entries, has_auto, false, true);
-    if !activation.active
-        || agent_doc_queue::document_queue::has_stop_fence_at_head(&activation.entries_after)
-        || agent_doc_queue::document_queue::time_gate_at_head(&activation.entries_after).is_some()
-    {
-        return None;
-    }
-    let head = agent_doc_queue::document_queue::first_prompt(&activation.entries_after)?;
-    Some(extract_head_id(&head.text).unwrap_or_else(|| head.text.trim().to_string()))
-}
-
-/// Pick the first DRAINABLE, non-deferred head prompt from an active queue's
-/// post-activation entries, applying the same `#goqueuestall` / `#goqstall2`
-/// filtering [`detect`] uses: skip inert noise lines (a bulleted free-text
-/// observation with no `#id`, directive verb, or question) and skip heads whose
-/// backlog id is deferred (`[operator-verify]` only; `#qcontdrain`). Single source
-/// of truth for "is there agent-drainable work at the queue head" so the supervisor
-/// idle-watch dispatch and `session-check` continuation agree.
-fn first_drainable_head<'a>(
-    entries_after: &'a [agent_doc_queue::document_queue::QueueEntry],
-    open_backlog_ids: Option<&std::collections::HashSet<String>>,
-    deferred_ids: &std::collections::HashSet<String>,
-    preset_supplies_directive: bool,
-) -> Option<&'a agent_doc_queue::document_queue::QueuePrompt> {
-    entries_after.iter().find_map(|entry| match entry {
-        agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
-            if head_is_drainable(
-                &prompt.text,
-                open_backlog_ids,
-                deferred_ids,
-                preset_supplies_directive,
-            ) {
-                Some(prompt)
-            } else {
-                None
-            }
-        }
-        _ => None,
-    })
-}
-
-/// Whether a single queue head is agent-drainable this session (`#cleardrainsignal`).
-///
-/// - Inert noise (structural/log artifacts such as pasted console output or
-///   spliced agent response fragments) is never drainable.
-/// - An `#id` head is drainable only when the id is an **open** `agent:backlog`
-///   item AND not deferred (`[operator-verify]` only; `#qcontdrain`). A `do [#id]`
-///   head whose id is absent from the open
-///   backlog (already `agent:done`, archived, or an orphaned ref) is a stale head
-///   the strike/reap path owns — NOT a continuation target, so it must not keep the
-///   go-mode drain alive. This makes continuation agree with the no-response queue
-///   guard, which intersects the head set with the open backlog the same way.
-/// - A free-text prose/directive/question head (no `#id`) is drainable. Plain
-///   operator prose is preserved as work even when it has no imperative verb.
-fn head_is_drainable(
-    text: &str,
-    open_backlog_ids: Option<&std::collections::HashSet<String>>,
-    deferred_ids: &std::collections::HashSet<String>,
-    preset_supplies_directive: bool,
-) -> bool {
-    let drainable = if preset_supplies_directive {
-        is_drainable_queue_head_with_context(text, true)
-    } else {
-        is_drainable_queue_head(text)
-    };
-    if !drainable {
-        return false;
-    }
-    match extract_head_id(text) {
-        Some(id) => {
-            let norm = id.to_ascii_lowercase();
-            if deferred_ids.contains(&norm) {
-                return false;
-            }
-            // Backlog-driven (go-mode) queue: an `#id` head must be an OPEN backlog
-            // item. A `do [#id]` whose id left the backlog (completed, archived, or
-            // an orphaned ref like a removed-without-archive id) is stale — the
-            // strike/reap path owns it, not the drain — so it must not keep the
-            // go-mode loop alive. When the doc has NO backlog component at all, the
-            // id-heads ARE the work themselves (free-form queue), so don't gate on
-            // membership.
-            match open_backlog_ids {
-                Some(open) => open.contains(&norm),
-                None => true,
-            }
-        }
-        None => true,
-    }
-}
-
-/// Open (`[ ]`/`[/]`, not `[x]`/done) `agent:backlog` ids from a document string,
-/// lowercased. Mirrors `session_check::done_signals::open_backlog_ids` but reads
-/// the caller's `content` so continuation and the no-response guard agree on the
-/// same drainable id set (`#cleardrainsignal`). Returns `None` when the document
-/// has no `agent:backlog` component (a free-form id-head queue is not backlog-driven,
-/// so id-head drainability is not gated on backlog membership).
-fn open_backlog_ids_from_content(content: &str) -> Option<std::collections::HashSet<String>> {
-    let components = agent_doc_element::element::parse(content).ok()?;
-    let mut found_backlog = false;
-    let mut ids = std::collections::HashSet::new();
-    for comp in &components {
-        if !agent_doc_element::element::is_backlog_component(&comp.name) {
-            continue;
-        }
-        found_backlog = true;
-        let body = &content[comp.open_end..comp.close_start];
-        let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(body);
-        for item in items {
-            if !item.is_done() && !item.id.is_empty() {
-                ids.insert(item.id.to_ascii_lowercase());
-            }
-        }
-    }
-    found_backlog.then_some(ids)
-}
-
-/// Count of OPEN (`[ ]`/`[/]`, not `[x]`/done) items in the `agent:review`
-/// component of `content`. A multi-phase task's phase that needs human/external
-/// validation is routed to `agent:review` as a gated `[/]` item; counting the
-/// open review items lets a closeout detect that a phase was routed to review
-/// this cycle (`#mphaseloop`).
-fn open_review_item_count(content: &str) -> usize {
-    let Ok(components) = agent_doc_element::element::parse(content) else {
-        return 0;
-    };
-    components
-        .iter()
-        .find(|comp| agent_doc_element::element::is_review_component(&comp.name))
-        .map(|comp| {
-            let body = &content[comp.open_end..comp.close_start];
-            let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(body);
-            items.into_iter().filter(|item| !item.is_done()).count()
-        })
-        .unwrap_or(0)
-}
-
-/// Whether `current` routed at least one new phase to `agent:review` relative to
-/// `prior`: the committed document has MORE open `agent:review` items than the
-/// pre-commit HEAD (`#mphaseloop`).
-///
-/// The multi-phase auto-loop policy (operator directive 2026-06-14) requires the
-/// go-mode drain to treat "needs review" as NON-terminal — a phase moved to
-/// review must NOT halt the queue; the drain emits the review item and advances
-/// to the next drainable head. The closeout uses this to emit the
-/// `drain_continue_after_review` proof when a review-routed cycle still owes a
-/// drainable continuation, distinguishing it from a turn that completed or
-/// genuinely blocked its phase.
-pub fn review_phase_routed(prior: &str, current: &str) -> bool {
-    open_review_item_count(current) > open_review_item_count(prior)
-}
-
-/// The live **drainable** continuation head of a document string.
-///
-/// Like [`live_continuation_head`] but returns `Some` only when the active queue
-/// has a head the agent can actually drain in the current session — applying the
-/// same drainability + deferred filtering as [`detect`] (without the snapshot-edit
-/// comparison): a `[clean-session]` head stays drainable (`#qcontdrain`; the
-/// supervisor additionally force-`/clear`s before dispatch), and only
-/// `[operator-verify]` heads and inert noise lines (operator bug-report
-/// observations with no `#id`/directive/question) are skipped. A queue whose only
-/// remaining heads are `[operator-verify]`/noise returns `None`.
-///
-/// The supervisor idle-queue watch uses this (not the unfiltered
-/// [`live_continuation_head`]) so it does not re-inject a no-op `/agent-doc` drain
-/// trigger every idle boundary for a queue `session-check` already reports as
-/// having no continuation required (#qchurn). It computes the same drainable set as
-/// the in-session `drainable_head_count` (`#qcontdrain`: both defer only
-/// `[operator-verify]`).
-pub fn live_drainable_continuation_head(file: &Path, content: &str) -> Option<String> {
-    let head = drainable_head_prompt_for_scope(file, content, DrainScope::Supervisor)?;
-    let stripped = agent_doc_queue::document_queue::strip_in_progress_marker(&head.text);
-    Some(extract_head_id(&stripped).unwrap_or(stripped))
-}
-
-fn drainable_head_prompt_for_scope(
-    file: &Path,
-    content: &str,
-    scope: DrainScope,
-) -> Option<agent_doc_queue::document_queue::QueuePrompt> {
-    let rc = crate::graph::RunContext::new(file.to_path_buf());
-    let (fm, _) = crate::frontmatter_io::parse_for_file_with_context(content, file, &rc).ok()?;
-    if fm.queue_active != Some(true) {
-        return None;
-    }
-    let components = agent_doc_element::element::parse(content).ok()?;
-    let queue_component = components.iter().find(|c| c.name == "queue")?;
-    let has_auto = agent_doc_queue::document_queue::has_auto_attr(&queue_component.attrs);
-    let body = &content[queue_component.open_end..queue_component.close_start];
-    let entries = agent_doc_queue::document_queue::parse(body).ok()?;
-    let activation =
-        agent_doc_queue::document_queue::resolve_activation(&entries, has_auto, false, true);
-    if !activation.active
-        || agent_doc_queue::document_queue::has_stop_fence_at_head(&activation.entries_after)
-        || agent_doc_queue::document_queue::time_gate_at_head(&activation.entries_after).is_some()
-    {
-        return None;
-    }
-    let open_backlog = open_backlog_ids_from_content(content);
-    let deferred_ids = match scope {
-        DrainScope::InSessionLoop => deferred_backlog_ids(content),
-        DrainScope::Supervisor => supervisor_deferred_backlog_ids(content),
-    };
-    let preset_supplies_directive = queue_component.attrs.contains_key("preset");
-    first_drainable_head(
-        &activation.entries_after,
-        open_backlog.as_ref(),
-        &deferred_ids,
-        preset_supplies_directive,
-    )
-    .cloned()
-}
-
-/// Count of agent-drainable heads in `content`'s active queue (`#cleardrainsignal`).
-///
-/// Applies the SAME `#goqueuestall` / `#goqstall2` filtering as
-/// [`live_drainable_continuation_head`] / [`first_drainable_head`]: a head counts
-/// only when it is a real directive/`#id`/question (not inert noise) AND its
-/// backlog id is not deferred (`[operator-verify]` only; `#qcontdrain`:
-/// `[clean-session]` drains in place). Returns 0 when the queue is inactive,
-/// stop-fenced, time-gated, or every remaining head is deferred/noise.
-///
-/// Preflight surfaces this so the agent and the Claude Code auto-loop have an
-/// authoritative "nothing is agent-drainable, do not loop" signal that does NOT
-/// depend on the route-owned supervisor being on the latest binary — the same
-/// drainability the supervisor idle-watch already enforces (#qchurn).
-pub fn drainable_head_count(file: &Path, content: &str) -> usize {
-    let rc = crate::graph::RunContext::new(file.to_path_buf());
-    let Ok((fm, _)) = crate::frontmatter_io::parse_for_file_with_context(content, file, &rc) else {
-        return 0;
-    };
-    if fm.queue_active != Some(true) {
-        return 0;
-    }
-    let Ok(components) = agent_doc_element::element::parse(content) else {
-        return 0;
-    };
-    let Some(queue_component) = components.iter().find(|c| c.name == "queue") else {
-        return 0;
-    };
-    let has_auto = agent_doc_queue::document_queue::has_auto_attr(&queue_component.attrs);
-    let body = &content[queue_component.open_end..queue_component.close_start];
-    let Ok(entries) = agent_doc_queue::document_queue::parse(body) else {
-        return 0;
-    };
-    let activation =
-        agent_doc_queue::document_queue::resolve_activation(&entries, has_auto, false, true);
-    if !activation.active
-        || agent_doc_queue::document_queue::has_stop_fence_at_head(&activation.entries_after)
-        || agent_doc_queue::document_queue::time_gate_at_head(&activation.entries_after).is_some()
-    {
-        return 0;
-    }
-    let open_backlog = open_backlog_ids_from_content(content);
-    let deferred_ids = deferred_backlog_ids(content);
-    let preset_supplies_directive = queue_component.attrs.contains_key("preset");
-    activation
-        .entries_after
-        .iter()
-        .filter(|entry| match entry {
-            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => head_is_drainable(
-                &prompt.text,
-                open_backlog.as_ref(),
-                &deferred_ids,
-                preset_supplies_directive,
-            ),
-            _ => false,
-        })
-        .count()
-}
-
-/// Recognized actionable directive verbs for go-mode drainability classification
-/// (`#goqstall2`). Word-matched anywhere in a normalized head. This is now an
-/// affirmative signal only: ordinary prose queue heads stay drainable even when
-/// they do not contain one of these verbs, because a natural-language bug report
-/// is still operator-authored work.
-///
-/// `#cleardrainsignal`: deliberately EXCLUDES words that are common nouns in
-/// agent-doc's own bug reports (e.g. "document" — "this document has…", "the
-/// document model" — appears in nearly every report). Keep this list to verbs
-/// that read as imperatives, not nouns, in queue prose; non-artifact prose is
-/// preserved separately by the default drainable branch.
-const QUEUE_DIRECTIVE_VERBS: &[&str] = &[
-    "do",
-    "fix",
-    "run",
-    "build",
-    "install",
-    "commit",
-    "push",
-    "implement",
-    "add",
-    "update",
-    "investigate",
-    "create",
-    "make",
-    "remove",
-    "delete",
-    "refactor",
-    "review",
-    "explain",
-    "drive",
-    "resume",
-    "continue",
-    "check",
-    "verify",
-    "write",
-    "test",
-    "debug",
-    "diagnose",
-    "merge",
-    "publish",
-    "release",
-    "bump",
-    "rebase",
-    "revert",
-    "rename",
-    "move",
-    "split",
-    "extract",
-    "wire",
-    "land",
-    "ship",
-    "draft",
-    "summarize",
-    "answer",
-    "respond",
-    "apply",
-    "enable",
-    "disable",
-    "gate",
-    "deploy",
-];
-
-/// Recurring **imperative command** verbs (`#qimpstrike`). These are executable
-/// directives that are valid *every* time they are queued — running `deploy`
-/// today does not retire a standing `deploy` directive queued tomorrow. They are
-/// therefore NOT one-time answerable tasks and must never be retired by the
-/// `#qftbklgstrike` lexical done/backlog matcher or the `#qheadresidue` residue
-/// guard (a single common verb like `deploy` is lexically close to many prior
-/// `commit + push + deploy` done items, and a response that echoes the head as a
-/// `> **Queue prompt:**` quote does not "answer" a standing command).
-///
-/// This is the single source of truth for the recurring-imperative subclass; both
-/// strike sites (`memory_cmd::semantic_queue_strike_matches` and
-/// `session_check::queue_head_provenance_guards`) call
-/// [`is_recurring_imperative_head`] rather than carrying their own verb list.
-///
-/// Distinct from [`QUEUE_DIRECTIVE_VERBS`] (the broad go-mode *drainability*
-/// signal, which deliberately includes `add`/`fix`/`update`/… — verbs that
-/// commonly *lead a one-time task* like "fix the lender email parity"). This
-/// narrower set is only the recurring deploy/release-cycle command verbs, so a
-/// multi-word prose head that merely *contains* one (`fix the deploy script`) is
-/// still a one-time task and can still be legitimately struck.
-const RECURRING_IMPERATIVE_COMMAND_VERBS: &[&str] = &[
-    "deploy", "commit", "push", "build", "install", "release", "test", "sync", "recycle",
-    "publish", "tag", "bump",
-];
-
-/// True when a queue head is a **recurring imperative command** (`#qimpstrike`):
-/// its normalized text is dominated by a known recurring-imperative command verb
-/// (see [`RECURRING_IMPERATIVE_COMMAND_VERBS`]) or is a recurring-command preset
-/// token (`#spec-test-commit-push`, `#commit-push`, …) whose id is built entirely
-/// from those verbs.
-///
-/// "Dominated by" = a short head (≤ 3 actionable words) whose *first* word is a
-/// recurring-imperative verb, e.g. `deploy`, `commit + push`,
-/// `push origin main`. A longer prose head that merely contains such a verb
-/// (`fix the deploy script so it retries`) is a one-time task, NOT a recurring
-/// command, so it returns false and stays eligible for the legitimate
-/// `#qftbklgstrike` restatement strike.
-pub(crate) fn is_recurring_imperative_head(text: &str) -> bool {
-    let normalized = normalize_queue_head_text(text);
-    if normalized.is_empty() {
-        return false;
-    }
-    // A recurring-command *preset token* (`#spec-test-commit-push`, `#commit-push`)
-    // is an executable directive: treat it as recurring when its id segments are
-    // all recurring-imperative verbs (ignore generic glue like `spec`).
-    if let Some(id) = extract_head_id(&normalized) {
-        let segments: Vec<&str> = id.split(['-', '_']).filter(|s| !s.is_empty()).collect();
-        let verb_segments = segments
-            .iter()
-            .filter(|s| {
-                RECURRING_IMPERATIVE_COMMAND_VERBS.contains(&s.to_ascii_lowercase().as_str())
-            })
-            .count();
-        // A preset built from at least two recurring verbs (`commit-push`,
-        // `spec-test-commit-push`) is a recurring-command preset.
-        if verb_segments >= 2 {
-            return true;
-        }
-    }
-    let words: Vec<String> = normalized
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| !w.is_empty())
-        .map(|w| w.to_ascii_lowercase())
-        .collect();
-    if words.is_empty() || words.len() > 3 {
-        return false;
-    }
-    // Dominated-by: the head LEADS with a recurring-imperative verb. `deploy`,
-    // `commit + push`, `push origin main` qualify; `the deploy failed` does not
-    // (leads with `the`).
-    RECURRING_IMPERATIVE_COMMAND_VERBS.contains(&words[0].as_str())
-}
-
-/// Strip a queue head's leading list bullet, emoji-shortcode tokens
-/// (`:pushpin:` / `:round_pushpin:`), and leading emoji glyphs / stray punctuation
-/// so the classifier sees the actionable text. Keeps `#` and `[` (an `#id` / `[#id]`
-/// can lead the line).
-fn normalize_queue_head_text(text: &str) -> String {
-    let mut s = text.trim();
-    if let Some(rest) = s.strip_prefix('-') {
-        s = rest.trim_start();
-    }
-    // Strip leading `:shortcode:` emoji tokens (e.g. `:pushpin:`), repeatedly.
-    loop {
-        s = s.trim_start();
-        if let Some(after_colon) = s.strip_prefix(':')
-            && let Some(end) = after_colon.find(':')
-        {
-            let token = &after_colon[..end];
-            if !token.is_empty()
-                && token
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-            {
-                s = &after_colon[end + 1..];
-                continue;
-            }
-        }
-        break;
-    }
-    // Strip leading emoji glyphs / stray punctuation, but keep `#`/`[` so an id can
-    // lead and `/` so a slash command (`/model sonnet`) stays recognizable.
-    s.trim_start_matches(|c: char| !c.is_alphanumeric() && c != '#' && c != '[' && c != '/')
-        .trim()
-        .to_string()
-}
-
-/// True when a queue head, after stripping the leading bullet and `:shortcode:`
-/// pins, begins with a markdown bold span (`**…**`) — the shape of an agent
-/// response-fragment summary bullet (`**migrate** — folded …`, `**Resolved 3
-/// reviews** → archived …`) that a cross-doc CRDT merge can splice into this
-/// queue (#qcontam). Genuine operator directives lead with a verb / `#id` / plain
-/// text, never a bold summary span, so this is a safe noise signal. Unlike
-/// [`normalize_queue_head_text`] this keeps `*` so the bold span survives.
-fn leads_with_markdown_bold_report(text: &str) -> bool {
-    let mut s = text.trim();
-    if let Some(rest) = s.strip_prefix('-') {
-        s = rest.trim_start();
-    }
-    // Strip leading `:shortcode:` pins (e.g. `:pushpin:`), repeatedly.
-    loop {
-        s = s.trim_start();
-        if let Some(after_colon) = s.strip_prefix(':')
-            && let Some(end) = after_colon.find(':')
-        {
-            let token = &after_colon[..end];
-            if !token.is_empty()
-                && token
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-            {
-                s = &after_colon[end + 1..];
-                continue;
-            }
-        }
-        break;
-    }
-    s.trim_start().starts_with("**")
-}
-
-/// True for one-line console/status artifacts that are safe to classify as
-/// non-work queue noise. Plain prose reports deliberately do not match here.
-fn is_single_line_artifact_noise(normalized: &str) -> bool {
-    let lower = normalized.trim().to_ascii_lowercase();
-    if lower.is_empty() {
-        return true;
-    }
-    if lower.starts_with("thread '") && lower.contains("panicked")
-        || lower == "stack backtrace:"
-        || lower == "backtrace:"
-    {
-        return true;
-    }
-    if lower.starts_with('[') {
-        let Some(close) = lower.find(']') else {
-            return false;
-        };
-        let tag = &lower[1..close];
-        if matches!(
-            tag,
-            "route"
-                | "preflight"
-                | "session-check"
-                | "queue"
-                | "write"
-                | "start"
-                | "sync"
-                | "debug"
-                | "info"
-                | "warn"
-                | "warning"
-                | "error"
-                | "trace"
-        ) {
-            return true;
-        }
-    }
-    false
-}
-
-/// Whether a queue `Prompt` head is auto-drainable in go-mode (`#goqstall2`).
-///
-/// A pre-materialized `## Queue` block can carry free-text lines that are not
-/// actionable drain targets — pasted console evidence or agent response fragments.
-/// Those churn no-op closeouts because the continuation walk treats every
-/// `Prompt` as a ready head.
-///
-/// A head is drainable iff it carries a `#id` / `[#id]` (the
-/// `[clean-session]`/`[operator-verify]` defer is applied separately by id), ends
-/// with a question mark, contains a recognized imperative directive verb, or lives
-/// in a preset-bearing queue where the preset supplies the directive verb. Plain
-/// operator prose is also drainable by default; only structural/log artifacts are
-/// inert **noise** surfaced as `queue_stale_noise_lines`.
-pub(crate) fn is_drainable_queue_head(text: &str) -> bool {
-    is_drainable_queue_head_with_context(text, false)
-}
-
-/// True when `text` is a non-drainable **noise** queue head: the inverse of
-/// [`is_drainable_queue_head_with_context`]. Pasted console output and
-/// agent-response fragments can never drain and only churn the go-mode loop.
-/// Plain operator prose is not noise. Centralized so `queue prune-noise` strikes
-/// exactly the entries [`queue_stale_noise_lines`] counts (`#goqstall2`).
-/// `preset_supplies_directive` must match the active queue's `preset` attribute
-/// so a preset-bearing queue classifies predicate-proven noise identically to the
-/// counter.
-pub(crate) fn is_noise_queue_head(text: &str, preset_supplies_directive: bool) -> bool {
-    !is_drainable_queue_head_with_context(text, preset_supplies_directive)
-}
-
-fn is_drainable_queue_head_with_context(text: &str, preset_supplies_directive: bool) -> bool {
-    // Pasted console-output / agent-response-fragment evidence is NOISE, not a
-    // drain target when it has no operator prose lead. A prose bug report followed
-    // by fenced diagnostics is still drainable: the prose lead is the object to
-    // act on, even without a queue-level preset.
-    //
-    // The non-prose markers below still demote the head even under a preset:
-    //   1. an agent component or boundary comment (`<!-- agent:` / `agent:boundary`)
-    //      — a spliced agent response artifact;
-    //   2. a leading markdown bold summary span (`**…**`) — an agent response bullet
-    //      (e.g. a cross-doc `**migrate** — folded … agent:review` fragment that a
-    //      CRDT merge split out of its fence into this queue). (#qcontam)
-    // Checked BEFORE the `#id` fast-path so a fragment carrying a stray cross-doc
-    // id is still demoted.
-    if text.contains("<!-- agent:")
-        || text.contains("agent:boundary")
-        || leads_with_markdown_bold_report(text)
-    {
-        return false;
-    }
-    if text.contains('\n') || text.contains("```") || text.contains("~~~") {
-        if !multiline_head_has_prose_lead(text) {
-            return false;
-        }
-        return true;
-    }
-    let normalized = normalize_queue_head_text(text);
-    if normalized.is_empty() {
-        return false;
-    }
-    if is_single_line_artifact_noise(&normalized) {
-        return false;
-    }
-    if extract_head_id(text).is_some() {
-        return true;
-    }
-    // A harness slash command (`/clear`, `/model sonnet`, `/code-review`) is a
-    // drainable command head, submitted to the owner pane — not prose noise.
-    if agent_doc_queue::queue_command::is_slash_command(&normalized) {
-        return true;
-    }
-    if normalized.trim_end().ends_with('?') {
-        return true;
-    }
-    if preset_supplies_directive {
-        return true;
-    }
-    let lowered = normalized.to_ascii_lowercase();
-    if lowered
-        .split(|c: char| !c.is_alphanumeric())
-        .any(|word| QUEUE_DIRECTIVE_VERBS.contains(&word))
-    {
-        return true;
-    }
-    // Default toward preserving operator-authored work. A prose bug report like
-    // "Queue items are being struck without being worked on" is actionable even
-    // though it is not phrased as an imperative.
-    true
-}
-
-fn multiline_head_has_prose_lead(text: &str) -> bool {
-    let lead = text
-        .lines()
-        .take_while(|line| {
-            let trimmed = line.trim_start();
-            !trimmed.starts_with("```") && !trimmed.starts_with("~~~")
-        })
-        .collect::<Vec<_>>()
-        .join(" ");
-    let normalized = normalize_queue_head_text(&lead);
-    normalized
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|word| word.len() > 2)
-        .any(|word| {
-            let lowered = word.to_ascii_lowercase();
-            !matches!(
-                lowered.as_str(),
-                "route" | "error" | "warning" | "warn" | "info" | "debug" | "trace" | "target"
-            )
-        })
-}
-
-/// Count of active queue `Prompt` heads that are non-drainable **noise**
-/// (`#goqstall2`): structural/log artifacts that are not `#id` heads, slash
-/// commands, questions, directives, or ordinary prose prompts. Used by
-/// `session-check` to surface a `queue_stale_noise_lines=N` diagnostic so the
-/// operator can clear pasted console evidence that would otherwise churn the
-/// go-mode drain. The field name is retained for compatibility; the predicate is
-/// exact noise, not a license to delete fresh operator queue edits.
-pub fn queue_stale_noise_lines(file: &Path) -> usize {
-    let Ok(content) = std::fs::read_to_string(file) else {
-        return 0;
-    };
-    let Ok(components) = agent_doc_element::element::parse(&content) else {
-        return 0;
-    };
-    let Some(queue_component) = components.iter().find(|c| c.name == "queue") else {
-        return 0;
-    };
-    let body = &content[queue_component.open_end..queue_component.close_start];
-    let Ok(entries) = agent_doc_queue::document_queue::parse(body) else {
-        return 0;
-    };
-    let preset_supplies_directive = queue_component.attrs.contains_key("preset");
-    entries
-        .iter()
-        .filter(|entry| match entry {
-            // Counts must match EXACTLY what `queue prune-noise` excises
-            // (#qnoise-multiline-strike): a Prompt is noise when not drainable (the
-            // classifier demotes multi-line / fenced text), and a pasted-evidence
-            // `Freeform` line (bare ``` console fence / prose head) is noise while
-            // `---`/`~~~` separators and `re [#id]` references are not.
-            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
-                !is_drainable_queue_head_with_context(&prompt.text, preset_supplies_directive)
-            }
-            agent_doc_queue::document_queue::QueueEntry::Freeform(line) => {
-                agent_doc_queue::document_queue::is_noise_freeform_line(line)
-            }
-            _ => false,
-        })
-        .count()
-}
-
-/// Extract the backlog `#id` from a queue prompt like `do [#id] ...` or `#id ...`.
-pub(crate) fn extract_head_id(prompt: &str) -> Option<String> {
-    if let Some(start) = prompt.find("[#")
-        && let Some(end) = prompt[start + 2..].find(']')
-    {
-        let id = prompt[start + 2..start + 2 + end].trim();
-        if !id.is_empty() {
-            return Some(id.to_string());
-        }
-    }
-    prompt
-        .split_whitespace()
-        .find_map(|token| {
-            token.strip_prefix('#').map(|rest| {
-                rest.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '-' && c != '_')
-                    .to_string()
-            })
-        })
-        .filter(|id| !id.is_empty())
 }
 
 /// Durable on-disk proof that a closed-out document still owes an auto-queue
@@ -1634,6 +671,14 @@ fn now_secs() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_doc_queue::queue_continuation::{
+        DrainScope, deferred_backlog_ids, deferred_head_count, drainable_head_count,
+        extract_head_id, head_requires_clean_session_in, head_requires_context_reset_in,
+        head_requires_focused_cycle_in, is_drainable_queue_head,
+        is_drainable_queue_head_with_context, is_recurring_imperative_head, live_continuation_head,
+        live_drainable_continuation_head, open_review_item_count, queue_stale_noise_lines,
+        review_phase_routed, supervisor_deferred_backlog_ids,
+    };
 
     /// `#degraded-ipc-no-stall`: the shared no-stall guidance must distinguish
     /// proven degraded editor transport from unproven IPC/direct-write fallback
@@ -1961,12 +1006,12 @@ mod tests {
         std::fs::write(&doc, &content).unwrap();
 
         assert_eq!(
-            live_drainable_continuation_head(&doc, &content).as_deref(),
+            live_drainable_continuation_head(&content, DrainScope::Supervisor).as_deref(),
             Some("f"),
             "supervisor drains the focused-cycle head (clear-and-continue)"
         );
         assert_eq!(
-            drainable_head_count(&doc, &content),
+            drainable_head_count(&content),
             0,
             "in-session loop yields the focused-cycle head to the supervisor"
         );
@@ -2060,7 +1105,7 @@ mod tests {
             detect(&doc).unwrap().is_none(),
             "all-deferred heads must not require continuation"
         );
-        assert_eq!(deferred_head_count(&doc), 2);
+        assert_eq!(deferred_head_count(&content), 2);
     }
 
     #[test]
@@ -2079,7 +1124,7 @@ mod tests {
             ],
         );
         std::fs::write(&doc, &content).unwrap();
-        assert_eq!(drainable_head_count(&doc, &content), 0);
+        assert_eq!(drainable_head_count(&content), 0);
     }
 
     #[test]
@@ -2102,7 +1147,7 @@ mod tests {
         );
         std::fs::write(&doc, &content).unwrap();
         // #b deferred (operator-verify), the prose report and #c remain real work.
-        assert_eq!(drainable_head_count(&doc, &content), 2);
+        assert_eq!(drainable_head_count(&content), 2);
     }
 
     #[test]
@@ -2119,7 +1164,7 @@ mod tests {
         );
         std::fs::write(&doc, &content).unwrap();
         // #orphan has no backlog item → excluded; only #c counts.
-        assert_eq!(drainable_head_count(&doc, &content), 1);
+        assert_eq!(drainable_head_count(&content), 1);
     }
 
     #[test]
@@ -2129,7 +1174,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let doc = write_doc(dir.path(), &["do [#x]", "do [#y]"], true, true);
         let content = std::fs::read_to_string(&doc).unwrap();
-        assert_eq!(drainable_head_count(&doc, &content), 2);
+        assert_eq!(drainable_head_count(&content), 2);
     }
 
     #[test]
@@ -2163,11 +1208,14 @@ mod tests {
         let continuation = detect(&doc).unwrap().expect("preset queue should drain");
         assert_eq!(continuation.head_prompt, cpa_line);
         assert_eq!(
-            live_drainable_continuation_head(&doc, &content).as_deref(),
+            live_drainable_continuation_head(&content, DrainScope::Supervisor).as_deref(),
             Some(cpa_line)
         );
-        assert_eq!(drainable_head_count(&doc, &content), 2);
-        assert_eq!(queue_stale_noise_lines(&doc), 0);
+        assert_eq!(drainable_head_count(&content), 2);
+        assert_eq!(
+            queue_stale_noise_lines(&std::fs::read_to_string(&doc).unwrap()),
+            0
+        );
     }
 
     #[test]
@@ -2213,11 +1261,14 @@ mod tests {
             Some(fenced.to_string())
         );
         assert_eq!(
-            live_drainable_continuation_head(&doc, &content).as_deref(),
+            live_drainable_continuation_head(&content, DrainScope::Supervisor).as_deref(),
             Some(fenced)
         );
-        assert_eq!(drainable_head_count(&doc, &content), 1);
-        assert_eq!(queue_stale_noise_lines(&doc), 0);
+        assert_eq!(drainable_head_count(&content), 1);
+        assert_eq!(
+            queue_stale_noise_lines(&std::fs::read_to_string(&doc).unwrap()),
+            0
+        );
     }
 
     #[test]
@@ -2252,11 +1303,14 @@ mod tests {
             Some(prompt.to_string())
         );
         assert_eq!(
-            live_drainable_continuation_head(&doc, &content).as_deref(),
+            live_drainable_continuation_head(&content, DrainScope::Supervisor).as_deref(),
             Some(prompt)
         );
-        assert_eq!(drainable_head_count(&doc, &content), 1);
-        assert_eq!(queue_stale_noise_lines(&doc), 0);
+        assert_eq!(drainable_head_count(&content), 1);
+        assert_eq!(
+            queue_stale_noise_lines(&std::fs::read_to_string(&doc).unwrap()),
+            0
+        );
     }
 
     #[test]
@@ -2274,9 +1328,12 @@ mod tests {
         let content = std::fs::read_to_string(&doc).unwrap();
 
         assert!(detect(&doc).unwrap().is_none());
-        assert!(live_drainable_continuation_head(&doc, &content).is_none());
-        assert_eq!(drainable_head_count(&doc, &content), 0);
-        assert_eq!(queue_stale_noise_lines(&doc), 1);
+        assert!(live_drainable_continuation_head(&content, DrainScope::Supervisor).is_none());
+        assert_eq!(drainable_head_count(&content), 0);
+        assert_eq!(
+            queue_stale_noise_lines(&std::fs::read_to_string(&doc).unwrap()),
+            1
+        );
     }
 
     #[test]
@@ -2519,7 +1576,10 @@ mod tests {
             continuation.head_prompt,
             "I'm still seeing JB File Cache Conflict dialogs. There should be 0."
         );
-        assert_eq!(queue_stale_noise_lines(&doc), 0);
+        assert_eq!(
+            queue_stale_noise_lines(&std::fs::read_to_string(&doc).unwrap()),
+            0
+        );
     }
 
     #[test]
@@ -2538,7 +1598,10 @@ mod tests {
             detect(&doc).unwrap().is_none(),
             "only-noise queue must not require continuation"
         );
-        assert_eq!(queue_stale_noise_lines(&doc), 2);
+        assert_eq!(
+            queue_stale_noise_lines(&std::fs::read_to_string(&doc).unwrap()),
+            2
+        );
     }
 
     #[test]
@@ -2558,7 +1621,7 @@ mod tests {
         );
         let content = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(
-            live_drainable_continuation_head(&doc, &content).as_deref(),
+            live_drainable_continuation_head(&content, DrainScope::Supervisor).as_deref(),
             Some("Fix the submit bug and add coverage"),
         );
     }
@@ -2578,11 +1641,11 @@ mod tests {
         );
         let content = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            live_drainable_continuation_head(&doc, &content).is_none(),
+            live_drainable_continuation_head(&content, DrainScope::Supervisor).is_none(),
             "only-noise queue must not yield a drainable idle-watch head"
         );
         assert!(
-            live_continuation_head(&doc, &content).is_some(),
+            live_continuation_head(&content).is_some(),
             "unfiltered head still returns the first noise line (the old churn source)"
         );
     }

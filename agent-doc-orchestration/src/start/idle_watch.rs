@@ -233,7 +233,7 @@ fn record_context_clear_prompt_for_hooks(
 
 /// Read the live `queue_active: true` ready head for the owned document, if any.
 ///
-/// Thin wrapper over [`crate::queue_continuation::live_drainable_continuation_head`]
+/// Thin wrapper over [`agent_doc_queue::queue_continuation::live_drainable_continuation_head`]
 /// so the supervisor idle-watch dispatch agrees with `session-check`'s continuation
 /// decision: it returns a head only when there is **agent-drainable** work at the
 /// queue head, skipping inert artifact/log noise lines and
@@ -242,7 +242,10 @@ fn record_context_clear_prompt_for_hooks(
 /// that has no continuation required (#qchurn / #goqueuestall / #goqstall2).
 fn idle_watch_active_queue_head(file: &Path) -> Option<String> {
     let content = std::fs::read_to_string(file).ok()?;
-    crate::queue_continuation::live_drainable_continuation_head(file, &content)
+    agent_doc_queue::queue_continuation::live_drainable_continuation_head(
+        &content,
+        agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+    )
 }
 
 /// `#qstallguard` Layer C: should the supervisor idle-watch SKIP dispatch on a
@@ -316,9 +319,10 @@ fn log_idle_queue_context_reset_submit(
 }
 
 fn forced_context_reset_reason_for_head(file: &Path, head: &str) -> Option<&'static str> {
-    if crate::queue_continuation::head_requires_focused_cycle(file, head) {
+    let content = std::fs::read_to_string(file).ok()?;
+    if agent_doc_queue::queue_continuation::head_requires_focused_cycle_in(&content, head) {
         Some(FOCUSED_CYCLE_CONTEXT_RESET_REASON)
-    } else if crate::queue_continuation::head_requires_clean_session(file, head) {
+    } else if agent_doc_queue::queue_continuation::head_requires_clean_session_in(&content, head) {
         Some(CLEAN_SESSION_CONTEXT_RESET_REASON)
     } else {
         None

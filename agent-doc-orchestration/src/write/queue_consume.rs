@@ -335,7 +335,11 @@ fn record_next_queue_head_selected_state(
     };
     let content_hash = crate::ops_log::content_hash(&head_text);
     let drainable = !stop_fence_at_head
-        && crate::queue_continuation::live_drainable_continuation_head(file, content).is_some();
+        && agent_doc_queue::queue_continuation::live_drainable_continuation_head(
+            content,
+            agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+        )
+        .is_some();
     let selected_event = crate::state_backbone::StateEvent::new(
         format!("queue-head-selected:{document_hash}:{node_key}:0:{content_hash}"),
         crate::state_backbone::StateFact::QueueHeadSelected {
@@ -1492,7 +1496,8 @@ fn noise_queue_head_node_keys(content: &str) -> Result<Vec<String>> {
         if text.is_empty() {
             continue;
         }
-        if crate::queue_continuation::is_noise_queue_head(text, preset_supplies_directive) {
+        if agent_doc_queue::queue_continuation::is_noise_queue_head(text, preset_supplies_directive)
+        {
             keys.push(node.node_key);
         }
     }
@@ -1648,7 +1653,7 @@ fn strike_all_noise_queue_heads(content: &str) -> Result<(String, usize)> {
         let is_noise = match &entry {
             agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
                 prompt.multiline
-                    && crate::queue_continuation::is_noise_queue_head(
+                    && agent_doc_queue::queue_continuation::is_noise_queue_head(
                         &prompt.text,
                         preset_supplies_directive,
                     )

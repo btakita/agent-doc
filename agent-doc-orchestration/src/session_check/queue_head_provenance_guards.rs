@@ -373,7 +373,7 @@ pub(crate) fn check_free_text_queue_head_provenance(
         // command, so the residue guard must leave it active/drainable rather than
         // flag it as "completed queue residue." Only genuine one-time prompts are
         // residue candidates.
-        if crate::queue_continuation::is_recurring_imperative_head(head) {
+        if agent_doc_queue::queue_continuation::is_recurring_imperative_head(head) {
             continue;
         }
         let still_queued = committed_queue_contains_active_free_text_head(&content, head);

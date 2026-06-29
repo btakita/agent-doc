@@ -1319,7 +1319,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                 // completed or genuinely blocked), emit the proof that the drain
                 // advances to the next drainable head instead of stalling.
                 if let (Some(prior), Some(current)) = (head_doc.as_deref(), snap.as_deref())
-                    && crate::queue_continuation::review_phase_routed(prior, current)
+                    && agent_doc_queue::queue_continuation::review_phase_routed(prior, current)
                 {
                     let next_head = continuation
                         .head_id

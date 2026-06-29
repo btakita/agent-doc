@@ -419,7 +419,7 @@ pub fn semantic_queue_strike_matches(
         // even when a common verb is lexically close to many prior done items.
         // It stays drainable and is retired only once actually dispatched this
         // cycle (the answered-this-turn consume path), not by fuzzy matching.
-        if crate::queue_continuation::is_recurring_imperative_head(&candidate.text) {
+        if agent_doc_queue::queue_continuation::is_recurring_imperative_head(&candidate.text) {
             continue;
         }
         // Score against both corpora; keep the single best match across both,

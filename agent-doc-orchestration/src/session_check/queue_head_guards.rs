@@ -54,7 +54,7 @@ pub(crate) fn check_no_response_active_queue_head(
     // session-check guard and continuation logic agree. After excluding deferred
     // heads, only genuinely drainable heads can still trip this guard.
     let deferred: std::collections::HashSet<String> =
-        crate::queue_continuation::deferred_backlog_ids(&content)
+        agent_doc_queue::queue_continuation::deferred_backlog_ids(&content)
             .into_iter()
             .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(&id))
             .collect();

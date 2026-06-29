@@ -712,9 +712,10 @@ fn send_clear_via_supervisor(ctx: &SessionContext) -> Result<SupervisorClearDeli
     let response = agent_doc_orchestration::supervisor::ipc::send_command(
         &ctx.supervisor_socket,
         &IpcMethod::Clear {
-            bytes: agent_doc_orchestration::supervisor::ipc::normalize_submit_text(
+            bytes: agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(
                 harness_clear_command(&ctx.harness),
-            ),
+            )
+            .to_string(),
         },
     )
     .with_context(|| {
@@ -5546,7 +5547,10 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         assert_eq!(latest, "/clear");
         assert_eq!(
             captured.lock().unwrap().as_slice(),
-            &[agent_doc_orchestration::supervisor::ipc::normalize_submit_text("/clear")]
+            &[
+                agent_doc_tmux_commands::submitted_text_without_trailing_line_endings("/clear")
+                    .to_string()
+            ]
         );
         drop(sock);
     }

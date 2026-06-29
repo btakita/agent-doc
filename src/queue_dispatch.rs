@@ -300,7 +300,8 @@ fn try_supervisor_dispatch(
 
     // Use `inject` method to send the command text to the harness stdin.
     // The harness interprets `/command` lines natively.
-    let bytes = supervisor_ipc::normalize_submit_text(&item.raw);
+    let bytes = agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(&item.raw)
+        .to_string();
     agent_doc_orchestration::input_diag::log_text_submit(
         Some(&ctx.file),
         "queue_dispatch.supervisor_ipc",
@@ -576,7 +577,10 @@ mod tests {
         assert!(matches!(result, DispatchResult::Ok));
         assert_eq!(
             captured.lock().unwrap().as_slice(),
-            &[agent_doc_orchestration::supervisor::ipc::normalize_submit_text("/doctor")]
+            &[
+                agent_doc_tmux_commands::submitted_text_without_trailing_line_endings("/doctor")
+                    .to_string()
+            ]
         );
 
         let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();

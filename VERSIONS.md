@@ -50,6 +50,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Route submit diagnostics no longer use an orchestration wrapper.** Route dispatch now calls `agent_doc_tmux_commands::tmux_submit_transform_for_harness` and `tmux_submit_key_for_harness` directly for text-submit diagnostics. The local `routed_trigger_submit_diagnostic` facade is deleted and covered by the tmux command boundary guard.
 
+- **Submit-text normalization no longer routes through orchestration.** The supervisor IPC `normalize_submit_text` helper and route `routed_trigger_submit_payload` wrapper are deleted. Raw PTY, supervisor IPC, queue dispatch, route, and session-clear callers now consume `agent_doc_tmux_commands::submitted_text_without_trailing_line_endings` directly, leaving orchestration to add only transport-specific submit bytes.
+
 - **Pane position selection moved to `agent-doc-tmux`.** The tmux pane geometry format, parser, and left/right/top/bottom selector now live in the focused tmux crate. `sessions` only queries `list-panes` and calls `agent_doc_tmux::select_pane_by_position` directly, with boundary coverage preventing the parser from returning to orchestration.
 
 - **Bare-shell pane command policy moved to `agent-doc-tmux`.** The `#{pane_current_command}` shell-name classifier for dead harness detection now lives with focused tmux observations. Route dispatch still reads tmux state and captures panes, but imports `agent_doc_tmux::pane_current_command_is_bare_shell` directly instead of owning the shell list.

@@ -1527,9 +1527,12 @@ mod tests {
         assert_eq!(routed, pane);
         assert_eq!(
             *injects.lock().unwrap(),
-            vec![routed_trigger_submit_payload(
-                &HarnessConfig::codex().trigger_command(&file_path)
-            )],
+            vec![
+                agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(
+                    &HarnessConfig::codex().trigger_command(&file_path)
+                )
+                .to_string()
+            ],
             "route should dispatch the bare Codex reopen through supervisor IPC before waiting for the delayed live-child ack"
         );
 
@@ -1608,9 +1611,10 @@ mod tests {
             !injects.is_empty()
                 && injects.iter().all(|inject| {
                     inject
-                        == &routed_trigger_submit_payload(
+                        == &agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(
                             &HarnessConfig::codex().trigger_command(&file_path),
                         )
+                        .to_string()
                 }),
             "route should still dispatch the trigger through supervisor IPC before accepting the optimistic startup-miss path: {injects:?}"
         );
@@ -1897,7 +1901,11 @@ mod tests {
         let trigger = HarnessConfig::codex().trigger_command(&file_path);
         let injects = injects.lock().unwrap().clone();
         assert!(
-            injects == vec![routed_trigger_submit_payload(&trigger)],
+            injects
+                == vec![
+                    agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(&trigger)
+                        .to_string()
+                ],
             "route should inject exactly one bare reopen through supervisor IPC after the fresh restart: {injects:?}"
         );
 

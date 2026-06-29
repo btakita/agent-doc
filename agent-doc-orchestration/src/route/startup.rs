@@ -2703,9 +2703,12 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         assert_eq!(routed, replacement_pane);
         assert!(
             *injects.lock().unwrap()
-                == vec![routed_trigger_submit_payload(
-                    &HarnessConfig::codex().trigger_command(&file_path)
-                )],
+                == vec![
+                    agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(
+                        &HarnessConfig::codex().trigger_command(&file_path)
+                    )
+                    .to_string()
+                ],
             "route should dispatch exactly one bare Codex reopen through supervisor IPC after the restart handoff"
         );
 
@@ -2918,8 +2921,10 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         .expect("route should dispatch through the authoritative actor pane");
         assert_eq!(resolved, actor_pane);
 
-        let trigger =
-            routed_trigger_submit_payload(&HarnessConfig::codex().trigger_command(&file_path));
+        let trigger = agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(
+            &HarnessConfig::codex().trigger_command(&file_path),
+        )
+        .to_string();
         assert_eq!(*injects.lock().unwrap(), vec![trigger]);
         assert_eq!(
             sessions::lookup(session_id).unwrap().as_deref(),
@@ -3545,8 +3550,10 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         .expect("route should optimistically queue a busy authoritative actor");
         assert_eq!(resolved, actor_pane);
 
-        let trigger =
-            routed_trigger_submit_payload(&HarnessConfig::claude().trigger_command(&file_path));
+        let trigger = agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(
+            &HarnessConfig::claude().trigger_command(&file_path),
+        )
+        .to_string();
         assert_eq!(*injects.lock().unwrap(), vec![trigger]);
         assert_eq!(
             sessions::lookup(session_id).unwrap().as_deref(),
@@ -3684,8 +3691,10 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     );
         assert_eq!(resolved, actor_pane);
 
-        let trigger =
-            routed_trigger_submit_payload(&HarnessConfig::codex().trigger_command(&file_path));
+        let trigger = agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(
+            &HarnessConfig::codex().trigger_command(&file_path),
+        )
+        .to_string();
         assert_eq!(*injects.lock().unwrap(), vec![trigger]);
         assert_eq!(
             sessions::lookup(session_id).unwrap().as_deref(),
@@ -4120,9 +4129,12 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         assert_eq!(resolved, pane);
         assert!(
             *injects.lock().unwrap()
-                == vec![routed_trigger_submit_payload(
-                    &HarnessConfig::codex().trigger_command(&file_path)
-                )],
+                == vec![
+                    agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(
+                        &HarnessConfig::codex().trigger_command(&file_path)
+                    )
+                    .to_string()
+                ],
             "route should dispatch to the registered pane via supervisor IPC after recovering the live owner via supervisor pid"
         );
 

@@ -233,22 +233,13 @@ fn default_restart_mode() -> String {
     "continue".to_string()
 }
 
-/// Normalize a single-line harness command before handing it to a submit path.
-///
-/// Tmux-backed submissions should use this normalized text directly and let the
-/// pane submit helper add the submit suffix. Raw PTY fallbacks should feed the
-/// normalized text into `submit_bytes`.
-pub fn normalize_submit_text(text: &str) -> String {
-    text.trim_end_matches(['\r', '\n']).to_string()
-}
-
 /// Build the canonical raw-PTY submit bytes for a single-line harness input.
 ///
 /// This is only for direct child-PTY fallback writes. Tmux-bound submissions
 /// use the shared `send-keys <text> Enter` helper and must not route through
 /// this raw carriage-return encoding.
 pub fn submit_bytes(text: &str) -> String {
-    let payload = normalize_submit_text(text);
+    let payload = agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(text);
     format!("{payload}\r")
 }
 
@@ -859,13 +850,6 @@ mod tests {
         assert_eq!(submit_bytes("/clear"), "/clear\r");
         assert_eq!(submit_bytes("/clear\n"), "/clear\r");
         assert_eq!(submit_bytes("/clear\r\n"), "/clear\r");
-    }
-
-    #[test]
-    fn normalize_submit_text_strips_trailing_line_endings() {
-        assert_eq!(normalize_submit_text("/clear"), "/clear");
-        assert_eq!(normalize_submit_text("/clear\n"), "/clear");
-        assert_eq!(normalize_submit_text("/clear\r\n"), "/clear");
     }
 
     #[test]

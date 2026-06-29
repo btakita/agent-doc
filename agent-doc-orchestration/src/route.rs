@@ -6805,13 +6805,6 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         assert_eq!(opencode.trigger_command("test.md"), "agent-doc test.md");
     }
     #[test]
-    fn routed_trigger_submit_payload_strips_trailing_line_endings() {
-        assert_eq!(
-            routed_trigger_submit_payload("agent-doc test.md\r\n"),
-            "agent-doc test.md"
-        );
-    }
-    #[test]
     fn validate_routed_trigger_payload_accepts_bare_codex_reopen() {
         let harness = HarnessConfig::codex();
         let trigger = harness.trigger_command("test.md");

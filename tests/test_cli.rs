@@ -4793,6 +4793,7 @@ fn test_agent_doc_tmux_commands_owns_submit_profile_policy() {
         "pub const fn tmux_submit_mode_for_harness(",
         "pub const fn tmux_submit_transform_for_harness(",
         "pub const fn tmux_submit_key_for_harness(",
+        "pub fn submitted_text_without_trailing_line_endings(",
         "pub fn text_submit_command(",
         "pub fn text_only_command(",
     ] {
@@ -4858,6 +4859,33 @@ fn test_agent_doc_tmux_commands_owns_submit_profile_policy() {
             && route_dispatch_source.contains("tmux_submit_transform_for_harness(")
             && route_dispatch_source.contains("tmux_submit_key_for_harness("),
         "route dispatch should call focused tmux submit diagnostics directly, without a local wrapper"
+    );
+    let supervisor_ipc_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/supervisor/ipc.rs"))
+            .unwrap();
+    let route_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+    for source in [
+        &supervisor_ipc_source,
+        &route_dispatch_source,
+        &route_source,
+        &start_source,
+        &queue_dispatch_source,
+        &session_actor_source,
+    ] {
+        assert!(
+            !source.contains("normalize_submit_text(")
+                && !source.contains("routed_trigger_submit_payload("),
+            "submit-text normalization should be consumed from agent-doc-tmux-commands directly, without orchestration wrappers"
+        );
+    }
+    assert!(
+        supervisor_ipc_source.contains("submitted_text_without_trailing_line_endings(")
+            && route_dispatch_source.contains("submitted_text_without_trailing_line_endings(")
+            && start_source.contains("submitted_text_without_trailing_line_endings(")
+            && queue_dispatch_source.contains("submitted_text_without_trailing_line_endings(")
+            && session_actor_source.contains("submitted_text_without_trailing_line_endings("),
+        "submit-text callers should use the focused tmux command normalization API directly"
     );
 
     for forbidden in [

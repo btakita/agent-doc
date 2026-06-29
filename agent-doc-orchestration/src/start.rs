@@ -1149,7 +1149,9 @@ fn auto_trigger_inject_command(
         "dispatch",
         "auto_trigger_inject",
     );
-    let submitted_text = crate::supervisor::ipc::normalize_submit_text(trigger_cmd);
+    let submitted_text =
+        agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(trigger_cmd)
+            .to_string();
     if let Some(pane_id) = shared.inject_pane.as_deref() {
         let profile =
             agent_doc_tmux_commands::tmux_submit_profile_for_harness(&shared.harness_binary);
@@ -1215,7 +1217,9 @@ fn auto_trigger_clear_command(
         "operator",
         "auto_trigger_clear",
     );
-    let submitted_text = crate::supervisor::ipc::normalize_submit_text(clear_cmd);
+    let submitted_text =
+        agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(clear_cmd)
+            .to_string();
     if let Some(pane_id) = shared.inject_pane.as_deref() {
         let profile =
             agent_doc_tmux_commands::tmux_submit_profile_for_harness(&shared.harness_binary);

@@ -1028,7 +1028,8 @@ pub(crate) fn dispatch_via_supervisor_ipc_with_mode(
     let _route_submit_guard =
         crate::route_in_flight::begin_route_submit(file, pane, &harness.binary)?;
     let method = IpcMethod::Inject {
-        bytes: routed_trigger_submit_payload(&payload),
+        bytes: agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(&payload)
+            .to_string(),
     };
     crate::input_diag::log_text_submit(
         Some(file),
@@ -1844,10 +1845,6 @@ pub(crate) fn routed_trigger_payload(trigger: &str) -> String {
 
 pub(crate) fn apply_plain_trigger_override(harness: &mut HarnessConfig) {
     harness.trigger_command_template = "agent-doc {file}".to_string();
-}
-
-pub(crate) fn routed_trigger_submit_payload(payload: &str) -> String {
-    crate::supervisor::ipc::normalize_submit_text(payload)
 }
 
 pub(crate) fn validate_routed_trigger_payload(

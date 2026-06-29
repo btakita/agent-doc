@@ -2,6 +2,12 @@
 
 use super::*;
 use crate::frontmatter_io;
+use agent_doc_supervisor::{
+    agent_change::harness_change_forces_fresh_spawn,
+    lifecycle::{BootResumeAction, boot_resume_action},
+    run_loop::{PostChildExitAction, post_child_exit_action},
+};
+use agent_doc_supervisor_process::{REEXEC_CHILD_PID_ENV, REEXEC_MASTER_FD_ENV, ReexecState};
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
 
@@ -908,14 +914,14 @@ pub fn run_with_reap_policy(
         let child_survived = pending_adopt
             .map(|state| state.child_survived())
             .unwrap_or(false);
-        let resume_action = crate::start::decisions::boot_resume_action(
+        let resume_action = boot_resume_action(
             is_recycle_boot,
             cycle_open,
             child_survived,
             already_consumed,
         );
         match resume_action {
-            crate::start::decisions::BootResumeAction::RedispatchInterruptedTurn => {
+            BootResumeAction::RedispatchInterruptedTurn => {
                 // The harness child died across the recycle — the interrupted turn
                 // has no surviving owner. Spawn a FRESH child (drop the dead-pid
                 // adopt) and re-trigger the same turn on the first iteration. Mark the
@@ -957,7 +963,7 @@ pub fn run_with_reap_policy(
                     ),
                 );
             }
-            crate::start::decisions::BootResumeAction::AdoptSurvivingChild => {
+            BootResumeAction::AdoptSurvivingChild => {
                 // The common Phase-A steady state: the adopted child is still running
                 // the interrupted turn. Adopt it as-is (the existing `#ctlrecycle`
                 // path below) without re-triggering — re-dispatching would double-run
@@ -967,7 +973,7 @@ pub fn run_with_reap_policy(
                     "supervisor_recycle_resume_adopt_surviving_child reason=child_alive_owns_resume",
                 );
             }
-            crate::start::decisions::BootResumeAction::None => {}
+            BootResumeAction::None => {}
         }
     }
     let mut restart_count: u32 = 0;
@@ -1011,7 +1017,7 @@ pub fn run_with_reap_policy(
                         route_owned,
                     ) {
                         Ok(restart_spec)
-                            if crate::start::decisions::harness_change_forces_fresh_spawn(
+                            if harness_change_forces_fresh_spawn(
                                 &harness.binary,
                                 &restart_spec.harness.binary,
                             ) =>
@@ -1419,21 +1425,21 @@ pub fn run_with_reap_policy(
         // stop → stop-agent → restart → normal classification) is modeled by the
         // pure `post_child_exit_action` so the "Stop Agent" keepalive contract is
         // unit-testable without a live PTY.
-        match crate::start::decisions::post_child_exit_action(
+        match post_child_exit_action(
             route_owned_completion.load(Ordering::Relaxed),
             shared.stop_requested.load(Ordering::Relaxed),
             shared.stop_agent_requested.load(Ordering::Relaxed),
             shared.restart_requested.load(Ordering::Relaxed),
         ) {
-            crate::start::decisions::PostChildExitAction::RouteOwnedComplete => {
+            PostChildExitAction::RouteOwnedComplete => {
                 log_event(&mut session_log, "route_owned_cycle_complete_stop");
                 break "route_owned_cycle_complete";
             }
-            crate::start::decisions::PostChildExitAction::ExitSupervisor => {
+            PostChildExitAction::ExitSupervisor => {
                 log_event(&mut session_log, "ipc_stop");
                 break "ipc_stop";
             }
-            crate::start::decisions::PostChildExitAction::StopAgentKeepalive => {
+            PostChildExitAction::StopAgentKeepalive => {
                 // "Stop Agent": the harness child was killed, but the supervisor must
                 // STAY alive at the restart-or-quit keepalive prompt — never exit
                 // (unlike `stop_requested`) and never auto-restart (unlike
@@ -1481,7 +1487,7 @@ pub fn run_with_reap_policy(
                     }
                 }
             }
-            crate::start::decisions::PostChildExitAction::AutoRestart => {
+            PostChildExitAction::AutoRestart => {
                 let mode = shared.restart_mode.lock().unwrap().clone();
                 first_run = mode == "fresh";
                 auto_trigger_next_launch = true;
@@ -1492,7 +1498,7 @@ pub fn run_with_reap_policy(
                 );
                 continue;
             }
-            crate::start::decisions::PostChildExitAction::NormalExitClassification => {}
+            PostChildExitAction::NormalExitClassification => {}
         }
 
         // Normal exit classification via CrashPolicy

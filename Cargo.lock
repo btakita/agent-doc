@@ -39,6 +39,7 @@ dependencies = [
  "agent-doc-queue",
  "agent-doc-secret-redact",
  "agent-doc-sqlite",
+ "agent-doc-supervisor",
  "agent-doc-template",
  "agent-doc-turn",
  "agent-doc-work-graph",

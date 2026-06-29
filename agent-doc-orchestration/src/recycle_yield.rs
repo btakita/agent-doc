@@ -2,7 +2,7 @@
 //!
 //! The supervisor hot-reloads onto a freshly-installed binary only at a turn
 //! boundary (`prompt_visible && !turn_active`) — see
-//! [`crate::start::decisions::supervisor_recycle_action`]. A continuously
+//! [`agent_doc_supervisor::lifecycle::supervisor_recycle_action`]. A continuously
 //! self-draining Claude Code `/loop` holds a fresh drain-owner lease AND keeps
 //! the harness `turn_active` back-to-back, so the supervisor never reaches that
 //! boundary and a stale binary persists for the whole session (the root of the

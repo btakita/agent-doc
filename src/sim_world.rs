@@ -671,7 +671,7 @@ impl RouteModel {
 /// Models the operator **recycle + clear pipeline** (`#clearcontresume`) so the
 /// SimWorld engine can drive the SAME production decision predicates the live
 /// supervisor idle-queue watch uses — `clear_cooldown_resume_ready` and
-/// `supervisor_recycle_action` in `agent_doc_orchestration::start::decisions` —
+/// `supervisor_recycle_action` in `agent_doc_supervisor::lifecycle` —
 /// instead of reimplementing the policy in the test harness. The operator's
 /// pipeline is `admin recycle --all-projects` (mark recycle at next idle
 /// boundary) → `session clear` (write the manual clear cooldown) → the cleared
@@ -3243,7 +3243,7 @@ fn never_closing_cycle_escalates_recycle_then_boot_redispatches_interrupted_turn
     // harness child dies — and the fresh supervisor boot re-dispatches the
     // genuinely-interrupted turn from the still-open `#durablerecycle` checkpoint
     // (idempotently: a second boot does not re-dispatch again).
-    use agent_doc_orchestration::start::decisions::MAX_CYCLE_OPEN_DEFER_TICKS;
+    use agent_doc_supervisor::lifecycle::MAX_CYCLE_OPEN_DEFER_TICKS;
 
     let mut world = SimWorld::new(9_191);
     world.apply(SimCommand::BindRouteOwner).unwrap();
@@ -3925,7 +3925,7 @@ fn failed_reexec_escalates_to_bounded_kill_relaunch() {
     // `EscalateKillRelaunch`, and the watch escalates to a bounded kill+relaunch of
     // the harness child (reclaiming the wedged child so the orphaned response commits),
     // capped at MAX_REEXEC_ESCALATIONS.
-    use agent_doc_orchestration::start::decisions::MAX_REEXEC_ESCALATIONS;
+    use agent_doc_supervisor::lifecycle::MAX_REEXEC_ESCALATIONS;
 
     let mut world = SimWorld::new(7_532);
     world.apply(SimCommand::BindRouteOwner).unwrap();

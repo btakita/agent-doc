@@ -2466,6 +2466,69 @@ fn test_agent_doc_debounce_is_sidecar_boundary() {
 }
 
 #[test]
+fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    assert!(
+        manifest_dir
+            .join("agent-doc-supervisor/src/lifecycle.rs")
+            .exists(),
+        "agent-doc-supervisor must own supervisor lifecycle policy"
+    );
+    assert!(
+        manifest_dir
+            .join("agent-doc-supervisor/src/agent_change.rs")
+            .exists(),
+        "agent-doc-supervisor must own harness-change policy"
+    );
+    assert!(
+        manifest_dir
+            .join("agent-doc-supervisor/src/run_loop.rs")
+            .exists(),
+        "agent-doc-supervisor must own pure run-loop exit dispatch"
+    );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/start/decisions.rs")
+            .exists(),
+        "orchestration must not keep a start::decisions facade over focused policy crates"
+    );
+
+    for relative in [
+        "agent-doc-orchestration/src/start.rs",
+        "agent-doc-orchestration/src/start/idle_watch.rs",
+        "agent-doc-orchestration/src/start/run.rs",
+        "agent-doc-orchestration/src/harness.rs",
+        "agent-doc-orchestration/src/project_controller/rpc.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            !source.contains("start::decisions")
+                && !source.contains("pub mod decisions")
+                && !source.contains("super::decisions"),
+            "{relative} must call focused supervisor/queue/process crates directly"
+        );
+    }
+
+    let supervisor_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&supervisor_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "agent-doc-supervisor-process",
+        "interprocess",
+        "notify",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-supervisor must stay pure and not depend on orchestration/process effects"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_document_realtime_owns_authority_boundaries() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let realtime_manifest =

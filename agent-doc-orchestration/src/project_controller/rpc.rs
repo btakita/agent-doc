@@ -4923,7 +4923,7 @@ mod tests {
 
     #[test]
     fn queue_boundary_self_recycle_makes_stale_content_ours_refusal_ineligible() {
-        use crate::start::decisions::{SupervisorRecycleAction, supervisor_recycle_action};
+        use agent_doc_supervisor::lifecycle::{SupervisorRecycleAction, supervisor_recycle_action};
 
         let installed_inode = 4242u64;
         assert!(

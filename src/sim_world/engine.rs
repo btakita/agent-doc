@@ -611,7 +611,7 @@ impl SimWorld {
             .iter()
             .map(String::as_str)
             .collect::<Vec<_>>();
-        let plan = agent_doc_orchestration::start::decisions::between_turn_enqueue_plan(
+        let plan = agent_doc_queue::queue::between_turn_enqueue_plan(
             requested,
             "/clear",
             "agent-doc sim.md",
@@ -951,7 +951,7 @@ impl SimWorld {
     /// `WaitForBoundary` — detection still fires, the trigger does NOT, and the
     /// switch is held pending (no silent drop).
     fn supervisor_harness_switch_tick(&mut self) {
-        use agent_doc_orchestration::start::decisions::{
+        use agent_doc_supervisor::agent_change::{
             AgentChangeRestartAction, agent_change_restart_decision,
         };
         let pending_switch = !self.recycle_clear.frontmatter_harness.is_empty()
@@ -1105,11 +1105,14 @@ impl SimWorld {
     /// No live pane — `prompt_visible` / `turn_active` are derived from the modeled
     /// supervisor lifecycle, exactly the offline simulation the operator asked for.
     pub(crate) fn supervisor_idle_queue_tick(&mut self) -> Result<()> {
-        use agent_doc_orchestration::start::decisions::{
-            CLEAR_COOLDOWN_RESUME_IDLE_TICKS, IdleQueueDrainDecision, SupervisorRecycleAction,
-            SupervisorRestartAction, clear_cooldown_resume_ready,
+        use agent_doc_queue::queue::{
+            CLEAR_COOLDOWN_RESUME_IDLE_TICKS, IdleQueueDrainDecision, clear_cooldown_resume_ready,
             drain_blocked_awaiting_clear_settle, drain_dispatch_dedup_skip,
-            idle_queue_drain_decision, supervisor_recycle_action, supervisor_restart_action,
+            idle_queue_drain_decision,
+        };
+        use agent_doc_supervisor::lifecycle::{
+            SupervisorRecycleAction, SupervisorRestartAction, supervisor_recycle_action,
+            supervisor_restart_action,
         };
 
         // The supervisor's idle signal: a dispatch-ready harness prompt is visible
@@ -1221,7 +1224,7 @@ impl SimWorld {
         // forcing the recycle so a never-closing / wedged cycle cannot starve the
         // stale-binary self-recycle forever (mirrors idle_watch.rs's
         // `cycle_open_defer_streak` / `effective_cycle_open`).
-        use agent_doc_orchestration::start::decisions::{
+        use agent_doc_supervisor::lifecycle::{
             MAX_CYCLE_OPEN_DEFER_TICKS, cycle_open_defer_escalates,
         };
         if self.recycle_clear.cycle_open && turn_boundary {
@@ -1271,7 +1274,7 @@ impl SimWorld {
             recycle_action,
             SupervisorRecycleAction::EscalateKillRelaunch
         ) {
-            use agent_doc_orchestration::start::decisions::{
+            use agent_doc_supervisor::lifecycle::{
                 MAX_REEXEC_ESCALATIONS, reexec_escalation_within_bound,
             };
             if turn_boundary
@@ -1490,7 +1493,7 @@ impl SimWorld {
     /// interrupted turn keyed off the checkpoint when the child died (and latches the
     /// consume so a second boot does not re-dispatch again).
     fn supervisor_recycle_boot(&mut self) {
-        use agent_doc_orchestration::start::decisions::{BootResumeAction, boot_resume_action};
+        use agent_doc_supervisor::lifecycle::{BootResumeAction, boot_resume_action};
         let action = boot_resume_action(
             // A boot here always models a recycle boot (the test drives it explicitly).
             true,

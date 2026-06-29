@@ -1,15 +1,31 @@
 //! The supervisor idle-queue watch thread and its two dedicated helpers, extracted
-//! from `start.rs`. This is the consumer of the pure [`super::decisions`] policy: it
-//! polls the owned pane on a timer, and on each busy→idle transition decides whether
-//! to drain a live `agent:queue` head, fire a context reset, or (`#ctlrecycle` R3)
-//! hot-reload a stale supervisor. As a child module of `start` it reaches the
-//! supervisor's private `SupervisorShared`, log/sleep helpers, decision re-exports,
-//! and `supervisor_perform_reexec` directly through `use super::*`.
+//! from `start.rs`. It polls the owned pane on a timer, and on each busy→idle
+//! transition decides whether to drain a live `agent:queue` head, fire a context
+//! reset, or (`#ctlrecycle` R3) hot-reload a stale supervisor. As a child module
+//! of `start` it reaches the supervisor's private `SupervisorShared`, log/sleep
+//! helpers, and `supervisor_perform_reexec` directly through `use super::*`.
 
 use super::*;
-use crate::start::decisions::{
-    IdleQueueContextClearInFlightDecision, IdleQueueContextClearInFlightFacts,
-    MAX_REEXEC_ESCALATIONS, reexec_escalation_within_bound,
+use agent_doc_queue::queue::{
+    CLEAR_COOLDOWN_RESUME_IDLE_TICKS, IdleQueueContextClearInFlightDecision,
+    IdleQueueContextClearInFlightFacts, IdleQueueContextResetDecision, IdleQueueDrainDecision,
+    IdleQueueDrainDecisionFacts, between_turn_enqueue_plan,
+    clean_session_head_forces_context_reset, clear_cooldown_resume_ready,
+    drain_blocked_awaiting_clear_settle, drain_dispatch_dedup_skip,
+    idle_queue_context_clear_in_flight_decision,
+    idle_queue_context_reset_decision_with_editor_typing,
+    idle_queue_drain_decision_with_editor_typing, stale_drain_recycle_yield_requested,
+};
+#[cfg(test)]
+use agent_doc_queue::queue::{idle_queue_context_reset_decision, idle_queue_drain_decision};
+use agent_doc_supervisor::{
+    agent_change::{AgentChangeRestartAction, agent_change_restart_decision},
+    lifecycle::{
+        MAX_CYCLE_OPEN_DEFER_TICKS, MAX_REEXEC_ESCALATIONS, SupervisorInstallAction,
+        SupervisorRecycleAction, SupervisorRestartAction, cycle_open_defer_escalates,
+        reexec_escalation_within_bound, supervisor_install_action, supervisor_recycle_action,
+        supervisor_restart_action,
+    },
 };
 
 const CLEAN_SESSION_CONTEXT_RESET_REASON: &str = "active queue head is a [clean-session] item - clearing to give it a fresh agent context (#cleandrainsup)";
@@ -370,11 +386,7 @@ fn record_context_clear_in_flight_marker(
 }
 
 fn log_between_turn_enqueue_delivery(file: &Path, clear_cmd: &str, drain_payload: &str) {
-    let plan = crate::start::decisions::between_turn_enqueue_plan(
-        [clear_cmd, drain_payload],
-        clear_cmd,
-        drain_payload,
-    );
+    let plan = between_turn_enqueue_plan([clear_cmd, drain_payload], clear_cmd, drain_payload);
     crate::ops_log::log_op(
         file,
         &format!(
@@ -478,7 +490,7 @@ fn idle_queue_resubmit_pending_payload(
 /// `#recycledeadlock` Part B (restart the interrupted task) — force-abandon the
 /// agent-doc cycle that a wedged-on-stale recycle is about to interrupt.
 ///
-/// Called only when [`super::decisions::supervisor_recycle_action`] decided to fire
+/// Called only when [`supervisor_recycle_action`] decided to fire
 /// a recycle WHILE a cycle was still open. Per Part A that decision is reachable only
 /// when the supervisor is stale AND a fact proves the running binary cannot commit
 /// the cycle (`explicit_admin` / `write_wedged` / `reexec_failed`), so the open cycle
@@ -785,7 +797,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     let resolved = crate::harness::HarnessConfig::from_context(&fm, &global);
                     let harness_changed = resolved.binary != launch_harness_binary;
                     if harness_changed {
-                        let decision = crate::start::decisions::agent_change_restart_decision(
+                        let decision = agent_change_restart_decision(
                             harness_changed,
                             agent_change_restart_enabled,
                             prompt_visible,
@@ -831,7 +843,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         // re-request a restart every tick.
                         let already_requested = agent_change_restart_requested_for.as_deref()
                             == Some(resolved.binary.as_str());
-                        if decision == crate::start::decisions::AgentChangeRestartAction::Restart
+                        if decision == AgentChangeRestartAction::Restart
                             && !already_requested
                         {
                             shared.restart_reexec.store(false, Ordering::Relaxed);
@@ -1014,7 +1026,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     .clone()
                     .unwrap_or_else(|| marker.written_at.to_string());
                 let resubmit_key = format!("context_clear_marker:{marker_key}");
-                match crate::start::decisions::idle_queue_context_clear_in_flight_decision(
+                match idle_queue_context_clear_in_flight_decision(
                     IdleQueueContextClearInFlightFacts {
                         marker_active: true,
                         prompt_visible,
@@ -1502,9 +1514,9 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     cycle_open_defer_streak = 0;
                     cycle_open_defer_escalated_logged = false;
                 }
-                let escalate_cycle_open = crate::start::decisions::cycle_open_defer_escalates(
+                let escalate_cycle_open = cycle_open_defer_escalates(
                     cycle_open_defer_streak,
-                    crate::start::decisions::MAX_CYCLE_OPEN_DEFER_TICKS,
+                    MAX_CYCLE_OPEN_DEFER_TICKS,
                 );
                 if escalate_cycle_open && !cycle_open_defer_escalated_logged {
                     cycle_open_defer_escalated_logged = true;
@@ -1515,7 +1527,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             path.display(),
                             shared.inject_pane.as_deref().unwrap_or("<pty>"),
                             cycle_open_defer_streak,
-                            crate::start::decisions::MAX_CYCLE_OPEN_DEFER_TICKS,
+                            MAX_CYCLE_OPEN_DEFER_TICKS,
                             inflight,
                         ),
                     );
@@ -1524,7 +1536,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         &format!(
                             "supervisor_recycle_cycle_open_escalated streak={} threshold={} action=force_recycle reason=cycle_never_closed",
                             cycle_open_defer_streak,
-                            crate::start::decisions::MAX_CYCLE_OPEN_DEFER_TICKS,
+                            MAX_CYCLE_OPEN_DEFER_TICKS,
                         ),
                     );
                 }
@@ -2145,7 +2157,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 let forced_context_reset_reason = active_head
                     .as_deref()
                     .and_then(|head| forced_context_reset_reason_for_head(&path, head));
-                let context_reset_reason = if crate::start::decisions::clean_session_head_forces_context_reset(
+                let context_reset_reason = if clean_session_head_forces_context_reset(
                     forced_context_reset_reason.is_some(),
                     clear_cooldown_active,
                 ) {
@@ -3082,7 +3094,7 @@ mod tests {
             edited_head
         );
         assert_eq!(
-            crate::start::decisions::idle_queue_context_reset_decision(
+            idle_queue_context_reset_decision(
                 true,
                 false,
                 false,
@@ -3093,7 +3105,7 @@ mod tests {
             IdleQueueContextResetDecision::SkipAlreadyResetHead
         );
         assert_eq!(
-            crate::start::decisions::idle_queue_context_reset_decision(
+            idle_queue_context_reset_decision(
                 true,
                 false,
                 false,
@@ -3150,14 +3162,7 @@ mod tests {
             "unexpected reset reason: {reason}"
         );
         assert_eq!(
-            crate::start::decisions::idle_queue_context_reset_decision(
-                true,
-                false,
-                false,
-                Some(head),
-                None,
-                true,
-            ),
+            idle_queue_context_reset_decision(true, false, false, Some(head), None, true,),
             IdleQueueContextResetDecision::Reset
         );
 
@@ -3199,16 +3204,9 @@ mod tests {
             Some("%25".to_string()),
         );
 
-        assert!(crate::start::decisions::clean_session_head_forces_context_reset(true, false,));
+        assert!(clean_session_head_forces_context_reset(true, false,));
         assert_eq!(
-            crate::start::decisions::idle_queue_context_reset_decision(
-                true,
-                false,
-                false,
-                Some(head),
-                None,
-                true,
-            ),
+            idle_queue_context_reset_decision(true, false, false, Some(head), None, true,),
             IdleQueueContextResetDecision::Reset
         );
 
@@ -3221,34 +3219,22 @@ mod tests {
             CLEAN_SESSION_CONTEXT_RESET_REASON,
         );
 
-        assert!(
-            crate::start::decisions::drain_blocked_awaiting_clear_settle(
-                true,
-                true,
-                false,
-                CLEAR_COOLDOWN_RESUME_IDLE_TICKS - 1,
-                CLEAR_COOLDOWN_RESUME_IDLE_TICKS,
-            )
-        );
-        assert!(
-            !crate::start::decisions::drain_blocked_awaiting_clear_settle(
-                true,
-                true,
-                false,
-                CLEAR_COOLDOWN_RESUME_IDLE_TICKS,
-                CLEAR_COOLDOWN_RESUME_IDLE_TICKS,
-            )
-        );
+        assert!(drain_blocked_awaiting_clear_settle(
+            true,
+            true,
+            false,
+            CLEAR_COOLDOWN_RESUME_IDLE_TICKS - 1,
+            CLEAR_COOLDOWN_RESUME_IDLE_TICKS,
+        ));
+        assert!(!drain_blocked_awaiting_clear_settle(
+            true,
+            true,
+            false,
+            CLEAR_COOLDOWN_RESUME_IDLE_TICKS,
+            CLEAR_COOLDOWN_RESUME_IDLE_TICKS,
+        ));
         assert_eq!(
-            crate::start::decisions::idle_queue_drain_decision(
-                false,
-                true,
-                false,
-                false,
-                false,
-                Some(head),
-                None,
-            ),
+            idle_queue_drain_decision(false, true, false, false, false, Some(head), None,),
             IdleQueueDrainDecision::Dispatch
         );
         log_idle_queue_drain_submit(

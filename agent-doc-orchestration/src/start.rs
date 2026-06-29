@@ -138,6 +138,13 @@ use crate::supervisor::{
     state::{CrashPolicy, RestartAction, SupervisorState},
 };
 use agent_doc_frontmatter::frontmatter;
+#[cfg(test)]
+use agent_doc_queue::queue::{
+    IdleQueueContextResetDecision, IdleQueueDrainDecision, clean_session_head_forces_context_reset,
+    idle_queue_context_reset_decision, idle_queue_drain_decision,
+};
+#[cfg(unix)]
+use agent_doc_supervisor_process::ReexecState;
 
 use crate::{config, sessions, snapshot};
 
@@ -463,20 +470,7 @@ fn record_session_startup_miss(
     );
 }
 
-pub mod decisions;
 mod idle_watch;
-
-pub(crate) use decisions::{
-    CLEAR_COOLDOWN_RESUME_IDLE_TICKS, IdleQueueContextResetDecision, IdleQueueDrainDecision,
-    IdleQueueDrainDecisionFacts, REEXEC_CHILD_PID_ENV, REEXEC_MASTER_FD_ENV, ReexecState,
-    SupervisorInstallAction, SupervisorRecycleAction, SupervisorRestartAction,
-    clear_cooldown_resume_ready, drain_blocked_awaiting_clear_settle, drain_dispatch_dedup_skip,
-    idle_queue_context_reset_decision_with_editor_typing,
-    idle_queue_drain_decision_with_editor_typing, stale_drain_recycle_yield_requested,
-    supervisor_install_action, supervisor_recycle_action, supervisor_restart_action,
-};
-#[cfg(test)]
-pub(crate) use decisions::{idle_queue_context_reset_decision, idle_queue_drain_decision};
 
 fn idle_queue_head_slash_command(active_head: &str) -> Option<String> {
     agent_doc_queue::queue_command::slash_command_text(active_head)
@@ -3784,7 +3778,7 @@ Done.
         let harness = crate::harness::HarnessConfig::codex();
         let head = "JB Run Agent Doc on sampleorders.md stalled after a restart with /clear.";
 
-        assert!(!crate::start::decisions::clean_session_head_forces_context_reset(false, false,));
+        assert!(!clean_session_head_forces_context_reset(false, false,));
         assert_eq!(
             idle_queue_context_reset_decision(true, false, false, Some(head), None, false),
             IdleQueueContextResetDecision::SkipNoResetNeeded

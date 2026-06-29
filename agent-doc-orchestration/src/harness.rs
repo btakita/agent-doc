@@ -1287,7 +1287,7 @@ mod tests {
         // And the change forces a FRESH spawn of the new harness — the supervisor
         // must not adopt the old (claude) child for the codex turn.
         assert!(
-            crate::start::decisions::harness_change_forces_fresh_spawn(
+            agent_doc_supervisor::agent_change::harness_change_forces_fresh_spawn(
                 &resolved_turn_n.binary,
                 &resolved_turn_n_plus_1.binary,
             ),
@@ -1309,7 +1309,7 @@ mod tests {
         let turn_n_plus_1 = HarnessConfig::from_context(&fm, &config);
         assert_eq!(turn_n.binary, turn_n_plus_1.binary);
         assert!(
-            !crate::start::decisions::harness_change_forces_fresh_spawn(
+            !agent_doc_supervisor::agent_change::harness_change_forces_fresh_spawn(
                 &turn_n.binary,
                 &turn_n_plus_1.binary,
             ),

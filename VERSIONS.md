@@ -61,6 +61,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Claim cross-session admission moved to `agent-doc-controller`.** The `CrossSessionDecision` enum, structured reject marker, stale-session/force decision, and foreign-supervisor lease guard now live in `agent_doc_controller::claim`. The `claim` orchestration module keeps only tmux/session/file side effects and calls the focused controller API directly.
 
+- **Cross-document owner command-line recognition moved to `agent-doc-controller`.** The pure process-command classifiers that identify long-lived agent-doc/harness owner sessions and extract the bound markdown document now live in `agent_doc_controller::command_line`. Sync keeps only the claimed-file path-matching adapter and calls the focused controller API directly.
+
 - **Route dispatch drain-retry policy moved to `agent-doc-controller`.** The `#pcp3a` concurrent-finalize drain retry decision now lives in `agent_doc_controller::dispatch` beside the other dispatch admission helpers. `route.rs` still performs repair/session-check/file IO, but it calls the focused controller API directly instead of owning the retry decision table.
 
 - **Dispatch-only busy/probe policy moved to `agent-doc-controller`.** The decision for when a dispatch-only route should wait for a busy actor to become ready, and when it should probe the live pane for active-turn wording before direct submit, now lives in `agent_doc_controller::dispatch`. `route.rs` maps persisted actor state into the controller dispatch vocabulary and keeps only tmux capture, logging, queue fallback, and refusal formatting.

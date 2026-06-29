@@ -8,6 +8,28 @@ fn arg_file_name_is(arg: &str, expected: &str) -> bool {
         .is_some_and(|name| name == expected)
 }
 
+fn token_basename(token: &str) -> &str {
+    Path::new(token)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(token)
+}
+
+fn token_is_agent_doc_binary(token: &str) -> bool {
+    token_basename(token).starts_with("agent-doc")
+}
+
+fn token_is_harness_binary(token: &str) -> bool {
+    matches!(
+        token_basename(token),
+        "claude" | "codex" | "opencode" | "bun" | "node"
+    )
+}
+
+fn token_is_non_owner_agent_doc_subcommand(token: &str) -> bool {
+    matches!(token, "route" | "claim")
+}
+
 fn is_shell_c_controller_sentinel(args: &[String], agent_doc_idx: usize) -> bool {
     agent_doc_idx >= 3
         && args.get(agent_doc_idx - 2).is_some_and(|arg| arg == "-c")
@@ -33,6 +55,44 @@ pub fn controller_serve_project_root_from_args(args: &[String]) -> Option<PathBu
     args[controller_idx + 3..]
         .windows(2)
         .find_map(|window| (window[0] == "--project-root").then(|| PathBuf::from(&window[1])))
+}
+
+/// True when `cmdline` is a long-lived agent-doc/harness owner invocation for
+/// some document, regardless of which document.
+pub fn cmdline_is_agent_doc_owner_session(cmdline: &str) -> bool {
+    let tokens = cmdline.split_whitespace().collect::<Vec<_>>();
+    if let Some(idx) = tokens
+        .iter()
+        .position(|token| token_is_agent_doc_binary(token))
+    {
+        let Some(next) = tokens.get(idx + 1) else {
+            return false;
+        };
+        if *next == "start" {
+            return true;
+        }
+        return !token_is_non_owner_agent_doc_subcommand(next);
+    }
+
+    tokens.iter().any(|token| token_is_harness_binary(token))
+}
+
+/// True when `cmdline` references at least one `.md` document path token.
+pub fn cmdline_references_md_document(cmdline: &str) -> bool {
+    cmdline.split_whitespace().any(|token| {
+        token
+            .trim_matches(|c| c == '"' || c == '\'')
+            .ends_with(".md")
+    })
+}
+
+/// First `.md` document path token in `cmdline`, for cross-document diagnostics.
+pub fn owner_document_from_cmdline(cmdline: &str) -> Option<String> {
+    cmdline
+        .split_whitespace()
+        .map(|token| token.trim_matches(|c| c == '"' || c == '\''))
+        .find(|token| token.ends_with(".md"))
+        .map(|token| token.to_string())
 }
 
 #[cfg(test)]
@@ -114,5 +174,37 @@ mod tests {
             ]),
             None
         );
+    }
+
+    #[test]
+    fn cmdline_owner_session_recognizes_supervisors_and_harnesses() {
+        assert!(cmdline_is_agent_doc_owner_session(
+            "/home/me/.cargo/bin/agent-doc start --route-owned tasks/doc.md"
+        ));
+        assert!(cmdline_is_agent_doc_owner_session(
+            "/usr/bin/codex /work/project/tasks/doc.md"
+        ));
+        assert!(!cmdline_is_agent_doc_owner_session(
+            "/home/me/.cargo/bin/agent-doc route tasks/doc.md"
+        ));
+        assert!(!cmdline_is_agent_doc_owner_session(
+            "/home/me/.cargo/bin/agent-doc claim tasks/doc.md --pane %1"
+        ));
+        assert!(!cmdline_is_agent_doc_owner_session("-zsh"));
+    }
+
+    #[test]
+    fn owner_document_from_cmdline_extracts_bound_document() {
+        assert_eq!(
+            owner_document_from_cmdline(
+                "/home/me/.cargo/bin/agent-doc start --route-owned tasks/software/tsift.md"
+            ),
+            Some("tasks/software/tsift.md".to_string())
+        );
+        assert_eq!(
+            owner_document_from_cmdline("/usr/bin/codex \"tasks/agent-doc/agent-doc-bugs2.md\""),
+            Some("tasks/agent-doc/agent-doc-bugs2.md".to_string())
+        );
+        assert_eq!(owner_document_from_cmdline("-zsh"), None);
     }
 }

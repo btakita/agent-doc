@@ -4678,60 +4678,9 @@ fn cmdline_has_file_match(cmdline: &str, file_path: &str) -> bool {
     false
 }
 
-fn token_basename(token: &str) -> &str {
-    Path::new(token)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(token)
-}
-
-fn token_is_agent_doc_binary(token: &str) -> bool {
-    token_basename(token).starts_with("agent-doc")
-}
-
-fn token_is_harness_binary(token: &str) -> bool {
-    matches!(
-        token_basename(token),
-        "claude" | "codex" | "opencode" | "bun" | "node"
-    )
-}
-
-fn token_is_non_owner_agent_doc_subcommand(token: &str) -> bool {
-    matches!(token, "route" | "claim")
-}
-
 fn agent_doc_cmdline_is_owner(cmdline: &str, file_path: &str) -> bool {
-    cmdline_has_file_match(cmdline, file_path) && cmdline_is_agent_doc_owner_session(cmdline)
-}
-
-/// File-agnostic half of [`agent_doc_cmdline_is_owner`]: true when `cmdline` is a
-/// long-lived agent-doc/codex owner invocation (a supervisor `start`, an owner
-/// subcommand, or a harness binary) for *some* document, regardless of which.
-fn cmdline_is_agent_doc_owner_session(cmdline: &str) -> bool {
-    let tokens = cmdline.split_whitespace().collect::<Vec<_>>();
-    if let Some(idx) = tokens
-        .iter()
-        .position(|token| token_is_agent_doc_binary(token))
-    {
-        let Some(next) = tokens.get(idx + 1) else {
-            return false;
-        };
-        if *next == "start" {
-            return true;
-        }
-        return !token_is_non_owner_agent_doc_subcommand(next);
-    }
-
-    tokens.iter().any(|token| token_is_harness_binary(token))
-}
-
-/// True when `cmdline` references at least one `.md` document path token.
-fn cmdline_references_md_document(cmdline: &str) -> bool {
-    cmdline.split_whitespace().any(|token| {
-        token
-            .trim_matches(|c| c == '"' || c == '\'')
-            .ends_with(".md")
-    })
+    cmdline_has_file_match(cmdline, file_path)
+        && agent_doc_controller::command_line::cmdline_is_agent_doc_owner_session(cmdline)
 }
 
 /// True when `cmdline` is a live agent-doc/codex owner session for a document
@@ -4740,19 +4689,9 @@ fn cmdline_references_md_document(cmdline: &str) -> bool {
 /// project/submodule whose session registry the calling root cannot see. Used to
 /// keep `claim`/`route` from commandeering such a pane.
 pub(crate) fn cmdline_owns_other_document(cmdline: &str, claimed_file: &str) -> bool {
-    cmdline_is_agent_doc_owner_session(cmdline)
-        && cmdline_references_md_document(cmdline)
+    agent_doc_controller::command_line::cmdline_is_agent_doc_owner_session(cmdline)
+        && agent_doc_controller::command_line::cmdline_references_md_document(cmdline)
         && !agent_doc_cmdline_is_owner(cmdline, claimed_file)
-}
-
-/// First `.md` document path token in `cmdline` (the document an
-/// agent-doc/codex owner session is bound to), for cross-document diagnostics.
-fn owner_document_from_cmdline(cmdline: &str) -> Option<String> {
-    cmdline
-        .split_whitespace()
-        .map(|token| token.trim_matches(|c| c == '"' || c == '\''))
-        .find(|token| token.ends_with(".md"))
-        .map(|token| token.to_string())
 }
 
 /// Diagnostic sibling of [`pane_runs_other_document_owner`]: returns the foreign
@@ -4788,7 +4727,7 @@ fn pane_owned_document_other_than(
             _ => continue,
         };
         if cmdline_owns_other_document(&cmdline, &claimed) {
-            return owner_document_from_cmdline(&cmdline);
+            return agent_doc_controller::command_line::owner_document_from_cmdline(&cmdline);
         }
     }
     None
@@ -5713,18 +5652,23 @@ mod tests {
     #[test]
     fn owner_document_from_cmdline_extracts_bound_document() {
         assert_eq!(
-            owner_document_from_cmdline(
+            agent_doc_controller::command_line::owner_document_from_cmdline(
                 "/home/brian/.cargo/bin/agent-doc start --route-owned tasks/software/tsift.md"
             ),
             Some("tasks/software/tsift.md".to_string())
         );
         // Quoted token is unwrapped.
         assert_eq!(
-            owner_document_from_cmdline("/usr/bin/codex \"tasks/agent-doc/agent-doc-bugs2.md\""),
+            agent_doc_controller::command_line::owner_document_from_cmdline(
+                "/usr/bin/codex \"tasks/agent-doc/agent-doc-bugs2.md\""
+            ),
             Some("tasks/agent-doc/agent-doc-bugs2.md".to_string())
         );
         // A bare shell owns no document.
-        assert_eq!(owner_document_from_cmdline("-zsh"), None);
+        assert_eq!(
+            agent_doc_controller::command_line::owner_document_from_cmdline("-zsh"),
+            None
+        );
     }
     #[test]
     fn cross_document_execution_identifies_foreign_owner_document() {
@@ -5738,7 +5682,7 @@ mod tests {
         let cycle_doc = "tasks/agent-doc/agent-doc-bugs2.md";
         assert!(cmdline_owns_other_document(pane_cmdline, cycle_doc));
         assert_eq!(
-            owner_document_from_cmdline(pane_cmdline),
+            agent_doc_controller::command_line::owner_document_from_cmdline(pane_cmdline),
             Some("tasks/software/tsift.md".to_string())
         );
         // No spurious cross-document signal when the pane owns the cycle's own doc.

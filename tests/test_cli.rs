@@ -3810,6 +3810,18 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     let project_controller_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/project_controller.rs"))
             .unwrap();
+    let command_line_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller/src/command_line.rs")).unwrap();
+    for required_snippet in [
+        "pub fn cmdline_is_agent_doc_owner_session(",
+        "pub fn cmdline_references_md_document(",
+        "pub fn owner_document_from_cmdline(",
+    ] {
+        assert!(
+            command_line_source.contains(required_snippet),
+            "agent-doc-controller should own process command-line ownership recognition: {required_snippet}"
+        );
+    }
     for forbidden_snippet in [
         "pub use agent_doc_controller::dispatch",
         "pub fn dispatch_error_stale_generation_redirect_target",
@@ -3850,6 +3862,31 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
                 "agent_doc_controller::command_line::controller_serve_project_root_from_args"
             ),
             "orchestration should call focused controller command-line parsing directly"
+        );
+    }
+    let sync_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync.rs")).unwrap();
+    for forbidden_snippet in [
+        "fn token_is_agent_doc_binary(",
+        "fn token_is_harness_binary(",
+        "fn token_is_non_owner_agent_doc_subcommand(",
+        "fn cmdline_is_agent_doc_owner_session(",
+        "fn cmdline_references_md_document(",
+        "fn owner_document_from_cmdline(",
+    ] {
+        assert!(
+            !sync_source.contains(forbidden_snippet),
+            "sync.rs must not re-own pure process command-line ownership policy: {forbidden_snippet}"
+        );
+    }
+    for required_snippet in [
+        "agent_doc_controller::command_line::cmdline_is_agent_doc_owner_session",
+        "agent_doc_controller::command_line::cmdline_references_md_document",
+        "agent_doc_controller::command_line::owner_document_from_cmdline",
+    ] {
+        assert!(
+            sync_source.contains(required_snippet),
+            "sync.rs should call focused controller command-line policy directly: {required_snippet}"
         );
     }
 

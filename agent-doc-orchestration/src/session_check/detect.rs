@@ -364,7 +364,7 @@ pub fn detect_jb_cache_conflict_cancel_recoverable_with_context(
     };
     if !matches!(
         state.phase,
-        crate::cycle_state::CyclePhase::WriteApplied | crate::cycle_state::CyclePhase::Committed
+        agent_doc_turn::CyclePhase::WriteApplied | agent_doc_turn::CyclePhase::Committed
     ) {
         return Ok(false);
     }

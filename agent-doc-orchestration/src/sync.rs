@@ -8373,7 +8373,7 @@ mod tests {
         );
         assert_eq!(
             crate::cycle_state::load(&doc_a).unwrap().unwrap().phase,
-            crate::cycle_state::CyclePhase::PreflightStarted
+            agent_doc_turn::CyclePhase::PreflightStarted
         );
     }
     #[test]

@@ -1697,8 +1697,7 @@ fn bare_write_placed_response_body(file: &Path) -> Result<bool> {
     }
     if !matches!(
         state.phase,
-        crate::cycle_state::CyclePhase::ResponseCaptured
-            | crate::cycle_state::CyclePhase::WriteApplied
+        agent_doc_turn::CyclePhase::ResponseCaptured | agent_doc_turn::CyclePhase::WriteApplied
     ) {
         return Ok(false);
     }
@@ -4847,7 +4846,7 @@ mod tests {
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(
             state.phase,
-            crate::cycle_state::CyclePhase::PreflightStarted,
+            agent_doc_turn::CyclePhase::PreflightStarted,
             "best-effort session commit must not mark the turn committed"
         );
 
@@ -8485,7 +8484,7 @@ scratch
             "strict recovery must preserve current edits and restore committed response:\n{recovered}"
         );
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         let head_after = crate::git::show_head(&doc).unwrap().unwrap();
         assert_eq!(head_after, recovered);
     }

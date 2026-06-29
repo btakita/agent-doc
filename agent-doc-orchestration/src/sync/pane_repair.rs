@@ -100,10 +100,10 @@ pub(crate) fn protected_registered_pane_state_from_capture(
 pub(crate) fn open_cycle_protected_file_state(file: &Path) -> Option<OpenCycleProtectedPaneState> {
     let state = crate::cycle_state::load(file).ok().flatten()?;
     let phase = match state.phase {
-        crate::cycle_state::CyclePhase::PreflightStarted => "preflight_started",
-        crate::cycle_state::CyclePhase::ResponseCaptured => "response_captured",
-        crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
-        crate::cycle_state::CyclePhase::Committed | crate::cycle_state::CyclePhase::Abandoned => {
+        agent_doc_turn::CyclePhase::PreflightStarted => "preflight_started",
+        agent_doc_turn::CyclePhase::ResponseCaptured => "response_captured",
+        agent_doc_turn::CyclePhase::WriteApplied => "write_applied",
+        agent_doc_turn::CyclePhase::Committed | agent_doc_turn::CyclePhase::Abandoned => {
             return None;
         }
     };
@@ -296,8 +296,8 @@ pub(crate) fn recover_missing_pane_closeout(
         return (None, None, None);
     };
     let phase = match state.phase {
-        crate::cycle_state::CyclePhase::ResponseCaptured => "response_captured",
-        crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
+        agent_doc_turn::CyclePhase::ResponseCaptured => "response_captured",
+        agent_doc_turn::CyclePhase::WriteApplied => "write_applied",
         _ => return (None, None, None),
     };
     let capture_present = crate::capture::load_active(file).ok().flatten().is_some();
@@ -341,12 +341,10 @@ pub(crate) fn recover_missing_pane_closeout(
 pub(crate) fn pending_missing_pane_repair_phase(file: &Path) -> Option<&'static str> {
     let state = crate::cycle_state::load(file).ok().flatten()?;
     match state.phase {
-        crate::cycle_state::CyclePhase::PreflightStarted => Some("preflight_started"),
-        crate::cycle_state::CyclePhase::ResponseCaptured => Some("response_captured"),
-        crate::cycle_state::CyclePhase::WriteApplied => Some("write_applied"),
-        crate::cycle_state::CyclePhase::Committed | crate::cycle_state::CyclePhase::Abandoned => {
-            None
-        }
+        agent_doc_turn::CyclePhase::PreflightStarted => Some("preflight_started"),
+        agent_doc_turn::CyclePhase::ResponseCaptured => Some("response_captured"),
+        agent_doc_turn::CyclePhase::WriteApplied => Some("write_applied"),
+        agent_doc_turn::CyclePhase::Committed | agent_doc_turn::CyclePhase::Abandoned => None,
     }
 }
 
@@ -612,7 +610,7 @@ mod tests {
         let state = crate::cycle_state::load(&doc)
             .unwrap()
             .expect("cycle state should exist");
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
 
         let status = crate::startup_miss::session_log_status(&doc, "session-lost-pane")
             .unwrap()
@@ -673,10 +671,7 @@ mod tests {
         assert!(!repair.repaired_stale_preflight);
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(
-            state.phase,
-            crate::cycle_state::CyclePhase::ResponseCaptured
-        );
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::ResponseCaptured);
         assert!(snapshot::pending_path_for(&doc).unwrap().exists());
     }
     #[test]
@@ -737,7 +732,7 @@ mod tests {
         assert!(!repair.repaired_stale_preflight);
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(
             crate::git::verify_snapshot_committed(&doc).unwrap(),
             crate::git::SnapshotCommitStatus::Committed
@@ -831,7 +826,7 @@ mod tests {
         assert!(!repair.repaired_stale_preflight);
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(
             crate::git::verify_snapshot_committed(&doc).unwrap(),
             crate::git::SnapshotCommitStatus::Committed

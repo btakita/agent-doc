@@ -557,7 +557,7 @@ pub(crate) fn check_committed_without_response_body_guard(file: &Path) -> Result
     let Some(state) = crate::cycle_state::load(file)? else {
         return Ok(GuardResult::None);
     };
-    if !matches!(state.phase, crate::cycle_state::CyclePhase::Committed) {
+    if !matches!(state.phase, agent_doc_turn::CyclePhase::Committed) {
         return Ok(GuardResult::None);
     }
     let committed_exchange_has_body = committed_exchange_has_response_body(file)?;

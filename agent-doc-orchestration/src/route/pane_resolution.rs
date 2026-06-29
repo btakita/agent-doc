@@ -1540,10 +1540,7 @@ mod tests {
         let state = crate::cycle_state::load(&doc)
             .unwrap()
             .expect("cycle state should exist after delayed ack");
-        assert_eq!(
-            state.phase,
-            crate::cycle_state::CyclePhase::PreflightStarted
-        );
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
         ipc.stop();
     }
     #[test]
@@ -3666,10 +3663,7 @@ mod tests {
         let state = crate::cycle_state::load(&doc)
             .unwrap()
             .expect("cycle state should exist after delayed fresh-start ack");
-        assert_eq!(
-            state.phase,
-            crate::cycle_state::CyclePhase::PreflightStarted
-        );
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]

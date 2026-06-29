@@ -625,11 +625,11 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
                         harness.binary,
                         state.cycle_id,
                         match state.phase {
-                            crate::cycle_state::CyclePhase::PreflightStarted => "preflight_started",
-                            crate::cycle_state::CyclePhase::ResponseCaptured => "response_captured",
-                            crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
-                            crate::cycle_state::CyclePhase::Committed => "committed",
-                            crate::cycle_state::CyclePhase::Abandoned => "abandoned",
+                            agent_doc_turn::CyclePhase::PreflightStarted => "preflight_started",
+                            agent_doc_turn::CyclePhase::ResponseCaptured => "response_captured",
+                            agent_doc_turn::CyclePhase::WriteApplied => "write_applied",
+                            agent_doc_turn::CyclePhase::Committed => "committed",
+                            agent_doc_turn::CyclePhase::Abandoned => "abandoned",
                         },
                         ack_timeout.as_secs()
                     ),

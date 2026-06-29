@@ -1550,13 +1550,13 @@ pub fn persist_session_actor_closeout(file: &Path) -> Result<bool> {
     Ok(true)
 }
 
-fn cycle_phase_store_label(phase: crate::cycle_state::CyclePhase) -> &'static str {
+fn cycle_phase_store_label(phase: agent_doc_turn::CyclePhase) -> &'static str {
     match phase {
-        crate::cycle_state::CyclePhase::PreflightStarted => "preflight_started",
-        crate::cycle_state::CyclePhase::ResponseCaptured => "response_captured",
-        crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
-        crate::cycle_state::CyclePhase::Committed => "committed",
-        crate::cycle_state::CyclePhase::Abandoned => "abandoned",
+        agent_doc_turn::CyclePhase::PreflightStarted => "preflight_started",
+        agent_doc_turn::CyclePhase::ResponseCaptured => "response_captured",
+        agent_doc_turn::CyclePhase::WriteApplied => "write_applied",
+        agent_doc_turn::CyclePhase::Committed => "committed",
+        agent_doc_turn::CyclePhase::Abandoned => "abandoned",
     }
 }
 

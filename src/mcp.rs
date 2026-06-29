@@ -965,10 +965,7 @@ mod tests {
         let state = agent_doc_orchestration::cycle_state::load(&file)
             .unwrap()
             .unwrap();
-        assert_eq!(
-            state.phase,
-            agent_doc_orchestration::cycle_state::CyclePhase::PreflightStarted
-        );
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
     }
 
     #[test]

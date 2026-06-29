@@ -16,6 +16,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Controller dispatch helpers no longer route through `project_controller::rpc` facades.** The RPC adapter imports `agent_doc_controller::dispatch` privately, and route authorization calls the focused coalesced-dispatch classifier directly. Added a boundary guard so pure dispatch admission helpers stay owned by `agent-doc-controller`.
 
+- **Cycle phase vocabulary no longer routes through `cycle_state`.** Orchestration sidecar code and CLI helpers import `agent_doc_turn::CyclePhase` directly, while `cycle_state` keeps only durable cycle sidecar persistence and transition application. Added a source-wide guard against the old `cycle_state::CyclePhase` facade path.
+
 ## 0.34.64
 
 - **`#suprestassoc` — `restart-supervisor` registry re-association is scoped to the requested document, not just the reused session id.** The CLI restart path now resolves registry entries by exact canonical document path first and only keeps the legacy session-id fallback for fileless registry rows; registry keys that explicitly name another document are rejected, so restarting `sampleportal.md` cannot adopt a stale `agent-doc-bugs2.md` pane/session projection that happens to carry the same session id. Coverage: deterministic registry lookup regressions for rejecting a foreign same-session entry and preferring the exact target document entry. Live editor/pane confirmation remains an `[operator-verify]` follow-up.

@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use lazily::{ThreadSafeContext, ThreadSafeStateMachine};
 use serde::{Deserialize, Serialize};
 
-use crate::cycle_state::CyclePhase;
+use agent_doc_turn::CyclePhase;
 use agent_doc_turn::{CycleEvent, CyclePhaseMachine};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

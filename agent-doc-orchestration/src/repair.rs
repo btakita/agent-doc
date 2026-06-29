@@ -358,10 +358,7 @@ pub fn cancel_preflight_cycle(file: &Path) -> Result<CancelOutcome> {
     if !state.is_open() {
         return Ok(CancelOutcome::NoOpenCycle);
     }
-    if !matches!(
-        state.phase,
-        crate::cycle_state::CyclePhase::PreflightStarted
-    ) {
+    if !matches!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted) {
         return Ok(CancelOutcome::Protected);
     }
     if crate::capture::load_by_id(file, &state.cycle_id)?.is_some() {
@@ -398,8 +395,7 @@ fn agent_owned_visible_response_is_adoptable(
     matches!(
         state.map(|state| state.phase),
         Some(
-            crate::cycle_state::CyclePhase::ResponseCaptured
-                | crate::cycle_state::CyclePhase::WriteApplied
+            agent_doc_turn::CyclePhase::ResponseCaptured | agent_doc_turn::CyclePhase::WriteApplied
         ) | None
     ) || crate::codex_hook::load_active_session_for_current_file(file)
         .ok()
@@ -459,7 +455,7 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
     let Some(state) = crate::cycle_state::load(file)? else {
         return Ok(RepairOutcome::Noop);
     };
-    if state.phase != crate::cycle_state::CyclePhase::PreflightStarted {
+    if state.phase != agent_doc_turn::CyclePhase::PreflightStarted {
         return Ok(RepairOutcome::Noop);
     }
 
@@ -676,8 +672,7 @@ pub fn recover_missing_commit_boundary(file: &Path, event: &str) -> Result<Optio
     let has_open_commit_boundary = state.as_ref().is_some_and(|state| {
         matches!(
             state.phase,
-            crate::cycle_state::CyclePhase::ResponseCaptured
-                | crate::cycle_state::CyclePhase::WriteApplied
+            agent_doc_turn::CyclePhase::ResponseCaptured | agent_doc_turn::CyclePhase::WriteApplied
         )
     });
     let has_missing_commit_event = if has_open_commit_boundary {
@@ -2369,7 +2364,7 @@ mod tests {
             CancelOutcome::Abandoned
         );
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Abandoned);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Abandoned);
     }
 
     #[test]
@@ -3282,7 +3277,7 @@ mod tests {
         let snap = snapshot::load(&doc).unwrap().unwrap();
         assert_eq!(snap, v2, "snapshot must follow the current document");
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert!(!state.is_open(), "cycle must be closed after retire");
         let capture = crate::capture::load_active(&doc).unwrap().unwrap();
         assert_eq!(capture.state, crate::capture::CaptureState::Discarded);
@@ -3437,7 +3432,7 @@ mod tests {
         assert!(!pending.exists(), "pending file should be cleared");
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(
             state.last_event,
             "repair_respect_manual_exchange_tail_removal"
@@ -3525,7 +3520,7 @@ mod tests {
             "stale preflight lock should be repaired"
         );
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(state.last_event, "repair_preflight_stale_lock");
     }
 
@@ -3559,7 +3554,7 @@ mod tests {
             "stale-preflight repair must canonicalize response-owned proof lines:\n{doc_after}"
         );
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(log.contains("repair_preflight_stale_lock"));
         assert!(log.contains("repair_response_body_prompt_prefix_stripped"));
@@ -3594,7 +3589,7 @@ mod tests {
         assert_eq!(repaired, RepairOutcome::StalePreflightLockRepaired);
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(state.last_event, "repair_preflight_stale_empty_cycle");
         assert_eq!(snapshot::load(&doc).unwrap().as_deref(), Some(base));
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), live);
@@ -3629,7 +3624,7 @@ mod tests {
         assert_eq!(outcome, RepairOutcome::StalePreflightCycleAbandoned);
 
         let after = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(after.phase, crate::cycle_state::CyclePhase::Abandoned);
+        assert_eq!(after.phase, agent_doc_turn::CyclePhase::Abandoned);
         assert_eq!(after.cycle_id, state.cycle_id);
         assert_eq!(
             after.last_event,
@@ -3678,7 +3673,7 @@ mod tests {
         assert_eq!(outcome, RepairOutcome::StalePreflightCycleAbandoned);
 
         let after = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(after.phase, crate::cycle_state::CyclePhase::Abandoned);
+        assert_eq!(after.phase, agent_doc_turn::CyclePhase::Abandoned);
         assert_eq!(after.cycle_id, state.cycle_id);
         assert!(writer.maybe_checkpoint("second partial").unwrap().is_none());
 
@@ -3732,10 +3727,7 @@ mod tests {
         assert!(message.contains("no response exists to replay"));
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(
-            state.phase,
-            crate::cycle_state::CyclePhase::PreflightStarted
-        );
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
         assert_eq!(state.last_event, "preflight_started");
     }
 
@@ -3764,10 +3756,7 @@ mod tests {
         assert_eq!(repaired, RepairOutcome::Noop);
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(
-            state.phase,
-            crate::cycle_state::CyclePhase::PreflightStarted
-        );
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
     }
 
     #[test]
@@ -3812,7 +3801,7 @@ mod tests {
         assert_eq!(repaired, RepairOutcome::StalePreflightLockRepaired);
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(state.last_event, "repair_preflight_committed_historical");
         assert_eq!(snapshot::load(&doc).unwrap().as_deref(), Some(updated));
     }
@@ -3877,7 +3866,7 @@ mod tests {
         );
 
         let after = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(after.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(after.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(after.cycle_id, state.cycle_id);
     }
 
@@ -3932,7 +3921,7 @@ mod tests {
         assert_eq!(repaired, RepairOutcome::CommitBoundaryRecovered);
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(state.last_event, "repair_commit_boundary_recovered");
         assert_eq!(snapshot::load(&doc).unwrap().as_deref(), Some(updated));
     }
@@ -4161,7 +4150,7 @@ mod tests {
         );
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
 
         let capture = crate::capture::load_active(&doc).unwrap().unwrap();
         assert_eq!(capture.state, crate::capture::CaptureState::Committed);
@@ -4219,7 +4208,7 @@ mod tests {
         );
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
     }
 
     #[test]
@@ -4264,7 +4253,7 @@ mod tests {
             "snapshot should advance to the visible response:\n{snap}"
         );
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
     }
 
     #[test]
@@ -4314,7 +4303,7 @@ mod tests {
             "snapshot should advance to the adopted response:\n{snap}"
         );
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
     }
 
     #[test]
@@ -4374,7 +4363,7 @@ mod tests {
         );
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
     }
 
     #[test]
@@ -4408,7 +4397,7 @@ mod tests {
         assert_eq!(outcome, RepairOutcome::ReplayedResponse);
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(state.last_event, "commit_success");
         let doc_after = std::fs::read_to_string(&doc).unwrap();
         assert!(doc_after.contains("### Re: replay after commit — gpt-5"));

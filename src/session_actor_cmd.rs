@@ -252,7 +252,7 @@ pub fn history(file: &Path) -> Result<()> {
 /// `session_actor::load_all_records_in` API. With `file = None`, scopes to the
 /// current working directory's project root.
 pub fn debug(file: Option<&Path>, json: bool) -> Result<()> {
-    use agent_doc_orchestration::cycle_state::CyclePhase;
+    use agent_doc_turn::CyclePhase;
     let base_dir = match file {
         Some(f) => {
             let canonical = f.canonicalize().unwrap_or_else(|_| f.to_path_buf());
@@ -1150,7 +1150,7 @@ fn document_dirty_after_committed_cycle(file: &Path) -> Result<bool> {
     let Some(state) = agent_doc_orchestration::cycle_state::load(file)? else {
         return Ok(false);
     };
-    if state.phase != agent_doc_orchestration::cycle_state::CyclePhase::Committed {
+    if state.phase != agent_doc_turn::CyclePhase::Committed {
         return Ok(true);
     }
     let Some(hash) = state.file_hash.as_deref() else {
@@ -5708,10 +5708,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         let state = agent_doc_orchestration::cycle_state::load(&doc)
             .unwrap()
             .unwrap();
-        assert_eq!(
-            state.phase,
-            agent_doc_orchestration::cycle_state::CyclePhase::Abandoned
-        );
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Abandoned);
     }
 
     #[test]

@@ -1734,10 +1734,7 @@ mod tests {
         run(&doc).unwrap();
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(
-            state.phase,
-            crate::cycle_state::CyclePhase::PreflightStarted
-        );
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
         assert_eq!(state.queue_task_id.as_deref(), Some("#durablerecycle"));
         assert_eq!(state.turn_id.as_deref(), Some("#durablerecycle"));
         assert!(
@@ -1947,10 +1944,7 @@ mod tests {
         run(&doc).unwrap();
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(
-            state.phase,
-            crate::cycle_state::CyclePhase::PreflightStarted
-        );
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
         assert!(
             state.requires_backlog_capture,
             "harness prompt preset expansion should record backlog capture requirement"
@@ -1988,7 +1982,7 @@ mod tests {
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(
             state.phase,
-            crate::cycle_state::CyclePhase::PreflightStarted,
+            agent_doc_turn::CyclePhase::PreflightStarted,
             "active queue prompt should open a cycle even when the file matches the snapshot"
         );
     }
@@ -2656,10 +2650,7 @@ mod tests {
         run(&doc).unwrap();
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(
-            state.phase,
-            crate::cycle_state::CyclePhase::PreflightStarted
-        );
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
     }
     #[test]
     fn preflight_auto_commits_open_write_applied_cycle() {
@@ -2679,7 +2670,7 @@ mod tests {
         run(&doc).unwrap();
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(state.last_event, "commit_success");
     }
     /// Phase 3 (#jbccc3): the jb_cache_conflict_cancel pattern leaves a cycle
@@ -2725,7 +2716,7 @@ mod tests {
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(patched), Some(patched))
             .unwrap();
         let pre_state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(pre_state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(pre_state.phase, agent_doc_turn::CyclePhase::Committed);
         assert!(matches!(
             crate::git::verify_snapshot_committed(&doc).unwrap(),
             crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead { .. }
@@ -2788,10 +2779,7 @@ mod tests {
         .unwrap();
 
         let pre_state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(
-            pre_state.phase,
-            crate::cycle_state::CyclePhase::WriteApplied
-        );
+        assert_eq!(pre_state.phase, agent_doc_turn::CyclePhase::WriteApplied);
         assert!(matches!(
             crate::git::verify_snapshot_committed(&doc).unwrap(),
             crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead { .. }
@@ -2808,7 +2796,7 @@ mod tests {
             crate::git::SnapshotCommitStatus::Committed
         ));
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         let show = Command::new("git")
             .current_dir(root)
             .args(["show", "HEAD:session.md"])
@@ -3297,10 +3285,7 @@ mod tests {
         run(&doc).unwrap();
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(
-            state.phase,
-            crate::cycle_state::CyclePhase::PreflightStarted
-        );
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
         assert_ne!(
             state.cycle_id, prior.cycle_id,
             "rerun should close the old preflight and open a fresh one"
@@ -3349,10 +3334,7 @@ mod tests {
         run(&doc).unwrap();
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(
-            state.phase,
-            crate::cycle_state::CyclePhase::PreflightStarted
-        );
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
         assert_ne!(
             state.cycle_id, prior.cycle_id,
             "preflight should abandon the stale empty cycle and open a fresh cycle for the prompt"
@@ -3411,10 +3393,7 @@ mod tests {
         run(&doc).unwrap();
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(
-            state.phase,
-            crate::cycle_state::CyclePhase::PreflightStarted
-        );
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
         assert_ne!(
             state.cycle_id, prior.cycle_id,
             "preflight should abandon the stale empty cycle and open a fresh cycle for the prompt"
@@ -3494,7 +3473,7 @@ mod tests {
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(
             state.phase,
-            crate::cycle_state::CyclePhase::PreflightStarted,
+            agent_doc_turn::CyclePhase::PreflightStarted,
             "compact follow-up should open a response cycle instead of becoming no_changes"
         );
         assert!(
@@ -3609,7 +3588,7 @@ mod tests {
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(
             state.phase,
-            crate::cycle_state::CyclePhase::PreflightStarted,
+            agent_doc_turn::CyclePhase::PreflightStarted,
             "after committing the queued snapshot, preflight should open a fresh cycle for the live edit"
         );
         let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
@@ -3671,7 +3650,7 @@ mod tests {
         );
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
     }
     #[test]
     fn preflight_fails_closed_on_ambiguous_preflight_started_patchback_without_artifact() {
@@ -3709,7 +3688,7 @@ mod tests {
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(
             state.phase,
-            crate::cycle_state::CyclePhase::PreflightStarted,
+            agent_doc_turn::CyclePhase::PreflightStarted,
             "ambiguous patchback must not be auto-committed"
         );
     }
@@ -3760,7 +3739,7 @@ mod tests {
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(
             state.phase,
-            crate::cycle_state::CyclePhase::PreflightStarted,
+            agent_doc_turn::CyclePhase::PreflightStarted,
             "recovery must not mark the stale cycle committed while HEAD lacks the visible response"
         );
     }
@@ -3816,7 +3795,7 @@ mod tests {
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(
             state.phase,
-            crate::cycle_state::CyclePhase::PreflightStarted,
+            agent_doc_turn::CyclePhase::PreflightStarted,
             "preflight should still open a response cycle for the live prompt"
         );
 
@@ -3893,7 +3872,7 @@ mod tests {
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(
             state.phase,
-            crate::cycle_state::CyclePhase::PreflightStarted,
+            agent_doc_turn::CyclePhase::PreflightStarted,
             "preflight should still open a response cycle for the relocated prompt"
         );
 
@@ -4562,7 +4541,7 @@ mod tests {
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(
             state.phase,
-            crate::cycle_state::CyclePhase::PreflightStarted,
+            agent_doc_turn::CyclePhase::PreflightStarted,
             "preflight should still open a response cycle for the prompt-preset status edit"
         );
 
@@ -4657,7 +4636,7 @@ mod tests {
         run(&doc).unwrap();
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(result.contains("Recovered answer."));
     }

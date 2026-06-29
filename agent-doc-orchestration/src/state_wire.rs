@@ -1034,7 +1034,7 @@ mod tests {
             // Snapshot-time canonical expectation.
             assert_eq!(
                 at_snapshot.closeout.phase,
-                Some(crate::cycle_state::CyclePhase::PreflightStarted)
+                Some(agent_doc_turn::CyclePhase::PreflightStarted)
             );
             let head = at_snapshot
                 .queue
@@ -1094,7 +1094,7 @@ mod tests {
             // cycle_phase_after = committed
             assert_eq!(
                 after.closeout.phase,
-                Some(crate::cycle_state::CyclePhase::Committed),
+                Some(agent_doc_turn::CyclePhase::Committed),
                 "cycle must converge to committed"
             );
             // queue_head_phase_after = completed

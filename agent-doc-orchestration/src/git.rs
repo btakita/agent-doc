@@ -5058,7 +5058,7 @@ Duplicate replay should stay live.
         );
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(state.last_event, "commit_already_current");
 
         let capture = crate::capture::load_active(&doc).unwrap();
@@ -5133,7 +5133,7 @@ Duplicate replay should stay live.
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(
             state.phase,
-            crate::cycle_state::CyclePhase::ResponseCaptured,
+            agent_doc_turn::CyclePhase::ResponseCaptured,
             "cycle must stay open until the live editor buffer reaches disk"
         );
 
@@ -5278,10 +5278,7 @@ Duplicate replay should stay live.
         );
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(
-            state.phase,
-            crate::cycle_state::CyclePhase::ResponseCaptured
-        );
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::ResponseCaptured);
         let capture = crate::capture::load_active(&doc).unwrap().unwrap();
         assert_eq!(capture.state, crate::capture::CaptureState::Captured);
 
@@ -5734,7 +5731,7 @@ Duplicate replay should stay live.
         );
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(state.last_event, "commit_already_current");
 
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
@@ -6537,10 +6534,7 @@ Duplicate replay should stay live.
         );
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(
-            state.phase,
-            crate::cycle_state::CyclePhase::ResponseCaptured
-        );
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::ResponseCaptured);
         assert_eq!(state.last_event, "response_captured");
 
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
@@ -6890,7 +6884,7 @@ Duplicate replay should stay live.
         );
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(state.last_event, "commit_already_current");
 
         let working_after = fs::read_to_string(&doc).unwrap();
@@ -7102,10 +7096,7 @@ Duplicate replay should stay live.
         );
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(
-            state.phase,
-            crate::cycle_state::CyclePhase::ResponseCaptured
-        );
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::ResponseCaptured);
         assert_eq!(state.last_event, "response_captured");
 
         let head_doc = show_head(&doc).unwrap().unwrap();

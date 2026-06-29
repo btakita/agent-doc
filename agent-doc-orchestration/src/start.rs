@@ -878,7 +878,7 @@ fn route_owned_cycle_completed_after_start(
     baseline: Option<&crate::cycle_state::CycleState>,
 ) -> bool {
     route_owned_cycle_changed_after_start(current, baseline)
-        && current.phase == crate::cycle_state::CyclePhase::Committed
+        && current.phase == agent_doc_turn::CyclePhase::Committed
 }
 
 fn route_owned_file_dirty_after_commit(
@@ -2841,7 +2841,7 @@ mod th {
     // --- relocate_if_wrong_session tests ---
     pub(crate) fn test_cycle(
         id: &str,
-        phase: crate::cycle_state::CyclePhase,
+        phase: agent_doc_turn::CyclePhase,
         updated_at: u64,
     ) -> crate::cycle_state::CycleState {
         crate::cycle_state::CycleState {
@@ -2887,7 +2887,7 @@ mod th {
         path: &Path,
         content: &str,
     ) -> crate::cycle_state::CycleState {
-        let mut state = test_cycle("cycle-2", crate::cycle_state::CyclePhase::Committed, 20);
+        let mut state = test_cycle("cycle-2", agent_doc_turn::CyclePhase::Committed, 20);
         state.file = path.display().to_string();
         state.file_hash = Some(crate::ops_log::content_hash(content));
         state
@@ -3331,7 +3331,7 @@ mod tests {
     }
     #[test]
     fn route_owned_cycle_completion_ignores_unchanged_committed_baseline() {
-        let baseline = test_cycle("cycle-1", crate::cycle_state::CyclePhase::Committed, 10);
+        let baseline = test_cycle("cycle-1", agent_doc_turn::CyclePhase::Committed, 10);
         let current = baseline.clone();
 
         assert!(
@@ -3341,8 +3341,8 @@ mod tests {
     }
     #[test]
     fn route_owned_cycle_completion_detects_new_committed_cycle() {
-        let baseline = test_cycle("cycle-1", crate::cycle_state::CyclePhase::Committed, 10);
-        let current = test_cycle("cycle-2", crate::cycle_state::CyclePhase::Committed, 20);
+        let baseline = test_cycle("cycle-1", agent_doc_turn::CyclePhase::Committed, 10);
+        let current = test_cycle("cycle-2", agent_doc_turn::CyclePhase::Committed, 20);
 
         assert!(
             route_owned_cycle_completed_after_start(&current, Some(&baseline)),
@@ -3351,8 +3351,8 @@ mod tests {
     }
     #[test]
     fn route_owned_cycle_completion_waits_while_new_cycle_open() {
-        let baseline = test_cycle("cycle-1", crate::cycle_state::CyclePhase::Committed, 10);
-        let current = test_cycle("cycle-2", crate::cycle_state::CyclePhase::WriteApplied, 20);
+        let baseline = test_cycle("cycle-1", agent_doc_turn::CyclePhase::Committed, 10);
+        let current = test_cycle("cycle-2", agent_doc_turn::CyclePhase::WriteApplied, 20);
 
         assert!(
             !route_owned_cycle_completed_after_start(&current, Some(&baseline)),

@@ -242,13 +242,13 @@ pub(crate) fn retry_routed_cycle_ack_after_fresh_restart(
     }
 }
 
-pub(crate) fn cycle_phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {
+pub(crate) fn cycle_phase_name(phase: agent_doc_turn::CyclePhase) -> &'static str {
     match phase {
-        crate::cycle_state::CyclePhase::PreflightStarted => "preflight_started",
-        crate::cycle_state::CyclePhase::ResponseCaptured => "response_captured",
-        crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
-        crate::cycle_state::CyclePhase::Committed => "committed",
-        crate::cycle_state::CyclePhase::Abandoned => "abandoned",
+        agent_doc_turn::CyclePhase::PreflightStarted => "preflight_started",
+        agent_doc_turn::CyclePhase::ResponseCaptured => "response_captured",
+        agent_doc_turn::CyclePhase::WriteApplied => "write_applied",
+        agent_doc_turn::CyclePhase::Committed => "committed",
+        agent_doc_turn::CyclePhase::Abandoned => "abandoned",
     }
 }
 
@@ -723,7 +723,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
         );
         assert_eq!(
             ack.unwrap().phase,
-            crate::cycle_state::CyclePhase::PreflightStarted
+            agent_doc_turn::CyclePhase::PreflightStarted
         );
     }
     #[test]
@@ -760,7 +760,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
         let ack = wait_for_start_ack(&doc, Some(&baseline), Duration::from_secs(1))
             .expect("new committed cycle should count as startup acknowledgment");
         assert_ne!(ack.cycle_id, baseline.cycle_id);
-        assert_eq!(ack.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(ack.phase, agent_doc_turn::CyclePhase::Committed);
     }
     #[test]
     fn wait_for_start_ack_times_out_without_cycle_change() {

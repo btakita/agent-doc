@@ -964,10 +964,7 @@ mod tests {
         assert_eq!(record, active);
         assert_eq!(record.state, CaptureState::Captured);
         assert_eq!(record.session_id.as_deref(), Some("sid"));
-        assert_eq!(
-            cycle.phase,
-            crate::cycle_state::CyclePhase::ResponseCaptured
-        );
+        assert_eq!(cycle.phase, agent_doc_turn::CyclePhase::ResponseCaptured);
         assert_eq!(
             cycle.capture_id.as_deref(),
             Some(record.capture_id.as_str())
@@ -1002,10 +999,7 @@ mod tests {
         assert_eq!(checkpoint, loaded);
         assert_eq!(loaded.response_body, "partial streamed response");
         assert_eq!(loaded.checkpoint_count, 1);
-        assert_eq!(
-            state.phase,
-            crate::cycle_state::CyclePhase::PreflightStarted
-        );
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
         assert!(state.capture_id.is_none());
     }
 

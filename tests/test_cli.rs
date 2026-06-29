@@ -2356,6 +2356,80 @@ fn test_agent_doc_turn_owns_drain_stall_policy() {
 }
 
 #[test]
+fn test_agent_doc_turn_cycle_phase_has_no_cycle_state_facade() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-turn")),
+        "agent-doc-turn must stay a first-class workspace crate"
+    );
+
+    let cycle_state_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/cycle_state.rs"))
+            .unwrap();
+    assert!(
+        !cycle_state_source.contains("pub use agent_doc_turn::CyclePhase"),
+        "cycle_state must not re-export CyclePhase from the focused turn crate"
+    );
+    assert!(
+        cycle_state_source
+            .contains("use agent_doc_turn::{CycleEvent, CyclePhase, CyclePhaseMachine};"),
+        "cycle_state should import the focused turn lifecycle model privately"
+    );
+
+    fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                collect_rs_files(&path, out);
+            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    let mut source_files = Vec::new();
+    collect_rs_files(
+        &manifest_dir.join("agent-doc-orchestration/src"),
+        &mut source_files,
+    );
+    collect_rs_files(&manifest_dir.join("src"), &mut source_files);
+    for path in source_files {
+        let source = fs::read_to_string(&path).unwrap();
+        let relative = path.strip_prefix(manifest_dir).unwrap().display();
+        for forbidden_snippet in [
+            "cycle_state::CyclePhase",
+            "agent_doc_orchestration::cycle_state::CyclePhase",
+            "use crate::cycle_state::CyclePhase",
+        ] {
+            assert!(
+                !source.contains(forbidden_snippet),
+                "{relative} must call agent_doc_turn::CyclePhase directly, not the cycle_state facade: {forbidden_snippet}"
+            );
+        }
+    }
+
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
+    assert!(
+        orchestration_dependencies.contains_key("agent-doc-turn"),
+        "orchestration must depend on the focused turn crate directly"
+    );
+    let root_dependencies = workspace["dependencies"].as_table().unwrap();
+    assert!(
+        root_dependencies.contains_key("agent-doc-turn"),
+        "the CLI shell must depend on the focused turn crate directly"
+    );
+}
+
+#[test]
 fn test_agent_doc_log_time_has_no_ops_log_facade() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();

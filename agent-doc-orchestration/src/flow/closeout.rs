@@ -225,7 +225,7 @@ pub fn complete_required_closeout(file: &Path) -> Result<bool> {
 
 pub fn cycle_already_committed(file: &Path) -> Option<String> {
     match crate::cycle_state::load(file) {
-        Ok(Some(state)) if state.phase == crate::cycle_state::CyclePhase::Committed => {
+        Ok(Some(state)) if state.phase == agent_doc_turn::CyclePhase::Committed => {
             Some(state.cycle_id)
         }
         _ => None,
@@ -267,7 +267,7 @@ pub fn stuck_captured_cycle(file: &Path) -> Option<StuckCapturedCycleInfo> {
             return None;
         }
     };
-    if state.phase != crate::cycle_state::CyclePhase::Committed {
+    if state.phase != agent_doc_turn::CyclePhase::Committed {
         return None;
     }
     let capture_id = state.capture_id.as_deref()?;
@@ -339,7 +339,7 @@ pub fn reconcile_compacted_committed_capture(file: &Path) -> Result<bool> {
     let Some(state) = crate::cycle_state::load(file)? else {
         return Ok(false);
     };
-    if state.phase != crate::cycle_state::CyclePhase::Committed {
+    if state.phase != agent_doc_turn::CyclePhase::Committed {
         return Ok(false);
     }
     let Some(capture_id) = state.capture_id.as_deref() else {
@@ -538,7 +538,7 @@ pub(crate) fn record_terminal_closeout_proof(file: &Path, did_commit: bool) -> R
             file.display()
         );
     };
-    if state.phase != crate::cycle_state::CyclePhase::Committed {
+    if state.phase != agent_doc_turn::CyclePhase::Committed {
         anyhow::bail!(
             "terminal proof cannot record closeout for {}: cycle `{}` is `{}`",
             file.display(),
@@ -635,13 +635,13 @@ fn now_millis() -> u64 {
         .unwrap_or(0)
 }
 
-pub fn cycle_phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {
+pub fn cycle_phase_name(phase: agent_doc_turn::CyclePhase) -> &'static str {
     match phase {
-        crate::cycle_state::CyclePhase::PreflightStarted => "preflight_started",
-        crate::cycle_state::CyclePhase::ResponseCaptured => "response_captured",
-        crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
-        crate::cycle_state::CyclePhase::Committed => "committed",
-        crate::cycle_state::CyclePhase::Abandoned => "abandoned",
+        agent_doc_turn::CyclePhase::PreflightStarted => "preflight_started",
+        agent_doc_turn::CyclePhase::ResponseCaptured => "response_captured",
+        agent_doc_turn::CyclePhase::WriteApplied => "write_applied",
+        agent_doc_turn::CyclePhase::Committed => "committed",
+        agent_doc_turn::CyclePhase::Abandoned => "abandoned",
     }
 }
 
@@ -952,7 +952,7 @@ impl CloseoutRecoveryEvidence {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CloseoutCycleEvidence {
     pub cycle_id: String,
-    pub phase: crate::cycle_state::CyclePhase,
+    pub phase: agent_doc_turn::CyclePhase,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1604,7 +1604,7 @@ pub fn classify_closeout_recovery_state(file: &Path) -> CloseoutRecoveryState {
         Ok(Some(state)) => state,
         _ => return CloseoutRecoveryState::Clean,
     };
-    use crate::cycle_state::CyclePhase;
+    use agent_doc_turn::CyclePhase;
     match state.phase {
         // `#recursive-repair-recovery-states`: an empty `preflight_started` cycle
         // (no capture, no captured-response hash, no pending mutation) is a
@@ -1848,7 +1848,7 @@ mod tests {
     #[test]
     fn cycle_phase_name_matches_persisted_phase_strings() {
         assert_eq!(
-            cycle_phase_name(crate::cycle_state::CyclePhase::ResponseCaptured),
+            cycle_phase_name(agent_doc_turn::CyclePhase::ResponseCaptured),
             "response_captured"
         );
     }
@@ -2397,7 +2397,7 @@ mod tests {
             evidence.active_cycle,
             Some(CloseoutCycleEvidence {
                 cycle_id: capture.cycle_id.clone(),
-                phase: crate::cycle_state::CyclePhase::ResponseCaptured,
+                phase: agent_doc_turn::CyclePhase::ResponseCaptured,
             })
         );
         assert_eq!(

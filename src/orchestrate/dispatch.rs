@@ -247,7 +247,7 @@ pub(crate) fn close_open_preflight_handoff_cycle(file: &Path) -> Result<()> {
     let Some(state) = agent_doc_orchestration::cycle_state::load(file)? else {
         return Ok(());
     };
-    if state.phase != agent_doc_orchestration::cycle_state::CyclePhase::PreflightStarted {
+    if state.phase != agent_doc_turn::CyclePhase::PreflightStarted {
         return Ok(());
     }
     if agent_doc_orchestration::capture::load_by_id(file, &state.cycle_id)?.is_some() {
@@ -442,7 +442,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .phase,
-            agent_doc_orchestration::cycle_state::CyclePhase::Abandoned
+            agent_doc_turn::CyclePhase::Abandoned
         );
     }
     #[test]

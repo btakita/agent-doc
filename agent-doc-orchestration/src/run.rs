@@ -394,7 +394,7 @@ enum NoChangeVerdict {
 fn classify_no_change_cycle_state(
     state: Option<&crate::cycle_state::CycleState>,
 ) -> NoChangeVerdict {
-    use crate::cycle_state::CyclePhase;
+    use agent_doc_turn::CyclePhase;
     let Some(state) = state else {
         return NoChangeVerdict::Clean;
     };
@@ -1690,13 +1690,13 @@ fn actor_record_for_file(file: &Path) -> Result<Option<crate::session_actor::Act
     crate::session_actor::load_record_in(&project_root, &file_arg)
 }
 
-fn cycle_phase_label(phase: crate::cycle_state::CyclePhase) -> &'static str {
+fn cycle_phase_label(phase: agent_doc_turn::CyclePhase) -> &'static str {
     match phase {
-        crate::cycle_state::CyclePhase::PreflightStarted => "preflight_started",
-        crate::cycle_state::CyclePhase::ResponseCaptured => "response_captured",
-        crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
-        crate::cycle_state::CyclePhase::Committed => "committed",
-        crate::cycle_state::CyclePhase::Abandoned => "abandoned",
+        agent_doc_turn::CyclePhase::PreflightStarted => "preflight_started",
+        agent_doc_turn::CyclePhase::ResponseCaptured => "response_captured",
+        agent_doc_turn::CyclePhase::WriteApplied => "write_applied",
+        agent_doc_turn::CyclePhase::Committed => "committed",
+        agent_doc_turn::CyclePhase::Abandoned => "abandoned",
     }
 }
 
@@ -2100,10 +2100,7 @@ mod tests {
         start_run_cycle(&doc).unwrap();
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(
-            state.phase,
-            crate::cycle_state::CyclePhase::PreflightStarted
-        );
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
         assert_eq!(state.last_event, "preflight_started");
 
         let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();

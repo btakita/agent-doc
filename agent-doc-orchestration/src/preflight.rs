@@ -1641,11 +1641,11 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
         "[preflight] WARNING: previous cycle `{}` is still `{}` ({}){} — attempting recovery before diff",
         state.cycle_id,
         match state.phase {
-            crate::cycle_state::CyclePhase::PreflightStarted => "preflight_started",
-            crate::cycle_state::CyclePhase::ResponseCaptured => "response_captured",
-            crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
-            crate::cycle_state::CyclePhase::Committed => "committed",
-            crate::cycle_state::CyclePhase::Abandoned => "abandoned",
+            agent_doc_turn::CyclePhase::PreflightStarted => "preflight_started",
+            agent_doc_turn::CyclePhase::ResponseCaptured => "response_captured",
+            agent_doc_turn::CyclePhase::WriteApplied => "write_applied",
+            agent_doc_turn::CyclePhase::Committed => "committed",
+            agent_doc_turn::CyclePhase::Abandoned => "abandoned",
         },
         state.last_event,
         ipc_hint
@@ -1660,7 +1660,7 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
             state.last_event
         ),
     );
-    if matches!(state.phase, crate::cycle_state::CyclePhase::WriteApplied) {
+    if matches!(state.phase, agent_doc_turn::CyclePhase::WriteApplied) {
         crate::ops_log::log_op(
             file,
             &format!(
@@ -1708,10 +1708,7 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
     if let Some(after) = crate::cycle_state::load(file)?
         && after.is_open()
     {
-        let marker_note = if matches!(
-            after.phase,
-            crate::cycle_state::CyclePhase::PreflightStarted
-        ) {
+        let marker_note = if matches!(after.phase, agent_doc_turn::CyclePhase::PreflightStarted) {
             crate::session_check::detect_bypassed_response_write(file)?
                 .map(|marker| format!("; found likely direct response patchback: {}", marker))
                 .unwrap_or_default()
@@ -1725,11 +1722,11 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
             "previous cycle `{}` is still `{}` after recovery/commit ({}){}{}",
             after.cycle_id,
             match after.phase {
-                crate::cycle_state::CyclePhase::PreflightStarted => "preflight_started",
-                crate::cycle_state::CyclePhase::ResponseCaptured => "response_captured",
-                crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
-                crate::cycle_state::CyclePhase::Committed => "committed",
-                crate::cycle_state::CyclePhase::Abandoned => "abandoned",
+                agent_doc_turn::CyclePhase::PreflightStarted => "preflight_started",
+                agent_doc_turn::CyclePhase::ResponseCaptured => "response_captured",
+                agent_doc_turn::CyclePhase::WriteApplied => "write_applied",
+                agent_doc_turn::CyclePhase::Committed => "committed",
+                agent_doc_turn::CyclePhase::Abandoned => "abandoned",
             },
             after.last_event,
             marker_note,
@@ -1737,7 +1734,7 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
         );
     }
 
-    if matches!(state.phase, crate::cycle_state::CyclePhase::WriteApplied) {
+    if matches!(state.phase, agent_doc_turn::CyclePhase::WriteApplied) {
         crate::ops_log::log_op(
             file,
             &format!("resume_commit_success file={}", file.display()),
@@ -4294,7 +4291,7 @@ mod tests {
         );
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
 
         let show = Command::new("git")
             .current_dir(root)
@@ -4561,7 +4558,7 @@ mod tests {
         );
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(state.last_event, "commit_already_current");
 
         let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();

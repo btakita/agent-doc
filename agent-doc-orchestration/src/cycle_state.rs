@@ -41,12 +41,10 @@
 //! - `mark_committed_closes_cycle`
 //! - `mark_write_applied_creates_synthetic_cycle_when_missing`
 
-use agent_doc_turn::{CycleEvent, CyclePhaseMachine};
+use agent_doc_turn::{CycleEvent, CyclePhase, CyclePhaseMachine};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-
-pub use agent_doc_turn::CyclePhase;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BacklogTargetRequirement {

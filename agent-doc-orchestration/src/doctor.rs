@@ -907,7 +907,7 @@ fn print_text_report(report: &WorkflowDoctorReport) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cycle_state::CyclePhase;
+    use agent_doc_turn::CyclePhase;
 
     fn invariant_result(
         report: &WorkflowDoctorReport,

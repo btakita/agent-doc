@@ -74,7 +74,7 @@ fn gather_convergence_facts(
     timeout_ms: u64,
 ) -> agent_doc_document_realtime::convergence_gate::ConvergenceFacts {
     let committed = match crate::cycle_state::load(file) {
-        Ok(Some(state)) => matches!(state.phase, crate::cycle_state::CyclePhase::Committed),
+        Ok(Some(state)) => matches!(state.phase, agent_doc_turn::CyclePhase::Committed),
         _ => true,
     };
     let elapsed_ms = deferring_since

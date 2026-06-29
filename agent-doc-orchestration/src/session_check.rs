@@ -456,7 +456,7 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
             // blocking.
             if codex_final_gate
                 && let Some(cycle) = crate::cycle_state::load(file).ok().flatten()
-                && matches!(cycle.phase, crate::cycle_state::CyclePhase::Abandoned)
+                && matches!(cycle.phase, agent_doc_turn::CyclePhase::Abandoned)
                 && cycle
                     .last_event
                     .starts_with("recursive_direct_invocation_blocked")
@@ -814,7 +814,7 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
         // (Defense in depth: the run-side early guard now bails before opening a
         // cycle in this shape, but older abandoned cycles or alternate paths must
         // still be caught here.)
-        if matches!(state.phase, crate::cycle_state::CyclePhase::Abandoned)
+        if matches!(state.phase, agent_doc_turn::CyclePhase::Abandoned)
             && state
                 .last_event
                 .starts_with("recursive_direct_invocation_blocked")
@@ -4065,7 +4065,7 @@ Body\n\
         }
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(state.last_event, "session_check_commit_boundary_recovered");
         let repaired_snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
         assert!(repaired_snapshot.contains("### Re: #patchbypass — gpt-5"));
@@ -4145,10 +4145,7 @@ Body\n\
         }
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(
-            state.phase,
-            crate::cycle_state::CyclePhase::PreflightStarted
-        );
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
     }
     #[test]
     fn session_check_recovers_missing_commit_log_from_committed_exchange_head() {
@@ -4239,7 +4236,7 @@ Body\n\
         }
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(state.last_event, "session_check_commit_boundary_recovered");
     }
     #[test]

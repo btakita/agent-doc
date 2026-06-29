@@ -76,7 +76,7 @@ pub fn admit(file: &Path) -> Result<AdmitOutput> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cycle_state::CyclePhase;
+    use agent_doc_turn::CyclePhase;
     use std::fs;
 
     #[test]

@@ -459,13 +459,13 @@ pub(crate) fn single_open_review_item_id(file: &Path) -> Result<Option<String>> 
     }
 }
 
-pub(crate) fn phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {
+pub(crate) fn phase_name(phase: agent_doc_turn::CyclePhase) -> &'static str {
     match phase {
-        crate::cycle_state::CyclePhase::PreflightStarted => "preflight_started",
-        crate::cycle_state::CyclePhase::ResponseCaptured => "response_captured",
-        crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
-        crate::cycle_state::CyclePhase::Committed => "committed",
-        crate::cycle_state::CyclePhase::Abandoned => "abandoned",
+        agent_doc_turn::CyclePhase::PreflightStarted => "preflight_started",
+        agent_doc_turn::CyclePhase::ResponseCaptured => "response_captured",
+        agent_doc_turn::CyclePhase::WriteApplied => "write_applied",
+        agent_doc_turn::CyclePhase::Committed => "committed",
+        agent_doc_turn::CyclePhase::Abandoned => "abandoned",
     }
 }
 
@@ -679,17 +679,17 @@ pub(crate) fn open_cycle_message(
         ));
     }
     let detail = match state.phase {
-        crate::cycle_state::CyclePhase::PreflightStarted => {
+        agent_doc_turn::CyclePhase::PreflightStarted => {
             "cycle started but no write/commit followed"
         }
-        crate::cycle_state::CyclePhase::ResponseCaptured => {
+        agent_doc_turn::CyclePhase::ResponseCaptured => {
             "response was captured but no write/commit followed"
         }
-        crate::cycle_state::CyclePhase::WriteApplied => {
+        agent_doc_turn::CyclePhase::WriteApplied => {
             "response write landed but no terminal commit followed"
         }
-        crate::cycle_state::CyclePhase::Committed => "no terminal commit followed",
-        crate::cycle_state::CyclePhase::Abandoned => "cycle was abandoned",
+        agent_doc_turn::CyclePhase::Committed => "no terminal commit followed",
+        agent_doc_turn::CyclePhase::Abandoned => "cycle was abandoned",
     };
     Ok(format!(
         "[session-check] INTERRUPTED: cycle `{}` is still `{}` ({}) — {}.{}",
@@ -705,10 +705,7 @@ pub(crate) fn open_cycle_manual_patchback_message(
     file: &Path,
     state: &crate::cycle_state::CycleState,
 ) -> Result<Option<String>> {
-    if !matches!(
-        state.phase,
-        crate::cycle_state::CyclePhase::PreflightStarted
-    ) {
+    if !matches!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted) {
         return Ok(None);
     }
     let Some(marker) = detect_bypassed_response_write(file)? else {

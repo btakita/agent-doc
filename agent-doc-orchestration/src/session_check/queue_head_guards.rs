@@ -11,7 +11,7 @@ pub(crate) fn check_no_response_active_queue_head(
     let Some(state) = crate::cycle_state::load(file)? else {
         return Ok(GuardResult::None);
     };
-    if !matches!(state.phase, crate::cycle_state::CyclePhase::Committed) {
+    if !matches!(state.phase, agent_doc_turn::CyclePhase::Committed) {
         return Ok(GuardResult::None);
     }
     if state.capture_id.is_some() || state.response_sha256.is_some() {
@@ -151,7 +151,7 @@ pub(crate) fn check_reaped_queue_head_without_response(
     let Some(state) = crate::cycle_state::load(file)? else {
         return Ok(GuardResult::None);
     };
-    if !matches!(state.phase, crate::cycle_state::CyclePhase::Committed) {
+    if !matches!(state.phase, agent_doc_turn::CyclePhase::Committed) {
         return Ok(GuardResult::None);
     }
     if state.reaped_pending_ids.is_empty() {

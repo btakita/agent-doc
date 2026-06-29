@@ -2361,8 +2361,8 @@ enum DrainRetryDecision {
 /// stuck cycle.
 fn classify_drain_retry(
     original_cycle_id: &str,
-    original_phase: crate::cycle_state::CyclePhase,
-    reloaded: Option<(&str, crate::cycle_state::CyclePhase, bool)>,
+    original_phase: agent_doc_turn::CyclePhase,
+    reloaded: Option<(&str, agent_doc_turn::CyclePhase, bool)>,
     attempt: u32,
     max_attempts: u32,
 ) -> DrainRetryDecision {
@@ -5263,7 +5263,7 @@ pub(crate) fn test_degraded_actor(pane_id: &str) -> AuthoritativeActorDispatchTa
 // (not fail closed) when there is positive evidence a finalize in another
 // process is concurrently progressing or has just closed the cycle.
 #[cfg(test)]
-use crate::cycle_state::CyclePhase;
+use agent_doc_turn::CyclePhase;
 
 #[cfg(test)]
 mod tests {

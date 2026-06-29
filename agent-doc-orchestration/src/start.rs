@@ -148,6 +148,10 @@ use agent_doc_supervisor::crash_policy::{
     supervisor_policy_exit_code, supervisor_resume_handoff_failed,
 };
 use agent_doc_supervisor::idle_reconcile::ready_busy_conflict_reconcile_decision;
+use agent_doc_supervisor::route_owned::{
+    RouteOwnedLivenessReason, RouteOwnedReapDecision, RouteOwnedReapPolicy,
+    route_owned_reap_decision,
+};
 #[cfg(unix)]
 use agent_doc_supervisor_process::ReexecState;
 use agent_doc_turn_executor::auto_trigger::{
@@ -156,39 +160,6 @@ use agent_doc_turn_executor::auto_trigger::{
 };
 
 use crate::{config, project_config_io, sessions};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum RouteOwnedReapPolicy {
-    Auto,
-    ReapAfterCommit,
-    KeepAlive,
-}
-
-impl RouteOwnedReapPolicy {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Auto => "auto",
-            Self::ReapAfterCommit => "reap_after_commit",
-            Self::KeepAlive => "keep_alive",
-        }
-    }
-}
-
-impl std::fmt::Display for RouteOwnedReapPolicy {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::Auto => "auto",
-            Self::ReapAfterCommit => "reap-after-commit",
-            Self::KeepAlive => "keep-alive",
-        })
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct RouteOwnedReapDecision {
-    reap: bool,
-    reason: String,
-}
 
 struct RouteOwnedCompletionConfig {
     file: PathBuf,
@@ -735,23 +706,27 @@ fn route_owned_line_is_response_heading(line: &str) -> bool {
 fn route_owned_liveness_reason(
     file: &Path,
     state: &crate::cycle_state::CycleState,
-) -> Option<String> {
+) -> Option<RouteOwnedLivenessReason> {
     let content = match std::fs::read_to_string(file) {
         Ok(content) => content,
-        Err(err) => return Some(format!("read_failed:{err}")),
+        Err(err) => {
+            return Some(RouteOwnedLivenessReason::AdapterFailure(format!(
+                "read_failed:{err}"
+            )));
+        }
     };
     let dirty_after_commit = route_owned_file_dirty_after_commit(&content, state);
     if dirty_after_commit && route_owned_exchange_tail_has_unresolved_prompt(&content) {
-        return Some("post_commit_user_follow_up".to_string());
+        return Some(RouteOwnedLivenessReason::PostCommitUserFollowUp);
     }
 
     let components = match agent_doc_element::element::parse(&content) {
         Ok(components) => components,
         Err(err) => {
             return Some(if dirty_after_commit {
-                "document_dirty_after_commit".to_string()
+                RouteOwnedLivenessReason::DocumentDirtyAfterCommit
             } else {
-                format!("component_parse_failed:{err}")
+                RouteOwnedLivenessReason::AdapterFailure(format!("component_parse_failed:{err}"))
             });
         }
     };
@@ -761,55 +736,33 @@ fn route_owned_liveness_reason(
         if agent_doc_element::element::is_backlog_component(&component.name)
             && route_owned_backlog_has_live_items(body)
         {
-            return Some("backlog_non_empty".to_string());
+            return Some(RouteOwnedLivenessReason::BacklogNonEmpty);
         }
         if component.name == "queue" && route_owned_queue_has_prompts(body) {
-            return Some("queue_non_empty".to_string());
+            return Some(RouteOwnedLivenessReason::QueueNonEmpty);
         }
         if component.name == "exchange" && route_owned_exchange_tail_has_unresolved_prompt(body) {
             return Some(if dirty_after_commit {
-                "post_commit_user_follow_up".to_string()
+                RouteOwnedLivenessReason::PostCommitUserFollowUp
             } else {
-                "exchange_tail_unresolved_prompt".to_string()
+                RouteOwnedLivenessReason::ExchangeTailUnresolvedPrompt
             });
         }
     }
 
     if dirty_after_commit {
-        return Some("document_dirty_after_commit".to_string());
+        return Some(RouteOwnedLivenessReason::DocumentDirtyAfterCommit);
     }
 
     None
 }
 
-fn route_owned_reap_decision(
+fn route_owned_reap_decision_for_file(
     file: &Path,
     state: &crate::cycle_state::CycleState,
     policy: RouteOwnedReapPolicy,
 ) -> RouteOwnedReapDecision {
-    match policy {
-        RouteOwnedReapPolicy::KeepAlive => RouteOwnedReapDecision {
-            reap: false,
-            reason: "explicit_keep_alive".to_string(),
-        },
-        RouteOwnedReapPolicy::ReapAfterCommit => RouteOwnedReapDecision {
-            reap: true,
-            reason: "explicit_reap_after_commit".to_string(),
-        },
-        RouteOwnedReapPolicy::Auto => {
-            if let Some(reason) = route_owned_liveness_reason(file, state) {
-                RouteOwnedReapDecision {
-                    reap: false,
-                    reason,
-                }
-            } else {
-                RouteOwnedReapDecision {
-                    reap: true,
-                    reason: "no_liveness_signals".to_string(),
-                }
-            }
-        }
-    }
+    route_owned_reap_decision(policy, route_owned_liveness_reason(file, state))
 }
 
 fn route_owned_live_pane_busy_reason(
@@ -928,7 +881,7 @@ fn spawn_route_owned_completion_thread(
                             reason,
                         }
                     } else {
-                        route_owned_reap_decision(&file, &state, reap_policy)
+                        route_owned_reap_decision_for_file(&file, &state, reap_policy)
                     };
                     let event = format!(
                         "route_owned_reap_decision policy={} decision={} reason={} cycle={} event={}",
@@ -3143,7 +3096,8 @@ Done.
         std::fs::write(&file, content).unwrap();
         let state = committed_state_for_doc(&file, content);
 
-        let decision = route_owned_reap_decision(&file, &state, RouteOwnedReapPolicy::Auto);
+        let decision =
+            route_owned_reap_decision_for_file(&file, &state, RouteOwnedReapPolicy::Auto);
 
         assert!(!decision.reap);
         assert_eq!(decision.reason, "backlog_non_empty");
@@ -3161,7 +3115,8 @@ Done.
         std::fs::write(&file, content).unwrap();
         let state = committed_state_for_doc(&file, content);
 
-        let decision = route_owned_reap_decision(&file, &state, RouteOwnedReapPolicy::Auto);
+        let decision =
+            route_owned_reap_decision_for_file(&file, &state, RouteOwnedReapPolicy::Auto);
 
         assert!(!decision.reap);
         assert_eq!(decision.reason, "queue_non_empty");
@@ -3177,7 +3132,8 @@ Done.
         std::fs::write(&file, edited).unwrap();
         let state = committed_state_for_doc(&file, committed);
 
-        let decision = route_owned_reap_decision(&file, &state, RouteOwnedReapPolicy::Auto);
+        let decision =
+            route_owned_reap_decision_for_file(&file, &state, RouteOwnedReapPolicy::Auto);
 
         assert!(!decision.reap);
         assert_eq!(decision.reason, "post_commit_user_follow_up");
@@ -3193,7 +3149,8 @@ Done.
         std::fs::write(&file, edited).unwrap();
         let state = committed_state_for_doc(&file, committed);
 
-        let decision = route_owned_reap_decision(&file, &state, RouteOwnedReapPolicy::Auto);
+        let decision =
+            route_owned_reap_decision_for_file(&file, &state, RouteOwnedReapPolicy::Auto);
 
         assert!(!decision.reap);
         assert_eq!(decision.reason, "document_dirty_after_commit");
@@ -3215,7 +3172,8 @@ Done.
         std::fs::write(&file, content).unwrap();
         let state = committed_state_for_doc(&file, content);
 
-        let decision = route_owned_reap_decision(&file, &state, RouteOwnedReapPolicy::Auto);
+        let decision =
+            route_owned_reap_decision_for_file(&file, &state, RouteOwnedReapPolicy::Auto);
 
         assert!(decision.reap);
         assert_eq!(decision.reason, "no_liveness_signals");
@@ -3229,8 +3187,11 @@ Done.
         std::fs::write(&file, content).unwrap();
         let state = committed_state_for_doc(&file, content);
 
-        let decision =
-            route_owned_reap_decision(&file, &state, RouteOwnedReapPolicy::ReapAfterCommit);
+        let decision = route_owned_reap_decision_for_file(
+            &file,
+            &state,
+            RouteOwnedReapPolicy::ReapAfterCommit,
+        );
 
         assert!(decision.reap);
         assert_eq!(decision.reason, "explicit_reap_after_commit");

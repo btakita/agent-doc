@@ -12,6 +12,7 @@ pub mod crash_policy;
 pub mod handoff;
 pub mod idle_reconcile;
 pub mod lifecycle;
+pub mod route_owned;
 pub mod run_loop;
 pub mod selfkill;
 

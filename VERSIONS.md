@@ -18,6 +18,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Claim cross-session admission moved to `agent-doc-controller`.** The `CrossSessionDecision` enum, structured reject marker, stale-session/force decision, and foreign-supervisor lease guard now live in `agent_doc_controller::claim`. The `claim` orchestration module keeps only tmux/session/file side effects and calls the focused controller API directly.
 
+- **Route-owned reap policy moved to `agent-doc-supervisor`.** The route-owned supervisor completion reap policy, liveness reason vocabulary, and hidden CLI reap-policy parser now live in `agent_doc_supervisor::route_owned`. The start path keeps only document liveness/file adapters and calls the focused supervisor API directly; the CLI shell imports the focused type instead of preserving an orchestration API path.
+
 - **Stale install-artifact policy moved to `agent-doc-supervisor`.** The `#install-stale-guard` grace window and timestamp classifier now live in `agent_doc_supervisor::config` beside auto-install/stale-binary policy. Preflight still discovers artifact mtimes and formats the warning, but calls the focused supervisor API directly instead of owning the staleness rule.
 
 - **Supervisor prompt/exit-code policy moved to `agent-doc-supervisor`.** Restart/quit prompt input classification and forwarded Ctrl-C clean-exit normalization now live in `agent_doc_supervisor::crash_policy` beside the child crash/restart policy. The start supervisor loop still owns stdin, tty, and child status adapters, but calls the focused supervisor API directly.

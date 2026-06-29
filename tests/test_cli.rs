@@ -4007,6 +4007,36 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             && start_run_source.contains("supervisor_clean_exit_before_prompt_seen("),
         "start paths should call focused supervisor restart policy directly"
     );
+    let supervisor_route_owned =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/route_owned.rs")).unwrap();
+    for required_snippet in [
+        "pub enum RouteOwnedReapPolicy",
+        "pub enum RouteOwnedLivenessReason",
+        "pub struct RouteOwnedReapDecision",
+        "pub fn route_owned_reap_decision(",
+    ] {
+        assert!(
+            supervisor_route_owned.contains(required_snippet),
+            "agent-doc-supervisor route_owned should own route-owned reap policy directly: {required_snippet}"
+        );
+    }
+    for forbidden_snippet in [
+        "pub enum RouteOwnedReapPolicy",
+        "pub enum RouteOwnedLivenessReason",
+        "struct RouteOwnedReapDecision",
+        "fn route_owned_reap_decision(",
+    ] {
+        assert!(
+            !start_source.contains(forbidden_snippet),
+            "start.rs must not re-own pure route-owned reap policy: {forbidden_snippet}"
+        );
+    }
+    let cli_main = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
+    assert!(
+        cli_main.contains("agent_doc_supervisor::route_owned::RouteOwnedReapPolicy")
+            && !cli_main.contains("agent_doc_orchestration::start::RouteOwnedReapPolicy"),
+        "the CLI shell should use the focused route-owned reap policy type directly"
+    );
 
     for relative in [
         "agent-doc-orchestration/src/start.rs",

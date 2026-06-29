@@ -605,9 +605,9 @@ enum Commands {
         #[arg(
             long = "route-owned-reap-policy",
             hide = true,
-            default_value_t = agent_doc_orchestration::start::RouteOwnedReapPolicy::Auto
+            default_value_t = agent_doc_supervisor::route_owned::RouteOwnedReapPolicy::Auto
         )]
-        route_owned_reap_policy: agent_doc_orchestration::start::RouteOwnedReapPolicy,
+        route_owned_reap_policy: agent_doc_supervisor::route_owned::RouteOwnedReapPolicy,
     },
     /// Route agent-doc command to the correct tmux pane
     Route {
@@ -2441,7 +2441,7 @@ fn main() -> anyhow::Result<()> {
             route_owned,
             route_owned_reap_policy,
         } => match route_owned_reap_policy {
-            agent_doc_orchestration::start::RouteOwnedReapPolicy::Auto => {
+            agent_doc_supervisor::route_owned::RouteOwnedReapPolicy::Auto => {
                 agent_doc_orchestration::start::run(&file, force, route_owned)
             }
             policy => agent_doc_orchestration::start::run_with_reap_policy(

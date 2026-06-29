@@ -1194,7 +1194,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // generic busy actor on the dispatch-only fail-closed path. Routed
         // through the `RoutedReopenGuardReason` enum + `prompt_ready_barrier`
         // FlowEvent.
-        ("agent-doc-orchestration/src/route.rs", "guard_") => 21,
+        // 21 -> 7: authoritative actor runtime dispatch guard policy moved to
+        // `agent-doc-controller::dispatch`, and the route-local guard tests were
+        // deleted instead of preserving a facade. The surviving route tokens are
+        // adapter/logging references around the focused guard decisions.
+        ("agent-doc-orchestration/src/route.rs", "guard_") => 7,
         // +2 (#jb-run-agent-doc-submit-diagnostics): the redacted
         // `route_submit_observation` / `route_submit_issue` helpers can include
         // dispatch-start proof labels while keeping prompt-submit failures
@@ -3655,6 +3659,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     .unwrap();
     let route_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+    let flow_routed_reopen_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/routed_reopen.rs"))
+            .unwrap();
     assert!(
         authoritative_actor.contains("agent_doc_controller::dispatch::dispatch_error_is_coalesced"),
         "route authorization should call the focused controller dispatch classifier directly"
@@ -3669,6 +3676,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-controller/src/dispatch.rs")).unwrap();
     for required_snippet in [
         "pub enum DispatchActorState",
+        "pub enum DispatchRuntimeHealth",
+        "pub struct AuthoritativeRuntimeFacts",
+        "pub fn authoritative_actor_dispatch_guard_reason(",
         "pub fn dispatch_only_busy_should_wait_for_ready(",
         "pub fn dispatch_only_should_probe_active_turn_cue(",
         "pub enum DispatchDrainRetryDecision",
@@ -3680,6 +3690,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         );
     }
     for forbidden_snippet in [
+        "pub enum ActorRuntimeHealth",
+        "pub struct AuthoritativeRuntimeFacts",
+        "pub fn authoritative_actor_dispatch_guard_reason(",
         "fn busy_dispatch_only_should_wait_for_ready(",
         "fn dispatch_only_should_probe_active_turn_cue(",
         "enum DrainRetryDecision",
@@ -3690,8 +3703,20 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             "route.rs must not re-own pure controller dispatch policy: {forbidden_snippet}"
         );
     }
+    for forbidden_snippet in [
+        "pub enum ActorRuntimeHealth",
+        "pub struct AuthoritativeRuntimeFacts",
+        "pub fn authoritative_actor_dispatch_guard_reason(",
+    ] {
+        assert!(
+            !flow_routed_reopen_source.contains(forbidden_snippet),
+            "flow::routed_reopen must not re-own pure controller dispatch policy: {forbidden_snippet}"
+        );
+    }
     assert!(
         route_source.contains("use agent_doc_controller::dispatch::{")
+            && route_source.contains("DispatchRuntimeHealth")
+            && route_source.contains("controller_authoritative_actor_dispatch_guard_reason(")
             && route_source.contains("DispatchActorState")
             && route_source.contains("dispatch_only_busy_should_wait_for_ready(")
             && route_source.contains("dispatch_only_should_probe_active_turn_cue(")

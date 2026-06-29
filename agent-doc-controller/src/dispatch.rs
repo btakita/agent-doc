@@ -80,6 +80,47 @@ pub enum DispatchActorState {
     Other,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DispatchRuntimeHealth {
+    Healthy,
+    Restartable,
+    Halted { restart_count: u32 },
+    Unreachable,
+    NoSocket,
+}
+
+impl DispatchRuntimeHealth {
+    pub fn label(self) -> String {
+        match self {
+            Self::Healthy => "healthy".to_string(),
+            Self::Restartable => "restartable".to_string(),
+            Self::Halted { restart_count } => {
+                format!("halted(restart_count={restart_count})")
+            }
+            Self::Unreachable => "unreachable".to_string(),
+            Self::NoSocket => "no_socket".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuthoritativeRuntimeFacts {
+    pub health: DispatchRuntimeHealth,
+    pub actor_state_present: bool,
+}
+
+pub fn authoritative_actor_dispatch_guard_reason(
+    facts: AuthoritativeRuntimeFacts,
+) -> Option<String> {
+    if facts.health != DispatchRuntimeHealth::Healthy {
+        return Some(format!("supervisor health is {}", facts.health.label()));
+    }
+    if !facts.actor_state_present {
+        return Some("supervisor actor_state is missing".to_string());
+    }
+    None
+}
+
 pub fn dispatch_only_busy_should_wait_for_ready(
     dispatch_only: bool,
     actor_state: DispatchActorState,
@@ -356,6 +397,33 @@ mod tests {
             false,
             false
         ));
+    }
+
+    #[test]
+    fn authoritative_runtime_guard_requires_healthy_supervisor_with_actor_state() {
+        assert!(
+            authoritative_actor_dispatch_guard_reason(AuthoritativeRuntimeFacts {
+                health: DispatchRuntimeHealth::Healthy,
+                actor_state_present: true,
+            })
+            .is_none()
+        );
+        assert!(
+            authoritative_actor_dispatch_guard_reason(AuthoritativeRuntimeFacts {
+                health: DispatchRuntimeHealth::NoSocket,
+                actor_state_present: true,
+            })
+            .unwrap()
+            .contains("no_socket")
+        );
+        assert!(
+            authoritative_actor_dispatch_guard_reason(AuthoritativeRuntimeFacts {
+                health: DispatchRuntimeHealth::Healthy,
+                actor_state_present: false,
+            })
+            .unwrap()
+            .contains("missing")
+        );
     }
 
     #[test]

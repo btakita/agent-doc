@@ -161,18 +161,15 @@ use std::time::{Duration, Instant};
 
 use crate::flow::closeout::CloseoutRecoveryDecision;
 use crate::flow::routed_reopen::{
-    ActorDispatchState, ActorRuntimeHealth, AuthoritativeActorDispatchAction,
-    AuthoritativeActorDispatchActionFacts, AuthoritativeActorReadyFacts,
-    AuthoritativePromptReadyBarrierFacts, AuthoritativeRuntimeFacts, BusyPaneAutoFixFacts,
+    ActorDispatchState, AuthoritativeActorDispatchAction, AuthoritativeActorDispatchActionFacts,
+    AuthoritativeActorReadyFacts, AuthoritativePromptReadyBarrierFacts, BusyPaneAutoFixFacts,
     BusyPaneAutoFixOutcome, DegradedAuthoritativeActorDirectSubmit,
     DegradedAuthoritativeActorFacts, DirectPaneSubmitStatus as CommandDispatchStatus,
     DispatchOnlyProofOutcomeFacts, DispatchOnlyReopenDelivery, DispatchStartProofDecision,
     DispatchStartProofFacts, PromptReadyBarrierDecision, ReopenMode, RoutedDispatchStartProof,
     RoutedReopenFacts, RoutedReopenGuardReason, StartingActorLogFacts,
     accepted_only_dispatch_start_log_message, accepted_only_dispatch_start_refusal_message,
-    actor_dispatch_blocker_reason, actor_recovery_hint,
-    authoritative_actor_dispatch_guard_reason as flow_authoritative_actor_dispatch_guard_reason,
-    authoritative_actor_ready_retry_budget,
+    actor_dispatch_blocker_reason, actor_recovery_hint, authoritative_actor_ready_retry_budget,
     busy_existing_pane_auto_fix_outcome as flow_busy_existing_pane_auto_fix_outcome,
     busy_projection_repaired_by_ready_prompt, can_use_degraded_authoritative_actor,
     classify_authoritative_actor_dispatch_action, classify_authoritative_prompt_ready_barrier,
@@ -192,8 +189,11 @@ use crate::flow::routed_reopen::{
 use crate::harness::HarnessConfig;
 use crate::supervisor::ipc::IpcMethod;
 use agent_doc_controller::dispatch::{
-    DispatchActorState, DispatchDrainRetryDecision, dispatch_drain_retry_decision,
-    dispatch_only_busy_should_wait_for_ready, dispatch_only_should_probe_active_turn_cue,
+    AuthoritativeRuntimeFacts, DispatchActorState, DispatchDrainRetryDecision,
+    DispatchRuntimeHealth,
+    authoritative_actor_dispatch_guard_reason as controller_authoritative_actor_dispatch_guard_reason,
+    dispatch_drain_retry_decision, dispatch_only_busy_should_wait_for_ready,
+    dispatch_only_should_probe_active_turn_cue,
 };
 use agent_doc_frontmatter::frontmatter;
 use tmux_router::Tmux;
@@ -1338,18 +1338,20 @@ fn actor_dispatch_state(state: agent_doc_sqlite::state_store::ActorState) -> Act
     }
 }
 
-fn actor_runtime_health(health: SupervisorHealth) -> ActorRuntimeHealth {
+fn dispatch_runtime_health(health: SupervisorHealth) -> DispatchRuntimeHealth {
     match health {
-        SupervisorHealth::Healthy => ActorRuntimeHealth::Healthy,
-        SupervisorHealth::Restartable => ActorRuntimeHealth::Restartable,
-        SupervisorHealth::Halted { restart_count } => ActorRuntimeHealth::Halted { restart_count },
-        SupervisorHealth::Unreachable => ActorRuntimeHealth::Unreachable,
-        SupervisorHealth::NoSocket => ActorRuntimeHealth::NoSocket,
+        SupervisorHealth::Healthy => DispatchRuntimeHealth::Healthy,
+        SupervisorHealth::Restartable => DispatchRuntimeHealth::Restartable,
+        SupervisorHealth::Halted { restart_count } => {
+            DispatchRuntimeHealth::Halted { restart_count }
+        }
+        SupervisorHealth::Unreachable => DispatchRuntimeHealth::Unreachable,
+        SupervisorHealth::NoSocket => DispatchRuntimeHealth::NoSocket,
     }
 }
 
 fn supervisor_health_label(health: SupervisorHealth) -> String {
-    actor_runtime_health(health).label()
+    dispatch_runtime_health(health).label()
 }
 
 fn runtime_actor_state_label(runtime: &SupervisorRuntime) -> &'static str {
@@ -1375,15 +1377,18 @@ fn authoritative_actor_ready_facts_from_target(
     }
 }
 
-fn authoritative_actor_dispatch_guard_reason(runtime: &SupervisorRuntime) -> Option<String> {
-    flow_authoritative_actor_dispatch_guard_reason(AuthoritativeRuntimeFacts {
-        health: actor_runtime_health(runtime.health),
+fn authoritative_runtime_facts(runtime: &SupervisorRuntime) -> AuthoritativeRuntimeFacts {
+    AuthoritativeRuntimeFacts {
+        health: dispatch_runtime_health(runtime.health),
         actor_state_present: runtime.actor_state.is_some(),
-    })
+    }
 }
 
 fn authoritative_actor_dispatch_target_eligible(actor: &AuthoritativeActorDispatchTarget) -> bool {
-    authoritative_actor_dispatch_guard_reason(&actor.runtime).is_none()
+    controller_authoritative_actor_dispatch_guard_reason(authoritative_runtime_facts(
+        &actor.runtime,
+    ))
+    .is_none()
 }
 
 fn supervisor_socket_path(file: &Path, session_id: &str) -> Option<std::path::PathBuf> {
@@ -8241,74 +8246,6 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
         assert!(
             !starting_timeout_blocked_actor_can_recover(&test_degraded_actor("%43"), true),
             "ordinary degraded actors must not use the starting-timeout recovery path"
-        );
-    }
-    #[test]
-    fn authoritative_actor_dispatch_guard_reason_returns_none_for_healthy_with_state() {
-        let runtime = SupervisorRuntime {
-            health: SupervisorHealth::Healthy,
-            actor_state: Some(agent_doc_sqlite::state_store::ActorState::Ready),
-        };
-        assert!(authoritative_actor_dispatch_guard_reason(&runtime).is_none());
-    }
-    #[test]
-    fn authoritative_actor_dispatch_guard_reason_returns_reason_for_restartable() {
-        let runtime = SupervisorRuntime {
-            health: SupervisorHealth::Restartable,
-            actor_state: Some(agent_doc_sqlite::state_store::ActorState::Ready),
-        };
-        let reason = authoritative_actor_dispatch_guard_reason(&runtime).unwrap();
-        assert!(
-            reason.contains("restartable"),
-            "expected restartable in reason: {reason}"
-        );
-    }
-    #[test]
-    fn authoritative_actor_dispatch_guard_reason_returns_reason_for_halted() {
-        let runtime = SupervisorRuntime {
-            health: SupervisorHealth::Halted { restart_count: 3 },
-            actor_state: Some(agent_doc_sqlite::state_store::ActorState::Ready),
-        };
-        let reason = authoritative_actor_dispatch_guard_reason(&runtime).unwrap();
-        assert!(
-            reason.contains("halted"),
-            "expected halted in reason: {reason}"
-        );
-    }
-    #[test]
-    fn authoritative_actor_dispatch_guard_reason_returns_reason_for_unreachable() {
-        let runtime = SupervisorRuntime {
-            health: SupervisorHealth::Unreachable,
-            actor_state: Some(agent_doc_sqlite::state_store::ActorState::Ready),
-        };
-        let reason = authoritative_actor_dispatch_guard_reason(&runtime).unwrap();
-        assert!(
-            reason.contains("unreachable"),
-            "expected unreachable in reason: {reason}"
-        );
-    }
-    #[test]
-    fn authoritative_actor_dispatch_guard_reason_returns_reason_for_no_socket() {
-        let runtime = SupervisorRuntime {
-            health: SupervisorHealth::NoSocket,
-            actor_state: Some(agent_doc_sqlite::state_store::ActorState::Ready),
-        };
-        let reason = authoritative_actor_dispatch_guard_reason(&runtime).unwrap();
-        assert!(
-            reason.contains("no_socket"),
-            "expected no_socket in reason: {reason}"
-        );
-    }
-    #[test]
-    fn authoritative_actor_dispatch_guard_reason_returns_reason_for_missing_actor_state() {
-        let runtime = SupervisorRuntime {
-            health: SupervisorHealth::Healthy,
-            actor_state: None,
-        };
-        let reason = authoritative_actor_dispatch_guard_reason(&runtime).unwrap();
-        assert!(
-            reason.contains("missing"),
-            "expected missing in reason: {reason}"
         );
     }
     #[test]

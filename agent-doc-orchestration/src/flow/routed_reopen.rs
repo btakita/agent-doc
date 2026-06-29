@@ -166,29 +166,6 @@ impl ActorDispatchState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ActorRuntimeHealth {
-    Healthy,
-    Restartable,
-    Halted { restart_count: u32 },
-    Unreachable,
-    NoSocket,
-}
-
-impl ActorRuntimeHealth {
-    pub fn label(self) -> String {
-        match self {
-            Self::Healthy => "healthy".to_string(),
-            Self::Restartable => "restartable".to_string(),
-            Self::Halted { restart_count } => {
-                format!("halted(restart_count={restart_count})")
-            }
-            Self::Unreachable => "unreachable".to_string(),
-            Self::NoSocket => "no_socket".to_string(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReopenMode {
     Managed,
     DispatchOnly,
@@ -784,24 +761,6 @@ pub fn busy_existing_pane_auto_fix_outcome(facts: BusyPaneAutoFixFacts) -> BusyP
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AuthoritativeRuntimeFacts {
-    pub health: ActorRuntimeHealth,
-    pub actor_state_present: bool,
-}
-
-pub fn authoritative_actor_dispatch_guard_reason(
-    facts: AuthoritativeRuntimeFacts,
-) -> Option<String> {
-    if facts.health != ActorRuntimeHealth::Healthy {
-        return Some(format!("supervisor health is {}", facts.health.label()));
-    }
-    if !facts.actor_state_present {
-        return Some("supervisor actor_state is missing".to_string());
-    }
-    None
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DegradedAuthoritativeActorFacts<'a> {
     pub actor_pane: &'a str,
     pub transition_caller: &'a str,
@@ -1329,33 +1288,6 @@ mod tests {
         assert!(message.contains("supervisor_health=no_socket"));
         assert!(message.contains("runtime_actor_state=missing"));
         assert!(message.contains("reason=supervisor health is no_socket"));
-    }
-
-    #[test]
-    fn runtime_guard_requires_healthy_supervisor_with_actor_state() {
-        assert!(
-            authoritative_actor_dispatch_guard_reason(AuthoritativeRuntimeFacts {
-                health: ActorRuntimeHealth::Healthy,
-                actor_state_present: true,
-            })
-            .is_none()
-        );
-        assert!(
-            authoritative_actor_dispatch_guard_reason(AuthoritativeRuntimeFacts {
-                health: ActorRuntimeHealth::NoSocket,
-                actor_state_present: true,
-            })
-            .unwrap()
-            .contains("no_socket")
-        );
-        assert!(
-            authoritative_actor_dispatch_guard_reason(AuthoritativeRuntimeFacts {
-                health: ActorRuntimeHealth::Healthy,
-                actor_state_present: false,
-            })
-            .unwrap()
-            .contains("missing")
-        );
     }
 
     #[test]

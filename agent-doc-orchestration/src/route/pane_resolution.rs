@@ -150,7 +150,9 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
 
     let degraded_authoritative_actor = authoritative_actor.as_ref().or(registered_actor.as_ref());
     if let Some(actor) = degraded_authoritative_actor
-        && let Some(reason) = authoritative_actor_dispatch_guard_reason(&actor.runtime)
+        && let Some(reason) = controller_authoritative_actor_dispatch_guard_reason(
+            authoritative_runtime_facts(&actor.runtime),
+        )
     {
         if dispatch_only_can_use_degraded_authoritative_actor(
             actor,

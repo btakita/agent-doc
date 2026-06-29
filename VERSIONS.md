@@ -22,6 +22,11 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   and `future work` now lives in `agent_doc_turn::heuristics`; the write path
   only emits the warning when no `--pending-add` was provided.
 
+- **Queue deletion identity policy moved to `agent-doc-queue`.** The queue-row
+  count comparison used to prove live editor buffer deletions now lives with
+  queue syntax and identity normalization. Preflight maintenance keeps only the
+  live-buffer/document mutation adapter and calls `agent_doc_queue` directly.
+
 - **Imperative response contract policy moved to `agent-doc-turn`.** The
   status-only/meta-refusal/blocker/evidence classifier used by the executable
   directive backstop now lives in `agent_doc_turn::response_text`; orchestration

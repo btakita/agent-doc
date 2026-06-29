@@ -804,6 +804,43 @@ pub fn queue_ids_including_struck(doc: &str) -> std::collections::HashSet<String
     ids
 }
 
+pub type QueueDeleteCounts = std::collections::HashMap<String, usize>;
+
+fn queue_entry_delete_key(entry: &QueueEntry) -> Option<String> {
+    match entry {
+        QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
+            let key = strip_priority_markers(&prompt.text);
+            (!key.is_empty()).then_some(key)
+        }
+        _ => None,
+    }
+}
+
+/// Count live or completed queue rows by deletion identity.
+///
+/// Live-buffer delete adoption compares these counts to prove the editor buffer
+/// only removed existing prompt rows, ignoring cosmetic priority markers.
+pub fn queue_delete_counts(body: &str) -> Option<QueueDeleteCounts> {
+    let entries = parse(body).ok()?;
+    let mut counts = std::collections::HashMap::new();
+    for entry in &entries {
+        if let Some(key) = queue_entry_delete_key(entry) {
+            *counts.entry(key).or_insert(0) += 1;
+        }
+    }
+    Some(counts)
+}
+
+pub fn queue_counts_are_subset(live: &QueueDeleteCounts, disk: &QueueDeleteCounts) -> bool {
+    live.iter()
+        .all(|(key, live_count)| *live_count <= disk.get(key).copied().unwrap_or(0))
+}
+
+pub fn queue_counts_have_deletion(disk: &QueueDeleteCounts, live: &QueueDeleteCounts) -> bool {
+    disk.iter()
+        .any(|(key, disk_count)| live.get(key).copied().unwrap_or(0) < *disk_count)
+}
+
 /// Clear all queue in-progress markers, then mark the first live prompt when
 /// requested. Returns `None` when the rendered queue would be unchanged.
 pub fn set_first_prompt_in_progress(
@@ -2660,6 +2697,23 @@ mod tests {
         .into_iter()
         .collect();
         assert_eq!(ids, expected);
+    }
+
+    #[test]
+    fn queue_delete_counts_normalize_priority_and_detect_deletions() {
+        let disk = "- :round_pushpin: do [#alpha]\n- do [#alpha]\n- do [#beta]\n- /preset next\n";
+        let live = "- do [#alpha]\n- :pushpin: do [#beta]\n";
+        let expanded_live = "- do [#alpha]\n- do [#gamma]\n";
+
+        let disk_counts = queue_delete_counts(disk).unwrap();
+        let live_counts = queue_delete_counts(live).unwrap();
+        let expanded_counts = queue_delete_counts(expanded_live).unwrap();
+
+        assert_eq!(disk_counts.get("do [#alpha]").copied(), Some(2));
+        assert_eq!(disk_counts.get("do [#beta]").copied(), Some(1));
+        assert!(queue_counts_have_deletion(&disk_counts, &live_counts));
+        assert!(queue_counts_are_subset(&live_counts, &disk_counts));
+        assert!(!queue_counts_are_subset(&expanded_counts, &disk_counts));
     }
 
     #[test]

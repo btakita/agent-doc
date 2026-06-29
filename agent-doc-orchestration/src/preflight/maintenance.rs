@@ -1646,40 +1646,6 @@ fn record_queue_worklist_state(
     Ok(())
 }
 
-type QueueDeleteCounts = std::collections::HashMap<String, usize>;
-
-fn queue_entry_delete_key(entry: &agent_doc_queue::document_queue::QueueEntry) -> Option<String> {
-    match entry {
-        agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
-        | agent_doc_queue::document_queue::QueueEntry::Completed(prompt) => {
-            let key = agent_doc_queue::document_queue::strip_priority_markers(&prompt.text);
-            (!key.is_empty()).then_some(key)
-        }
-        _ => None,
-    }
-}
-
-fn queue_delete_counts(body: &str) -> Option<QueueDeleteCounts> {
-    let entries = agent_doc_queue::document_queue::parse(body).ok()?;
-    let mut counts = std::collections::HashMap::new();
-    for entry in &entries {
-        if let Some(key) = queue_entry_delete_key(entry) {
-            *counts.entry(key).or_insert(0) += 1;
-        }
-    }
-    Some(counts)
-}
-
-fn queue_counts_are_subset(live: &QueueDeleteCounts, disk: &QueueDeleteCounts) -> bool {
-    live.iter()
-        .all(|(key, live_count)| *live_count <= disk.get(key).copied().unwrap_or(0))
-}
-
-fn queue_counts_have_deletion(disk: &QueueDeleteCounts, live: &QueueDeleteCounts) -> bool {
-    disk.iter()
-        .any(|(key, disk_count)| live.get(key).copied().unwrap_or(0) < *disk_count)
-}
-
 /// Fold a proven editor-buffer queue deletion into the preflight queue source.
 ///
 /// Queue maintenance normally starts from disk and then converges that queue
@@ -1721,14 +1687,14 @@ fn adopt_live_buffer_queue_deletions(file: &Path, disk_content: &mut String) -> 
     if disk_body == live_body {
         return Ok(false);
     }
-    let Some(disk_counts) = queue_delete_counts(disk_body) else {
+    let Some(disk_counts) = agent_doc_queue::document_queue::queue_delete_counts(disk_body) else {
         return Ok(false);
     };
-    let Some(live_counts) = queue_delete_counts(live_body) else {
+    let Some(live_counts) = agent_doc_queue::document_queue::queue_delete_counts(live_body) else {
         return Ok(false);
     };
-    if !queue_counts_have_deletion(&disk_counts, &live_counts)
-        || !queue_counts_are_subset(&live_counts, &disk_counts)
+    if !agent_doc_queue::document_queue::queue_counts_have_deletion(&disk_counts, &live_counts)
+        || !agent_doc_queue::document_queue::queue_counts_are_subset(&live_counts, &disk_counts)
     {
         return Ok(false);
     }

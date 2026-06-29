@@ -4977,6 +4977,9 @@ fn test_agent_doc_queue_has_no_manual_addition_compatibility_shim() {
         "pub fn normalized_queue_line_for_match(",
         "pub fn queue_contains_prompt_line(",
         "pub fn queue_ids_including_struck(",
+        "pub fn queue_delete_counts(",
+        "pub fn queue_counts_are_subset(",
+        "pub fn queue_counts_have_deletion(",
     ] {
         assert!(
             queue_source.contains(required),
@@ -5014,6 +5017,33 @@ fn test_agent_doc_queue_has_no_manual_addition_compatibility_shim() {
         assert!(
             response_guards.contains(required),
             "response_guards should call focused queue identity policy directly: {required}"
+        );
+    }
+
+    let maintenance_source = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
+    )
+    .unwrap();
+    for forbidden in [
+        "type QueueDeleteCounts =",
+        "fn queue_entry_delete_key(",
+        "fn queue_delete_counts(",
+        "fn queue_counts_are_subset(",
+        "fn queue_counts_have_deletion(",
+    ] {
+        assert!(
+            !maintenance_source.contains(forbidden),
+            "preflight maintenance must not re-own queue deletion identity policy: {forbidden}"
+        );
+    }
+    for required in [
+        "agent_doc_queue::document_queue::queue_delete_counts",
+        "agent_doc_queue::document_queue::queue_counts_are_subset",
+        "agent_doc_queue::document_queue::queue_counts_have_deletion",
+    ] {
+        assert!(
+            maintenance_source.contains(required),
+            "preflight maintenance should call focused queue deletion policy directly: {required}"
         );
     }
 }

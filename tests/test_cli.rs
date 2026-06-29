@@ -3721,6 +3721,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     let flow_routed_reopen_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/routed_reopen.rs"))
             .unwrap();
+    let flow_types_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/types.rs")).unwrap();
     assert!(
         authoritative_actor.contains("agent_doc_controller::dispatch::dispatch_error_is_coalesced"),
         "route authorization should call the focused controller dispatch classifier directly"
@@ -3735,6 +3737,43 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-controller/src/dispatch.rs")).unwrap();
     for required_snippet in [
         "pub enum DispatchActorState",
+        "pub enum RouteDecision",
+        "pub enum ActorDispatchState",
+        "pub enum ReopenMode",
+        "pub struct RoutedReopenFacts",
+        "pub struct RoutedReopenOutcome",
+        "pub fn decide_authoritative_reopen(",
+        "pub enum AuthoritativeActorDispatchAction",
+        "pub struct AuthoritativeActorDispatchActionFacts",
+        "pub fn classify_authoritative_actor_dispatch_action(",
+        "pub fn dispatch_only_focus_only_should_fail_closed(",
+        "pub struct PromptReadyBarrierFacts",
+        "pub enum PromptReadyBarrierDecision",
+        "pub fn classify_prompt_ready_barrier(",
+        "pub struct AuthoritativeActorReadyFacts",
+        "pub struct AuthoritativePromptReadyBarrierFacts",
+        "pub fn classify_authoritative_prompt_ready_barrier(",
+        "pub struct StartingActorLogFacts",
+        "pub fn starting_actor_not_ready_log_line(",
+        "pub fn starting_actor_ready_log_line(",
+        "pub fn starting_actor_terminal_log_line(",
+        "pub fn starting_actor_timeout_coalesced_log_line(",
+        "pub const fn actor_start_wait_terminal_state(",
+        "pub const fn actor_dispatch_blocker_reason(",
+        "pub const fn actor_can_queue_optimistically(",
+        "pub const fn busy_projection_repaired_by_ready_prompt(",
+        "pub const fn actor_waiting_input_recoverable(",
+        "pub fn actor_recovery_hint(",
+        "pub enum BusyPaneAutoFixOutcome",
+        "pub struct BusyPaneAutoFixFacts",
+        "pub fn busy_existing_pane_auto_fix_outcome(",
+        "pub struct DegradedAuthoritativeActorFacts",
+        "pub fn can_use_degraded_authoritative_actor(",
+        "pub struct DegradedAuthoritativeActorDirectSubmit",
+        "pub fn degraded_authoritative_actor_direct_submit_log_message(",
+        "pub enum RoutedReopenGuardReason",
+        "pub fn is_interactive_shell_substate_reason(",
+        "pub fn dispatch_only_blocked_guard_reason(",
         "pub enum ActorLifecycleState",
         "pub fn effective_authoritative_actor_state(",
         "pub enum DispatchRuntimeHealth",
@@ -3874,6 +3913,43 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         );
     }
     for forbidden_snippet in [
+        "pub enum RouteDecision",
+        "pub enum ActorDispatchState",
+        "pub enum ReopenMode",
+        "pub struct RoutedReopenFacts",
+        "pub struct RoutedReopenOutcome",
+        "pub fn decide_authoritative_reopen(",
+        "pub enum AuthoritativeActorDispatchAction",
+        "pub struct AuthoritativeActorDispatchActionFacts",
+        "pub fn classify_authoritative_actor_dispatch_action(",
+        "pub fn dispatch_only_focus_only_should_fail_closed(",
+        "pub struct PromptReadyBarrierFacts",
+        "pub enum PromptReadyBarrierDecision",
+        "pub fn classify_prompt_ready_barrier(",
+        "pub struct AuthoritativeActorReadyFacts",
+        "pub struct AuthoritativePromptReadyBarrierFacts",
+        "pub fn classify_authoritative_prompt_ready_barrier(",
+        "pub struct StartingActorLogFacts",
+        "pub fn starting_actor_not_ready_log_line(",
+        "pub fn starting_actor_ready_log_line(",
+        "pub fn starting_actor_terminal_log_line(",
+        "pub fn starting_actor_timeout_coalesced_log_line(",
+        "pub const fn actor_start_wait_terminal_state(",
+        "pub const fn actor_dispatch_blocker_reason(",
+        "pub const fn actor_can_queue_optimistically(",
+        "pub const fn busy_projection_repaired_by_ready_prompt(",
+        "pub const fn actor_waiting_input_recoverable(",
+        "pub fn actor_recovery_hint(",
+        "pub enum BusyPaneAutoFixOutcome",
+        "pub struct BusyPaneAutoFixFacts",
+        "pub fn busy_existing_pane_auto_fix_outcome(",
+        "pub struct DegradedAuthoritativeActorFacts",
+        "pub fn can_use_degraded_authoritative_actor(",
+        "pub struct DegradedAuthoritativeActorDirectSubmit",
+        "pub fn degraded_authoritative_actor_direct_submit_log_message(",
+        "pub enum RoutedReopenGuardReason",
+        "pub fn is_interactive_shell_substate_reason(",
+        "pub fn dispatch_only_blocked_guard_reason(",
         "pub enum ActorRuntimeHealth",
         "pub enum ActorLifecycleState",
         "pub fn effective_authoritative_actor_state(",
@@ -3940,7 +4016,24 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         );
     }
     assert!(
+        !flow_types_source.contains("pub enum RouteDecision"),
+        "flow::types must not keep route decision policy after it moves to agent-doc-controller"
+    );
+    assert!(
         route_source.contains("use agent_doc_controller::dispatch::{")
+            && route_source.contains("ActorDispatchState")
+            && route_source.contains("ReopenMode")
+            && route_source.contains("RoutedReopenFacts")
+            && route_source.contains("decide_authoritative_reopen")
+            && route_source.contains("AuthoritativeActorDispatchAction")
+            && route_source.contains("AuthoritativeActorDispatchActionFacts")
+            && route_source.contains("classify_authoritative_actor_dispatch_action")
+            && route_source.contains("PromptReadyBarrierDecision")
+            && route_source.contains("AuthoritativeActorReadyFacts")
+            && route_source.contains("AuthoritativePromptReadyBarrierFacts")
+            && route_source.contains("classify_authoritative_prompt_ready_barrier")
+            && route_source.contains("RoutedReopenGuardReason")
+            && route_source.contains("dispatch_only_blocked_guard_reason")
             && route_source.contains("ActorLifecycleState")
             && route_source.contains("effective_authoritative_actor_state")
             && route_source.contains("DispatchRuntimeHealth")

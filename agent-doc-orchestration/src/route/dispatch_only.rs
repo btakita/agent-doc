@@ -933,8 +933,8 @@ pub(crate) fn dispatch_active_turn_queue_source(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::flow::routed_reopen::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
+    use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     #[test]
     fn dispatch_only_starting_pane_not_ready_error_matches_sampleportal_active_turn() {
         let file = std::path::Path::new("tasks/professional/sampleportal.md");

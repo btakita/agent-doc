@@ -1196,7 +1196,7 @@ pub(crate) fn authoritative_actor_dispatch_recovery_hint(
 pub(crate) fn authoritative_actor_dispatch_can_queue_optimistically(
     state: agent_doc_sqlite::state_store::ActorState,
 ) -> bool {
-    crate::flow::routed_reopen::actor_can_queue_optimistically(actor_dispatch_state(state))
+    agent_doc_controller::dispatch::actor_can_queue_optimistically(actor_dispatch_state(state))
 }
 
 pub(crate) fn canonical_dispatch_file(path: &std::path::Path) -> std::path::PathBuf {
@@ -1803,8 +1803,8 @@ pub(crate) fn apply_plain_trigger_override(harness: &mut HarnessConfig) {
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::flow::routed_reopen::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
+    use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     #[test]
     fn authoritative_actor_starting_hint_names_reroute_and_restart() {
         let file = std::path::Path::new("/tmp/session.md");

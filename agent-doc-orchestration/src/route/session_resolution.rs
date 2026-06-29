@@ -274,8 +274,8 @@ pub(crate) fn registry_base_dir_for_file(file: &Path, fallback: &Path) -> std::p
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::flow::routed_reopen::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
+    use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     #[test]
     fn unregistered_file_skips_lazy_claim() {
         // When registered is None, the lazy-claim step should be skipped.

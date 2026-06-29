@@ -160,52 +160,48 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::flow::closeout::CloseoutRecoveryDecision;
-use crate::flow::routed_reopen::{
-    ActorDispatchState, AuthoritativeActorDispatchAction, AuthoritativeActorDispatchActionFacts,
-    AuthoritativeActorReadyFacts, AuthoritativePromptReadyBarrierFacts, BusyPaneAutoFixFacts,
-    BusyPaneAutoFixOutcome, DegradedAuthoritativeActorDirectSubmit,
-    DegradedAuthoritativeActorFacts, PromptReadyBarrierDecision, ReopenMode, RoutedReopenFacts,
-    RoutedReopenGuardReason, StartingActorLogFacts, actor_dispatch_blocker_reason,
-    actor_recovery_hint,
-    busy_existing_pane_auto_fix_outcome as flow_busy_existing_pane_auto_fix_outcome,
-    busy_projection_repaired_by_ready_prompt, can_use_degraded_authoritative_actor,
-    classify_authoritative_actor_dispatch_action, classify_authoritative_prompt_ready_barrier,
-    decide_authoritative_reopen, degraded_authoritative_actor_direct_submit_log_message,
-    dispatch_only_blocked_guard_reason, dispatch_only_focus_only_should_fail_closed,
-    log_dispatch_proof_failed, log_prompt_ready_barrier_failed, starting_actor_not_ready_log_line,
-    starting_actor_ready_log_line, starting_actor_terminal_log_line,
-    starting_actor_timeout_coalesced_log_line,
-};
+use crate::flow::routed_reopen::{log_dispatch_proof_failed, log_prompt_ready_barrier_failed};
 use crate::harness::HarnessConfig;
 use crate::supervisor::ipc::IpcMethod;
 use agent_doc_controller::dispatch::{
-    ActorLifecycleState, AuthoritativeRuntimeFacts, CloseoutBlockDispatchDecision,
-    CloseoutBlockDispatchFacts, DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT,
-    DirectPaneAcceptancePollState, DirectPaneDispatchStartProofFacts,
-    DirectPaneEnterResubmitAttemptFacts, DirectPaneExistingDraftSubmitFacts,
-    DirectPaneResubmitProofFacts, DirectPaneSubmitStatus as CommandDispatchStatus,
-    DispatchActorState, DispatchDrainRetryDecision, DispatchOnlyBusyRefusalFacts,
-    DispatchOnlyProofOutcomeFacts, DispatchOnlyReopenDelivery, DispatchRuntimeHealth,
-    DispatchStartProofDecision, DispatchStartProofFacts, DuplicatePanePolicyErrorFacts,
-    MissingCycleAckFacts, RetryBudget, RouteBusyDiagnosticFacts, RouteBusyQueuedDiagnosticFacts,
-    RouteDispatchBugReportItemFacts, RouteLatencyFacts, RouteLatencyStatus,
-    RouteStartupMissDiagnosticFacts, RouteSubmitObservation,
+    ActorDispatchState, ActorLifecycleState, AuthoritativeActorDispatchAction,
+    AuthoritativeActorDispatchActionFacts, AuthoritativeActorReadyFacts,
+    AuthoritativePromptReadyBarrierFacts, AuthoritativeRuntimeFacts, BusyPaneAutoFixFacts,
+    BusyPaneAutoFixOutcome, CloseoutBlockDispatchDecision, CloseoutBlockDispatchFacts,
+    DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT, DegradedAuthoritativeActorDirectSubmit,
+    DegradedAuthoritativeActorFacts, DirectPaneAcceptancePollState,
+    DirectPaneDispatchStartProofFacts, DirectPaneEnterResubmitAttemptFacts,
+    DirectPaneExistingDraftSubmitFacts, DirectPaneResubmitProofFacts,
+    DirectPaneSubmitStatus as CommandDispatchStatus, DispatchActorState,
+    DispatchDrainRetryDecision, DispatchOnlyBusyRefusalFacts, DispatchOnlyProofOutcomeFacts,
+    DispatchOnlyReopenDelivery, DispatchRuntimeHealth, DispatchStartProofDecision,
+    DispatchStartProofFacts, DuplicatePanePolicyErrorFacts, MissingCycleAckFacts,
+    PromptReadyBarrierDecision, ReopenMode, RetryBudget, RouteBusyDiagnosticFacts,
+    RouteBusyQueuedDiagnosticFacts, RouteDispatchBugReportItemFacts, RouteLatencyFacts,
+    RouteLatencyStatus, RouteStartupMissDiagnosticFacts, RouteSubmitObservation,
     RouteSubmitObservationFacts as ControllerRouteSubmitObservationFacts, RoutedCycleAckFacts,
-    RoutedDispatchStartProof, RoutedTriggerPayloadFacts, STARTING_ACTOR_TIMEOUT_REASON,
+    RoutedDispatchStartProof, RoutedReopenFacts, RoutedReopenGuardReason,
+    RoutedTriggerPayloadFacts, STARTING_ACTOR_TIMEOUT_REASON, StartingActorLogFacts,
     StartingTimeoutActorFacts, StartupMissRouteFacts, accepted_only_dispatch_start_log_message,
     accepted_only_dispatch_start_refusal_message, actor_blocked_by_starting_timeout,
+    actor_dispatch_blocker_reason, actor_recovery_hint,
     authoritative_actor_dispatch_guard_reason as controller_authoritative_actor_dispatch_guard_reason,
-    authoritative_actor_ready_retry_budget, classify_closeout_block_dispatch,
-    classify_dispatch_start_proof, direct_pane_acceptance_poll_status,
+    authoritative_actor_ready_retry_budget,
+    busy_existing_pane_auto_fix_outcome as controller_busy_existing_pane_auto_fix_outcome,
+    busy_projection_repaired_by_ready_prompt, can_use_degraded_authoritative_actor,
+    classify_authoritative_actor_dispatch_action, classify_authoritative_prompt_ready_barrier,
+    classify_closeout_block_dispatch, classify_dispatch_start_proof, decide_authoritative_reopen,
+    degraded_authoritative_actor_direct_submit_log_message, direct_pane_acceptance_poll_status,
     direct_pane_can_continue_enter_resubmit, direct_pane_can_enter_existing_draft,
     direct_pane_resubmit_proof_line, direct_pane_should_await_dispatch_start_proof,
     direct_pane_submit_acceptance_budget, direct_pane_submit_acceptance_timeout,
-    direct_pane_submit_outcome, dispatch_drain_retry_decision,
+    direct_pane_submit_outcome, dispatch_drain_retry_decision, dispatch_only_blocked_guard_reason,
     dispatch_only_busy_refusal_message as controller_dispatch_only_busy_refusal_message,
     dispatch_only_busy_should_wait_for_ready,
     dispatch_only_dispatch_start_proof_required as controller_dispatch_only_dispatch_start_proof_required,
-    dispatch_only_sent_console_message, dispatch_only_sent_log_message,
-    dispatch_only_should_print_unproven_progress, dispatch_only_should_probe_active_turn_cue,
+    dispatch_only_focus_only_should_fail_closed, dispatch_only_sent_console_message,
+    dispatch_only_sent_log_message, dispatch_only_should_print_unproven_progress,
+    dispatch_only_should_probe_active_turn_cue,
     dispatch_only_starting_pane_ready_timeout_for_binary,
     dispatch_only_starting_pane_recovery_retry_budget,
     dispatch_only_starting_pane_recovery_timeout_for_binary, duplicate_pane_policy_error_message,
@@ -216,6 +212,8 @@ use agent_doc_controller::dispatch::{
     route_submit_observation_message, routed_cycle_ack_timeout,
     routed_dispatch_start_timeout_for_binary, routed_trigger_payload_rejection,
     should_optimistically_accept_missing_cycle_ack, should_require_routed_cycle_ack,
+    starting_actor_not_ready_log_line, starting_actor_ready_log_line,
+    starting_actor_terminal_log_line, starting_actor_timeout_coalesced_log_line,
     starting_timeout_blocked_actor_can_recover, startup_miss_requires_fresh_start,
     startup_miss_should_fail_closed, startup_miss_should_restart_live_owner,
     startup_miss_superseded_by_later_open_start,
@@ -4979,8 +4977,8 @@ pub(crate) fn test_degraded_actor(pane_id: &str) -> AuthoritativeActorDispatchTa
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::flow::routed_reopen::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
+    use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
 
     #[test]
     fn route_closeout_user_outcome_surfaces_unblocker_for_stuck_cycle() {

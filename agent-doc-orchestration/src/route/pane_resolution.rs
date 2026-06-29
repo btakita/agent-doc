@@ -1457,8 +1457,8 @@ pub(crate) fn rescue_from_stash(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::flow::routed_reopen::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
+    use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_waits_longer_for_live_child_cycle_ack() {

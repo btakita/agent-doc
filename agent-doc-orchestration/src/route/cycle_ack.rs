@@ -546,8 +546,8 @@ pub(crate) fn recent_lines_contain_wrapped_trigger(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::flow::routed_reopen::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
+    use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     #[test]
     fn route_enqueue_exchange_slash_command_keeps_literal_head_for_idle_drain() {
         let dir = tempfile::TempDir::new().unwrap();

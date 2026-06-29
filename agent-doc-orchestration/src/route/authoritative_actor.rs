@@ -656,7 +656,7 @@ pub(crate) fn dispatch_only_can_use_degraded_authoritative_actor(
 pub(crate) fn authoritative_actor_start_wait_terminal_state(
     state: agent_doc_sqlite::state_store::ActorState,
 ) -> bool {
-    crate::flow::routed_reopen::actor_start_wait_terminal_state(actor_dispatch_state(state))
+    agent_doc_controller::dispatch::actor_start_wait_terminal_state(actor_dispatch_state(state))
 }
 
 pub(crate) fn route_starting_actor_not_ready_log_line(
@@ -826,8 +826,8 @@ pub(crate) fn mark_starting_actor_timeout_blocked(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::flow::routed_reopen::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
+    use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn load_authoritative_actor_dispatch_target_accepts_normalized_claude_harness_identity() {

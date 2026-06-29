@@ -186,7 +186,7 @@ pub(crate) fn busy_existing_pane_auto_fix_outcome(
     supervisor_health: Option<SupervisorHealth>,
     restarted_supervisor: bool,
 ) -> BusyPaneAutoFixOutcome {
-    flow_busy_existing_pane_auto_fix_outcome(BusyPaneAutoFixFacts {
+    controller_busy_existing_pane_auto_fix_outcome(BusyPaneAutoFixFacts {
         test_hook_changed,
         fix_made_changes,
         supervisor_healthy: matches!(supervisor_health, Some(SupervisorHealth::Healthy)),

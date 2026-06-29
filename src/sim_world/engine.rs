@@ -2285,11 +2285,10 @@ impl SimWorld {
         }
         // The pane proves a dispatch-ready prompt (prompt_ready=true); defer the
         // promote-vs-fail-closed decision to the production predicate.
-        let repaired =
-            agent_doc_orchestration::flow::routed_reopen::busy_projection_repaired_by_ready_prompt(
-                agent_doc_orchestration::flow::routed_reopen::ActorDispatchState::Busy,
-                true,
-            );
+        let repaired = agent_doc_controller::dispatch::busy_projection_repaired_by_ready_prompt(
+            agent_doc_controller::dispatch::ActorDispatchState::Busy,
+            true,
+        );
         if !repaired {
             bail!(
                 "production predicate refused stale busy projection repair; seed={} trace={:?}",

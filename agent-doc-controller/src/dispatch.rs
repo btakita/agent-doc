@@ -83,6 +83,484 @@ pub enum DispatchActorState {
     Other,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum RouteDecision {
+    ReuseReady,
+    WaitForReady,
+    FreshRestart,
+    StartNew,
+    FailClosed,
+}
+
+impl RouteDecision {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ReuseReady => "reuse_ready",
+            Self::WaitForReady => "wait_for_ready",
+            Self::FreshRestart => "fresh_restart",
+            Self::StartNew => "start_new",
+            Self::FailClosed => "fail_closed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActorDispatchState {
+    Ready,
+    Starting,
+    Busy,
+    WaitingInput,
+    Blocked,
+    Closed,
+    Missing,
+}
+
+impl ActorDispatchState {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Ready => "ready",
+            Self::Starting => "starting",
+            Self::Busy => "busy",
+            Self::WaitingInput => "waiting_input",
+            Self::Blocked => "blocked",
+            Self::Closed => "closed",
+            Self::Missing => "missing",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReopenMode {
+    Managed,
+    DispatchOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RoutedReopenFacts {
+    pub actor_state: ActorDispatchState,
+    pub prompt_ready: bool,
+    pub has_prompt_bearing_work: bool,
+    pub mode: ReopenMode,
+    pub degraded_authority: bool,
+    pub dispatch_eligible: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RoutedReopenOutcome {
+    pub decision: RouteDecision,
+    pub reason: &'static str,
+}
+
+pub fn decide_authoritative_reopen(facts: RoutedReopenFacts) -> RoutedReopenOutcome {
+    if facts.degraded_authority || !facts.dispatch_eligible {
+        return RoutedReopenOutcome {
+            decision: RouteDecision::FailClosed,
+            reason: "degraded_authority",
+        };
+    }
+
+    match facts.actor_state {
+        ActorDispatchState::Ready if facts.prompt_ready => RoutedReopenOutcome {
+            decision: RouteDecision::ReuseReady,
+            reason: "ready_prompt",
+        },
+        ActorDispatchState::Ready => RoutedReopenOutcome {
+            decision: RouteDecision::WaitForReady,
+            reason: "ready_without_prompt_proof",
+        },
+        ActorDispatchState::Starting => RoutedReopenOutcome {
+            decision: RouteDecision::WaitForReady,
+            reason: "starting_requires_prompt_ready_barrier",
+        },
+        ActorDispatchState::Busy if facts.mode == ReopenMode::Managed => RoutedReopenOutcome {
+            decision: RouteDecision::ReuseReady,
+            reason: "managed_busy_actor_can_queue_once",
+        },
+        ActorDispatchState::Busy => RoutedReopenOutcome {
+            decision: RouteDecision::FailClosed,
+            reason: "dispatch_only_busy_actor_not_ready",
+        },
+        ActorDispatchState::WaitingInput
+        | ActorDispatchState::Blocked
+        | ActorDispatchState::Closed => RoutedReopenOutcome {
+            decision: RouteDecision::FailClosed,
+            reason: "actor_terminal_or_protected_state",
+        },
+        ActorDispatchState::Missing if facts.has_prompt_bearing_work => RoutedReopenOutcome {
+            decision: RouteDecision::StartNew,
+            reason: "missing_actor_with_prompt_work",
+        },
+        ActorDispatchState::Missing => RoutedReopenOutcome {
+            decision: RouteDecision::StartNew,
+            reason: "missing_actor",
+        },
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthoritativeActorDispatchAction {
+    FocusOnly,
+    DispatchOnlyBusyQueue,
+    RecoverDispatchOnlyWaitingInput,
+    ManagedSupervisorQueue,
+    FailClosed,
+    DispatchOnlyDirectPane,
+    ManagedSupervisorIpc,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuthoritativeActorDispatchActionFacts {
+    pub mode: ReopenMode,
+    pub actor_state: ActorDispatchState,
+    pub has_prompt_bearing_work: bool,
+    pub reopen_decision: RouteDecision,
+}
+
+pub fn classify_authoritative_actor_dispatch_action(
+    facts: AuthoritativeActorDispatchActionFacts,
+) -> AuthoritativeActorDispatchAction {
+    if actor_dispatch_blocker_reason(facts.actor_state).is_some() {
+        if !facts.has_prompt_bearing_work {
+            return AuthoritativeActorDispatchAction::FocusOnly;
+        }
+        if facts.mode == ReopenMode::DispatchOnly
+            && actor_can_queue_optimistically(facts.actor_state)
+            && facts.reopen_decision == RouteDecision::FailClosed
+        {
+            return AuthoritativeActorDispatchAction::DispatchOnlyBusyQueue;
+        }
+        if facts.mode == ReopenMode::DispatchOnly
+            && actor_waiting_input_recoverable(facts.actor_state)
+        {
+            return AuthoritativeActorDispatchAction::RecoverDispatchOnlyWaitingInput;
+        }
+        if facts.reopen_decision == RouteDecision::ReuseReady
+            && actor_can_queue_optimistically(facts.actor_state)
+        {
+            return AuthoritativeActorDispatchAction::ManagedSupervisorQueue;
+        }
+        return AuthoritativeActorDispatchAction::FailClosed;
+    }
+
+    match facts.mode {
+        ReopenMode::DispatchOnly => AuthoritativeActorDispatchAction::DispatchOnlyDirectPane,
+        ReopenMode::Managed => AuthoritativeActorDispatchAction::ManagedSupervisorIpc,
+    }
+}
+
+pub fn dispatch_only_focus_only_should_fail_closed(
+    mode: ReopenMode,
+    actor_state: ActorDispatchState,
+) -> bool {
+    mode == ReopenMode::DispatchOnly && actor_state == ActorDispatchState::Busy
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PromptReadyBarrierFacts {
+    pub actor_state: ActorDispatchState,
+    pub prompt_ready: bool,
+    pub dispatch_eligible: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptReadyBarrierDecision {
+    Ready,
+    Terminal,
+    Continue,
+}
+
+pub fn classify_prompt_ready_barrier(facts: PromptReadyBarrierFacts) -> PromptReadyBarrierDecision {
+    if facts.actor_state == ActorDispatchState::Ready
+        && facts.prompt_ready
+        && facts.dispatch_eligible
+    {
+        return PromptReadyBarrierDecision::Ready;
+    }
+    if busy_projection_repaired_by_ready_prompt(facts.actor_state, facts.prompt_ready)
+        && facts.dispatch_eligible
+    {
+        return PromptReadyBarrierDecision::Ready;
+    }
+    if actor_start_wait_terminal_state(facts.actor_state) {
+        return PromptReadyBarrierDecision::Terminal;
+    }
+    PromptReadyBarrierDecision::Continue
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthoritativeActorReadyFacts {
+    pub pane_id: String,
+    pub generation: u64,
+    pub actor_state: ActorDispatchState,
+    pub supervisor_health: String,
+    pub runtime_state: String,
+    pub prompt_ready: bool,
+    pub last_transition_reason: String,
+    pub last_transition_caller: String,
+}
+
+impl AuthoritativeActorReadyFacts {
+    pub fn log_fields(&self) -> String {
+        format!(
+            "pane={} generation={} actor_state={} supervisor_health={} runtime_state={} prompt_ready={} last_transition_reason={} last_transition_caller={}",
+            self.pane_id,
+            self.generation,
+            self.actor_state.as_str(),
+            self.supervisor_health,
+            self.runtime_state,
+            self.prompt_ready,
+            self.last_transition_reason,
+            self.last_transition_caller
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuthoritativePromptReadyBarrierFacts<'a> {
+    pub ready_facts: &'a AuthoritativeActorReadyFacts,
+    pub dispatch_eligible: bool,
+}
+
+pub fn classify_authoritative_prompt_ready_barrier(
+    facts: AuthoritativePromptReadyBarrierFacts<'_>,
+) -> PromptReadyBarrierDecision {
+    classify_prompt_ready_barrier(PromptReadyBarrierFacts {
+        actor_state: facts.ready_facts.actor_state,
+        prompt_ready: facts.ready_facts.prompt_ready,
+        dispatch_eligible: facts.dispatch_eligible,
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StartingActorLogFacts<'a> {
+    pub file_display: &'a str,
+    pub harness_binary: &'a str,
+    pub timeout: Duration,
+    pub elapsed: Duration,
+    pub ready_facts: &'a AuthoritativeActorReadyFacts,
+}
+
+pub fn starting_actor_not_ready_log_line(facts: StartingActorLogFacts<'_>) -> String {
+    format!(
+        "route_authoritative_actor_starting_not_ready file={} harness={} timeout_ms={} elapsed_ms={} {}",
+        facts.file_display,
+        facts.harness_binary,
+        facts.timeout.as_millis(),
+        facts.elapsed.as_millis(),
+        facts.ready_facts.log_fields()
+    )
+}
+
+pub fn starting_actor_ready_log_line(
+    file_display: &str,
+    harness_binary: &str,
+    elapsed: Duration,
+    facts: &AuthoritativeActorReadyFacts,
+) -> String {
+    format!(
+        "route_starting_actor_ready file={} harness={} elapsed_ms={} {}",
+        file_display,
+        harness_binary,
+        elapsed.as_millis(),
+        facts.log_fields()
+    )
+}
+
+pub fn starting_actor_terminal_log_line(
+    file_display: &str,
+    harness_binary: &str,
+    elapsed: Duration,
+    facts: &AuthoritativeActorReadyFacts,
+) -> String {
+    format!(
+        "route_authoritative_actor_starting_terminal file={} harness={} elapsed_ms={} {}",
+        file_display,
+        harness_binary,
+        elapsed.as_millis(),
+        facts.log_fields()
+    )
+}
+
+pub fn starting_actor_timeout_coalesced_log_line(
+    file_display: &str,
+    harness_binary: &str,
+    elapsed: Duration,
+    facts: &AuthoritativeActorReadyFacts,
+) -> String {
+    format!(
+        "route_starting_actor_timeout_coalesced file={} harness={} elapsed_ms={} {}",
+        file_display,
+        harness_binary,
+        elapsed.as_millis(),
+        facts.log_fields()
+    )
+}
+
+pub const fn actor_start_wait_terminal_state(state: ActorDispatchState) -> bool {
+    matches!(
+        state,
+        ActorDispatchState::Closed | ActorDispatchState::Blocked
+    )
+}
+
+pub const fn actor_dispatch_blocker_reason(state: ActorDispatchState) -> Option<&'static str> {
+    match state {
+        ActorDispatchState::Ready => None,
+        ActorDispatchState::Starting => Some("the authoritative actor is still starting"),
+        ActorDispatchState::Busy => Some("the authoritative actor is busy"),
+        ActorDispatchState::WaitingInput => {
+            Some("the authoritative actor is waiting for user input")
+        }
+        ActorDispatchState::Closed => Some("the authoritative actor is closed"),
+        ActorDispatchState::Blocked => Some("the authoritative actor is blocked"),
+        ActorDispatchState::Missing => Some("the authoritative actor is missing"),
+    }
+}
+
+pub const fn actor_can_queue_optimistically(state: ActorDispatchState) -> bool {
+    matches!(state, ActorDispatchState::Busy)
+}
+
+pub const fn busy_projection_repaired_by_ready_prompt(
+    actor_state: ActorDispatchState,
+    prompt_ready: bool,
+) -> bool {
+    matches!(actor_state, ActorDispatchState::Busy) && prompt_ready
+}
+
+pub const fn actor_waiting_input_recoverable(state: ActorDispatchState) -> bool {
+    matches!(state, ActorDispatchState::WaitingInput)
+}
+
+pub fn actor_recovery_hint(state: ActorDispatchState, file_display: &str) -> String {
+    match state {
+        ActorDispatchState::Starting => format!(
+            "Wait for the pane to show a dispatch-ready prompt (`prompt_ready=true`), then rerun `agent-doc {file_display}`. If the pane stays stuck, restart the owner with `agent-doc start {file_display}`."
+        ),
+        ActorDispatchState::Busy => {
+            "Wait for the active turn to finish before rerouting this document.".to_string()
+        }
+        ActorDispatchState::WaitingInput => format!(
+            "Answer the supervisor prompt in the pane, or restart the owner with `agent-doc start {file_display}`."
+        ),
+        ActorDispatchState::Closed => {
+            format!("Start a new owner with `agent-doc start {file_display}` before rerouting.")
+        }
+        ActorDispatchState::Blocked => format!(
+            "Inspect the pane diagnostics, then restart the owner with `agent-doc start {file_display}`."
+        ),
+        ActorDispatchState::Ready | ActorDispatchState::Missing => String::new(),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BusyPaneAutoFixOutcome {
+    RetryRoute,
+    RetryRouteAfterSupervisorRestart,
+    RetryRouteAfterFreshRestart,
+    FailClosed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BusyPaneAutoFixFacts {
+    pub test_hook_changed: bool,
+    pub fix_made_changes: bool,
+    pub supervisor_healthy: bool,
+    pub restarted_supervisor: bool,
+}
+
+pub fn busy_existing_pane_auto_fix_outcome(facts: BusyPaneAutoFixFacts) -> BusyPaneAutoFixOutcome {
+    if facts.restarted_supervisor {
+        return BusyPaneAutoFixOutcome::RetryRouteAfterSupervisorRestart;
+    }
+    if facts.test_hook_changed || facts.fix_made_changes {
+        return BusyPaneAutoFixOutcome::RetryRoute;
+    }
+    if facts.supervisor_healthy {
+        BusyPaneAutoFixOutcome::RetryRouteAfterFreshRestart
+    } else {
+        BusyPaneAutoFixOutcome::FailClosed
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DegradedAuthoritativeActorFacts<'a> {
+    pub actor_pane: &'a str,
+    pub transition_caller: &'a str,
+    pub transition_reason: &'a str,
+    pub registered_pane: Option<&'a str>,
+    pub live_owner_pane: Option<&'a str>,
+}
+
+pub fn can_use_degraded_authoritative_actor(facts: DegradedAuthoritativeActorFacts<'_>) -> bool {
+    if facts.transition_caller == "register" && facts.transition_reason == "register" {
+        return false;
+    }
+    facts.registered_pane == Some(facts.actor_pane)
+        || facts.live_owner_pane == Some(facts.actor_pane)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DegradedAuthoritativeActorDirectSubmit<'a> {
+    pub file_display: &'a str,
+    pub pane_id: &'a str,
+    pub harness_binary: &'a str,
+    pub generation: u64,
+    pub record_state: &'a str,
+    pub supervisor_health: &'a str,
+    pub runtime_actor_state: &'a str,
+    pub reason: &'a str,
+}
+
+pub fn degraded_authoritative_actor_direct_submit_log_message(
+    facts: DegradedAuthoritativeActorDirectSubmit<'_>,
+) -> String {
+    format!(
+        "route_dispatch_only_authoritative_degraded_direct_pane file={} pane={} harness={} generation={} record_state={} supervisor_health={} runtime_actor_state={} reason={}",
+        facts.file_display,
+        facts.pane_id,
+        facts.harness_binary,
+        facts.generation,
+        facts.record_state,
+        facts.supervisor_health,
+        facts.runtime_actor_state,
+        facts.reason
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoutedReopenGuardReason {
+    AcceptedOnlyDispatchStartProof,
+    StartingActorNotReady,
+    StartingActorNotReadyUnpersisted,
+    DispatchOnlyBusyActorNotReady,
+    BlockedInInteractiveSubstate,
+}
+
+impl RoutedReopenGuardReason {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::AcceptedOnlyDispatchStartProof => "accepted_only_dispatch_start_proof",
+            Self::StartingActorNotReady => "starting_actor_not_ready",
+            Self::StartingActorNotReadyUnpersisted => "starting_actor_not_ready_unpersisted",
+            Self::DispatchOnlyBusyActorNotReady => "dispatch_only_busy_actor_not_ready",
+            Self::BlockedInInteractiveSubstate => "blocked_in_interactive_substate",
+        }
+    }
+}
+
+pub fn is_interactive_shell_substate_reason(reason: &str) -> bool {
+    reason.trim_start().starts_with("interactive shell")
+}
+
+pub fn dispatch_only_blocked_guard_reason(blocker_reason: &str) -> RoutedReopenGuardReason {
+    if is_interactive_shell_substate_reason(blocker_reason) {
+        RoutedReopenGuardReason::BlockedInInteractiveSubstate
+    } else {
+        RoutedReopenGuardReason::DispatchOnlyBusyActorNotReady
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActorLifecycleState {
     Starting,
@@ -1982,6 +2460,352 @@ mod tests {
         assert_eq!(
             DispatchOnlyReopenDelivery::SupervisorIpcOnce.submit_mode_for_harness("codex"),
             "supervisor_normalized_submit"
+        );
+    }
+
+    #[test]
+    fn interactive_substate_gets_dedicated_guard_reason() {
+        for reason in [
+            "interactive shell reverse-i-search",
+            "interactive shell history search",
+            "  interactive shell reverse-i-search",
+        ] {
+            assert!(is_interactive_shell_substate_reason(reason), "{reason}");
+            assert_eq!(
+                dispatch_only_blocked_guard_reason(reason),
+                RoutedReopenGuardReason::BlockedInInteractiveSubstate,
+            );
+            assert_eq!(
+                dispatch_only_blocked_guard_reason(reason).as_str(),
+                "blocked_in_interactive_substate",
+            );
+        }
+        for reason in [
+            "active codex turn",
+            "queued draft in composer",
+            "active claude turn",
+        ] {
+            assert!(!is_interactive_shell_substate_reason(reason), "{reason}");
+            assert_eq!(
+                dispatch_only_blocked_guard_reason(reason),
+                RoutedReopenGuardReason::DispatchOnlyBusyActorNotReady,
+            );
+        }
+    }
+
+    #[test]
+    fn routed_reopen_decision_separates_start_wait_and_queue_paths() {
+        let starting = decide_authoritative_reopen(RoutedReopenFacts {
+            actor_state: ActorDispatchState::Starting,
+            prompt_ready: false,
+            has_prompt_bearing_work: true,
+            mode: ReopenMode::DispatchOnly,
+            degraded_authority: false,
+            dispatch_eligible: true,
+        });
+        assert_eq!(starting.decision, RouteDecision::WaitForReady);
+        assert_eq!(starting.reason, "starting_requires_prompt_ready_barrier");
+
+        assert_eq!(
+            decide_authoritative_reopen(RoutedReopenFacts {
+                actor_state: ActorDispatchState::Busy,
+                prompt_ready: false,
+                has_prompt_bearing_work: true,
+                mode: ReopenMode::DispatchOnly,
+                degraded_authority: false,
+                dispatch_eligible: true,
+            })
+            .decision,
+            RouteDecision::FailClosed
+        );
+        assert_eq!(
+            decide_authoritative_reopen(RoutedReopenFacts {
+                actor_state: ActorDispatchState::Busy,
+                prompt_ready: false,
+                has_prompt_bearing_work: true,
+                mode: ReopenMode::Managed,
+                degraded_authority: false,
+                dispatch_eligible: true,
+            })
+            .decision,
+            RouteDecision::ReuseReady
+        );
+    }
+
+    #[test]
+    fn busy_projection_repaired_only_with_proven_ready_prompt() {
+        assert!(busy_projection_repaired_by_ready_prompt(
+            ActorDispatchState::Busy,
+            true
+        ));
+        assert!(!busy_projection_repaired_by_ready_prompt(
+            ActorDispatchState::Busy,
+            false
+        ));
+        for state in [
+            ActorDispatchState::Ready,
+            ActorDispatchState::Starting,
+            ActorDispatchState::WaitingInput,
+            ActorDispatchState::Blocked,
+            ActorDispatchState::Closed,
+            ActorDispatchState::Missing,
+        ] {
+            assert!(!busy_projection_repaired_by_ready_prompt(state, true));
+        }
+    }
+
+    #[test]
+    fn authoritative_actor_dispatch_action_classifies_delivery_boundary() {
+        assert_eq!(
+            classify_authoritative_actor_dispatch_action(AuthoritativeActorDispatchActionFacts {
+                mode: ReopenMode::DispatchOnly,
+                actor_state: ActorDispatchState::Ready,
+                has_prompt_bearing_work: true,
+                reopen_decision: RouteDecision::ReuseReady,
+            }),
+            AuthoritativeActorDispatchAction::DispatchOnlyDirectPane
+        );
+        assert_eq!(
+            classify_authoritative_actor_dispatch_action(AuthoritativeActorDispatchActionFacts {
+                mode: ReopenMode::Managed,
+                actor_state: ActorDispatchState::Ready,
+                has_prompt_bearing_work: true,
+                reopen_decision: RouteDecision::ReuseReady,
+            }),
+            AuthoritativeActorDispatchAction::ManagedSupervisorIpc
+        );
+        assert_eq!(
+            classify_authoritative_actor_dispatch_action(AuthoritativeActorDispatchActionFacts {
+                mode: ReopenMode::Managed,
+                actor_state: ActorDispatchState::Busy,
+                has_prompt_bearing_work: true,
+                reopen_decision: RouteDecision::ReuseReady,
+            }),
+            AuthoritativeActorDispatchAction::ManagedSupervisorQueue
+        );
+        assert_eq!(
+            classify_authoritative_actor_dispatch_action(AuthoritativeActorDispatchActionFacts {
+                mode: ReopenMode::DispatchOnly,
+                actor_state: ActorDispatchState::Busy,
+                has_prompt_bearing_work: true,
+                reopen_decision: RouteDecision::FailClosed,
+            }),
+            AuthoritativeActorDispatchAction::DispatchOnlyBusyQueue
+        );
+        assert_eq!(
+            classify_authoritative_actor_dispatch_action(AuthoritativeActorDispatchActionFacts {
+                mode: ReopenMode::DispatchOnly,
+                actor_state: ActorDispatchState::WaitingInput,
+                has_prompt_bearing_work: true,
+                reopen_decision: RouteDecision::FailClosed,
+            }),
+            AuthoritativeActorDispatchAction::RecoverDispatchOnlyWaitingInput
+        );
+        assert_eq!(
+            classify_authoritative_actor_dispatch_action(AuthoritativeActorDispatchActionFacts {
+                mode: ReopenMode::Managed,
+                actor_state: ActorDispatchState::Blocked,
+                has_prompt_bearing_work: false,
+                reopen_decision: RouteDecision::FailClosed,
+            }),
+            AuthoritativeActorDispatchAction::FocusOnly
+        );
+    }
+
+    #[test]
+    fn dispatch_only_focus_only_fails_closed_only_for_busy_actor() {
+        assert!(dispatch_only_focus_only_should_fail_closed(
+            ReopenMode::DispatchOnly,
+            ActorDispatchState::Busy
+        ));
+        assert!(!dispatch_only_focus_only_should_fail_closed(
+            ReopenMode::Managed,
+            ActorDispatchState::Busy
+        ));
+        for state in [
+            ActorDispatchState::WaitingInput,
+            ActorDispatchState::Blocked,
+            ActorDispatchState::Closed,
+            ActorDispatchState::Starting,
+            ActorDispatchState::Ready,
+        ] {
+            assert!(!dispatch_only_focus_only_should_fail_closed(
+                ReopenMode::DispatchOnly,
+                state
+            ));
+        }
+    }
+
+    #[test]
+    fn prompt_ready_barrier_requires_state_prompt_and_eligibility() {
+        assert_eq!(
+            classify_prompt_ready_barrier(PromptReadyBarrierFacts {
+                actor_state: ActorDispatchState::Starting,
+                prompt_ready: false,
+                dispatch_eligible: true,
+            }),
+            PromptReadyBarrierDecision::Continue
+        );
+        assert_eq!(
+            classify_prompt_ready_barrier(PromptReadyBarrierFacts {
+                actor_state: ActorDispatchState::Ready,
+                prompt_ready: true,
+                dispatch_eligible: false,
+            }),
+            PromptReadyBarrierDecision::Continue
+        );
+        assert_eq!(
+            classify_prompt_ready_barrier(PromptReadyBarrierFacts {
+                actor_state: ActorDispatchState::Ready,
+                prompt_ready: true,
+                dispatch_eligible: true,
+            }),
+            PromptReadyBarrierDecision::Ready
+        );
+        assert_eq!(
+            classify_prompt_ready_barrier(PromptReadyBarrierFacts {
+                actor_state: ActorDispatchState::Busy,
+                prompt_ready: true,
+                dispatch_eligible: true,
+            }),
+            PromptReadyBarrierDecision::Ready
+        );
+        assert_eq!(
+            classify_prompt_ready_barrier(PromptReadyBarrierFacts {
+                actor_state: ActorDispatchState::Closed,
+                prompt_ready: false,
+                dispatch_eligible: true,
+            }),
+            PromptReadyBarrierDecision::Terminal
+        );
+    }
+
+    #[test]
+    fn authoritative_ready_facts_own_log_shape_and_barrier_input() {
+        let facts = AuthoritativeActorReadyFacts {
+            pane_id: "%42".to_string(),
+            generation: 7,
+            actor_state: ActorDispatchState::Ready,
+            supervisor_health: "healthy".to_string(),
+            runtime_state: "ready".to_string(),
+            prompt_ready: true,
+            last_transition_reason: "dispatch_bind".to_string(),
+            last_transition_caller: "route".to_string(),
+        };
+
+        assert_eq!(
+            classify_authoritative_prompt_ready_barrier(AuthoritativePromptReadyBarrierFacts {
+                ready_facts: &facts,
+                dispatch_eligible: true,
+            }),
+            PromptReadyBarrierDecision::Ready
+        );
+        assert!(facts.log_fields().contains("generation=7"));
+        assert!(
+            starting_actor_ready_log_line(
+                "/tmp/doc.md",
+                "codex",
+                Duration::from_millis(12),
+                &facts
+            )
+            .contains("route_starting_actor_ready")
+        );
+        assert!(
+            starting_actor_not_ready_log_line(StartingActorLogFacts {
+                file_display: "/tmp/doc.md",
+                harness_binary: "codex",
+                timeout: Duration::from_secs(8),
+                elapsed: Duration::from_secs(8),
+                ready_facts: &facts,
+            })
+            .contains("timeout_ms=8000")
+        );
+    }
+
+    #[test]
+    fn degraded_authority_requires_current_pane_binding() {
+        let facts = DegradedAuthoritativeActorFacts {
+            actor_pane: "%42",
+            transition_caller: "route",
+            transition_reason: "dispatch_bind",
+            registered_pane: Some("%42"),
+            live_owner_pane: None,
+        };
+        assert!(can_use_degraded_authoritative_actor(facts));
+        assert!(can_use_degraded_authoritative_actor(
+            DegradedAuthoritativeActorFacts {
+                registered_pane: None,
+                live_owner_pane: Some("%42"),
+                ..facts
+            }
+        ));
+        assert!(!can_use_degraded_authoritative_actor(
+            DegradedAuthoritativeActorFacts {
+                registered_pane: Some("%99"),
+                live_owner_pane: Some("%99"),
+                ..facts
+            }
+        ));
+        assert!(!can_use_degraded_authoritative_actor(
+            DegradedAuthoritativeActorFacts {
+                transition_caller: "register",
+                transition_reason: "register",
+                registered_pane: Some("%42"),
+                live_owner_pane: Some("%42"),
+                ..facts
+            }
+        ));
+    }
+
+    #[test]
+    fn degraded_direct_submit_log_names_supervisor_reason() {
+        let message = degraded_authoritative_actor_direct_submit_log_message(
+            DegradedAuthoritativeActorDirectSubmit {
+                file_display: "/tmp/doc.md",
+                pane_id: "%42",
+                harness_binary: "codex",
+                generation: 2,
+                record_state: "ready",
+                supervisor_health: "no_socket",
+                runtime_actor_state: "missing",
+                reason: "supervisor health is no_socket",
+            },
+        );
+
+        assert!(message.contains("route_dispatch_only_authoritative_degraded_direct_pane"));
+        assert!(message.contains("supervisor_health=no_socket"));
+        assert!(message.contains("runtime_actor_state=missing"));
+        assert!(message.contains("reason=supervisor health is no_socket"));
+    }
+
+    #[test]
+    fn busy_pane_auto_fix_decision_prefers_explicit_retry_evidence() {
+        assert_eq!(
+            busy_existing_pane_auto_fix_outcome(BusyPaneAutoFixFacts {
+                test_hook_changed: false,
+                fix_made_changes: false,
+                supervisor_healthy: true,
+                restarted_supervisor: false,
+            }),
+            BusyPaneAutoFixOutcome::RetryRouteAfterFreshRestart
+        );
+        assert_eq!(
+            busy_existing_pane_auto_fix_outcome(BusyPaneAutoFixFacts {
+                test_hook_changed: true,
+                fix_made_changes: false,
+                supervisor_healthy: false,
+                restarted_supervisor: false,
+            }),
+            BusyPaneAutoFixOutcome::RetryRoute
+        );
+        assert_eq!(
+            busy_existing_pane_auto_fix_outcome(BusyPaneAutoFixFacts {
+                test_hook_changed: false,
+                fix_made_changes: false,
+                supervisor_healthy: false,
+                restarted_supervisor: true,
+            }),
+            BusyPaneAutoFixOutcome::RetryRouteAfterSupervisorRestart
         );
     }
 

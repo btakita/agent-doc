@@ -1078,8 +1078,8 @@ pub(crate) fn await_idle_with_max_wait(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::flow::routed_reopen::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
+    use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     #[test]
     fn codex_busy_ctrl_g_gate_only_fires_for_shell_search_blocker() {
         // C-g is allowed only for the two shell-search blocker reasons that

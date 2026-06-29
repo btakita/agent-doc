@@ -167,27 +167,6 @@ impl PatchbackShape {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum RouteDecision {
-    ReuseReady,
-    WaitForReady,
-    FreshRestart,
-    StartNew,
-    FailClosed,
-}
-
-impl RouteDecision {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::ReuseReady => "reuse_ready",
-            Self::WaitForReady => "wait_for_ready",
-            Self::FreshRestart => "fresh_restart",
-            Self::StartNew => "start_new",
-            Self::FailClosed => "fail_closed",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum DispatchProof {
     AcceptedOnly,
     DispatchStarted,

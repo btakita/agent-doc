@@ -2294,6 +2294,68 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
 }
 
 #[test]
+fn test_agent_doc_queue_owns_do_directive_target_parsing() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let queue_directive =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_directive.rs")).unwrap();
+    for required in [
+        "pub fn do_directive_target_ids",
+        "pub fn do_directive_target_ids_in_line",
+        "fn leads_with_bare_id_token",
+    ] {
+        assert!(
+            queue_directive.contains(required),
+            "agent-doc-queue must own id-backed queue directive parsing: {required}"
+        );
+    }
+
+    let backlog_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-element-backlog/src/backlog.rs")).unwrap();
+    assert!(
+        backlog_source.contains("pub fn extract_pending_hash_ids"),
+        "ordered tracked-work #id scanning should live with backlog/tracked-work parsing"
+    );
+
+    let done_signals = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/done_signals.rs"),
+    )
+    .unwrap();
+    for forbidden in [
+        "pub fn do_directive_target_ids",
+        "pub(crate) fn do_directive_target_ids_in_line",
+        "pub(crate) fn extract_pending_hash_ids",
+        "pub(crate) fn leads_with_bare_id_token",
+    ] {
+        assert!(
+            !done_signals.contains(forbidden),
+            "session_check must not re-own queue directive parsing: {forbidden}"
+        );
+    }
+    assert!(
+        done_signals.contains("agent_doc_element_backlog::backlog::extract_pending_hash_ids"),
+        "done signal parsing should reuse the focused tracked-work #id scanner"
+    );
+
+    for relative in [
+        "agent-doc-orchestration/src/preflight/run.rs",
+        "agent-doc-orchestration/src/project_controller.rs",
+        "agent-doc-orchestration/src/session_check/queue_head_guards.rs",
+        "agent-doc-orchestration/src/session_check/queue_head_provenance_guards.rs",
+        "agent-doc-orchestration/src/session_check/response_guards.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("agent_doc_queue::queue_directive::do_directive_target_ids"),
+            "{relative} should call focused queue directive parsing directly"
+        );
+        assert!(
+            !source.contains("crate::session_check::do_directive_target_ids"),
+            "{relative} must not route queue directive parsing through session_check"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_turn_owns_drain_stall_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();

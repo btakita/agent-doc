@@ -1563,7 +1563,7 @@ fn cycle_phase_store_label(phase: agent_doc_turn::CyclePhase) -> &'static str {
 }
 
 fn queue_head_id_from_prompt(prompt: &str) -> Option<String> {
-    crate::session_check::do_directive_target_ids(&[prompt.to_string()])
+    agent_doc_queue::queue_directive::do_directive_target_ids(&[prompt.to_string()])
         .into_iter()
         .next()
 }

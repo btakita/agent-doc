@@ -5626,47 +5626,6 @@ Body\n\
         ));
     }
     #[test]
-    fn do_directive_target_ids_extracts_bracketed_and_bare_forms() {
-        let prompts = vec![
-            "do [#alpha]".to_string(),
-            "❯ do #beta".to_string(),
-            "[queue] do #gamma".to_string(),
-            "investigate #delta".to_string(),
-        ];
-        let ids = do_directive_target_ids(&prompts);
-        assert_eq!(ids, vec!["alpha", "beta", "gamma"]);
-    }
-    #[test]
-    fn do_directive_target_ids_strips_queue_priority_pins() {
-        // Queue maintenance pins lines with `:round_pushpin:` / `:pushpin:`;
-        // the pinned spelling targets the same id as the unpinned one
-        // (#queue-user-edit-overwrite consumed-head accounting).
-        let prompts = vec![
-            ":round_pushpin: [#pinned]".to_string(),
-            "- :pushpin: do [#opin]".to_string(),
-            "📌 #emoji proceed".to_string(),
-        ];
-        let ids = do_directive_target_ids(&prompts);
-        assert_eq!(ids, vec!["pinned", "opin", "emoji"]);
-    }
-    #[test]
-    fn do_directive_target_ids_optional_do_stage2_bare_and_reference_forms() {
-        // Optional-`do` Stage 2: the `do` verb is optional for a bare leading id
-        // token, and a `re` reference never targets an id.
-        let prompts = vec![
-            "[#solo]".to_string(),                      // bare bracketed → id-backed
-            "- [#listed] do the small fix".to_string(), // bare after list marker
-            "#hashbare proceed".to_string(),            // bare hash token
-            "re [#ref]".to_string(),                    // reference → inert
-            "re #ref2".to_string(),                     // reference → inert
-            "[#note]: just prose".to_string(),          // trailing `:` → inert
-            "see [#mention] for context".to_string(),   // not leading → inert
-            "do [#explicit]".to_string(),               // explicit still works
-        ];
-        let ids = do_directive_target_ids(&prompts);
-        assert_eq!(ids, vec!["solo", "listed", "hashbare", "explicit"]);
-    }
-    #[test]
     fn expect_done_or_gate_guard_fails_when_directive_target_left_open() {
         let tmp = tempfile::TempDir::new().unwrap();
         let doc = setup_committed_do_directive_cycle(

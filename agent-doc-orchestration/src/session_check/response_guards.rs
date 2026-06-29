@@ -105,7 +105,7 @@ pub(crate) fn queue_ids_including_struck(doc: &str) -> std::collections::HashSet
                     .and_then(|s| s.strip_suffix('~'))
             })
             .unwrap_or(no_bullet);
-        for id in do_directive_target_ids_in_line(unstruck) {
+        for id in agent_doc_queue::queue_directive::do_directive_target_ids_in_line(unstruck) {
             ids.insert(id);
         }
     }
@@ -160,7 +160,9 @@ pub(crate) fn check_dropped_queue_prompt_guard(
             {
                 return false;
             }
-            let dropped_ids = do_directive_target_ids(std::slice::from_ref(prompt));
+            let dropped_ids = agent_doc_queue::queue_directive::do_directive_target_ids(
+                std::slice::from_ref(prompt),
+            );
             // Preserved by id: the dropped prompt's `[#id]` is present in the
             // committed/visible queue (possibly as a struck `~~do [#id]~~` from a
             // prior cycle). Text-identity matching above cannot bridge the bare

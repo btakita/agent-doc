@@ -2031,6 +2031,48 @@ pub fn extract_pending_ids_from_text(text: &str) -> HashSet<String> {
     ids
 }
 
+/// Ordered unique bare `#id` references in free text.
+///
+/// Unlike [`extract_pending_ids_from_text`], this accepts both bracketed
+/// `[#id]` and bare `#id` forms and preserves first-seen order. It is used by
+/// prompt/directive parsers that need deterministic target order.
+pub fn extract_pending_hash_ids(text: &str) -> Vec<String> {
+    let mut ids = Vec::new();
+    let chars = text.char_indices().collect::<Vec<_>>();
+    let mut idx = 0usize;
+
+    while idx < chars.len() {
+        let (byte_idx, ch) = chars[idx];
+        if ch != '#' {
+            idx += 1;
+            continue;
+        }
+
+        let start = byte_idx + ch.len_utf8();
+        let mut end = start;
+        let mut cursor = idx + 1;
+        while cursor < chars.len() {
+            let (next_byte, next_ch) = chars[cursor];
+            if next_ch.is_ascii_alphanumeric() || next_ch == '-' || next_ch == '_' {
+                end = next_byte + next_ch.len_utf8();
+                cursor += 1;
+                continue;
+            }
+            break;
+        }
+
+        if end > start {
+            let id = normalize_pending_id(&text[start..end]);
+            if !ids.iter().any(|existing| existing == &id) {
+                ids.push(id);
+            }
+        }
+        idx = cursor.max(idx + 1);
+    }
+
+    ids
+}
+
 /// Extract only each done/archive **item's own** `#id` — the FIRST `[#id]` on a
 /// list-item line (`- <date> [#id] …` / `- [x] [#id] …`) — and ignore any other
 /// `[#id]` cited in that item's prose.
@@ -2866,6 +2908,12 @@ mod tests {
 
     fn ids() -> HashSet<String> {
         HashSet::new()
+    }
+
+    #[test]
+    fn extract_pending_hash_ids_preserves_order_and_accepts_bare_ids() {
+        let ids = extract_pending_hash_ids("do [#alpha] then #beta then #alpha and #under_score");
+        assert_eq!(ids, vec!["alpha", "beta", "under_score"]);
     }
 
     #[test]

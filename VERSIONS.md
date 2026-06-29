@@ -36,6 +36,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Partial-staging closeout diff policy moved to `agent-doc-diff`.** The source/test path relatedness filter and changed string/backtick literal extraction now live with pure diff classification. `session_check::partial_staging` remains the git/file adapter and calls `agent_doc_diff` directly. Added focused unit coverage and a boundary guard so orchestration does not re-own the policy.
 
+- **Id-backed queue directive parsing moved to `agent-doc-queue`.** `do #id` / `do [#id]` / optional bare leading `#id` target extraction now lives in `agent-doc-queue::queue_directive`, backed by ordered tracked-work `#id` scanning in `agent-doc-element-backlog`. Session-check, preflight, and controller callers import the focused queue API directly instead of routing through `session_check`. Added focused parser coverage and a boundary guard so the directive parser does not return to orchestration.
+
 ## 0.34.64
 
 - **`#suprestassoc` — `restart-supervisor` registry re-association is scoped to the requested document, not just the reused session id.** The CLI restart path now resolves registry entries by exact canonical document path first and only keeps the legacy session-id fallback for fileless registry rows; registry keys that explicitly name another document are rejected, so restarting `sampleportal.md` cannot adopt a stale `agent-doc-bugs2.md` pane/session projection that happens to carry the same session id. Coverage: deterministic registry lookup regressions for rejecting a foreign same-session entry and preferring the exact target document entry. Live editor/pane confirmation remains an `[operator-verify]` follow-up.

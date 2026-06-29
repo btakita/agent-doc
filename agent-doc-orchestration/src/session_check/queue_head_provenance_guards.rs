@@ -131,7 +131,7 @@ pub(crate) fn committed_queue_head_ids(content: &str) -> Vec<String> {
     let Some(queue) = components.iter().find(|c| c.name == "queue") else {
         return Vec::new();
     };
-    do_directive_target_ids(&[queue.content(content).to_string()])
+    agent_doc_queue::queue_directive::do_directive_target_ids(&[queue.content(content).to_string()])
 }
 
 /// `do [#id]` target ids for the current live queue head only.
@@ -147,7 +147,7 @@ pub(crate) fn committed_current_queue_head_ids(content: &str) -> Vec<String> {
     let Some(head) = agent_doc_queue::document_queue::first_prompt(&entries) else {
         return Vec::new();
     };
-    do_directive_target_ids(std::slice::from_ref(&head.text))
+    agent_doc_queue::queue_directive::do_directive_target_ids(std::slice::from_ref(&head.text))
 }
 
 /// `#queue-clear-unrun-items`: an active `agent:queue` head is executable user
@@ -180,7 +180,8 @@ pub(crate) fn check_queue_head_removal_guard(
     if state.is_open() {
         return Ok(GuardResult::None);
     }
-    let recorded_ids = do_directive_target_ids(&state.active_queue_heads);
+    let recorded_ids =
+        agent_doc_queue::queue_directive::do_directive_target_ids(&state.active_queue_heads);
     if recorded_ids.is_empty() {
         return Ok(GuardResult::None);
     }

@@ -26,7 +26,8 @@ pub(crate) fn check_no_response_active_queue_head(
     if !bookkeeping_evidence {
         return Ok(GuardResult::None);
     }
-    let recorded_ids = do_directive_target_ids(&state.active_queue_heads);
+    let recorded_ids =
+        agent_doc_queue::queue_directive::do_directive_target_ids(&state.active_queue_heads);
     if recorded_ids.is_empty() {
         return Ok(GuardResult::None);
     }
@@ -159,7 +160,7 @@ pub(crate) fn check_reaped_queue_head_without_response(
     }
 
     let directive_ids: std::collections::HashSet<String> =
-        do_directive_target_ids(&state.active_queue_heads)
+        agent_doc_queue::queue_directive::do_directive_target_ids(&state.active_queue_heads)
             .into_iter()
             .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(&id))
             .filter(|id| !id.is_empty())

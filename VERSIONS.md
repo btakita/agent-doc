@@ -34,6 +34,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Authoritative actor effective-state policy moved to `agent-doc-controller`.** The rule that persisted terminal actor states (`blocked`/`closed`) win over fresher runtime IPC, while non-terminal records may be refreshed by runtime state, now lives in `agent_doc_controller::dispatch`. Route only maps SQLite actor states into the focused lifecycle enum before applying the controller policy.
 
+- **Route closeout-block action selection moved to `agent-doc-controller`.** The decision that prefers queuing an available reroute prompt after closeout, otherwise waits behind an existing active queue head, otherwise fails closed now lives in `agent_doc_controller::dispatch`. Route still computes closeout recovery and reads the document queue head, then calls the focused controller classifier directly.
+
 - **Route-owned reap policy moved to `agent-doc-supervisor`.** The route-owned supervisor completion reap policy, liveness reason vocabulary, and hidden CLI reap-policy parser now live in `agent_doc_supervisor::route_owned`. The start path keeps only document liveness/file adapters and calls the focused supervisor API directly; the CLI shell imports the focused type instead of preserving an orchestration API path.
 
 - **Stale install-artifact policy moved to `agent-doc-supervisor`.** The `#install-stale-guard` grace window and timestamp classifier now live in `agent_doc_supervisor::config` beside auto-install/stale-binary policy. Preflight still discovers artifact mtimes and formats the warning, but calls the focused supervisor API directly instead of owning the staleness rule.

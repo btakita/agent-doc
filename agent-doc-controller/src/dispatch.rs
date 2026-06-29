@@ -388,6 +388,31 @@ pub fn direct_pane_submit_outcome(
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CloseoutBlockDispatchFacts {
+    pub recovery_queues_prompt_for_after_closeout: bool,
+    pub active_queue_head: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CloseoutBlockDispatchDecision {
+    EnqueuePromptForAfterCloseout,
+    WaitForActiveQueueHead { head: String },
+    FailClosed,
+}
+
+pub fn classify_closeout_block_dispatch(
+    facts: CloseoutBlockDispatchFacts,
+) -> CloseoutBlockDispatchDecision {
+    if facts.recovery_queues_prompt_for_after_closeout {
+        return CloseoutBlockDispatchDecision::EnqueuePromptForAfterCloseout;
+    }
+    if let Some(head) = facts.active_queue_head {
+        return CloseoutBlockDispatchDecision::WaitForActiveQueueHead { head };
+    }
+    CloseoutBlockDispatchDecision::FailClosed
+}
+
 /// Decision for the route-dispatch drain retry loop after a mid-drain `repair`
 /// plus `session_check` failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -831,6 +856,41 @@ mod tests {
                 Some(RoutedDispatchStartProof::HookStateAdvanced),
             ),
             "acceptance_unobserved_dispatch_proven"
+        );
+    }
+
+    #[test]
+    fn closeout_block_dispatch_prefers_queued_prompt_context() {
+        assert_eq!(
+            classify_closeout_block_dispatch(CloseoutBlockDispatchFacts {
+                recovery_queues_prompt_for_after_closeout: true,
+                active_queue_head: Some("existing-head".to_string()),
+            }),
+            CloseoutBlockDispatchDecision::EnqueuePromptForAfterCloseout
+        );
+    }
+
+    #[test]
+    fn closeout_block_dispatch_waits_on_existing_active_queue() {
+        assert_eq!(
+            classify_closeout_block_dispatch(CloseoutBlockDispatchFacts {
+                recovery_queues_prompt_for_after_closeout: false,
+                active_queue_head: Some("queue-head".to_string()),
+            }),
+            CloseoutBlockDispatchDecision::WaitForActiveQueueHead {
+                head: "queue-head".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn closeout_block_dispatch_fails_closed_without_prompt_or_queue() {
+        assert_eq!(
+            classify_closeout_block_dispatch(CloseoutBlockDispatchFacts {
+                recovery_queues_prompt_for_after_closeout: false,
+                active_queue_head: None,
+            }),
+            CloseoutBlockDispatchDecision::FailClosed
         );
     }
 

@@ -183,16 +183,16 @@ use crate::flow::routed_reopen::{
 use crate::harness::HarnessConfig;
 use crate::supervisor::ipc::IpcMethod;
 use agent_doc_controller::dispatch::{
-    ActorLifecycleState, AuthoritativeRuntimeFacts,
-    DirectPaneSubmitStatus as CommandDispatchStatus, DispatchActorState,
-    DispatchDrainRetryDecision, DispatchRuntimeHealth, DispatchStartProofDecision,
-    DispatchStartProofFacts, RetryBudget, RoutedDispatchStartProof, STARTING_ACTOR_TIMEOUT_REASON,
-    StartingTimeoutActorFacts, actor_blocked_by_starting_timeout,
+    ActorLifecycleState, AuthoritativeRuntimeFacts, CloseoutBlockDispatchDecision,
+    CloseoutBlockDispatchFacts, DirectPaneSubmitStatus as CommandDispatchStatus,
+    DispatchActorState, DispatchDrainRetryDecision, DispatchRuntimeHealth,
+    DispatchStartProofDecision, DispatchStartProofFacts, RetryBudget, RoutedDispatchStartProof,
+    STARTING_ACTOR_TIMEOUT_REASON, StartingTimeoutActorFacts, actor_blocked_by_starting_timeout,
     authoritative_actor_dispatch_guard_reason as controller_authoritative_actor_dispatch_guard_reason,
-    authoritative_actor_ready_retry_budget, classify_dispatch_start_proof,
-    direct_pane_submit_acceptance_budget, direct_pane_submit_acceptance_timeout,
-    direct_pane_submit_outcome, dispatch_drain_retry_decision,
-    dispatch_only_busy_should_wait_for_ready,
+    authoritative_actor_ready_retry_budget, classify_closeout_block_dispatch,
+    classify_dispatch_start_proof, direct_pane_submit_acceptance_budget,
+    direct_pane_submit_acceptance_timeout, direct_pane_submit_outcome,
+    dispatch_drain_retry_decision, dispatch_only_busy_should_wait_for_ready,
     dispatch_only_dispatch_start_proof_required as controller_dispatch_only_dispatch_start_proof_required,
     dispatch_only_should_probe_active_turn_cue,
     dispatch_only_starting_pane_ready_timeout_for_binary,
@@ -432,20 +432,6 @@ enum RouteCloseoutDrainOutcome {
     NoOpenCycle,
     Recovered(String),
     Blocked(String),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum RouteCloseoutBlockDecision {
-    EnqueuePromptForAfterCloseout {
-        decision: CloseoutRecoveryDecision,
-    },
-    WaitForActiveQueueHead {
-        head: String,
-        decision: CloseoutRecoveryDecision,
-    },
-    FailClosed {
-        decision: CloseoutRecoveryDecision,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2483,7 +2469,7 @@ fn classify_route_closeout_block(
     file: &Path,
     reason: String,
     has_prompt_context: bool,
-) -> RouteCloseoutBlockDecision {
+) -> (CloseoutRecoveryDecision, CloseoutBlockDispatchDecision) {
     let recovery_decision = crate::flow::closeout::decide_closeout_recovery(
         file,
         crate::flow::closeout::CloseoutRecoveryDecisionInput {
@@ -2492,26 +2478,22 @@ fn classify_route_closeout_block(
             stale_capture_supersession_proof: None,
         },
     );
-    if matches!(
+    let recovery_queues_prompt_for_after_closeout = matches!(
         recovery_decision,
         crate::flow::closeout::CloseoutRecoveryDecision::QueuePromptForAfterCloseout { .. }
-    ) {
-        return RouteCloseoutBlockDecision::EnqueuePromptForAfterCloseout {
-            decision: recovery_decision,
-        };
-    }
-    let active_queue_head = std::fs::read_to_string(file)
-        .ok()
-        .and_then(|content| agent_doc_queue::queue_continuation::live_continuation_head(&content));
-    if let Some(head) = active_queue_head {
-        return RouteCloseoutBlockDecision::WaitForActiveQueueHead {
-            head,
-            decision: recovery_decision,
-        };
-    }
-    RouteCloseoutBlockDecision::FailClosed {
-        decision: recovery_decision,
-    }
+    );
+    let active_queue_head = if recovery_queues_prompt_for_after_closeout {
+        None
+    } else {
+        std::fs::read_to_string(file).ok().and_then(|content| {
+            agent_doc_queue::queue_continuation::live_continuation_head(&content)
+        })
+    };
+    let dispatch_decision = classify_closeout_block_dispatch(CloseoutBlockDispatchFacts {
+        recovery_queues_prompt_for_after_closeout,
+        active_queue_head,
+    });
+    (recovery_decision, dispatch_decision)
 }
 
 /// `#routedrainnextaction`: format the user-facing outcome fields for a route
@@ -3627,8 +3609,10 @@ fn route_via_authoritative_actor(
             }
         }
         RouteCloseoutDrainOutcome::Blocked(reason) => {
-            match classify_route_closeout_block(file, reason, prompt_context.is_some()) {
-                RouteCloseoutBlockDecision::EnqueuePromptForAfterCloseout { decision } => {
+            let (decision, dispatch_decision) =
+                classify_route_closeout_block(file, reason, prompt_context.is_some());
+            match dispatch_decision {
+                CloseoutBlockDispatchDecision::EnqueuePromptForAfterCloseout => {
                     let Some(context) = prompt_context else {
                         unreachable!("prompt-context decision requires a prompt context");
                     };
@@ -3657,7 +3641,7 @@ fn route_via_authoritative_actor(
                     );
                     return Ok(dispatch_pane);
                 }
-                RouteCloseoutBlockDecision::WaitForActiveQueueHead { head, decision } => {
+                CloseoutBlockDispatchDecision::WaitForActiveQueueHead { head } => {
                     let blocker = decision.route_terminal_reason();
                     crate::ops_log::log_op(
                         file,
@@ -3676,7 +3660,7 @@ fn route_via_authoritative_actor(
                     );
                     return Ok(dispatch_pane);
                 }
-                RouteCloseoutBlockDecision::FailClosed { decision } => {
+                CloseoutBlockDispatchDecision::FailClosed => {
                     let reason = decision.route_terminal_reason();
                     anyhow::bail!(
                         "authoritative actor generation {} for {} owns pane {} but route could not drain the active closeout before dispatch: {}",
@@ -7021,8 +7005,10 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         write_open_cycle_route_doc(&doc, content);
         let low_level_reason = "captured response baseline no longer matches current document";
 
-        match super::classify_route_closeout_block(&doc, low_level_reason.to_string(), true) {
-            super::RouteCloseoutBlockDecision::EnqueuePromptForAfterCloseout { decision } => {
+        let (decision, dispatch_decision) =
+            super::classify_route_closeout_block(&doc, low_level_reason.to_string(), true);
+        match dispatch_decision {
+            CloseoutBlockDispatchDecision::EnqueuePromptForAfterCloseout => {
                 assert_eq!(
                     decision.state(),
                     Some(crate::flow::closeout::CloseoutRecoveryState::OpenCycle)
@@ -7051,8 +7037,10 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         write_open_cycle_route_doc(&doc, content);
         let low_level_reason = "captured response baseline no longer matches current document";
 
-        match super::classify_route_closeout_block(&doc, low_level_reason.to_string(), false) {
-            super::RouteCloseoutBlockDecision::WaitForActiveQueueHead { head, decision } => {
+        let (decision, dispatch_decision) =
+            super::classify_route_closeout_block(&doc, low_level_reason.to_string(), false);
+        match dispatch_decision {
+            CloseoutBlockDispatchDecision::WaitForActiveQueueHead { head } => {
                 assert_eq!(head, "jbruncloseoutstate");
                 assert_eq!(
                     decision.state(),
@@ -7081,8 +7069,10 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         write_open_cycle_route_doc(&doc, content);
         let low_level_reason = "captured response baseline no longer matches current document";
 
-        match super::classify_route_closeout_block(&doc, low_level_reason.to_string(), false) {
-            super::RouteCloseoutBlockDecision::FailClosed { decision } => {
+        let (decision, dispatch_decision) =
+            super::classify_route_closeout_block(&doc, low_level_reason.to_string(), false);
+        match dispatch_decision {
+            CloseoutBlockDispatchDecision::FailClosed => {
                 assert_eq!(
                     decision.state(),
                     Some(crate::flow::closeout::CloseoutRecoveryState::OpenCycle)

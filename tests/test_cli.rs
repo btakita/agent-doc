@@ -3623,6 +3623,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub(crate) fn spent_preset_id_from_pause_reason",
         "pub(crate) struct StaleQueuePauseRecovery",
         "pub(crate) fn dispatch_error_stale_queue_pause_recovery",
+        "pub(crate) struct CloseoutBlockDispatchFacts",
+        "pub(crate) enum CloseoutBlockDispatchDecision",
+        "pub(crate) fn classify_closeout_block_dispatch",
         "pub(crate) fn recycle_debounce_decision",
         "pub(crate) fn force_overrides_in_flight_gate",
     ] {
@@ -3704,6 +3707,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn dispatch_only_should_probe_active_turn_cue(",
         "pub enum DispatchDrainRetryDecision",
         "pub fn dispatch_drain_retry_decision(",
+        "pub struct CloseoutBlockDispatchFacts",
+        "pub enum CloseoutBlockDispatchDecision",
+        "pub fn classify_closeout_block_dispatch(",
     ] {
         assert!(
             controller_dispatch.contains(required_snippet),
@@ -3726,6 +3732,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn direct_pane_submit_outcome(",
         "enum DrainRetryDecision",
         "fn classify_drain_retry(",
+        "enum RouteCloseoutBlockDecision",
+        "fn classify_closeout_block_dispatch(",
     ] {
         assert!(
             !route_source.contains(forbidden_snippet),
@@ -3757,6 +3765,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn direct_pane_submit_acceptance_timeout(",
         "pub fn direct_pane_submit_acceptance_budget(",
         "pub fn direct_pane_submit_outcome(",
+        "pub struct CloseoutBlockDispatchFacts",
+        "pub enum CloseoutBlockDispatchDecision",
+        "pub fn classify_closeout_block_dispatch(",
     ] {
         assert!(
             !flow_routed_reopen_source.contains(forbidden_snippet),
@@ -3775,6 +3786,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("direct_pane_submit_outcome")
             && route_source.contains("RetryBudget")
             && route_source.contains("authoritative_actor_ready_retry_budget")
+            && route_source.contains("CloseoutBlockDispatchDecision")
+            && route_source.contains("CloseoutBlockDispatchFacts")
+            && route_source.contains("classify_closeout_block_dispatch")
             && route_source.contains("dispatch_only_starting_pane_ready_timeout_for_binary")
             && route_source.contains("dispatch_only_starting_pane_recovery_retry_budget")
             && route_source.contains("dispatch_only_starting_pane_recovery_timeout_for_binary")

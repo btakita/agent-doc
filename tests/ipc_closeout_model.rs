@@ -1,4 +1,4 @@
-use agent_doc_orchestration::flow::closeout::{
+use agent_doc_turn::closeout_recovery::{
     CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput, CloseoutRecoveryState,
     closeout_recovery_decision_from_state,
 };
@@ -402,13 +402,13 @@ proptest! {
         let blocker_reason = (proof_index == 2).then_some("route blocked by open closeout");
         let proof = (proof_index > 0).then_some("visible response superseded capture");
         let decision = closeout_recovery_decision_from_state(
-            Path::new("session.md"),
             state,
             CloseoutRecoveryDecisionInput {
                 prompt_context_available,
                 blocker_reason,
                 stale_capture_supersession_proof: proof,
             },
+            Some("agent-doc recover session.md"),
         );
         let expected = expected_closeout_recovery_decision(
             state,

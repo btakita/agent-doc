@@ -5769,12 +5769,13 @@ fn ipc_snapshot_guard_blocks_live_queue_drift_after_preflight() {
 #[test]
 fn closeout_recovery_transition_scenarios_cover_simworld_inputs() {
     use agent_doc_document_realtime::write_policy::FullContentVisibleReplacementDecision;
-    use agent_doc_orchestration::flow::closeout::{
+    use agent_doc_turn::closeout_recovery::{
         CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput, CloseoutRecoveryState,
         closeout_recovery_decision_from_state,
     };
 
     let file = Path::new("sim.md");
+    let recovery_command = Some("agent-doc recover sim.md");
 
     // Queue edits around capture/write fragmentation stay visible, but do not get
     // adopted into the committed snapshot.
@@ -5799,9 +5800,9 @@ fn closeout_recovery_transition_scenarios_cover_simworld_inputs() {
     assert!(!queue_world.snapshot.contains(live_queue_prompt));
     assert_eq!(
         closeout_recovery_decision_from_state(
-            file,
             CloseoutRecoveryState::UnsafeUserContentDrift,
             CloseoutRecoveryDecisionInput::default(),
+            recovery_command,
         )
         .as_str(),
         "blocked"
@@ -5818,9 +5819,9 @@ fn closeout_recovery_transition_scenarios_cover_simworld_inputs() {
     );
     assert_eq!(compact_world.coverage.stale_source_buffer_skips, 1);
     match closeout_recovery_decision_from_state(
-        file,
         CloseoutRecoveryState::OpenCycle,
         CloseoutRecoveryDecisionInput::default(),
+        recovery_command,
     ) {
         CloseoutRecoveryDecision::Blocked { missing_proof, .. } => {
             assert!(missing_proof.contains("open cycle"), "{missing_proof}");
@@ -5829,13 +5830,13 @@ fn closeout_recovery_transition_scenarios_cover_simworld_inputs() {
     }
     assert_eq!(
         closeout_recovery_decision_from_state(
-            file,
             CloseoutRecoveryState::OpenCycle,
             CloseoutRecoveryDecisionInput {
                 prompt_context_available: true,
                 blocker_reason: Some("JB Run Agent Doc during open closeout"),
                 stale_capture_supersession_proof: None,
             },
+            recovery_command,
         ),
         CloseoutRecoveryDecision::QueuePromptForAfterCloseout {
             state: CloseoutRecoveryState::OpenCycle,
@@ -5863,21 +5864,21 @@ fn closeout_recovery_transition_scenarios_cover_simworld_inputs() {
     );
     assert_eq!(
         closeout_recovery_decision_from_state(
-            file,
             CloseoutRecoveryState::SidecarVisibleDrift,
             CloseoutRecoveryDecisionInput::default(),
+            recovery_command,
         )
         .as_str(),
         "reset_sidecars_from_visible"
     );
     assert_eq!(
         closeout_recovery_decision_from_state(
-            file,
             CloseoutRecoveryState::MissingResponseBody,
             CloseoutRecoveryDecisionInput {
                 stale_capture_supersession_proof: Some("visible response superseded stale ACK"),
                 ..CloseoutRecoveryDecisionInput::default()
             },
+            recovery_command,
         ),
         CloseoutRecoveryDecision::RetireStaleCapture {
             state: CloseoutRecoveryState::MissingResponseBody,

@@ -2571,6 +2571,10 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     let recovery_source =
         fs::read_to_string(manifest_dir.join("agent-doc-turn/src/closeout_recovery.rs")).unwrap();
     for required in [
+        "pub enum CloseoutRecoveryState",
+        "pub struct CloseoutRecoveryDecisionInput",
+        "pub enum CloseoutRecoveryDecision",
+        "pub fn closeout_recovery_decision_from_state",
         "pub enum CloseoutRecoveryMutationReason",
         "pub enum MetadataDriftAuthority",
         "pub const fn capture_refresh_event",
@@ -2586,6 +2590,10 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/closeout.rs"))
             .unwrap();
     for forbidden in [
+        "pub enum CloseoutRecoveryState",
+        "pub struct CloseoutRecoveryDecisionInput",
+        "pub enum CloseoutRecoveryDecision",
+        "pub fn closeout_recovery_decision_from_state",
         "pub enum CloseoutRecoveryMutationReason",
         "pub enum MetadataDriftAuthority",
         "impl CloseoutRecoveryMutationReason",
@@ -2598,8 +2606,12 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     }
     assert!(
         closeout_source.contains("use agent_doc_turn::closeout_recovery::{")
+            && closeout_source.contains("CloseoutRecoveryDecision")
+            && closeout_source.contains("CloseoutRecoveryDecisionInput")
             && closeout_source.contains("CloseoutRecoveryMutationReason")
+            && closeout_source.contains("CloseoutRecoveryState")
             && closeout_source.contains("MetadataDriftAuthority")
+            && closeout_source.contains("closeout_recovery_decision_from_state")
             && closeout_source.contains("metadata_drift_authority"),
         "orchestration closeout recovery should call focused turn policy directly"
     );

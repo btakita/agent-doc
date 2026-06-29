@@ -289,7 +289,10 @@ pub fn debug(file: Option<&Path>, json: bool) -> Result<()> {
             .map(|s| phase_str(s.phase));
         let recovery_state =
             agent_doc_orchestration::flow::closeout::classify_closeout_recovery_state(doc_path);
-        let recovery_command = recovery_state.recovery_command(doc_path);
+        let recovery_command = agent_doc_orchestration::flow::closeout::closeout_recovery_command(
+            doc_path,
+            recovery_state,
+        );
         let mut value = serde_json::to_value(record).unwrap_or(serde_json::Value::Null);
         if let serde_json::Value::Object(map) = &mut value {
             map.insert(

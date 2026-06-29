@@ -58,6 +58,257 @@ impl CloseoutRecoveryMutationReason {
     }
 }
 
+/// Typed closeout recovery state (`#closeout-repair-churn`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloseoutRecoveryState {
+    /// No recovery needed.
+    Clean,
+    /// Cycle still open (preflight_started / response_captured / write_applied).
+    OpenCycle,
+    /// Committed binary-owned work but the assistant response body is missing
+    /// from HEAD (no capture, or a captured body not materialized in HEAD).
+    MissingResponseBody,
+    /// A visible `### Re:` response was patched directly into the document
+    /// outside the binary write path.
+    DirectResponsePatchback,
+    /// Raw `<!-- agent:NAME -->` component markers were escaped into the
+    /// committed exchange instead of applied as `<!-- patch:* -->` blocks.
+    EscapedTemplatePatch,
+    /// Snapshot differs from HEAD only by agent-doc-generated exchange artifacts
+    /// (boundary / `(HEAD)` markers, answered-prompt-prefix canonicalization).
+    BoundaryOnlyDrift,
+    /// A reaped/closed item left a nested parent submodule pointer uncommitted
+    /// while the document itself is clean.
+    NestedParentPointerStale,
+    /// An empty `preflight_started` cycle with no capture, response, or pending
+    /// mutation.
+    OpenEmptyPreflight,
+    /// Snapshot differs from HEAD only by agent-doc-generated queue/frontmatter
+    /// metadata; user/response and tracked-item content is byte-identical.
+    QueueMetadataDrift,
+    /// The visible/working file is stale relative to its sidecars (or vice versa)
+    /// by metadata only, after an accepted metadata change.
+    SidecarVisibleDrift,
+    /// User-authored prompt/response content drifted vs HEAD.
+    UnsafeUserContentDrift,
+}
+
+impl CloseoutRecoveryState {
+    pub const ALL: [Self; 11] = [
+        Self::Clean,
+        Self::OpenCycle,
+        Self::MissingResponseBody,
+        Self::DirectResponsePatchback,
+        Self::EscapedTemplatePatch,
+        Self::BoundaryOnlyDrift,
+        Self::NestedParentPointerStale,
+        Self::OpenEmptyPreflight,
+        Self::QueueMetadataDrift,
+        Self::SidecarVisibleDrift,
+        Self::UnsafeUserContentDrift,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Clean => "clean",
+            Self::OpenCycle => "open_cycle",
+            Self::MissingResponseBody => "missing_response_body",
+            Self::DirectResponsePatchback => "direct_response_patchback",
+            Self::EscapedTemplatePatch => "escaped_template_patch",
+            Self::BoundaryOnlyDrift => "boundary_only_drift",
+            Self::NestedParentPointerStale => "nested_parent_pointer_stale",
+            Self::OpenEmptyPreflight => "open_empty_preflight",
+            Self::QueueMetadataDrift => "queue_metadata_drift",
+            Self::SidecarVisibleDrift => "sidecar_visible_drift",
+            Self::UnsafeUserContentDrift => "unsafe_user_content_drift",
+        }
+    }
+}
+
+/// Input facts that are already known at a closeout recovery call site.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CloseoutRecoveryDecisionInput<'a> {
+    /// A routed/JB prompt is waiting and should not be typed over an unresolved
+    /// closeout.
+    pub prompt_context_available: bool,
+    /// Low-level blocker text from the caller, retained only as evidence on the
+    /// typed decision boundary.
+    pub blocker_reason: Option<&'a str>,
+    /// Positive proof that the active capture is stale and superseded by visible
+    /// exchange content, so retiring it will not drop the user's intended answer.
+    pub stale_capture_supersession_proof: Option<&'a str>,
+}
+
+/// Typed closeout recovery policy boundary (`#smcloseoutdecision`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CloseoutRecoveryDecision {
+    /// No closeout recovery remains.
+    AlreadyCommitted,
+    /// The existing response/cycle can be safely replayed or completed by the
+    /// binary without choosing between competing user-authored contents.
+    ReplaySafe {
+        state: CloseoutRecoveryState,
+        command: String,
+    },
+    /// A stale capture can be retired because superseding visible content proves
+    /// the captured body should not be replayed.
+    RetireStaleCapture {
+        state: CloseoutRecoveryState,
+        proof: String,
+    },
+    /// Sidecars are stale relative to the visible markdown and can be rebuilt
+    /// from the visible file.
+    ResetSidecarsFromVisible {
+        state: CloseoutRecoveryState,
+        command: String,
+    },
+    /// A new routed prompt must wait behind the unresolved closeout instead of
+    /// being submitted to the pane.
+    QueuePromptForAfterCloseout {
+        state: CloseoutRecoveryState,
+        reason: String,
+    },
+    /// Recovery is not safe because a required proof is missing.
+    Blocked {
+        state: CloseoutRecoveryState,
+        missing_proof: String,
+        recommended: String,
+    },
+}
+
+impl CloseoutRecoveryDecision {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::AlreadyCommitted => "already_committed",
+            Self::ReplaySafe { .. } => "replay_safe",
+            Self::RetireStaleCapture { .. } => "retire_stale_capture",
+            Self::ResetSidecarsFromVisible { .. } => "reset_sidecars_from_visible",
+            Self::QueuePromptForAfterCloseout { .. } => "queue_prompt_for_after_closeout",
+            Self::Blocked { .. } => "blocked",
+        }
+    }
+
+    pub const fn state(&self) -> Option<CloseoutRecoveryState> {
+        match self {
+            Self::AlreadyCommitted => None,
+            Self::ReplaySafe { state, .. }
+            | Self::RetireStaleCapture { state, .. }
+            | Self::ResetSidecarsFromVisible { state, .. }
+            | Self::QueuePromptForAfterCloseout { state, .. }
+            | Self::Blocked { state, .. } => Some(*state),
+        }
+    }
+
+    pub fn route_terminal_reason(&self) -> String {
+        match self {
+            Self::AlreadyCommitted => "closeout recovery already_committed".to_string(),
+            Self::ReplaySafe { state, command } => format!(
+                "closeout recovery replay_safe [{}]: {}",
+                state.as_str(),
+                command
+            ),
+            Self::RetireStaleCapture { state, proof } => format!(
+                "closeout recovery retire_stale_capture [{}]: proof: {}",
+                state.as_str(),
+                proof
+            ),
+            Self::ResetSidecarsFromVisible { state, command } => format!(
+                "closeout recovery reset_sidecars_from_visible [{}]: {}",
+                state.as_str(),
+                command
+            ),
+            Self::QueuePromptForAfterCloseout { state, .. } => format!(
+                "closeout recovery queue_prompt_for_after_closeout [{}]: routed prompt queued behind unresolved closeout",
+                state.as_str()
+            ),
+            Self::Blocked {
+                state,
+                missing_proof,
+                recommended,
+            } => format!(
+                "closeout recovery blocked [{}]: missing proof: {}; recommended: {}",
+                state.as_str(),
+                missing_proof,
+                recommended
+            ),
+        }
+    }
+}
+
+pub fn closeout_recovery_decision_from_state(
+    state: CloseoutRecoveryState,
+    input: CloseoutRecoveryDecisionInput<'_>,
+    recovery_command: Option<&str>,
+) -> CloseoutRecoveryDecision {
+    if input.prompt_context_available {
+        return CloseoutRecoveryDecision::QueuePromptForAfterCloseout {
+            state,
+            reason: input
+                .blocker_reason
+                .unwrap_or_else(|| state.as_str())
+                .to_string(),
+        };
+    }
+
+    if state == CloseoutRecoveryState::Clean {
+        return CloseoutRecoveryDecision::AlreadyCommitted;
+    }
+
+    if let Some(proof) = input.stale_capture_supersession_proof
+        && matches!(
+            state,
+            CloseoutRecoveryState::MissingResponseBody
+                | CloseoutRecoveryState::UnsafeUserContentDrift
+        )
+    {
+        return CloseoutRecoveryDecision::RetireStaleCapture {
+            state,
+            proof: proof.to_string(),
+        };
+    }
+
+    let command = || recovery_command.unwrap_or_default().to_string();
+    match state {
+        CloseoutRecoveryState::Clean => CloseoutRecoveryDecision::AlreadyCommitted,
+        CloseoutRecoveryState::DirectResponsePatchback
+        | CloseoutRecoveryState::BoundaryOnlyDrift
+        | CloseoutRecoveryState::NestedParentPointerStale
+        | CloseoutRecoveryState::OpenEmptyPreflight
+        | CloseoutRecoveryState::QueueMetadataDrift => CloseoutRecoveryDecision::ReplaySafe {
+            state,
+            command: command(),
+        },
+        CloseoutRecoveryState::SidecarVisibleDrift => {
+            CloseoutRecoveryDecision::ResetSidecarsFromVisible {
+                state,
+                command: command(),
+            }
+        }
+        CloseoutRecoveryState::OpenCycle => CloseoutRecoveryDecision::Blocked {
+            state,
+            missing_proof: "open cycle must finish, be replayed, or be explicitly queued behind"
+                .to_string(),
+            recommended: command(),
+        },
+        CloseoutRecoveryState::MissingResponseBody => CloseoutRecoveryDecision::Blocked {
+            state,
+            missing_proof: "captured response body presence or supersession proof".to_string(),
+            recommended: command(),
+        },
+        CloseoutRecoveryState::EscapedTemplatePatch => CloseoutRecoveryDecision::Blocked {
+            state,
+            missing_proof: "unescaped patchback blocks that can be applied safely".to_string(),
+            recommended: command(),
+        },
+        CloseoutRecoveryState::UnsafeUserContentDrift => CloseoutRecoveryDecision::Blocked {
+            state,
+            missing_proof: "proof that visible user-authored content is metadata-only drift"
+                .to_string(),
+            recommended: command(),
+        },
+    }
+}
+
 /// Decide the authoritative side of a content-equal metadata-only drift between
 /// a `local` document string (the candidate to commit) and the committed `head`.
 ///
@@ -181,5 +432,142 @@ mod tests {
             CloseoutRecoveryMutationReason::BenignReplayBaseline.capture_refresh_message(),
             "benign drift detected"
         );
+    }
+
+    #[test]
+    fn closeout_recovery_state_labels_are_stable() {
+        use CloseoutRecoveryState::*;
+        let cases = [
+            (Clean, "clean"),
+            (OpenCycle, "open_cycle"),
+            (MissingResponseBody, "missing_response_body"),
+            (DirectResponsePatchback, "direct_response_patchback"),
+            (EscapedTemplatePatch, "escaped_template_patch"),
+            (BoundaryOnlyDrift, "boundary_only_drift"),
+            (NestedParentPointerStale, "nested_parent_pointer_stale"),
+            (OpenEmptyPreflight, "open_empty_preflight"),
+            (QueueMetadataDrift, "queue_metadata_drift"),
+            (SidecarVisibleDrift, "sidecar_visible_drift"),
+            (UnsafeUserContentDrift, "unsafe_user_content_drift"),
+        ];
+        assert_eq!(cases.len(), CloseoutRecoveryState::ALL.len());
+        for (state, label) in cases {
+            assert_eq!(state.as_str(), label);
+        }
+    }
+
+    #[test]
+    fn recovery_decision_maps_states_to_typed_outcomes() {
+        use CloseoutRecoveryDecision::*;
+        use CloseoutRecoveryState::*;
+        let command = Some("agent-doc recover tasks/doc.md");
+
+        let default_cases = [
+            (Clean, "already_committed"),
+            (OpenCycle, "blocked"),
+            (MissingResponseBody, "blocked"),
+            (DirectResponsePatchback, "replay_safe"),
+            (EscapedTemplatePatch, "blocked"),
+            (BoundaryOnlyDrift, "replay_safe"),
+            (NestedParentPointerStale, "replay_safe"),
+            (OpenEmptyPreflight, "replay_safe"),
+            (QueueMetadataDrift, "replay_safe"),
+            (SidecarVisibleDrift, "reset_sidecars_from_visible"),
+            (UnsafeUserContentDrift, "blocked"),
+        ];
+        assert_eq!(default_cases.len(), CloseoutRecoveryState::ALL.len());
+
+        for (state, expected) in default_cases {
+            let decision = closeout_recovery_decision_from_state(
+                state,
+                CloseoutRecoveryDecisionInput::default(),
+                command,
+            );
+            assert_eq!(
+                decision.as_str(),
+                expected,
+                "unexpected default decision for {state:?}: {decision:?}"
+            );
+            assert_eq!(
+                decision.state(),
+                if state == Clean { None } else { Some(state) },
+                "decision should retain its source state for {state:?}: {decision:?}"
+            );
+            match decision {
+                AlreadyCommitted => {}
+                ReplaySafe {
+                    command: rendered, ..
+                }
+                | ResetSidecarsFromVisible {
+                    command: rendered, ..
+                } => {
+                    assert_eq!(rendered, command.unwrap());
+                }
+                Blocked {
+                    missing_proof,
+                    recommended,
+                    ..
+                } => {
+                    assert!(
+                        !missing_proof.is_empty(),
+                        "blocked decision should name missing proof for {state:?}"
+                    );
+                    assert_eq!(recommended, command.unwrap());
+                }
+                other => panic!("default path unexpectedly produced {other:?} for {state:?}"),
+            }
+        }
+
+        for state in CloseoutRecoveryState::ALL {
+            assert_eq!(
+                closeout_recovery_decision_from_state(
+                    state,
+                    CloseoutRecoveryDecisionInput {
+                        prompt_context_available: true,
+                        blocker_reason: Some("active closeout"),
+                        stale_capture_supersession_proof: Some("superseded"),
+                    },
+                    command,
+                ),
+                QueuePromptForAfterCloseout {
+                    state,
+                    reason: "active closeout".to_string(),
+                },
+                "prompt context must take priority for {state:?}"
+            );
+            assert_eq!(
+                closeout_recovery_decision_from_state(
+                    state,
+                    CloseoutRecoveryDecisionInput {
+                        prompt_context_available: true,
+                        blocker_reason: None,
+                        stale_capture_supersession_proof: None,
+                    },
+                    None,
+                ),
+                QueuePromptForAfterCloseout {
+                    state,
+                    reason: state.as_str().to_string(),
+                },
+                "prompt context fallback reason should be the state name for {state:?}"
+            );
+        }
+
+        for state in [MissingResponseBody, UnsafeUserContentDrift] {
+            assert_eq!(
+                closeout_recovery_decision_from_state(
+                    state,
+                    CloseoutRecoveryDecisionInput {
+                        stale_capture_supersession_proof: Some("heading already answered"),
+                        ..CloseoutRecoveryDecisionInput::default()
+                    },
+                    command,
+                ),
+                RetireStaleCapture {
+                    state,
+                    proof: "heading already answered".to_string(),
+                }
+            );
+        }
     }
 }

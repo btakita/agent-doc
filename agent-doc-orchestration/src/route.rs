@@ -159,7 +159,6 @@ use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use crate::flow::closeout::CloseoutRecoveryDecision;
 use crate::flow::routed_reopen::{log_dispatch_proof_failed, log_prompt_ready_barrier_failed};
 use crate::harness::HarnessConfig;
 use crate::supervisor::ipc::IpcMethod;
@@ -219,6 +218,7 @@ use agent_doc_controller::dispatch::{
     startup_miss_superseded_by_later_open_start,
 };
 use agent_doc_frontmatter::frontmatter;
+use agent_doc_turn::closeout_recovery::{CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput};
 use tmux_router::Tmux;
 
 use crate::{frontmatter_io, prompt, resync, sessions, snapshot, sync};
@@ -2277,7 +2277,7 @@ fn classify_route_closeout_block(
 ) -> (CloseoutRecoveryDecision, CloseoutBlockDispatchDecision) {
     let recovery_decision = crate::flow::closeout::decide_closeout_recovery(
         file,
-        crate::flow::closeout::CloseoutRecoveryDecisionInput {
+        CloseoutRecoveryDecisionInput {
             prompt_context_available: has_prompt_context,
             blocker_reason: Some(&reason),
             stale_capture_supersession_proof: None,
@@ -2285,7 +2285,7 @@ fn classify_route_closeout_block(
     );
     let recovery_queues_prompt_for_after_closeout = matches!(
         recovery_decision,
-        crate::flow::closeout::CloseoutRecoveryDecision::QueuePromptForAfterCloseout { .. }
+        CloseoutRecoveryDecision::QueuePromptForAfterCloseout { .. }
     );
     let active_queue_head = if recovery_queues_prompt_for_after_closeout {
         None
@@ -2318,11 +2318,9 @@ fn classify_route_closeout_block(
 /// For every other decision variant (genuine queue-behind, replay-safe, etc.)
 /// keep the historical `QueuedBehindOwner` outcome — those really are "wait for
 /// the owner turn to drain" cases.
-fn route_closeout_user_outcome_fields(
-    decision: &crate::flow::closeout::CloseoutRecoveryDecision,
-) -> String {
-    use crate::flow::closeout::CloseoutRecoveryDecision as Decision;
+fn route_closeout_user_outcome_fields(decision: &CloseoutRecoveryDecision) -> String {
     use crate::flow::outcome::UserFacingOutcomeKind;
+    use agent_doc_turn::closeout_recovery::CloseoutRecoveryDecision as Decision;
     if let Decision::Blocked { recommended, .. } = decision {
         let command = extract_recovery_command(recommended).unwrap_or_else(|| recommended.clone());
         if let Ok(outcome) = crate::flow::outcome::UserFacingOutcome::with_unblocker(
@@ -4979,6 +4977,7 @@ mod tests {
     use super::*;
     use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
     use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
+    use agent_doc_turn::closeout_recovery::CloseoutRecoveryState;
 
     #[test]
     fn route_closeout_user_outcome_surfaces_unblocker_for_stuck_cycle() {
@@ -4986,7 +4985,6 @@ mod tests {
         // (captured-response baseline drift / IPC no_ack) must surface the
         // specific recovery command via BlockedWithExactUnblocker instead of
         // the misleading `wait_for_owner_turn_to_drain` (no live owner turn).
-        use crate::flow::closeout::{CloseoutRecoveryDecision, CloseoutRecoveryState};
         let decision = CloseoutRecoveryDecision::Blocked {
             state: CloseoutRecoveryState::OpenCycle,
             missing_proof: "open cycle must finish, be replayed, or be explicitly queued behind"
@@ -5021,7 +5019,6 @@ mod tests {
         // #routedrainnextaction: a non-Blocked recovery decision (the operator's
         // turn is genuinely running, prompt is queued behind it) keeps the
         // historical QueuedBehindOwner / wait_for_owner_turn_to_drain wording.
-        use crate::flow::closeout::{CloseoutRecoveryDecision, CloseoutRecoveryState};
         let decision = CloseoutRecoveryDecision::QueuePromptForAfterCloseout {
             state: CloseoutRecoveryState::OpenCycle,
             reason: "live owner turn in progress".to_string(),
@@ -6714,10 +6711,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             super::classify_route_closeout_block(&doc, low_level_reason.to_string(), true);
         match dispatch_decision {
             CloseoutBlockDispatchDecision::EnqueuePromptForAfterCloseout => {
-                assert_eq!(
-                    decision.state(),
-                    Some(crate::flow::closeout::CloseoutRecoveryState::OpenCycle)
-                );
+                assert_eq!(decision.state(), Some(CloseoutRecoveryState::OpenCycle));
                 assert_eq!(decision.as_str(), "queue_prompt_for_after_closeout");
             }
             other => panic!("prompt context should queue behind closeout: {other:?}"),
@@ -6747,10 +6741,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         match dispatch_decision {
             CloseoutBlockDispatchDecision::WaitForActiveQueueHead { head } => {
                 assert_eq!(head, "jbruncloseoutstate");
-                assert_eq!(
-                    decision.state(),
-                    Some(crate::flow::closeout::CloseoutRecoveryState::OpenCycle)
-                );
+                assert_eq!(decision.state(), Some(CloseoutRecoveryState::OpenCycle));
                 let reason = decision.route_terminal_reason();
                 assert!(
                     reason.contains("closeout recovery blocked [open_cycle]"),
@@ -6778,10 +6769,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             super::classify_route_closeout_block(&doc, low_level_reason.to_string(), false);
         match dispatch_decision {
             CloseoutBlockDispatchDecision::FailClosed => {
-                assert_eq!(
-                    decision.state(),
-                    Some(crate::flow::closeout::CloseoutRecoveryState::OpenCycle)
-                );
+                assert_eq!(decision.state(), Some(CloseoutRecoveryState::OpenCycle));
                 let reason = decision.route_terminal_reason();
                 assert!(
                     reason.contains("closeout recovery blocked [open_cycle]"),

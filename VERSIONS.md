@@ -67,6 +67,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   closeout code import the focused enum directly instead of routing through an
   orchestration-owned reason table.
 
+- **Closeout recovery state decisions moved to `agent-doc-turn`.** The typed
+  recovery state vocabulary, decision input, action-shaped decision enum, and
+  pure state-to-decision mapping now live in `agent_doc_turn::closeout_recovery`.
+  Orchestration keeps evidence gathering and file-specific recovery-command
+  rendering, then calls the focused turn policy directly.
+
 - **Bare prompt-prefix diff slicing moved to `agent-doc-diff`.** The
   marker-scoped helper that scans a unified diff before an inserted response
   heading now lives beside the prompt-bearing diff classifier. Session-check

@@ -2795,6 +2795,18 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         turn_response_text.contains("pub fn strip_assistant_heading"),
         "agent-doc-turn must own append response heading normalization"
     );
+    for required in [
+        "pub fn response_satisfies_imperative_contract",
+        "const IMPERATIVE_STATUS_ONLY_SIGNALS",
+        "const IMPERATIVE_META_REFUSAL_SIGNALS",
+        "const IMPERATIVE_BLOCKER_SIGNALS",
+        "const IMPERATIVE_EVIDENCE_LABELS",
+    ] {
+        assert!(
+            turn_response_text.contains(required),
+            "agent-doc-turn must own imperative response contract policy: {required}"
+        );
+    }
     let turn_lib = fs::read_to_string(manifest_dir.join("agent-doc-turn/src/lib.rs")).unwrap();
     assert!(
         turn_lib.contains("pub mod response_text;"),
@@ -2809,6 +2821,30 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     assert!(
         !write_source.contains("pub fn strip_assistant_heading"),
         "orchestration write must not re-own append response heading normalization"
+    );
+    let write_normalize =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/normalize.rs"))
+            .unwrap();
+    for forbidden in [
+        "const IMPERATIVE_STATUS_ONLY_SIGNALS",
+        "const IMPERATIVE_META_REFUSAL_SIGNALS",
+        "const IMPERATIVE_BLOCKER_SIGNALS",
+        "const IMPERATIVE_EVIDENCE_LABELS",
+        "fn response_satisfies_imperative_contract",
+        "fn contains_execution_evidence",
+        "fn has_commandish_backticks",
+        "fn has_code_path",
+        "fn contains_commit_hash",
+    ] {
+        assert!(
+            !write_normalize.contains(forbidden),
+            "write::normalize must not re-own imperative response contract policy: {forbidden}"
+        );
+    }
+    assert!(
+        write_normalize
+            .contains("agent_doc_turn::response_text::response_satisfies_imperative_contract"),
+        "write::normalize should call focused imperative response contract policy directly"
     );
     for relative in [
         "agent-doc-orchestration/src/write/run_entry.rs",

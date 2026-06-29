@@ -95,9 +95,11 @@
 //! - `enforce_imperative_response_contract(file, baseline, current, response)`:
 //!   when the current document diff contains imperative user directives
 //!   (`do #id`, `run tests`, `build + install`, `commit + push`, or approval
-//!   words like `go`), rejects status-only/meta responses unless they include
-//!   either concrete execution evidence or a concrete blocker. This is the
-//!   binary-side backstop for the executable-directive contract.
+//!   words like `go`), rejects status-only/meta responses using
+//!   `agent_doc_turn::response_text::response_satisfies_imperative_contract`.
+//!   The write path keeps diff inspection, ops-log emission, and rejection
+//!   formatting as the binary-side backstop for the executable-directive
+//!   contract.
 //!
 //! - `agent_doc_template::sanitize`: escapes `<!-- agent:NAME -->` and
 //!   `<!-- /agent:NAME -->` markers appearing in patch content before the

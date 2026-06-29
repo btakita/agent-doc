@@ -431,57 +431,6 @@ pub(crate) fn preserve_head_exchange_prompt_prefix_state(content: &str, head: &s
     exchange.replace_content(content, &rebuilt)
 }
 
-pub(crate) const IMPERATIVE_STATUS_ONLY_SIGNALS: &[&str] = &[
-    "in progress",
-    "continuing",
-    "starting",
-    "working on it",
-    "still working",
-    "next i'll",
-    "next i will",
-    "i'll update",
-    "i will update",
-    "i'm going to",
-    "i am going to",
-    "let me do that",
-];
-
-pub(crate) const IMPERATIVE_META_REFUSAL_SIGNALS: &[&str] = &[
-    "because you asked me to run agent-doc",
-    "treated that text as document content",
-    "not to execute",
-    "say do #",
-    "repeat the instruction in chat",
-    "i stayed on the first layer",
-    "operate on the session document",
-];
-
-pub(crate) const IMPERATIVE_BLOCKER_SIGNALS: &[&str] = &[
-    "blocked",
-    "blocker",
-    "failed",
-    "error",
-    "cannot",
-    "can't",
-    "unable",
-    "missing",
-    "permission denied",
-    "requires approval",
-    "needs approval",
-    "lock file",
-    "timed out",
-];
-
-pub(crate) const IMPERATIVE_EVIDENCE_LABELS: &[&str] = &[
-    "what changed:",
-    "verification:",
-    "commit / push:",
-    "outcome:",
-    "root cause:",
-    "blocked:",
-    "blocker:",
-];
-
 pub fn enforce_imperative_response_contract(
     file: &Path,
     baseline: Option<&str>,
@@ -508,7 +457,7 @@ pub fn enforce_imperative_response_contract_for_diff(
     if !agent_doc_diff::diff_contains_imperative_directive(diff_text) {
         return Ok(());
     }
-    if response_satisfies_imperative_contract(response) {
+    if agent_doc_turn::response_text::response_satisfies_imperative_contract(response) {
         return Ok(());
     }
     let trigger = agent_doc_diff::extract_imperative_directives(diff_text)
@@ -548,99 +497,6 @@ pub(crate) fn template_mode_overrides_for_current_doc(
         overrides.insert("exchange".to_string(), "replace".to_string());
     }
     overrides
-}
-
-pub(crate) fn response_satisfies_imperative_contract(response: &str) -> bool {
-    let lower = response.to_ascii_lowercase();
-    if contains_any_signal(&lower, IMPERATIVE_BLOCKER_SIGNALS) {
-        return true;
-    }
-    if contains_any_signal(&lower, IMPERATIVE_META_REFUSAL_SIGNALS) {
-        return false;
-    }
-    if contains_execution_evidence(response, &lower) {
-        return true;
-    }
-    if contains_any_signal(&lower, IMPERATIVE_STATUS_ONLY_SIGNALS) {
-        return false;
-    }
-    false
-}
-
-pub(crate) fn contains_any_signal(haystack: &str, signals: &[&str]) -> bool {
-    signals.iter().any(|signal| haystack.contains(signal))
-}
-
-pub(crate) fn contains_execution_evidence(response: &str, lower: &str) -> bool {
-    if response.contains("```") || response.contains("~~~") {
-        return true;
-    }
-    if IMPERATIVE_EVIDENCE_LABELS
-        .iter()
-        .any(|label| lower.contains(label))
-    {
-        return true;
-    }
-    if lower.contains("implemented and verified")
-        || lower.contains("built and installed")
-        || lower.contains("added regression coverage")
-        || lower.contains("pushed to ")
-    {
-        return true;
-    }
-    response.lines().any(|line| {
-        has_commandish_backticks(line)
-            || has_code_path(line)
-            || contains_commit_hash(line)
-            || line.trim_start().starts_with("- `")
-    })
-}
-
-pub(crate) fn has_commandish_backticks(line: &str) -> bool {
-    if !line.contains('`') {
-        return false;
-    }
-    let lower = line.to_ascii_lowercase();
-    lower.contains("cargo ")
-        || lower.contains("git ")
-        || lower.contains("make ")
-        || lower.contains("npm ")
-        || lower.contains("pnpm ")
-        || lower.contains("yarn ")
-        || lower.contains("pytest")
-        || lower.contains("uv run")
-        || lower.contains("agent-doc ")
-        || line.contains('/')
-}
-
-pub(crate) fn has_code_path(line: &str) -> bool {
-    let lower = line.to_ascii_lowercase();
-    line.contains("src/")
-        || line.contains("tests/")
-        || line.contains("specs/")
-        || line.contains("runbooks/")
-        || lower.contains(".rs")
-        || lower.contains(".md")
-        || lower.contains(".toml")
-        || lower.contains(".json")
-        || lower.contains(".sh")
-        || lower.contains(".kt")
-        || lower.contains(".ts")
-}
-
-pub(crate) fn contains_commit_hash(line: &str) -> bool {
-    let mut run = 0usize;
-    for ch in line.chars() {
-        if ch.is_ascii_hexdigit() {
-            run += 1;
-            if run >= 7 {
-                return true;
-            }
-        } else {
-            run = 0;
-        }
-    }
-    false
 }
 
 pub(crate) fn truncate_signal(value: &str, max: usize) -> String {

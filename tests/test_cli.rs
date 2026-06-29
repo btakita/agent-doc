@@ -2474,6 +2474,27 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
             .join("agent-doc-document-realtime/src/watch_authority.rs")
             .exists()
     );
+    assert!(
+        manifest_dir
+            .join("agent-doc-document-realtime/src/read_authority.rs")
+            .exists()
+    );
+    let orchestration_realtime =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/realtime_model.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "pub enum DocAuthority",
+        "pub struct BufferState",
+        "pub struct Reconciliation",
+        "pub fn reconcile_current_doc",
+        "pub fn current_doc",
+        "pub fn buffer_supersedes",
+    ] {
+        assert!(
+            !orchestration_realtime.contains(forbidden_snippet),
+            "orchestration must not re-own pure realtime read-authority policy: {forbidden_snippet}"
+        );
+    }
     for forbidden in [
         "agent-doc-core",
         "agent-doc-orchestration",

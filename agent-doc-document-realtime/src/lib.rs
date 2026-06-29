@@ -9,8 +9,14 @@ use serde::{Deserialize, Serialize};
 
 pub mod convergence_gate;
 pub mod ipc_corruption;
+pub mod read_authority;
 pub mod watch_authority;
 pub mod write_authority;
+
+pub use read_authority::{
+    BufferState, DocAuthority, Reconciliation, buffer_supersedes, current_doc,
+    reconcile_current_doc,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -6363,7 +6363,7 @@ fn jb_cache_conflict_accept_late_replay_manual_repair_recovers_today() {
 // See tasks/agent-doc/plan-simworld-editor-integration.md.
 // ============================================================================
 
-use agent_doc_orchestration::realtime_model::{BufferState, DocAuthority, Reconciliation};
+use agent_doc_document_realtime::{BufferState, DocAuthority, Reconciliation};
 
 /// Which editor's live-buffer protocol a [`SimEditor`] emulates. The read
 /// authority contract is identical across kinds (a dirty buffer is always
@@ -6756,10 +6756,8 @@ fn simeditor_save_then_close_falls_back_to_disk_authority() {
         "save flushed to disk"
     );
     // Pure seam: a present, in-sync buffer is disk-canonical with reason `in_sync`.
-    let in_sync = agent_doc_orchestration::realtime_model::reconcile_current_doc(
-        &disk_now,
-        Some(&editor.buffer_state()),
-    );
+    let in_sync =
+        agent_doc_document_realtime::reconcile_current_doc(&disk_now, Some(&editor.buffer_state()));
     assert_eq!(in_sync.authority, DocAuthority::Disk);
     assert_eq!(in_sync.reason, "in_sync");
     // Durable seam: the in-sync buffer is suppressed to no-feed, so disk wins.

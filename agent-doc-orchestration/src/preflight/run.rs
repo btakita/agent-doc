@@ -2,6 +2,7 @@
 
 use super::*;
 use agent_doc_diff as diff;
+use agent_doc_turn::drain_stall::{StallFacts, StallVerdict, classify_stall};
 
 /// Options controlling a `preflight` invocation.
 #[derive(Debug, Clone, Copy, Default)]
@@ -1405,7 +1406,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
-            let facts = crate::drain_stall::StallFacts {
+            let facts = StallFacts {
                 continuation_pending_marker: true,
                 continuation_required_now: queue_continuation_required,
                 drainable_head_count: queue_state.queue_drainable_head_count,
@@ -1417,9 +1418,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                 )
                 .is_some(),
             };
-            if let crate::drain_stall::StallVerdict::Stalled(message) =
-                crate::drain_stall::classify_stall(&facts)
-            {
+            if let StallVerdict::Stalled(message) = classify_stall(&facts) {
                 if !options.probe {
                     crate::ops_log::log_op(file, &message);
                 }

@@ -2293,6 +2293,69 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
 }
 
 #[test]
+fn test_agent_doc_turn_owns_drain_stall_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-turn")),
+        "agent-doc-turn must stay a first-class workspace crate"
+    );
+    assert!(
+        manifest_dir
+            .join("agent-doc-turn/src/drain_stall.rs")
+            .exists(),
+        "queue-stall turn policy should live in the focused turn crate"
+    );
+
+    let orchestration_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/drain_stall.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "pub use agent_doc_turn::drain_stall",
+        "pub fn classify_stall",
+        "pub struct StallFacts",
+        "pub enum StallVerdict",
+        "pub const QUEUE_STALL_DETECTED",
+    ] {
+        assert!(
+            !orchestration_source.contains(forbidden_snippet),
+            "orchestration must not re-export or re-own pure drain-stall policy: {forbidden_snippet}"
+        );
+    }
+
+    let preflight_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
+    assert!(
+        preflight_source.contains("use agent_doc_turn::drain_stall::{"),
+        "preflight must consume focused drain-stall policy directly"
+    );
+
+    let turn_manifest = fs::read_to_string(manifest_dir.join("agent-doc-turn/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&turn_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-turn must stay pure and free of orchestration, git, editor IPC, sqlite, or tmux crates"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_work_graph_is_source_agnostic_boundary() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();

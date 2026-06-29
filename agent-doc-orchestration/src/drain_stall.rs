@@ -5,11 +5,8 @@
 
 use std::path::{Path, PathBuf};
 
+use agent_doc_turn::drain_stall::ContinuationPending;
 use anyhow::{Context, Result};
-
-pub use agent_doc_turn::drain_stall::{
-    ContinuationPending, QUEUE_STALL_DETECTED, StallFacts, StallVerdict, classify_stall,
-};
 
 /// Directory (relative to the project root) holding per-document continuation
 /// markers. Mirrors the sibling recycle-yield / drain-owner sidecar layout.

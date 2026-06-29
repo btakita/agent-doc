@@ -1,11 +1,6 @@
 //! Template I/O — `&Path`-taking wrappers around the pure
-//! [`agent_doc_core::template`] surface. Lives in the main crate so
-//! `agent-doc-core` can satisfy plan acceptance criterion #3 ("no
-//! `&Path` or `std::fs` in core"). Wave 5 / `#ckv3` of `#adcr`.
-//!
-//! Re-exported from [`crate::template`] so existing call sites that use
-//! `template_io::apply_patches(file, …)` / `template_io::apply_patches_with_overrides(file, …)`
-//! / `template_io::template_info(file)` continue to resolve unchanged.
+//! [`agent_doc_template`] surface. Keeps project-config lookup and file reads
+//! out of the pure template crate.
 
 #![allow(dead_code)]
 
@@ -24,7 +19,7 @@ use crate::graph::RunContext;
 use crate::project_config_io;
 
 /// File-based wrapper for the pure
-/// [`agent_doc_core::template_io::apply_patches`]. Loads component/max_lines
+/// [`agent_doc_template::apply_patches_pure`]. Loads component/max_lines
 /// configs from the document's `.agent-doc/config.toml`, derives the
 /// boundary summary from the file stem, and delegates.
 pub fn apply_patches(
@@ -57,7 +52,7 @@ pub fn apply_patches_with_context(
 }
 
 /// File-based wrapper for
-/// [`agent_doc_core::template_io::apply_patches_with_overrides`].
+/// [`agent_doc_template::apply_patches_with_overrides_pure`].
 pub fn apply_patches_with_overrides(
     doc: &str,
     patches: &[PatchBlock],

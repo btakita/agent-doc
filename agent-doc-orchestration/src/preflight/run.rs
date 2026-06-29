@@ -667,7 +667,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     let harness = rc.harness();
     let model_scan = initial_diff
         .as_ref()
-        .map(|d| agent_doc_core::model_tier::scan_model_switch(d, &harness, &global_config.model));
+        .map(|d| agent_doc_model_tier::scan_model_switch(d, &harness, &global_config.model));
     let mut diff_result: Option<String> = if let Some(scan) = model_scan.as_ref() {
         // Use the stripped diff for downstream consumers.
         Some(scan.stripped_diff.clone())
@@ -1042,7 +1042,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                         (fm, fm_tier, env_map, resolved, prompt_presets)
                     })
                     .unwrap_or_default();
-            let comp_value = agent_doc_core::model_tier::extract_model_component(&content);
+            let comp_value = agent_doc_model_tier::extract_model_component(&content);
             (
                 source_fm,
                 fm_tier,
@@ -1062,7 +1062,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         ),
     };
     let component_tier = component_tier_value.as_deref().and_then(|v| {
-        agent_doc_core::model_tier::component_value_to_tier(v, &harness, &global_config.model)
+        agent_doc_model_tier::component_value_to_tier(v, &harness, &global_config.model)
     });
 
     let mut prompt_presets_requested = prompt_diff_result
@@ -1242,12 +1242,12 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             .and_then(|v| v.as_str().map(|s| s.to_string()))
     });
     let suggested =
-        agent_doc_core::model_tier::suggested_tier(diff_type_str.as_deref(), lines_added, file);
+        agent_doc_model_tier::suggested_tier(diff_type_str.as_deref(), lines_added, file);
 
     let model_switch_name = model_scan.as_ref().and_then(|s| s.model_switch.clone());
     let model_switch_tier = model_scan.as_ref().and_then(|s| s.model_switch_tier);
     let required_tier_value = component_tier.or(frontmatter_tier);
-    let effective_tier_value = agent_doc_core::model_tier::compose_effective_tier(
+    let effective_tier_value = agent_doc_model_tier::compose_effective_tier(
         model_switch_tier,
         component_tier,
         frontmatter_tier,

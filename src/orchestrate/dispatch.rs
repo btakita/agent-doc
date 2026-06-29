@@ -99,11 +99,11 @@ pub(crate) fn run_ordered_task_step(
         .or(fm.agent.as_deref())
         .or(global_config.default_agent.as_deref())
         .unwrap_or("claude");
-    let harness = agent_doc::model_tier::harness_key_for_agent_name(agent_name);
+    let harness = agent_doc_model_tier::harness_key_for_agent_name(agent_name);
     let resolved_model = options
         .model_override
         .or(fm.resolve_harness_model(&harness))
-        .map(|m| agent_doc::model_tier::canonical_model_name(m, &harness, &global_config.model));
+        .map(|m| agent_doc_model_tier::canonical_model_name(m, &harness, &global_config.model));
     let model = resolved_model.as_deref();
     let session_accretion = agent_doc_orchestration::session_accretion::inspect(file).ok();
     let mut prompt = build_agent_prompt(
@@ -306,7 +306,8 @@ pub(crate) fn exchange_stream_seed(doc: &str) -> Result<Option<ExchangeStreamSee
         }));
     }
 
-    let boundary = agent_doc::format_boundary_marker(&agent_doc::new_boundary_id());
+    let boundary =
+        agent_doc_element::id::format_boundary_marker(&agent_doc_element::id::new_boundary_id());
     Ok(Some(ExchangeStreamSeed {
         prefix: content.to_string(),
         suffix: format!("{boundary}\n"),

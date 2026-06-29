@@ -715,10 +715,10 @@ fn short_model_name(model_id: &str) -> &str {
 fn resolve_agent_model(
     frontmatter_model: Option<&str>,
     harness: &str,
-    model_config: &agent_doc_core::model_tier::ModelConfig,
+    model_config: &agent_doc_model_tier::ModelConfig,
 ) -> Option<String> {
     let m = frontmatter_model?;
-    let canonical = agent_doc_core::model_tier::canonical_model_name(m, harness, model_config);
+    let canonical = agent_doc_model_tier::canonical_model_name(m, harness, model_config);
     // The Claude Code `opus` alias is deferred — agent-doc never pins a concrete
     // opus version, so it cannot attribute a specific id. Return None so the
     // running skill self-stamps its real model identity (always the current
@@ -5795,13 +5795,13 @@ mod tests {
     #[test]
     fn resolve_agent_model_uses_frontmatter_only() {
         // ANTHROPIC_MODEL env var is deliberately ignored — only frontmatter matters.
-        let cfg = agent_doc_core::model_tier::ModelConfig::default();
+        let cfg = agent_doc_model_tier::ModelConfig::default();
         let result = resolve_agent_model(Some("claude-opus-4"), "claude-code", &cfg);
         assert_eq!(result, Some("opus-4".to_string()));
     }
     #[test]
     fn resolve_agent_model_strips_claude_prefix_from_frontmatter() {
-        let cfg = agent_doc_core::model_tier::ModelConfig::default();
+        let cfg = agent_doc_model_tier::ModelConfig::default();
         let result = resolve_agent_model(Some("claude-haiku-4-5"), "claude-code", &cfg);
         assert_eq!(result, Some("haiku-4-5".to_string()));
     }
@@ -5810,27 +5810,27 @@ mod tests {
         // The bare `opus` alias is deferred: agent-doc pins no version, so
         // attribution returns None and the running skill self-stamps its real
         // model identity (always the current opus).
-        let cfg = agent_doc_core::model_tier::ModelConfig::default();
+        let cfg = agent_doc_model_tier::ModelConfig::default();
         let result = resolve_agent_model(Some("opus"), "claude-code", &cfg);
         assert_eq!(result, None);
     }
     #[test]
     fn resolve_agent_model_stamps_pinned_concrete_opus() {
         // An explicitly pinned concrete opus id still stamps its short name.
-        let cfg = agent_doc_core::model_tier::ModelConfig::default();
+        let cfg = agent_doc_model_tier::ModelConfig::default();
         let result = resolve_agent_model(Some("claude-opus-4-8"), "claude-code", &cfg);
         assert_eq!(result, Some("opus-4-8".to_string()));
     }
     #[test]
     fn resolve_agent_model_preserves_short_openai_style_name() {
-        let cfg = agent_doc_core::model_tier::ModelConfig::default();
+        let cfg = agent_doc_model_tier::ModelConfig::default();
         let result = resolve_agent_model(Some("gpt-5"), "codex", &cfg);
         assert_eq!(result, Some("gpt-5".to_string()));
     }
     #[test]
     fn resolve_agent_model_none_when_no_frontmatter() {
         // No frontmatter → None, regardless of env var state.
-        let cfg = agent_doc_core::model_tier::ModelConfig::default();
+        let cfg = agent_doc_model_tier::ModelConfig::default();
         let result = resolve_agent_model(None, "claude-code", &cfg);
         assert_eq!(result, None);
     }

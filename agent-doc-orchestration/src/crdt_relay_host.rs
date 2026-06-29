@@ -1,7 +1,7 @@
 //! Live wiring of the CRDT relay/commit-barrier into the finalize + disk paths
 //! (`#crdtauth4` cutover).
 //!
-//! The state-vector sync primitive ([`agent_doc_core::crdt_sync`]), the authority
+//! The state-vector sync primitive ([`agent_doc_merge::crdt_sync`]), the authority
 //! state machine ([`crate::crdt_authority`]), and the relay hub
 //! ([`crate::crdt_relay`]) were built and tested as standalone modules. This
 //! module is the **live cutover**: it routes the real `finalize` commit point and

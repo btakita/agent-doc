@@ -225,7 +225,7 @@ fn reject_plain_shell_bare_file_invocation(args: &[OsString]) -> anyhow::Result<
         return Ok(());
     }
 
-    if agent_doc_core::model_tier::detect_harness() == "default" {
+    if agent_doc_model_tier::detect_harness() == "default" {
         anyhow::bail!(
             "bare `agent-doc <FILE>` must be run from a supported harness (Codex, Claude Code, or OpenCode). From a normal shell, use an explicit subcommand such as `agent-doc run <FILE>`, `agent-doc route <FILE>`, or `agent-doc start <FILE>`."
         );

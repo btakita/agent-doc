@@ -1,7 +1,7 @@
 //! Multiple-editor relay hub + ephemeral awareness (`#crdtauth4`, plan phase 5).
 //!
 //! A **star-topology relay hub** built on top of the state-vector sync primitive
-//! ([`agent_doc_core::crdt_sync`]) and gated by the CRDT-authority state machine
+//! ([`agent_doc_merge::crdt_sync`]) and gated by the CRDT-authority state machine
 //! ([`crate::crdt_authority`]). It is the fan-out / registry layer the plan calls
 //! for (`tasks/agent-doc/plan-crdt-authority-model.md`, "Multiple editors"):
 //!

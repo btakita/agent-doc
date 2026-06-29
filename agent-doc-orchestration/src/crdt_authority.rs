@@ -218,7 +218,7 @@ fn document_has_live_editor_transport(projection: &DocumentStateProjection) -> b
 /// Run one incremental state-vector sync round between two replicas ONLY under a
 /// multi-replica authority (`#crdtauth1sv` seam).
 ///
-/// This wires the state-vector sync primitive ([`agent_doc_core::crdt_sync`]) to
+/// This wires the state-vector sync primitive ([`agent_doc_merge::crdt_sync`]) to
 /// the authority SM: the incremental protocol is engaged exactly when the
 /// authority proves a live multi-replica session ([`CrdtAuthority::MultiReplica`]).
 /// Under [`CrdtAuthority::GitAuthoritative`] the CRDT is ephemeral — git is the

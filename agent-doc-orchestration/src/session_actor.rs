@@ -262,7 +262,7 @@ pub fn detect_document_harness_in(base_dir: &Path, file: &str) -> String {
     {
         return harness;
     }
-    normalize_harness_name(&agent_doc_core::model_tier::detect_harness())
+    normalize_harness_name(&agent_doc_model_tier::detect_harness())
 }
 
 pub fn load_record_in(base_dir: &Path, file: &str) -> Result<Option<ActorRecord>> {

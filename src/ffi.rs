@@ -2213,7 +2213,7 @@ pub unsafe extern "C" fn agent_doc_resolve_project_path(
 /// # Safety
 ///
 // `agent_doc_free_string` and `agent_doc_free_state` moved to
-// `agent_doc_core::ffi` (Wave 5 / `#k9e1` proof-of-concept). They are
+// `agent_doc_ffi` (Wave 5 / `#k9e1` proof-of-concept). They are
 // re-exported below via `pub use agent_doc_ffi::*;`. The
 // `force_link_core_ffi_symbols` function below references them to
 // prevent the static linker from stripping them out of the main cdylib.
@@ -2305,7 +2305,7 @@ pub unsafe extern "C" fn agent_doc_apply_node_patches(
     }
 }
 
-/// Prevent the static linker from stripping the `agent_doc_core::ffi`
+/// Prevent the static linker from stripping the `agent_doc_ffi`
 /// symbols out of `libagent_doc.{so,dylib,dll}`. Called from `lib.rs`
 /// via a constructor-style reference path so editor plugins
 /// (JetBrains, VS Code) continue to find the symbols at runtime.

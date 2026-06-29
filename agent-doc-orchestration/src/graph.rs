@@ -306,7 +306,7 @@ impl RunContext {
             }
         });
 
-        let harness = ctx.slot(|_ctx: &Context| agent_doc_core::model_tier::detect_harness());
+        let harness = ctx.slot(|_ctx: &Context| agent_doc_model_tier::detect_harness());
 
         let global_config = ctx.slot(|_ctx: &Context| -> Arc<config::Config> {
             Arc::new(match config::load() {

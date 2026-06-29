@@ -13,10 +13,8 @@
 //!   `Parallel` (always subagent), `Sequential` (fully serial).
 //! - `load()` reads and parses the global config file; returns `Config::default()` when the
 //!   file is absent. Propagates I/O and parse errors via `anyhow::Result`.
-//! - Project-level configuration (`ProjectConfig`, `ComponentConfig`) is now in the
-//!   `project_config` module for shared access (used by both binary and library).
-//! - Re-exports: `ProjectConfig`, `ComponentConfig`, and project-level functions from
-//!   `project_config` for backward compatibility.
+//! - Project-level configuration types live in `agent-doc-frontmatter`;
+//!   file-backed helpers live in `project_config_io`.
 //!
 //! ## Agentic Contracts
 //! - **Never panics on missing config**: `load()` returns defaults when the file is absent.
@@ -26,9 +24,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-// Pure types from agent-doc-core (relocated under Direction A).
-use agent_doc_core::model_tier::ModelConfig;
 use agent_doc_frontmatter::frontmatter::CodexNetworkAccess;
+use agent_doc_model_tier::ModelConfig;
 
 // Re-export project-level tmux helpers from the sibling I/O module (for
 // convenience). Consumed across the crate boundary by the main `agent-doc`

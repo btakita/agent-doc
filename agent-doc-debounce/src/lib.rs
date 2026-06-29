@@ -323,7 +323,7 @@ pub struct EditorSyncBarrierOutcome {
 /// agent-doc's own write time, in the same `SystemTime` clock domain as the editor
 /// plugin's `LiveBufferSnapshot.timestamp_ms`, so the two are directly comparable.
 ///
-/// `actor` is a free-text provenance label that maps to `agent-doc-core`'s
+/// `actor` is a free-text provenance label that maps to `agent-doc-turn`'s
 /// `OpActor` (today always `"agent"` for binary disk writes); kept as a string here
 /// to avoid coupling the debounce layer to the core op-log crate in this phase.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -2153,7 +2153,6 @@ fn test_manifest_uses_publishable_dependency_contract() {
     );
 
     for crate_name in [
-        "agent-doc-core",
         "agent-doc-debounce",
         "agent-doc-diff",
         "agent-doc-document-realtime",
@@ -2161,6 +2160,7 @@ fn test_manifest_uses_publishable_dependency_contract() {
         "agent-doc-ffi",
         "agent-doc-frontmatter",
         "agent-doc-merge",
+        "agent-doc-model-tier",
         "agent-doc-orchestration",
         "agent-doc-template",
         "agent-doc-turn",
@@ -2185,26 +2185,13 @@ fn test_manifest_uses_publishable_dependency_contract() {
             .unwrap();
     let core_parsed: toml::Value = toml::from_str(&core_manifest).unwrap();
     let core_dependencies = core_parsed["dependencies"].as_table().unwrap();
+    assert!(
+        core_dependencies.is_empty(),
+        "agent-doc-core is an empty transitional crate and must not retain facade dependencies"
+    );
     for crate_name in [
         "agent-doc-element",
-        "agent-doc-model-tier",
         "agent-doc-element-queue",
-    ] {
-        let dependency = core_dependencies[crate_name].as_table().unwrap();
-        assert!(
-            dependency
-                .get("path")
-                .and_then(toml::Value::as_str)
-                .is_some(),
-            "{crate_name} should keep a local path for workspace builds"
-        );
-        assert_eq!(
-            dependency.get("version").and_then(toml::Value::as_str),
-            package_version,
-            "{crate_name} must carry a registry version for cargo publish"
-        );
-    }
-    for crate_name in [
         "agent-doc-template",
         "agent-doc-diff",
         "agent-doc-frontmatter",
@@ -2212,6 +2199,7 @@ fn test_manifest_uses_publishable_dependency_contract() {
         "agent-doc-syntax",
         "agent-doc-topic",
         "agent-doc-merge",
+        "agent-doc-model-tier",
         "agent-doc-ffi",
     ] {
         assert!(
@@ -2265,7 +2253,7 @@ fn test_agent_doc_merge_is_pure_workspace_boundary() {
 
     assert!(
         !dependencies.contains_key("agent-doc-core"),
-        "agent-doc-merge owns pure merge policy directly and must not depend on the core facade"
+        "agent-doc-merge owns pure merge policy directly and must not depend on the transitional core crate"
     );
     assert!(dependencies.contains_key("agent-doc-element"));
     assert!(dependencies.contains_key("agent-doc-element-queue"));

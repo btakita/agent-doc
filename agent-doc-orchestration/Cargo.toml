@@ -2,7 +2,7 @@
 name = "agent-doc-orchestration"
 version = "0.34.65"
 edition = "2024"
-description = "Orchestration layer for agent-doc (routing, git, sessions, IPC, supervision, sync) — sits between the CLI and agent-doc-core"
+description = "Orchestration layer for agent-doc (routing, git, sessions, IPC, supervision, sync) — adapts the CLI to focused domain crates"
 license = "MIT"
 repository = "https://github.com/btakita/agent-doc"
 
@@ -16,7 +16,6 @@ name = "agent_doc_orchestration"
 test-support = []
 
 [dependencies]
-agent-doc-core = { path = "../agent-doc-core", version = "0.34.65" }
 agent-doc-controller = { path = "../agent-doc-controller", version = "0.34.65" }
 agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.65" }
 agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.65" }
@@ -30,6 +29,7 @@ agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.65"
 agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.34.65" }
 agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.65" }
 agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.65" }
+agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.34.65" }
 agent-doc-queue = { path = "../agent-doc-queue", version = "0.34.65" }
 agent-doc-secret-redact = { path = "../agent-doc-secret-redact", version = "0.34.65" }
 agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.34.65" }

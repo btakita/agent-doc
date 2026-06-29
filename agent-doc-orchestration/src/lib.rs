@@ -2,13 +2,11 @@
 //!
 //! The orchestration layer of agent-doc: routing, git, sessions, IPC,
 //! process supervision, and tmux sync. Sits between the CLI shell
-//! (`agent-doc`) and the pure data layer (`agent-doc-core`), completing a
-//! 3-layer architecture (CLI → orchestration → core).
+//! (`agent-doc`) and the focused domain crates.
 //!
 //! Extraction tracked under `#adoc-orchestration-crate` / `#bz6s`. See
 //! `tasks/agent-doc/plan-agent-doc-orchestration-extraction.md` for the wave
-//! plan. The main `agent-doc` crate re-exports these modules via `pub use`
-//! shims so existing call sites resolve unchanged during the migration.
+//! plan.
 //!
 //! Wave 0 (scaffold) + Wave 1a: `ipc_socket` (the one dependency-free leaf).
 //! Direction A, increment 2: `env`, `fs_util`, `secret_redact` — three more
@@ -16,19 +14,16 @@
 //! Direction A, increment 3: `config`, `project_config_io`.
 //! Direction A, increment 4: `ops_log` — best-effort operational logging.
 //! Pulled `find_project_root` (a pure path walk) down into `fs_util` so
-//! `ops_log` no longer reaches back into the main crate's `snapshot` module;
-//! `snapshot::find_project_root` is now a re-export shim.
+//! `ops_log` no longer reaches back into the main crate's `snapshot` module.
 //! Direction A, increment 5: `input_diag` — structured tmux/supervisor input
 //! diagnostics (production-dep on `ops_log` only). Brings a self-contained
 //! `#[cfg(test)] test_support` (crate-local `TEST_ENV_LOCK`) for its
 //! env-mutating tests, since orchestration's test binary is independent of the
 //! main crate's.
 //! Direction A, increment 6 (big-bang): the entire entangled cluster +
-//! sessions/supervisor + neighbors moves in one migration. Orchestration is now
-//! self-contained over `agent_doc_core`; the main crate becomes a CLI shell
-//! re-exporting these modules via `pub use` shims. Core-backed lib modules
-//! (`element`/`crdt`/`frontmatter`/`project_config`/`template`) are mirrored
-//! here as shims so moved bodies need no `crate::` rewriting.
+//! sessions/supervisor + neighbors moved in one migration. Orchestration now
+//! depends on focused crates directly for extracted document, merge, turn, and
+//! realtime policy.
 //!
 //! The next boundary is to retire this crate as an authority holder. Pure
 //! document projection lives in `agent-doc-document`, document authority
@@ -49,7 +44,7 @@ pub mod ipc_socket;
 pub mod ops_log;
 pub mod project_config_io;
 
-// I/O wrappers for the core-backed shims.
+// I/O wrappers around focused pure crates.
 pub mod frontmatter_io;
 pub mod template_io;
 

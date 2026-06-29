@@ -68,7 +68,6 @@ name = "agent-doc"
 path = "src/main.rs"
 
 [dependencies]
-agent-doc-core = { path = "agent-doc-core", version = "0.34.65" }
 agent-doc-debounce = { path = "agent-doc-debounce", version = "0.34.65" }
 agent-doc-diff = { path = "agent-doc-diff", version = "0.34.65" }
 agent-doc-document-realtime = { path = "agent-doc-document-realtime", version = "0.34.65" }
@@ -79,6 +78,7 @@ agent-doc-ffi = { path = "agent-doc-ffi", version = "0.34.65" }
 agent-doc-frontmatter = { path = "agent-doc-frontmatter", version = "0.34.65" }
 agent-doc-markdown-ast = { path = "agent-doc-markdown-ast", version = "0.34.65" }
 agent-doc-merge = { path = "agent-doc-merge", version = "0.34.65" }
+agent-doc-model-tier = { path = "agent-doc-model-tier", version = "0.34.65" }
 agent-doc-orchestration = { path = "agent-doc-orchestration", version = "0.34.65" }
 agent-doc-queue = { path = "agent-doc-queue", version = "0.34.65" }
 agent-doc-secret-redact = { path = "agent-doc-secret-redact", version = "0.34.65" }

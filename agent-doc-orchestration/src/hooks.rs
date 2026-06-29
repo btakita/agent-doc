@@ -80,11 +80,11 @@ pub fn fire_doc_event(file: &Path, event: &str) {
         return;
     }
     let session_id = fm.session.as_deref().unwrap_or("").to_string();
-    let harness = agent_doc_core::model_tier::detect_harness();
-    let model_config = agent_doc_core::model_tier::ModelConfig::default();
+    let harness = agent_doc_model_tier::detect_harness();
+    let model_config = agent_doc_model_tier::ModelConfig::default();
     let resolved_model = fm
         .resolve_harness_model(&harness)
-        .map(|s| agent_doc_core::model_tier::canonical_model_name(s, &harness, &model_config));
+        .map(|s| agent_doc_model_tier::canonical_model_name(s, &harness, &model_config));
     fire_doc_hooks(
         &fm.hooks,
         event,

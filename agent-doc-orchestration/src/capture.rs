@@ -855,11 +855,11 @@ fn metadata_from_frontmatter(file_content: &str) -> CaptureMetadata {
         return CaptureMetadata::default();
     };
     let resolved = fm.resolve_mode();
-    let harness = agent_doc_core::model_tier::detect_harness();
-    let model_config = agent_doc_core::model_tier::ModelConfig::default();
+    let harness = agent_doc_model_tier::detect_harness();
+    let model_config = agent_doc_model_tier::ModelConfig::default();
     let resolved_model = fm
         .resolve_harness_model(&harness)
-        .map(|s| agent_doc_core::model_tier::canonical_model_name(s, &harness, &model_config));
+        .map(|s| agent_doc_model_tier::canonical_model_name(s, &harness, &model_config));
     CaptureMetadata {
         session_id: fm.session,
         agent: fm.agent,

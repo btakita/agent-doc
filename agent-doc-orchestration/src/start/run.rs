@@ -94,10 +94,10 @@ fn build_harness_launch_spec(
     }
     // Inject --model from harness-specific model frontmatter when not already in args.
     if !base_args.iter().any(|a| a == "--model") {
-        let harness_key = agent_doc_core::model_tier::harness_key_for_agent_name(&harness.binary);
+        let harness_key = agent_doc_model_tier::harness_key_for_agent_name(&harness.binary);
         if let Some(model) = fm.resolve_harness_model(&harness_key) {
             base_args.push("--model".into());
-            base_args.push(agent_doc_core::model_tier::canonical_model_name(
+            base_args.push(agent_doc_model_tier::canonical_model_name(
                 model,
                 &harness_key,
                 &global_config.model,
@@ -317,7 +317,7 @@ pub fn run_with_reap_policy(
         } else {
             ("fallback", "claude")
         };
-        let env_harness = agent_doc_core::model_tier::detect_harness();
+        let env_harness = agent_doc_model_tier::detect_harness();
         start_console_status(
             &mut session_log,
             route_owned,
@@ -624,9 +624,9 @@ pub fn run_with_reap_policy(
     );
 
     // Fire document-level session_start hooks
-    let harness_name = agent_doc_core::model_tier::harness_key_for_agent_name(&harness.binary);
+    let harness_name = agent_doc_model_tier::harness_key_for_agent_name(&harness.binary);
     let resolved_model = fm.resolve_harness_model(&harness_name).map(|s| {
-        agent_doc_core::model_tier::canonical_model_name(s, &harness_name, &global_config.model)
+        agent_doc_model_tier::canonical_model_name(s, &harness_name, &global_config.model)
     });
     crate::hooks::fire_doc_hooks(
         &fm.hooks,

@@ -184,7 +184,7 @@ impl RunStderrRedirect {
             file,
             &format!(
                 "run_stderr_redirect harness={} tmux_pane={} target={}",
-                agent_doc_core::model_tier::detect_harness(),
+                agent_doc_model_tier::detect_harness(),
                 std::env::var("TMUX_PANE").unwrap_or_else(|_| "<unset>".to_string()),
                 stderr_path.display()
             ),
@@ -242,7 +242,7 @@ fn run_stderr_redirect_needed() -> bool {
     {
         return false;
     }
-    run_stderr_redirect_harness(agent_doc_core::model_tier::detect_harness().as_str())
+    run_stderr_redirect_harness(agent_doc_model_tier::detect_harness().as_str())
 }
 
 fn run_stderr_redirect_harness(harness: &str) -> bool {
@@ -559,10 +559,10 @@ fn run_once(
         .or(config.default_agent.as_deref())
         .unwrap_or("claude");
     let agent_config = config.agents.get(agent_name);
-    let harness = agent_doc_core::model_tier::harness_key_for_agent_name(agent_name);
+    let harness = agent_doc_model_tier::harness_key_for_agent_name(agent_name);
     let resolved_model = model
         .or(fm.resolve_harness_model(&harness))
-        .map(|m| agent_doc_core::model_tier::canonical_model_name(m, &harness, &config.model));
+        .map(|m| agent_doc_model_tier::canonical_model_name(m, &harness, &config.model));
     let prompt_cache_routing_affinity =
         prompt_cache_routing_affinity(run_mode, agent_name, resolved_model.as_deref());
 
@@ -1261,7 +1261,7 @@ pub(crate) fn owned_pane_self_invocation_detail(
     session_id: &str,
     agent_name: &str,
 ) -> Option<String> {
-    if agent_name != "codex" || agent_doc_core::model_tier::detect_harness() != "codex" {
+    if agent_name != "codex" || agent_doc_model_tier::detect_harness() != "codex" {
         return None;
     }
     let current_pane = crate::sessions::current_pane().ok()?;

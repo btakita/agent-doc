@@ -1,12 +1,6 @@
 //! Frontmatter I/O — `&Path`-taking wrappers around the pure
-//! [`agent_doc_core::frontmatter`] surface. Lives in the main crate so
-//! `agent-doc-core` can satisfy plan acceptance criterion #3 ("no
-//! `&Path` or `std::fs` in core"). Wave 5 / `#0c4e` of `#adcr`.
-//!
-//! Re-exported from [`crate::frontmatter`] so existing call sites that
-//! use `frontmatter_io::parse_for_file(content, &Path)`,
-//! `frontmatter_io::ensure_session_for_file(content, &Path)`, and
-//! `frontmatter_io::read_session_id(&Path)` continue resolving unchanged.
+//! [`agent_doc_frontmatter::frontmatter`] surface. Keeps filesystem and
+//! project-root resolution out of the pure frontmatter crate.
 //!
 //! Phase 3 / `#lr-config-3`: adds `*_with_context` variants that accept
 //! a [`crate::graph::RunContext`] to reuse cached project config + SSH

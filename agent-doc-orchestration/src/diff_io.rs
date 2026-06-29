@@ -1,8 +1,8 @@
 //! Diff I/O — snapshot-backed half of the original `diff.rs`. The pure half
-//! lives in [`agent_doc_core::diff`] (Wave 4 of #adcr per `#rtx6` Option 1).
+//! lives in [`agent_doc_diff`].
 //!
 //! These functions all touch `snapshot::{load, save, resolve, path_for}` and
-//! must stay in the orchestration crate. Re-exported from [`crate::diff`].
+//! must stay in the orchestration crate.
 
 use anyhow::Result;
 use similar::{ChangeTag, TextDiff};

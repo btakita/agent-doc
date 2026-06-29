@@ -23,7 +23,6 @@ dependencies = [
 name = "agent-doc"
 version = "0.34.65"
 dependencies = [
- "agent-doc-core",
  "agent-doc-debounce",
  "agent-doc-diff",
  "agent-doc-document-realtime",
@@ -35,6 +34,7 @@ dependencies = [
  "agent-doc-frontmatter",
  "agent-doc-markdown-ast",
  "agent-doc-merge",
+ "agent-doc-model-tier",
  "agent-doc-orchestration",
  "agent-doc-queue",
  "agent-doc-secret-redact",
@@ -85,11 +85,6 @@ dependencies = [
 [[package]]
 name = "agent-doc-core"
 version = "0.34.65"
-dependencies = [
- "agent-doc-element",
- "agent-doc-element-queue",
- "agent-doc-model-tier",
-]
 
 [[package]]
 name = "agent-doc-debounce"
@@ -120,7 +115,6 @@ dependencies = [
 name = "agent-doc-document"
 version = "0.34.65"
 dependencies = [
- "agent-doc-core",
  "agent-doc-element",
  "agent-doc-element-backlog",
  "agent-doc-element-registry",
@@ -312,7 +306,6 @@ name = "agent-doc-orchestration"
 version = "0.34.65"
 dependencies = [
  "agent-doc-controller",
- "agent-doc-core",
  "agent-doc-debounce",
  "agent-doc-diff",
  "agent-doc-document",
@@ -325,6 +318,7 @@ dependencies = [
  "agent-doc-log-time",
  "agent-doc-markdown-ast",
  "agent-doc-merge",
+ "agent-doc-model-tier",
  "agent-doc-queue",
  "agent-doc-secret-redact",
  "agent-doc-sqlite",
@@ -382,7 +376,6 @@ dependencies = [
 name = "agent-doc-queue"
 version = "0.34.65"
 dependencies = [
- "agent-doc-core",
  "agent-doc-document",
  "agent-doc-element-backlog",
  "agent-doc-element-queue",
@@ -407,7 +400,6 @@ dependencies = [
 name = "agent-doc-sqlite"
 version = "0.34.65"
 dependencies = [
- "agent-doc-core",
  "agent-doc-frontmatter",
  "agent-doc-topic",
  "agent-doc-turn",

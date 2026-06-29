@@ -8,7 +8,7 @@ system harder to reason about and makes realtime/turn invariants easier to
 regress accidentally.
 
 This PRD tracks the extraction work needed to make those transitional crates
-small enough that they are adapters/facades rather than God crates.
+small enough that they are adapters rather than God crates.
 
 ## Goals
 
@@ -17,7 +17,8 @@ small enough that they are adapters/facades rather than God crates.
   [Real-Time Workflow Authority](../../specs/14-realtime-workflow.md) and
   [Turn Lifecycle Authority](../../specs/15-turn-lifecycle.md).
 - Keep extraction work visible, testable, and incrementally shippable.
-- Preserve compatibility re-exports while callers migrate.
+- Treat the focused crates as the greenfield Rust API; internal callers import
+  those crates directly instead of preserving old facade paths.
 
 ## Non-Goals
 
@@ -33,21 +34,21 @@ small enough that they are adapters/facades rather than God crates.
 
 | Responsibility | Destination | Current status |
 |---|---|---|
-| Element descriptors and local element models | `agent-doc-element-*` plus `agent-doc-element-registry` | Active. Queue item lifecycle now lives in `agent-doc-element-queue`; orchestration no longer owns the queue item state machine. `agent-doc-core` re-exports its older lifecycle facade temporarily. |
+| Element descriptors and local element models | `agent-doc-element-*` plus `agent-doc-element-registry` | Active. Queue item lifecycle now lives in `agent-doc-element-queue`; orchestration no longer owns the queue item state machine. |
 | Cross-element document projection | `agent-doc-document` | Active for queue projection, element-model composition, and pure Auto-DAG analysis/rendering. |
-| Template-mode patch parsing, repair, and replay validation | `agent-doc-template` | Active. Pure patch parsing, replay-payload validation, component mutation, boundary repositioning, and duplicate prompt/tail repair live here; `agent-doc-core` keeps compatibility re-exports and orchestration keeps file-backed config/document IO. |
-| Diff annotation and prompt-bearing classification | `agent-doc-diff` | Active. Pure comment stripping, unified-diff helpers, slash/preset/directive extraction, and prompt-bearing change classification live here; `agent-doc-core` keeps a compatibility re-export. |
-| Frontmatter and project config parsing | `agent-doc-frontmatter` | Active. Document frontmatter schema, project config types, and pure parsing/serialization helpers live here; `agent-doc-core` keeps compatibility re-exports and orchestration keeps file-backed IO. |
+| Template-mode patch parsing, repair, and replay validation | `agent-doc-template` | Active. Pure patch parsing, replay-payload validation, component mutation, boundary repositioning, and duplicate prompt/tail repair live here; orchestration keeps file-backed config/document IO. |
+| Diff annotation and prompt-bearing classification | `agent-doc-diff` | Active. Pure comment stripping, unified-diff helpers, slash/preset/directive extraction, and prompt-bearing change classification live here. |
+| Frontmatter and project config parsing | `agent-doc-frontmatter` | Active. Document frontmatter schema, project config types, and pure parsing/serialization helpers live here; orchestration keeps file-backed IO. |
 | Editor visual syntax tokenization | `agent-doc-syntax` | Active. Pure visual token spans for editor integrations live here; FFI remains the ABI adapter. |
-| Exchange topic-section parsing | `agent-doc-topic` | Active. Pure `### Re:` exchange section splitting and boundary-tail stripping live here; compaction/archive code consumes the parser through compatibility re-exports while call sites migrate. |
+| Exchange topic-section parsing | `agent-doc-topic` | Active. Pure `### Re:` exchange section splitting and boundary-tail stripping live here; compaction/archive code consumes the parser directly. |
 | C/JNA editor ABI | `agent-doc-ffi` | Active. Pure C-ABI exports for editor integrations live here and depend on focused crates directly; the main crate remains the cdylib adapter. |
 | Pure merge / conflict policy | `agent-doc-merge` | Active. Semantic merge, CRDT merge, CRDT state-vector sync, per-cell merge projection, merge write-ownership phases, events, transition table, liveness facts, and disk-write predicate live here; orchestration only adapts plugin-owner sidecar IO into that pure model. |
 | Turn lifecycle, operation log, and turn-scope affectedness | `agent-doc-turn` | Active. Lifecycle consumes realtime handoff proof and owns commit policy. Cycle phase transitions, closeout response heuristics, operation-log data types, turn-scope manifests, affectedness classification, and queue-continuation stall classification live here; orchestration owns only sidecar persistence and command adapters. |
-| Executor vocabulary | `agent-doc-turn-executor` | Active. Turn executor model vocabulary lives here, and idle-queue drain/context-clear readiness policy now lives in `agent-doc-turn-executor::idle_queue`; orchestration keeps compatibility re-exports for existing start/idle-watch callers. |
+| Executor vocabulary | `agent-doc-turn-executor` | Active. Turn executor model vocabulary lives here, and idle-queue drain/context-clear readiness policy now lives in `agent-doc-turn-executor::idle_queue`; orchestration should call the focused API directly. |
 | Tmux observations and command effects | `agent-doc-tmux`, `agent-doc-tmux-commands`, `agent-doc-tmux-io`, `agent-doc-turn-executor-tmux` | Active starter crates; orchestration still has transitional tmux code. |
 | SQLite-backed persistence | `agent-doc-sqlite` | Active. |
 | Document realtime scheduler | `agent-doc-document-realtime` | Active. Owns editor/disk authority states, apply scheduling states, verification handoff vocabulary, pure live-editor delivery target selection, write/watch authority predicates, and the inter-turn document convergence gate. |
-| Editor debounce and sidecars | `agent-doc-debounce` | Active. Typing debounce state, live-buffer sidecars, editor sync barriers, write-provenance records, and live-buffer classification diagnostics live here; orchestration keeps a compatibility re-export and consumes the sidecar API. |
+| Editor debounce and sidecars | `agent-doc-debounce` | Active. Typing debounce state, live-buffer sidecars, editor sync barriers, write-provenance records, and live-buffer classification diagnostics live here; orchestration consumes the sidecar API directly. |
 | Supervisor model and process effects | `agent-doc-supervisor`, `agent-doc-supervisor-process` | Active. Pure state/recovery decisions, supervisor config precedence, process lifecycle decisions, harness-change restart policy, post-child-exit run-loop dispatch, and controller handoff state now live in `agent-doc-supervisor`; process handoff state for `execve` re-entry now lives in `agent-doc-supervisor-process`. |
 | Controller RPC/CAS | `agent-doc-controller` | Active. Controller stores/apply decisions; it does not own supervisor policy. Pure dispatch admission helpers for in-flight coalescing, operator reopen classification, and stale-generation redirect parsing now live in `agent-doc-controller::dispatch`; orchestration's RPC layer remains the socket/process adapter. |
 
@@ -57,7 +58,7 @@ small enough that they are adapters/facades rather than God crates.
 |---|---|---|
 | `component.rs` | `agent-doc-element::element` | Extracted. Element parsing is element/document syntax; keep parser pure and file-IO free. |
 | `pending.rs` | `agent-doc-element-backlog` / `agent-doc-tracked-work` | Tracked work parsing and lifecycle should be shared by backlog, review, icebox, and done. |
-| `queue_item_lifecycle.rs` | `agent-doc-element-queue` | Extracted. Core path is compatibility only. |
+| `queue_item_lifecycle.rs` | `agent-doc-element-queue` | Extracted. |
 | `template.rs` | `agent-doc-template` | Extracted. Pure patch parsing, component mutation, boundary repositioning, and repair helpers live in `agent-doc-template`; file-backed config/document IO stays in orchestration adapters. |
 | `replay_guard.rs` | `agent-doc-template` | Extracted. Replay payload shape validation lives beside template patch parsing because patch-bearing replay depends on `parse_patches`. |
 | `crdt.rs`, `crdt_sync.rs`, `cell_doc.rs` | `agent-doc-merge` | Extracted. Pure CRDT/merge math, per-cell projection, and state-vector sync primitives live in `agent-doc-merge`; transport/authority adapters stay in orchestration/realtime layers. |
@@ -67,7 +68,7 @@ small enough that they are adapters/facades rather than God crates.
 | `heuristics.rs` | `agent-doc-turn` | Extracted. Pending-capture recommendation detection is turn closeout policy; orchestration only applies the resulting signal to guards. |
 | `syntax.rs` | `agent-doc-syntax` | Extracted. Editor-facing visual tokenization is pure document syntax; FFI/editor integrations stay as adapters. |
 | `topic.rs` | `agent-doc-topic` | Extracted. Exchange topic section parsing is pure text segmentation shared by compaction/archive flows. |
-| `ffi.rs` | `agent-doc-ffi` | Extracted. C/JNA ABI exports depend on focused crates directly; `agent-doc-core` keeps only a compatibility re-export. |
+| `ffi.rs` | `agent-doc-ffi` | Extracted. C/JNA ABI exports depend on focused crates directly. |
 
 ## Orchestration Split Targets
 
@@ -89,8 +90,8 @@ small enough that they are adapters/facades rather than God crates.
 - `agent-doc-orchestration` no longer owns new domain policy for merge,
   realtime document authority, turn lifecycle, tmux state, supervisor state, or
   controller CAS.
-- Existing public paths that are not yet migrated continue to work through
-  compatibility re-exports.
+- Internal and in-repo public Rust paths use focused crates directly; extracted
+  APIs are not kept alive through `agent-doc-core` or root-crate facades.
 - Each extracted crate has at least one meaningful unit test or compile-time
   dependency-boundary test.
 - The workspace builds and the focused extraction tests pass.
@@ -103,7 +104,7 @@ deprecated without losing a domain boundary. During the transition it may:
 
 - wire CLI/start/run-loop effects together;
 - adapt existing sidecar, tmux, process, and file IO into focused crates;
-- re-export compatibility paths while callers migrate.
+- adapt existing sidecar, tmux, process, and file IO into focused crates.
 
 It should not own durable policy for document realtime, merge, turn lifecycle,
 element semantics, executor readiness, supervisor lifecycle, process handoff, or
@@ -113,6 +114,6 @@ callers with focused crate APIs and mark the crate deprecated or remove it.
 ## Completion Signal
 
 This PRD is complete when `agent-doc-core` and `agent-doc-orchestration` are no
-longer God crates by behavior: they may still re-export or adapt, but their
-remaining modules do not define durable domain policy that belongs to the
+longer God crates by behavior: they may still adapt effectful boundaries, but
+their remaining modules do not define durable domain policy that belongs to the
 focused crates above.

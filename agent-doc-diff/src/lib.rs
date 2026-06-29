@@ -233,9 +233,8 @@ pub fn strip_comments(content: &str) -> String {
 }
 
 /// Byte-precise removal of the managed `agent_doc_pipeline:` frontmatter block
-/// for diff comparison. The full frontmatter parser still lives behind
-/// `agent-doc-core` while that seam is extracted; this local pure helper keeps
-/// diff classification independent of the core facade.
+/// for diff comparison. Keeping this local pure helper avoids pulling the full
+/// frontmatter parser into diff classification.
 fn strip_pipeline_block_lines(content: &str) -> String {
     let lines: Vec<&str> = content.split('\n').collect();
     if lines.first().map(|line| line.trim_end()) != Some("---") {

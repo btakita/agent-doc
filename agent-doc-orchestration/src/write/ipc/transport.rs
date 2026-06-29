@@ -1819,7 +1819,7 @@ pub(crate) fn build_ipc_patches_json(
     // response a second time, doubling the editor buffer.
     let current_doc = match boundary_seed {
         Some(seed) => {
-            let bid = agent_doc_core::id::boundary_id_from_seed_with_summary(seed, summary);
+            let bid = agent_doc_element::id::boundary_id_from_seed_with_summary(seed, summary);
             template::reposition_boundary_to_end_clean_with_summary_and_id(
                 &raw_doc,
                 Some(&bid),

@@ -205,10 +205,10 @@ pub fn run(
 
     // Send to streaming agent
     let fork = fm.resume.is_none();
-    let harness = agent_doc_core::model_tier::harness_key_for_agent_name(agent_name);
+    let harness = agent_doc_model_tier::harness_key_for_agent_name(agent_name);
     let resolved_model = model
         .or(fm.resolve_harness_model(&harness))
-        .map(|m| agent_doc_core::model_tier::canonical_model_name(m, &harness, &config.model));
+        .map(|m| agent_doc_model_tier::canonical_model_name(m, &harness, &config.model));
     let chunks = streaming_agent.send_streaming(
         &prompt,
         fm.resume.as_deref(),

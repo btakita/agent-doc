@@ -2421,37 +2421,12 @@ pub fn reap_orphaned_preparing_controllers(
 /// regardless of which project it belongs to. The project-scoped
 /// [`args_match_same_project_controller`] only answers "is this MY project's
 /// controller?"; M5 needs "is this ANY project's controller, and which one?".
-fn arg_file_name_is(arg: &str, expected: &str) -> bool {
-    Path::new(arg)
-        .file_name()
-        .is_some_and(|name| name == expected)
-}
-
-fn is_shell_c_controller_sentinel(args: &[String], agent_doc_idx: usize) -> bool {
-    agent_doc_idx >= 3
-        && args.get(agent_doc_idx - 2).is_some_and(|arg| arg == "-c")
-        && args.first().is_some_and(|arg| {
-            ["sh", "bash", "dash", "zsh"]
-                .iter()
-                .any(|shell| arg_file_name_is(arg, shell))
-        })
-}
-
 fn agent_doc_controller_serve_arg_index(args: &[String]) -> Option<usize> {
-    args.windows(3).enumerate().find_map(|(idx, window)| {
-        (arg_file_name_is(&window[0], "agent-doc")
-            && window[1] == "controller"
-            && window[2] == "serve"
-            && (idx == 0 || is_shell_c_controller_sentinel(args, idx)))
-        .then_some(idx)
-    })
+    agent_doc_controller::command_line::agent_doc_controller_serve_arg_index(args)
 }
 
 fn controller_serve_project_root_from_args(args: &[String]) -> Option<PathBuf> {
-    let controller_idx = agent_doc_controller_serve_arg_index(args)?;
-    args[controller_idx + 3..]
-        .windows(2)
-        .find_map(|window| (window[0] == "--project-root").then(|| PathBuf::from(&window[1])))
+    agent_doc_controller::command_line::controller_serve_project_root_from_args(args)
 }
 
 fn controller_serve_project_root(pid: u32) -> Option<PathBuf> {

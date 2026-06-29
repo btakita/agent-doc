@@ -277,6 +277,38 @@ pub fn is_exchange_response_heading(trimmed: &str) -> bool {
         || trimmed.starts_with("###### Re:")
 }
 
+pub fn is_direct_response_patchback_heading(trimmed: &str) -> bool {
+    trimmed.starts_with("### Re:") || trimmed == "## Assistant"
+}
+
+pub fn has_new_response_heading_marker(snapshot_doc: &str, current_doc: &str) -> bool {
+    let snapshot_counts = response_heading_marker_counts(snapshot_doc);
+    let current_counts = response_heading_marker_counts(current_doc);
+    current_counts
+        .into_iter()
+        .any(|(marker, count)| count > snapshot_counts.get(&marker).copied().unwrap_or(0))
+}
+
+fn response_heading_marker_counts(doc: &str) -> std::collections::BTreeMap<String, usize> {
+    let mut counts = std::collections::BTreeMap::new();
+    for line in doc.lines() {
+        let trimmed = line.trim();
+        if is_direct_response_patchback_heading(trimmed) {
+            *counts.entry(trimmed.to_string()).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
+/// Known binary-authored recovery diagnostics use `### Re:` headings so diff
+/// classification treats them as recovery artifacts, not user prompt targets.
+pub fn is_binary_authored_recovery_diagnostic_heading(trimmed: &str) -> bool {
+    (trimmed.starts_with("### Re:")
+        || trimmed.starts_with("#### Re:")
+        || trimmed.starts_with("##### Re:"))
+        && trimmed.contains("interrupted-cycle recovery")
+}
+
 /// True when a `### Re:` heading answers a queue/backlog continuation rather
 /// than a free-text exchange prompt.
 pub fn is_queue_continuation_response_heading(trimmed: &str) -> bool {
@@ -850,6 +882,37 @@ mod tests {
             "### Re: user free-text prompt"
         ));
         assert!(!is_queue_continuation_response_heading("## Assistant"));
+    }
+
+    #[test]
+    fn direct_response_patchback_heading_policy_counts_new_markers() {
+        let before = "## Exchange\n\n### Re: old topic\n\nOld answer.\n";
+        let after =
+            "## Exchange\n\n### Re: old topic\n\nOld answer.\n\n### Re: new topic\n\nNew answer.\n";
+
+        assert!(is_direct_response_patchback_heading("## Assistant"));
+        assert!(is_direct_response_patchback_heading("### Re: new topic"));
+        assert!(!is_direct_response_patchback_heading(
+            "#### Re: nested heading"
+        ));
+        assert!(has_new_response_heading_marker(before, after));
+        assert!(!has_new_response_heading_marker(after, before));
+    }
+
+    #[test]
+    fn binary_recovery_diagnostic_headings_are_exempted_by_shape() {
+        assert!(is_binary_authored_recovery_diagnostic_heading(
+            "### Re: interrupted-cycle recovery for file.md"
+        ));
+        assert!(is_binary_authored_recovery_diagnostic_heading(
+            "##### Re: interrupted-cycle recovery for file.md"
+        ));
+        assert!(!is_binary_authored_recovery_diagnostic_heading(
+            "### Re: ordinary user answer"
+        ));
+        assert!(!is_binary_authored_recovery_diagnostic_heading(
+            "## Assistant interrupted-cycle recovery"
+        ));
     }
 
     #[test]

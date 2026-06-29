@@ -716,7 +716,7 @@ pub fn detect_bypassed_response_write_between(
     if cur_norm == snap_norm {
         return None;
     }
-    if !has_new_response_heading_marker(&snap_norm, &cur_norm) {
+    if !agent_doc_turn::closeout_signal::has_new_response_heading_marker(&snap_norm, &cur_norm) {
         return None;
     }
 
@@ -728,10 +728,11 @@ pub fn detect_bypassed_response_write_between(
             continue;
         }
         let trimmed = change.value().trim();
-        if is_binary_authored_recovery_diagnostic_heading(trimmed) {
+        if agent_doc_turn::closeout_signal::is_binary_authored_recovery_diagnostic_heading(trimmed)
+        {
             continue;
         }
-        if trimmed.starts_with("### Re:") || trimmed == "## Assistant" {
+        if agent_doc_turn::closeout_signal::is_direct_response_patchback_heading(trimmed) {
             if let Some(bare_target) =
                 first_bare_prompt_prefix_target_before_marker(&diff_text, trimmed)
             {
@@ -762,40 +763,6 @@ pub(crate) fn first_bare_prompt_prefix_target_before_marker(
         prefix_diff.push('\n');
     }
     agent_doc_diff::first_bare_prompt_prefix_target(&prefix_diff)
-}
-
-pub(crate) fn has_new_response_heading_marker(snapshot_doc: &str, current_doc: &str) -> bool {
-    use std::collections::BTreeMap;
-
-    fn marker_counts(doc: &str) -> BTreeMap<String, usize> {
-        let mut counts = BTreeMap::new();
-        for line in doc.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with("### Re:") || trimmed == "## Assistant" {
-                *counts.entry(trimmed.to_string()).or_insert(0) += 1;
-            }
-        }
-        counts
-    }
-
-    let snapshot_counts = marker_counts(snapshot_doc);
-    let current_counts = marker_counts(current_doc);
-    current_counts
-        .into_iter()
-        .any(|(marker, count)| count > snapshot_counts.get(&marker).copied().unwrap_or(0))
-}
-
-/// Binary-authored interrupted-cycle recovery diagnostics are appended by
-/// `preflight::format_ipc_dogfood_note` with a `### Re:` heading so the diff
-/// classifier sees a `RecoveryArtifact` (never a user `PromptTarget`). That same
-/// `### Re:` would otherwise trip this direct-patchback detector, wedging the
-/// cycle in an append -> flag -> refuse -> re-append loop. Exempt the known
-/// recovery-diagnostic shape (`#ipc-recovery-diagnostic-patchback`).
-pub(crate) fn is_binary_authored_recovery_diagnostic_heading(trimmed: &str) -> bool {
-    (trimmed.starts_with("### Re:")
-        || trimmed.starts_with("#### Re:")
-        || trimmed.starts_with("##### Re:"))
-        && trimmed.contains("interrupted-cycle recovery")
 }
 
 /// `#prompt-preempts-auto-queue`: snapshot-independent detection of a live

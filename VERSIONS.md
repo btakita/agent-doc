@@ -35,8 +35,10 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 - **Closeout prompt/response text matching moved to `agent-doc-turn`.** Prompt
   prefix normalization, exchange prompt-line matching, `### Re:` heading
   classification, queue-continuation heading classification, and assistant
-  response-body extraction now live in `agent_doc_turn::closeout_signal`;
-  session-check keeps only file/cycle/ops-log guard adapters.
+  response-body extraction now live in `agent_doc_turn::closeout_signal`.
+  Direct response patchback heading detection and binary recovery-diagnostic
+  heading exemptions also moved there; session-check keeps only file/cycle/ops-log
+  guard adapters.
 
 - **Lease TTL freshness moved to `agent-doc-lease`.** Drain-owner, plugin-owner, queue-edit-owner, recycle-yield, and recycle-inflight sidecars now call `agent_doc_lease::timestamp_is_fresh` directly instead of each re-owning the same saturating timestamp policy. The domain modules keep only lease/request bodies, paths, TTL env knobs, and side-effect adapters, with boundary coverage preventing local `*_is_fresh` wrappers from returning.
 

@@ -2584,6 +2584,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub fn normalized_prompt_for_match",
         "pub fn exchange_contains_prompt_line",
         "pub fn is_exchange_response_heading",
+        "pub fn is_direct_response_patchback_heading",
+        "pub fn has_new_response_heading_marker",
+        "pub fn is_binary_authored_recovery_diagnostic_heading",
         "pub fn is_queue_continuation_response_heading",
         "pub fn assistant_response_text",
         "pub fn free_text_queue_marker_has_bare_heading_residue",
@@ -2642,6 +2645,8 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     for forbidden in [
         "pub fn is_exchange_response_heading",
         "pub fn is_queue_continuation_response_heading",
+        "pub(crate) fn has_new_response_heading_marker",
+        "pub(crate) fn is_binary_authored_recovery_diagnostic_heading",
         "pub(crate) fn body_enumerates_multiple_gated_phases",
         "pub(crate) fn count_phase_markers",
         "pub(crate) fn body_already_split_into_child_ids",
@@ -2662,6 +2667,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "agent_doc_turn::closeout_signal::body_already_split_into_child_ids",
         "agent_doc_turn::closeout_signal::queue_audit_collapses_partial_completion",
         "agent_doc_turn::closeout_signal::is_exchange_response_heading",
+        "agent_doc_turn::closeout_signal::is_direct_response_patchback_heading",
+        "agent_doc_turn::closeout_signal::has_new_response_heading_marker",
+        "agent_doc_turn::closeout_signal::is_binary_authored_recovery_diagnostic_heading",
         "agent_doc_turn::closeout_signal::is_queue_continuation_response_heading",
         "agent_doc_turn::closeout_signal::normalized_prompt_for_match",
     ] {

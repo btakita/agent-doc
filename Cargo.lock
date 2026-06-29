@@ -315,6 +315,7 @@ dependencies = [
  "agent-doc-markdown-ast",
  "anyhow",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

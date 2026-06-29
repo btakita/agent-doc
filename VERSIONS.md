@@ -14,6 +14,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Auto-trigger readiness policy moved to `agent-doc-turn-executor`.** The auto-trigger monitor, clear-cooldown deadline action, no-prompt hard-deadline action, and timeout/cancelled stop outcome now live in `agent_doc_turn_executor::auto_trigger`. The start supervisor thread keeps only sleep, pane inspection, logging, and startup-miss side effects while calling the focused executor API directly.
 
+- **Context usage policy moved to `agent-doc-model-tier`.** Harness transcript token aggregation, Claude project transcript path composition, model-context window lookup, Codex `token_count` percentage parsing, and the clear/no-clear diagnostic decision now live in `agent_doc_model_tier::context_usage`. Orchestration's `context_pct` module keeps only file-backed transcript reads and newest-transcript discovery, and the Codex hook calls the focused clear-decision API directly.
+
 - **Stale install-artifact policy moved to `agent-doc-supervisor`.** The `#install-stale-guard` grace window and timestamp classifier now live in `agent_doc_supervisor::config` beside auto-install/stale-binary policy. Preflight still discovers artifact mtimes and formats the warning, but calls the focused supervisor API directly instead of owning the staleness rule.
 
 - **Supervisor prompt/exit-code policy moved to `agent-doc-supervisor`.** Restart/quit prompt input classification and forwarded Ctrl-C clean-exit normalization now live in `agent_doc_supervisor::crash_policy` beside the child crash/restart policy. The start supervisor loop still owns stdin, tty, and child status adapters, but calls the focused supervisor API directly.

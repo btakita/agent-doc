@@ -2227,6 +2227,119 @@ fn test_manifest_uses_publishable_dependency_contract() {
 }
 
 #[test]
+fn test_agent_doc_model_tier_owns_context_usage_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let package_version = workspace["package"]["version"].as_str();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-model-tier")),
+        "agent-doc-model-tier must stay a first-class workspace crate"
+    );
+
+    let model_tier_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-model-tier/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&model_tier_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    assert!(
+        dependencies.contains_key("serde_json"),
+        "context transcript token parsing belongs in agent-doc-model-tier and needs serde_json"
+    );
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-model-tier context usage policy must stay free of core, orchestration, git, editor IPC, sqlite, or tmux crates"
+        );
+    }
+
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
+    let dependency = orchestration_dependencies["agent-doc-model-tier"]
+        .as_table()
+        .unwrap();
+    assert_eq!(
+        dependency.get("path").and_then(toml::Value::as_str),
+        Some("../agent-doc-model-tier")
+    );
+    assert_eq!(
+        dependency.get("version").and_then(toml::Value::as_str),
+        package_version
+    );
+
+    let context_usage =
+        fs::read_to_string(manifest_dir.join("agent-doc-model-tier/src/context_usage.rs")).unwrap();
+    for required_snippet in [
+        "pub enum Harness",
+        "pub struct UsedTokens",
+        "pub const CLAUDE_CONTEXT_WINDOW",
+        "pub fn claude_project_hash(",
+        "pub fn claude_transcript_path(",
+        "pub fn claude_projects_subdir(",
+        "pub fn parse_claude_jsonl_used_tokens(",
+        "pub fn context_window_for_model(",
+        "pub fn context_pct(",
+        "pub fn parse_codex_jsonl_context_pct(",
+        "pub struct ClearDecision",
+        "pub fn clear_decision(",
+    ] {
+        assert!(
+            context_usage.contains(required_snippet),
+            "agent-doc-model-tier should own context usage policy directly: {required_snippet}"
+        );
+    }
+
+    let orchestration_context =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/context_pct.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "pub enum Harness",
+        "pub struct UsedTokens",
+        "pub const CLAUDE_CONTEXT_WINDOW",
+        "pub fn claude_project_hash(",
+        "pub fn claude_transcript_path(",
+        "pub fn claude_projects_subdir(",
+        "pub fn parse_claude_jsonl_used_tokens(",
+        "pub fn context_window_for_model(",
+        "pub fn context_pct(",
+        "pub fn parse_codex_jsonl_context_pct(",
+        "pub struct ClearDecision",
+        "pub fn clear_decision(",
+    ] {
+        assert!(
+            !orchestration_context.contains(forbidden_snippet),
+            "context_pct.rs must stay a transcript IO adapter and not re-own context usage policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        orchestration_context.contains("use agent_doc_model_tier::context_usage::{"),
+        "context_pct.rs should call focused model-tier context usage helpers directly"
+    );
+
+    let codex_hook =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/codex_hook.rs")).unwrap();
+    assert!(
+        codex_hook.contains("use agent_doc_model_tier::context_usage::{")
+            && codex_hook.contains("clear_decision")
+            && codex_hook.contains("Harness"),
+        "codex hook should use focused context usage policy directly"
+    );
+}
+
+#[test]
 fn test_agent_doc_queue_owns_queue_continuation_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();

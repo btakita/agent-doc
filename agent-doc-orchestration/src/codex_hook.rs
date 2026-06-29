@@ -38,6 +38,7 @@
 //! - `stop_blocks_open_cycle_without_recoverable_response`
 //! - `stop_fails_closed_after_one_auto_continue`
 
+use agent_doc_model_tier::context_usage::{Harness, clear_decision};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -482,11 +483,7 @@ fn codex_live_context_pct(file: &Path) -> Option<f64> {
         .next()
         .or_else(|| std::env::current_dir().ok())?;
     let transcript = crate::context_pct::latest_codex_transcript(Path::new(&home), &project_dir)?;
-    crate::context_pct::transcript_context_pct(
-        crate::context_pct::Harness::Codex,
-        &transcript,
-        "codex",
-    )
+    crate::context_pct::transcript_context_pct(Harness::Codex, &transcript, "codex")
 }
 
 pub(crate) fn codex_queue_context_reset_reason(
@@ -500,7 +497,7 @@ pub(crate) fn codex_queue_context_reset_reason(
     if crate::session_accretion::queue_context_reset_opted_in(file) {
         let threshold = crate::session_accretion::clear_threshold_for_doc(file);
         let pct = codex_live_context_pct(file);
-        let decision = crate::context_pct::clear_decision(true, pct, threshold);
+        let decision = clear_decision(true, pct, threshold);
         if reason.is_none() && decision.clear {
             reason = Some(format!(
                 "transcript context {:.1}% >= clear threshold {}% (#clearcodex)",
@@ -529,7 +526,7 @@ fn codex_continuation_clear_reason(
     if crate::session_accretion::queue_context_reset_opted_in(file) {
         let threshold = crate::session_accretion::clear_threshold_for_doc(file);
         let pct = codex_live_context_pct(file);
-        let decision = crate::context_pct::clear_decision(true, pct, threshold);
+        let decision = clear_decision(true, pct, threshold);
         crate::ops_log::log_op(file, &decision.diagnostic);
         crate::ops_log::log_op(
             file,

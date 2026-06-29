@@ -47,6 +47,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
+pub mod context_usage;
+
 /// The Claude Code `opus` model alias. It is **deferred**, not version-pinned:
 /// agent-doc passes it through verbatim to `claude --model opus`, which Claude
 /// Code resolves to its current latest opus. Keeping it unversioned means launch

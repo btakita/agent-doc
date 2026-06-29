@@ -1,13 +1,14 @@
-//! # Module: context_pct (`#s760a` / `#s760b`)
+//! # Module: context_pct (`#s760a` orchestration adapter)
 //!
 //! ## Spec (`#s760wire` — transcript-token context-% source)
-//! The pure *source* half of the pre-emptive queue `/clear` decision: derive the
-//! real context-usage % from the harness session transcript's cumulative token
-//! usage — **not** exchange size, **not** a TUI-footer scrape (footers vary by
-//! harness/config, so scraping is wrong for the shipped product). See
-//! `tasks/agent-doc/plan-s760-transcript-ctx-clear.md`.
+//! The file-backed half of the pre-emptive queue `/clear` source: locate and
+//! read harness session transcripts, then call
+//! `agent_doc_model_tier::context_usage` for token parsing, context-window
+//! percentage, and clear/no-clear policy. Context usage still comes from the
+//! transcript's cumulative token usage — **not** exchange size, **not** a TUI
+//! footer scrape. See `tasks/agent-doc/plan-s760-transcript-ctx-clear.md`.
 //!
-//! This module owns two phases:
+//! This module owns one adapter phase:
 //! - **`#s760a`** — the harness-aware transcript locator + token reader. For
 //!   Claude Code, locate `~/.claude/projects/<project-hash>/<session-id>.jsonl`
 //!   and read the latest entry's cumulative `usage`. For Codex, locate the
@@ -15,8 +16,6 @@
 //!   read the latest `token_count` event's `last_token_usage` plus
 //!   `model_context_window`. OpenCode transcript stores are not yet confirmed,
 //!   so they return `None` (unsupported, skip) rather than guess.
-//! - **`#s760b`** — the model → context-window table and the ctx% compute
-//!   (`pct = used / window * 100`, clamped).
 //!
 //! The route-dispatch gate (`#s760c`, in `route.rs`) and operator live-verify
 //! (`#s760d`) consume this source; they are intentionally **not** in this module.
@@ -30,122 +29,15 @@
 //! `route.rs` gate.
 //!
 //! ## Evals
-//! - `parse_jsonl_returns_latest_usage`
-//! - `parse_jsonl_tolerates_non_json_and_empty`
-//! - `parse_jsonl_none_when_no_usage`
-//! - `claude_project_hash_replaces_slash_and_dot`
-//! - `claude_transcript_path_composes`
-//! - `context_window_known_families_200k`
-//! - `context_window_unknown_is_none`
-//! - `context_pct_computes_and_clamps`
-//! - `context_pct_unknown_model_is_none`
 //! - `read_used_tokens_unsupported_harness_is_none`
-//! - `parse_codex_jsonl_context_pct_uses_latest_token_count`
 //! - `transcript_context_pct_end_to_end`
+//! - `latest_claude_transcript_picks_newest_jsonl`
+//! - `latest_codex_transcript_picks_newest_matching_project`
 
+use agent_doc_model_tier::context_usage::{
+    Harness, UsedTokens, context_pct, parse_claude_jsonl_used_tokens, parse_codex_jsonl_context_pct,
+};
 use std::path::{Path, PathBuf};
-
-/// Harness whose session transcript token usage we can read (`#s760a`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Harness {
-    Claude,
-    Codex,
-    OpenCode,
-}
-
-impl Harness {
-    /// Parse a harness token (the value of `agent:`/`--agent`). Returns `None`
-    /// for anything we do not recognize so the caller can fail safe.
-    pub fn parse(s: &str) -> Option<Harness> {
-        match s.trim().to_ascii_lowercase().as_str() {
-            "claude" | "claude-code" => Some(Harness::Claude),
-            "codex" => Some(Harness::Codex),
-            "opencode" => Some(Harness::OpenCode),
-            _ => None,
-        }
-    }
-}
-
-/// Cumulative token usage read from a harness session transcript (`#s760a`).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct UsedTokens {
-    pub input: u64,
-    pub output: u64,
-    pub cache_read: u64,
-    pub cache_creation: u64,
-}
-
-impl UsedTokens {
-    /// Total tokens occupying the context window: input + output + both cache
-    /// classes (cache-read and cache-creation both consume window space).
-    pub fn total(self) -> u64 {
-        self.input
-            .saturating_add(self.output)
-            .saturating_add(self.cache_read)
-            .saturating_add(self.cache_creation)
-    }
-}
-
-/// Default context window (tokens) for the current Claude model family.
-pub const CLAUDE_CONTEXT_WINDOW: u64 = 200_000;
-
-/// Claude Code encodes a project directory into its `~/.claude/projects/`
-/// subdirectory name by replacing every `/` and `.` with `-`
-/// (e.g. `/home/u/.cfg/p` → `-home-u--cfg-p`). Pure string transform.
-pub fn claude_project_hash(project_dir: &Path) -> String {
-    project_dir.to_string_lossy().replace(['/', '.'], "-")
-}
-
-/// Locate a Claude Code session transcript:
-/// `<home>/.claude/projects/<project-hash>/<session-id>.jsonl` (`#s760a`).
-pub fn claude_transcript_path(home: &Path, project_dir: &Path, session_id: &str) -> PathBuf {
-    home.join(".claude")
-        .join("projects")
-        .join(claude_project_hash(project_dir))
-        .join(format!("{session_id}.jsonl"))
-}
-
-/// Parse cumulative token usage from Claude Code JSONL transcript content
-/// (`#s760a`). Each line is one JSON record; assistant records nest the usage
-/// block under `message.usage` (a few record shapes carry a top-level `usage`).
-/// Returns the LATEST record's usage, or `None` if none carries usage. Pure over
-/// the content (no filesystem) so it is unit-testable against fixtures, and
-/// tolerant of non-JSON / partial trailing lines (an active transcript may be
-/// mid-write).
-pub fn parse_claude_jsonl_used_tokens(content: &str) -> Option<UsedTokens> {
-    let mut latest: Option<UsedTokens> = None;
-    for line in content.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let value: serde_json::Value = match serde_json::from_str(line) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        let usage = value
-            .get("message")
-            .and_then(|m| m.get("usage"))
-            .or_else(|| value.get("usage"));
-        let Some(usage) = usage else { continue };
-        let field = |k: &str| {
-            usage
-                .get(k)
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0)
-        };
-        let used = UsedTokens {
-            input: field("input_tokens"),
-            output: field("output_tokens"),
-            cache_read: field("cache_read_input_tokens"),
-            cache_creation: field("cache_creation_input_tokens"),
-        };
-        if used.total() > 0 {
-            latest = Some(used);
-        }
-    }
-    latest
-}
 
 /// Read cumulative token usage from a transcript file for the given harness
 /// (`#s760a`). Claude -> parse JSONL; OpenCode -> `None` (unsupported until its
@@ -168,38 +60,6 @@ pub fn read_used_tokens(harness: Harness, transcript: &Path) -> Option<UsedToken
     }
 }
 
-/// Map a resolved model id to its context window in tokens (`#s760b`). Known
-/// Claude families (Opus/Sonnet/Haiku/Fable, or any `claude-*`) are 200k. An
-/// unknown model returns `None` and warns — the caller then treats ctx% as
-/// unknown and never clears (fail safe, per the destructive-`/clear` invariant).
-pub fn context_window_for_model(model: &str) -> Option<u64> {
-    let m = model.to_ascii_lowercase();
-    if m.contains("opus")
-        || m.contains("sonnet")
-        || m.contains("haiku")
-        || m.contains("fable")
-        || m.starts_with("claude")
-    {
-        return Some(CLAUDE_CONTEXT_WINDOW);
-    }
-    eprintln!(
-        "[s760] WARNING: unknown model {model:?}; context window unknown, ctx% None (never clears)"
-    );
-    None
-}
-
-/// Compute context-usage percent for `used` tokens against `model`'s window
-/// (`#s760b`), clamped to `[0, 100]`. `None` when the model (hence window) is
-/// unknown — the caller never clears on `None`.
-pub fn context_pct(used: u64, model: &str) -> Option<f64> {
-    let window = context_window_for_model(model)?;
-    if window == 0 {
-        return None;
-    }
-    let pct = (used as f64) / (window as f64) * 100.0;
-    Some(pct.clamp(0.0, 100.0))
-}
-
 /// Read a transcript and compute ctx% in one call (`#s760a` + `#s760b`). `None`
 /// (never clear) on any failure: unreadable/empty transcript, unsupported
 /// harness, or unknown model.
@@ -207,7 +67,13 @@ pub fn transcript_context_pct(harness: Harness, transcript: &Path, model: &str) 
     match harness {
         Harness::Claude => {
             let used = read_used_tokens(harness, transcript)?;
-            context_pct(used.total(), model)
+            let pct = context_pct(used.total(), model);
+            if pct.is_none() {
+                eprintln!(
+                    "[s760] WARNING: unknown model {model:?}; context window unknown, ctx% None (never clears)"
+                );
+            }
+            pct
         }
         Harness::Codex => {
             let content = std::fs::read_to_string(transcript).ok()?;
@@ -220,112 +86,6 @@ pub fn transcript_context_pct(harness: Harness, transcript: &Path, model: &str) 
             None
         }
     }
-}
-
-fn json_u64_at(value: &serde_json::Value, path: &[&str]) -> u64 {
-    let mut cursor = value;
-    for key in path {
-        let Some(next) = cursor.get(*key) else {
-            return 0;
-        };
-        cursor = next;
-    }
-    cursor.as_u64().unwrap_or(0)
-}
-
-fn context_pct_for_window(used: u64, window: u64) -> Option<f64> {
-    if window == 0 {
-        return None;
-    }
-    Some(((used as f64) / (window as f64) * 100.0).clamp(0.0, 100.0))
-}
-
-/// Parse Codex TUI session JSONL and compute live context usage from the latest
-/// `token_count` event. Codex reports the current turn's prompt/context usage in
-/// `last_token_usage` and the exact `model_context_window` for that model. The
-/// CLI displays cached input separately (`input=N (+ M cached)`), and cached
-/// input still occupies the model context window, so it is included here.
-pub fn parse_codex_jsonl_context_pct(content: &str) -> Option<f64> {
-    let mut latest: Option<(u64, u64)> = None;
-    for line in content.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let value: serde_json::Value = match serde_json::from_str(line) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        if value
-            .get("payload")
-            .and_then(|p| p.get("type"))
-            .and_then(serde_json::Value::as_str)
-            != Some("token_count")
-        {
-            continue;
-        }
-        let window = json_u64_at(&value, &["payload", "info", "model_context_window"]);
-        let input = json_u64_at(
-            &value,
-            &["payload", "info", "last_token_usage", "input_tokens"],
-        );
-        let cached = json_u64_at(
-            &value,
-            &["payload", "info", "last_token_usage", "cached_input_tokens"],
-        );
-        let output = json_u64_at(
-            &value,
-            &["payload", "info", "last_token_usage", "output_tokens"],
-        );
-        let used = input.saturating_add(cached).saturating_add(output);
-        if window > 0 && used > 0 {
-            latest = Some((used, window));
-        }
-    }
-    let (used, window) = latest?;
-    context_pct_for_window(used, window)
-}
-
-/// Outcome of the `#s760c` dispatch-time pre-emptive `/clear` gate. `clear` is
-/// whether the caller should fire the destructive `/clear`; `diagnostic` is the
-/// canonical `[s760] clear-decision …` line the caller emits to ops.log so the
-/// decision is observable in production without re-deriving it.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ClearDecision {
-    pub clear: bool,
-    pub diagnostic: String,
-}
-
-/// Decide whether the route/supervisor dispatch gate should pre-emptively
-/// `/clear` before sending a queue head (`#s760c`). Pure over the resolved
-/// inputs so it is unit-testable; the caller resolves `opted_in`, the live
-/// transcript ctx% (`pct`), and `threshold`, then emits [`ClearDecision::diagnostic`]
-/// to ops.log and only sends the destructive `/clear` when [`ClearDecision::clear`]
-/// is true.
-///
-/// Fails safe per the `plan-s760` invariants: an unknown ctx% (`pct = None`, from
-/// an unknown model / missing transcript / unsupported harness) never clears, and
-/// a disabled opt-in never clears regardless of `pct`. The diagnostic always
-/// renders so a `clear=false` decision (and its reason) is still observable.
-pub fn clear_decision(opted_in: bool, pct: Option<f64>, threshold: u8) -> ClearDecision {
-    let clear = opted_in && pct.is_some_and(|p| p >= f64::from(threshold));
-    let pct_field = match pct {
-        Some(p) => format!("{p:.1}"),
-        None => "none".to_string(),
-    };
-    let diagnostic = format!(
-        "[s760] clear-decision optIn={opted_in} threshold={threshold} pct={pct_field} clear={clear}"
-    );
-    ClearDecision { clear, diagnostic }
-}
-
-/// Compose the `~/.claude/projects/<project-hash>/` directory that holds a
-/// project's Claude Code session transcripts (`#s760c`). The per-session
-/// transcript file lives inside this directory.
-pub fn claude_projects_subdir(home: &Path, project_dir: &Path) -> PathBuf {
-    home.join(".claude")
-        .join("projects")
-        .join(claude_project_hash(project_dir))
 }
 
 /// Locate the active Claude Code session transcript as the most-recently-modified
@@ -441,105 +201,6 @@ mod tests {
 "#;
 
     #[test]
-    fn parse_jsonl_returns_latest_usage() {
-        let used = parse_claude_jsonl_used_tokens(FIXTURE).expect("latest usage");
-        // The LAST assistant entry wins, not the first.
-        assert_eq!(used.input, 2);
-        assert_eq!(used.output, 4205);
-        assert_eq!(used.cache_read, 243320);
-        assert_eq!(used.cache_creation, 2232);
-        assert_eq!(used.total(), 2 + 4205 + 243320 + 2232);
-    }
-
-    #[test]
-    fn parse_jsonl_tolerates_non_json_and_empty() {
-        let content = "not json at all\n\n{\"message\":{\"usage\":{\"input_tokens\":7}}}\n{partial";
-        let used = parse_claude_jsonl_used_tokens(content).expect("usage from the one valid line");
-        assert_eq!(used.input, 7);
-        assert_eq!(used.total(), 7);
-    }
-
-    #[test]
-    fn parse_jsonl_none_when_no_usage() {
-        assert!(parse_claude_jsonl_used_tokens("").is_none());
-        assert!(
-            parse_claude_jsonl_used_tokens("{\"type\":\"user\",\"message\":{\"content\":\"x\"}}")
-                .is_none()
-        );
-        // A zero-total usage block is treated as no usage (fail safe).
-        assert!(
-            parse_claude_jsonl_used_tokens("{\"message\":{\"usage\":{\"input_tokens\":0}}}")
-                .is_none()
-        );
-    }
-
-    #[test]
-    fn claude_project_hash_replaces_slash_and_dot() {
-        assert_eq!(
-            claude_project_hash(Path::new("/home/brian/work/btakita/agent-loop")),
-            "-home-brian-work-btakita-agent-loop"
-        );
-        // `/.` collapses to `--`, matching Claude Code's real encoding.
-        assert_eq!(
-            claude_project_hash(Path::new("/home/u/.claude-mem")),
-            "-home-u--claude-mem"
-        );
-    }
-
-    #[test]
-    fn claude_transcript_path_composes() {
-        let p = claude_transcript_path(
-            Path::new("/home/brian"),
-            Path::new("/home/brian/work/btakita/agent-loop"),
-            "74bb0c6d-4f39",
-        );
-        assert_eq!(
-            p,
-            Path::new(
-                "/home/brian/.claude/projects/-home-brian-work-btakita-agent-loop/74bb0c6d-4f39.jsonl"
-            )
-        );
-    }
-
-    #[test]
-    fn context_window_known_families_200k() {
-        for m in [
-            "claude-opus-4-8",
-            "claude-sonnet-4-6",
-            "claude-haiku-4-5-20251001",
-            "claude-fable-5",
-            "opus",
-            "Sonnet",
-        ] {
-            assert_eq!(
-                context_window_for_model(m),
-                Some(CLAUDE_CONTEXT_WINDOW),
-                "{m}"
-            );
-        }
-    }
-
-    #[test]
-    fn context_window_unknown_is_none() {
-        assert!(context_window_for_model("gpt-5").is_none());
-        assert!(context_window_for_model("llama-3").is_none());
-    }
-
-    #[test]
-    fn context_pct_computes_and_clamps() {
-        // 100k / 200k = 50%.
-        assert_eq!(context_pct(100_000, "claude-opus-4-8"), Some(50.0));
-        // Over-window clamps to 100, never above.
-        assert_eq!(context_pct(500_000, "opus"), Some(100.0));
-        assert_eq!(context_pct(0, "sonnet"), Some(0.0));
-    }
-
-    #[test]
-    fn context_pct_unknown_model_is_none() {
-        assert!(context_pct(100_000, "gpt-5").is_none());
-    }
-
-    #[test]
     fn read_used_tokens_unsupported_harness_is_none() {
         let tmp = NamedTempFile::new().unwrap();
         assert!(read_used_tokens(Harness::Codex, tmp.path()).is_none());
@@ -548,25 +209,6 @@ mod tests {
         assert!(
             read_used_tokens(Harness::Claude, Path::new("/no/such/transcript.jsonl")).is_none()
         );
-    }
-
-    #[test]
-    fn parse_codex_jsonl_context_pct_uses_latest_token_count() {
-        let content = r#"{"type":"session_meta","payload":{"cwd":"/tmp/project"}}
-{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10000,"cached_input_tokens":5000,"output_tokens":1000},"model_context_window":100000}}}
-{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":20000,"cached_input_tokens":10000,"output_tokens":5000},"model_context_window":100000}}}
-"#;
-        let pct = parse_codex_jsonl_context_pct(content).expect("codex pct");
-        assert_eq!(pct, 35.0);
-    }
-
-    #[test]
-    fn parse_codex_jsonl_context_pct_clamps_and_ignores_missing_window() {
-        let content = r#"{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":1,"cached_input_tokens":1,"output_tokens":1}}}}
-{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":90000,"cached_input_tokens":20000,"output_tokens":1000},"model_context_window":100000}}}
-"#;
-        let pct = parse_codex_jsonl_context_pct(content).expect("codex pct");
-        assert_eq!(pct, 100.0);
     }
 
     #[test]
@@ -598,64 +240,6 @@ mod tests {
         );
         // Unsupported harness -> None.
         assert!(transcript_context_pct(Harness::OpenCode, tmp.path(), "opus").is_none());
-    }
-
-    #[test]
-    fn harness_parse_known_and_unknown() {
-        assert_eq!(Harness::parse("claude"), Some(Harness::Claude));
-        assert_eq!(Harness::parse("Claude-Code"), Some(Harness::Claude));
-        assert_eq!(Harness::parse("codex"), Some(Harness::Codex));
-        assert_eq!(Harness::parse("opencode"), Some(Harness::OpenCode));
-        assert!(Harness::parse("junie").is_none());
-    }
-
-    #[test]
-    fn clear_decision_clears_only_when_opted_in_and_at_or_above_threshold() {
-        // Opted in, at threshold → clear, with the canonical diagnostic.
-        let d = clear_decision(true, Some(50.0), 50);
-        assert!(d.clear);
-        assert_eq!(
-            d.diagnostic,
-            "[s760] clear-decision optIn=true threshold=50 pct=50.0 clear=true"
-        );
-        // Above threshold → clear.
-        assert!(clear_decision(true, Some(83.4), 50).clear);
-        // Below threshold → no clear.
-        let below = clear_decision(true, Some(49.9), 50);
-        assert!(!below.clear);
-        assert_eq!(
-            below.diagnostic,
-            "[s760] clear-decision optIn=true threshold=50 pct=49.9 clear=false"
-        );
-    }
-
-    #[test]
-    fn clear_decision_fails_safe_on_unknown_pct_and_disabled_opt_in() {
-        // Unknown ctx% never clears, even far past any threshold.
-        let unknown = clear_decision(true, None, 50);
-        assert!(!unknown.clear);
-        assert_eq!(
-            unknown.diagnostic,
-            "[s760] clear-decision optIn=true threshold=50 pct=none clear=false"
-        );
-        // Disabled opt-in never clears, even at 100%.
-        let off = clear_decision(false, Some(100.0), 50);
-        assert!(!off.clear);
-        assert_eq!(
-            off.diagnostic,
-            "[s760] clear-decision optIn=false threshold=50 pct=100.0 clear=false"
-        );
-    }
-
-    #[test]
-    fn claude_projects_subdir_composes() {
-        assert_eq!(
-            claude_projects_subdir(
-                Path::new("/home/brian"),
-                Path::new("/home/brian/work/btakita/agent-loop"),
-            ),
-            Path::new("/home/brian/.claude/projects/-home-brian-work-btakita-agent-loop")
-        );
     }
 
     #[test]

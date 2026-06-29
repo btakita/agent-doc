@@ -1199,11 +1199,10 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // deleted instead of preserving a facade. The surviving route tokens are
         // adapter/logging references around the focused guard decisions.
         ("agent-doc-orchestration/src/route.rs", "guard_") => 7,
-        // +2 (#jb-run-agent-doc-submit-diagnostics): the redacted
-        // `route_submit_observation` / `route_submit_issue` helpers can include
-        // dispatch-start proof labels while keeping prompt-submit failures
-        // visible in ops-log review.
-        ("agent-doc-orchestration/src/route.rs", "proof=") => 3,
+        // 3 -> 0: route submit-observation proof rendering moved to
+        // `agent-doc-controller::dispatch`; route now adapts proof facts into
+        // the focused controller formatter instead of owning `proof=` log text.
+        ("agent-doc-orchestration/src/route.rs", "proof=") => 0,
         // +1 for the audited route resilience diagnostic
         // `route_queue_dispatch_unparseable_preserved ... reason={parse_err}`:
         // when the existing agent:queue is polluted/unparseable the route
@@ -3726,6 +3725,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn should_require_routed_cycle_ack(",
         "pub struct MissingCycleAckFacts",
         "pub fn should_optimistically_accept_missing_cycle_ack(",
+        "pub enum RouteSubmitObservation",
+        "pub struct RouteSubmitObservationFacts",
+        "pub fn route_submit_observation_message(",
+        "pub fn route_submit_issue_message(",
     ] {
         assert!(
             controller_dispatch.contains(required_snippet),
@@ -3754,6 +3757,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn classify_drain_retry(",
         "enum RouteCloseoutBlockDecision",
         "fn classify_closeout_block_dispatch(",
+        "enum RouteSubmitObservation",
+        "fn route_submit_observation_message(",
+        "fn route_submit_issue_message(",
     ] {
         assert!(
             !route_source.contains(forbidden_snippet),
@@ -3797,6 +3803,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn should_require_routed_cycle_ack(",
         "pub struct MissingCycleAckFacts",
         "pub fn should_optimistically_accept_missing_cycle_ack(",
+        "pub enum RouteSubmitObservation",
+        "pub struct RouteSubmitObservationFacts",
+        "pub fn route_submit_observation_message(",
+        "pub fn route_submit_issue_message(",
     ] {
         assert!(
             !flow_routed_reopen_source.contains(forbidden_snippet),
@@ -3834,6 +3844,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("should_require_routed_cycle_ack")
             && route_source.contains("MissingCycleAckFacts")
             && route_source.contains("should_optimistically_accept_missing_cycle_ack")
+            && route_source.contains("RouteSubmitObservation")
+            && route_source.contains("ControllerRouteSubmitObservationFacts")
+            && route_source.contains("route_submit_observation_message(")
+            && route_source.contains("route_submit_issue_message(")
             && route_source.contains("DispatchActorState")
             && route_source.contains("dispatch_only_busy_should_wait_for_ready(")
             && route_source.contains("dispatch_only_should_probe_active_turn_cue(")

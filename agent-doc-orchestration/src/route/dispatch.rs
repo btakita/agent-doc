@@ -155,7 +155,7 @@ pub(crate) fn poll_direct_pane_acceptance(
                     .is_some()
                 {
                     let capture_hash = last_capture.as_ref().map(|(_, _, hash, _)| hash.as_str());
-                    log_route_submit_observation(RouteSubmitObservationFacts {
+                    log_route_submit_observation(RouteSubmitObservationLogFacts {
                         file,
                         pane,
                         harness,
@@ -205,7 +205,7 @@ pub(crate) fn poll_direct_pane_acceptance(
             diagnostic_path =
                 preserve_route_pane_snapshot(file, pane, harness, phase, content).path;
         }
-        log_route_submit_observation(RouteSubmitObservationFacts {
+        log_route_submit_observation(RouteSubmitObservationLogFacts {
             file,
             pane,
             harness,
@@ -222,7 +222,7 @@ pub(crate) fn poll_direct_pane_acceptance(
             proof: None,
         });
     } else if capture_failed {
-        log_route_submit_observation(RouteSubmitObservationFacts {
+        log_route_submit_observation(RouteSubmitObservationLogFacts {
             file,
             pane,
             harness,
@@ -1133,7 +1133,7 @@ pub(crate) fn dispatch_via_supervisor_ipc_with_mode(
             harness,
             proof.dispatch_stage_label(),
         );
-        log_route_submit_observation(RouteSubmitObservationFacts {
+        log_route_submit_observation(RouteSubmitObservationLogFacts {
             file,
             pane,
             harness,
@@ -1204,7 +1204,7 @@ pub(crate) fn dispatch_via_supervisor_ipc_with_mode(
             None
         }
     };
-    log_route_submit_observation(RouteSubmitObservationFacts {
+    log_route_submit_observation(RouteSubmitObservationLogFacts {
         file,
         pane,
         harness,
@@ -1572,7 +1572,7 @@ fn try_late_direct_pane_enter_resubmit_after_unproven_dispatch(
             harness,
             proof.dispatch_stage_label(),
         );
-        log_route_submit_observation(RouteSubmitObservationFacts {
+        log_route_submit_observation(RouteSubmitObservationLogFacts {
             file,
             pane,
             harness,
@@ -1709,7 +1709,7 @@ pub(crate) fn dispatch_routed_reopen_with_mode(
             harness,
             proof.dispatch_stage_label(),
         );
-        log_route_submit_observation(RouteSubmitObservationFacts {
+        log_route_submit_observation(RouteSubmitObservationLogFacts {
             file,
             pane,
             harness,
@@ -1796,7 +1796,7 @@ pub(crate) fn dispatch_routed_reopen_with_mode(
                     None
                 }
             };
-            log_route_submit_observation(RouteSubmitObservationFacts {
+            log_route_submit_observation(RouteSubmitObservationLogFacts {
                 file,
                 pane,
                 harness,

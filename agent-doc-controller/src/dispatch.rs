@@ -173,6 +173,102 @@ pub fn should_optimistically_accept_missing_cycle_ack(facts: MissingCycleAckFact
     facts.harness_binary == "codex" && facts.live_child_for_file
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteSubmitObservation {
+    Accepted,
+    TriggerStillVisible,
+    CaptureFailed,
+    DispatchStartProven,
+    AcceptedWithoutDispatchProof,
+}
+
+impl RouteSubmitObservation {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Accepted => "accepted",
+            Self::TriggerStillVisible => "trigger_still_visible",
+            Self::CaptureFailed => "capture_failed",
+            Self::DispatchStartProven => "dispatch_start_proven",
+            Self::AcceptedWithoutDispatchProof => "accepted_without_dispatch_start_proof",
+        }
+    }
+
+    pub const fn issue(self) -> Option<&'static str> {
+        match self {
+            Self::TriggerStillVisible => Some("prompt_not_submitted"),
+            Self::CaptureFailed => Some("submit_unverified_capture_failed"),
+            Self::AcceptedWithoutDispatchProof => Some("accepted_without_dispatch_start_proof"),
+            Self::Accepted | Self::DispatchStartProven => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RouteSubmitObservationFacts<'a> {
+    pub file_display: &'a str,
+    pub pane: &'a str,
+    pub harness_binary: &'a str,
+    pub phase: &'a str,
+    pub observation: RouteSubmitObservation,
+    pub trigger_visible: Option<bool>,
+    pub elapsed_ms: u128,
+    pub capture_len: Option<usize>,
+    pub capture_hash: Option<&'a str>,
+    pub proof: Option<RoutedDispatchStartProof>,
+    pub editor_attempt_id: Option<&'a str>,
+}
+
+fn append_route_submit_evidence(message: &mut String, facts: RouteSubmitObservationFacts<'_>) {
+    if let Some(trigger_visible) = facts.trigger_visible {
+        message.push_str(&format!(" trigger_visible={trigger_visible}"));
+    }
+    if let Some(capture_len) = facts.capture_len {
+        message.push_str(&format!(" capture_len={capture_len}"));
+    }
+    if let Some(capture_hash) = facts.capture_hash {
+        message.push_str(&format!(" capture_hash={capture_hash}"));
+    }
+    if let Some(proof) = facts.proof {
+        message.push_str(&format!(" proof={}", proof.dispatch_stage_label()));
+    }
+    if let Some(editor_attempt_id) = facts.editor_attempt_id {
+        message.push_str(&format!(" editor_attempt_id={editor_attempt_id}"));
+    }
+}
+
+pub fn route_submit_observation_message(facts: RouteSubmitObservationFacts<'_>) -> String {
+    let mut message = format!(
+        "route_submit_observation file={} pane={} harness={} phase={} result={} elapsed_ms={}",
+        facts.file_display,
+        facts.pane,
+        facts.harness_binary,
+        facts.phase,
+        facts.observation.label(),
+        facts.elapsed_ms
+    );
+    append_route_submit_evidence(&mut message, facts);
+    if let Some(issue) = facts.observation.issue() {
+        message.push_str(&format!(" issue={issue}"));
+    }
+    message
+}
+
+pub fn route_submit_issue_message(facts: RouteSubmitObservationFacts<'_>) -> Option<String> {
+    let issue = facts.observation.issue()?;
+    let mut message = format!(
+        "route_submit_issue file={} pane={} harness={} phase={} issue={} result={} elapsed_ms={}",
+        facts.file_display,
+        facts.pane,
+        facts.harness_binary,
+        facts.phase,
+        issue,
+        facts.observation.label(),
+        facts.elapsed_ms
+    );
+    append_route_submit_evidence(&mut message, facts);
+    Some(message)
+}
+
 pub const STARTING_ACTOR_TIMEOUT_REASON: &str = "starting_actor_timeout";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -959,6 +1055,103 @@ mod tests {
                 live_child_for_file: true,
             }
         ));
+    }
+
+    fn route_submit_facts(
+        observation: RouteSubmitObservation,
+    ) -> RouteSubmitObservationFacts<'static> {
+        RouteSubmitObservationFacts {
+            file_display: "/tmp/run-agent-doc.md",
+            pane: "%7",
+            harness_binary: "codex",
+            phase: "direct_pane_acceptance",
+            observation,
+            trigger_visible: Some(true),
+            elapsed_ms: 5123,
+            capture_len: Some(2048),
+            capture_hash: Some("abc123def456"),
+            proof: None,
+            editor_attempt_id: Some("attempt_1_2"),
+        }
+    }
+
+    #[test]
+    fn route_submit_observation_marks_prompt_not_submitted_without_prompt_text() {
+        let facts = route_submit_facts(RouteSubmitObservation::TriggerStillVisible);
+
+        let message = route_submit_observation_message(facts);
+        assert!(message.contains("route_submit_observation"), "{message}");
+        assert!(
+            message.contains("result=trigger_still_visible"),
+            "{message}"
+        );
+        assert!(message.contains("trigger_visible=true"), "{message}");
+        assert!(message.contains("issue=prompt_not_submitted"), "{message}");
+        assert!(message.contains("capture_hash=abc123def456"), "{message}");
+        assert!(
+            message.contains("editor_attempt_id=attempt_1_2"),
+            "{message}"
+        );
+        assert!(!message.contains("agent-doc "), "{message}");
+
+        let issue =
+            route_submit_issue_message(facts).expect("prompt-not-submitted should be an issue");
+        assert!(issue.contains("route_submit_issue"), "{issue}");
+        assert!(issue.contains("issue=prompt_not_submitted"), "{issue}");
+        assert!(issue.contains("result=trigger_still_visible"), "{issue}");
+        assert!(issue.contains("editor_attempt_id=attempt_1_2"), "{issue}");
+    }
+
+    #[test]
+    fn route_submit_observation_marks_dispatch_start_proof_without_issue() {
+        let facts = RouteSubmitObservationFacts {
+            phase: "dispatch_start_proof",
+            observation: RouteSubmitObservation::DispatchStartProven,
+            trigger_visible: None,
+            elapsed_ms: 800,
+            capture_len: None,
+            capture_hash: None,
+            proof: Some(RoutedDispatchStartProof::HookStateAdvanced),
+            editor_attempt_id: None,
+            ..route_submit_facts(RouteSubmitObservation::DispatchStartProven)
+        };
+
+        let message = route_submit_observation_message(facts);
+        assert!(
+            message.contains("result=dispatch_start_proven"),
+            "{message}"
+        );
+        assert!(message.contains("proof=submitted"), "{message}");
+        assert!(
+            route_submit_issue_message(facts).is_none(),
+            "dispatch-start proof should not emit an issue"
+        );
+    }
+
+    #[test]
+    fn route_submit_observation_marks_accepted_without_dispatch_proof_as_issue() {
+        let facts = RouteSubmitObservationFacts {
+            phase: "dispatch_start_proof",
+            observation: RouteSubmitObservation::AcceptedWithoutDispatchProof,
+            trigger_visible: None,
+            elapsed_ms: 10_000,
+            capture_len: None,
+            capture_hash: None,
+            proof: None,
+            editor_attempt_id: None,
+            ..route_submit_facts(RouteSubmitObservation::AcceptedWithoutDispatchProof)
+        };
+
+        let issue = route_submit_issue_message(facts)
+            .expect("required dispatch-start proof absence should be an issue");
+        assert!(
+            issue.contains("issue=accepted_without_dispatch_start_proof"),
+            "{issue}"
+        );
+        assert!(
+            issue.contains("result=accepted_without_dispatch_start_proof"),
+            "{issue}"
+        );
     }
 
     #[test]

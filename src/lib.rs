@@ -37,9 +37,8 @@ pub mod model_tier;
 pub mod project_config;
 pub mod template;
 
-// Boundary ID helpers moved to `agent_doc_core::id` (Wave 1 of #adcr extraction).
-// Re-exported here so existing `crate::new_boundary_id` etc. call sites in
-// component.rs, template.rs, boundary.rs, etc. keep compiling unchanged.
+// Boundary ID helpers live with `agent-doc-element-boundary`; they are
+// re-exported through `agent_doc_core::id` for downstream compatibility.
 pub use agent_doc_core::id::{
     BOUNDARY_ID_LEN, format_boundary_marker, new_boundary_id, new_boundary_id_with_summary,
 };

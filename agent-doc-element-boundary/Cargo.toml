@@ -11,3 +11,4 @@ name = "agent_doc_element_boundary"
 
 [dependencies]
 agent-doc-element = { path = "../agent-doc-element", version = "0.34.65" }
+uuid = { version = "1", features = ["v4"] }

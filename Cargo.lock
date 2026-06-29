@@ -72,6 +72,7 @@ dependencies = [
 name = "agent-doc-core"
 version = "0.34.65"
 dependencies = [
+ "agent-doc-element-boundary",
  "agent-doc-element-queue",
  "agent-doc-model-tier",
  "anyhow",
@@ -126,6 +127,7 @@ name = "agent-doc-element-boundary"
 version = "0.34.65"
 dependencies = [
  "agent-doc-element",
+ "uuid",
 ]
 
 [[package]]

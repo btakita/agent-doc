@@ -2169,6 +2169,7 @@ fn test_manifest_uses_publishable_dependency_contract() {
         "agent-doc-queue",
         "agent-doc-template",
         "agent-doc-turn",
+        "agent-doc-workflow",
         "agent-doc-work-graph",
     ] {
         let dependency = dependencies[crate_name].as_table().unwrap();
@@ -3419,6 +3420,70 @@ fn test_agent_doc_work_graph_is_source_agnostic_boundary() {
             "agent-doc-work-graph must stay source-agnostic and free of document, orchestration, git, editor IPC, sqlite, or tmux crates"
         );
     }
+}
+
+#[test]
+fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-workflow")),
+        "agent-doc-workflow must stay a first-class workspace crate"
+    );
+    assert!(
+        manifest_dir.join("agent-doc-workflow/src/lib.rs").exists(),
+        "cross-cutting workflow policy should live in the focused workflow crate"
+    );
+
+    let workflow_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/lib.rs")).unwrap();
+    for required in [
+        "pub enum WorkflowEvidenceKind",
+        "pub enum WorkflowProof",
+        "pub enum WorkflowMutation",
+        "pub enum WorkflowDecision",
+        "pub struct WorkflowTransition",
+        "pub fn decide_stale_supervisor",
+        "pub fn decide_queue_drainability",
+        "pub fn decide_captured_response",
+        "pub fn decide_live_buffer",
+    ] {
+        assert!(
+            workflow_source.contains(required),
+            "agent-doc-workflow must own workflow kernel policy: {required}"
+        );
+    }
+
+    let flow_mod =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/mod.rs")).unwrap();
+    assert!(
+        !flow_mod.contains("pub mod workflow_state"),
+        "orchestration must not expose a workflow_state facade"
+    );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/flow/workflow_state.rs")
+            .exists(),
+        "orchestration must not keep a workflow_state module after extraction"
+    );
+
+    let workflow_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&workflow_manifest).unwrap();
+    let dependencies = parsed
+        .get("dependencies")
+        .and_then(toml::Value::as_table)
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        dependencies.is_empty(),
+        "agent-doc-workflow should remain a pure dependency-free decision kernel"
+    );
 }
 
 #[test]

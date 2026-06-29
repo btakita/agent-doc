@@ -1,4 +1,4 @@
-//! Pure workflow-state decision kernel for cross-cutting agent-doc policy.
+//! Pure workflow decision kernel for cross-cutting agent-doc policy.
 //!
 //! This module is mirror-mode: callers still gather evidence and perform I/O in
 //! the existing route, queue, closeout, and editor-write paths. The policy here

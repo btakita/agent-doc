@@ -47,6 +47,7 @@ dependencies = [
  "agent-doc-tmux-commands",
  "agent-doc-turn",
  "agent-doc-work-graph",
+ "agent-doc-workflow",
  "agent-kit",
  "anyhow",
  "assert_cmd",
@@ -547,6 +548,10 @@ dependencies = [
  "anyhow",
  "serde",
 ]
+
+[[package]]
+name = "agent-doc-workflow"
+version = "0.34.65"
 
 [[package]]
 name = "agent-kit"

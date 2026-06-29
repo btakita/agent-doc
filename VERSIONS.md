@@ -28,6 +28,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   closeout outcomes into the focused boolean input and keeps only flow-event
   formatting.
 
+- **Cross-cutting workflow kernel moved to `agent-doc-workflow`.** The pure
+  evidence-to-decision-to-mutation/proof transition table for stale supervisors,
+  queue drainability, captured responses, and live-buffer drift now lives in a
+  dependency-free focused crate. Orchestration no longer exposes a
+  `flow::workflow_state` module.
+
 - **Append response heading normalization moved to `agent-doc-turn`.** The helper
   that strips echoed `## Assistant` / trailing `## User` headings before append
   writes now lives in `agent_doc_turn::response_text`; orchestration calls the

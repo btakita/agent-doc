@@ -17,7 +17,6 @@ pub mod routed_reopen;
 pub mod session_cycle;
 pub mod types;
 pub mod workflow_invariants;
-pub mod workflow_state;
 
 #[cfg(test)]
 mod tests {

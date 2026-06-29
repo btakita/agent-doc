@@ -275,7 +275,7 @@ fn queue_continuation_invariant() -> WorkflowInvariant {
             coverage(
                 RegressionCoverageKind::SimWorld,
                 "queue continuation remains eligible after file-IPC closeout fallback",
-                Some("cargo test -p agent-doc-orchestration workflow_state"),
+                Some("cargo test -p agent-doc-workflow"),
             ),
             coverage(
                 RegressionCoverageKind::IntegrationTest,
@@ -357,8 +357,8 @@ fn stale_supervisor_invariant() -> WorkflowInvariant {
         regression_coverage: vec![
             coverage(
                 RegressionCoverageKind::UnitTest,
-                "workflow_state stale supervisor transition rows",
-                Some("cargo test -p agent-doc-orchestration workflow_state"),
+                "agent-doc-workflow stale supervisor transition rows",
+                Some("cargo test -p agent-doc-workflow"),
             ),
             coverage(
                 RegressionCoverageKind::IntegrationTest,
@@ -632,7 +632,7 @@ fn generation_redirect_invariant() -> WorkflowInvariant {
             coverage(
                 RegressionCoverageKind::UnitTest,
                 "captured-response retry-on-current-generation transition",
-                Some("cargo test -p agent-doc-orchestration workflow_state"),
+                Some("cargo test -p agent-doc-workflow"),
             ),
             coverage(
                 RegressionCoverageKind::IntegrationTest,

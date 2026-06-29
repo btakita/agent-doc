@@ -991,38 +991,6 @@ pub(crate) fn supervisor_stale_warning_message(status: &ControllerStatus) -> Opt
     ))
 }
 
-/// `#fccsupwarn2` — pure staleness comparison for the route-owned HOST supervisor,
-/// keyed on the RUNNING binary inode rather than process start time.
-///
-/// Unlike the lazy controller, the `agent-doc start --route-owned <doc>` host that
-/// actually serves and writes a document records NO `ControllerBinaryIdentity` in its
-/// supervisor lease — only a PID and heartbeat. The earlier heuristic compared the
-/// supervisor PROCESS START TIME against the installed binary's mtime
-/// (`process_start_secs < installed_mtime_secs`). That was a permanent FALSE POSITIVE
-/// for a supervisor that hot-reloaded onto the fresh binary via in-place `execve`
-/// (`supervisor_binary_stale_self_recycled`): `execve` preserves the process start
-/// time, so a host already running the current binary still reported "started before
-/// the install" forever — driving an endless, useless `restart-supervisor` loop and
-/// misleading the agent into treating a healthy supervisor as broken.
-///
-/// Identity, not time, is the robust signal: a supervisor mapping the SAME on-disk
-/// inode as the installed binary runs current code (whether by its original launch or
-/// by an in-place re-exec); a supervisor mapping a different inode (the old, now
-/// unlinked binary) is stale. `running_exe_inode` is the inode reached through
-/// `/proc/<pid>/exe`; `installed_inode` is the inode of the installed binary path.
-/// Returns `true` only when BOTH are known and differ — fail-open (an unknown running
-/// inode reads NOT stale) so a read error can never spam a warning or block a cycle.
-/// Pure so it is unit-testable without `/proc`.
-pub(crate) fn host_supervisor_is_stale(
-    running_exe_inode: Option<u64>,
-    installed_inode: u64,
-) -> bool {
-    match running_exe_inode {
-        Some(running) => running != installed_inode,
-        None => false,
-    }
-}
-
 /// `#fccsupwarn3` — user-facing warning for a stale route-owned host supervisor.
 /// Point at the routine non-destructive refresh: idle-boundary recycle or normal
 /// file-scoped restart. (`#recycledeadlock`: the prior "avoid force/discard recovery
@@ -1047,8 +1015,9 @@ pub(crate) fn host_supervisor_stale_warning_message(supervisor_pid: u32) -> Stri
 /// route-owned host supervisor was hours stale and silently kept producing the dialogs.
 /// This check resolves the host supervisor PID for `file` via the authoritative actor
 /// binding + supervisor lease, then compares the inode it maps via `/proc/<pid>/exe`
-/// against the installed binary's inode via [`host_supervisor_is_stale`] — so a
-/// supervisor that re-exec'd onto the fresh binary in place reads fresh.
+/// against the installed binary's inode via
+/// [`agent_doc_supervisor::config::host_supervisor_is_stale`] — so a supervisor
+/// that re-exec'd onto the fresh binary in place reads fresh.
 ///
 /// Fully fail-open: a missing project root, no authoritative binding, no live supervisor
 /// PID, a dead PID, an unreadable `/proc/<pid>`, or any stat error yields `None` so this
@@ -1072,7 +1041,7 @@ pub(crate) fn host_supervisor_stale_warning_for_doc(file: &Path) -> Option<Strin
     // must read FRESH even though its process start time predates the install.
     let installed_inode = inode_of_path(&current_binary_identity().ok()?.path)?;
     let running_inode = running_exe_inode_for_pid(supervisor_pid);
-    if !host_supervisor_is_stale(running_inode, installed_inode) {
+    if !agent_doc_supervisor::config::host_supervisor_is_stale(running_inode, installed_inode) {
         return None;
     }
     Some(host_supervisor_stale_warning_message(supervisor_pid))
@@ -1291,12 +1260,6 @@ pub(crate) fn run_supervisor_auto_install(crate_root: &Path) -> Result<()> {
 const AUTO_INSTALL_MAX_ATTEMPTS: u32 = 3;
 const AUTO_INSTALL_RETRY_BACKOFF_SECS: u64 = 20;
 
-/// `#autoinstallretry` — should the auto-install retry after a failed attempt?
-/// Pure + testable: retry while attempts remain. (`attempt` is 1-based.)
-pub(crate) fn auto_install_should_retry(attempt: u32, max_attempts: u32) -> bool {
-    agent_doc_supervisor::config::auto_install_should_retry(attempt, max_attempts)
-}
-
 /// Run the auto-install sequence ONCE through `make install`. The Makefile owns
 /// the local-dev profile, incremental target dir, linker selection, and cdylib
 /// install flags. The target is idempotent, so retrying it is safe.
@@ -1333,7 +1296,7 @@ fn run_supervisor_auto_install_with_retry(
         match run_auto_install_steps_once(crate_root) {
             Ok(()) => return Ok(()),
             Err(err) => {
-                if auto_install_should_retry(attempt, max_attempts) {
+                if agent_doc_supervisor::config::auto_install_should_retry(attempt, max_attempts) {
                     eprintln!(
                         "[agent-doc] supervisor auto-install attempt {attempt}/{max_attempts} failed ({err}); retrying in {}s (#autoinstallretry — transient build state: mid-edit working tree or build-lock contention usually clears by the next attempt)",
                         backoff.as_secs()
@@ -4260,6 +4223,8 @@ mod tests {
 
     #[test]
     fn auto_install_should_retry_while_attempts_remain() {
+        use agent_doc_supervisor::config::auto_install_should_retry;
+
         // `#autoinstallretry`: retry the first attempts, give up on the last so the
         // caller can fall back to operator refresh.
         assert!(auto_install_should_retry(1, 3), "attempt 1 of 3 retries");
@@ -4668,6 +4633,8 @@ mod tests {
 
     #[test]
     fn host_supervisor_is_stale_compares_running_inode_against_installed_inode() {
+        use agent_doc_supervisor::config::host_supervisor_is_stale;
+
         // #fccsupwarn2 — staleness is identity (inode), NOT process start time. A
         // supervisor that hot-reloaded onto the fresh binary via in-place `execve`
         // preserves its process start time but remaps the inode, so it must read FRESH.
@@ -4695,6 +4662,7 @@ mod tests {
 
     #[test]
     fn queue_boundary_self_recycle_makes_stale_content_ours_refusal_ineligible() {
+        use agent_doc_supervisor::config::host_supervisor_is_stale;
         use agent_doc_supervisor::lifecycle::{SupervisorRecycleAction, supervisor_recycle_action};
 
         let installed_inode = 4242u64;

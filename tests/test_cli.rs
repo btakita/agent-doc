@@ -3291,10 +3291,21 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub(crate) fn resolve_agent_change_restart",
         "pub(crate) fn source_newer_than_installed_binary",
         "pub(crate) fn resolve_supervisor_auto_install",
+        "pub(crate) fn auto_install_should_retry",
+        "pub(crate) fn host_supervisor_is_stale",
     ] {
         assert!(
             !rpc_source.contains(forbidden_snippet),
             "project_controller::rpc must not wrap pure supervisor config helpers: {forbidden_snippet}"
+        );
+    }
+    for required_snippet in [
+        "agent_doc_supervisor::config::auto_install_should_retry",
+        "agent_doc_supervisor::config::host_supervisor_is_stale",
+    ] {
+        assert!(
+            rpc_source.contains(required_snippet),
+            "project_controller::rpc should call focused supervisor config helpers directly: {required_snippet}"
         );
     }
 

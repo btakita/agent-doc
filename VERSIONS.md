@@ -10,6 +10,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Realtime write/reconnect policy moved to `agent-doc-document-realtime`.** Visible-write idle admission, full-content source proof/replacement rejection, reconnect-buffer reconciliation, and editorless disk fallback decisions now live in `agent_doc_document_realtime::write_policy`. Orchestration keeps only sidecar/editor/git/file adapters and flow-event formatting, and callers import the focused realtime API directly rather than using orchestration facades.
 
+- **Template patchback policy moved to `agent-doc-template`.** Patchback shape vocabulary/classification, marker/component counting, pure parse-plan construction, and the orchestrate patchback contract now live in `agent_doc_template::patchback`. `flow::document_mutation` keeps only file-scoped ops-log and FlowEvent adaptation, while write and orchestration-batch callers use the focused template API directly.
+
 - **Lease TTL freshness moved to `agent-doc-lease`.** Drain-owner, plugin-owner, queue-edit-owner, recycle-yield, and recycle-inflight sidecars now call `agent_doc_lease::timestamp_is_fresh` directly instead of each re-owning the same saturating timestamp policy. The domain modules keep only lease/request bodies, paths, TTL env knobs, and side-effect adapters, with boundary coverage preventing local `*_is_fresh` wrappers from returning.
 
 - **Managed capability-proof retry policy moved to `agent-doc-turn-executor`.** The proof retry budget, probe timeout defaults, frontmatter/config precedence, and exponential backoff decision now live in `agent_doc_turn_executor::capability_proof`. The supervisor start path gathers frontmatter/config facts and calls the focused API directly, while `agent::mod` keeps only backend resolution/runtime helpers and no longer owns the policy or retry decision.
@@ -2197,9 +2199,10 @@ install --harness codex` writes `[mcp_servers.agent-doc]` into
   `0.2.123`.
 
 - **FlowCore owns the next closeout, mutation, and session-cycle slices.**
-  `flow::document_mutation` now parses and classifies template patchback shapes
+  `agent_doc_template::patchback` now parses and classifies template patchback shapes
   before visible writes across template, stream, IPC, and repair replay paths,
-  including orchestrate-origin plain-response rejection. `flow::closeout` owns
+  including orchestrate-origin plain-response rejection; `flow::document_mutation`
+  emits the file-scoped FlowEvent/ops-log adapter. `flow::closeout` owns
   the strict terminal transaction for commit, snapshot convergence, parent
   gitlink verification, session-check, and fallback-patch cleanup. `preflight`
   and `plan` now share `flow::session_cycle` prompt-target and finalize-command

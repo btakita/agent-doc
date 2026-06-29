@@ -2816,16 +2816,6 @@ fn is_append_mode_component(name: &str) -> bool {
 mod normalize;
 pub use normalize::*;
 
-fn enforce_orchestrate_template_patch_contract(
-    origin: Option<&str>,
-    patches: &[agent_doc_template::PatchBlock],
-    unmatched: &str,
-) -> Result<()> {
-    crate::flow::document_mutation::enforce_orchestrate_patchback_contract(
-        origin, patches, unmatched,
-    )
-}
-
 /// Lift `agent:pending` out of `agent:exchange` if nested.
 ///
 /// After patch application, pending may end up nested inside exchange due to

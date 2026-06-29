@@ -372,7 +372,7 @@ pub fn try_ipc(
                 effective_unmatched_socket.len(),
                 baseline.map(str::len).unwrap_or(0),
                 normalize_prefix_lines.map(|lines| lines.len()).unwrap_or(0),
-                patchback_marker_count_outside_code(unmatched)
+                agent_doc_template::patchback::patchback_marker_count_outside_code(unmatched)
             ),
         );
         // Pre-write fallback patch file before socket send. If socket delivery

@@ -1322,7 +1322,8 @@ do #spfxnorm. spec-test-build-install-commit-push
 
 #[cfg(test)]
 mod verify_sidecar_normalization_tests {
-    use super::{enforce_orchestrate_template_patch_contract, verify_sidecar_normalization};
+    use super::verify_sidecar_normalization;
+    use agent_doc_template::patchback::enforce_orchestrate_patchback_contract;
 
     #[test]
     fn empty_targets_always_passes() {
@@ -1388,15 +1389,15 @@ mod verify_sidecar_normalization_tests {
     #[test]
     fn orchestrate_contract_rejects_non_exchange_patch() {
         let patches = vec![agent_doc_template::PatchBlock::new("status", "updated")];
-        let err = enforce_orchestrate_template_patch_contract(Some("orchestrate"), &patches, "")
-            .unwrap_err();
+        let err =
+            enforce_orchestrate_patchback_contract(Some("orchestrate"), &patches, "").unwrap_err();
         assert!(err.to_string().contains("patch:exchange"));
     }
 
     #[test]
     fn orchestrate_contract_rejects_unmatched_transcript() {
         let patches = vec![agent_doc_template::PatchBlock::new("exchange", "ok")];
-        let err = enforce_orchestrate_template_patch_contract(
+        let err = enforce_orchestrate_patchback_contract(
             Some("orchestrate"),
             &patches,
             "### Re: raw transcript — gpt-5",
@@ -1408,13 +1409,13 @@ mod verify_sidecar_normalization_tests {
     #[test]
     fn orchestrate_contract_allows_exchange_only_patch() {
         let patches = vec![agent_doc_template::PatchBlock::new("exchange", "ok")];
-        enforce_orchestrate_template_patch_contract(Some("orchestrate"), &patches, "")
+        enforce_orchestrate_patchback_contract(Some("orchestrate"), &patches, "")
             .expect("exchange-only orchestrate patch should be accepted");
     }
 
     #[test]
     fn orchestrate_contract_allows_clean_plain_response() {
-        enforce_orchestrate_template_patch_contract(
+        enforce_orchestrate_patchback_contract(
             Some("orchestrate"),
             &[],
             "### Re: orchplainresp — gpt-5\n\nImplemented and verified.",
@@ -1428,13 +1429,13 @@ mod verify_sidecar_normalization_tests {
             agent_doc_template::PatchBlock::new("exchange", "response"),
             agent_doc_template::PatchBlock::new("status", "updated"),
         ];
-        enforce_orchestrate_template_patch_contract(Some("orchestrate"), &patches, "")
+        enforce_orchestrate_patchback_contract(Some("orchestrate"), &patches, "")
             .expect("explicit multi-component patch should be accepted");
     }
 
     #[test]
     fn orchestrate_contract_rejects_plain_transcript_prompt_lines() {
-        let err = enforce_orchestrate_template_patch_contract(
+        let err = enforce_orchestrate_patchback_contract(
             Some("orchestrate"),
             &[],
             "### Re: topic — gpt-5\n\nDone.\n❯ do #next",
@@ -1445,7 +1446,7 @@ mod verify_sidecar_normalization_tests {
 
     #[test]
     fn orchestrate_contract_rejects_plain_transcript_headings() {
-        let err = enforce_orchestrate_template_patch_contract(
+        let err = enforce_orchestrate_patchback_contract(
             Some("orchestrate"),
             &[],
             "## User\nrequest\n\n## Assistant\nresponse",
@@ -1456,7 +1457,7 @@ mod verify_sidecar_normalization_tests {
 
     #[test]
     fn orchestrate_contract_rejects_plain_full_document_dump() {
-        let err = enforce_orchestrate_template_patch_contract(
+        let err = enforce_orchestrate_patchback_contract(
             Some("orchestrate"),
             &[],
             "<!-- agent:exchange -->\n### Re: topic — gpt-5\n<!-- /agent:exchange -->",
@@ -1467,7 +1468,7 @@ mod verify_sidecar_normalization_tests {
 
     #[test]
     fn orchestrate_contract_rejects_sanitized_full_document_dump() {
-        let err = enforce_orchestrate_template_patch_contract(
+        let err = enforce_orchestrate_patchback_contract(
             Some("orchestrate"),
             &[],
             "&lt;!-- agent:exchange --&gt;\n### Re: topic — gpt-5\n&lt;!-- /agent:exchange --&gt;",
@@ -1478,7 +1479,7 @@ mod verify_sidecar_normalization_tests {
 
     #[test]
     fn orchestrate_contract_rejects_multiple_plain_responses() {
-        let err = enforce_orchestrate_template_patch_contract(
+        let err = enforce_orchestrate_patchback_contract(
             Some("orchestrate"),
             &[],
             "### Re: first — gpt-5\n\nOne.\n\n### Re: second — gpt-5\n\nTwo.",

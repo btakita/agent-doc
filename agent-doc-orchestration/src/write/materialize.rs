@@ -716,10 +716,6 @@ pub(crate) fn sanitize_template_patchback_response_for_write(response: &mut Stri
     }
 }
 
-pub(crate) fn patchback_marker_count_outside_code(response: &str) -> usize {
-    crate::flow::document_mutation::patchback_marker_count_outside_code(response)
-}
-
 #[cfg(test)]
 mod pending_patch_normalization_tests {
     use super::normalize_backlog_patch_response;

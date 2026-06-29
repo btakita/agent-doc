@@ -1,5 +1,5 @@
-use super::document_mutation::{self, OrchestratePatchbackDecision};
 use super::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
+use agent_doc_template::patchback::{self, OrchestratePatchbackDecision};
 use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -180,7 +180,7 @@ pub fn normalize_child_template_response(response: String) -> ChildPatchbackNorm
         };
     };
     if patches.is_empty() && !unmatched.trim().is_empty() {
-        if document_mutation::classify_orchestrate_plain_response(unmatched.trim()).is_accepted() {
+        if patchback::classify_orchestrate_plain_response(unmatched.trim()).is_accepted() {
             return ChildPatchbackNormalization {
                 response: format!(
                     "<!-- patch:exchange -->\n{}\n<!-- /patch:exchange -->\n",
@@ -196,7 +196,7 @@ pub fn normalize_child_template_response(response: String) -> ChildPatchbackNorm
     }
 
     let decision = if matches!(
-        document_mutation::classify_orchestrate_patchback(&patches, &unmatched),
+        patchback::classify_orchestrate_patchback(&patches, &unmatched),
         OrchestratePatchbackDecision::AcceptExplicitPatch
     ) {
         ChildPatchbackNormalizationDecision::KeptExplicitPatch

@@ -139,34 +139,6 @@ impl DocumentMutationKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum PatchbackShape {
-    ValidPatch,
-    PlainResponse,
-    MalformedPatch,
-    TranscriptDump,
-    MixedOutput,
-    /// Raw template form: stdin carries literal `<!-- agent:NAME -->` /
-    /// `<!-- /agent:NAME -->` component blocks instead of supported
-    /// `<!-- patch:* -->` patch blocks. Committing these as plain text escapes
-    /// the markers into the live exchange (`#closeout-repair-churn`), so this
-    /// shape must fail closed before commit.
-    EscapedComponentMarkers,
-}
-
-impl PatchbackShape {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::ValidPatch => "valid_patch",
-            Self::PlainResponse => "plain_response",
-            Self::MalformedPatch => "malformed_patch",
-            Self::TranscriptDump => "transcript_dump",
-            Self::MixedOutput => "mixed_output",
-            Self::EscapedComponentMarkers => "escaped_component_markers",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum DispatchProof {
     AcceptedOnly,
     DispatchStarted,

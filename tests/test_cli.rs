@@ -5357,6 +5357,102 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
 }
 
 #[test]
+fn test_agent_doc_template_owns_patchback_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let template_patchback =
+        fs::read_to_string(manifest_dir.join("agent-doc-template/src/patchback.rs")).unwrap();
+    for required_snippet in [
+        "pub enum PatchbackShape",
+        "pub struct PatchbackShapeFacts",
+        "pub fn classify_patchback_shape",
+        "pub fn raw_component_block_count",
+        "pub fn patchback_marker_count_outside_code",
+        "pub struct TemplatePatchbackPlan",
+        "pub fn parse_template_patchback_plan",
+        "pub enum OrchestratePatchbackRejectReason",
+        "pub fn classify_orchestrate_patchback",
+        "pub fn classify_orchestrate_plain_response",
+        "pub fn enforce_orchestrate_patchback_contract",
+    ] {
+        assert!(
+            template_patchback.contains(required_snippet),
+            "agent-doc-template must own template patchback policy: {required_snippet}"
+        );
+    }
+
+    let template_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-template/src/lib.rs")).unwrap();
+    assert!(
+        template_lib.contains("pub mod patchback;"),
+        "agent-doc-template should expose patchback policy through its owning module"
+    );
+    assert!(
+        !template_lib.contains("pub use patchback"),
+        "agent-doc-template should not add a patchback root facade"
+    );
+
+    let flow_types =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/types.rs")).unwrap();
+    let flow_document_mutation = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/flow/document_mutation.rs"),
+    )
+    .unwrap();
+    let write_materialize =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/materialize.rs"))
+            .unwrap();
+    let orchestration_sources = [
+        (
+            "agent-doc-orchestration/src/flow/types.rs",
+            flow_types.as_str(),
+        ),
+        (
+            "agent-doc-orchestration/src/flow/document_mutation.rs",
+            flow_document_mutation.as_str(),
+        ),
+        (
+            "agent-doc-orchestration/src/write/materialize.rs",
+            write_materialize.as_str(),
+        ),
+    ];
+    for (source, content) in orchestration_sources {
+        for forbidden_snippet in [
+            "pub enum PatchbackShape",
+            "pub struct PatchbackShapeFacts",
+            "pub fn classify_patchback_shape",
+            "pub fn raw_component_block_count",
+            "pub fn patchback_marker_count_outside_code",
+            "pub struct TemplatePatchbackPlan",
+            "pub enum OrchestratePatchbackRejectReason",
+            "pub fn classify_orchestrate_patchback",
+            "pub fn classify_orchestrate_plain_response",
+            "pub fn enforce_orchestrate_patchback_contract",
+        ] {
+            assert!(
+                !content.contains(forbidden_snippet),
+                "orchestration must not re-own or facade template patchback policy in {source}: {forbidden_snippet}"
+            );
+        }
+    }
+
+    let orchestration_batch = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/flow/orchestration_batch.rs"),
+    )
+    .unwrap();
+    assert!(
+        orchestration_batch.contains("agent_doc_template::patchback"),
+        "orchestration batch normalization should call the focused template patchback policy directly"
+    );
+    let write_run_entry =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/run_entry.rs"))
+            .unwrap();
+    assert!(
+        write_run_entry
+            .contains("agent_doc_template::patchback::enforce_orchestrate_patchback_contract"),
+        "write run entry should enforce orchestrate patchback contracts through the focused template API"
+    );
+}
+
+#[test]
 fn test_codex_plugin_manifest_omits_invalid_claude_skill_path() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest_path = manifest_dir.join(".codex-plugin/plugin.json");

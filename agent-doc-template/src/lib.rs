@@ -9,6 +9,7 @@ pub mod id {
 
 mod template;
 
+pub mod patchback;
 pub mod replay_guard;
 
 pub use template::*;

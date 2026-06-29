@@ -219,7 +219,11 @@ pub fn run_template(
     // Enforcement: reject replace:pending (and deprecated patch:pending) blocks unless allowed.
     enforce_no_replace_pending(&patches, flags.allow_replace_pending)?;
     enforce_no_destructive_todo_patch(&current_content, &patches)?;
-    enforce_orchestrate_template_patch_contract(origin, &patches, &unmatched)?;
+    if let Err(reason) = agent_doc_template::patchback::enforce_orchestrate_patchback_contract(
+        origin, &patches, &unmatched,
+    ) {
+        anyhow::bail!("{}", reason.message());
+    }
 
     if patches.is_empty() && unmatched.trim().is_empty() {
         anyhow::bail!("no patch blocks or content found in response");
@@ -517,7 +521,11 @@ pub fn run_stream(
     // Enforcement: reject replace:pending (and deprecated patch:pending) blocks unless allowed.
     enforce_no_replace_pending(&patches, flags.allow_replace_pending)?;
     enforce_no_destructive_todo_patch(&current_content, &patches)?;
-    enforce_orchestrate_template_patch_contract(origin, &patches, &unmatched)?;
+    if let Err(reason) = agent_doc_template::patchback::enforce_orchestrate_patchback_contract(
+        origin, &patches, &unmatched,
+    ) {
+        anyhow::bail!("{}", reason.message());
+    }
 
     if patches.is_empty() && unmatched.trim().is_empty() {
         anyhow::bail!("no patch blocks or content found in response");

@@ -44,10 +44,10 @@ pub(crate) fn check_blocked_closeout_followup_guard(
 
     let text = response_text_for_guards(&capture.response_body);
     let lower = text.to_ascii_lowercase();
-    if !text_has_blocked_future_action_signal(&lower) {
+    if !agent_doc_turn::closeout_signal::text_has_blocked_future_action_signal(&lower) {
         return Ok(GuardResult::None);
     }
-    if text_has_no_followup_justification(&lower) {
+    if agent_doc_turn::closeout_signal::text_has_no_followup_justification(&lower) {
         return Ok(GuardResult::None);
     }
 
@@ -86,7 +86,7 @@ pub(crate) fn check_blocked_closeout_followup_guard(
         }
         // Tie the blocked signal to the directed id (same paragraph) so an
         // incidental blocked phrase about unrelated work does not fire.
-        if !blocked_signal_tied_to_id(&text, &id) {
+        if !agent_doc_turn::closeout_signal::blocked_signal_tied_to_id(&text, &id) {
             continue;
         }
         if !unresolved.iter().any(|existing| existing == &id) {
@@ -230,8 +230,8 @@ pub(crate) fn check_gated_phase_split_guard(
                 continue;
             }
             let body = format!("{} {}", item.text, item.continuation);
-            if body_enumerates_multiple_gated_phases(&body)
-                && !body_already_split_into_child_ids(&body, &id)
+            if agent_doc_turn::closeout_signal::body_enumerates_multiple_gated_phases(&body)
+                && !agent_doc_turn::closeout_signal::body_already_split_into_child_ids(&body, &id)
                 && !flagged.iter().any(|existing| existing == &id)
             {
                 flagged.push(id);
@@ -271,61 +271,6 @@ pub(crate) fn check_gated_phase_split_guard(
             add_after_hint
         ),
     ]))
-}
-
-/// True when a kept-open item body enumerates multiple gated/remaining phases:
-/// the word "phase" appears, at least two short parenthesized phase markers
-/// (`(1)`, `(2a)`, `(2b)`, `(3)`, ...) are present, and a gating/remaining
-/// signal frames them as deferred work.
-pub(crate) fn body_enumerates_multiple_gated_phases(body: &str) -> bool {
-    let lower = body.to_ascii_lowercase();
-    if !lower.contains("phase") {
-        return false;
-    }
-    let gating = [
-        "gated",
-        "remaining",
-        "live-verify",
-        "live verify",
-        "awaiting",
-        "still needs",
-        "not yet",
-    ];
-    if !gating.iter().any(|signal| lower.contains(signal)) {
-        return false;
-    }
-    count_phase_markers(body) >= 2
-}
-
-/// Count distinct short parenthesized phase markers like `(1)`, `(2a)`, `(2b)`,
-/// `(3)`. Requires 1-2 digits optionally followed by 1-2 ASCII lowercase letters
-/// so dates and commit hashes (`(2026-05-31)`, `(submodule 407b0825)`) are not
-/// mistaken for phase markers.
-pub(crate) fn count_phase_markers(body: &str) -> usize {
-    static MARKER: std::sync::LazyLock<regex::Regex> =
-        std::sync::LazyLock::new(|| regex::Regex::new(r"\((\d{1,2}[a-z]{0,2})\)").unwrap());
-    let mut seen = std::collections::HashSet::new();
-    for cap in MARKER.captures_iter(body) {
-        seen.insert(cap[1].to_string());
-    }
-    seen.len()
-}
-
-/// True when the body already references at least two discrete child ids other
-/// than its own (and other than the ubiquitous `#agent-doc-bug` preset tag) —
-/// i.e. the phases were already broken out into independently trackable ids, so
-/// the split advisory should stay quiet.
-pub(crate) fn body_already_split_into_child_ids(body: &str, own_id: &str) -> bool {
-    static ID_REF: std::sync::LazyLock<regex::Regex> =
-        std::sync::LazyLock::new(|| regex::Regex::new(r"#([a-z0-9][a-z0-9-]*)").unwrap());
-    let mut others = std::collections::HashSet::new();
-    for cap in ID_REF.captures_iter(body) {
-        let id = agent_doc_element_backlog::backlog::normalize_pending_id(&cap[1]);
-        if !id.is_empty() && id != own_id && id != "agent-doc-bug" {
-            others.insert(id);
-        }
-    }
-    others.len() >= 2
 }
 
 /// Substep-completion phrases that evidence partial progress in a queue audit.

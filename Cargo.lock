@@ -496,6 +496,7 @@ dependencies = [
  "agent-doc-element-backlog",
  "lazily 0.13.1",
  "proptest",
+ "regex",
  "serde",
  "serde_json",
 ]

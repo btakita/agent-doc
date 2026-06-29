@@ -2375,6 +2375,12 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub fn directive_response_source",
         "pub fn content_has_re_heading_for_id",
         "pub fn reaped_directive_ids_without_response",
+        "pub fn text_has_blocked_future_action_signal",
+        "pub fn text_has_no_followup_justification",
+        "pub fn blocked_signal_tied_to_id",
+        "pub fn body_enumerates_multiple_gated_phases",
+        "pub fn count_phase_markers",
+        "pub fn body_already_split_into_child_ids",
         "pub fn response_clearly_completes_pending_id",
         "pub fn response_heading_resolves_to_pending_id",
         "pub fn explicit_done_signal_ids",
@@ -2419,6 +2425,51 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         assert!(
             queue_head_guards.contains(required),
             "queue_head_guards should call focused closeout signal policy directly: {required}"
+        );
+    }
+
+    let closeout_guards = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/closeout_guards.rs"),
+    )
+    .unwrap();
+    for forbidden in [
+        "pub(crate) fn body_enumerates_multiple_gated_phases",
+        "pub(crate) fn count_phase_markers",
+        "pub(crate) fn body_already_split_into_child_ids",
+    ] {
+        assert!(
+            !closeout_guards.contains(forbidden),
+            "closeout_guards must not re-own gated-phase closeout policy: {forbidden}"
+        );
+    }
+    for required in [
+        "agent_doc_turn::closeout_signal::text_has_blocked_future_action_signal",
+        "agent_doc_turn::closeout_signal::text_has_no_followup_justification",
+        "agent_doc_turn::closeout_signal::blocked_signal_tied_to_id",
+        "agent_doc_turn::closeout_signal::body_enumerates_multiple_gated_phases",
+        "agent_doc_turn::closeout_signal::body_already_split_into_child_ids",
+    ] {
+        assert!(
+            closeout_guards.contains(required),
+            "closeout_guards should call focused closeout signal policy directly: {required}"
+        );
+    }
+
+    let provenance_guards = fs::read_to_string(
+        manifest_dir
+            .join("agent-doc-orchestration/src/session_check/queue_head_provenance_guards.rs"),
+    )
+    .unwrap();
+    for forbidden in [
+        "pub(crate) const BLOCKED_FUTURE_ACTION_PHRASES",
+        "pub(crate) const NO_FOLLOWUP_JUSTIFICATION_PHRASES",
+        "pub(crate) fn text_has_blocked_future_action_signal",
+        "pub(crate) fn text_has_no_followup_justification",
+        "pub(crate) fn blocked_signal_tied_to_id",
+    ] {
+        assert!(
+            !provenance_guards.contains(forbidden),
+            "queue_head_provenance_guards must not re-own blocked-followup closeout policy: {forbidden}"
         );
     }
 

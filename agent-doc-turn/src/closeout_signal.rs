@@ -4,6 +4,126 @@
 //! turn policy that decides whether response text completes a tracked-work id
 //! and whether prompt text carries explicit done/resolved signals.
 
+/// Tight list of "blocked / still needs future action" phrases that, combined
+/// with a directed id gated this cycle, indicate a closeout reported more agent
+/// execution is still needed. Kept narrow so ordinary review prose does not
+/// trip closeout guards.
+pub const BLOCKED_FUTURE_ACTION_PHRASES: &[&str] = &[
+    "remains blocked",
+    "still blocked",
+    "is blocked",
+    "are blocked",
+    "blocked on",
+    "blocked by",
+    "blocked:",
+    "blocked until",
+    "next step to complete",
+    "next steps to complete",
+    "steps to complete",
+    "cannot complete until",
+    "can't complete until",
+    "still needs to",
+    "still need to",
+    "must remove",
+    "must delete",
+    "must expire",
+    "needs to be removed",
+    "no live cutover",
+    "waiting on approval",
+    "awaiting approval",
+    "needs approval before",
+    "requires approval before",
+    "deliberately delete",
+    "get approval",
+];
+
+/// Explicit "no follow-up needed" justifications that satisfy a blocked-shape
+/// closeout for a genuinely review-only gate.
+pub const NO_FOLLOWUP_JUSTIFICATION_PHRASES: &[&str] = &[
+    "no additional backlog follow-up",
+    "no additional follow-up is needed",
+    "no follow-up backlog",
+    "no further backlog",
+    "no actionable backlog follow-up",
+    "no remaining backlog work",
+];
+
+pub fn text_has_blocked_future_action_signal(lower: &str) -> bool {
+    BLOCKED_FUTURE_ACTION_PHRASES
+        .iter()
+        .any(|phrase| lower.contains(phrase))
+}
+
+pub fn text_has_no_followup_justification(lower: &str) -> bool {
+    NO_FOLLOWUP_JUSTIFICATION_PHRASES
+        .iter()
+        .any(|phrase| lower.contains(phrase))
+}
+
+/// True when a blocked / still-needed-work phrase co-occurs with `#id` inside
+/// the same paragraph of the response. Paragraph scoping keeps incidental
+/// blocked phrases about unrelated work from tying the signal to the directed id.
+pub fn blocked_signal_tied_to_id(text: &str, id: &str) -> bool {
+    let needle = format!("#{}", id.to_ascii_lowercase());
+    text.split("\n\n").any(|paragraph| {
+        let lower = paragraph.to_ascii_lowercase();
+        lower.contains(&needle) && text_has_blocked_future_action_signal(&lower)
+    })
+}
+
+/// True when a kept-open item body enumerates multiple gated/remaining phases:
+/// the word "phase" appears, at least two short parenthesized phase markers
+/// (`(1)`, `(2a)`, `(2b)`, `(3)`, ...) are present, and a gating/remaining
+/// signal frames them as deferred work.
+pub fn body_enumerates_multiple_gated_phases(body: &str) -> bool {
+    let lower = body.to_ascii_lowercase();
+    if !lower.contains("phase") {
+        return false;
+    }
+    let gating = [
+        "gated",
+        "remaining",
+        "live-verify",
+        "live verify",
+        "awaiting",
+        "still needs",
+        "not yet",
+    ];
+    if !gating.iter().any(|signal| lower.contains(signal)) {
+        return false;
+    }
+    count_phase_markers(body) >= 2
+}
+
+/// Count distinct short parenthesized phase markers like `(1)`, `(2a)`, `(2b)`,
+/// `(3)`. Requires 1-2 digits optionally followed by 1-2 ASCII lowercase letters
+/// so dates and commit hashes (`(2026-05-31)`, `(submodule 407b0825)`) are not
+/// mistaken for phase markers.
+pub fn count_phase_markers(body: &str) -> usize {
+    static MARKER: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"\((\d{1,2}[a-z]{0,2})\)").unwrap());
+    let mut seen = std::collections::HashSet::new();
+    for cap in MARKER.captures_iter(body) {
+        seen.insert(cap[1].to_string());
+    }
+    seen.len()
+}
+
+/// True when the body already references at least two discrete child ids other
+/// than its own (and other than the ubiquitous `#agent-doc-bug` preset tag).
+pub fn body_already_split_into_child_ids(body: &str, own_id: &str) -> bool {
+    static ID_REF: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"#([a-z0-9][a-z0-9-]*)").unwrap());
+    let mut others = std::collections::HashSet::new();
+    for cap in ID_REF.captures_iter(body) {
+        let id = agent_doc_element_backlog::backlog::normalize_pending_id(&cap[1]);
+        if !id.is_empty() && id != own_id && id != "agent-doc-bug" {
+            others.insert(id);
+        }
+    }
+    others.len() >= 2
+}
+
 /// Where a directive id's response heading materialized.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ResponseSource {
@@ -344,6 +464,40 @@ mod tests {
             Some(ResponseSource::Archive)
         );
         assert!(directive_response_source(unrelated, &archives, "lost").is_none());
+    }
+
+    #[test]
+    fn blocked_followup_policy_ties_future_action_to_directed_id() {
+        assert!(text_has_blocked_future_action_signal(
+            "merchant center is blocked on approval"
+        ));
+        assert!(text_has_no_followup_justification(
+            "no additional backlog follow-up is needed because rollout is review-only"
+        ));
+        assert!(blocked_signal_tied_to_id(
+            "### Re: do #abc\n\n#abc remains blocked on approval.",
+            "abc"
+        ));
+        assert!(!blocked_signal_tied_to_id(
+            "### Re: do #abc\n\n#other remains blocked on approval.",
+            "abc"
+        ));
+    }
+
+    #[test]
+    fn gated_phase_split_policy_detects_multi_phase_unsplit_body() {
+        let body =
+            "Remaining gated phases: phase (2b) live-verify the pane, phase (3) ship the rollout.";
+        assert!(body_enumerates_multiple_gated_phases(body));
+        assert_eq!(count_phase_markers(body), 2);
+        assert!(!body_already_split_into_child_ids(body, "parentfix"));
+    }
+
+    #[test]
+    fn gated_phase_split_policy_accepts_child_id_breakout() {
+        let body = "Remaining gated phases tracked as children: phase (2b) -> #childb, phase (3) -> #childc. Plan: tasks/x.md";
+        assert!(body_enumerates_multiple_gated_phases(body));
+        assert!(body_already_split_into_child_ids(body, "parentfix"));
     }
 
     #[test]

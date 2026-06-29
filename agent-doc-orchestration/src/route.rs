@@ -185,7 +185,8 @@ use crate::supervisor::ipc::IpcMethod;
 use agent_doc_controller::dispatch::{
     AuthoritativeRuntimeFacts, DirectPaneSubmitStatus as CommandDispatchStatus, DispatchActorState,
     DispatchDrainRetryDecision, DispatchRuntimeHealth, DispatchStartProofDecision,
-    DispatchStartProofFacts, RetryBudget, RoutedDispatchStartProof,
+    DispatchStartProofFacts, RetryBudget, RoutedDispatchStartProof, STARTING_ACTOR_TIMEOUT_REASON,
+    StartingTimeoutActorFacts, actor_blocked_by_starting_timeout,
     authoritative_actor_dispatch_guard_reason as controller_authoritative_actor_dispatch_guard_reason,
     authoritative_actor_ready_retry_budget, classify_dispatch_start_proof,
     direct_pane_submit_acceptance_budget, direct_pane_submit_acceptance_timeout,
@@ -196,6 +197,7 @@ use agent_doc_controller::dispatch::{
     dispatch_only_starting_pane_ready_timeout_for_binary,
     dispatch_only_starting_pane_recovery_retry_budget,
     dispatch_only_starting_pane_recovery_timeout_for_binary,
+    starting_timeout_blocked_actor_can_recover,
 };
 use agent_doc_frontmatter::frontmatter;
 use tmux_router::Tmux;
@@ -387,18 +389,6 @@ impl AuthoritativeActorDispatchTarget {
         }
         self.runtime.actor_state.unwrap_or(self.record.state)
     }
-}
-
-fn actor_blocked_by_starting_timeout(actor: &AuthoritativeActorDispatchTarget) -> bool {
-    actor.record.state == agent_doc_sqlite::state_store::ActorState::Blocked
-        && actor.record.last_transition.reason == "starting_actor_timeout"
-}
-
-fn starting_timeout_blocked_actor_can_recover(
-    actor: &AuthoritativeActorDispatchTarget,
-    prompt_ready: bool,
-) -> bool {
-    actor_blocked_by_starting_timeout(actor) && prompt_ready
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3814,7 +3804,11 @@ fn route_via_authoritative_actor(
         }
     }
 
-    if actor_blocked_by_starting_timeout(&actor) {
+    if actor_blocked_by_starting_timeout(StartingTimeoutActorFacts {
+        actor_blocked: actor.record.state == agent_doc_sqlite::state_store::ActorState::Blocked,
+        last_transition_reason: &actor.record.last_transition.reason,
+        prompt_ready: false,
+    }) {
         if let Some(recovered) = recover_starting_timeout_blocked_actor_if_dispatch_ready(
             tmux, file, file_path, &actor, harness,
         ) {
@@ -8143,7 +8137,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
     fn authoritative_actor_state_preserves_terminal_record_over_runtime_starting() {
         let mut blocked_record = test_actor_record("%42");
         blocked_record.state = agent_doc_sqlite::state_store::ActorState::Blocked;
-        blocked_record.last_transition.reason = "starting_actor_timeout".to_string();
+        blocked_record.last_transition.reason = STARTING_ACTOR_TIMEOUT_REASON.to_string();
         let blocked_actor = AuthoritativeActorDispatchTarget {
             record: blocked_record,
             runtime: SupervisorRuntime {
@@ -8157,7 +8151,12 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
             "a route-owned blocked record should remain a durable terminal gate even if stale supervisor IPC still reports starting"
         );
         assert!(
-            actor_blocked_by_starting_timeout(&blocked_actor),
+            actor_blocked_by_starting_timeout(StartingTimeoutActorFacts {
+                actor_blocked: blocked_actor.record.state
+                    == agent_doc_sqlite::state_store::ActorState::Blocked,
+                last_transition_reason: &blocked_actor.record.last_transition.reason,
+                prompt_ready: false,
+            }),
             "a route-owned starting timeout should be identifiable before route re-registers the stale pane"
         );
 
@@ -8180,7 +8179,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
     fn starting_timeout_blocked_actor_recovery_requires_prompt_ready_proof() {
         let mut blocked_record = test_actor_record("%42");
         blocked_record.state = agent_doc_sqlite::state_store::ActorState::Blocked;
-        blocked_record.last_transition.reason = "starting_actor_timeout".to_string();
+        blocked_record.last_transition.reason = STARTING_ACTOR_TIMEOUT_REASON.to_string();
         let blocked_actor = AuthoritativeActorDispatchTarget {
             record: blocked_record,
             runtime: SupervisorRuntime {
@@ -8190,15 +8189,31 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
         };
 
         assert!(
-            starting_timeout_blocked_actor_can_recover(&blocked_actor, true),
+            starting_timeout_blocked_actor_can_recover(StartingTimeoutActorFacts {
+                actor_blocked: blocked_actor.record.state
+                    == agent_doc_sqlite::state_store::ActorState::Blocked,
+                last_transition_reason: &blocked_actor.record.last_transition.reason,
+                prompt_ready: true,
+            }),
             "a route-owned starting timeout may recover only after direct dispatch-ready prompt proof"
         );
         assert!(
-            !starting_timeout_blocked_actor_can_recover(&blocked_actor, false),
+            !starting_timeout_blocked_actor_can_recover(StartingTimeoutActorFacts {
+                actor_blocked: blocked_actor.record.state
+                    == agent_doc_sqlite::state_store::ActorState::Blocked,
+                last_transition_reason: &blocked_actor.record.last_transition.reason,
+                prompt_ready: false,
+            }),
             "route must not clear a durable starting timeout without prompt proof"
         );
+        let degraded_actor = test_degraded_actor("%43");
         assert!(
-            !starting_timeout_blocked_actor_can_recover(&test_degraded_actor("%43"), true),
+            !starting_timeout_blocked_actor_can_recover(StartingTimeoutActorFacts {
+                actor_blocked: degraded_actor.record.state
+                    == agent_doc_sqlite::state_store::ActorState::Blocked,
+                last_transition_reason: &degraded_actor.record.last_transition.reason,
+                prompt_ready: true,
+            }),
             "ordinary degraded actors must not use the starting-timeout recovery path"
         );
     }

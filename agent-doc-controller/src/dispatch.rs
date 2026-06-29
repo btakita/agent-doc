@@ -82,6 +82,23 @@ pub enum DispatchActorState {
     Other,
 }
 
+pub const STARTING_ACTOR_TIMEOUT_REASON: &str = "starting_actor_timeout";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StartingTimeoutActorFacts<'a> {
+    pub actor_blocked: bool,
+    pub last_transition_reason: &'a str,
+    pub prompt_ready: bool,
+}
+
+pub fn actor_blocked_by_starting_timeout(facts: StartingTimeoutActorFacts<'_>) -> bool {
+    facts.actor_blocked && facts.last_transition_reason == STARTING_ACTOR_TIMEOUT_REASON
+}
+
+pub fn starting_timeout_blocked_actor_can_recover(facts: StartingTimeoutActorFacts<'_>) -> bool {
+    actor_blocked_by_starting_timeout(facts) && facts.prompt_ready
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DispatchRuntimeHealth {
     Healthy,
@@ -672,6 +689,38 @@ mod tests {
         assert!(!dispatch_only_dispatch_start_proof_required("codex"));
         assert!(!dispatch_only_dispatch_start_proof_required("opencode"));
         assert!(!dispatch_only_dispatch_start_proof_required("claude"));
+    }
+
+    #[test]
+    fn starting_timeout_recovery_requires_blocked_timeout_and_prompt_ready() {
+        let blocked_timeout_ready = StartingTimeoutActorFacts {
+            actor_blocked: true,
+            last_transition_reason: STARTING_ACTOR_TIMEOUT_REASON,
+            prompt_ready: true,
+        };
+        assert!(actor_blocked_by_starting_timeout(blocked_timeout_ready));
+        assert!(starting_timeout_blocked_actor_can_recover(
+            blocked_timeout_ready
+        ));
+
+        assert!(!starting_timeout_blocked_actor_can_recover(
+            StartingTimeoutActorFacts {
+                prompt_ready: false,
+                ..blocked_timeout_ready
+            }
+        ));
+        assert!(!actor_blocked_by_starting_timeout(
+            StartingTimeoutActorFacts {
+                actor_blocked: false,
+                ..blocked_timeout_ready
+            }
+        ));
+        assert!(!actor_blocked_by_starting_timeout(
+            StartingTimeoutActorFacts {
+                last_transition_reason: "ordinary_block",
+                ..blocked_timeout_ready
+            }
+        ));
     }
 
     #[test]

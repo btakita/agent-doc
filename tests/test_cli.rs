@@ -3690,6 +3690,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn dispatch_only_starting_pane_recovery_timeout_for_binary(",
         "pub fn dispatch_only_starting_pane_ready_retry_budget(",
         "pub fn dispatch_only_starting_pane_recovery_retry_budget(",
+        "pub const STARTING_ACTOR_TIMEOUT_REASON",
+        "pub struct StartingTimeoutActorFacts",
+        "pub fn actor_blocked_by_starting_timeout(",
+        "pub fn starting_timeout_blocked_actor_can_recover(",
         "pub enum DirectPaneSubmitStatus",
         "pub fn direct_pane_submit_acceptance_timeout(",
         "pub fn direct_pane_submit_acceptance_budget(",
@@ -3712,6 +3716,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn dispatch_only_should_probe_active_turn_cue(",
         "fn dispatch_only_starting_pane_ready_timeout_for_binary(",
         "fn dispatch_only_starting_pane_recovery_timeout(",
+        "fn actor_blocked_by_starting_timeout(",
+        "fn starting_timeout_blocked_actor_can_recover(",
         "fn direct_pane_submit_acceptance_timeout(",
         "fn direct_pane_submit_acceptance_budget(",
         "fn direct_pane_submit_outcome(",
@@ -3738,6 +3744,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn dispatch_only_starting_pane_recovery_timeout_for_binary(",
         "pub fn dispatch_only_starting_pane_ready_retry_budget(",
         "pub fn dispatch_only_starting_pane_recovery_retry_budget(",
+        "pub const STARTING_ACTOR_TIMEOUT_REASON",
+        "pub struct StartingTimeoutActorFacts",
+        "pub fn actor_blocked_by_starting_timeout(",
+        "pub fn starting_timeout_blocked_actor_can_recover(",
         "pub enum DirectPaneSubmitStatus",
         "pub fn direct_pane_submit_acceptance_timeout(",
         "pub fn direct_pane_submit_acceptance_budget(",
@@ -3761,6 +3771,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("dispatch_only_starting_pane_ready_timeout_for_binary")
             && route_source.contains("dispatch_only_starting_pane_recovery_retry_budget")
             && route_source.contains("dispatch_only_starting_pane_recovery_timeout_for_binary")
+            && route_source.contains("STARTING_ACTOR_TIMEOUT_REASON")
+            && route_source.contains("StartingTimeoutActorFacts")
+            && route_source.contains("actor_blocked_by_starting_timeout")
+            && route_source.contains("starting_timeout_blocked_actor_can_recover")
             && route_source.contains("DispatchActorState")
             && route_source.contains("dispatch_only_busy_should_wait_for_ready(")
             && route_source.contains("dispatch_only_should_probe_active_turn_cue(")

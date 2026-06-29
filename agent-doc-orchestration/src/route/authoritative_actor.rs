@@ -320,14 +320,22 @@ pub(crate) fn poll_starting_timeout_blocked_actor_dispatch_ready(
     actor: &AuthoritativeActorDispatchTarget,
     harness: &HarnessConfig,
 ) -> bool {
-    if !actor_blocked_by_starting_timeout(actor) {
+    if !actor_blocked_by_starting_timeout(StartingTimeoutActorFacts {
+        actor_blocked: actor.record.state == agent_doc_sqlite::state_store::ActorState::Blocked,
+        last_transition_reason: &actor.record.last_transition.reason,
+        prompt_ready: false,
+    }) {
         return false;
     }
     let budget = authoritative_actor_ready_retry_budget(Some(harness.binary.as_str()), cfg!(test));
     let deadline = Instant::now() + budget.timeout;
     loop {
         let prompt_ready = current_generation_ready_prompt_proven(tmux, actor, harness);
-        if starting_timeout_blocked_actor_can_recover(actor, prompt_ready) {
+        if starting_timeout_blocked_actor_can_recover(StartingTimeoutActorFacts {
+            actor_blocked: actor.record.state == agent_doc_sqlite::state_store::ActorState::Blocked,
+            last_transition_reason: &actor.record.last_transition.reason,
+            prompt_ready,
+        }) {
             return true;
         }
         if Instant::now() >= deadline {
@@ -787,7 +795,7 @@ pub(crate) fn mark_starting_actor_timeout_blocked(
             generation: facts.generation,
             state: agent_doc_sqlite::state_store::ActorState::Blocked,
             caller: "route".to_string(),
-            reason: "starting_actor_timeout".to_string(),
+            reason: STARTING_ACTOR_TIMEOUT_REASON.to_string(),
         },
     ) {
         Ok(updated) => {

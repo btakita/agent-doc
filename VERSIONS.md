@@ -30,6 +30,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Dispatch-only retry budgets moved to `agent-doc-controller`.** The authoritative-actor ready retry budget and dispatch-only starting-pane ready/recovery timeouts now live in `agent_doc_controller::dispatch`. Route still applies the operator `--wait-for-ready` override and performs tmux polling, but the harness/test-mode timeout table is no longer owned by `flow::routed_reopen` or route-local wrappers.
 
+- **Starting-timeout recovery policy moved to `agent-doc-controller`.** The durable `starting_actor_timeout` reason, blocked-actor facts, and prompt-proof recovery classifier now live in `agent_doc_controller::dispatch`. Route still persists timeout sidecars and polls tmux panes, but it adapts actor records into the focused controller policy directly instead of owning the recovery rule.
+
 - **Route-owned reap policy moved to `agent-doc-supervisor`.** The route-owned supervisor completion reap policy, liveness reason vocabulary, and hidden CLI reap-policy parser now live in `agent_doc_supervisor::route_owned`. The start path keeps only document liveness/file adapters and calls the focused supervisor API directly; the CLI shell imports the focused type instead of preserving an orchestration API path.
 
 - **Stale install-artifact policy moved to `agent-doc-supervisor`.** The `#install-stale-guard` grace window and timestamp classifier now live in `agent_doc_supervisor::config` beside auto-install/stale-binary policy. Preflight still discovers artifact mtimes and formats the warning, but calls the focused supervisor API directly instead of owning the staleness rule.

@@ -75,7 +75,6 @@ tracing-appender = "0.2"
 libc = "0.2"
 portable-pty = "0.9"
 alacritty_terminal = "0.26"
-signal-hook = "0.4"
 tagpath = { version = "0.12.1", default-features = false }
 tiny_http = { version = "0.12", default-features = false, features = ["ssl-rustls"] }
 tsift-memory = "0.1.70"

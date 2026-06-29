@@ -364,7 +364,6 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2 0.11.0",
- "signal-hook",
  "similar",
  "tagpath",
  "tempfile",
@@ -433,8 +432,11 @@ name = "agent-doc-supervisor-process"
 version = "0.34.65"
 dependencies = [
  "agent-doc-supervisor",
+ "anyhow",
  "libc",
+ "portable-pty",
  "serde",
+ "signal-hook",
 ]
 
 [[package]]

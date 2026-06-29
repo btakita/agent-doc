@@ -11,5 +11,8 @@ name = "agent_doc_supervisor_process"
 
 [dependencies]
 agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.34.65" }
+anyhow = "1"
 libc = "0.2"
+portable-pty = "0.9"
 serde = { version = "1", features = ["derive"] }
+signal-hook = "0.4"

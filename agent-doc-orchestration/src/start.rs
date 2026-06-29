@@ -134,7 +134,6 @@ use crate::supervisor::{
     in_process::{InProcessSupervisor, PtySupervisedChild, TickOutcome},
     ipc::{IpcMethod, IpcResponse, SupervisorIpc},
     pty::PtySpawnConfig,
-    resize,
     state::{CrashPolicy, RestartAction, SupervisorState},
 };
 use agent_doc_frontmatter::frontmatter;

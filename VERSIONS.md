@@ -28,6 +28,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Tmux-router types no longer route through `sessions`.** Callers now import `Tmux`, `IsolatedTmux`, `PaneMoveOp`, `Registry`, `RegistryEntry`, and `RegistryLock` from `tmux_router` directly, while `sessions` keeps only agent-doc-specific registry/path/capture helpers. Added a guard so the tmux-router type facade does not return.
 
+- **Terminal resize effects moved to `agent-doc-supervisor-process`.** `ResizeWatcher` and `query_terminal_size` now live in the focused process-effect crate; orchestration's supervisor module no longer owns or re-exports `supervisor::resize`. Added a guard so the resize facade does not return.
+
 ## 0.34.64
 
 - **`#suprestassoc` — `restart-supervisor` registry re-association is scoped to the requested document, not just the reused session id.** The CLI restart path now resolves registry entries by exact canonical document path first and only keeps the legacy session-id fallback for fileless registry rows; registry keys that explicitly name another document are rejected, so restarting `sampleportal.md` cannot adopt a stale `agent-doc-bugs2.md` pane/session projection that happens to carry the same session id. Coverage: deterministic registry lookup regressions for rejecting a foreign same-session entry and preferring the exact target document entry. Live editor/pane confirmation remains an `[operator-verify]` follow-up.

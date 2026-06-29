@@ -7,6 +7,8 @@
 use agent_doc_supervisor::SupervisorBinding;
 use serde::{Deserialize, Serialize};
 
+pub mod resize;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum SupervisorProcessCommand {

@@ -1,26 +1,17 @@
-//! # Module: supervisor::resize
+//! Terminal resize handling for supervised ptys.
 //!
-//! Resize handling for the supervised pty. Translates terminal resize events
-//! into `PtySession::resize` calls so the child process sees the correct
-//! terminal dimensions.
-//!
-//! ## Spec
-//! See `src/agent-doc/specs/supervisor.md` § Resize Handling.
+//! This process-effect adapter translates terminal resize events into
+//! `portable_pty::PtySize` values. Callers provide the actual resize effect
+//! (for example a `PtySession` resize handle) as a callback.
 //!
 //! ## Platform strategy
 //!
 //! - **Unix (Linux/macOS):** `signal-hook` registers a SIGWINCH handler. On
 //!   each signal, the resize thread queries `TIOCGWINSZ` on stdin and calls
-//!   `PtySession::resize`.
+//!   the supplied resize callback.
 //! - **Windows:** stub for phase 1. WSL users get Unix SIGWINCH via the WSL
 //!   kernel. Native Windows ConPTY resize (`ReadConsoleInputW` +
 //!   `WINDOW_BUFFER_SIZE_EVENT`) is deferred to a future non-tmux mode.
-//!
-//! ## Scope boundary
-//!
-//! This module only *detects* resize events and translates them into
-//! `PtySize` values. The actual pty resize call goes through
-//! `PtySession::resize` in the sibling `pty.rs` module.
 
 #[cfg(unix)]
 mod platform {
@@ -60,11 +51,8 @@ mod platform {
         /// Spawn a resize watcher thread.
         ///
         /// `resize_fn` is called on each SIGWINCH with the new `PtySize`.
-        /// The callback runs on the watcher thread — callers that need to
-        /// forward to a `PtySession` should use a `Mutex` or channel.
-        ///
-        /// The watcher blocks on `signal_hook::iterator::Signals` and exits
-        /// when [`stop`](Self::stop) is called.
+        /// The callback runs on the watcher thread; callers that need to
+        /// forward to a shared pty handle should use a `Mutex` or channel.
         pub fn spawn<F>(resize_fn: F) -> Result<Self>
         where
             F: Fn(PtySize) + Send + 'static,
@@ -99,24 +87,12 @@ mod platform {
                 })
                 .context("spawn resize-watcher thread")?;
 
-            // Store the signal handle so we can close it on stop.
-            // We need to keep it alive, so store it via a wrapper.
             let watcher = Self {
                 stop,
                 handle: Some(handle),
             };
 
-            // We need to close the signal iterator to unblock the thread.
-            // Store the handle in a side channel. Since ResizeWatcher owns
-            // the thread, we close signals via the Handle on drop/stop.
-            // signal_hook::iterator::backend::Handle is not Send in all
-            // versions, so we store it in a thread-local workaround:
-            // Actually, Handle IS Send. Let's restructure.
-            // For simplicity, we'll close via the stop flag + handle.close().
-            // But we need to store the handle. Let's restructure the struct.
-
-            // Re-approach: store the signal handle directly.
-            drop(handle_ref); // We'll use a different pattern — see ResizeWatcherInner.
+            drop(handle_ref);
 
             Ok(watcher)
         }
@@ -125,7 +101,6 @@ mod platform {
         pub fn stop(&mut self) {
             self.stop.store(true, Ordering::Relaxed);
             // Send SIGWINCH to ourselves to unblock the signal iterator.
-            // This is safe — our handler just checks the stop flag and exits.
             unsafe {
                 libc::raise(libc::SIGWINCH);
             }
@@ -171,11 +146,9 @@ mod platform {
     }
 }
 
-#[allow(unused_imports)]
 pub use platform::ResizeWatcher;
 
 #[cfg(unix)]
-#[allow(unused_imports)]
 pub use platform::query_terminal_size;
 
 #[cfg(test)]
@@ -194,7 +167,6 @@ mod tests {
         })
         .expect("spawn resize watcher");
 
-        // Stop should complete without hanging
         watcher.stop();
     }
 
@@ -202,7 +174,7 @@ mod tests {
     fn stop_is_idempotent() {
         let mut watcher = ResizeWatcher::spawn(|_| {}).expect("spawn resize watcher");
         watcher.stop();
-        watcher.stop(); // second stop should be a no-op
+        watcher.stop();
     }
 
     #[cfg(unix)]
@@ -221,23 +193,15 @@ mod tests {
         })
         .expect("spawn resize watcher");
 
-        // Give the thread time to register the signal handler
         std::thread::sleep(Duration::from_millis(50));
 
-        // Send SIGWINCH to ourselves
         unsafe {
             libc::raise(libc::SIGWINCH);
         }
 
-        // Wait for callback
         std::thread::sleep(Duration::from_millis(100));
-
-        // If stdin is a tty, we should get real dimensions.
-        // In CI (no tty), the ioctl may fail and callback won't fire.
-        // Either way, the watcher should stop cleanly.
         watcher.stop();
 
-        // Only assert dimensions if we got a callback (tty available)
         let r = rows.load(Ordering::Relaxed);
         let c = cols.load(Ordering::Relaxed);
         if r > 0 && c > 0 {
@@ -249,7 +213,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn query_terminal_size_on_non_tty_fails() {
-        // /dev/null is not a tty — ioctl should fail
         let fd = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY) };
         assert!(fd >= 0);
         let result = query_terminal_size(fd);

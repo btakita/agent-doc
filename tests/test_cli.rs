@@ -3106,6 +3106,38 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
 }
 
 #[test]
+fn test_agent_doc_supervisor_process_owns_resize_effects() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    assert!(
+        manifest_dir
+            .join("agent-doc-supervisor-process/src/resize.rs")
+            .exists(),
+        "agent-doc-supervisor-process must own terminal resize process effects"
+    );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/supervisor/resize.rs")
+            .exists(),
+        "orchestration must not keep a supervisor::resize facade"
+    );
+
+    let supervisor_mod =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/supervisor/mod.rs"))
+            .unwrap();
+    assert!(
+        !supervisor_mod.contains("pub mod resize"),
+        "orchestration supervisor module must not re-export resize effects"
+    );
+
+    let start_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/run.rs")).unwrap();
+    assert!(
+        start_run.contains("agent_doc_supervisor_process::{") && start_run.contains("resize,"),
+        "supervisor run loop should import resize from agent-doc-supervisor-process directly"
+    );
+}
+
+#[test]
 fn test_focus_no_stash_promote_compatibility_shim_is_removed() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     for relative in [

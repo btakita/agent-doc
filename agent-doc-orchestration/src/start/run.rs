@@ -7,7 +7,9 @@ use agent_doc_supervisor::{
     lifecycle::{BootResumeAction, boot_resume_action},
     run_loop::{PostChildExitAction, post_child_exit_action},
 };
-use agent_doc_supervisor_process::{REEXEC_CHILD_PID_ENV, REEXEC_MASTER_FD_ENV, ReexecState};
+use agent_doc_supervisor_process::{
+    REEXEC_CHILD_PID_ENV, REEXEC_MASTER_FD_ENV, ReexecState, resize,
+};
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
 

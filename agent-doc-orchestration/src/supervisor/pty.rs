@@ -345,7 +345,7 @@ impl PtySession {
     }
 
     /// Create a thread-safe resize handle that can be sent to other threads
-    /// (e.g., [`super::resize::ResizeWatcher`]).
+    /// (e.g., [`agent_doc_supervisor_process::resize::ResizeWatcher`]).
     ///
     /// On Unix, extracts the raw master fd via `MasterPty::as_raw_fd` and
     /// returns a handle that calls `TIOCSWINSZ` directly. This avoids

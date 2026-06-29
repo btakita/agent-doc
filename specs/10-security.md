@@ -28,7 +28,7 @@ agent-doc is designed for single-user, local operation. There is no authenticati
 
 ## Secret Redaction
 
-The `secret_redact` module (`src/secret_redact.rs`) is a backend hygiene layer that scrubs common plaintext secret shapes from anything written to `.agent-doc/` state files or stream/finalize stdout messages. It is **always on** with no operator-facing flag.
+The `agent-doc-secret-redact` crate is a backend hygiene layer that scrubs common plaintext secret shapes from anything written to `.agent-doc/` state files or stream/finalize stdout messages. It is **always on** with no operator-facing flag.
 
 ### Patterns (most-specific first)
 

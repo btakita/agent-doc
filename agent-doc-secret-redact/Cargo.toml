@@ -1,0 +1,13 @@
+[package]
+name = "agent-doc-secret-redact"
+version = "0.34.65"
+edition = "2024"
+description = "Secret redaction hygiene layer for agent-doc state and stream output"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_secret_redact"
+
+[dependencies]
+regex = "1"

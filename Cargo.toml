@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "agent-doc-core",
+    "agent-doc-secret-redact",
     "agent-doc-element",
     "agent-doc-element-backlog",
     "agent-doc-element-boundary",

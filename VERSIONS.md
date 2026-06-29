@@ -17,6 +17,11 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   normalization decision now live in `agent_doc_template::patchback`.
   `flow::orchestration_batch` keeps only the FlowEvent adapter.
 
+- **Auto-DAG schedule decision vocabulary moved to `agent-doc-work-graph`.** The
+  ready/session-review-blocked schedule decision and stable reason labels now
+  live beside the source-agnostic Auto-DAG model. Orchestration batch flow keeps
+  only event rendering and logging.
+
 - **Append response heading normalization moved to `agent-doc-turn`.** The helper
   that strips echoed `## Assistant` / trailing `## User` headings before append
   writes now lives in `agent_doc_turn::response_text`; orchestration calls the

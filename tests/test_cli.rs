@@ -3311,6 +3311,26 @@ fn test_agent_doc_work_graph_is_source_agnostic_boundary() {
             .exists(),
         "work-graph analysis should live in the focused crate"
     );
+    let work_graph_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-work-graph/src/lib.rs")).unwrap();
+    for required in ["pub enum AutoDagScheduleDecision", "pub const fn as_str"] {
+        assert!(
+            work_graph_source.contains(required),
+            "agent-doc-work-graph must own Auto-DAG scheduling policy: {required}"
+        );
+    }
+    let orchestration_batch = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/flow/orchestration_batch.rs"),
+    )
+    .unwrap();
+    assert!(
+        !orchestration_batch.contains("pub enum AutoDagScheduleDecision"),
+        "orchestration batch flow must not re-own Auto-DAG scheduling policy"
+    );
+    assert!(
+        orchestration_batch.contains("agent_doc_work_graph::AutoDagScheduleDecision"),
+        "orchestration batch flow should call the focused Auto-DAG scheduling policy directly"
+    );
     assert!(
         !manifest_dir
             .join("agent-doc-document/src/auto_dag.rs")

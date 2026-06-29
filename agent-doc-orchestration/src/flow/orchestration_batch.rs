@@ -100,29 +100,14 @@ pub fn log_child_closeout_event(file: &Path, child: &BatchChildResult) {
     super::proof::log_flow_event(file, child_closeout_event(child));
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AutoDagScheduleDecision {
-    Ready,
-    SessionReviewBlocked,
-}
-
-impl AutoDagScheduleDecision {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Ready => "ready",
-            Self::SessionReviewBlocked => "session_review_blocked",
-        }
-    }
-}
-
 pub fn auto_dag_schedule_event(
-    decision: AutoDagScheduleDecision,
+    decision: agent_doc_work_graph::AutoDagScheduleDecision,
     node_count: usize,
     batch_count: usize,
 ) -> FlowEvent {
     let outcome = match decision {
-        AutoDagScheduleDecision::Ready => FlowOutcome::Completed,
-        AutoDagScheduleDecision::SessionReviewBlocked => FlowOutcome::Blocked,
+        agent_doc_work_graph::AutoDagScheduleDecision::Ready => FlowOutcome::Completed,
+        agent_doc_work_graph::AutoDagScheduleDecision::SessionReviewBlocked => FlowOutcome::Blocked,
     };
     FlowEvent::new(
         FlowName::OrchestrationBatch,
@@ -137,7 +122,7 @@ pub fn auto_dag_schedule_event(
 
 pub fn log_auto_dag_schedule_event(
     file: &Path,
-    decision: AutoDagScheduleDecision,
+    decision: agent_doc_work_graph::AutoDagScheduleDecision,
     node_count: usize,
     batch_count: usize,
 ) {

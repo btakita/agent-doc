@@ -76,7 +76,7 @@ mod tests {
         assert!(orchestration_batch::batch_should_continue(false, &child));
 
         let auto_dag_event = orchestration_batch::auto_dag_schedule_event(
-            orchestration_batch::AutoDagScheduleDecision::SessionReviewBlocked,
+            agent_doc_work_graph::AutoDagScheduleDecision::SessionReviewBlocked,
             2,
             1,
         );

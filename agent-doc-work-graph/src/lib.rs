@@ -121,6 +121,21 @@ impl AutoDag {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoDagScheduleDecision {
+    Ready,
+    SessionReviewBlocked,
+}
+
+impl AutoDagScheduleDecision {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Ready => "ready",
+            Self::SessionReviewBlocked => "session_review_blocked",
+        }
+    }
+}
+
 const LANES_IN_ORDER: [Lane; 5] = [
     Lane::Implementable,
     Lane::LiveVerify,
@@ -276,6 +291,15 @@ mod tests {
         assert_eq!(dag.items.len(), 1);
         assert_eq!(dag.items[0].id, "pm-123");
         assert_eq!(dag.items[0].lane, Lane::LiveVerify);
+    }
+
+    #[test]
+    fn auto_dag_schedule_decision_labels_are_stable() {
+        assert_eq!(AutoDagScheduleDecision::Ready.as_str(), "ready");
+        assert_eq!(
+            AutoDagScheduleDecision::SessionReviewBlocked.as_str(),
+            "session_review_blocked"
+        );
     }
 
     #[test]

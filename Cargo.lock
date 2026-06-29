@@ -359,6 +359,7 @@ dependencies = [
  "agent-doc-turn",
  "agent-doc-turn-executor",
  "agent-doc-turn-executor-tmux",
+ "agent-doc-work-graph",
  "agent-kit",
  "alacritty_terminal",
  "anyhow",

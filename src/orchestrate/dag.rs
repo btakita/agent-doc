@@ -392,9 +392,9 @@ pub(crate) fn run_auto_dag_mode(
 
     let schedule_blocker = crate::auto_dag::guard_blocker(&schedule);
     let schedule_decision = if schedule_blocker.is_some() {
-        agent_doc_orchestration::flow::orchestration_batch::AutoDagScheduleDecision::SessionReviewBlocked
+        agent_doc_work_graph::AutoDagScheduleDecision::SessionReviewBlocked
     } else {
-        agent_doc_orchestration::flow::orchestration_batch::AutoDagScheduleDecision::Ready
+        agent_doc_work_graph::AutoDagScheduleDecision::Ready
     };
     agent_doc_orchestration::flow::orchestration_batch::log_auto_dag_schedule_event(
         file,

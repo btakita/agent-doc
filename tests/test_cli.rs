@@ -4732,6 +4732,52 @@ fn test_agent_doc_tmux_owns_pane_position_selection() {
 }
 
 #[test]
+fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let tmux_manifest = fs::read_to_string(manifest_dir.join("agent-doc-tmux/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&tmux_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+
+    let tmux_source = fs::read_to_string(manifest_dir.join("agent-doc-tmux/src/lib.rs")).unwrap();
+    assert!(
+        tmux_source.contains("pub fn pane_current_command_is_bare_shell("),
+        "agent-doc-tmux must own pure pane current-command shell classification"
+    );
+
+    let dispatch_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch.rs"))
+            .unwrap();
+    for forbidden in [
+        "pub(crate) fn pane_current_command_is_bare_shell(",
+        "\"zsh\" | \"bash\" | \"sh\" | \"fish\" | \"dash\" | \"ksh\" | \"tcsh\" | \"csh\"",
+    ] {
+        assert!(
+            !dispatch_source.contains(forbidden),
+            "route dispatch must observe tmux state, not re-own bare-shell command policy: {forbidden}"
+        );
+    }
+    assert!(
+        dispatch_source.contains("use agent_doc_tmux::pane_current_command_is_bare_shell;"),
+        "route dispatch should call the focused tmux bare-shell API directly"
+    );
+
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-tmux bare-shell policy must stay free of orchestration, git, editor IPC, sqlite, or tmux-router effects"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_tmux_commands_owns_submit_profile_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let tmux_commands_manifest =

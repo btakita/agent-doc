@@ -2,6 +2,8 @@
 
 use super::*;
 
+use agent_doc_tmux::pane_current_command_is_bare_shell;
+
 /// Outcome of one direct-pane submit-acceptance poll window.
 pub(crate) struct DirectPaneAcceptance {
     status: CommandDispatchStatus,
@@ -534,17 +536,6 @@ fn send_direct_pane_enter_resubmit_until_stable(
         not_dispatched: false,
         diagnostic_path,
     }
-}
-
-/// Foreground program names tmux reports via `#{pane_current_command}` when a
-/// pane has fallen back to a bare interactive shell because the harness
-/// crashed/exited. A login shell can show a leading `-` (for example `-zsh`).
-pub(crate) fn pane_current_command_is_bare_shell(cmd: &str) -> bool {
-    let name = cmd.trim().trim_start_matches('-');
-    matches!(
-        name,
-        "zsh" | "bash" | "sh" | "fish" | "dash" | "ksh" | "tcsh" | "csh"
-    )
 }
 
 /// #1vhn: positively verify the pane still hosts a live harness immediately
@@ -1904,36 +1895,6 @@ mod tests {
             hint.contains("agent-doc start /tmp/session.md"),
             "starting actor hint should name the owner restart recovery: {hint}"
         );
-    }
-    #[test]
-    fn pane_current_command_is_bare_shell_classifies_shells() {
-        // #1vhn: shells (with or without a login `-` prefix) indicate the harness
-        // crashed/exited to a bare prompt; harness/agent processes do not.
-        for shell in [
-            "zsh", "bash", "sh", "fish", "dash", "ksh", "tcsh", "csh", "-zsh", "-bash", " zsh ",
-        ] {
-            assert!(
-                pane_current_command_is_bare_shell(shell),
-                "{shell:?} should classify as a bare shell"
-            );
-        }
-        for not_shell in [
-            "claude",
-            "node",
-            "codex",
-            "opencode",
-            "bun",
-            "agent-doc",
-            "sleep",
-            "cat",
-            "vim",
-            "",
-        ] {
-            assert!(
-                !pane_current_command_is_bare_shell(not_shell),
-                "{not_shell:?} should NOT classify as a bare shell"
-            );
-        }
     }
     #[test]
     fn routed_trigger_submit_diagnostic_names_codex_enter_key() {

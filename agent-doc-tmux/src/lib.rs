@@ -212,6 +212,17 @@ pub fn select_pane_by_position(
         })
 }
 
+/// Foreground program names tmux reports via `#{pane_current_command}` when a
+/// pane has fallen back to a bare interactive shell. Login shells can show a
+/// leading `-`, for example `-zsh`.
+pub fn pane_current_command_is_bare_shell(cmd: &str) -> bool {
+    let name = cmd.trim().trim_start_matches('-');
+    matches!(
+        name,
+        "zsh" | "bash" | "sh" | "fish" | "dash" | "ksh" | "tcsh" | "csh"
+    )
+}
+
 pub fn transition_tmux(
     current: &TmuxRealtimeState,
     event: &TmuxObservation,
@@ -355,5 +366,34 @@ mod tests {
                 height: 0,
             }]
         );
+    }
+
+    #[test]
+    fn pane_current_command_classifies_bare_shells() {
+        for shell in [
+            "zsh", "bash", "sh", "fish", "dash", "ksh", "tcsh", "csh", "-zsh", "-bash", " zsh ",
+        ] {
+            assert!(
+                pane_current_command_is_bare_shell(shell),
+                "{shell:?} should classify as a bare shell"
+            );
+        }
+        for not_shell in [
+            "claude",
+            "node",
+            "codex",
+            "opencode",
+            "bun",
+            "agent-doc",
+            "sleep",
+            "cat",
+            "vim",
+            "",
+        ] {
+            assert!(
+                !pane_current_command_is_bare_shell(not_shell),
+                "{not_shell:?} should NOT classify as a bare shell"
+            );
+        }
     }
 }

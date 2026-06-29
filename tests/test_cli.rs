@@ -6546,7 +6546,7 @@ fn test_agent_doc_template_owns_response_materialization_policy() {
         "agent-doc-orchestration/src/write/run_entry.rs",
         "agent-doc-orchestration/src/write/ipc/transport.rs",
         "agent-doc-orchestration/src/write/ipc.rs",
-        "agent-doc-orchestration/src/write/converge.rs",
+        "agent-doc-orchestration/src/write/materialize.rs",
         "agent-doc-orchestration/src/write/normalize.rs",
     ];
     for relative_path in focused_callers {
@@ -6555,6 +6555,194 @@ fn test_agent_doc_template_owns_response_materialization_policy() {
             source.contains("agent_doc_template::response_materialization::"),
             "{relative_path} should call the focused response materialization API directly"
         );
+    }
+}
+
+#[test]
+fn test_agent_doc_template_owns_strict_response_heading_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let template_response_materialization =
+        fs::read_to_string(manifest_dir.join("agent-doc-template/src/response_materialization.rs"))
+            .unwrap();
+    for required_snippet in [
+        "pub fn ensure_strict_template_response_heading",
+        "pub fn ensure_strict_template_response_heading_for_current_doc",
+        "pub fn template_response_has_heading",
+        "pub fn live_exchange_tail_proves_streamed_response_heading",
+        "pub fn offset_after_last_prompt_line",
+        "pub fn response_text_has_heading",
+    ] {
+        assert!(
+            template_response_materialization.contains(required_snippet),
+            "agent-doc-template must own strict template response-heading policy: {required_snippet}"
+        );
+    }
+
+    let write_materialize =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/materialize.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "pub use agent_doc_template::response_materialization",
+        "pub fn ensure_strict_template_response_heading",
+        "pub(crate) fn ensure_strict_template_response_heading",
+        "fn template_response_has_heading",
+        "fn live_exchange_tail_proves_streamed_response_heading",
+        "fn offset_after_last_prompt_line",
+        "fn response_text_has_heading",
+    ] {
+        assert!(
+            !write_materialize.contains(forbidden_snippet),
+            "write/materialize.rs must not facade or re-own strict heading policy: {forbidden_snippet}"
+        );
+    }
+
+    for relative_path in [
+        "agent-doc-orchestration/src/write/run_entry.rs",
+        "agent-doc-orchestration/src/write/normalize.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
+        assert!(
+            source.contains(
+                "agent_doc_template::response_materialization::ensure_strict_template_response_heading"
+            ),
+            "{relative_path} should call strict heading policy through agent-doc-template directly"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_queue_owns_queue_head_classification_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let queue_response =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_response.rs")).unwrap();
+    for required_snippet in [
+        "pub fn head_id_names_tracked_directive_item",
+        "pub fn head_id_is_registered_preset",
+        "pub fn queue_head_is_bare_do_directive",
+        "pub fn queue_prompt_text_is_queue_activation_trigger",
+        "pub fn queue_prompt_text_is_free_text",
+        "pub fn queue_head_is_free_text_prompt",
+    ] {
+        assert!(
+            queue_response.contains(required_snippet),
+            "agent-doc-queue must own queue-head classification policy: {required_snippet}"
+        );
+    }
+
+    let queue_consume =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/queue_consume.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "pub(crate) use agent_doc_queue::queue_response",
+        "pub fn queue_head_is_free_text_prompt",
+        "pub(crate) fn queue_head_is_free_text_prompt",
+        "pub fn queue_prompt_text_is_free_text",
+        "pub(crate) fn queue_prompt_text_is_free_text",
+        "pub fn head_id_is_registered_preset",
+        "pub(crate) fn head_id_is_registered_preset",
+        "pub fn queue_head_is_bare_do_directive",
+        "pub(crate) fn queue_head_is_bare_do_directive",
+    ] {
+        assert!(
+            !queue_consume.contains(forbidden_snippet),
+            "write/queue_consume.rs must not re-own or facade queue-head classification: {forbidden_snippet}"
+        );
+    }
+
+    for relative_path in [
+        "agent-doc-orchestration/src/queue_cmd.rs",
+        "agent-doc-orchestration/src/project_controller/rpc.rs",
+        "agent-doc-orchestration/src/session_check/queue_head_provenance_guards.rs",
+        "agent-doc-orchestration/src/repair.rs",
+        "agent-doc-orchestration/src/preflight/maintenance.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
+        assert!(
+            !source.contains("crate::write::queue_head_is_free_text_prompt")
+                && !source.contains("crate::write::queue_prompt_text_is_free_text")
+                && !source.contains("crate::write::head_id_is_registered_preset"),
+            "{relative_path} should call queue classification through agent-doc-queue directly"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let realtime_write_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime/src/write_policy.rs"))
+            .unwrap();
+    for required_snippet in [
+        "pub fn exchange_change_is_safe_historical_reduction",
+        "pub fn exchange_response_block_ranges",
+        "pub fn live_prompt_drift_auto_recovery_safe",
+        "pub fn live_prompt_drift_recovery_target",
+        "pub fn snapshot_contains_dropped_prompt",
+    ] {
+        assert!(
+            realtime_write_policy.contains(required_snippet),
+            "agent-doc-document-realtime must own exchange/live-drift recovery policy: {required_snippet}"
+        );
+    }
+
+    let converge =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/converge.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "pub fn live_prompt_drift_auto_recovery_safe",
+        "fn live_prompt_drift_recovery_target",
+        "pub(crate) fn snapshot_contains_dropped_prompt",
+        "fn snapshot_contains_dropped_prompt(",
+        "fn exchange_change_is_safe_historical_reduction",
+        "fn exchange_response_block_ranges",
+    ] {
+        assert!(
+            !converge.contains(forbidden_snippet),
+            "write/converge.rs must not re-own realtime exchange/live-drift policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        converge.contains("agent_doc_document_realtime::write_policy::{")
+            && converge.contains("live_prompt_drift_recovery_target("),
+        "write/converge.rs should adapt effect gates into focused realtime recovery policy"
+    );
+}
+
+#[test]
+fn test_agent_doc_controller_owns_route_text_predicates() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let controller_dispatch =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller/src/dispatch.rs")).unwrap();
+    for required_snippet in [
+        "pub fn is_codex_shell_search_blocker",
+        "pub fn normalize_context_session",
+        "pub fn is_stash_window_name",
+    ] {
+        assert!(
+            controller_dispatch.contains(required_snippet),
+            "agent-doc-controller must own route textual predicate policy: {required_snippet}"
+        );
+    }
+
+    for relative_path in [
+        "agent-doc-orchestration/src/route/busy_pane.rs",
+        "agent-doc-orchestration/src/route/session_resolution.rs",
+        "agent-doc-orchestration/src/sync.rs",
+        "agent-doc-orchestration/src/resync.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
+        for forbidden_snippet in [
+            "pub(crate) use agent_doc_controller::dispatch",
+            "pub fn is_codex_shell_search_blocker",
+            "pub(crate) fn is_codex_shell_search_blocker",
+            "fn normalize_context_session",
+            "fn is_stash_window_name(",
+        ] {
+            assert!(
+                !source.contains(forbidden_snippet),
+                "{relative_path} must not re-own or facade route textual predicate policy: {forbidden_snippet}"
+            );
+        }
     }
 }
 

@@ -1310,12 +1310,15 @@ mod verify_sidecar_normalization_tests {
             "exchange",
             "### Re: queue head — gpt-5\n\nAnswered.\n",
         )];
-        super::ensure_strict_template_response_heading(&patches, "").unwrap();
+        agent_doc_template::response_materialization::ensure_strict_template_response_heading(
+            &patches, "",
+        )
+        .unwrap();
     }
 
     #[test]
     fn strict_template_response_heading_accepts_unmatched_heading() {
-        super::ensure_strict_template_response_heading(
+        agent_doc_template::response_materialization::ensure_strict_template_response_heading(
             &[],
             "### Re: queue head — gpt-5\n\nAnswered.\n",
         )
@@ -1328,7 +1331,11 @@ mod verify_sidecar_normalization_tests {
             "exchange",
             "- changed paths\n- verification\n",
         )];
-        let err = super::ensure_strict_template_response_heading(&patches, "").unwrap_err();
+        let err =
+            agent_doc_template::response_materialization::ensure_strict_template_response_heading(
+                &patches, "",
+            )
+            .unwrap_err();
         assert!(
             err.to_string()
                 .contains("strict template closeout response")
@@ -1341,7 +1348,11 @@ mod verify_sidecar_normalization_tests {
             "status",
             "### Re: misplaced — gpt-5\n\nWrong component.\n",
         )];
-        let err = super::ensure_strict_template_response_heading(&patches, "").unwrap_err();
+        let err =
+            agent_doc_template::response_materialization::ensure_strict_template_response_heading(
+                &patches, "",
+            )
+            .unwrap_err();
         assert!(err.to_string().contains("patch:exchange"));
     }
 
@@ -1360,8 +1371,10 @@ mod verify_sidecar_normalization_tests {
             "\nImplemented and verified.\n",
         )];
 
-        super::ensure_strict_template_response_heading_for_current_doc(current, &patches, "")
-            .unwrap();
+        agent_doc_template::response_materialization::ensure_strict_template_response_heading_for_current_doc(
+            current, &patches, "",
+        )
+        .unwrap();
     }
 
     #[test]
@@ -1379,8 +1392,10 @@ mod verify_sidecar_normalization_tests {
             "\nImplemented and verified.\n",
         )];
         let err =
-            super::ensure_strict_template_response_heading_for_current_doc(current, &patches, "")
-                .unwrap_err();
+            agent_doc_template::response_materialization::ensure_strict_template_response_heading_for_current_doc(
+                current, &patches, "",
+            )
+            .unwrap_err();
         assert!(
             err.to_string()
                 .contains("strict template closeout response")

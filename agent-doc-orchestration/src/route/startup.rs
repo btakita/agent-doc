@@ -1059,6 +1059,7 @@ mod tests {
     #![allow(unused_imports)]
     use super::*;
     use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
+    use agent_doc_controller::dispatch::is_codex_shell_search_blocker;
     use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     #[test]
     fn codex_busy_ctrl_g_gate_only_fires_for_shell_search_blocker() {

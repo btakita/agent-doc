@@ -496,7 +496,7 @@ fn committed_queue_contains_active_free_text_head(content: &str, head: &str) -> 
         .into_iter()
         .any(|prompt| {
             let text = prompt.text.trim();
-            crate::write::queue_prompt_text_is_free_text(content, text)
+            agent_doc_queue::queue_response::queue_prompt_text_is_free_text(content, text)
                 && normalized_free_text_queue_head_identity(text) == target
         })
 }

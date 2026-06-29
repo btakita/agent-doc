@@ -4,6 +4,8 @@
 //! already-read document/response text; file IO and lifecycle mutations stay in
 //! orchestration.
 
+use anyhow::{Context, Result};
+
 pub fn queue_prompt_done_id(text: &str) -> Option<String> {
     let marker = text.find('#')?;
     let tail = &text[marker + 1..];
@@ -45,6 +47,112 @@ pub fn normalize_queue_prompt_text(text: &str) -> String {
 
 pub fn queue_prompt_text_matches(prompt_change: &str, queue_head: &str) -> bool {
     normalize_queue_prompt_text(prompt_change) == normalize_queue_prompt_text(queue_head)
+}
+
+fn active_queue_head_text(content: &str) -> Result<Option<String>> {
+    let (fm, _) = agent_doc_frontmatter::frontmatter::parse(content)?;
+    if fm.queue_active != Some(true) {
+        return Ok(None);
+    }
+    let components = agent_doc_element::element::parse(content)?;
+    let comp = components
+        .iter()
+        .find(|component| component.name == "queue")
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "queue consume guard: queue_active is true but document has no agent:queue component"
+            )
+        })?;
+    let body = &content[comp.open_end..comp.close_start];
+    let entries = crate::document_queue::parse(body)
+        .context("queue consume guard: failed to parse document queue")?;
+    Ok(crate::document_queue::first_prompt(&entries).map(|prompt| prompt.text.clone()))
+}
+
+/// True when `head_id` names an item tracked in `agent:backlog`, `agent:review`,
+/// or `agent:pending`.
+pub fn head_id_names_tracked_directive_item(content: &str, head_id: &str) -> bool {
+    let Ok(comps) = agent_doc_element::element::parse(content) else {
+        return false;
+    };
+    comps
+        .iter()
+        .filter(|c| c.name == "backlog" || c.name == "review" || c.name == "pending")
+        .any(|comp| {
+            let (_, items, _) =
+                agent_doc_element_backlog::backlog::parse_items(comp.content(content));
+            items
+                .iter()
+                .any(|item| !item.id.is_empty() && item.id.eq_ignore_ascii_case(head_id))
+        })
+}
+
+/// True when `head_id` matches a registered `prompt_presets` key in the
+/// document frontmatter and does NOT also name a tracked directive item.
+pub fn head_id_is_registered_preset(content: &str, head_id: &str) -> bool {
+    if head_id_names_tracked_directive_item(content, head_id) {
+        return false;
+    }
+    let Ok((fm, _)) = agent_doc_frontmatter::frontmatter::parse(content) else {
+        return false;
+    };
+    agent_doc_frontmatter::frontmatter::resolve_prompt_preset_key(&fm.prompt_presets, head_id)
+        .is_some()
+}
+
+/// A queue head that is just a `do [#id]` / `do #id` directive: the `do` verb
+/// plus the id (with optional bracket sugar) and nothing else.
+pub fn queue_head_is_bare_do_directive(queue_head: &str) -> bool {
+    let norm = normalize_queue_prompt_text(queue_head);
+    let Some(rest) = norm.strip_prefix("do ") else {
+        return false;
+    };
+    matches!(
+        rest.strip_prefix('#'),
+        Some(id)
+            if !id.is_empty()
+                && id
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+    )
+}
+
+fn normalized_queue_prompt_text_is_queue_activation_trigger(normalized: &str) -> bool {
+    let after = normalized
+        .strip_prefix("do queue")
+        .or_else(|| normalized.strip_prefix("run queue"));
+    let Some(after) = after else {
+        return false;
+    };
+    after.is_empty() || after.starts_with(|c: char| !c.is_alphanumeric() && c != '#')
+}
+
+/// True when `text` is the queue activation prompt form (`do queue` /
+/// `run queue`) after queue prompt normalization strips prompt markers and pins.
+pub fn queue_prompt_text_is_queue_activation_trigger(text: &str) -> bool {
+    let normalized = normalize_queue_prompt_text(text);
+    normalized_queue_prompt_text_is_queue_activation_trigger(&normalized)
+}
+
+/// True when `text` is a free-text queue prompt (NOT an id-backed directive and
+/// NOT a queue activation trigger).
+pub fn queue_prompt_text_is_free_text(content: &str, text: &str) -> bool {
+    let normalized = normalize_queue_prompt_text(text);
+    if let Some(ids) = crate::queue_directive::topic_resolves_to_only_id_directives(&normalized) {
+        return ids
+            .iter()
+            .all(|id| head_id_is_registered_preset(content, id));
+    }
+    !normalized_queue_prompt_text_is_queue_activation_trigger(&normalized)
+}
+
+/// True when the active queue head is a free-text prompt: it is neither an
+/// id-backed directive nor a queue activation trigger.
+pub fn queue_head_is_free_text_prompt(content: &str) -> Result<bool> {
+    let Some(queue_head) = active_queue_head_text(content)? else {
+        return Ok(false);
+    };
+    Ok(queue_prompt_text_is_free_text(content, &queue_head))
 }
 
 pub fn response_heading_topic(line: &str) -> Option<&str> {
@@ -265,6 +373,18 @@ mod tests {
         "Triaged both.\n",
     );
 
+    fn active_queue_doc(head: &str) -> String {
+        format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:queue auto -->\n",
+                "- {}\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            head
+        )
+    }
+
     #[test]
     fn queue_prompt_done_id_parses_canonical_forms() {
         assert_eq!(
@@ -289,6 +409,131 @@ mod tests {
         assert!(queue_prompt_text_matches("do [#foo]", ":pushpin: do #foo"));
         assert!(queue_prompt_text_matches("❯ do [#Foo]", "do #foo"));
         assert!(!queue_prompt_text_matches("do [#foo]", "do [#bar]"));
+    }
+
+    #[test]
+    fn queue_head_is_bare_do_directive_detection() {
+        assert!(queue_head_is_bare_do_directive("do [#foo]"));
+        assert!(queue_head_is_bare_do_directive("do #foo"));
+        assert!(queue_head_is_bare_do_directive(":pushpin: do [#foo]"));
+        assert!(queue_head_is_bare_do_directive(":round_pushpin: do #foo"));
+        assert!(!queue_head_is_bare_do_directive(
+            "JB Run Agent Doc on tsift.md add the prompt into agent:queue.\n#spec-test-build-install-commit-push"
+        ));
+        assert!(!queue_head_is_bare_do_directive(
+            "#spec-test-build-install-commit-push"
+        ));
+    }
+
+    #[test]
+    fn queue_prompt_text_is_queue_activation_trigger_recognizes_prompt_forms() {
+        assert!(queue_prompt_text_is_queue_activation_trigger("do queue"));
+        assert!(queue_prompt_text_is_queue_activation_trigger("run queue"));
+        assert!(queue_prompt_text_is_queue_activation_trigger("Do Queue."));
+        assert!(queue_prompt_text_is_queue_activation_trigger(
+            "❯ :pushpin: run queue"
+        ));
+        assert!(!queue_prompt_text_is_queue_activation_trigger(
+            "do #queue Phase 2"
+        ));
+        assert!(!queue_prompt_text_is_queue_activation_trigger(
+            "document queue behavior"
+        ));
+    }
+
+    #[test]
+    fn queue_prompt_text_is_free_text_classification() {
+        let content =
+            "---\nqueue_active: true\n---\n<!-- agent:queue -->\n- x\n<!-- /agent:queue -->\n";
+        assert!(!queue_prompt_text_is_free_text(
+            content,
+            "do [#fullboundary]"
+        ));
+        assert!(!queue_prompt_text_is_free_text(content, "#orphanqhead"));
+        assert!(!queue_prompt_text_is_free_text(content, "do queue"));
+        assert!(queue_prompt_text_is_free_text(
+            content,
+            "My free-text queue items are not immediately struck as if they are addressed."
+        ));
+        assert!(queue_prompt_text_is_free_text(
+            content,
+            "Approve [#shoptiers] then ship it"
+        ));
+    }
+
+    #[test]
+    fn queue_head_is_free_text_prompt_classifies_head_shapes() {
+        assert!(
+            queue_head_is_free_text_prompt(&active_queue_doc(
+                "Is tsift properly integrated into multi-crate architecture?"
+            ))
+            .unwrap(),
+            "a no-#id queue head is free text and consumable by being answered"
+        );
+        assert!(
+            !queue_head_is_free_text_prompt(&active_queue_doc(":pushpin: do [#foo]")).unwrap(),
+            "a pinned do[#id] head is id-backed, not free text"
+        );
+        for head in [
+            "[#foo]",
+            ":pushpin: [#foo]",
+            ":round_pushpin: [#foo]",
+            "do [#syncbarrier] [#crdtsvdom]",
+        ] {
+            assert!(
+                !queue_head_is_free_text_prompt(&active_queue_doc(head)).unwrap(),
+                "head {head:?} is id-backed, not free text"
+            );
+        }
+        assert!(
+            queue_head_is_free_text_prompt(&active_queue_doc(
+                "Approve [#shoptiers]. What are #next-steps?"
+            ))
+            .unwrap(),
+            "a free-text head that merely mentions #ids stays free text"
+        );
+        assert!(
+            !queue_head_is_free_text_prompt(&active_queue_doc("do queue")).unwrap(),
+            "queue activation triggers are not free-text heads"
+        );
+        let inactive = active_queue_doc("Review the queue diagnostics")
+            .replace("queue_active: true", "queue_active: false");
+        assert!(!queue_head_is_free_text_prompt(&inactive).unwrap());
+    }
+
+    #[test]
+    fn queue_head_is_free_text_prompt_registered_presets_are_synthetic() {
+        let registered = concat!(
+            "---\nqueue_active: true\n",
+            "prompt_presets:\n",
+            "  '#advance-review': Go through the review items.\n",
+            "---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- #advance-review\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert!(queue_head_is_free_text_prompt(registered).unwrap());
+        assert!(head_id_is_registered_preset(registered, "advance-review"));
+
+        let preset_and_tracked = concat!(
+            "---\nqueue_active: true\n",
+            "prompt_presets:\n",
+            "  '#advance-review': Go through the review items.\n",
+            "---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- #advance-review\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#advance-review] tracked directive that shadows the preset name\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        assert!(!queue_head_is_free_text_prompt(preset_and_tracked).unwrap());
+        assert!(!head_id_is_registered_preset(
+            preset_and_tracked,
+            "advance-review"
+        ));
+
+        assert!(!queue_head_is_free_text_prompt(&active_queue_doc("#advance-review")).unwrap());
     }
 
     #[test]

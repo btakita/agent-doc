@@ -1,8 +1,12 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+#[cfg(test)]
+use agent_doc_document_realtime::write_policy::live_prompt_drift_auto_recovery_safe;
 use agent_doc_document_realtime::write_policy::{
     AckMismatchRecovery, classify_ack_mismatch_recovery,
+    exchange_change_is_safe_historical_reduction, live_prompt_drift_recovery_target,
+    snapshot_contains_dropped_prompt,
 };
 
 pub(crate) fn stale_snapshot_reset_drift(
@@ -261,291 +265,8 @@ fn component_change_is_turn_independent(
     })
 }
 
-fn exchange_change_is_complete_response_block_trim(snapshot: &str, current: &str) -> bool {
-    if snapshot == current {
-        return false;
-    }
-    let blocks = exchange_response_block_ranges(snapshot);
-    if blocks.is_empty() {
-        return false;
-    }
-
-    let mut snapshot_pos = 0usize;
-    let mut current_pos = 0usize;
-    let mut removed = 0usize;
-    for block in blocks {
-        let prefix = &snapshot[snapshot_pos..block.start];
-        if !current[current_pos..].starts_with(prefix) {
-            return false;
-        }
-        current_pos += prefix.len();
-
-        let block_text = &snapshot[block.clone()];
-        if current[current_pos..].starts_with(block_text) {
-            current_pos += block_text.len();
-        } else {
-            removed += 1;
-        }
-        snapshot_pos = block.end;
-    }
-
-    removed > 0 && current[current_pos..] == snapshot[snapshot_pos..]
-}
-
-fn exchange_change_is_safe_historical_reduction(snapshot: &str, current: &str) -> bool {
-    exchange_change_is_complete_response_block_trim(snapshot, current)
-        || exchange_change_is_compact_summary_replacement(snapshot, current)
-}
-
-fn exchange_change_is_compact_summary_replacement(snapshot: &str, current: &str) -> bool {
-    if snapshot == current {
-        return false;
-    }
-    let current_trimmed = current.trim_start();
-    if !current_trimmed.starts_with("### Session Summary") {
-        return false;
-    }
-    if !current.contains("*Compacted. Content archived to `")
-        && !current.contains("Compacted content:")
-    {
-        return false;
-    }
-
-    let snapshot_headings = exchange_response_heading_lines(snapshot);
-    if snapshot_headings.is_empty() {
-        return false;
-    }
-    let current_headings = exchange_response_heading_lines(current);
-    if current_headings
-        .iter()
-        .any(|heading| !snapshot_headings.contains(heading))
-    {
-        return false;
-    }
-
-    current_headings.len() < snapshot_headings.len()
-}
-
-fn exchange_response_heading_lines(exchange: &str) -> Vec<String> {
-    exchange
-        .lines()
-        .filter(|line| is_exchange_response_heading(line))
-        .map(|line| line.trim().to_string())
-        .collect()
-}
-
-fn exchange_response_block_ranges(exchange: &str) -> Vec<std::ops::Range<usize>> {
-    #[derive(Clone, Copy)]
-    struct Line<'a> {
-        start: usize,
-        end: usize,
-        text: &'a str,
-    }
-
-    let mut lines = Vec::new();
-    let mut offset = 0usize;
-    for line in exchange.split_inclusive('\n') {
-        let end = offset + line.len();
-        lines.push(Line {
-            start: offset,
-            end,
-            text: line,
-        });
-        offset = end;
-    }
-    if offset < exchange.len() {
-        lines.push(Line {
-            start: offset,
-            end: exchange.len(),
-            text: &exchange[offset..],
-        });
-    }
-
-    let heading_indices: Vec<_> = lines
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, line)| is_exchange_response_heading(line.text).then_some(idx))
-        .collect();
-    let mut ranges = Vec::new();
-    for (pos, &heading_idx) in heading_indices.iter().enumerate() {
-        let mut end_idx = heading_indices.get(pos + 1).copied().unwrap_or(lines.len());
-        for (idx, line) in lines.iter().enumerate().take(end_idx).skip(heading_idx + 1) {
-            if is_exchange_boundary(line.text) {
-                end_idx = idx;
-                break;
-            }
-        }
-        ranges.push(lines[heading_idx].start..lines[end_idx - 1].end);
-    }
-    ranges
-}
-
-fn is_exchange_response_heading(line: &str) -> bool {
-    line.trim_start().starts_with("### Re:")
-}
-
-fn is_exchange_boundary(line: &str) -> bool {
-    line.trim_start().starts_with("<!-- agent:boundary:")
-}
-
-/// `#exch-intermix`: realtime resolver for the `live_prompt_drift_after_preflight`
-/// closeout wedge. After the IPC drift guard carries the agent response in the
-/// snapshot candidate, the visible document may still be missing that response
-/// while carrying newer operator-visible edits. Recovery must rebase only the
-/// missing response block onto the current document; it must not adopt the
-/// snapshot as a whole-document authority.
-///
-/// This returns true only when the current realtime document can preserve the
-/// operator-visible state and accept the missing agent response as a delta. It
-/// never authorizes wholesale snapshot adoption: queue/backlog/frontmatter and
-/// other disjoint operator edits stay as they are in `file_content`, while only
-/// the newest missing `### Re:` block from `snapshot` may be appended to
-/// `agent:exchange`. Prompt-target edits inside the visible file still fail
-/// closed because the resolver cannot prove where the response should land
-/// relative to a newly typed prompt.
-pub fn live_prompt_drift_auto_recovery_safe(snapshot: &str, file_content: &str) -> bool {
-    live_prompt_drift_recovery_target(snapshot, file_content).is_some()
-}
-
-fn live_prompt_drift_recovery_target(snapshot: &str, file_content: &str) -> Option<String> {
-    // A newly typed prompt inside `agent:exchange` makes response placement
-    // ambiguous. Queue/backlog prompt text is disjoint operator state and is
-    // preserved by the merged target below.
-    if exchange_has_disk_only_prompt_target(snapshot, file_content) {
-        return None;
-    }
-
-    let response_block = latest_missing_snapshot_response_block(snapshot, file_content)?;
-    let components = element::parse(file_content).ok()?;
-    let exchange = components
-        .iter()
-        .find(|component| component.name == AGENT_RESPONSE_COMPONENT)?;
-    let mut exchange_body = exchange.content(file_content).to_string();
-    agent_doc_template::response_materialization::push_materialization_segment(
-        &mut exchange_body,
-        &response_block,
-    );
-    let recovered = exchange.replace_content(file_content, &exchange_body);
-    (normalize_visible_recovery_compare(&recovered)
-        != normalize_visible_recovery_compare(file_content))
-    .then_some(recovered)
-}
-
-fn exchange_has_disk_only_prompt_target(snapshot: &str, file_content: &str) -> bool {
-    let (Ok(snapshot_components), Ok(file_components)) =
-        (element::parse(snapshot), element::parse(file_content))
-    else {
-        return true;
-    };
-    let (Some(snapshot_exchange), Some(file_exchange)) = (
-        snapshot_components
-            .iter()
-            .find(|component| component.name == AGENT_RESPONSE_COMPONENT),
-        file_components
-            .iter()
-            .find(|component| component.name == AGENT_RESPONSE_COMPONENT),
-    ) else {
-        return true;
-    };
-    let snapshot_counts = exchange_prompt_target_counts(snapshot_exchange.content(snapshot));
-    let mut seen: HashMap<String, usize> = HashMap::new();
-    for prompt in exchange_prompt_target_lines(file_exchange.content(file_content)) {
-        let count = seen.entry(prompt.clone()).or_insert(0);
-        *count += 1;
-        if *count > snapshot_counts.get(&prompt).copied().unwrap_or(0) {
-            return true;
-        }
-    }
-    false
-}
-
-fn exchange_prompt_target_counts(exchange_body: &str) -> HashMap<String, usize> {
-    let mut counts = HashMap::new();
-    for prompt in exchange_prompt_target_lines(exchange_body) {
-        *counts.entry(prompt).or_insert(0) += 1;
-    }
-    counts
-}
-
-fn exchange_prompt_target_lines(exchange_body: &str) -> Vec<String> {
-    exchange_body
-        .lines()
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            if trimmed.starts_with('❯')
-                || agent_doc_diff::text_line_looks_like_prompt_target(trimmed)
-            {
-                Some(
-                    trimmed
-                        .strip_prefix('❯')
-                        .unwrap_or(trimmed)
-                        .trim()
-                        .to_string(),
-                )
-            } else {
-                None
-            }
-        })
-        .collect()
-}
-
-fn latest_missing_snapshot_response_block(snapshot: &str, file_content: &str) -> Option<String> {
-    let (Ok(snapshot_components), Ok(file_components)) =
-        (element::parse(snapshot), element::parse(file_content))
-    else {
-        return None;
-    };
-    let (Some(snapshot_exchange), Some(file_exchange)) = (
-        snapshot_components
-            .iter()
-            .find(|component| component.name == AGENT_RESPONSE_COMPONENT),
-        file_components
-            .iter()
-            .find(|component| component.name == AGENT_RESPONSE_COMPONENT),
-    ) else {
-        return None;
-    };
-    let snapshot_body = snapshot_exchange.content(snapshot);
-    let file_body = file_exchange.content(file_content);
-    let file_norm = normalize_visible_recovery_compare(file_body);
-    for range in exchange_response_block_ranges(snapshot_body)
-        .into_iter()
-        .rev()
-    {
-        let block = &snapshot_body[range];
-        let block_norm = normalize_visible_recovery_compare(block);
-        let block_trimmed = block_norm.trim();
-        if block_trimmed.is_empty() {
-            continue;
-        }
-        if !file_norm.contains(block_trimmed) {
-            return Some(block.to_string());
-        }
-    }
-    None
-}
-
 fn normalize_visible_recovery_compare(content: &str) -> String {
     crate::git::normalize_transient_agent_doc_markers(&strip_boundary_for_dedup(content))
-}
-
-/// `#exch-intermix-falsedrop`: true when a recorded dropped prompt is still
-/// present in the response candidate — as an active line, a
-/// struck/consumed queue item (`~~…~~`), or echoed in a `### Re:` heading — so
-/// response recovery loses nothing. The drift-time dropped-prompt record
-/// compares the divergent IPC candidate against `content_ours` and therefore
-/// false-positives on prompts that `content_ours` consumed or preserved; this
-/// containment check reconciles those against the response candidate text.
-/// Returns false only when the prompt text genuinely does not appear in the
-/// candidate (real user-content loss -> fail closed). Strike markers are stripped from both sides
-/// so a consumed item still matches its recorded prompt text.
-pub(crate) fn snapshot_contains_dropped_prompt(snapshot: &str, prompt: &str) -> bool {
-    let stripped = prompt.replace("~~", "");
-    let needle = stripped.trim();
-    if needle.is_empty() {
-        return true;
-    }
-    snapshot.replace("~~", "").contains(needle)
 }
 
 /// `#exch-intermix`: auto-recover the `live_prompt_drift_after_preflight`
@@ -587,7 +308,11 @@ pub fn try_auto_recover_live_prompt_drift(
     if dropped_missing_from_snapshot {
         return Ok(None);
     }
-    let Some(recovery_target) = live_prompt_drift_recovery_target(snapshot, file_content) else {
+    let Some(recovery_target) = live_prompt_drift_recovery_target(
+        snapshot,
+        file_content,
+        normalize_visible_recovery_compare,
+    ) else {
         return Ok(None);
     };
 
@@ -2369,7 +2094,11 @@ mod core_tests {
         let snapshot = crate::test_support::drift_content_ours();
         let fragmented = crate::test_support::drift_baseline();
         assert!(
-            live_prompt_drift_auto_recovery_safe(&snapshot, &fragmented),
+            live_prompt_drift_auto_recovery_safe(
+                &snapshot,
+                &fragmented,
+                normalize_visible_recovery_compare,
+            ),
             "benign live-prompt-drift wedge should be recoverable"
         );
     }
@@ -3472,7 +3201,11 @@ mod core_tests {
         // Snapshot == file: no wedge, nothing to recover, must not fire.
         let snapshot = crate::test_support::drift_content_ours();
         assert!(
-            !live_prompt_drift_auto_recovery_safe(&snapshot, &snapshot),
+            !live_prompt_drift_auto_recovery_safe(
+                &snapshot,
+                &snapshot,
+                normalize_visible_recovery_compare,
+            ),
             "no drift means no auto-recovery"
         );
     }
@@ -3487,7 +3220,11 @@ mod core_tests {
             "❯ do #fix\n❯ do #brand-new-user-prompt-typed-after-preflight\n<!-- /agent:exchange -->",
         );
         assert!(
-            !live_prompt_drift_auto_recovery_safe(&snapshot, &fragmented),
+            !live_prompt_drift_auto_recovery_safe(
+                &snapshot,
+                &fragmented,
+                normalize_visible_recovery_compare,
+            ),
             "a disk-only user prompt must block auto-recovery"
         );
     }
@@ -3500,8 +3237,12 @@ mod core_tests {
             "- do [#fix]\n<!-- /agent:queue -->",
             "- do [#fix]\n- do [#user-added-queue-item]\n<!-- /agent:queue -->",
         );
-        let target = live_prompt_drift_recovery_target(&snapshot, &fragmented)
-            .expect("queue edits should be preserved while the response lands");
+        let target = live_prompt_drift_recovery_target(
+            &snapshot,
+            &fragmented,
+            normalize_visible_recovery_compare,
+        )
+        .expect("queue edits should be preserved while the response lands");
         assert!(target.contains("### Re: do #fix"));
         assert!(target.contains("- do [#user-added-queue-item]"));
     }
@@ -3518,8 +3259,12 @@ mod core_tests {
             "❯ do #fix\noperator-partial-wo\n<!-- /agent:exchange -->",
         );
 
-        let target = live_prompt_drift_recovery_target(&snapshot, &fragmented)
-            .expect("partial exchange text should be preserved while the response lands");
+        let target = live_prompt_drift_recovery_target(
+            &snapshot,
+            &fragmented,
+            normalize_visible_recovery_compare,
+        )
+        .expect("partial exchange text should be preserved while the response lands");
         assert!(target.contains("### Re: do #fix"));
         assert!(
             target.contains("operator-partial-wo"),
@@ -3540,8 +3285,12 @@ mod core_tests {
             crate::test_support::drift_baseline()
         );
 
-        let target = live_prompt_drift_recovery_target(&snapshot, &fragmented)
-            .expect("backlog edits should be preserved while the response lands");
+        let target = live_prompt_drift_recovery_target(
+            &snapshot,
+            &fragmented,
+            normalize_visible_recovery_compare,
+        )
+        .expect("backlog edits should be preserved while the response lands");
         assert!(target.contains("### Re: do #fix"));
         assert!(target.contains("- existing backlog text with operator word"));
         assert!(!target.contains("- existing backlog text\n<!-- /agent:backlog -->"));
@@ -3560,8 +3309,12 @@ mod core_tests {
             crate::test_support::drift_baseline()
         );
 
-        let target = live_prompt_drift_recovery_target(&snapshot, &fragmented)
-            .expect("backlog deletions should be preserved while the response lands");
+        let target = live_prompt_drift_recovery_target(
+            &snapshot,
+            &fragmented,
+            normalize_visible_recovery_compare,
+        )
+        .expect("backlog deletions should be preserved while the response lands");
         assert!(target.contains("### Re: do #fix"));
         assert!(target.contains("- keep this"));
         assert!(!target.contains("operator deleted this"));
@@ -3580,8 +3333,12 @@ mod core_tests {
             crate::test_support::drift_baseline()
         );
 
-        let target = live_prompt_drift_recovery_target(&snapshot, &fragmented)
-            .expect("backlog edits should be preserved while the response lands");
+        let target = live_prompt_drift_recovery_target(
+            &snapshot,
+            &fragmented,
+            normalize_visible_recovery_compare,
+        )
+        .expect("backlog edits should be preserved while the response lands");
         assert!(target.contains("### Re: do #fix"));
         assert!(target.contains("- edited backlog wording"));
         assert!(!target.contains("- original backlog wording"));
@@ -3753,8 +3510,12 @@ mod core_tests {
             "❯ do #fix\n<!-- /agent:exchange -->",
             "❯ do #fix\noperator-partial-wo\n<!-- /agent:exchange -->",
         );
-        let recovery_target = live_prompt_drift_recovery_target(&snapshot, &fragmented)
-            .expect("partial exchange text should be preserved in the target");
+        let recovery_target = live_prompt_drift_recovery_target(
+            &snapshot,
+            &fragmented,
+            normalize_visible_recovery_compare,
+        )
+        .expect("partial exchange text should be preserved in the target");
         fs::write(&doc, &fragmented).unwrap();
         snapshot::save(&doc, &snapshot).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&fragmented)).unwrap();

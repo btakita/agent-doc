@@ -10,6 +10,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Realtime write/reconnect policy moved to `agent-doc-document-realtime`.** Visible-write idle admission, full-content source proof/replacement rejection, reconnect-buffer reconciliation, and editorless disk fallback decisions now live in `agent_doc_document_realtime::write_policy`. Orchestration keeps only sidecar/editor/git/file adapters and flow-event formatting, and callers import the focused realtime API directly rather than using orchestration facades.
 
+- **Realtime exchange recovery policy moved to `agent-doc-document-realtime`.** Exchange response-block parsing, safe historical exchange-reduction classification, live-prompt-drift recovery target construction, and dropped-prompt containment checks now live in `agent_doc_document_realtime::write_policy`. Orchestration keeps only cycle-state, IPC, snapshot, CRDT, ops-log, and transient-marker normalization adapters.
+
 - **CRDT authority policy moved to `agent-doc-document-realtime`.** CRDT
   authority classification, liveness-derived authority selection, sync
   admission, and commit-barrier gating now live in
@@ -47,6 +49,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   appending, and zero-patch marker rejection now live in
   `agent_doc_template::response_materialization`. Orchestration keeps only
   template parsing, IPC payload, file, and log adapters.
+
+- **Strict template response-heading policy moved to `agent-doc-template`.** The strict closeout `### Re:` heading requirement and streamed-visible-prefix proof now live beside response materialization in `agent_doc_template::response_materialization`. Write adapters call the focused template API directly instead of re-exporting it through orchestration.
+
+- **Queue head classification moved to `agent-doc-queue`.** Free-text vs id-backed queue-head classification, registered-preset detection, tracked directive-id detection, bare-do directive recognition, and queue activation-trigger text recognition now live in `agent_doc_queue::queue_response`. Orchestration keeps queue mutation/file adapters and imports the focused queue policy directly.
+
+- **Route textual predicates moved to `agent-doc-controller`.** Codex shell-search blocker recognition, context-session normalization, and stash-window name classification now live in `agent_doc_controller::dispatch`; route, sync, and resync modules consume those predicates directly while keeping tmux/process effects local.
 
 - **Auto-DAG schedule decision vocabulary moved to `agent-doc-work-graph`.** The
   ready/session-review-blocked schedule decision and stable reason labels now

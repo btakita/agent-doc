@@ -234,7 +234,7 @@ pub fn run_template(
         )?;
     }
     if flags.strict_closeout {
-        ensure_strict_template_response_heading_for_current_doc(
+        agent_doc_template::response_materialization::ensure_strict_template_response_heading_for_current_doc(
             &current_content,
             &patches,
             &unmatched,
@@ -544,7 +544,7 @@ pub fn run_stream(
         )?;
     }
     if flags.strict_closeout {
-        ensure_strict_template_response_heading_for_current_doc(
+        agent_doc_template::response_materialization::ensure_strict_template_response_heading_for_current_doc(
             &current_content,
             &patches,
             &unmatched,
@@ -1194,7 +1194,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
         )?;
     }
     if flags.strict_closeout {
-        ensure_strict_template_response_heading_for_current_doc(
+        agent_doc_template::response_materialization::ensure_strict_template_response_heading_for_current_doc(
             &current_content,
             &patches,
             &unmatched,

@@ -20,6 +20,7 @@ use crate::snapshot;
 use agent_doc_element::element;
 use agent_doc_element_backlog::backlog;
 use agent_doc_queue::document_queue as queue;
+use agent_doc_queue::queue_response::queue_head_is_free_text_prompt;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ConsumeOptions {
@@ -84,7 +85,7 @@ fn classify_active_head(content: &str) -> Result<HeadKind> {
     if queue::prompts(&entries).is_empty() {
         return Ok(HeadKind::None);
     }
-    if crate::write::queue_head_is_free_text_prompt(content)? {
+    if queue_head_is_free_text_prompt(content)? {
         Ok(HeadKind::FreeText)
     } else {
         Ok(HeadKind::IdBacked)

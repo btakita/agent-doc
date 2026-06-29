@@ -97,6 +97,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::sessions;
+use agent_doc_controller::dispatch::is_stash_window_name;
 use agent_doc_frontmatter::frontmatter;
 use tmux_router::{PaneMoveOp, Tmux};
 
@@ -855,11 +856,6 @@ fn pane_window_name(tmux: &Tmux, pane_id: &str) -> Option<String> {
     }
     let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if name.is_empty() { None } else { Some(name) }
-}
-
-/// Check if a window name is a stash window (e.g., "stash", "stash-1", "stash-2").
-fn is_stash_window_name(name: &str) -> bool {
-    name == "stash" || name.starts_with("stash-")
 }
 
 /// Get the current command running in a tmux pane.

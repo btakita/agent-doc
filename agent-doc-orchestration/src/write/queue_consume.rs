@@ -2,12 +2,13 @@
 
 use super::*;
 use agent_doc_queue::{
-    queue_directive::{topic_resolves_to_exact_id, topic_resolves_to_only_id_directives},
+    queue_directive::topic_resolves_to_exact_id,
     queue_response::{
         display_queue_prompt_text, free_text_head_answered_by_response, free_text_head_match_prose,
-        head_carries_in_progress_marker, normalize_done_id, normalize_for_answer_match,
-        normalize_queue_prompt_text, queue_prompt_done_id, queue_prompt_text_matches,
-        response_heading_topic, response_topic_matches_queue_head,
+        head_carries_in_progress_marker, head_id_names_tracked_directive_item, normalize_done_id,
+        normalize_for_answer_match, normalize_queue_prompt_text, queue_head_is_bare_do_directive,
+        queue_head_is_free_text_prompt, queue_prompt_done_id, queue_prompt_text_is_free_text,
+        queue_prompt_text_matches, response_heading_topic, response_topic_matches_queue_head,
     },
 };
 
@@ -835,130 +836,6 @@ pub(crate) fn response_targets_synthetic_queue_head_id(
         .lines()
         .filter_map(response_heading_topic)
         .any(|topic| topic_resolves_to_exact_id(topic, &head_id)))
-}
-
-/// True when `head_id` matches a registered `prompt_presets` key in the
-/// document frontmatter and does NOT also name a tracked backlog/review/icebox
-/// directive item (#qpresetstrike).
-///
-/// A queue head that is a bare prompt-preset token (`#advance-review` drawn from
-/// frontmatter `prompt_presets`) has no backlog row, so no `--done`/`--pending-gate`
-/// closeout can record a completion outcome for it: `--done advance-review` fails
-/// with "id not found in backlog/icebox", and the leading `#` made the old
-/// classifier route `queue consume` to `--done` and wedge the head. Such a head is
-/// a *synthetic* prompt completed by being answered (like a free-text head), so it
-/// is strikeable through `queue consume` and the free-text finalize heuristic. A
-/// preset token that ALSO happens to be a tracked backlog/review id stays id-backed
-/// (the tracked-item check wins) so it keeps its explicit `--done` reap path.
-pub(crate) fn head_id_is_registered_preset(content: &str, head_id: &str) -> bool {
-    if head_id_names_tracked_directive_item(content, head_id) {
-        return false;
-    }
-    let Ok((fm, _)) = frontmatter::parse(content) else {
-        return false;
-    };
-    agent_doc_frontmatter::frontmatter::resolve_prompt_preset_key(&fm.prompt_presets, head_id)
-        .is_some()
-}
-
-/// True when `head_id` names an item tracked in `agent:backlog` or `agent:review`.
-/// These ids are id-backed directives requiring an explicit
-/// `--done`/`--pending-gate`/`--pending-edit` closeout — distinct from a
-/// registered prompt-preset id (e.g. `#spec-...`), which is not a tracked item and
-/// still completes on a `### Re: #id` heading match (#zwn5).
-pub(crate) fn head_id_names_tracked_directive_item(content: &str, head_id: &str) -> bool {
-    let Ok(comps) = agent_doc_element::element::parse(content) else {
-        return false;
-    };
-    comps
-        .iter()
-        .filter(|c| c.name == "backlog" || c.name == "review" || c.name == "pending")
-        .any(|comp| {
-            let (_, items, _) =
-                agent_doc_element_backlog::backlog::parse_items(comp.content(content));
-            items
-                .iter()
-                .any(|item| !item.id.is_empty() && item.id.eq_ignore_ascii_case(head_id))
-        })
-}
-
-/// A queue head that is just a `do [#id]` / `do #id` directive — the `do` verb
-/// plus the id (with optional bracket sugar) and nothing else. These follow the
-/// strike-on-halt explicit-flag rule rather than heading-based consumption.
-pub(crate) fn queue_head_is_bare_do_directive(queue_head: &str) -> bool {
-    let norm = normalize_queue_prompt_text(queue_head);
-    let Some(rest) = norm.strip_prefix("do ") else {
-        return false;
-    };
-    matches!(
-        rest.strip_prefix('#'),
-        Some(id)
-            if !id.is_empty()
-                && id
-                    .chars()
-                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
-    )
-}
-
-/// True when the active queue head is a free-text prompt: it carries no
-/// extractable `#id` (so it is neither a `do [#id]` directive nor a `#preset`
-/// head) and is not a `do queue` / `run queue` activation trigger. Such a prompt
-/// has no `#id`-based completion mechanism — none of the explicit-flag or
-/// heading-id consumption paths can ever strike it — so it is consumed by being
-/// answered: a captured response body for the cycle completes it
-/// (#free-text-queue-head-consume).
-pub(crate) fn queue_head_is_free_text_prompt(content: &str) -> Result<bool> {
-    let Some(queue_head) = active_queue_head_text(content)? else {
-        return Ok(false);
-    };
-    // #free-text-queue-owner-consume: a head is id-backed (NOT free text, so it
-    // needs an explicit `--done`/`--pending-gate`/`--pending-edit` completion
-    // signal) only when the ENTIRE head resolves to a single id directive —
-    // `#id`, `[#id]`, or `do [#id]`. A free-text head that merely *mentions* a
-    // `#id` in prose — e.g. `Approve [#shoptiers]. What are #next-steps?` — is
-    // still free text and completes on being answered. The old `queue_prompt_done_id(..).is_some()`
-    // test matched any `#id` mention and wrongly left such heads un-strikable,
-    // hanging the auto-queue (they have no single id to `--done`).
-    let normalized_head = normalize_queue_prompt_text(&queue_head);
-    // #qmultiidstrike: a head composed ENTIRELY of `do` + one or more id
-    // directives is id-backed regardless of id COUNT (`do [#a] [#b]` as much as
-    // `do [#a]`). It is struck only once every referenced id is reaped, never by
-    // the positional free-text heuristic.
-    if let Some(ids) = topic_resolves_to_only_id_directives(&normalized_head) {
-        // #qpresetstrike: a head whose ids are ALL registered `prompt_presets`
-        // tokens (no `--done` reap path) is a synthetic prompt completed by being
-        // answered, so treat it as free text (strikeable by `queue consume` and the
-        // free-text finalize heuristic) rather than wedging it as id-backed.
-        if ids
-            .iter()
-            .all(|id| head_id_is_registered_preset(content, id))
-        {
-            return Ok(true);
-        }
-        return Ok(false);
-    }
-    if agent_doc_diff::detect_queue_trigger(&normalized_head) {
-        return Ok(false);
-    }
-    Ok(true)
-}
-
-/// True when `text` is a free-text queue prompt (NOT an id-backed directive and
-/// NOT a queue trigger) — the per-entry analogue of
-/// [`queue_head_is_free_text_prompt`], used by the position-independent
-/// answered-head strike (#ftstrike) which must classify entries anywhere in the
-/// queue, not only the active head.
-pub(crate) fn queue_prompt_text_is_free_text(content: &str, text: &str) -> bool {
-    let normalized = normalize_queue_prompt_text(text);
-    // #qmultiidstrike: mirror `queue_head_is_free_text_prompt` — a head composed
-    // solely of id directives is id-backed regardless of id count, unless every id
-    // is a registered preset (no reap path → synthetic free text).
-    if let Some(ids) = topic_resolves_to_only_id_directives(&normalized) {
-        return ids
-            .iter()
-            .all(|id| head_id_is_registered_preset(content, id));
-    }
-    !agent_doc_diff::detect_queue_trigger(&normalized)
 }
 
 /// True when `head_text`'s normalized prose prefix matches a free-text queue head
@@ -3360,7 +3237,12 @@ mod core_tests {
             queue_head_is_free_text_prompt(registered).unwrap(),
             "a registered preset-token head completes on being answered (free text)"
         );
-        assert!(head_id_is_registered_preset(registered, "advance-review"));
+        assert!(
+            agent_doc_queue::queue_response::head_id_is_registered_preset(
+                registered,
+                "advance-review"
+            )
+        );
 
         // A registered preset token that ALSO names a tracked backlog id stays
         // id-backed (the tracked-item reap path wins).
@@ -3380,10 +3262,12 @@ mod core_tests {
             !queue_head_is_free_text_prompt(preset_and_tracked).unwrap(),
             "a preset token that is also a tracked backlog id stays id-backed"
         );
-        assert!(!head_id_is_registered_preset(
-            preset_and_tracked,
-            "advance-review"
-        ));
+        assert!(
+            !agent_doc_queue::queue_response::head_id_is_registered_preset(
+                preset_and_tracked,
+                "advance-review"
+            )
+        );
 
         // An unregistered #-token (preset name not in frontmatter) is NOT treated
         // as a preset — it stays id-backed so it is never struck blind.
@@ -3394,10 +3278,12 @@ mod core_tests {
             "<!-- /agent:queue -->\n",
         );
         assert!(!queue_head_is_free_text_prompt(unregistered).unwrap());
-        assert!(!head_id_is_registered_preset(
-            unregistered,
-            "advance-review"
-        ));
+        assert!(
+            !agent_doc_queue::queue_response::head_id_is_registered_preset(
+                unregistered,
+                "advance-review"
+            )
+        );
     }
 
     #[test]

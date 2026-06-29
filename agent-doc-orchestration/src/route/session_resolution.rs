@@ -1,6 +1,7 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use agent_doc_controller::dispatch::{is_stash_window_name, normalize_context_session};
 
 /// Get the tmux session that owns the caller pane.
 pub(crate) fn current_tmux_session(tmux: &Tmux) -> Option<String> {
@@ -109,17 +110,6 @@ pub(crate) fn ensure_auto_start_target_session(
     );
 }
 
-pub(crate) fn normalize_context_session(context_session: Option<&str>) -> Option<&str> {
-    context_session.and_then(|session| {
-        let trimmed = session.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed)
-        }
-    })
-}
-
 /// Find an explicit target pane for lazy claiming.
 /// Skips panes already claimed by another document in the session registry.
 pub(crate) fn find_target_pane(
@@ -165,10 +155,6 @@ pub(crate) fn pane_window_name(tmux: &Tmux, pane_id: &str) -> Option<String> {
             .filter(|o| o.status.success())
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
     })
-}
-
-pub(crate) fn is_stash_window_name(window_name: &str) -> bool {
-    window_name == "stash" || window_name.starts_with("stash-")
 }
 
 pub(crate) fn evict_previous_stash_pane(

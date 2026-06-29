@@ -44,6 +44,108 @@ pub fn ensure_template_response_write_proof(patches: &[PatchBlock], unmatched: &
     );
 }
 
+pub fn ensure_strict_template_response_heading(
+    patches: &[PatchBlock],
+    unmatched: &str,
+) -> Result<()> {
+    if template_response_has_heading(patches, unmatched) {
+        return Ok(());
+    }
+
+    anyhow::bail!(
+        "strict template closeout response must include a `### Re:` response heading in `patch:exchange` or unmatched response body"
+    );
+}
+
+pub fn ensure_strict_template_response_heading_for_current_doc(
+    current_content: &str,
+    patches: &[PatchBlock],
+    unmatched: &str,
+) -> Result<()> {
+    match ensure_strict_template_response_heading(patches, unmatched) {
+        Ok(()) => Ok(()),
+        Err(_)
+            if live_exchange_tail_proves_streamed_response_heading(
+                current_content,
+                patches,
+                unmatched,
+            ) =>
+        {
+            Ok(())
+        }
+        Err(err) => Err(err),
+    }
+}
+
+pub fn template_response_has_heading(patches: &[PatchBlock], unmatched: &str) -> bool {
+    response_text_has_heading(unmatched)
+        || patches.iter().any(|patch| {
+            patch.name == "exchange"
+                && !patch.content.trim().is_empty()
+                && response_text_has_heading(&patch.content)
+        })
+}
+
+pub fn live_exchange_tail_proves_streamed_response_heading(
+    current_content: &str,
+    patches: &[PatchBlock],
+    unmatched: &str,
+) -> bool {
+    if !unmatched.trim().is_empty() {
+        return false;
+    }
+
+    let mut non_empty = patches
+        .iter()
+        .filter(|patch| !patch.content.trim().is_empty());
+    let Some(patch) = non_empty.next() else {
+        return false;
+    };
+    if non_empty.next().is_some() || patch.name != "exchange" {
+        return false;
+    }
+
+    let Ok(components) = agent_doc_element::element::parse(current_content) else {
+        return false;
+    };
+    let Some(exchange) = components
+        .iter()
+        .rev()
+        .find(|component| component.name == "exchange")
+    else {
+        return false;
+    };
+    let exchange_content = exchange.content(current_content);
+    let Some(tail_start) = offset_after_last_prompt_line(exchange_content) else {
+        return false;
+    };
+
+    response_text_has_heading(&exchange_content[tail_start..])
+}
+
+pub fn offset_after_last_prompt_line(text: &str) -> Option<usize> {
+    let mut offset = 0usize;
+    let mut last = None;
+    for line in text.split_inclusive('\n') {
+        if line.trim_start().starts_with('❯') {
+            last = Some(offset + line.len());
+        }
+        offset += line.len();
+    }
+    last
+}
+
+pub fn response_text_has_heading(text: &str) -> bool {
+    text.lines().any(|line| {
+        let trimmed = line.trim_start();
+        trimmed.starts_with("### Re:")
+            || trimmed.starts_with("#### Re:")
+            || trimmed.starts_with("##### Re:")
+            || trimmed.starts_with("###### Re:")
+            || trimmed.starts_with("## Re:")
+    })
+}
+
 pub fn same_ignoring_trailing_newlines(left: &str, right: &str) -> bool {
     left.trim_end_matches('\n') == right.trim_end_matches('\n')
 }
@@ -161,6 +263,73 @@ mod tests {
         let proof = template_response_write_proof(&patches, "");
         assert_eq!(proof.explicit_components, vec!["exchange"]);
         assert!(proof.has_real_body());
+    }
+
+    #[test]
+    fn strict_template_response_heading_accepts_exchange_patch_heading() {
+        let patches = vec![PatchBlock::new(
+            "exchange",
+            "### Re: queue head - gpt-5\n\nAnswered.\n",
+        )];
+
+        ensure_strict_template_response_heading(&patches, "").unwrap();
+    }
+
+    #[test]
+    fn strict_template_response_heading_accepts_unmatched_heading() {
+        ensure_strict_template_response_heading(&[], "### Re: queue head - gpt-5\n\nAnswered.\n")
+            .unwrap();
+    }
+
+    #[test]
+    fn strict_template_response_heading_rejects_body_only_exchange_patch() {
+        let patches = vec![PatchBlock::new(
+            "exchange",
+            "- changed paths\n- verification\n",
+        )];
+
+        let err = ensure_strict_template_response_heading(&patches, "").unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("strict template closeout response")
+        );
+    }
+
+    #[test]
+    fn strict_template_response_heading_accepts_streamed_visible_prefix() {
+        let current = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #stream. spec-test-build-install-commit-push\n",
+            "<!-- patch:exchange -->\n",
+            "### Re: streamed - gpt-5\n",
+            "<!-- agent:boundary:streamed -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let patches = vec![PatchBlock::new("exchange", "\nImplemented and verified.\n")];
+
+        ensure_strict_template_response_heading_for_current_doc(current, &patches, "").unwrap();
+    }
+
+    #[test]
+    fn strict_template_response_heading_rejects_prior_heading_before_live_prompt() {
+        let current = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior - gpt-5\n\n",
+            "Done.\n",
+            "❯ do #new. spec-test-build-install-commit-push\n",
+            "<!-- agent:boundary:new -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let patches = vec![PatchBlock::new("exchange", "\nImplemented and verified.\n")];
+
+        let err = ensure_strict_template_response_heading_for_current_doc(current, &patches, "")
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("strict template closeout response")
+        );
     }
 
     #[test]

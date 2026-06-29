@@ -182,6 +182,33 @@ fn strip_ansi(s: &str) -> String {
     result
 }
 
+/// `#codex-route-busy-ctrl-g-opens-editor`: pure decision for whether the
+/// busy-pane reroute may send `C-g`. `C-g` safely aborts a shell
+/// `reverse-i-search` / history-search, but in any other Codex state (normal
+/// composer, active turn) it opens the external editor. Any non-shell-search
+/// reason, including an unknown timeout (`None`), fails closed.
+pub fn is_codex_shell_search_blocker(blocker_reason: Option<&str>) -> bool {
+    matches!(
+        blocker_reason,
+        Some("interactive shell reverse-i-search") | Some("interactive shell history search")
+    )
+}
+
+pub fn normalize_context_session(context_session: Option<&str>) -> Option<&str> {
+    context_session.and_then(|session| {
+        let trimmed = session.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    })
+}
+
+pub fn is_stash_window_name(window_name: &str) -> bool {
+    window_name == "stash" || window_name.starts_with("stash-")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DispatchActorState {
     Ready,
@@ -1913,6 +1940,52 @@ gpt-5.4 high - ~/work/btakita/agent-loop/src/session-share - Context 31% used
             recent_lines_contain_trigger(content, trigger),
             "wrapped Codex composer lines must still count as pending input"
         );
+    }
+
+    #[test]
+    fn codex_shell_search_blocker_allows_only_shell_search_reasons() {
+        assert!(is_codex_shell_search_blocker(Some(
+            "interactive shell reverse-i-search"
+        )));
+        assert!(is_codex_shell_search_blocker(Some(
+            "interactive shell history search"
+        )));
+
+        assert!(!is_codex_shell_search_blocker(Some("active codex turn")));
+        assert!(!is_codex_shell_search_blocker(Some(
+            "queued draft in composer"
+        )));
+        assert!(!is_codex_shell_search_blocker(Some(
+            "active permission prompt"
+        )));
+        assert!(!is_codex_shell_search_blocker(Some(" reverse-i-search")));
+        assert!(!is_codex_shell_search_blocker(None));
+    }
+
+    #[test]
+    fn normalize_context_session_trims_and_rejects_blank() {
+        assert_eq!(
+            normalize_context_session(Some("agent-doc")),
+            Some("agent-doc")
+        );
+        assert_eq!(
+            normalize_context_session(Some("  work-session \n")),
+            Some("work-session")
+        );
+        assert_eq!(normalize_context_session(Some("")), None);
+        assert_eq!(normalize_context_session(Some(" \t\n")), None);
+        assert_eq!(normalize_context_session(None), None);
+    }
+
+    #[test]
+    fn is_stash_window_name_matches_route_stash_windows() {
+        assert!(is_stash_window_name("stash"));
+        assert!(is_stash_window_name("stash-1"));
+        assert!(is_stash_window_name("stash-42"));
+        assert!(is_stash_window_name("stash-"));
+        assert!(!is_stash_window_name(""));
+        assert!(!is_stash_window_name("agent-doc"));
+        assert!(!is_stash_window_name("stashed"));
     }
 
     #[test]

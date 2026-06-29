@@ -1,6 +1,7 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use agent_doc_controller::dispatch::is_stash_window_name;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn recover_dispatch_only_authoritative_waiting_input(

@@ -193,6 +193,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tempfile::NamedTempFile;
 
+use agent_doc_controller::dispatch::is_stash_window_name;
 use agent_doc_element::element;
 use tmux_router::{PaneMoveOp, Tmux};
 
@@ -1624,10 +1625,6 @@ fn window_name_for_window_id(tmux: &Tmux, window_id: &str) -> Option<String> {
 
 fn target_is_agent_doc_window(tmux: &Tmux, target: &str) -> bool {
     window_name_for_window_id(tmux, target).as_deref() == Some("agent-doc")
-}
-
-fn is_stash_window_name(window_name: &str) -> bool {
-    window_name == "stash" || window_name.starts_with("stash-")
 }
 
 /// Returns `true` when `pane_id` currently lives in a `stash` window.

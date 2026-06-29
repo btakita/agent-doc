@@ -1344,7 +1344,7 @@ fn active_queue_head_is_registered_preset(content: &str, preset_id: &str) -> Res
     };
     let normalized = normalize_queue_prompt_text(&head);
     Ok(topic_resolves_to_exact_id(&normalized, preset_id)
-        && crate::write::head_id_is_registered_preset(content, preset_id))
+        && agent_doc_queue::queue_response::head_id_is_registered_preset(content, preset_id))
 }
 
 fn resume_spent_preset_pause(

@@ -5,7 +5,7 @@
 //! allowed to proceed.
 
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 fn content_hash(content: &str) -> String {
     let mut hasher = Sha256::new();
@@ -321,12 +321,345 @@ pub fn classify_ack_mismatch_recovery(
     None
 }
 
+pub fn exchange_change_is_complete_response_block_trim(snapshot: &str, current: &str) -> bool {
+    if snapshot == current {
+        return false;
+    }
+    let blocks = exchange_response_block_ranges(snapshot);
+    if blocks.is_empty() {
+        return false;
+    }
+
+    let mut snapshot_pos = 0usize;
+    let mut current_pos = 0usize;
+    let mut removed = 0usize;
+    for block in blocks {
+        let prefix = &snapshot[snapshot_pos..block.start];
+        if !current[current_pos..].starts_with(prefix) {
+            return false;
+        }
+        current_pos += prefix.len();
+
+        let block_text = &snapshot[block.clone()];
+        if current[current_pos..].starts_with(block_text) {
+            current_pos += block_text.len();
+        } else {
+            removed += 1;
+        }
+        snapshot_pos = block.end;
+    }
+
+    removed > 0 && current[current_pos..] == snapshot[snapshot_pos..]
+}
+
+pub fn exchange_change_is_safe_historical_reduction(snapshot: &str, current: &str) -> bool {
+    exchange_change_is_complete_response_block_trim(snapshot, current)
+        || exchange_change_is_compact_summary_replacement(snapshot, current)
+}
+
+pub fn exchange_change_is_compact_summary_replacement(snapshot: &str, current: &str) -> bool {
+    if snapshot == current {
+        return false;
+    }
+    let current_trimmed = current.trim_start();
+    if !current_trimmed.starts_with("### Session Summary") {
+        return false;
+    }
+    if !current.contains("*Compacted. Content archived to `")
+        && !current.contains("Compacted content:")
+    {
+        return false;
+    }
+
+    let snapshot_headings = exchange_response_heading_lines(snapshot);
+    if snapshot_headings.is_empty() {
+        return false;
+    }
+    let current_headings = exchange_response_heading_lines(current);
+    if current_headings
+        .iter()
+        .any(|heading| !snapshot_headings.contains(heading))
+    {
+        return false;
+    }
+
+    current_headings.len() < snapshot_headings.len()
+}
+
+pub fn exchange_response_heading_lines(exchange: &str) -> Vec<String> {
+    exchange
+        .lines()
+        .filter(|line| is_exchange_response_heading(line))
+        .map(|line| line.trim().to_string())
+        .collect()
+}
+
+pub fn exchange_response_block_ranges(exchange: &str) -> Vec<std::ops::Range<usize>> {
+    #[derive(Clone, Copy)]
+    struct Line<'a> {
+        start: usize,
+        end: usize,
+        text: &'a str,
+    }
+
+    let mut lines = Vec::new();
+    let mut offset = 0usize;
+    for line in exchange.split_inclusive('\n') {
+        let end = offset + line.len();
+        lines.push(Line {
+            start: offset,
+            end,
+            text: line,
+        });
+        offset = end;
+    }
+    if offset < exchange.len() {
+        lines.push(Line {
+            start: offset,
+            end: exchange.len(),
+            text: &exchange[offset..],
+        });
+    }
+
+    let heading_indices: Vec<_> = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, line)| is_exchange_response_heading(line.text).then_some(idx))
+        .collect();
+    let mut ranges = Vec::new();
+    for (pos, &heading_idx) in heading_indices.iter().enumerate() {
+        let mut end_idx = heading_indices.get(pos + 1).copied().unwrap_or(lines.len());
+        for (idx, line) in lines.iter().enumerate().take(end_idx).skip(heading_idx + 1) {
+            if is_exchange_boundary(line.text) {
+                end_idx = idx;
+                break;
+            }
+        }
+        ranges.push(lines[heading_idx].start..lines[end_idx - 1].end);
+    }
+    ranges
+}
+
+fn is_exchange_response_heading(line: &str) -> bool {
+    line.trim_start().starts_with("### Re:")
+}
+
+fn is_exchange_boundary(line: &str) -> bool {
+    line.trim_start().starts_with("<!-- agent:boundary:")
+}
+
+/// `#exch-intermix`: realtime resolver for the `live_prompt_drift_after_preflight`
+/// closeout wedge. After the IPC drift guard carries the agent response in the
+/// snapshot candidate, the visible document may still be missing that response
+/// while carrying newer operator-visible edits. Recovery must rebase only the
+/// missing response block onto the current document; it must not adopt the
+/// snapshot as a whole-document authority.
+///
+/// This returns true only when the current realtime document can preserve the
+/// operator-visible state and accept the missing agent response as a delta. It
+/// never authorizes wholesale snapshot adoption: queue/backlog/frontmatter and
+/// other disjoint operator edits stay as they are in `file_content`, while only
+/// the newest missing `### Re:` block from `snapshot` may be appended to
+/// `agent:exchange`. Prompt-target edits inside the visible file still fail
+/// closed because the resolver cannot prove where the response should land
+/// relative to a newly typed prompt.
+pub fn live_prompt_drift_auto_recovery_safe(
+    snapshot: &str,
+    file_content: &str,
+    normalize_visible_recovery_compare: impl Fn(&str) -> String + Copy,
+) -> bool {
+    live_prompt_drift_recovery_target(snapshot, file_content, normalize_visible_recovery_compare)
+        .is_some()
+}
+
+pub fn live_prompt_drift_recovery_target(
+    snapshot: &str,
+    file_content: &str,
+    normalize_visible_recovery_compare: impl Fn(&str) -> String + Copy,
+) -> Option<String> {
+    // A newly typed prompt inside `agent:exchange` makes response placement
+    // ambiguous. Queue/backlog prompt text is disjoint operator state and is
+    // preserved by the merged target below.
+    if exchange_has_disk_only_prompt_target(snapshot, file_content) {
+        return None;
+    }
+
+    let response_block = latest_missing_snapshot_response_block(
+        snapshot,
+        file_content,
+        normalize_visible_recovery_compare,
+    )?;
+    let components = agent_doc_element::element::parse(file_content).ok()?;
+    let exchange = components
+        .iter()
+        .find(|component| component.name == AGENT_RESPONSE_COMPONENT)?;
+    let mut exchange_body = exchange.content(file_content).to_string();
+    agent_doc_template::response_materialization::push_materialization_segment(
+        &mut exchange_body,
+        &response_block,
+    );
+    let recovered = exchange.replace_content(file_content, &exchange_body);
+    (normalize_visible_recovery_compare(&recovered)
+        != normalize_visible_recovery_compare(file_content))
+    .then_some(recovered)
+}
+
+fn exchange_has_disk_only_prompt_target(snapshot: &str, file_content: &str) -> bool {
+    let (Ok(snapshot_components), Ok(file_components)) = (
+        agent_doc_element::element::parse(snapshot),
+        agent_doc_element::element::parse(file_content),
+    ) else {
+        return true;
+    };
+    let (Some(snapshot_exchange), Some(file_exchange)) = (
+        snapshot_components
+            .iter()
+            .find(|component| component.name == AGENT_RESPONSE_COMPONENT),
+        file_components
+            .iter()
+            .find(|component| component.name == AGENT_RESPONSE_COMPONENT),
+    ) else {
+        return true;
+    };
+    let snapshot_counts = exchange_prompt_target_counts(snapshot_exchange.content(snapshot));
+    let mut seen: HashMap<String, usize> = HashMap::new();
+    for prompt in exchange_prompt_target_lines(file_exchange.content(file_content)) {
+        let count = seen.entry(prompt.clone()).or_insert(0);
+        *count += 1;
+        if *count > snapshot_counts.get(&prompt).copied().unwrap_or(0) {
+            return true;
+        }
+    }
+    false
+}
+
+fn exchange_prompt_target_counts(exchange_body: &str) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    for prompt in exchange_prompt_target_lines(exchange_body) {
+        *counts.entry(prompt).or_insert(0) += 1;
+    }
+    counts
+}
+
+fn exchange_prompt_target_lines(exchange_body: &str) -> Vec<String> {
+    exchange_body
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.starts_with('❯')
+                || agent_doc_diff::text_line_looks_like_prompt_target(trimmed)
+            {
+                Some(
+                    trimmed
+                        .strip_prefix('❯')
+                        .unwrap_or(trimmed)
+                        .trim()
+                        .to_string(),
+                )
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn latest_missing_snapshot_response_block(
+    snapshot: &str,
+    file_content: &str,
+    normalize_visible_recovery_compare: impl Fn(&str) -> String + Copy,
+) -> Option<String> {
+    let (Ok(snapshot_components), Ok(file_components)) = (
+        agent_doc_element::element::parse(snapshot),
+        agent_doc_element::element::parse(file_content),
+    ) else {
+        return None;
+    };
+    let (Some(snapshot_exchange), Some(file_exchange)) = (
+        snapshot_components
+            .iter()
+            .find(|component| component.name == AGENT_RESPONSE_COMPONENT),
+        file_components
+            .iter()
+            .find(|component| component.name == AGENT_RESPONSE_COMPONENT),
+    ) else {
+        return None;
+    };
+    let snapshot_body = snapshot_exchange.content(snapshot);
+    let file_body = file_exchange.content(file_content);
+    let file_norm = normalize_visible_recovery_compare(file_body);
+    for range in exchange_response_block_ranges(snapshot_body)
+        .into_iter()
+        .rev()
+    {
+        let block = &snapshot_body[range];
+        let block_norm = normalize_visible_recovery_compare(block);
+        let block_trimmed = block_norm.trim();
+        if block_trimmed.is_empty() {
+            continue;
+        }
+        if !file_norm.contains(block_trimmed) {
+            return Some(block.to_string());
+        }
+    }
+    None
+}
+
+/// `#exch-intermix-falsedrop`: true when a recorded dropped prompt is still
+/// present in the response candidate - as an active line, a
+/// struck/consumed queue item (`~~...~~`), or echoed in a `### Re:` heading - so
+/// response recovery loses nothing. The drift-time dropped-prompt record
+/// compares the divergent IPC candidate against `content_ours` and therefore
+/// false-positives on prompts that `content_ours` consumed or preserved; this
+/// containment check reconciles those against the response candidate text.
+/// Returns false only when the prompt text genuinely does not appear in the
+/// candidate (real user-content loss -> fail closed). Strike markers are
+/// stripped from both sides so a consumed item still matches its recorded prompt
+/// text.
+pub fn snapshot_contains_dropped_prompt(snapshot: &str, prompt: &str) -> bool {
+    let stripped = prompt.replace("~~", "");
+    let needle = stripped.trim();
+    if needle.is_empty() {
+        return true;
+    }
+    snapshot.replace("~~", "").contains(needle)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn identity_normalize(text: &str) -> String {
         text.to_string()
+    }
+
+    fn drift_baseline() -> String {
+        concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #fix\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#fix]\n",
+            "<!-- /agent:queue -->\n",
+        )
+        .to_string()
+    }
+
+    fn drift_content_ours() -> String {
+        concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #fix\n",
+            "### Re: do #fix — opus-4-8\n\n",
+            "Implemented the fix and verified it end to end. The response body is long\n",
+            "enough to clear the stale-snapshot-reset-drift threshold so the wedge shape\n",
+            "is genuinely detected by the recovery discriminator under test here.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#fix]\n",
+            "<!-- /agent:queue -->\n",
+        )
+        .to_string()
     }
 
     fn doc_with_exchange(exchange: &str, queue: &str) -> String {
@@ -486,5 +819,157 @@ mod tests {
             classify_ack_mismatch_recovery(&target, &recovered, identity_normalize),
             None
         );
+    }
+
+    #[test]
+    fn exchange_change_is_safe_historical_reduction_accepts_response_block_trim() {
+        let snapshot = concat!(
+            "❯ do [#old]\n",
+            "### Re: do [#old]\n\nOld response body.\n",
+            "❯ do [#new]\n",
+            "### Re: do [#new]\n\nNew response body.\n",
+        );
+        let current = concat!(
+            "❯ do [#old]\n",
+            "### Re: do [#old]\n\nOld response body.\n",
+            "❯ do [#new]\n",
+        );
+
+        assert!(exchange_change_is_safe_historical_reduction(
+            snapshot, current
+        ));
+    }
+
+    #[test]
+    fn exchange_change_is_safe_historical_reduction_accepts_compact_summary_replacement() {
+        let snapshot = concat!(
+            "### Re: archived 0 - gpt-5\n\nArchived response body.\n",
+            "### Re: archived 1 - gpt-5\n\nArchived response body.\n",
+        );
+        let current = concat!(
+            "### Session Summary\n\n",
+            "*Compacted. Content archived to `.agent-doc/archives/session.md`*\n\n",
+            "Compacted content:\n",
+            "- Archived 2 response topic(s): archived 0; archived 1\n",
+        );
+
+        assert!(exchange_change_is_safe_historical_reduction(
+            snapshot, current
+        ));
+    }
+
+    #[test]
+    fn exchange_change_is_safe_historical_reduction_rejects_unproven_rewrite() {
+        let snapshot = "### Re: archived 0 - gpt-5\n\nArchived response body.\n";
+        let current =
+            "### Session Summary\n\nOperator-authored replacement without compact archive proof.\n";
+
+        assert!(!exchange_change_is_safe_historical_reduction(
+            snapshot, current
+        ));
+    }
+
+    #[test]
+    fn live_prompt_drift_auto_recovery_safe_accepts_benign_wedge() {
+        let snapshot = drift_content_ours();
+        let fragmented = drift_baseline();
+
+        assert!(live_prompt_drift_auto_recovery_safe(
+            &snapshot,
+            &fragmented,
+            identity_normalize
+        ));
+    }
+
+    #[test]
+    fn live_prompt_drift_auto_recovery_safe_rejects_no_wedge() {
+        let snapshot = drift_content_ours();
+
+        assert!(!live_prompt_drift_auto_recovery_safe(
+            &snapshot,
+            &snapshot,
+            identity_normalize
+        ));
+    }
+
+    #[test]
+    fn live_prompt_drift_auto_recovery_safe_rejects_disk_only_exchange_prompt() {
+        let snapshot = drift_content_ours();
+        let fragmented = drift_baseline().replace(
+            "❯ do #fix\n<!-- /agent:exchange -->",
+            "❯ do #fix\n❯ do #brand-new-user-prompt-typed-after-preflight\n<!-- /agent:exchange -->",
+        );
+
+        assert!(!live_prompt_drift_auto_recovery_safe(
+            &snapshot,
+            &fragmented,
+            identity_normalize
+        ));
+    }
+
+    #[test]
+    fn live_prompt_drift_recovery_target_preserves_disk_only_queue_item() {
+        let snapshot = drift_content_ours();
+        let fragmented = drift_baseline().replace(
+            "- do [#fix]\n<!-- /agent:queue -->",
+            "- do [#fix]\n- do [#user-added-queue-item]\n<!-- /agent:queue -->",
+        );
+
+        let target = live_prompt_drift_recovery_target(&snapshot, &fragmented, identity_normalize)
+            .expect("queue edits should be preserved while the response lands");
+
+        assert!(target.contains("### Re: do #fix"));
+        assert!(target.contains("- do [#user-added-queue-item]"));
+    }
+
+    #[test]
+    fn live_prompt_drift_recovery_target_preserves_partial_exchange_word() {
+        let snapshot = drift_content_ours();
+        let fragmented = drift_baseline().replace(
+            "❯ do #fix\n<!-- /agent:exchange -->",
+            "❯ do #fix\noperator-partial-wo\n<!-- /agent:exchange -->",
+        );
+
+        let target = live_prompt_drift_recovery_target(&snapshot, &fragmented, identity_normalize)
+            .expect("partial exchange text should be preserved while the response lands");
+
+        assert!(target.contains("### Re: do #fix"));
+        assert!(
+            target.contains("operator-partial-wo"),
+            "operator-typed partial word must survive recovery:\n{target}"
+        );
+    }
+
+    #[test]
+    fn live_prompt_drift_recovery_target_preserves_operator_edited_backlog_text() {
+        let snapshot = format!(
+            "{}\n<!-- agent:backlog -->\n- original backlog wording\n<!-- /agent:backlog -->\n",
+            drift_content_ours()
+        );
+        let fragmented = format!(
+            "{}\n<!-- agent:backlog -->\n- edited backlog wording\n<!-- /agent:backlog -->\n",
+            drift_baseline()
+        );
+
+        let target = live_prompt_drift_recovery_target(&snapshot, &fragmented, identity_normalize)
+            .expect("backlog edits should be preserved while the response lands");
+
+        assert!(target.contains("### Re: do #fix"));
+        assert!(target.contains("- edited backlog wording"));
+        assert!(!target.contains("- original backlog wording"));
+    }
+
+    #[test]
+    fn snapshot_contains_dropped_prompt_matches_consumed_and_active() {
+        let snapshot = concat!(
+            "<!-- agent:queue go -->\n",
+            "- ~~do [#consumed]~~\n",
+            "- do [#active]\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        assert!(snapshot_contains_dropped_prompt(snapshot, "do [#consumed]"));
+        assert!(snapshot_contains_dropped_prompt(snapshot, "do [#active]"));
+        assert!(!snapshot_contains_dropped_prompt(snapshot, "do [#gone]"));
     }
 }

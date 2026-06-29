@@ -135,9 +135,11 @@ dependencies = [
 name = "agent-doc-document-realtime"
 version = "0.34.65"
 dependencies = [
+ "agent-doc-diff",
  "agent-doc-document",
  "agent-doc-element",
  "agent-doc-merge",
+ "agent-doc-template",
  "anyhow",
  "lazily 0.13.1",
  "serde",

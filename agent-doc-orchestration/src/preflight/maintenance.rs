@@ -1,7 +1,9 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
-use agent_doc_queue::queue_response::free_text_head_answered_by_response;
+use agent_doc_queue::queue_response::{
+    free_text_head_answered_by_response, queue_prompt_text_is_free_text,
+};
 
 /// Resolve the live finalize-pipeline view surfaced in preflight output
 /// (`#fmrunid-wire`). Cycle-state is authoritative; the document
@@ -2631,7 +2633,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
             .iter()
             .map(|entry| match entry {
                 agent_doc_queue::document_queue::QueueEntry::Prompt(p)
-                    if crate::write::queue_prompt_text_is_free_text(&current_content, &p.text)
+                    if queue_prompt_text_is_free_text(&current_content, &p.text)
                         && free_text_head_answered_by_response(&exchange_text, &p.text)
                         && committed_free_text.contains(&gate_norm(&p.text)) =>
                 {
@@ -2748,10 +2750,8 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                     .iter()
                     .map(|entry| match entry {
                         agent_doc_queue::document_queue::QueueEntry::Prompt(p)
-                            if crate::write::queue_prompt_text_is_free_text(
-                                &current_content,
-                                &p.text,
-                            ) && committed_free_text.contains(&gate_norm(&p.text)) =>
+                            if queue_prompt_text_is_free_text(&current_content, &p.text)
+                                && committed_free_text.contains(&gate_norm(&p.text)) =>
                         {
                             match by_norm.get(&gate_norm(&p.text)) {
                                 Some(m) => {

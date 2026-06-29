@@ -1881,7 +1881,7 @@ fn strike_recovered_free_text_queue_head(file: &Path) {
 /// the operator deleted struck items (or a free-text head was consumed) the
 /// repair wrongly struck the next open id-backed head by position.
 fn first_queue_head_is_free_text(content: &str) -> bool {
-    crate::write::queue_head_is_free_text_prompt(content).unwrap_or(false)
+    agent_doc_queue::queue_response::queue_head_is_free_text_prompt(content).unwrap_or(false)
 }
 
 fn repair_replay_command_options(

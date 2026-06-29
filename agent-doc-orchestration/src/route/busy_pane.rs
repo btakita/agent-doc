@@ -1,6 +1,7 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use agent_doc_controller::dispatch::is_codex_shell_search_blocker;
 
 pub(crate) fn format_busy_existing_pane_error(
     file: &Path,
@@ -192,22 +193,6 @@ pub(crate) fn busy_existing_pane_auto_fix_outcome(
         supervisor_healthy: matches!(supervisor_health, Some(SupervisorHealth::Healthy)),
         restarted_supervisor,
     })
-}
-
-/// `#codex-route-busy-ctrl-g-opens-editor`: pure decision for whether the
-/// busy-pane reroute may send `C-g`. `C-g` safely aborts a shell
-/// `reverse-i-search` / history-search, but in any other Codex state (normal
-/// composer, active turn) it opens the external editor. The busy classification
-/// already came from [`HarnessConfig::dispatch_blocker_reason`] via
-/// [`wait_for_agent_ready_outcome`], so we gate on that authoritative
-/// `blocker_reason` rather than re-capturing (which races the wait loop's
-/// 2-poll blocker streak). Any non-shell-search reason — including an unknown
-/// timeout (`None`) — fails closed to the editor-safe Escape + C-c path.
-pub(crate) fn is_codex_shell_search_blocker(blocker_reason: Option<&str>) -> bool {
-    matches!(
-        blocker_reason,
-        Some("interactive shell reverse-i-search") | Some("interactive shell history search")
-    )
 }
 
 /// Whether the busy-pane reroute may send `C-g`. Fast-path on the authoritative

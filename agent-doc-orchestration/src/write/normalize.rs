@@ -431,33 +431,6 @@ pub(crate) fn preserve_head_exchange_prompt_prefix_state(content: &str, head: &s
     exchange.replace_content(content, &rebuilt)
 }
 
-/// Phrases that signal deferred/future work in an agent response.
-/// When detected without a corresponding `--pending-add`, a warning is emitted.
-pub(crate) const FUTURE_WORK_SIGNALS: &[&str] = &[
-    "worth revisiting",
-    "revisit later",
-    "follow-up needed",
-    "future work",
-];
-
-/// Core detection logic — no env var dependency.
-pub fn check_future_work_signals(response: &str, has_pending_add: bool) -> Option<&'static str> {
-    if has_pending_add {
-        return None;
-    }
-    let lower = response.to_lowercase();
-    for &signal in FUTURE_WORK_SIGNALS {
-        if lower.contains(signal) {
-            eprintln!(
-                "[write] WARN: response contains future-work signal {:?} but no --pending-add was provided",
-                signal
-            );
-            return Some(signal);
-        }
-    }
-    None
-}
-
 pub(crate) const IMPERATIVE_STATUS_ONLY_SIGNALS: &[&str] = &[
     "in progress",
     "continuing",
@@ -1099,45 +1072,8 @@ pub fn normalize_exchange_prefixes_for_targets(doc: &str, prefix_lines: &[String
 }
 
 #[cfg(test)]
-mod future_work_signal_tests {
+mod imperative_contract_tests {
     use super::*;
-
-    #[test]
-    fn detects_worth_revisiting() {
-        let result =
-            check_future_work_signals("This design is fine. Worth revisiting after v2.", false);
-        assert_eq!(result, Some("worth revisiting"));
-    }
-
-    #[test]
-    fn detects_future_work() {
-        let result = check_future_work_signals("This is future work for the next release.", false);
-        assert_eq!(result, Some("future work"));
-    }
-
-    #[test]
-    fn detects_follow_up_needed() {
-        let result = check_future_work_signals("Follow-up needed on the auth migration.", false);
-        assert_eq!(result, Some("follow-up needed"));
-    }
-
-    #[test]
-    fn no_warning_when_pending_add_provided() {
-        let result = check_future_work_signals("Worth revisiting later.", true);
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn no_warning_without_signals() {
-        let result = check_future_work_signals("Everything is complete and working.", false);
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn case_insensitive_detection() {
-        let result = check_future_work_signals("WORTH REVISITING this approach.", false);
-        assert_eq!(result, Some("worth revisiting"));
-    }
 
     #[test]
     fn imperative_contract_rejects_status_only_response() {

@@ -88,13 +88,9 @@
 //!
 //! - `apply_stream_from_string`: recovery variant of `run_stream` (CRDT merge).
 //!
-//! - `check_future_work_signals(response, has_pending_add)`: scans the response
-//!   for deferred-work phrases ("worth revisiting", "revisit later",
-//!   "follow-up needed", "future work") case-insensitively. Returns
-//!   `Some(signal)` when a match is found and `has_pending_add` is false (i.e.,
-//!   the caller didn't already promote to pending). `WriteFlags.has_pending_add`
-//!   carries this state through the call chain (no env var dependency).
-//!   Integrated into `run_stream` after patch application.
+//! - `agent_doc_turn::heuristics::future_work_signal`: detects deferred-work
+//!   phrases in responses while `run_stream` owns only the warning side effect
+//!   when the caller did not provide `--pending-add`.
 //!
 //! - `enforce_imperative_response_contract(file, baseline, current, response)`:
 //!   when the current document diff contains imperative user directives
@@ -184,7 +180,8 @@
 //!   exits with code 75 and leaves a patch file for deferred plugin pickup.
 //! - `detects_worth_revisiting`: response with "Worth revisiting" and no
 //!   pending-add → returns `Some("worth revisiting")`.
-//! - `detects_future_work`: response with "future work" → returns the signal.
+//! - `future_work_signal`: response with "future work" and no pending-add state
+//!   → warns from the write path.
 //! - `detects_follow_up_needed`: response with "Follow-up needed" → returns signal.
 //! - `suppressed_when_pending_add_present`: response with signal but
 //!   `has_pending_add=true` → returns `None`.

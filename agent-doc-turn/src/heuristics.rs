@@ -61,11 +61,29 @@ const NO_FOLLOWUP_PHRASES: &[&str] = &[
     "no new follow up work",
 ];
 
+const FUTURE_WORK_SIGNALS: &[&str] = &[
+    "worth revisiting",
+    "revisit later",
+    "follow-up needed",
+    "future work",
+];
+
 pub fn response_explicitly_has_no_followups(response_text: &str) -> bool {
     let lower = response_text.to_ascii_lowercase();
     NO_FOLLOWUP_PHRASES
         .iter()
         .any(|phrase| lower.contains(phrase))
+}
+
+pub fn future_work_signal(response_text: &str, has_pending_add: bool) -> Option<&'static str> {
+    if has_pending_add {
+        return None;
+    }
+    let lower = response_text.to_ascii_lowercase();
+    FUTURE_WORK_SIGNALS
+        .iter()
+        .copied()
+        .find(|signal| lower.contains(signal))
 }
 
 pub fn detect_uncaptured_recommendations(text: &str) -> RecommendationSignal {
@@ -421,6 +439,39 @@ mod tests {
         assert!(!response_explicitly_has_no_followups(
             "I did not find a third issue in this pass."
         ));
+    }
+
+    #[test]
+    fn detects_future_work_signals_without_pending_add() {
+        assert_eq!(
+            future_work_signal("This design is fine. Worth revisiting after v2.", false),
+            Some("worth revisiting")
+        );
+        assert_eq!(
+            future_work_signal("This is future work for the next release.", false),
+            Some("future work")
+        );
+        assert_eq!(
+            future_work_signal("Follow-up needed on the auth migration.", false),
+            Some("follow-up needed")
+        );
+        assert_eq!(
+            future_work_signal("WORTH REVISITING this approach.", false),
+            Some("worth revisiting")
+        );
+    }
+
+    #[test]
+    fn future_work_signals_are_suppressed_by_pending_add() {
+        assert_eq!(future_work_signal("Worth revisiting later.", true), None);
+    }
+
+    #[test]
+    fn future_work_signal_ignores_plain_completion() {
+        assert_eq!(
+            future_work_signal("Everything is complete and working.", false),
+            None
+        );
     }
 
     #[test]

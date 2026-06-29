@@ -490,8 +490,14 @@ pub fn run_stream(
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
     let mode_overrides = template_mode_overrides_for_current_doc(file, baseline, &current_content);
 
-    // Lint: warn if response contains future-work signals without --pending-add
-    check_future_work_signals(&response, flags.has_pending_add);
+    if let Some(signal) =
+        agent_doc_turn::heuristics::future_work_signal(&response, flags.has_pending_add)
+    {
+        eprintln!(
+            "[write] WARN: response contains future-work signal {:?} but no --pending-add was provided",
+            signal
+        );
+    }
 
     // Parse and validate patchback shape before any visible document mutation.
     let parsed =

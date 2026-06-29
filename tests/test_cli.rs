@@ -2835,6 +2835,7 @@ fn test_agent_doc_turn_owns_pending_capture_heuristics() {
     for required in [
         "pub fn detect_uncaptured_recommendations(",
         "pub fn response_explicitly_has_no_followups(",
+        "pub fn future_work_signal(",
     ] {
         assert!(
             heuristics.contains(required),
@@ -2854,6 +2855,28 @@ fn test_agent_doc_turn_owns_pending_capture_heuristics() {
             "prompt_contract must not re-own turn closeout no-follow-up policy: {forbidden}"
         );
     }
+
+    let write_normalize =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/normalize.rs"))
+            .unwrap();
+    for forbidden in [
+        "pub fn check_future_work_signals",
+        "const FUTURE_WORK_SIGNALS",
+        "pub(crate) const FUTURE_WORK_SIGNALS",
+    ] {
+        assert!(
+            !write_normalize.contains(forbidden),
+            "write::normalize must not re-own turn future-work phrase policy: {forbidden}"
+        );
+    }
+
+    let write_run_entry =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/run_entry.rs"))
+            .unwrap();
+    assert!(
+        write_run_entry.contains("agent_doc_turn::heuristics::future_work_signal"),
+        "write run entry should call focused future-work response policy directly"
+    );
 
     for relative in [
         "agent-doc-orchestration/src/session_check/pending_guards.rs",

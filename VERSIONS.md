@@ -17,6 +17,11 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   writes now lives in `agent_doc_turn::response_text`; orchestration calls the
   focused API directly and no longer defines the write-local normalizer.
 
+- **Future-work response signal policy moved to `agent-doc-turn`.** Deferred-work
+  phrase detection for `worth revisiting`, `revisit later`, `follow-up needed`,
+  and `future work` now lives in `agent_doc_turn::heuristics`; the write path
+  only emits the warning when no `--pending-add` was provided.
+
 - **Lease TTL freshness moved to `agent-doc-lease`.** Drain-owner, plugin-owner, queue-edit-owner, recycle-yield, and recycle-inflight sidecars now call `agent_doc_lease::timestamp_is_fresh` directly instead of each re-owning the same saturating timestamp policy. The domain modules keep only lease/request bodies, paths, TTL env knobs, and side-effect adapters, with boundary coverage preventing local `*_is_fresh` wrappers from returning.
 
 - **Managed capability-proof retry policy moved to `agent-doc-turn-executor`.** The proof retry budget, probe timeout defaults, frontmatter/config precedence, and exponential backoff decision now live in `agent_doc_turn_executor::capability_proof`. The supervisor start path gathers frontmatter/config facts and calls the focused API directly, while `agent::mod` keeps only backend resolution/runtime helpers and no longer owns the policy or retry decision.

@@ -1,6 +1,7 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use agent_doc_supervisor::idle_reconcile::recoverable_ready_busy_blocker_reason;
 
 pub(crate) fn record_recent_output(shared: &SupervisorShared, bytes: &[u8]) {
     if bytes.is_empty() {
@@ -128,10 +129,6 @@ pub(crate) fn actor_state_is_ready(shared: &SupervisorShared) -> bool {
         .is_some_and(|state| state == agent_doc_sqlite::state_store::ActorState::Ready)
 }
 
-pub(crate) fn recoverable_ready_busy_blocker_reason(reason: &str) -> bool {
-    matches!(reason, "queued draft in composer")
-}
-
 pub(crate) fn ready_busy_blocker_reason(
     shared: &SupervisorShared,
     harness: &crate::harness::HarnessConfig,
@@ -140,18 +137,6 @@ pub(crate) fn ready_busy_blocker_reason(
     harness
         .dispatch_blocker_reason(&output)
         .filter(|reason| recoverable_ready_busy_blocker_reason(reason))
-}
-
-pub(crate) fn ready_busy_conflict_reconcile_decision(
-    actor_ready: bool,
-    blocker_reason: Option<&str>,
-    clear_cooldown_active: bool,
-    consecutive_ready_busy_ticks: u32,
-) -> bool {
-    actor_ready
-        && !clear_cooldown_active
-        && blocker_reason.is_some_and(recoverable_ready_busy_blocker_reason)
-        && consecutive_ready_busy_ticks >= STALE_BUSY_RECONCILE_TICKS
 }
 
 /// `#runexitrestart`: fresh-tmux-capture dispatch-ready evidence for the
@@ -330,26 +315,6 @@ pub(crate) fn supervisor_pane_payload_already_pending(
 /// is pausing the loop, and the idle-over-busy condition has held for
 /// `STALE_BUSY_RECONCILE_TICKS` consecutive polls (debounce so a turn that is
 /// still spinning up is never cut short). Pure for unit testing the gate.
-pub(crate) fn stale_busy_idle_reconcile_decision(
-    actor_busy: bool,
-    pane_has_busy_cue: bool,
-    clear_cooldown_active: bool,
-    consecutive_idle_busy_ticks: u32,
-) -> bool {
-    actor_busy
-        && !pane_has_busy_cue
-        && !clear_cooldown_active
-        && consecutive_idle_busy_ticks >= STALE_BUSY_RECONCILE_TICKS
-}
-
-pub(crate) fn reconcile_stale_busy_idle_queue_state(
-    last_dispatched: Option<String>,
-    idle_busy_ticks: &mut u32,
-) -> Option<String> {
-    *idle_busy_ticks = 0;
-    last_dispatched
-}
-
 pub(crate) fn opencode_permission_prompt_active(shared: &SupervisorShared) -> bool {
     // Primary: parse terminal screen for the structured permission dialog
     let output = child_output_for_detection(shared);
@@ -438,23 +403,13 @@ mod tests {
     use tempfile::TempDir;
     use tmux_router::IsolatedTmux;
     #[test]
-    fn stale_busy_reconcile_fires_after_debounce_over_idle_pane() {
-        // Actor wedged busy, live pane shows no busy cue, cooldown clear, and the
-        // idle-over-busy condition has held for the full debounce window: reconcile.
-        assert!(stale_busy_idle_reconcile_decision(
-            true,
-            false,
-            false,
-            STALE_BUSY_RECONCILE_TICKS
-        ));
-    }
-    #[test]
     fn stale_busy_reconcile_preserves_already_dispatched_head_dedup() {
         let mut idle_busy_ticks = STALE_BUSY_RECONCILE_TICKS;
-        let last_dispatched = reconcile_stale_busy_idle_queue_state(
-            Some("do [#learn-ohio-duplicate-gate]".to_string()),
-            &mut idle_busy_ticks,
-        );
+        let last_dispatched =
+            agent_doc_supervisor::idle_reconcile::reconcile_stale_busy_idle_queue_state(
+                Some("do [#learn-ohio-duplicate-gate]".to_string()),
+                &mut idle_busy_ticks,
+            );
 
         assert_eq!(idle_busy_ticks, 0);
         assert_eq!(
@@ -562,49 +517,6 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         );
     }
 
-    #[test]
-    fn stale_busy_reconcile_waits_for_full_debounce() {
-        // One idle observation is not enough — a turn spinning up briefly shows no
-        // busy cue. Hold off until the debounce window is satisfied.
-        for ticks in 0..STALE_BUSY_RECONCILE_TICKS {
-            assert!(
-                !stale_busy_idle_reconcile_decision(true, false, false, ticks),
-                "should not reconcile after only {ticks} idle ticks"
-            );
-        }
-    }
-    #[test]
-    fn stale_busy_reconcile_skips_when_pane_busy() {
-        // The pane shows a busy cue — a turn is genuinely running. Never reconcile,
-        // regardless of how many ticks elapsed.
-        assert!(!stale_busy_idle_reconcile_decision(
-            true,
-            true,
-            false,
-            STALE_BUSY_RECONCILE_TICKS + 10
-        ));
-    }
-    #[test]
-    fn stale_busy_reconcile_skips_when_actor_ready() {
-        // Actor already dispatchable: nothing to reconcile.
-        assert!(!stale_busy_idle_reconcile_decision(
-            false,
-            false,
-            false,
-            STALE_BUSY_RECONCILE_TICKS
-        ));
-    }
-    #[test]
-    fn stale_busy_reconcile_skips_during_clear_cooldown() {
-        // A non-interrupting operator clear paused the loop; do not race it by
-        // flipping the actor ready underneath the deferred clear.
-        assert!(!stale_busy_idle_reconcile_decision(
-            true,
-            false,
-            true,
-            STALE_BUSY_RECONCILE_TICKS
-        ));
-    }
     #[test]
     fn opencode_permission_prompt_translates_legacy_arrows_to_tab_controls() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
@@ -878,41 +790,6 @@ cargo install — installed agent-doc 0.34.0
 
         assert!(reason.contains("live_pane_busy_blocked_prompt"));
         assert!(reason.contains("queued draft in composer"));
-    }
-    #[test]
-    fn ready_busy_conflict_reconcile_debounces_stale_queue_draft() {
-        for ticks in 0..STALE_BUSY_RECONCILE_TICKS {
-            assert!(
-                !ready_busy_conflict_reconcile_decision(
-                    true,
-                    Some("queued draft in composer"),
-                    false,
-                    ticks,
-                ),
-                "tick {ticks} should still wait for the bounded re-probe"
-            );
-        }
-        assert!(ready_busy_conflict_reconcile_decision(
-            true,
-            Some("queued draft in composer"),
-            false,
-            STALE_BUSY_RECONCILE_TICKS,
-        ));
-    }
-    #[test]
-    fn ready_busy_conflict_reconcile_protects_active_turns() {
-        assert!(!ready_busy_conflict_reconcile_decision(
-            true,
-            Some("active codex turn"),
-            false,
-            STALE_BUSY_RECONCILE_TICKS + 10,
-        ));
-        assert!(!ready_busy_conflict_reconcile_decision(
-            true,
-            Some("active permission prompt"),
-            false,
-            STALE_BUSY_RECONCILE_TICKS + 10,
-        ));
     }
     #[test]
     fn ready_busy_blocker_reason_filters_to_recoverable_queue_draft() {

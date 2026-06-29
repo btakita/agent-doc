@@ -20,6 +20,10 @@ use agent_doc_queue::queue::{
 use agent_doc_queue::queue::{idle_queue_context_reset_decision, idle_queue_drain_decision};
 use agent_doc_supervisor::{
     agent_change::{AgentChangeRestartAction, agent_change_restart_decision},
+    idle_reconcile::{
+        ready_busy_conflict_reconcile_decision, reconcile_stale_busy_idle_queue_state,
+        stale_busy_idle_reconcile_decision,
+    },
     lifecycle::{
         MAX_CYCLE_OPEN_DEFER_TICKS, MAX_REEXEC_ESCALATIONS, SupervisorInstallAction,
         SupervisorRecycleAction, SupervisorRestartAction, cycle_open_defer_escalates,
@@ -703,6 +707,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     pane_busy_cue == Some(true),
                     clear_cooldown_active,
                     idle_busy_ticks,
+                    STALE_BUSY_RECONCILE_TICKS,
                 ) {
                     shared.transition_actor_state(
                         agent_doc_sqlite::state_store::ActorState::Ready,
@@ -758,6 +763,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     ready_busy_reason.as_deref(),
                     clear_cooldown_active,
                     ready_busy_ticks,
+                    STALE_BUSY_RECONCILE_TICKS,
                 );
                 if ready_busy_reconciled {
                     let reason = ready_busy_reason.as_deref().unwrap_or("unknown");

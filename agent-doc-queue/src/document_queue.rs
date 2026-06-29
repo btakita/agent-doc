@@ -984,21 +984,6 @@ pub fn operator_authored_prompt_identities(
     identities
 }
 
-/// Auto-pin freshly operator-added queue prompts with the operator priority
-/// marker (`#7r2s`).
-///
-/// Kept as a compatibility shim for older call sites/tests. New operator-added
-/// prompts are now position-locked by passing [`operator_authored_prompt_identities`]
-/// to the priority/DAG sort, which avoids injecting a visible `:pushpin:`.
-pub fn annotate_manual_queue_additions(
-    snapshot: &[QueueEntry],
-    current: &[QueueEntry],
-    synced_ids: &std::collections::HashSet<String>,
-) -> Option<Vec<QueueEntry>> {
-    let _ = operator_authored_prompt_identities(snapshot, current, synced_ids);
-    None
-}
-
 /// Pin tier of a prompt's text: `0` = operator pin, `1` = agent pin, `2` =
 /// unpinned. Tier 0 (operator pin) is position-locked by
 /// `sort_prompts_by_priority` (`#queue-operator-pin-position-lock`); among the
@@ -2664,14 +2649,10 @@ mod tests {
         let expected: std::collections::HashSet<String> =
             ["do [#manual]".to_string()].into_iter().collect();
         assert_eq!(identities, expected);
-        assert!(
-            annotate_manual_queue_additions(&snapshot, &current, &synced).is_none(),
-            "manual additions are now anchored by identity, not visible pins"
-        );
     }
 
     #[test]
-    fn annotate_manual_queue_additions_skips_backlog_synced_and_pinned() {
+    fn operator_authored_prompt_identities_skip_backlog_synced_and_pinned() {
         // A new line the binary appended from the backlog this cycle (#synced) is
         // NOT auto-pinned; an already-pinned new line is left as-is; an existing
         // (snapshot) line is untouched.

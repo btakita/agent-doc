@@ -3283,6 +3283,12 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "agent-doc-supervisor must own child crash/restart policy"
     );
     assert!(
+        manifest_dir
+            .join("agent-doc-supervisor/src/idle_reconcile.rs")
+            .exists(),
+        "agent-doc-supervisor must own supervisor idle/ready reconcile policy"
+    );
+    assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/start/decisions.rs")
             .exists(),
@@ -3348,6 +3354,33 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         );
     }
 
+    let start_detection =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/detection.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "pub(crate) fn ready_busy_conflict_reconcile_decision(",
+        "pub(crate) fn stale_busy_idle_reconcile_decision(",
+        "pub(crate) fn reconcile_stale_busy_idle_queue_state(",
+    ] {
+        assert!(
+            !start_detection.contains(forbidden_snippet),
+            "start::detection must not re-own pure supervisor reconcile policy: {forbidden_snippet}"
+        );
+    }
+    let idle_watch =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
+            .unwrap();
+    let start_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
+    assert!(
+        idle_watch.contains("agent_doc_supervisor::{")
+            && idle_watch.contains("idle_reconcile::{")
+            && start_source.contains(
+                "agent_doc_supervisor::idle_reconcile::ready_busy_conflict_reconcile_decision"
+            ),
+        "start paths should call focused supervisor idle_reconcile policy directly"
+    );
+
     for relative in [
         "agent-doc-orchestration/src/start.rs",
         "agent-doc-orchestration/src/supervisor/in_process.rs",
@@ -3374,6 +3407,27 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         assert!(
             !dependencies.contains_key(forbidden),
             "agent-doc-supervisor must stay pure and not depend on orchestration/process effects"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_queue_has_no_manual_addition_compatibility_shim() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let queue_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/document_queue.rs")).unwrap();
+
+    assert!(
+        queue_source.contains("pub fn operator_authored_prompt_identities("),
+        "agent-doc-queue should expose the focused operator-authored identity API"
+    );
+    for forbidden_snippet in [
+        "pub fn annotate_manual_queue_additions(",
+        "compatibility shim for older call sites",
+    ] {
+        assert!(
+            !queue_source.contains(forbidden_snippet),
+            "agent-doc-queue must not retain the removed manual-addition compatibility shim: {forbidden_snippet}"
         );
     }
 }

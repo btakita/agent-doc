@@ -10,6 +10,7 @@ pub mod agent_change;
 pub mod config;
 pub mod crash_policy;
 pub mod handoff;
+pub mod idle_reconcile;
 pub mod lifecycle;
 pub mod run_loop;
 

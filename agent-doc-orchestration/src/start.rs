@@ -142,6 +142,7 @@ use agent_doc_queue::queue::{
     idle_queue_context_reset_decision, idle_queue_drain_decision,
 };
 use agent_doc_supervisor::crash_policy::{CrashPolicy, RestartAction, SupervisorState};
+use agent_doc_supervisor::idle_reconcile::ready_busy_conflict_reconcile_decision;
 #[cfg(unix)]
 use agent_doc_supervisor_process::ReexecState;
 
@@ -1092,6 +1093,7 @@ fn spawn_route_owned_completion_thread(
                         ready_busy_reason.as_deref(),
                         false,
                         ready_busy_ticks,
+                        ROUTE_OWNED_READY_BUSY_RECONCILE_TICKS,
                     );
                     if ready_busy_reconciled
                         && key.is_some()

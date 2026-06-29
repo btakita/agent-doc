@@ -56,12 +56,6 @@ pub fn queue_edit_owner_ttl() -> Duration {
     Duration::from_secs(secs.max(1))
 }
 
-/// Pure freshness predicate: a lease is fresh while its heartbeat is within
-/// `ttl` of `now`. Side-effect free for deterministic unit tests.
-pub fn queue_edit_owner_lease_is_fresh(heartbeat_secs: u64, now: u64, ttl: Duration) -> bool {
-    now.saturating_sub(heartbeat_secs) <= ttl.as_secs()
-}
-
 fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -151,7 +145,7 @@ pub fn foreign_queue_edit_in_flight_with(
     if lease.holder_pid == self_pid {
         return None;
     }
-    if !queue_edit_owner_lease_is_fresh(lease.heartbeat_secs, now, ttl) {
+    if !agent_doc_lease::timestamp_is_fresh(lease.heartbeat_secs, now, ttl) {
         return None;
     }
     if !pid_is_live(lease.holder_pid) {
@@ -215,25 +209,6 @@ impl Drop for QueueEditGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn freshness_predicate_uses_ttl_window() {
-        let ttl = Duration::from_secs(15);
-        assert!(
-            queue_edit_owner_lease_is_fresh(1_000, 1_000, ttl),
-            "same instant"
-        );
-        assert!(
-            queue_edit_owner_lease_is_fresh(1_000, 1_015, ttl),
-            "at the ttl edge"
-        );
-        assert!(
-            !queue_edit_owner_lease_is_fresh(1_000, 1_016, ttl),
-            "past the ttl"
-        );
-        // Clock skew (heartbeat in the future) saturates to fresh.
-        assert!(queue_edit_owner_lease_is_fresh(2_000, 1_000, ttl));
-    }
 
     #[test]
     fn refresh_then_read_roundtrips_a_fresh_lease() {

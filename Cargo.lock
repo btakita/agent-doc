@@ -276,6 +276,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-doc-lease"
+version = "0.34.65"
+
+[[package]]
 name = "agent-doc-log-time"
 version = "0.34.65"
 
@@ -329,6 +333,7 @@ dependencies = [
  "agent-doc-element-review",
  "agent-doc-frontmatter",
  "agent-doc-fs",
+ "agent-doc-lease",
  "agent-doc-log-time",
  "agent-doc-markdown-ast",
  "agent-doc-merge",
@@ -394,6 +399,7 @@ dependencies = [
  "agent-doc-element-backlog",
  "agent-doc-element-queue",
  "agent-doc-frontmatter",
+ "agent-doc-lease",
  "agent-doc-markdown-ast",
  "anyhow",
  "libc",

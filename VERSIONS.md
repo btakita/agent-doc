@@ -8,6 +8,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Release publish contract fix for `#suprestassoc`.** Supersedes the unpublished `0.34.64` crate attempt by depending on `lazily 0.13.1`, which publishes the `CellTree` / `SemTree` / `TextCrdt` / reconcile API that `agent-doc-core` already used through the local path dependency. The behavior change remains the `restart-supervisor` document-scoped registry lookup described in `0.34.64`; this version is the publishable release artifact.
 
+- **Lease TTL freshness moved to `agent-doc-lease`.** Drain-owner, plugin-owner, queue-edit-owner, recycle-yield, and recycle-inflight sidecars now call `agent_doc_lease::timestamp_is_fresh` directly instead of each re-owning the same saturating timestamp policy. The domain modules keep only lease/request bodies, paths, TTL env knobs, and side-effect adapters, with boundary coverage preventing local `*_is_fresh` wrappers from returning.
+
 - **No-follow-up closeout heuristic moved to `agent-doc-turn`.** Explicit "no actionable follow-up" response detection now lives in `agent_doc_turn::heuristics` beside pending-capture recommendation detection. Session-check and pre-commit guards import the focused turn API directly, and boundary coverage prevents `prompt_contract` from re-owning the phrase policy.
 
 - **Reaped directive response-loss detection moved to `agent-doc-turn`.** The pure detector that decides whether a reaped `do #id` queue head lost its `### Re:` response now lives in `agent_doc_turn::closeout_signal`. Session-check still gathers cycle state, live exchange text, and HEAD compact archives, but calls the focused turn API directly and keeps only guard formatting/ops-log adapters.

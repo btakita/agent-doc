@@ -68,12 +68,6 @@ pub fn plugin_owner_ttl() -> Duration {
     Duration::from_secs(secs.max(1))
 }
 
-/// Pure freshness predicate: a lease is fresh while its heartbeat is within
-/// `ttl` of `now`. Side-effect free for deterministic unit tests.
-pub fn plugin_owner_lease_is_fresh(heartbeat_secs: u64, now: u64, ttl: Duration) -> bool {
-    now.saturating_sub(heartbeat_secs) <= ttl.as_secs()
-}
-
 fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -147,7 +141,7 @@ pub fn ownership_liveness_from_lease(
         Some(lease) => OwnershipLiveness {
             lease_present: true,
             pid_live: is_pid_live(lease.pid),
-            heartbeat_fresh: plugin_owner_lease_is_fresh(lease.heartbeat_secs, now, ttl),
+            heartbeat_fresh: agent_doc_lease::timestamp_is_fresh(lease.heartbeat_secs, now, ttl),
         },
         None => OwnershipLiveness::default(),
     }
@@ -309,7 +303,7 @@ fn try_acquire_plugin_owner_at(
             Some(lease) => {
                 // Someone else's lease. Defer only while it is fresh AND its pid
                 // is live; otherwise the owner is gone — contend for takeover.
-                if plugin_owner_lease_is_fresh(lease.heartbeat_secs, now, ttl)
+                if agent_doc_lease::timestamp_is_fresh(lease.heartbeat_secs, now, ttl)
                     && is_pid_live(lease.pid)
                 {
                     return false;
@@ -541,25 +535,6 @@ mod tests {
             live_plugin_owner_consumer_id_for_lease(None, |_| true),
             None
         );
-    }
-
-    #[test]
-    fn freshness_predicate_uses_ttl_window() {
-        let ttl = Duration::from_secs(30);
-        assert!(
-            plugin_owner_lease_is_fresh(1_000, 1_000, ttl),
-            "same instant"
-        );
-        assert!(
-            plugin_owner_lease_is_fresh(1_000, 1_030, ttl),
-            "at the ttl edge"
-        );
-        assert!(
-            !plugin_owner_lease_is_fresh(1_000, 1_031, ttl),
-            "past the ttl"
-        );
-        // Clock skew (heartbeat in the future) saturates to fresh.
-        assert!(plugin_owner_lease_is_fresh(2_000, 1_000, ttl));
     }
 
     #[test]

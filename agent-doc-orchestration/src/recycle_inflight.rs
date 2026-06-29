@@ -80,12 +80,6 @@ pub fn recycle_inflight_ttl() -> Duration {
     Duration::from_secs(secs.max(1))
 }
 
-/// Pure freshness predicate: a marker is live while it is within `ttl` of `now`.
-/// Side-effect free for deterministic unit tests.
-pub fn recycle_inflight_is_fresh(marked_secs: u64, now: u64, ttl: Duration) -> bool {
-    now.saturating_sub(marked_secs) <= ttl.as_secs()
-}
-
 fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -151,7 +145,8 @@ pub fn read_recycle_inflight(file: &str) -> Option<RecycleInflightMarker> {
 /// proceed with the normal ready probe.
 pub fn fresh_recycle_inflight(file: &str, now: u64) -> Option<RecycleInflightMarker> {
     let marker = read_recycle_inflight(file)?;
-    recycle_inflight_is_fresh(marker.marked_secs, now, recycle_inflight_ttl()).then_some(marker)
+    agent_doc_lease::timestamp_is_fresh(marker.marked_secs, now, recycle_inflight_ttl())
+        .then_some(marker)
 }
 
 /// Convenience boolean: is the project's supervisor mid-recycle right now?
@@ -233,22 +228,6 @@ pub fn clear_recycle_inflight(file: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn freshness_predicate_uses_ttl_window() {
-        let ttl = Duration::from_secs(15);
-        assert!(recycle_inflight_is_fresh(1_000, 1_000, ttl), "same instant");
-        assert!(
-            recycle_inflight_is_fresh(1_000, 1_015, ttl),
-            "at the ttl edge"
-        );
-        assert!(
-            !recycle_inflight_is_fresh(1_000, 1_016, ttl),
-            "past the ttl"
-        );
-        // Clock skew (marker in the future) saturates to fresh.
-        assert!(recycle_inflight_is_fresh(2_000, 1_000, ttl));
-    }
 
     #[test]
     fn mark_then_read_roundtrips_a_fresh_marker() {

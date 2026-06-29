@@ -1,0 +1,11 @@
+[package]
+name = "agent-doc-lease"
+version = "0.34.65"
+edition = "2024"
+description = "TTL freshness primitives for agent-doc leases and sidecars"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_lease"
+

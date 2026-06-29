@@ -70,12 +70,6 @@ pub fn recycle_yield_ttl() -> Duration {
     Duration::from_secs(secs.max(1))
 }
 
-/// Pure freshness predicate: a request is live while it is within `ttl` of `now`.
-/// Side-effect free for deterministic unit tests.
-pub fn recycle_yield_is_fresh(requested_secs: u64, now: u64, ttl: Duration) -> bool {
-    now.saturating_sub(requested_secs) <= ttl.as_secs()
-}
-
 fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -143,7 +137,8 @@ pub fn read_recycle_yield(file: &str) -> Option<RecycleYieldRequest> {
 /// `None` means the loop should drain as usual.
 pub fn fresh_recycle_yield(file: &str, now: u64) -> Option<RecycleYieldRequest> {
     let request = read_recycle_yield(file)?;
-    recycle_yield_is_fresh(request.requested_secs, now, recycle_yield_ttl()).then_some(request)
+    agent_doc_lease::timestamp_is_fresh(request.requested_secs, now, recycle_yield_ttl())
+        .then_some(request)
 }
 
 /// Convenience boolean: is a fresh recycle-yield request pending for `file`
@@ -169,16 +164,6 @@ pub fn clear_recycle_yield(file: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn freshness_predicate_uses_ttl_window() {
-        let ttl = Duration::from_secs(120);
-        assert!(recycle_yield_is_fresh(1_000, 1_000, ttl), "same instant");
-        assert!(recycle_yield_is_fresh(1_000, 1_120, ttl), "at the ttl edge");
-        assert!(!recycle_yield_is_fresh(1_000, 1_121, ttl), "past the ttl");
-        // Clock skew (request in the future) saturates to fresh.
-        assert!(recycle_yield_is_fresh(2_000, 1_000, ttl));
-    }
 
     #[test]
     fn request_then_read_roundtrips_a_fresh_request() {

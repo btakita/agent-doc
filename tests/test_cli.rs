@@ -2885,6 +2885,79 @@ fn test_agent_doc_log_time_has_no_ops_log_facade() {
 }
 
 #[test]
+fn test_agent_doc_lease_is_freshness_boundary() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-lease")),
+        "agent-doc-lease must stay a first-class workspace crate"
+    );
+
+    let package_version = workspace["package"]["version"].as_str();
+    for relative_manifest in [
+        "agent-doc-orchestration/Cargo.toml",
+        "agent-doc-queue/Cargo.toml",
+    ] {
+        let manifest = fs::read_to_string(manifest_dir.join(relative_manifest)).unwrap();
+        let parsed: toml::Value = toml::from_str(&manifest).unwrap();
+        let dependencies = parsed["dependencies"].as_table().unwrap();
+        let dependency = dependencies["agent-doc-lease"].as_table().unwrap();
+        assert_eq!(
+            dependency.get("version").and_then(toml::Value::as_str),
+            package_version,
+            "{relative_manifest} should depend on the versioned lease crate"
+        );
+    }
+
+    let lease_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-lease/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&lease_manifest).unwrap();
+    let dependencies = parsed.get("dependencies").and_then(toml::Value::as_table);
+    assert!(
+        dependencies.is_none_or(|dependencies| dependencies.is_empty()),
+        "agent-doc-lease must stay pure and dependency-free"
+    );
+
+    for (relative, forbidden) in [
+        (
+            "agent-doc-orchestration/src/drain_owner.rs",
+            "pub fn drain_owner_lease_is_fresh(",
+        ),
+        (
+            "agent-doc-orchestration/src/plugin_owner.rs",
+            "pub fn plugin_owner_lease_is_fresh(",
+        ),
+        (
+            "agent-doc-orchestration/src/recycle_yield.rs",
+            "pub fn recycle_yield_is_fresh(",
+        ),
+        (
+            "agent-doc-orchestration/src/recycle_inflight.rs",
+            "pub fn recycle_inflight_is_fresh(",
+        ),
+        (
+            "agent-doc-queue/src/queue_edit_owner.rs",
+            "pub fn queue_edit_owner_lease_is_fresh(",
+        ),
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            !source.contains(forbidden) && !source.contains("saturating_sub("),
+            "{relative} must not re-own TTL freshness policy: {forbidden}"
+        );
+        assert!(
+            source.contains("agent_doc_lease::timestamp_is_fresh"),
+            "{relative} should call the focused lease crate directly"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_work_graph_is_source_agnostic_boundary() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();

@@ -3661,6 +3661,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     .unwrap();
     let route_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+    let route_dispatch_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch.rs"))
+            .unwrap();
     let route_pane_resolution_source = fs::read_to_string(
         manifest_dir.join("agent-doc-orchestration/src/route/pane_resolution.rs"),
     )
@@ -3714,6 +3717,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn direct_pane_submit_acceptance_timeout(",
         "pub fn direct_pane_submit_acceptance_budget(",
         "pub fn direct_pane_submit_outcome(",
+        "pub const DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR",
+        "pub struct DirectPaneAcceptancePollState",
+        "pub fn direct_pane_acceptance_poll_status(",
         "pub fn dispatch_only_busy_should_wait_for_ready(",
         "pub fn dispatch_only_should_probe_active_turn_cue(",
         "pub enum DispatchDrainRetryDecision",
@@ -3757,6 +3763,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn direct_pane_submit_acceptance_timeout(",
         "fn direct_pane_submit_acceptance_budget(",
         "fn direct_pane_submit_outcome(",
+        "const DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR",
+        "struct DirectPaneAcceptancePollState",
+        "fn direct_pane_acceptance_poll_status(",
         "enum DrainRetryDecision",
         "fn classify_drain_retry(",
         "enum RouteCloseoutBlockDecision",
@@ -3802,6 +3811,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn direct_pane_submit_acceptance_timeout(",
         "pub fn direct_pane_submit_acceptance_budget(",
         "pub fn direct_pane_submit_outcome(",
+        "pub const DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR",
+        "pub struct DirectPaneAcceptancePollState",
+        "pub fn direct_pane_acceptance_poll_status(",
         "pub struct CloseoutBlockDispatchFacts",
         "pub enum CloseoutBlockDispatchDecision",
         "pub fn classify_closeout_block_dispatch(",
@@ -3833,6 +3845,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("classify_dispatch_start_proof")
             && route_source.contains("DirectPaneSubmitStatus as CommandDispatchStatus")
             && route_source.contains("direct_pane_submit_outcome")
+            && route_source.contains("DirectPaneAcceptancePollState")
+            && route_source.contains("direct_pane_acceptance_poll_status")
             && route_source.contains("RetryBudget")
             && route_source.contains("authoritative_actor_ready_retry_budget")
             && route_source.contains("CloseoutBlockDispatchDecision")
@@ -3868,6 +3882,22 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("DispatchDrainRetryDecision")
             && route_source.contains("dispatch_drain_retry_decision("),
         "route.rs should call focused controller dispatch policy directly"
+    );
+    for forbidden_snippet in [
+        "const DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR",
+        "struct DirectPaneAcceptancePollState",
+        "fn direct_pane_acceptance_poll_status(",
+    ] {
+        assert!(
+            !route_dispatch_source.contains(forbidden_snippet),
+            "route/dispatch.rs must not re-own direct-pane acceptance poll policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        route_dispatch_source.contains("DirectPaneAcceptancePollState::default()")
+            && route_dispatch_source.contains("direct_pane_acceptance_poll_status(")
+            && route_dispatch_source.contains(".saw_trigger_visible()"),
+        "route/dispatch.rs should adapt tmux captures into focused controller acceptance polling"
     );
     assert!(
         route_pane_resolution_source.contains("startup_miss_route_facts(")

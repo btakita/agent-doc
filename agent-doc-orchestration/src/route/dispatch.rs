@@ -19,8 +19,6 @@ pub(crate) struct DirectPaneAcceptance {
     diagnostic_path: Option<PathBuf>,
 }
 
-const DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR: Duration = Duration::from_millis(900);
-
 fn protected_prompt_draft_preview(harness: &HarnessConfig, content: &str) -> Option<String> {
     let candidate = harness.last_prompt_candidate(content)?;
     let stripped = crate::prompt::strip_ansi(&candidate);
@@ -92,35 +90,6 @@ fn direct_pane_max_enter_resubmits() -> usize {
         .unwrap_or(DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT)
 }
 
-#[derive(Debug, Default)]
-struct DirectPaneAcceptancePollState {
-    saw_trigger_visible: bool,
-    first_empty_capture_at: Option<Duration>,
-}
-
-fn direct_pane_acceptance_poll_status(
-    state: &mut DirectPaneAcceptancePollState,
-    elapsed: Duration,
-    trigger_visible: bool,
-) -> Option<CommandDispatchStatus> {
-    if trigger_visible {
-        state.saw_trigger_visible = true;
-        state.first_empty_capture_at = None;
-        return None;
-    }
-
-    if state.saw_trigger_visible {
-        return Some(CommandDispatchStatus::Accepted);
-    }
-
-    let first_empty_at = state.first_empty_capture_at.get_or_insert(elapsed);
-    if elapsed.saturating_sub(*first_empty_at) >= DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR {
-        Some(CommandDispatchStatus::Accepted)
-    } else {
-        None
-    }
-}
-
 /// Poll the pane capture until the trigger text is consumed or the acceptance
 /// window expires, logging the resulting submit observation. Pure detection —
 /// it never sends input — so callers can re-run it after a re-submit attempt.
@@ -174,7 +143,7 @@ pub(crate) fn poll_direct_pane_acceptance(
                     // starts a turn, a genuine submit leaves the pane PROCESSING (not
                     // idle), so empty+idle+never-seen means the send no-op'd into a
                     // not-ready pane — the prompt was not dispatched.
-                    let not_dispatched = !poll_state.saw_trigger_visible
+                    let not_dispatched = !poll_state.saw_trigger_visible()
                         && last_capture
                             .as_ref()
                             .map(|(_, _, _, content)| pane_idle_dispatch_ready(content, harness))
@@ -1979,47 +1948,6 @@ mod tests {
             ("tmux_text_enter", "Enter")
         );
     }
-    #[test]
-    fn direct_pane_acceptance_waits_for_stable_empty_capture() {
-        let mut state = DirectPaneAcceptancePollState::default();
-        assert_eq!(
-            direct_pane_acceptance_poll_status(&mut state, Duration::from_millis(0), false),
-            None
-        );
-        assert_eq!(
-            direct_pane_acceptance_poll_status(
-                &mut state,
-                DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR - Duration::from_millis(1),
-                false
-            ),
-            None
-        );
-        assert_eq!(
-            direct_pane_acceptance_poll_status(
-                &mut state,
-                DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR,
-                false
-            ),
-            Some(CommandDispatchStatus::Accepted)
-        );
-    }
-    #[test]
-    fn direct_pane_acceptance_accepts_after_visible_draft_disappears() {
-        let mut state = DirectPaneAcceptancePollState::default();
-        assert_eq!(
-            direct_pane_acceptance_poll_status(&mut state, Duration::from_millis(0), false),
-            None
-        );
-        assert_eq!(
-            direct_pane_acceptance_poll_status(&mut state, Duration::from_millis(150), true),
-            None
-        );
-        assert_eq!(
-            direct_pane_acceptance_poll_status(&mut state, Duration::from_millis(300), false),
-            Some(CommandDispatchStatus::Accepted)
-        );
-    }
-
     #[test]
     fn protected_prompt_draft_preview_redacts_and_bounds_latest_draft() {
         let harness = HarnessConfig::codex();

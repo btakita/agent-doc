@@ -581,6 +581,8 @@ pub enum DirectPaneSubmitStatus {
     TimedOut,
 }
 
+pub const DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR: Duration = Duration::from_millis(900);
+
 pub fn direct_pane_submit_acceptance_timeout() -> Duration {
     Duration::from_secs(1)
 }
@@ -600,6 +602,41 @@ pub fn direct_pane_submit_outcome(
         (DirectPaneSubmitStatus::Accepted, _) => "accepted",
         (DirectPaneSubmitStatus::TimedOut, Some(_)) => "acceptance_unobserved_dispatch_proven",
         (DirectPaneSubmitStatus::TimedOut, None) => "acceptance_unobserved",
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct DirectPaneAcceptancePollState {
+    saw_trigger_visible: bool,
+    first_empty_capture_at: Option<Duration>,
+}
+
+impl DirectPaneAcceptancePollState {
+    pub const fn saw_trigger_visible(self) -> bool {
+        self.saw_trigger_visible
+    }
+}
+
+pub fn direct_pane_acceptance_poll_status(
+    state: &mut DirectPaneAcceptancePollState,
+    elapsed: Duration,
+    trigger_visible: bool,
+) -> Option<DirectPaneSubmitStatus> {
+    if trigger_visible {
+        state.saw_trigger_visible = true;
+        state.first_empty_capture_at = None;
+        return None;
+    }
+
+    if state.saw_trigger_visible {
+        return Some(DirectPaneSubmitStatus::Accepted);
+    }
+
+    let first_empty_at = state.first_empty_capture_at.get_or_insert(elapsed);
+    if elapsed.saturating_sub(*first_empty_at) >= DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR {
+        Some(DirectPaneSubmitStatus::Accepted)
+    } else {
+        None
     }
 }
 
@@ -1332,6 +1369,50 @@ mod tests {
                 Some(RoutedDispatchStartProof::HookStateAdvanced),
             ),
             "acceptance_unobserved_dispatch_proven"
+        );
+    }
+
+    #[test]
+    fn direct_pane_acceptance_waits_for_stable_empty_capture() {
+        let mut state = DirectPaneAcceptancePollState::default();
+        assert_eq!(
+            direct_pane_acceptance_poll_status(&mut state, Duration::from_millis(0), false),
+            None
+        );
+        assert!(!state.saw_trigger_visible());
+        assert_eq!(
+            direct_pane_acceptance_poll_status(
+                &mut state,
+                DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR - Duration::from_millis(1),
+                false
+            ),
+            None
+        );
+        assert_eq!(
+            direct_pane_acceptance_poll_status(
+                &mut state,
+                DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR,
+                false
+            ),
+            Some(DirectPaneSubmitStatus::Accepted)
+        );
+    }
+
+    #[test]
+    fn direct_pane_acceptance_accepts_after_visible_draft_disappears() {
+        let mut state = DirectPaneAcceptancePollState::default();
+        assert_eq!(
+            direct_pane_acceptance_poll_status(&mut state, Duration::from_millis(0), false),
+            None
+        );
+        assert_eq!(
+            direct_pane_acceptance_poll_status(&mut state, Duration::from_millis(150), true),
+            None
+        );
+        assert!(state.saw_trigger_visible());
+        assert_eq!(
+            direct_pane_acceptance_poll_status(&mut state, Duration::from_millis(300), false),
+            Some(DirectPaneSubmitStatus::Accepted)
         );
     }
 

@@ -4781,6 +4781,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/config.rs")).unwrap();
     let supervisor_crash_policy =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/crash_policy.rs")).unwrap();
+    let supervisor_run_loop =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/run_loop.rs")).unwrap();
     for required_snippet in [
         "pub const STALE_INSTALL_GRACE_SECS",
         "pub fn classify_stale_install_artifacts",
@@ -4850,6 +4852,22 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
     let start_run_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/run.rs")).unwrap();
+    for required_snippet in ["pub struct ChildLaunchPlan", "pub fn child_launch_plan("] {
+        assert!(
+            supervisor_run_loop.contains(required_snippet),
+            "agent-doc-supervisor run_loop should own supervisor child-launch planning directly: {required_snippet}"
+        );
+    }
+    for forbidden_snippet in ["struct ChildLaunchPlan", "fn child_launch_plan("] {
+        assert!(
+            !start_run_source.contains(forbidden_snippet),
+            "start/run.rs must not re-own pure supervisor child-launch planning: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        start_run_source.contains("run_loop::{") && start_run_source.contains("child_launch_plan"),
+        "start/run.rs should call focused supervisor child-launch planning directly"
+    );
     for forbidden_snippet in [
         "enum PromptDecision",
         "fn classify_prompt_decision",

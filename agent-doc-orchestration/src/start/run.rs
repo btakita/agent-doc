@@ -5,7 +5,7 @@ use crate::frontmatter_io;
 use agent_doc_supervisor::{
     agent_change::harness_change_forces_fresh_spawn,
     lifecycle::{BootResumeAction, boot_resume_action},
-    run_loop::{PostChildExitAction, post_child_exit_action},
+    run_loop::{PostChildExitAction, child_launch_plan, post_child_exit_action},
 };
 use agent_doc_supervisor_process::{
     REEXEC_CHILD_PID_ENV, REEXEC_MASTER_FD_ENV, ReexecState, resize,
@@ -33,19 +33,6 @@ fn start_console_status(
     );
     if printed {
         eprintln!("{message}");
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ChildLaunchPlan {
-    use_continue_args: bool,
-    auto_trigger: bool,
-}
-
-fn child_launch_plan(first_run: bool, auto_trigger_next_launch: bool) -> ChildLaunchPlan {
-    ChildLaunchPlan {
-        use_continue_args: !first_run,
-        auto_trigger: auto_trigger_next_launch || !first_run,
     }
 }
 
@@ -1904,34 +1891,6 @@ mod tests {
         assert!(
             content.contains("[start] harness resolved: binary=codex"),
             "status proof should remain in the session log: {content}"
-        );
-    }
-
-    #[test]
-    fn child_launch_plan_separates_fresh_args_from_auto_trigger() {
-        assert_eq!(
-            child_launch_plan(true, false),
-            ChildLaunchPlan {
-                use_continue_args: false,
-                auto_trigger: false,
-            },
-            "initial supervisor launch should open the harness without typing agent-doc"
-        );
-        assert_eq!(
-            child_launch_plan(false, false),
-            ChildLaunchPlan {
-                use_continue_args: true,
-                auto_trigger: true,
-            },
-            "continue-mode restart should resume and re-submit agent-doc"
-        );
-        assert_eq!(
-            child_launch_plan(true, true),
-            ChildLaunchPlan {
-                use_continue_args: false,
-                auto_trigger: true,
-            },
-            "fresh restart still needs to re-submit agent-doc after the new prompt"
         );
     }
 

@@ -692,7 +692,7 @@ fn post_exchange_comment_prompt_preset_warning(
     prompt_presets: &indexmap::IndexMap<String, String>,
 ) -> Option<PreflightWarning> {
     let mut referenced = Vec::new();
-    for comment in post_exchange_ordinary_html_comments(content) {
+    for comment in agent_doc_diff::post_exchange_ordinary_html_comments(content) {
         if !prompt_presets.is_empty() {
             push_unique_strings(
                 &mut referenced,
@@ -705,7 +705,7 @@ fn post_exchange_comment_prompt_preset_warning(
         }
         push_unique_strings(
             &mut referenced,
-            post_exchange_comment_directive_signals(&comment),
+            agent_doc_diff::post_exchange_comment_directive_signals(&comment),
         );
     }
     if referenced.is_empty() {
@@ -1043,90 +1043,6 @@ fn misplaced_component_attr_warning(file: &Path, content: &str) -> Option<Prefli
         document_agent: None,
         active_harness: None,
     })
-}
-
-fn post_exchange_ordinary_html_comments(content: &str) -> Vec<String> {
-    let Ok(components) = agent_doc_element::element::parse(content) else {
-        return Vec::new();
-    };
-    let Some(exchange_close_end) = components
-        .iter()
-        .filter(|component| component.name == "exchange")
-        .map(|component| component.close_end)
-        .max()
-    else {
-        return Vec::new();
-    };
-
-    let mut comments = Vec::new();
-    let mut tail_start = exchange_close_end;
-    let mut tail = &content[tail_start..];
-    while let Some(open) = tail.find("<!--") {
-        let after_open = &tail[open + "<!--".len()..];
-        let Some(close) = after_open.find("-->") else {
-            break;
-        };
-        let absolute_open = tail_start + open;
-        let inner = after_open[..close].trim();
-        if !agent_doc_element::element::is_agent_marker(inner)
-            && !components.iter().any(|component| {
-                absolute_open >= component.open_start && absolute_open < component.close_end
-            })
-            && !comment_is_user_note(inner)
-        {
-            comments.push(inner.to_string());
-        }
-        let consumed = open + "<!--".len() + close + "-->".len();
-        tail_start += consumed;
-        tail = &content[tail_start..];
-    }
-    comments
-}
-
-fn comment_is_user_note(inner: &str) -> bool {
-    let lines: Vec<&str> = inner.lines().collect();
-    if lines.len() < 2 {
-        return false;
-    }
-    let has_horizontal_rule = lines.iter().any(|l| l.trim() == "---");
-    let has_prose = lines.iter().any(|l| {
-        let t = l.trim();
-        !t.is_empty()
-            && t != "---"
-            && !t.starts_with('#')
-            && !t.starts_with('/')
-            && !t.starts_with("dispatch ")
-            && !t.starts_with("preset ")
-    });
-    has_horizontal_rule && has_prose
-}
-
-fn post_exchange_comment_directive_signals(comment: &str) -> Vec<String> {
-    let mut signals = Vec::new();
-    for line in comment.lines() {
-        let trimmed = line.trim().trim_start_matches('❯').trim();
-        if let Some(rest) = trimmed.strip_prefix("dispatch ") {
-            push_unique_strings(&mut signals, vec![format!("dispatch {}", first_word(rest))]);
-        } else if let Some(rest) = trimmed.strip_prefix("preset ") {
-            push_unique_strings(&mut signals, vec![format!("preset {}", first_word(rest))]);
-        } else if looks_like_slash_command(trimmed) {
-            push_unique_strings(&mut signals, vec![first_word(trimmed).to_string()]);
-        }
-    }
-    signals
-}
-
-fn first_word(text: &str) -> &str {
-    text.split_whitespace().next().unwrap_or(text)
-}
-
-fn looks_like_slash_command(text: &str) -> bool {
-    let Some(rest) = text.strip_prefix('/') else {
-        return false;
-    };
-    rest.chars()
-        .next()
-        .is_some_and(|ch| ch.is_ascii_lowercase())
 }
 
 /// Trigger an automatic `resync --fix` when session-drift has been detected

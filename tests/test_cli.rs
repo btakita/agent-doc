@@ -2568,6 +2568,56 @@ fn test_agent_doc_queue_owns_queue_response_head_matching_policy() {
 }
 
 #[test]
+fn test_agent_doc_queue_owns_free_text_response_proof_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let queue_response =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_response.rs")).unwrap();
+    for required in [
+        "pub fn normalize_for_answer_match",
+        "pub fn head_carries_in_progress_marker",
+        "pub fn free_text_head_match_prose",
+        "pub fn free_text_head_answered_by_response",
+    ] {
+        assert!(
+            queue_response.contains(required),
+            "agent-doc-queue must own free-text queue response proof policy: {required}"
+        );
+    }
+
+    for relative in [
+        "agent-doc-orchestration/src/write/queue_consume.rs",
+        "agent-doc-orchestration/src/session_check/queue_head_provenance_guards.rs",
+        "agent-doc-orchestration/src/preflight/maintenance.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        for forbidden in [
+            "fn normalize_for_answer_match",
+            "fn response_blockquote_text",
+            "fn response_explicit_queue_prompt_echoes_head",
+            "fn head_carries_in_progress_marker",
+            "fn free_text_head_match_prose",
+            "fn free_text_head_answered_by_response",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{relative} must not re-own free-text queue response proof policy: {forbidden}"
+            );
+        }
+    }
+
+    let queue_consume =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/queue_consume.rs"))
+            .unwrap();
+    assert!(
+        queue_consume.contains("free_text_head_answered_by_response")
+            && queue_consume.contains("free_text_head_match_prose")
+            && queue_consume.contains("head_carries_in_progress_marker")
+            && queue_consume.contains("normalize_for_answer_match"),
+        "queue_consume should import focused free-text queue response proof policy directly"
+    );
+}
+
+#[test]
 fn test_agent_doc_queue_owns_queue_command_classification() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let queue_command =
@@ -3775,6 +3825,45 @@ fn test_agent_doc_diff_owns_unstarted_prompt_bearing_policy() {
 }
 
 #[test]
+fn test_agent_doc_diff_owns_post_exchange_comment_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let diff_source = fs::read_to_string(manifest_dir.join("agent-doc-diff/src/lib.rs")).unwrap();
+    for required in [
+        "pub fn post_exchange_ordinary_html_comments",
+        "pub fn post_exchange_comment_directive_signals",
+    ] {
+        assert!(
+            diff_source.contains(required),
+            "agent-doc-diff must own post-exchange comment directive policy: {required}"
+        );
+    }
+
+    let preflight_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    for forbidden in [
+        "fn post_exchange_ordinary_html_comments",
+        "fn comment_is_user_note",
+        "fn post_exchange_comment_directive_signals",
+        "fn first_word",
+        "fn looks_like_slash_command",
+    ] {
+        assert!(
+            !preflight_source.contains(forbidden),
+            "preflight must not re-own post-exchange comment directive policy: {forbidden}"
+        );
+    }
+    for required in [
+        "agent_doc_diff::post_exchange_ordinary_html_comments",
+        "agent_doc_diff::post_exchange_comment_directive_signals",
+    ] {
+        assert!(
+            preflight_source.contains(required),
+            "preflight should call the focused diff comment policy directly: {required}"
+        );
+    }
+}
+
+#[test]
 fn test_project_config_io_tmux_helpers_have_no_config_facade() {
     fn contains_path_segment(source: &str, needle: &str) -> bool {
         source.match_indices(needle).any(|(index, _)| {
@@ -4197,6 +4286,48 @@ fn test_agent_doc_debounce_is_sidecar_boundary() {
             !dependencies.contains_key(forbidden),
             "agent-doc-debounce must not depend on core, orchestration, git, editor IPC, sqlite, or tmux crates"
         );
+    }
+}
+
+#[test]
+fn test_agent_doc_controller_owns_route_trigger_matching_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let controller_dispatch =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller/src/dispatch.rs")).unwrap();
+    for required in [
+        "pub fn recent_lines_contain_trigger",
+        "pub fn line_contains_trigger",
+        "pub fn compact_trigger_text",
+        "pub fn strip_leading_prompt_prefix",
+        "pub fn shares_trigger_prefix",
+        "pub fn recent_lines_contain_wrapped_trigger",
+    ] {
+        assert!(
+            controller_dispatch.contains(required),
+            "agent-doc-controller must own route trigger matching policy: {required}"
+        );
+    }
+
+    for relative in [
+        "agent-doc-orchestration/src/route/cycle_ack.rs",
+        "agent-doc-orchestration/src/route/dispatch.rs",
+        "agent-doc-orchestration/src/route.rs",
+        "agent-doc-orchestration/src/start/detection.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        for forbidden in [
+            "fn recent_lines_contain_trigger",
+            "fn line_contains_trigger",
+            "fn compact_trigger_text",
+            "fn strip_leading_prompt_prefix",
+            "fn shares_trigger_prefix",
+            "fn recent_lines_contain_wrapped_trigger",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{relative} must not re-own route trigger matching policy: {forbidden}"
+            );
+        }
     }
 }
 
@@ -6029,6 +6160,44 @@ fn test_agent_doc_tmux_commands_owns_submit_profile_policy() {
             "agent-doc-tmux-commands submit policy must stay free of orchestration, git, editor IPC, sqlite, or tmux-router effects"
         );
     }
+}
+
+#[test]
+fn test_agent_doc_document_realtime_owns_ack_mismatch_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let realtime_write_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime/src/write_policy.rs"))
+            .unwrap();
+    for required in [
+        "pub enum AckMismatchRecovery",
+        "pub fn classify_ack_mismatch_recovery",
+    ] {
+        assert!(
+            realtime_write_policy.contains(required),
+            "agent-doc-document-realtime must own ACK-mismatch recovery policy: {required}"
+        );
+    }
+
+    let converge_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/converge.rs"))
+            .unwrap();
+    for forbidden in [
+        "enum AckMismatchRecovery",
+        "fn classify_ack_mismatch_recovery",
+        "fn missing_agent_response_block",
+        "fn stale_queue_prompt_exchange_artifact",
+        "fn blank_components_named",
+    ] {
+        assert!(
+            !converge_source.contains(forbidden),
+            "write::converge must not re-own ACK-mismatch recovery policy: {forbidden}"
+        );
+    }
+    assert!(
+        converge_source.contains("agent_doc_document_realtime::write_policy::{")
+            && converge_source.contains("classify_ack_mismatch_recovery("),
+        "write::converge should call the focused realtime ACK-mismatch policy directly"
+    );
 }
 
 #[test]

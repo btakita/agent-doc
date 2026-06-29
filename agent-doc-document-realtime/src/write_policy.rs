@@ -5,6 +5,7 @@
 //! allowed to proceed.
 
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 
 fn content_hash(content: &str) -> String {
     let mut hasher = Sha256::new();
@@ -184,9 +185,155 @@ pub fn decide_editorless_disk_fallback(
     EditorlessDiskFallbackDecision::FailClosed
 }
 
+const AGENT_RESPONSE_COMPONENT: &str = "exchange";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AckMismatchRecovery {
+    RevertUntrustedAckToCurrent,
+    ReplayMissingAgentResponseToTarget,
+}
+
+fn blank_components_named(doc: &str, names: &[&str]) -> Option<String> {
+    let comps = agent_doc_element::element::parse(doc).ok()?;
+    let mut spans: Vec<(usize, usize)> = comps
+        .iter()
+        .filter(|c| names.contains(&c.name.as_str()))
+        .map(|c| (c.open_end, c.close_start))
+        .collect();
+    spans.sort_by_key(|(start, _)| *start);
+    let mut out = doc.to_string();
+    for (start, end) in spans.into_iter().rev() {
+        if start <= end
+            && end <= out.len()
+            && out.is_char_boundary(start)
+            && out.is_char_boundary(end)
+        {
+            out.replace_range(start..end, "");
+        }
+    }
+    Some(out)
+}
+
+fn missing_agent_response_block<'a>(target_body: &'a str, recovered_body: &str) -> Option<&'a str> {
+    if target_body.len() <= recovered_body.len() {
+        return None;
+    }
+    let missing = if let Some(missing) = target_body.strip_prefix(recovered_body) {
+        missing
+    } else if let Some(missing) = target_body.strip_suffix(recovered_body) {
+        missing
+    } else {
+        let start = target_body.find(recovered_body)?;
+        let end = start + recovered_body.len();
+        let before = &target_body[..start];
+        let after = &target_body[end..];
+        if before.trim().is_empty() {
+            after
+        } else if after.trim().is_empty() {
+            before
+        } else {
+            return None;
+        }
+    };
+    let trimmed = missing.trim_start();
+    if trimmed.starts_with("### Re:") || trimmed.contains("\n### Re:") {
+        Some(missing)
+    } else {
+        None
+    }
+}
+
+fn stale_queue_prompt_exchange_artifact(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.starts_with('>') || trimmed == "❯ >"
+}
+
+pub fn classify_ack_mismatch_recovery(
+    target: &str,
+    recovered: &str,
+    normalize_transient_markers: impl Fn(&str) -> String,
+) -> Option<AckMismatchRecovery> {
+    let (Some(target_without_exchange), Some(recovered_without_exchange)) = (
+        blank_components_named(target, &[AGENT_RESPONSE_COMPONENT]),
+        blank_components_named(recovered, &[AGENT_RESPONSE_COMPONENT]),
+    ) else {
+        return None;
+    };
+    if normalize_transient_markers(&target_without_exchange)
+        != normalize_transient_markers(&recovered_without_exchange)
+    {
+        return None;
+    }
+
+    let (Ok(target_comps), Ok(recovered_comps)) = (
+        agent_doc_element::element::parse(target),
+        agent_doc_element::element::parse(recovered),
+    ) else {
+        return None;
+    };
+    let target_exchange = target_comps
+        .iter()
+        .find(|c| c.name == AGENT_RESPONSE_COMPONENT);
+    let recovered_exchange = recovered_comps
+        .iter()
+        .find(|c| c.name == AGENT_RESPONSE_COMPONENT);
+    let (Some(target_exchange), Some(recovered_exchange)) = (target_exchange, recovered_exchange)
+    else {
+        return None;
+    };
+    let target_body = normalize_transient_markers(target_exchange.content(target));
+    let recovered_body = normalize_transient_markers(recovered_exchange.content(recovered));
+    if target_body == recovered_body {
+        return None;
+    }
+    if recovered_body.len() < target_body.len()
+        && missing_agent_response_block(&target_body, &recovered_body).is_some()
+    {
+        return Some(AckMismatchRecovery::ReplayMissingAgentResponseToTarget);
+    }
+    let target_lines: HashSet<&str> = target_body
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    let recovered_lines: HashSet<&str> = recovered_body
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    if !target_lines
+        .iter()
+        .all(|line| recovered_lines.contains(line))
+    {
+        return None;
+    }
+    let recovered_only: Vec<&str> = recovered_lines.difference(&target_lines).copied().collect();
+    if !recovered_only.is_empty()
+        && recovered_only
+            .iter()
+            .all(|line| stale_queue_prompt_exchange_artifact(line))
+        && recovered_only
+            .iter()
+            .any(|line| line.trim().starts_with("> **Queue prompt:**"))
+    {
+        return Some(AckMismatchRecovery::RevertUntrustedAckToCurrent);
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn identity_normalize(text: &str) -> String {
+        text.to_string()
+    }
+
+    fn doc_with_exchange(exchange: &str, queue: &str) -> String {
+        format!(
+            "# Plan\n\n<!-- agent:exchange -->\n{exchange}<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n{queue}<!-- /agent:queue -->\n"
+        )
+    }
 
     #[test]
     fn editorless_detached_disk_after_no_delivery_or_no_listener() {
@@ -296,6 +443,48 @@ mod tests {
         assert_eq!(
             decision,
             FullContentVisibleReplacementDecision::RejectStaleSourceBuffer
+        );
+    }
+
+    #[test]
+    fn ack_mismatch_classifies_stale_queue_prompt_artifact_as_revert() {
+        let exchange = "### Re: do [#head]\n\nAnswered from the agent.\n";
+        let target = doc_with_exchange(exchange, "- do [#head]\n");
+        let recovered = doc_with_exchange(
+            &format!("{exchange}> **Queue prompt:** stale leftover from failed queue consume\n"),
+            "- do [#head]\n",
+        );
+
+        assert_eq!(
+            classify_ack_mismatch_recovery(&target, &recovered, identity_normalize),
+            Some(AckMismatchRecovery::RevertUntrustedAckToCurrent)
+        );
+    }
+
+    #[test]
+    fn ack_mismatch_classifies_missing_agent_response_as_target_replay() {
+        let target = doc_with_exchange(
+            "❯ do [#head]\n\n### Re: do [#head]\n\nAnswered from the agent.\n",
+            "- do [#head]\n",
+        );
+        let recovered = doc_with_exchange("❯ do [#head]\n", "- do [#head]\n");
+
+        assert_eq!(
+            classify_ack_mismatch_recovery(&target, &recovered, identity_normalize),
+            Some(AckMismatchRecovery::ReplayMissingAgentResponseToTarget)
+        );
+    }
+
+    #[test]
+    fn ack_mismatch_rejects_user_prompt_drift() {
+        let exchange = "### Re: do [#head]\n\nAnswered from the agent.\n";
+        let target = doc_with_exchange(exchange, "- do [#head]\n");
+        let recovered =
+            doc_with_exchange(&format!("{exchange}❯ do [#followup]\n"), "- do [#head]\n");
+
+        assert_eq!(
+            classify_ack_mismatch_recovery(&target, &recovered, identity_normalize),
+            None
         );
     }
 }

@@ -205,7 +205,7 @@ use agent_doc_controller::dispatch::{
     dispatch_only_starting_pane_recovery_retry_budget,
     dispatch_only_starting_pane_recovery_timeout_for_binary, duplicate_pane_policy_error_message,
     effective_authoritative_actor_state, existing_pane_ready_timeout,
-    fresh_route_start_ack_timeout, route_busy_diagnostic_message,
+    fresh_route_start_ack_timeout, recent_lines_contain_trigger, route_busy_diagnostic_message,
     route_busy_queued_diagnostic_message, route_dispatch_bug_report_item, route_latency_message,
     route_latency_status, route_startup_miss_diagnostic_message, route_submit_issue_message,
     route_submit_observation_message, routed_cycle_ack_timeout,

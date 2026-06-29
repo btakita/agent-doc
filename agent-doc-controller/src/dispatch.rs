@@ -76,6 +76,112 @@ pub fn dispatch_should_coalesce_in_flight(
     in_flight_same_cycle && !operator_driven
 }
 
+pub fn recent_lines_contain_trigger(content: &str, trigger: &str) -> bool {
+    let recent_lines: Vec<String> = content.lines().rev().take(8).map(strip_ansi).collect();
+    recent_lines
+        .iter()
+        .any(|line| line_contains_trigger(line, trigger))
+        || recent_lines_contain_wrapped_trigger(&recent_lines, trigger)
+}
+
+pub fn line_contains_trigger(line: &str, trigger: &str) -> bool {
+    let mut offset = 0usize;
+    while let Some(found) = line[offset..].find(trigger) {
+        let start = offset + found;
+        let end = start + trigger.len();
+        let prev_ok = line[..start]
+            .chars()
+            .next_back()
+            .map(|ch| ch.is_whitespace() || matches!(ch, '>' | '\u{276f}' | '\u{23f5}'))
+            .unwrap_or(true);
+        let next_ok = line[end..]
+            .chars()
+            .next()
+            .map(|ch| ch.is_whitespace())
+            .unwrap_or(true);
+        if prev_ok && next_ok {
+            return true;
+        }
+        offset = start + 1;
+    }
+    false
+}
+
+pub fn compact_trigger_text(text: &str) -> String {
+    text.chars().filter(|ch| !ch.is_whitespace()).collect()
+}
+
+pub fn strip_leading_prompt_prefix(line: &str) -> &str {
+    let trimmed = line.trim_start();
+    for prompt in ["\u{276f}", ">", "\u{203a}", "\u{23f5}"] {
+        if let Some(rest) = trimmed.strip_prefix(prompt) {
+            return rest.trim_start();
+        }
+    }
+    trimmed
+}
+
+pub fn shares_trigger_prefix(fragment: &str, trigger: &str) -> bool {
+    let mut frag = fragment.chars();
+    let mut trig = trigger.chars();
+    loop {
+        match (frag.next(), trig.next()) {
+            (Some(left), Some(right)) if left == right => {}
+            (Some(_), Some(_)) => return false,
+            (None, _) | (_, None) => return true,
+        }
+    }
+}
+
+pub fn recent_lines_contain_wrapped_trigger(recent_lines_rev: &[String], trigger: &str) -> bool {
+    let compact_trigger = compact_trigger_text(trigger);
+    if compact_trigger.is_empty() {
+        return false;
+    }
+    let lines: Vec<&String> = recent_lines_rev.iter().rev().collect();
+    for start in 0..lines.len() {
+        let first = compact_trigger_text(strip_leading_prompt_prefix(lines[start]));
+        if first.is_empty() || !shares_trigger_prefix(&first, &compact_trigger) {
+            continue;
+        }
+        let mut joined = first;
+        if joined.contains(&compact_trigger) {
+            return true;
+        }
+        for next in lines.iter().skip(start + 1).take(3) {
+            joined.push_str(&compact_trigger_text(next));
+            if joined.contains(&compact_trigger) {
+                return true;
+            }
+            if joined.len() > compact_trigger.len() + 32 {
+                break;
+            }
+        }
+    }
+    false
+}
+
+fn strip_ansi(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            if let Some(next) = chars.next()
+                && next == '['
+            {
+                for c2 in chars.by_ref() {
+                    if c2.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DispatchActorState {
     Ready,
@@ -1774,6 +1880,52 @@ fn valid_preset_pause_id(candidate: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recent_lines_contain_trigger_matches_claude_trigger() {
+        let content = "\
+history line
+\x1b[32m\u{276f}\x1b[0m /agent-doc test.md
+";
+        assert!(recent_lines_contain_trigger(content, "/agent-doc test.md"));
+        assert!(!recent_lines_contain_trigger(content, "agent-doc test.md"));
+    }
+
+    #[test]
+    fn recent_lines_contain_trigger_matches_codex_trigger() {
+        let content = "\
+history line
+> agent-doc test.md
+";
+        assert!(recent_lines_contain_trigger(content, "agent-doc test.md"));
+        assert!(!recent_lines_contain_trigger(content, "/agent-doc test.md"));
+    }
+
+    #[test]
+    fn recent_lines_contain_trigger_matches_wrapped_codex_trigger() {
+        let trigger = "agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md";
+        let content = "\
+\u{203a} agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/claud
+escore-3.md
+gpt-5.4 high - ~/work/btakita/agent-loop/src/session-share - Context 31% used
+";
+        assert!(
+            recent_lines_contain_trigger(content, trigger),
+            "wrapped Codex composer lines must still count as pending input"
+        );
+    }
+
+    #[test]
+    fn line_contains_trigger_rejects_codex_substring_inside_claude_trigger() {
+        assert!(line_contains_trigger(
+            "\u{276f} /agent-doc test.md",
+            "/agent-doc test.md"
+        ));
+        assert!(!line_contains_trigger(
+            "\u{276f} /agent-doc test.md",
+            "agent-doc test.md"
+        ));
+    }
 
     #[test]
     fn auto_dispatch_coalesces_only_when_same_cycle_in_flight() {

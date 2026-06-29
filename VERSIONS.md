@@ -92,6 +92,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   `agent_doc_queue::queue_directive`. Orchestration keeps only lifecycle,
   document IO, and mutation adapters.
 
+- **Free-text queue head answer-matching policy moved to `agent-doc-queue`.** The
+  normalized free-text head matching, explicit queue-prompt echo proof,
+  in-progress marker detection, and fenced-log prose-prefix matching now live
+  beside queue response/head matching. Queue consume, preflight maintenance, and
+  session-check import the focused queue API directly.
+
 - **Imperative response contract policy moved to `agent-doc-turn`.** The
   status-only/meta-refusal/blocker/evidence classifier used by the executable
   directive backstop now lives in `agent_doc_turn::response_text`; orchestration
@@ -143,6 +149,11 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   suppression, and first actionable prompt-bearing change selector now live
   beside the prompt-bearing diff classifier. Session-check keeps snapshot,
   HEAD, and current-file adapters only.
+
+- **Post-exchange comment directive policy moved to `agent-doc-diff`.** The
+  ordinary HTML comment scanner after `agent:exchange`, user-note exemption, and
+  post-exchange directive signal extraction now live beside comment stripping
+  and prompt-bearing diff policy. Preflight keeps only warning assembly.
 
 - **Lease TTL freshness moved to `agent-doc-lease`.** Drain-owner, plugin-owner, queue-edit-owner, recycle-yield, and recycle-inflight sidecars now call `agent_doc_lease::timestamp_is_fresh` directly instead of each re-owning the same saturating timestamp policy. The domain modules keep only lease/request bodies, paths, TTL env knobs, and side-effect adapters, with boundary coverage preventing local `*_is_fresh` wrappers from returning.
 
@@ -200,6 +211,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Routed cycle-ack policy moved to `agent-doc-controller`.** The decision that prompt-bearing reroutes require a new cycle ack only when no baseline cycle is already open, and the Codex live-child missing-ack optimism rule, now live in `agent_doc_controller::dispatch`. Route still waits on cycle-state sidecars and records startup-miss evidence, but it adapts cycle/harness facts into the focused controller policy.
 
+- **Route trigger matching policy moved to `agent-doc-controller`.** Recent
+  composer-line trigger detection, prompt-prefix stripping, whitespace-compacted
+  wrapped-trigger matching, and trigger boundary checks now live in
+  `agent_doc_controller::dispatch`. Route and supervisor detection keep only
+  tmux capture/current-output adapters.
+
 - **Route submit-observation policy moved to `agent-doc-controller`.** The accepted/trigger-still-visible/capture-failed/dispatch-proof observation vocabulary, issue mapping, and structured route-submit log rendering now live in `agent_doc_controller::dispatch`. Route remains the ops-log adapter that supplies file, harness, elapsed-time, and editor-attempt facts.
 
 - **Route latency policy moved to `agent-doc-controller`.** The route latency budget status classifier and structured `route_latency` log formatter now live in `agent_doc_controller::dispatch`. Route still measures elapsed time and emits ops-log/stderr records, but it adapts those timings into the focused controller policy.
@@ -215,6 +232,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 - **Routed reopen timeout budgets moved to `agent-doc-controller`.** Dispatch-start proof, fresh-start ack, routed-cycle ack, and existing-pane readiness timeout tables now live in `agent_doc_controller::dispatch`. Route modules pass harness/live-child/test-mode facts directly and no longer wrap the budget functions through `flow::routed_reopen`.
 
 - **Routed reopen decision policy moved to `agent-doc-controller`.** The route decision enum, authoritative actor dispatch-state vocabulary, reopen action classifier, prompt-ready barrier classifier, starting-actor log templates, busy-pane auto-fix decision, degraded-authoritative-actor admission, and dispatch-only blocked guard reason now live in `agent_doc_controller::dispatch`. `flow::routed_reopen` is reduced to the FlowEvent/log adapter, and route modules import the focused controller API directly.
+
+- **ACK-mismatch recovery policy moved to `agent-doc-document-realtime`.** The
+  pure classifier that distinguishes stale queue-prompt ACK artifacts from
+  missing-agent-response ACKs now lives in `agent_doc_document_realtime`. Write
+  convergence keeps editor refresh effects and supplies the existing transient
+  marker normalizer as an adapter.
 
 - **Tmux submit profile policy moved to `agent-doc-tmux-commands`.** The harness submit profile, submit-mode/key vocabulary, trailing-newline trimming, and text/Enter command builders now live in `agent_doc_tmux_commands`. `sessions` remains the effect adapter that executes tmux commands, while route/start/idle-watch import the focused command policy directly instead of routing through `sessions`.
 

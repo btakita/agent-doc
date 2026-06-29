@@ -2,6 +2,10 @@
 
 use super::*;
 
+use agent_doc_controller::dispatch::{
+    compact_trigger_text, line_contains_trigger, recent_lines_contain_trigger,
+    shares_trigger_prefix, strip_leading_prompt_prefix,
+};
 use agent_doc_tmux::pane_current_command_is_bare_shell;
 
 /// Outcome of one direct-pane submit-acceptance poll window.

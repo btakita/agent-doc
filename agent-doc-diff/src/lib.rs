@@ -5,6 +5,9 @@
 //!   `<!-- ... -->` HTML comments from document content, while preserving agent
 //!   range markers (`<!-- agent:* -->`). Comment patterns inside fenced code blocks
 //!   and inline backtick spans are not treated as comment syntax.
+//! - `post_exchange_ordinary_html_comments(content)` returns ordinary HTML comments
+//!   after the last `agent:exchange` close, excluding agent markers, component-owned
+//!   comments, and preserved user-note blocks.
 //! - `compute(doc)` reads the on-disk snapshot for `doc`, waits for stable content
 //!   via `wait_for_stable_content`, strips comments from both sides, and returns a
 //!   unified diff (5-line context, header `snapshot`→`document`) or `None` when
@@ -60,6 +63,12 @@
 //! - `strip_preserves_comment_syntax_in_fenced_code_block`: `<!-- not a comment -->` inside triple-backtick fence → unchanged
 //! - `strip_preserves_comment_syntax_in_inline_backticks`: `` `<!--` `` in inline code → not treated as comment start
 //! - `strip_backtick_comment_before_agent_marker`: `` `<!--` `` text followed by `<!-- /agent:exchange -->` → agent marker not consumed
+//! - `post_exchange_comment_scan_ignores_agent_components_and_user_notes`:
+//!   post-exchange scratch comments are returned, while comments inside agent components
+//!   and user-note blocks are ignored.
+//! - `post_exchange_comment_directive_signals_detects_directive_text`: dispatch,
+//!   preset, and slash-command-looking lines in ordinary comments produce ordered,
+//!   unique signal strings.
 //! - `stale_snapshot_detects_completed_exchange`: snapshot + completed assistant/user cycle with empty trailing user block → `is_stale_snapshot` returns `true`
 //! - `stale_snapshot_false_when_user_has_new_content`: trailing `## User` block has text → `is_stale_snapshot` returns `false`
 //! - `stale_snapshot_ignores_comments_in_detection`: scratch comments between exchanges → still detected as stale
@@ -273,6 +282,106 @@ fn strip_pipeline_block_lines(content: &str) -> String {
         out.push(line);
     }
     out.join("\n")
+}
+
+/// Return ordinary HTML comments that appear after the final exchange close.
+///
+/// Agent markers, comments inside any parsed agent component, and preserved
+/// multi-line user-note comments are not executable prompt material and are
+/// excluded from the result.
+pub fn post_exchange_ordinary_html_comments(content: &str) -> Vec<String> {
+    let Ok(components) = element::parse(content) else {
+        return Vec::new();
+    };
+    let Some(exchange_close_end) = components
+        .iter()
+        .filter(|component| component.name == "exchange")
+        .map(|component| component.close_end)
+        .max()
+    else {
+        return Vec::new();
+    };
+
+    let mut comments = Vec::new();
+    let mut tail_start = exchange_close_end;
+    let mut tail = &content[tail_start..];
+    while let Some(open) = tail.find("<!--") {
+        let after_open = &tail[open + "<!--".len()..];
+        let Some(close) = after_open.find("-->") else {
+            break;
+        };
+        let absolute_open = tail_start + open;
+        let inner = after_open[..close].trim();
+        if !element::is_agent_marker(inner)
+            && !components.iter().any(|component| {
+                absolute_open >= component.open_start && absolute_open < component.close_end
+            })
+            && !post_exchange_comment_is_user_note(inner)
+        {
+            comments.push(inner.to_string());
+        }
+        let consumed = open + "<!--".len() + close + "-->".len();
+        tail_start += consumed;
+        tail = &content[tail_start..];
+    }
+    comments
+}
+
+fn post_exchange_comment_is_user_note(inner: &str) -> bool {
+    let lines: Vec<&str> = inner.lines().collect();
+    if lines.len() < 2 {
+        return false;
+    }
+    let has_horizontal_rule = lines.iter().any(|line| line.trim() == "---");
+    let has_prose = lines.iter().any(|line| {
+        let trimmed = line.trim();
+        !trimmed.is_empty()
+            && trimmed != "---"
+            && !trimmed.starts_with('#')
+            && !trimmed.starts_with('/')
+            && !trimmed.starts_with("dispatch ")
+            && !trimmed.starts_with("preset ")
+    });
+    has_horizontal_rule && has_prose
+}
+
+/// Return ordered, unique directive-looking signal strings from a comment body.
+pub fn post_exchange_comment_directive_signals(comment: &str) -> Vec<String> {
+    let mut signals = Vec::new();
+    for line in comment.lines() {
+        let trimmed = line.trim().trim_start_matches('❯').trim();
+        let signal = if let Some(rest) = trimmed.strip_prefix("dispatch ") {
+            Some(format!(
+                "dispatch {}",
+                post_exchange_comment_first_word(rest)
+            ))
+        } else if let Some(rest) = trimmed.strip_prefix("preset ") {
+            Some(format!("preset {}", post_exchange_comment_first_word(rest)))
+        } else if post_exchange_comment_looks_like_slash_command(trimmed) {
+            Some(post_exchange_comment_first_word(trimmed).to_string())
+        } else {
+            None
+        };
+        if let Some(signal) = signal
+            && !signals.iter().any(|existing| existing == &signal)
+        {
+            signals.push(signal);
+        }
+    }
+    signals
+}
+
+fn post_exchange_comment_first_word(text: &str) -> &str {
+    text.split_whitespace().next().unwrap_or(text)
+}
+
+fn post_exchange_comment_looks_like_slash_command(text: &str) -> bool {
+    let Some(rest) = text.strip_prefix('/') else {
+        return false;
+    };
+    rest.chars()
+        .next()
+        .is_some_and(|ch| ch.is_ascii_lowercase())
 }
 
 /// Annotate a unified diff with content-source markers.
@@ -3212,6 +3321,62 @@ diff --git a/src/lib.rs b/src/lib.rs
         assert_eq!(
             strip_comments(input),
             "<!-- agent:s -->\ndata\n<!-- /agent:s -->\n"
+        );
+    }
+
+    #[test]
+    fn post_exchange_comment_scan_ignores_agent_components_and_user_notes() {
+        let content = concat!(
+            "<!--\n",
+            "pre-exchange scratch ignored\n",
+            "/clear\n",
+            "-->\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior - gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!--\n",
+            "Scratch note while testing.\n",
+            "dispatch #manual-review\n",
+            "-->\n\n",
+            "<!--\n",
+            "---\n",
+            "Preserved user note.\n",
+            "dispatch #ignored\n",
+            "-->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- dispatch #queued -->\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:done -->\n",
+            "<!-- archived #manual-review -->\n",
+            "<!-- /agent:done -->\n",
+        );
+
+        assert_eq!(
+            post_exchange_ordinary_html_comments(content),
+            vec!["Scratch note while testing.\ndispatch #manual-review".to_string()]
+        );
+    }
+
+    #[test]
+    fn post_exchange_comment_directive_signals_detects_directive_text() {
+        let comment = concat!(
+            "Scratch note while testing.\n",
+            "dispatch #manual-review now\n",
+            "dispatch #manual-review again\n",
+            "preset #repair-check with args\n",
+            "❯ /clear now\n",
+            "/Clear ignored\n",
+            "//ignored\n",
+        );
+
+        assert_eq!(
+            post_exchange_comment_directive_signals(comment),
+            vec![
+                "dispatch #manual-review".to_string(),
+                "preset #repair-check".to_string(),
+                "/clear".to_string()
+            ]
         );
     }
 

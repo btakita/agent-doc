@@ -1,6 +1,7 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use agent_doc_controller::dispatch::recent_lines_contain_trigger;
 use agent_doc_supervisor::idle_reconcile::recoverable_ready_busy_blocker_reason;
 
 pub(crate) fn record_recent_output(shared: &SupervisorShared, bytes: &[u8]) {
@@ -204,7 +205,7 @@ pub(crate) fn supervisor_pane_has_busy_cue(
 /// proven pending" and dispatches normally — a failed capture must never
 /// suppress a legitimate dispatch; only a positive match dedups.
 ///
-/// Reuses `route::cycle_ack::recent_lines_contain_trigger`, the same
+/// Reuses `agent_doc_controller::dispatch::recent_lines_contain_trigger`, the same
 /// still-in-composer detector the route acceptance poll uses, so the dedup is
 /// keyed off the harness composer rather than scrollback far above it. For
 /// `agent-doc <path>` triggers, also reuse route's draft equivalence matcher so
@@ -217,7 +218,7 @@ pub(crate) fn supervisor_pane_payload_pending_in_content(
     if agent_doc_queue::queue_command::is_context_clear_command(payload) {
         return context_clear_command_visible_in_active_input(content, payload, harness);
     }
-    crate::route::recent_lines_contain_trigger(content, payload)
+    recent_lines_contain_trigger(content, payload)
         || crate::route::direct_pane_existing_draft_visible(content, payload, harness)
 }
 

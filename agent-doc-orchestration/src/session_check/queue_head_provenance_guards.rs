@@ -1,4 +1,5 @@
 use super::*;
+use agent_doc_queue::queue_response::free_text_head_answered_by_response;
 
 pub(crate) fn check_expect_done_or_gate_guard(
     file: &Path,
@@ -381,12 +382,12 @@ pub(crate) fn check_free_text_queue_head_provenance(
         }
         let still_queued = committed_queue_contains_active_free_text_head(&content, head);
         if still_queued {
-            if crate::write::free_text_head_answered_by_response(&exchange_text, head) {
+            if free_text_head_answered_by_response(&exchange_text, head) {
                 completed_residue.push(head.clone());
             }
             continue;
         }
-        if crate::write::free_text_head_answered_by_response(&exchange_text, head)
+        if free_text_head_answered_by_response(&exchange_text, head)
             || agent_doc_turn::closeout_signal::response_head_plausibly_answers(
                 &exchange_text,
                 head,

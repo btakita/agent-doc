@@ -4650,6 +4650,52 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         claim_source.contains("use agent_doc_controller::claim::{"),
         "claim.rs should call focused controller claim policy directly"
     );
+    let controller_operator_clear =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller/src/operator_clear.rs"))
+            .unwrap();
+    for required_snippet in [
+        "pub enum OperatorClearInputState",
+        "pub enum OperatorClearGuardOutcome",
+        "pub const fn clear_guard_outcome",
+    ] {
+        assert!(
+            controller_operator_clear.contains(required_snippet),
+            "agent-doc-controller should own operator-clear guard policy directly: {required_snippet}"
+        );
+    }
+    let flow_operator_clear =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/operator_clear.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "pub enum OperatorClearInputState",
+        "pub enum OperatorClearGuardOutcome",
+        "pub fn clear_guard_outcome",
+        "pub const fn clear_guard_outcome",
+    ] {
+        assert!(
+            !flow_operator_clear.contains(forbidden_snippet),
+            "flow::operator_clear must stay a flow adapter and not re-own operator-clear policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        flow_operator_clear.contains(
+            "use agent_doc_controller::operator_clear::{OperatorClearGuardOutcome, OperatorClearInputState};"
+        ) && flow_operator_clear.contains(
+            "agent_doc_controller::operator_clear::clear_guard_outcome"
+        ),
+        "flow::operator_clear should call focused operator-clear policy directly"
+    );
+    let session_actor_cmd_source =
+        fs::read_to_string(manifest_dir.join("src/session_actor_cmd.rs")).unwrap();
+    assert!(
+        session_actor_cmd_source
+            .contains("use agent_doc_controller::operator_clear::OperatorClearInputState;")
+            && session_actor_cmd_source
+                .contains("use agent_doc_controller::operator_clear::OperatorClearGuardOutcome;")
+            && !session_actor_cmd_source
+                .contains("agent_doc_orchestration::flow::operator_clear::OperatorClearInputState"),
+        "session actor commands should import focused operator-clear policy directly"
+    );
 
     let controller_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-controller/Cargo.toml")).unwrap();

@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 pub mod claim;
 pub mod command_line;
 pub mod dispatch;
+pub mod operator_clear;
 pub mod recycle;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

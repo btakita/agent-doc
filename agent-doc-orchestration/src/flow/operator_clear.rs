@@ -1,42 +1,21 @@
 use super::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
+use agent_doc_controller::operator_clear::{OperatorClearGuardOutcome, OperatorClearInputState};
 use std::path::Path;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OperatorClearInputState {
-    IdlePrompt,
-    CleanExit,
-    NoLivePane,
-    ProtectedInput,
-    Busy,
-}
-
-impl OperatorClearInputState {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::IdlePrompt => "idle_prompt",
-            Self::CleanExit => "clean_exit",
-            Self::NoLivePane => "no_live_pane",
-            Self::ProtectedInput => "protected_input",
-            Self::Busy => "busy",
-        }
-    }
-}
-
-pub fn clear_guard_outcome(state: OperatorClearInputState) -> FlowOutcome {
-    match state {
-        OperatorClearInputState::IdlePrompt
-        | OperatorClearInputState::CleanExit
-        | OperatorClearInputState::NoLivePane => FlowOutcome::Completed,
-        OperatorClearInputState::ProtectedInput => FlowOutcome::FailedClosed,
-        OperatorClearInputState::Busy => FlowOutcome::Blocked,
+fn clear_guard_flow_outcome(outcome: OperatorClearGuardOutcome) -> FlowOutcome {
+    match outcome {
+        OperatorClearGuardOutcome::Completed => FlowOutcome::Completed,
+        OperatorClearGuardOutcome::Blocked => FlowOutcome::Blocked,
+        OperatorClearGuardOutcome::FailedClosed => FlowOutcome::FailedClosed,
     }
 }
 
 pub fn clear_guard_event(state: OperatorClearInputState) -> FlowEvent {
+    let outcome = agent_doc_controller::operator_clear::clear_guard_outcome(state);
     FlowEvent::new(
         FlowName::OperatorClear,
         FlowStage::OperatorGuard,
-        clear_guard_outcome(state),
+        clear_guard_flow_outcome(outcome),
     )
     .with_reason(state.as_str())
 }

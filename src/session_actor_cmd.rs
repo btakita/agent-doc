@@ -3,7 +3,9 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use agent_doc_orchestration::flow::operator_clear::OperatorClearInputState;
+#[cfg(test)]
+use agent_doc_controller::operator_clear::OperatorClearGuardOutcome;
+use agent_doc_controller::operator_clear::OperatorClearInputState;
 use agent_doc_orchestration::startup_miss::{SessionLogStatus, StartupMiss};
 use agent_doc_orchestration::supervisor::ipc::IpcMethod;
 #[cfg(test)]
@@ -4461,8 +4463,8 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
 
         assert_eq!(state, OperatorClearInputState::IdlePrompt);
         assert_eq!(
-            agent_doc_orchestration::flow::operator_clear::clear_guard_outcome(state),
-            agent_doc_orchestration::flow::types::FlowOutcome::Completed
+            agent_doc_controller::operator_clear::clear_guard_outcome(state),
+            OperatorClearGuardOutcome::Completed
         );
     }
 
@@ -4481,8 +4483,8 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
 
         assert_eq!(state, OperatorClearInputState::Busy);
         assert_eq!(
-            agent_doc_orchestration::flow::operator_clear::clear_guard_outcome(state),
-            agent_doc_orchestration::flow::types::FlowOutcome::Blocked
+            agent_doc_controller::operator_clear::clear_guard_outcome(state),
+            OperatorClearGuardOutcome::Blocked
         );
         let message =
             busy_clear_refusal_message(Path::new("/tmp/doc.md"), &evidence, "active codex turn");
@@ -4658,8 +4660,8 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
 
         assert_eq!(state, OperatorClearInputState::CleanExit);
         assert_eq!(
-            agent_doc_orchestration::flow::operator_clear::clear_guard_outcome(state),
-            agent_doc_orchestration::flow::types::FlowOutcome::Completed
+            agent_doc_controller::operator_clear::clear_guard_outcome(state),
+            OperatorClearGuardOutcome::Completed
         );
     }
 

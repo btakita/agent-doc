@@ -10,6 +10,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Realtime write/reconnect policy moved to `agent-doc-document-realtime`.** Visible-write idle admission, full-content source proof/replacement rejection, reconnect-buffer reconciliation, and editorless disk fallback decisions now live in `agent_doc_document_realtime::write_policy`. Orchestration keeps only sidecar/editor/git/file adapters and flow-event formatting, and callers import the focused realtime API directly rather than using orchestration facades.
 
+- **Operator-clear guard policy moved to `agent-doc-controller`.** The
+  operator-clear input-state vocabulary and guard outcome table now live in
+  `agent_doc_controller::operator_clear`. Orchestration keeps only the
+  `FlowEvent`/ops-log adapter and CLI call sites import the focused controller
+  policy directly.
+
 - **Template patchback policy moved to `agent-doc-template`.** Patchback shape vocabulary/classification, marker/component counting, pure parse-plan construction, and the orchestrate patchback contract now live in `agent_doc_template::patchback`. `flow::document_mutation` keeps only file-scoped ops-log and FlowEvent adaptation, while write and orchestration-batch callers use the focused template API directly.
 
 - **Child template patchback normalization moved to `agent-doc-template`.** The

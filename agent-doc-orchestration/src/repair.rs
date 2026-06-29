@@ -490,7 +490,7 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
                 file,
                 crate::flow::types::FlowStage::TerminalGuard,
                 crate::flow::types::FlowOutcome::FailedClosed,
-                crate::flow::closeout::CloseoutGuardReason::ResponsePatchbackUncommitted,
+                agent_doc_turn::closeout_guard::CloseoutGuardReason::ResponsePatchbackUncommitted,
             );
             anyhow::bail!(
                 "{} for {}: stale preflight_started cycle `{}` has visible response patchback drift ({marker}) that is not committed in HEAD. Run `agent-doc write --commit {}` or `agent-doc finalize {}` through the normal closeout path; recovery will not report an already-committed cycle while this response is still only in the working tree.",
@@ -519,7 +519,7 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
             file,
             crate::flow::types::FlowStage::TerminalGuard,
             crate::flow::types::FlowOutcome::Completed,
-            crate::flow::closeout::CloseoutGuardReason::StalePreflightLockRepaired,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::StalePreflightLockRepaired,
         );
         eprintln!(
             "[repair] repaired stale preflight_started cycle {} for {}",
@@ -551,7 +551,7 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
             file,
             crate::flow::types::FlowStage::TerminalGuard,
             crate::flow::types::FlowOutcome::Completed,
-            crate::flow::closeout::CloseoutGuardReason::StalePreflightLockRepaired,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::StalePreflightLockRepaired,
         );
         eprintln!(
             "[repair] closed stale preflight_started cycle {} for {} after repairing committed historical {} drift",
@@ -567,7 +567,7 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
             file,
             crate::flow::types::FlowStage::TerminalGuard,
             crate::flow::types::FlowOutcome::FailedClosed,
-            crate::flow::closeout::CloseoutGuardReason::OpenCycle,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::OpenCycle,
         );
         anyhow::bail!(
             "{} for {}: found visible response patchback ({marker}) but no pending/capture artifact exists and HEAD cannot prove the patchback was already committed",
@@ -609,7 +609,7 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
                 file,
                 crate::flow::types::FlowStage::TerminalGuard,
                 crate::flow::types::FlowOutcome::FailedClosed,
-                crate::flow::closeout::CloseoutGuardReason::StalePreflightCycleAbandoned,
+                agent_doc_turn::closeout_guard::CloseoutGuardReason::StalePreflightCycleAbandoned,
             );
             eprintln!(
                 "[repair] abandoned stale empty preflight_started cycle {} for {} after {}s; unresolved prompt remains visible for the next preflight",
@@ -623,7 +623,7 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
             file,
             crate::flow::types::FlowStage::TerminalGuard,
             crate::flow::types::FlowOutcome::Blocked,
-            crate::flow::closeout::CloseoutGuardReason::OpenCycle,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::OpenCycle,
         );
         anyhow::bail!(
             "{} for {}: previous cycle `{}` is still `preflight_started`, the live document has unresolved prompt_target: {preview}, and no response exists to replay. The cycle is only {}s old; wait until it is stale or restart the harness pane and rerun `agent-doc {}` (or use `agent-doc start {}` from a fresh pane) so the prompt is handled by a new response cycle.",
@@ -656,7 +656,7 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
             file,
             crate::flow::types::FlowStage::TerminalGuard,
             crate::flow::types::FlowOutcome::Completed,
-            crate::flow::closeout::CloseoutGuardReason::StalePreflightLockRepaired,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::StalePreflightLockRepaired,
         );
         eprintln!(
             "[repair] closed stale empty preflight_started cycle {} for {} after {}s without a capture",
@@ -730,7 +730,7 @@ pub fn recover_missing_commit_boundary(file: &Path, event: &str) -> Result<Optio
         file,
         crate::flow::types::FlowStage::TerminalGuard,
         crate::flow::types::FlowOutcome::Completed,
-        crate::flow::closeout::CloseoutGuardReason::CommitBoundaryRecovered,
+        agent_doc_turn::closeout_guard::CloseoutGuardReason::CommitBoundaryRecovered,
     );
     Ok(Some(reason))
 }
@@ -2027,7 +2027,7 @@ pub fn repair(file: &Path) -> Result<RepairOutcome> {
             file,
             crate::flow::types::FlowStage::SessionCheck,
             crate::flow::types::FlowOutcome::FailedClosed,
-            crate::flow::closeout::CloseoutGuardReason::SessionCheckInterrupted,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::SessionCheckInterrupted,
         );
         anyhow::bail!(message);
     }

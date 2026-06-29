@@ -2665,7 +2665,7 @@ fn ensure_active_capture_materialized_for_commit(
         file,
         crate::flow::types::FlowStage::TerminalGuard,
         crate::flow::types::FlowOutcome::FailedClosed,
-        crate::flow::closeout::CloseoutGuardReason::AlreadyCommitted,
+        agent_doc_turn::closeout_guard::CloseoutGuardReason::AlreadyCommitted,
     );
     anyhow::bail!(
         "captured response body is not present in the staged snapshot for {} even though the snapshot already matches HEAD; refusing already-committed closeout. Replay the captured response with `agent-doc write --commit {}` before marking the cycle committed.",
@@ -2703,7 +2703,7 @@ fn ensure_no_live_editor_buffer_ahead_of_disk(
         file,
         crate::flow::types::FlowStage::PreCommitGuard,
         crate::flow::types::FlowOutcome::Blocked,
-        crate::flow::closeout::CloseoutGuardReason::ReplicaDeliveryPending,
+        agent_doc_turn::closeout_guard::CloseoutGuardReason::ReplicaDeliveryPending,
     );
     anyhow::bail!(
         "live editor buffer has unflushed changes ahead of disk for {}; refusing to commit from stale disk (editor_id={}, edit_epoch={}, last_synced_epoch={})",

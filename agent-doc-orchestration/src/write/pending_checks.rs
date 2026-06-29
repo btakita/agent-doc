@@ -257,7 +257,7 @@ pub(crate) fn precommit_pending_capture_check(file: &Path) -> Result<()> {
             file,
             crate::flow::types::FlowStage::PreCommitGuard,
             crate::flow::types::FlowOutcome::Blocked,
-            crate::flow::closeout::CloseoutGuardReason::PendingCaptureTargetMissing,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingCaptureTargetMissing,
         );
         anyhow::bail!(
             "[finalize] pre-commit gate: active prompt required backlog capture in {} \
@@ -277,7 +277,7 @@ pub(crate) fn precommit_pending_capture_check(file: &Path) -> Result<()> {
             file,
             crate::flow::types::FlowStage::PreCommitGuard,
             crate::flow::types::FlowOutcome::Blocked,
-            crate::flow::closeout::CloseoutGuardReason::PendingCaptureInventoryShortfall,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingCaptureInventoryShortfall,
         );
         anyhow::bail!(
             "[finalize] pre-commit gate: active #agent-doc-bug contract described at least {} distinct issue(s), \
@@ -305,7 +305,7 @@ pub(crate) fn precommit_pending_capture_check(file: &Path) -> Result<()> {
             file,
             crate::flow::types::FlowStage::PreCommitGuard,
             crate::flow::types::FlowOutcome::Blocked,
-            crate::flow::closeout::CloseoutGuardReason::PendingCapturePlanShortfall,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingCapturePlanShortfall,
         );
         anyhow::bail!(
             "[finalize] pre-commit gate: active #agent-doc-bug contract required at least {} explicit plan reference(s), \
@@ -327,7 +327,7 @@ pub(crate) fn precommit_pending_capture_check(file: &Path) -> Result<()> {
             file,
             crate::flow::types::FlowStage::PreCommitGuard,
             crate::flow::types::FlowOutcome::Blocked,
-            crate::flow::closeout::CloseoutGuardReason::PendingCapturePromisedIdsMissing,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingCapturePromisedIdsMissing,
         );
         anyhow::bail!(
             "[finalize] pre-commit gate: response promised new tracked item(s) {} \
@@ -353,7 +353,7 @@ pub(crate) fn precommit_pending_capture_check(file: &Path) -> Result<()> {
             file,
             crate::flow::types::FlowStage::PreCommitGuard,
             crate::flow::types::FlowOutcome::Blocked,
-            crate::flow::closeout::CloseoutGuardReason::PendingCaptureRequired,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingCaptureRequired,
         );
         anyhow::bail!(
             "[finalize] pre-commit gate: active prompt requested backlog capture \
@@ -388,7 +388,7 @@ pub(crate) fn precommit_pending_capture_check(file: &Path) -> Result<()> {
         file,
         crate::flow::types::FlowStage::PreCommitGuard,
         crate::flow::types::FlowOutcome::Blocked,
-        crate::flow::closeout::CloseoutGuardReason::PendingCaptureRecommendations,
+        agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingCaptureRecommendations,
     );
     anyhow::bail!(
         "[finalize] pre-commit gate: response contains ~{} recommendation-like items \
@@ -441,7 +441,7 @@ pub(crate) fn prewrite_pending_capture_check(
             file,
             crate::flow::types::FlowStage::PreWriteGuard,
             crate::flow::types::FlowOutcome::Blocked,
-            crate::flow::closeout::CloseoutGuardReason::PendingCaptureTargetMissing,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingCaptureTargetMissing,
         );
         anyhow::bail!(
             "[finalize] pre-write gate: active prompt required backlog capture in {} \
@@ -462,7 +462,7 @@ pub(crate) fn prewrite_pending_capture_check(
             file,
             crate::flow::types::FlowStage::PreWriteGuard,
             crate::flow::types::FlowOutcome::Blocked,
-            crate::flow::closeout::CloseoutGuardReason::PendingCaptureInventoryShortfall,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingCaptureInventoryShortfall,
         );
         anyhow::bail!(
             "[finalize] pre-write gate: active #agent-doc-bug contract described at least {} distinct issue(s), \
@@ -496,7 +496,7 @@ pub(crate) fn prewrite_pending_capture_check(
             file,
             crate::flow::types::FlowStage::PreWriteGuard,
             crate::flow::types::FlowOutcome::Blocked,
-            crate::flow::closeout::CloseoutGuardReason::PendingCapturePlanShortfall,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingCapturePlanShortfall,
         );
         anyhow::bail!(
             "[finalize] pre-write gate: active #agent-doc-bug contract required at least {} explicit plan reference(s), \
@@ -521,7 +521,7 @@ pub(crate) fn prewrite_pending_capture_check(
             file,
             crate::flow::types::FlowStage::PreWriteGuard,
             crate::flow::types::FlowOutcome::Blocked,
-            crate::flow::closeout::CloseoutGuardReason::PendingCapturePromisedIdsMissing,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingCapturePromisedIdsMissing,
         );
         anyhow::bail!(
             "[finalize] pre-write gate: response promised new tracked item(s) {} \
@@ -552,7 +552,7 @@ pub(crate) fn prewrite_pending_capture_check(
             file,
             crate::flow::types::FlowStage::PreWriteGuard,
             crate::flow::types::FlowOutcome::Blocked,
-            crate::flow::closeout::CloseoutGuardReason::PendingCaptureRequired,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingCaptureRequired,
         );
         anyhow::bail!(
             "[finalize] pre-write gate: active prompt requested backlog capture \
@@ -592,7 +592,7 @@ pub(crate) fn prewrite_pending_capture_check(
         file,
         crate::flow::types::FlowStage::PreWriteGuard,
         crate::flow::types::FlowOutcome::Blocked,
-        crate::flow::closeout::CloseoutGuardReason::PendingCaptureRecommendations,
+        agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingCaptureRecommendations,
     );
     anyhow::bail!(
         "[finalize] pre-write gate: response contains ~{} recommendation-like items \
@@ -645,7 +645,7 @@ pub(crate) fn precommit_pending_done_check_with_options(
             file,
             crate::flow::types::FlowStage::PreCommitGuard,
             crate::flow::types::FlowOutcome::Blocked,
-            crate::flow::closeout::CloseoutGuardReason::PendingDoneMalformedTrackedItem,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingDoneMalformedTrackedItem,
         );
         anyhow::bail!(
             "[finalize] pre-commit gate: {}",
@@ -697,7 +697,7 @@ pub(crate) fn precommit_pending_done_check_with_options(
         file,
         crate::flow::types::FlowStage::PreCommitGuard,
         crate::flow::types::FlowOutcome::Blocked,
-        crate::flow::closeout::CloseoutGuardReason::PendingDoneMissing,
+        agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingDoneMissing,
     );
     anyhow::bail!(
         "[finalize] pre-commit gate: response appears to complete existing pending {} \
@@ -746,7 +746,7 @@ pub(crate) fn prewrite_pending_done_check(
             file,
             crate::flow::types::FlowStage::PreWriteGuard,
             crate::flow::types::FlowOutcome::Blocked,
-            crate::flow::closeout::CloseoutGuardReason::PendingDoneMalformedTrackedItem,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingDoneMalformedTrackedItem,
         );
         anyhow::bail!(
             "[finalize] pre-write gate: {}",
@@ -788,7 +788,7 @@ pub(crate) fn prewrite_pending_done_check(
         file,
         crate::flow::types::FlowStage::PreWriteGuard,
         crate::flow::types::FlowOutcome::Blocked,
-        crate::flow::closeout::CloseoutGuardReason::PendingDoneMissing,
+        agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingDoneMissing,
     );
     anyhow::bail!(
         "[finalize] pre-write gate: response appears to complete existing pending {} \

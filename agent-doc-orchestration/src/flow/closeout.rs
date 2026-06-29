@@ -1,4 +1,5 @@
-use super::types::{CloseoutState, FlowEvent, FlowName, FlowOutcome, FlowStage};
+use super::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
+use agent_doc_turn::closeout_guard::CloseoutGuardReason;
 use agent_doc_turn::closeout_recovery::{
     CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput, CloseoutRecoveryMutationReason,
     CloseoutRecoveryState, MetadataDriftAuthority, closeout_recovery_decision_from_state,
@@ -6,57 +7,6 @@ use agent_doc_turn::closeout_recovery::{
 };
 use anyhow::{Context, Result};
 use std::path::Path;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum CloseoutGuardReason {
-    MissingCycleState,
-    OpenCycle,
-    PendingCaptureTargetMissing,
-    PendingCaptureInventoryShortfall,
-    PendingCapturePlanShortfall,
-    PendingCapturePromisedIdsMissing,
-    PendingCaptureRequired,
-    PendingCaptureRecommendations,
-    PendingDoneMalformedTrackedItem,
-    PendingDoneMissing,
-    ReviewDoneSourceNotReviewed,
-    AlreadyCommitted,
-    SnapshotDiffersFromHead,
-    ParentPointerStale,
-    SessionCheckInterrupted,
-    ResponsePatchbackUncommitted,
-    CommitBoundaryRecovered,
-    StalePreflightLockRepaired,
-    StalePreflightCycleAbandoned,
-    ReplicaDeliveryPending,
-}
-
-impl CloseoutGuardReason {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::MissingCycleState => "missing_cycle_state",
-            Self::OpenCycle => "open_cycle",
-            Self::PendingCaptureTargetMissing => "pending_capture_target_missing",
-            Self::PendingCaptureInventoryShortfall => "pending_capture_inventory_shortfall",
-            Self::PendingCapturePlanShortfall => "pending_capture_plan_shortfall",
-            Self::PendingCapturePromisedIdsMissing => "pending_capture_promised_ids_missing",
-            Self::PendingCaptureRequired => "pending_capture_required",
-            Self::PendingCaptureRecommendations => "pending_capture_recommendations",
-            Self::PendingDoneMalformedTrackedItem => "pending_done_malformed_tracked_item",
-            Self::PendingDoneMissing => "pending_done_missing",
-            Self::ReviewDoneSourceNotReviewed => "review_done_source_not_reviewed",
-            Self::AlreadyCommitted => "already_committed",
-            Self::SnapshotDiffersFromHead => "snapshot_differs_from_head",
-            Self::ParentPointerStale => "parent_pointer_stale",
-            Self::SessionCheckInterrupted => "session_check_interrupted",
-            Self::ResponsePatchbackUncommitted => "response_patchback_uncommitted",
-            Self::CommitBoundaryRecovered => "commit_boundary_recovered",
-            Self::StalePreflightLockRepaired => "stale_preflight_lock_repaired",
-            Self::StalePreflightCycleAbandoned => "stale_preflight_cycle_abandoned",
-            Self::ReplicaDeliveryPending => "replica_delivery_pending",
-        }
-    }
-}
 
 pub fn closeout_guard_event(
     stage: FlowStage,
@@ -73,27 +23,6 @@ pub fn log_closeout_guard_event(
     reason: CloseoutGuardReason,
 ) {
     super::proof::log_flow_event(file, closeout_guard_event(stage, outcome, reason));
-}
-
-pub fn closeout_state_from_cycle_phase(phase: &str) -> Option<CloseoutState> {
-    match phase {
-        "preflight_started" => Some(CloseoutState::PreflightStarted),
-        "response_captured" => Some(CloseoutState::ResponseCaptured),
-        "write_applied" => Some(CloseoutState::WriteApplied),
-        "committed" => Some(CloseoutState::Committed),
-        "abandoned" => Some(CloseoutState::Abandoned),
-        _ => None,
-    }
-}
-
-pub fn terminal_guard_outcome(state: CloseoutState) -> FlowOutcome {
-    match state {
-        CloseoutState::Committed => FlowOutcome::Completed,
-        CloseoutState::Abandoned => FlowOutcome::FailedClosed,
-        CloseoutState::PreflightStarted
-        | CloseoutState::ResponseCaptured
-        | CloseoutState::WriteApplied => FlowOutcome::Blocked,
-    }
 }
 
 pub fn complete_required_closeout(file: &Path) -> Result<bool> {
@@ -1437,14 +1366,6 @@ fn closeout_latency_message(file: &Path, total_ms: u128, phases: &[(String, u128
 mod tests {
     use super::*;
     use std::process::Command;
-
-    #[test]
-    fn committed_is_terminal_completed() {
-        assert_eq!(
-            terminal_guard_outcome(CloseoutState::Committed),
-            FlowOutcome::Completed
-        );
-    }
 
     #[test]
     fn closeout_guard_event_is_typed() {

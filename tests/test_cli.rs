@@ -2566,11 +2566,30 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
             .exists(),
         "pure closeout recovery policy should live in the focused turn crate"
     );
+    assert!(
+        manifest_dir
+            .join("agent-doc-turn/src/closeout_guard.rs")
+            .exists(),
+        "closeout guard vocabulary should live in the focused turn crate"
+    );
 
     let turn_source =
         fs::read_to_string(manifest_dir.join("agent-doc-turn/src/closeout_signal.rs")).unwrap();
+    let guard_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn/src/closeout_guard.rs")).unwrap();
     let recovery_source =
         fs::read_to_string(manifest_dir.join("agent-doc-turn/src/closeout_recovery.rs")).unwrap();
+    for required in [
+        "pub enum CloseoutGuardReason",
+        "pub enum CloseoutGuardOutcome",
+        "pub fn closeout_cycle_phase_from_str",
+        "pub const fn closeout_terminal_guard_outcome",
+    ] {
+        assert!(
+            guard_source.contains(required),
+            "agent-doc-turn must own closeout guard policy: {required}"
+        );
+    }
     for required in [
         "pub enum CloseoutRecoveryState",
         "pub struct CloseoutRecoveryDecisionInput",
@@ -2590,6 +2609,43 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     let closeout_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/closeout.rs"))
             .unwrap();
+    let flow_types_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/types.rs")).unwrap();
+    for forbidden in [
+        "pub enum CloseoutGuardReason",
+        "impl CloseoutGuardReason",
+        "pub fn closeout_state_from_cycle_phase",
+        "pub fn terminal_guard_outcome",
+    ] {
+        assert!(
+            !closeout_source.contains(forbidden),
+            "flow::closeout must not re-own or facade focused closeout guard policy: {forbidden}"
+        );
+    }
+    assert!(
+        !flow_types_source.contains("pub enum CloseoutState"),
+        "flow types must not keep a duplicate closeout state vocabulary"
+    );
+    assert!(
+        closeout_source.contains("use agent_doc_turn::closeout_guard::CloseoutGuardReason;"),
+        "flow::closeout should adapt focused closeout guard reasons into flow events"
+    );
+    for relative in [
+        "agent-doc-orchestration/src/flow/mod.rs",
+        "agent-doc-orchestration/src/git.rs",
+        "agent-doc-orchestration/src/repair.rs",
+        "agent-doc-orchestration/src/write.rs",
+        "agent-doc-orchestration/src/write/ipc/transport.rs",
+        "agent-doc-orchestration/src/write/pending_checks.rs",
+        "agent-doc-orchestration/src/write/run_entry.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            !source.contains("crate::flow::closeout::CloseoutGuardReason")
+                && !source.contains("closeout::CloseoutGuardReason"),
+            "{relative} should use focused closeout guard reasons directly"
+        );
+    }
     for forbidden in [
         "pub enum CloseoutRecoveryState",
         "pub struct CloseoutRecoveryDecisionInput",

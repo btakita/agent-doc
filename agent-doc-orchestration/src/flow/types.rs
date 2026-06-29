@@ -160,27 +160,6 @@ impl DispatchProof {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum CloseoutState {
-    PreflightStarted,
-    ResponseCaptured,
-    WriteApplied,
-    Committed,
-    Abandoned,
-}
-
-impl CloseoutState {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::PreflightStarted => "preflight_started",
-            Self::ResponseCaptured => "response_captured",
-            Self::WriteApplied => "write_applied",
-            Self::Committed => "committed",
-            Self::Abandoned => "abandoned",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum FlowOutcome {
     Completed,
     Blocked,

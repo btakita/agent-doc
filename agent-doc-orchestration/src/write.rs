@@ -1637,7 +1637,7 @@ fn enforce_review_done_guard(file: &Path, id: &str) -> Result<()> {
                 file,
                 crate::flow::types::FlowStage::PreWriteGuard,
                 crate::flow::types::FlowOutcome::Blocked,
-                crate::flow::closeout::CloseoutGuardReason::ReviewDoneSourceNotReviewed,
+                agent_doc_turn::closeout_guard::CloseoutGuardReason::ReviewDoneSourceNotReviewed,
             );
             anyhow::bail!("{}", message)
         }
@@ -2403,7 +2403,7 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
                         file,
                         crate::flow::types::FlowStage::PreCommitGuard,
                         crate::flow::types::FlowOutcome::Blocked,
-                        crate::flow::closeout::CloseoutGuardReason::ReplicaDeliveryPending,
+                        agent_doc_turn::closeout_guard::CloseoutGuardReason::ReplicaDeliveryPending,
                     );
                     eprintln!(
                         "[commit] skipped: live editor replica delivery is still pending for {}",
@@ -2449,7 +2449,7 @@ fn log_closeout_guard(
     file: &Path,
     stage: crate::flow::types::FlowStage,
     outcome: crate::flow::types::FlowOutcome,
-    reason: crate::flow::closeout::CloseoutGuardReason,
+    reason: agent_doc_turn::closeout_guard::CloseoutGuardReason,
 ) {
     crate::flow::closeout::log_closeout_guard_event(file, stage, outcome, reason);
 }

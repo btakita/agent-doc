@@ -238,7 +238,7 @@ pub fn try_ipc(
                 file,
                 crate::flow::types::FlowStage::TerminalGuard,
                 crate::flow::types::FlowOutcome::Blocked,
-                crate::flow::closeout::CloseoutGuardReason::AlreadyCommitted,
+                agent_doc_turn::closeout_guard::CloseoutGuardReason::AlreadyCommitted,
             );
             crate::ops_log::log_op(
                 file,
@@ -631,7 +631,7 @@ pub fn try_ipc(
                         file,
                         crate::flow::types::FlowStage::TerminalGuard,
                         crate::flow::types::FlowOutcome::Blocked,
-                        crate::flow::closeout::CloseoutGuardReason::AlreadyCommitted,
+                        agent_doc_turn::closeout_guard::CloseoutGuardReason::AlreadyCommitted,
                     );
                     crate::ops_log::log_op(
                         file,
@@ -752,7 +752,7 @@ pub fn try_ipc(
             file,
             crate::flow::types::FlowStage::TerminalGuard,
             crate::flow::types::FlowOutcome::Blocked,
-            crate::flow::closeout::CloseoutGuardReason::AlreadyCommitted,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::AlreadyCommitted,
         );
         crate::ops_log::log_op(
             file,
@@ -1149,7 +1149,7 @@ pub(crate) fn try_ipc_full_content_with_mode(
             file,
             crate::flow::types::FlowStage::TerminalGuard,
             crate::flow::types::FlowOutcome::Blocked,
-            crate::flow::closeout::CloseoutGuardReason::AlreadyCommitted,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::AlreadyCommitted,
         );
         crate::ops_log::log_op(
             file,
@@ -1409,7 +1409,7 @@ pub(crate) fn write_ipc_and_poll(
                 doc_file,
                 crate::flow::types::FlowStage::TerminalGuard,
                 crate::flow::types::FlowOutcome::Blocked,
-                crate::flow::closeout::CloseoutGuardReason::AlreadyCommitted,
+                agent_doc_turn::closeout_guard::CloseoutGuardReason::AlreadyCommitted,
             );
             crate::ops_log::log_op(
                 doc_file,

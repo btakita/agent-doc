@@ -48,7 +48,7 @@ mod tests {
         let closeout_event = closeout::closeout_guard_event(
             FlowStage::SessionCheck,
             FlowOutcome::FailedClosed,
-            closeout::CloseoutGuardReason::SessionCheckInterrupted,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::SessionCheckInterrupted,
         );
         assert_eq!(closeout_event.flow, FlowName::Closeout);
         assert_eq!(closeout_event.stage, FlowStage::SessionCheck);

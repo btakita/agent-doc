@@ -16,6 +16,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   `FlowEvent`/ops-log adapter and CLI call sites import the focused controller
   policy directly.
 
+- **Closeout guard vocabulary moved to `agent-doc-turn`.** The stable closeout
+  guard reason labels, terminal guard outcome table, and closeout cycle-phase
+  parsing now live in `agent_doc_turn::closeout_guard`. Orchestration keeps only
+  `FlowEvent`/ops-log formatting and no longer owns a duplicate closeout state
+  vocabulary.
+
 - **Template patchback policy moved to `agent-doc-template`.** Patchback shape vocabulary/classification, marker/component counting, pure parse-plan construction, and the orchestrate patchback contract now live in `agent_doc_template::patchback`. `flow::document_mutation` keeps only file-scoped ops-log and FlowEvent adaptation, while write and orchestration-batch callers use the focused template API directly.
 
 - **Child template patchback normalization moved to `agent-doc-template`.** The

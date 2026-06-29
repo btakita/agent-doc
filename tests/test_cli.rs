@@ -2581,6 +2581,11 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub fn text_has_shipped_signal",
         "pub fn text_has_partial_remaining_signal",
         "pub fn response_text_for_guards",
+        "pub fn normalized_prompt_for_match",
+        "pub fn exchange_contains_prompt_line",
+        "pub fn is_exchange_response_heading",
+        "pub fn is_queue_continuation_response_heading",
+        "pub fn assistant_response_text",
         "pub fn free_text_queue_marker_has_bare_heading_residue",
         "pub fn response_head_plausibly_answers",
         "pub fn response_clearly_completes_pending_id",
@@ -2635,6 +2640,8 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     )
     .unwrap();
     for forbidden in [
+        "pub fn is_exchange_response_heading",
+        "pub fn is_queue_continuation_response_heading",
         "pub(crate) fn body_enumerates_multiple_gated_phases",
         "pub(crate) fn count_phase_markers",
         "pub(crate) fn body_already_split_into_child_ids",
@@ -2654,10 +2661,38 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "agent_doc_turn::closeout_signal::body_enumerates_multiple_gated_phases",
         "agent_doc_turn::closeout_signal::body_already_split_into_child_ids",
         "agent_doc_turn::closeout_signal::queue_audit_collapses_partial_completion",
+        "agent_doc_turn::closeout_signal::is_exchange_response_heading",
+        "agent_doc_turn::closeout_signal::is_queue_continuation_response_heading",
+        "agent_doc_turn::closeout_signal::normalized_prompt_for_match",
     ] {
         assert!(
             closeout_guards.contains(required),
             "closeout_guards should call focused closeout signal policy directly: {required}"
+        );
+    }
+
+    let response_guards = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/response_guards.rs"),
+    )
+    .unwrap();
+    for forbidden in [
+        "pub(crate) fn normalized_prompt_for_match",
+        "pub(crate) fn exchange_contains_prompt_line",
+        "pub(crate) fn assistant_response_text",
+    ] {
+        assert!(
+            !response_guards.contains(forbidden),
+            "response_guards must not re-own closeout prompt/response text policy: {forbidden}"
+        );
+    }
+    for required in [
+        "agent_doc_turn::closeout_signal::exchange_contains_prompt_line",
+        "agent_doc_turn::closeout_signal::assistant_response_text",
+        "agent_doc_turn::closeout_signal::normalized_prompt_for_match",
+    ] {
+        assert!(
+            response_guards.contains(required),
+            "response_guards should call focused closeout prompt/response text policy directly: {required}"
         );
     }
 

@@ -2,31 +2,6 @@
 
 use super::*;
 
-pub(crate) fn normalized_prompt_for_match(line: &str) -> String {
-    line.trim().trim_start_matches('❯').trim().to_string()
-}
-
-/// True when `doc`'s `agent:exchange` component contains a line matching the
-/// given prompt (normalized: leading `❯` and whitespace stripped). Used to
-/// decide whether a recorded dropped prompt has been resolved (reached the
-/// committed document) so the guard can clear and stop firing.
-pub(crate) fn exchange_contains_prompt_line(doc: &str, prompt: &str) -> bool {
-    let needle = normalized_prompt_for_match(prompt);
-    if needle.is_empty() {
-        return true;
-    }
-    let Ok(components) = agent_doc_element::element::parse(doc) else {
-        return false;
-    };
-    let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
-        return false;
-    };
-    exchange
-        .content(doc)
-        .lines()
-        .any(|line| normalized_prompt_for_match(line) == needle)
-}
-
 /// `#queue-user-edit-overwrite`: fail closed when this cycle recorded a
 /// user-authored `agent:queue` edit dropped during a `content_ours` IPC adoption
 /// and that queue line is still absent from the committed `HEAD` — unless the
@@ -70,8 +45,8 @@ pub(crate) fn check_dropped_queue_prompt_guard(
             // visible/HEAD exchange → kept, not lost.
             if agent_doc_queue::document_queue::queue_contains_prompt_line(&visible, prompt)
                 || agent_doc_queue::document_queue::queue_contains_prompt_line(head, prompt)
-                || exchange_contains_prompt_line(&visible, prompt)
-                || exchange_contains_prompt_line(head, prompt)
+                || agent_doc_turn::closeout_signal::exchange_contains_prompt_line(&visible, prompt)
+                || agent_doc_turn::closeout_signal::exchange_contains_prompt_line(head, prompt)
             {
                 return false;
             }
@@ -117,44 +92,6 @@ pub(crate) fn check_dropped_queue_prompt_guard(
     )))
 }
 
-/// Collect the assistant `### Re:` response prose from an exchange component
-/// body (heading + boundary + comment + blockquote lines excluded). Used to
-/// detect queue lines that were copied out of a response body.
-///
-/// Blockquote lines (`> …`) are EXCLUDED: every `### Re:` response echoes the
-/// prompt it is answering as a `> **Queue prompt:** … > <verbatim head text>`
-/// quote. Including those echoes made the contamination guard
-/// (`check_queue_response_contamination_guard`) false-positive on any
-/// still-live free-text queue head whose text a response quoted — the response
-/// legitimately quotes the head it answered, and an earlier response that
-/// quoted a near-identical prompt would flag an unrelated live queue item too.
-/// The guard targets assistant ANSWER prose copied into the queue, not the
-/// prompt-echo, so blockquoted quotes are not response prose for this purpose.
-/// (#jb-run-agent-doc-response-queue-contamination — blockquote-echo false positive)
-pub(crate) fn assistant_response_text(exchange_body: &str) -> String {
-    let mut in_response = false;
-    let mut out = String::new();
-    for line in exchange_body.lines() {
-        let trimmed = line.trim();
-        if is_exchange_response_heading(trimmed) {
-            in_response = true;
-            continue;
-        }
-        if trimmed.starts_with("<!-- agent:boundary") {
-            continue;
-        }
-        if in_response
-            && !trimmed.is_empty()
-            && !trimmed.starts_with("<!--")
-            && !trimmed.starts_with('>')
-        {
-            out.push_str(trimmed);
-            out.push('\n');
-        }
-    }
-    out
-}
-
 /// `#jb-run-agent-doc-response-queue-contamination`: `Run Agent Doc` / queue
 /// synthesis must never enqueue assistant response prose. The live repro added
 /// `- Yes. I drove the already-authenticated Google Ads browser session ...`
@@ -179,7 +116,8 @@ pub(crate) fn check_queue_response_contamination_guard(
     let Ok(entries) = agent_doc_queue::document_queue::parse(queue_body) else {
         return Ok(GuardResult::None);
     };
-    let response_text = assistant_response_text(exchange.content(&content));
+    let response_text =
+        agent_doc_turn::closeout_signal::assistant_response_text(exchange.content(&content));
     if response_text.trim().is_empty() {
         return Ok(GuardResult::None);
     }
@@ -198,7 +136,7 @@ pub(crate) fn check_queue_response_contamination_guard(
         }
         // Only treat substantial prose as a contamination candidate; short
         // free-text prompts are legitimate (`#free-text-queue-head-consume`).
-        let normalized = normalized_prompt_for_match(text);
+        let normalized = agent_doc_turn::closeout_signal::normalized_prompt_for_match(text);
         if normalized.chars().count() < 20 {
             continue;
         }
@@ -253,7 +191,9 @@ pub(crate) fn check_dropped_exchange_prompt_guard(
     let still_missing: Vec<String> = state
         .dropped_exchange_prompts
         .iter()
-        .filter(|prompt| !exchange_contains_prompt_line(head, prompt))
+        .filter(|prompt| {
+            !agent_doc_turn::closeout_signal::exchange_contains_prompt_line(head, prompt)
+        })
         .cloned()
         .collect();
     if still_missing.is_empty() {

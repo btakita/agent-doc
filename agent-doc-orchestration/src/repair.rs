@@ -269,7 +269,9 @@ fn extract_visible_response_patch_between(
         let trimmed = line.trim_end_matches('\n').trim();
         match change.tag() {
             similar::ChangeTag::Insert => {
-                if !collecting && !crate::session_check::is_exchange_response_heading(trimmed) {
+                if !collecting
+                    && !agent_doc_turn::closeout_signal::is_exchange_response_heading(trimmed)
+                {
                     continue;
                 }
                 collecting = true;
@@ -284,7 +286,7 @@ fn extract_visible_response_patch_between(
                     || trimmed == "<!-- /agent:exchange -->"
                     || trimmed == "<!-- /patch:exchange -->"
                     || agent_doc_diff::text_line_looks_like_prompt_target(trimmed)
-                    || crate::session_check::is_exchange_response_heading(trimmed)
+                    || agent_doc_turn::closeout_signal::is_exchange_response_heading(trimmed)
                 {
                     break;
                 }
@@ -1171,7 +1173,7 @@ fn repair_prompt_target_immediately_before_existing_response(
                 continue;
             }
             let normalized = trimmed.strip_prefix("❯ ").unwrap_or(trimmed).trim();
-            return crate::session_check::is_exchange_response_heading(normalized);
+            return agent_doc_turn::closeout_signal::is_exchange_response_heading(normalized);
         }
     }
     false

@@ -461,7 +461,7 @@ pub(crate) fn exchange_has_new_appended_content(snapshot: &str, current: &str) -
     if appended
         .lines()
         .map(str::trim)
-        .any(is_exchange_response_heading)
+        .any(agent_doc_turn::closeout_signal::is_exchange_response_heading)
     {
         return true;
     }
@@ -785,14 +785,6 @@ pub(crate) fn has_new_response_heading_marker(snapshot_doc: &str, current_doc: &
         .any(|(marker, count)| count > snapshot_counts.get(&marker).copied().unwrap_or(0))
 }
 
-pub fn is_exchange_response_heading(trimmed: &str) -> bool {
-    trimmed == "## Assistant"
-        || trimmed.starts_with("### Re:")
-        || trimmed.starts_with("#### Re:")
-        || trimmed.starts_with("##### Re:")
-        || trimmed.starts_with("###### Re:")
-}
-
 /// Binary-authored interrupted-cycle recovery diagnostics are appended by
 /// `preflight::format_ipc_dogfood_note` with a `### Re:` heading so the diff
 /// classifier sees a `RecoveryArtifact` (never a user `PromptTarget`). That same
@@ -842,12 +834,12 @@ pub(crate) fn unresolved_exchange_prompt_in_content(content: &str) -> Option<Str
     // still unresolved; the queue continuation must not let the boundary bury it.
     // Scan only the prompt region up to the FIRST response heading so a queue
     // continuation's own response body is never mistaken for prompt text.
-    let first_response_idx = tail
-        .iter()
-        .position(|line| is_exchange_response_heading(line.trim()));
+    let first_response_idx = tail.iter().position(|line| {
+        agent_doc_turn::closeout_signal::is_exchange_response_heading(line.trim())
+    });
     if let Some(idx) = first_response_idx {
         let heading = tail[idx].trim();
-        if !is_queue_continuation_response_heading(heading) {
+        if !agent_doc_turn::closeout_signal::is_queue_continuation_response_heading(heading) {
             // A genuine free-text answer resolves the prompt.
             return None;
         }
@@ -865,7 +857,7 @@ pub(crate) fn unresolved_exchange_prompt_in_content(content: &str) -> Option<Str
             !line.is_empty()
                 && !line.starts_with("<!--")
                 && !line.starts_with("-->")
-                && !is_exchange_response_heading(line)
+                && !agent_doc_turn::closeout_signal::is_exchange_response_heading(line)
                 // `#ipcproofnostall`: a binary-authored interrupted-cycle
                 // IPC-proof recovery diagnostic line (the structured
                 // `ipc_proof_insufficient ... invariant=... recovery=...` event or
@@ -882,7 +874,7 @@ pub(crate) fn unresolved_exchange_prompt_in_content(content: &str) -> Option<Str
                 // prompt-only tail.
                 && !agent_doc_diff::line_is_binary_authored_compact_summary(line)
         })
-        .map(normalized_prompt_for_match)
+        .map(agent_doc_turn::closeout_signal::normalized_prompt_for_match)
         .filter(|line| !line.is_empty())
         .collect();
     if prompt_lines.is_empty() {
@@ -910,28 +902,7 @@ pub(crate) fn exchange_tail_has_response_heading(file: &Path) -> bool {
         .unwrap_or(0);
     lines[tail_start..]
         .iter()
-        .any(|line| is_exchange_response_heading(line.trim()))
-}
-
-/// `#queue-continuation-buries-prompt`: a queue-continuation response heading
-/// (`### Re: do [#id]` / `### Re: re [#id]`, any h-level) answers a queue or
-/// backlog item, not a free-text user prompt. Such a heading must not mark a
-/// preceding free-text exchange prompt as answered, or a queue continuation can
-/// advance the boundary past an unanswered user prompt and bury it in the
-/// snapshot (the JB "ignored my previous prompt" class).
-pub fn is_queue_continuation_response_heading(trimmed: &str) -> bool {
-    let Some(rest) = trimmed
-        .strip_prefix("### Re:")
-        .or_else(|| trimmed.strip_prefix("#### Re:"))
-        .or_else(|| trimmed.strip_prefix("##### Re:"))
-        .or_else(|| trimmed.strip_prefix("###### Re:"))
-    else {
-        return false;
-    };
-    let topic = rest.trim_start();
-    // Queue-continuation topics start with the `do`/`re` directive verb plus a
-    // bracketed id, e.g. "do [#6cmx]" or "re [#374n] ...".
-    (topic.starts_with("do [#") || topic.starts_with("re [#")) && topic.contains(']')
+        .any(|line| agent_doc_turn::closeout_signal::is_exchange_response_heading(line.trim()))
 }
 
 pub fn detect_unstarted_prompt_bearing_diff(file: &Path) -> Result<Option<String>> {
@@ -1076,7 +1047,7 @@ pub(crate) fn prompt_target_is_immediately_before_existing_response(
             if trimmed.is_empty() || trimmed.starts_with("<!--") {
                 continue;
             }
-            if is_exchange_response_heading(trimmed) {
+            if agent_doc_turn::closeout_signal::is_exchange_response_heading(trimmed) {
                 return true;
             }
             if answered_prompt_marker {
@@ -1121,7 +1092,7 @@ pub(crate) fn prompt_only_exchange_tail(doc: &str) -> Option<String> {
         if in_fence.is_some() {
             continue;
         }
-        if is_exchange_response_heading(trimmed) {
+        if agent_doc_turn::closeout_signal::is_exchange_response_heading(trimmed) {
             prompt_preview = None;
             in_assistant_response = true;
             continue;

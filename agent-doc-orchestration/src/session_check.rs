@@ -7308,18 +7308,32 @@ Body\n\
     }
     #[test]
     fn is_queue_continuation_response_heading_distinguishes_directive_topics() {
-        assert!(is_queue_continuation_response_heading("### Re: do [#6cmx]"));
-        assert!(is_queue_continuation_response_heading(
-            "#### Re: re [#374n] follow-up"
-        ));
+        assert!(
+            agent_doc_turn::closeout_signal::is_queue_continuation_response_heading(
+                "### Re: do [#6cmx]"
+            )
+        );
+        assert!(
+            agent_doc_turn::closeout_signal::is_queue_continuation_response_heading(
+                "#### Re: re [#374n] follow-up"
+            )
+        );
         // Free-text answer topics are NOT queue continuations.
-        assert!(!is_queue_continuation_response_heading(
-            "### Re: JB Run Agent Doc deadlock — opus-4-8"
-        ));
-        assert!(!is_queue_continuation_response_heading(
-            "### Re: do this thing"
-        ));
-        assert!(!is_queue_continuation_response_heading("not a heading"));
+        assert!(
+            !agent_doc_turn::closeout_signal::is_queue_continuation_response_heading(
+                "### Re: JB Run Agent Doc deadlock — opus-4-8"
+            )
+        );
+        assert!(
+            !agent_doc_turn::closeout_signal::is_queue_continuation_response_heading(
+                "### Re: do this thing"
+            )
+        );
+        assert!(
+            !agent_doc_turn::closeout_signal::is_queue_continuation_response_heading(
+                "not a heading"
+            )
+        );
     }
     #[test]
     fn unresolved_exchange_prompt_detects_fresh_prompt_without_boundary() {

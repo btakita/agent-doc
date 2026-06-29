@@ -246,6 +246,81 @@ pub fn response_text_for_guards(response: &str) -> String {
     response.to_string()
 }
 
+pub fn normalized_prompt_for_match(line: &str) -> String {
+    line.trim().trim_start_matches('❯').trim().to_string()
+}
+
+/// True when `doc`'s `agent:exchange` component contains a line matching the
+/// given prompt after prompt-prefix and whitespace normalization.
+pub fn exchange_contains_prompt_line(doc: &str, prompt: &str) -> bool {
+    let needle = normalized_prompt_for_match(prompt);
+    if needle.is_empty() {
+        return true;
+    }
+    let Ok(components) = agent_doc_element::element::parse(doc) else {
+        return false;
+    };
+    let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
+        return false;
+    };
+    exchange
+        .content(doc)
+        .lines()
+        .any(|line| normalized_prompt_for_match(line) == needle)
+}
+
+pub fn is_exchange_response_heading(trimmed: &str) -> bool {
+    trimmed == "## Assistant"
+        || trimmed.starts_with("### Re:")
+        || trimmed.starts_with("#### Re:")
+        || trimmed.starts_with("##### Re:")
+        || trimmed.starts_with("###### Re:")
+}
+
+/// True when a `### Re:` heading answers a queue/backlog continuation rather
+/// than a free-text exchange prompt.
+pub fn is_queue_continuation_response_heading(trimmed: &str) -> bool {
+    let Some(rest) = trimmed
+        .strip_prefix("### Re:")
+        .or_else(|| trimmed.strip_prefix("#### Re:"))
+        .or_else(|| trimmed.strip_prefix("##### Re:"))
+        .or_else(|| trimmed.strip_prefix("###### Re:"))
+    else {
+        return false;
+    };
+    let topic = rest.trim_start();
+    (topic.starts_with("do [#") || topic.starts_with("re [#")) && topic.contains(']')
+}
+
+/// Collect assistant response prose from an exchange component body.
+///
+/// Heading, boundary, comment, and blockquote prompt-echo lines are excluded so
+/// callers can compare queue prompts against answer prose rather than echoed
+/// prompt text.
+pub fn assistant_response_text(exchange_body: &str) -> String {
+    let mut in_response = false;
+    let mut out = String::new();
+    for line in exchange_body.lines() {
+        let trimmed = line.trim();
+        if is_exchange_response_heading(trimmed) {
+            in_response = true;
+            continue;
+        }
+        if trimmed.starts_with("<!-- agent:boundary") {
+            continue;
+        }
+        if in_response
+            && !trimmed.is_empty()
+            && !trimmed.starts_with("<!--")
+            && !trimmed.starts_with('>')
+        {
+            out.push_str(trimmed);
+            out.push('\n');
+        }
+    }
+    out
+}
+
 pub fn free_text_queue_marker_has_bare_heading_residue(content: &str) -> bool {
     content.contains("<!-- no-free-text-queue-head-guard -->")
         && content.lines().any(|line| line.trim() == "###")
@@ -721,6 +796,60 @@ mod tests {
             response_text_for_guards(status_only),
             "Shipped status text."
         );
+    }
+
+    #[test]
+    fn exchange_prompt_matching_normalizes_prompt_prefixes() {
+        let doc = concat!(
+            "<!-- agent:exchange -->\n",
+            "  ❯   Keep this prompt\n",
+            "<!-- /agent:exchange -->\n"
+        );
+
+        assert_eq!(
+            normalized_prompt_for_match(" ❯  Keep this prompt "),
+            "Keep this prompt"
+        );
+        assert!(exchange_contains_prompt_line(doc, "Keep this prompt"));
+        assert!(exchange_contains_prompt_line(doc, "❯ Keep this prompt"));
+        assert!(!exchange_contains_prompt_line(doc, "Different prompt"));
+    }
+
+    #[test]
+    fn assistant_response_text_skips_headings_boundaries_comments_and_quotes() {
+        let exchange = concat!(
+            "Old prompt\n",
+            "### Re: do [#abc]\n",
+            "<!-- agent:boundary:abc -->\n",
+            "<!-- internal comment -->\n",
+            "> **Queue prompt:** do [#abc]\n",
+            "Implemented the answer.\n",
+            "\n",
+            "#### Re: follow-up\n",
+            "Verified the follow-up.\n"
+        );
+
+        assert_eq!(
+            assistant_response_text(exchange),
+            "Implemented the answer.\nVerified the follow-up.\n"
+        );
+    }
+
+    #[test]
+    fn response_heading_classifiers_distinguish_queue_continuations() {
+        assert!(is_exchange_response_heading("## Assistant"));
+        assert!(is_exchange_response_heading("### Re: user prompt"));
+        assert!(is_exchange_response_heading("###### Re: deep prompt"));
+        assert!(is_queue_continuation_response_heading(
+            "### Re: do [#abc] finish task"
+        ));
+        assert!(is_queue_continuation_response_heading(
+            "#### Re: re [#abc] follow-up"
+        ));
+        assert!(!is_queue_continuation_response_heading(
+            "### Re: user free-text prompt"
+        ));
+        assert!(!is_queue_continuation_response_heading("## Assistant"));
     }
 
     #[test]

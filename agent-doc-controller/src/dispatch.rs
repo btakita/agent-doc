@@ -269,6 +269,57 @@ pub fn route_submit_issue_message(facts: RouteSubmitObservationFacts<'_>) -> Opt
     Some(message)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteLatencyStatus {
+    Ok,
+    OverBudget,
+}
+
+impl RouteLatencyStatus {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::OverBudget => "over_budget",
+        }
+    }
+}
+
+pub fn route_latency_status(elapsed_ms: u128, budget_ms: u128) -> RouteLatencyStatus {
+    if elapsed_ms >= budget_ms {
+        RouteLatencyStatus::OverBudget
+    } else {
+        RouteLatencyStatus::Ok
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RouteLatencyFacts<'a> {
+    pub phase: &'a str,
+    pub elapsed_ms: u128,
+    pub budget_ms: u128,
+    pub pane: &'a str,
+    pub harness_binary: &'a str,
+    pub outcome: &'a str,
+    pub editor_attempt_id: Option<&'a str>,
+}
+
+pub fn route_latency_message(facts: RouteLatencyFacts<'_>) -> String {
+    let mut message = format!(
+        "route_latency phase={} elapsed_ms={} budget_ms={} status={} pane={} harness={} outcome={}",
+        facts.phase,
+        facts.elapsed_ms,
+        facts.budget_ms,
+        route_latency_status(facts.elapsed_ms, facts.budget_ms).label(),
+        facts.pane,
+        facts.harness_binary,
+        facts.outcome
+    );
+    if let Some(editor_attempt_id) = facts.editor_attempt_id {
+        message.push_str(&format!(" editor_attempt_id={editor_attempt_id}"));
+    }
+    message
+}
+
 pub const STARTING_ACTOR_TIMEOUT_REASON: &str = "starting_actor_timeout";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1152,6 +1203,45 @@ mod tests {
             issue.contains("result=accepted_without_dispatch_start_proof"),
             "{issue}"
         );
+    }
+
+    #[test]
+    fn route_latency_status_marks_elapsed_at_budget_as_over_budget() {
+        assert_eq!(route_latency_status(999, 1000), RouteLatencyStatus::Ok);
+        assert_eq!(
+            route_latency_status(1000, 1000),
+            RouteLatencyStatus::OverBudget
+        );
+        assert_eq!(RouteLatencyStatus::Ok.label(), "ok");
+        assert_eq!(RouteLatencyStatus::OverBudget.label(), "over_budget");
+    }
+
+    #[test]
+    fn route_latency_message_includes_budget_status_and_editor_attempt() {
+        let ok = route_latency_message(RouteLatencyFacts {
+            phase: "dispatch_start_proof",
+            elapsed_ms: 999,
+            budget_ms: 1000,
+            pane: "%1",
+            harness_binary: "codex",
+            outcome: "submitted",
+            editor_attempt_id: None,
+        });
+        assert!(ok.contains("status=ok"), "{ok}");
+        assert!(ok.contains("elapsed_ms=999"), "{ok}");
+
+        let slow = route_latency_message(RouteLatencyFacts {
+            phase: "dispatch_start_proof",
+            elapsed_ms: 10_000,
+            budget_ms: 10_000,
+            pane: "%1",
+            harness_binary: "codex",
+            outcome: "unproven_but_accepted",
+            editor_attempt_id: Some("attempt_1_2"),
+        });
+        assert!(slow.contains("status=over_budget"), "{slow}");
+        assert!(slow.contains("outcome=unproven_but_accepted"), "{slow}");
+        assert!(slow.contains("editor_attempt_id=attempt_1_2"), "{slow}");
     }
 
     #[test]

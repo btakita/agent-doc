@@ -187,9 +187,10 @@ use agent_doc_controller::dispatch::{
     CloseoutBlockDispatchFacts, DirectPaneSubmitStatus as CommandDispatchStatus,
     DispatchActorState, DispatchDrainRetryDecision, DispatchRuntimeHealth,
     DispatchStartProofDecision, DispatchStartProofFacts, MissingCycleAckFacts, RetryBudget,
-    RouteSubmitObservation, RouteSubmitObservationFacts as ControllerRouteSubmitObservationFacts,
-    RoutedCycleAckFacts, RoutedDispatchStartProof, STARTING_ACTOR_TIMEOUT_REASON,
-    StartingTimeoutActorFacts, StartupMissRouteFacts, actor_blocked_by_starting_timeout,
+    RouteLatencyFacts, RouteLatencyStatus, RouteSubmitObservation,
+    RouteSubmitObservationFacts as ControllerRouteSubmitObservationFacts, RoutedCycleAckFacts,
+    RoutedDispatchStartProof, STARTING_ACTOR_TIMEOUT_REASON, StartingTimeoutActorFacts,
+    StartupMissRouteFacts, actor_blocked_by_starting_timeout,
     authoritative_actor_dispatch_guard_reason as controller_authoritative_actor_dispatch_guard_reason,
     authoritative_actor_ready_retry_budget, classify_closeout_block_dispatch,
     classify_dispatch_start_proof, direct_pane_submit_acceptance_budget,
@@ -200,11 +201,11 @@ use agent_doc_controller::dispatch::{
     dispatch_only_starting_pane_ready_timeout_for_binary,
     dispatch_only_starting_pane_recovery_retry_budget,
     dispatch_only_starting_pane_recovery_timeout_for_binary, effective_authoritative_actor_state,
-    route_submit_issue_message, route_submit_observation_message,
-    should_optimistically_accept_missing_cycle_ack, should_require_routed_cycle_ack,
-    starting_timeout_blocked_actor_can_recover, startup_miss_requires_fresh_start,
-    startup_miss_should_fail_closed, startup_miss_should_restart_live_owner,
-    startup_miss_superseded_by_later_open_start,
+    route_latency_message, route_latency_status, route_submit_issue_message,
+    route_submit_observation_message, should_optimistically_accept_missing_cycle_ack,
+    should_require_routed_cycle_ack, starting_timeout_blocked_actor_can_recover,
+    startup_miss_requires_fresh_start, startup_miss_should_fail_closed,
+    startup_miss_should_restart_live_owner, startup_miss_superseded_by_later_open_start,
 };
 use agent_doc_frontmatter::frontmatter;
 use tmux_router::Tmux;
@@ -435,14 +436,6 @@ enum RoutedDispatchStartTracker {
     },
 }
 
-fn route_latency_status(elapsed: Duration, budget: Duration) -> &'static str {
-    if elapsed >= budget {
-        "over_budget"
-    } else {
-        "ok"
-    }
-}
-
 /// Poll cadence for the direct-pane submit-acceptance check in
 /// `send_command_unchecked`. `#run-agent-doc-latency`: tightened from 300ms so a
 /// pane that consumes the routed trigger quickly is confirmed accepted within one
@@ -455,28 +448,6 @@ const DIRECT_PANE_SUBMIT_ACCEPTANCE_POLL_INTERVAL: Duration = Duration::from_mil
 /// of the old ~500-1000ms floor, while still requiring two consecutive idle
 /// observations to debounce a transient prompt flicker.
 const AGENT_READY_POLL_INTERVAL: Duration = Duration::from_millis(150);
-
-fn route_latency_message(
-    phase: &str,
-    elapsed: Duration,
-    budget: Duration,
-    pane: &str,
-    harness: &HarnessConfig,
-    outcome: &str,
-) -> String {
-    let mut message = format!(
-        "route_latency phase={} elapsed_ms={} budget_ms={} status={} pane={} harness={} outcome={}",
-        phase,
-        elapsed.as_millis(),
-        budget.as_millis(),
-        route_latency_status(elapsed, budget),
-        pane,
-        harness.binary,
-        outcome
-    );
-    append_editor_route_attempt(&mut message);
-    message
-}
 
 const EDITOR_ROUTE_ATTEMPT_ID_ENV: &str = "AGENT_DOC_EDITOR_ROUTE_ATTEMPT_ID";
 
@@ -845,9 +816,20 @@ fn log_route_latency(
     harness: &HarnessConfig,
     outcome: &str,
 ) {
-    let message = route_latency_message(phase, elapsed, budget, pane, harness, outcome);
+    let editor_attempt_id = editor_route_attempt_id();
+    let elapsed_ms = elapsed.as_millis();
+    let budget_ms = budget.as_millis();
+    let message = route_latency_message(RouteLatencyFacts {
+        phase,
+        elapsed_ms,
+        budget_ms,
+        pane,
+        harness_binary: &harness.binary,
+        outcome,
+        editor_attempt_id: editor_attempt_id.as_deref(),
+    });
     crate::ops_log::log_op(file, &message);
-    if route_latency_status(elapsed, budget) == "over_budget" {
+    if route_latency_status(elapsed_ms, budget_ms) == RouteLatencyStatus::OverBudget {
         eprintln!(
             "[route] latency budget exceeded: phase {} took {}ms (budget {}ms, pane={}, harness={}, outcome={})",
             phase,
@@ -7005,25 +6987,27 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     #[test]
     fn route_latency_message_marks_budget_status() {
         let harness = HarnessConfig::codex();
-        let ok = route_latency_message(
-            "dispatch_start_proof",
-            Duration::from_millis(999),
-            Duration::from_secs(1),
-            "%1",
-            &harness,
-            "submitted",
-        );
+        let ok = route_latency_message(RouteLatencyFacts {
+            phase: "dispatch_start_proof",
+            elapsed_ms: Duration::from_millis(999).as_millis(),
+            budget_ms: Duration::from_secs(1).as_millis(),
+            pane: "%1",
+            harness_binary: &harness.binary,
+            outcome: "submitted",
+            editor_attempt_id: None,
+        });
         assert!(ok.contains("status=ok"), "{ok}");
         assert!(ok.contains("elapsed_ms=999"), "{ok}");
 
-        let slow = route_latency_message(
-            "dispatch_start_proof",
-            Duration::from_secs(10),
-            Duration::from_secs(10),
-            "%1",
-            &harness,
-            "unproven_but_accepted",
-        );
+        let slow = route_latency_message(RouteLatencyFacts {
+            phase: "dispatch_start_proof",
+            elapsed_ms: Duration::from_secs(10).as_millis(),
+            budget_ms: Duration::from_secs(10).as_millis(),
+            pane: "%1",
+            harness_binary: &harness.binary,
+            outcome: "unproven_but_accepted",
+            editor_attempt_id: None,
+        });
         assert!(slow.contains("status=over_budget"), "{slow}");
         assert!(slow.contains("outcome=unproven_but_accepted"), "{slow}");
     }
@@ -7032,14 +7016,16 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     fn route_diagnostics_include_editor_attempt_id_when_present() {
         let _attempt = EnvGuard::set(EDITOR_ROUTE_ATTEMPT_ID_ENV, "attempt 1/2");
         let harness = HarnessConfig::codex();
-        let latency = route_latency_message(
-            "direct_pane_submit",
-            Duration::from_millis(120),
-            Duration::from_secs(1),
-            "%7",
-            &harness,
-            "accepted",
-        );
+        let editor_attempt_id = editor_route_attempt_id();
+        let latency = route_latency_message(RouteLatencyFacts {
+            phase: "direct_pane_submit",
+            elapsed_ms: Duration::from_millis(120).as_millis(),
+            budget_ms: Duration::from_secs(1).as_millis(),
+            pane: "%7",
+            harness_binary: &harness.binary,
+            outcome: "accepted",
+            editor_attempt_id: editor_attempt_id.as_deref(),
+        });
         assert!(
             latency.contains("editor_attempt_id=attempt_1_2"),
             "{latency}"
@@ -7048,17 +7034,19 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
 
     #[test]
     fn direct_pane_submit_budget_allows_acceptance_poll_slack() {
-        let message = route_latency_message(
-            "direct_pane_submit",
-            Duration::from_millis(1180),
-            direct_pane_submit_acceptance_budget(),
-            "%1",
-            &HarnessConfig::codex(),
-            direct_pane_submit_outcome(
+        let harness = HarnessConfig::codex();
+        let message = route_latency_message(RouteLatencyFacts {
+            phase: "direct_pane_submit",
+            elapsed_ms: Duration::from_millis(1180).as_millis(),
+            budget_ms: direct_pane_submit_acceptance_budget().as_millis(),
+            pane: "%1",
+            harness_binary: &harness.binary,
+            outcome: direct_pane_submit_outcome(
                 CommandDispatchStatus::TimedOut,
                 Some(RoutedDispatchStartProof::HookPromptMatched),
             ),
-        );
+            editor_attempt_id: None,
+        });
 
         assert!(message.contains("status=ok"), "{message}");
         assert!(

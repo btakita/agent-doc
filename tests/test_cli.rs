@@ -3729,6 +3729,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub struct RouteSubmitObservationFacts",
         "pub fn route_submit_observation_message(",
         "pub fn route_submit_issue_message(",
+        "pub enum RouteLatencyStatus",
+        "pub struct RouteLatencyFacts",
+        "pub fn route_latency_status(",
+        "pub fn route_latency_message(",
     ] {
         assert!(
             controller_dispatch.contains(required_snippet),
@@ -3760,6 +3764,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "enum RouteSubmitObservation",
         "fn route_submit_observation_message(",
         "fn route_submit_issue_message(",
+        "fn route_latency_status(",
+        "fn route_latency_message(",
     ] {
         assert!(
             !route_source.contains(forbidden_snippet),
@@ -3807,6 +3813,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub struct RouteSubmitObservationFacts",
         "pub fn route_submit_observation_message(",
         "pub fn route_submit_issue_message(",
+        "pub enum RouteLatencyStatus",
+        "pub struct RouteLatencyFacts",
+        "pub fn route_latency_status(",
+        "pub fn route_latency_message(",
     ] {
         assert!(
             !flow_routed_reopen_source.contains(forbidden_snippet),
@@ -3848,6 +3858,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("ControllerRouteSubmitObservationFacts")
             && route_source.contains("route_submit_observation_message(")
             && route_source.contains("route_submit_issue_message(")
+            && route_source.contains("RouteLatencyFacts")
+            && route_source.contains("RouteLatencyStatus")
+            && route_source.contains("route_latency_message(")
+            && route_source.contains("route_latency_status(")
             && route_source.contains("DispatchActorState")
             && route_source.contains("dispatch_only_busy_should_wait_for_ready(")
             && route_source.contains("dispatch_only_should_probe_active_turn_cue(")

@@ -3720,6 +3720,13 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub const DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR",
         "pub struct DirectPaneAcceptancePollState",
         "pub fn direct_pane_acceptance_poll_status(",
+        "pub const DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT",
+        "pub struct DirectPaneEnterResubmitFacts",
+        "pub fn direct_pane_needs_enter_resubmit(",
+        "pub struct DirectPaneEnterResubmitAttemptFacts",
+        "pub fn direct_pane_can_continue_enter_resubmit(",
+        "pub struct DirectPaneExistingDraftSubmitFacts",
+        "pub fn direct_pane_can_enter_existing_draft(",
         "pub fn dispatch_only_busy_should_wait_for_ready(",
         "pub fn dispatch_only_should_probe_active_turn_cue(",
         "pub enum DispatchDrainRetryDecision",
@@ -3847,6 +3854,11 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("direct_pane_submit_outcome")
             && route_source.contains("DirectPaneAcceptancePollState")
             && route_source.contains("direct_pane_acceptance_poll_status")
+            && route_source.contains("DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT")
+            && route_source.contains("DirectPaneEnterResubmitAttemptFacts")
+            && route_source.contains("DirectPaneExistingDraftSubmitFacts")
+            && route_source.contains("direct_pane_can_continue_enter_resubmit")
+            && route_source.contains("direct_pane_can_enter_existing_draft")
             && route_source.contains("RetryBudget")
             && route_source.contains("authoritative_actor_ready_retry_budget")
             && route_source.contains("CloseoutBlockDispatchDecision")
@@ -3887,17 +3899,25 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "const DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR",
         "struct DirectPaneAcceptancePollState",
         "fn direct_pane_acceptance_poll_status(",
+        "const DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT",
+        "fn direct_pane_needs_enter_resubmit(",
+        "fn direct_pane_can_continue_enter_resubmit(",
+        "fn direct_pane_can_enter_existing_draft(",
     ] {
         assert!(
             !route_dispatch_source.contains(forbidden_snippet),
-            "route/dispatch.rs must not re-own direct-pane acceptance poll policy: {forbidden_snippet}"
+            "route/dispatch.rs must not re-own direct-pane controller policy: {forbidden_snippet}"
         );
     }
     assert!(
         route_dispatch_source.contains("DirectPaneAcceptancePollState::default()")
             && route_dispatch_source.contains("direct_pane_acceptance_poll_status(")
-            && route_dispatch_source.contains(".saw_trigger_visible()"),
-        "route/dispatch.rs should adapt tmux captures into focused controller acceptance polling"
+            && route_dispatch_source.contains(".saw_trigger_visible()")
+            && route_dispatch_source.contains("DirectPaneEnterResubmitAttemptFacts")
+            && route_dispatch_source.contains("direct_pane_can_continue_enter_resubmit(")
+            && route_dispatch_source.contains("DirectPaneExistingDraftSubmitFacts")
+            && route_dispatch_source.contains("direct_pane_can_enter_existing_draft("),
+        "route/dispatch.rs should adapt tmux captures into focused controller direct-pane policy"
     );
     assert!(
         route_pane_resolution_source.contains("startup_miss_route_facts(")

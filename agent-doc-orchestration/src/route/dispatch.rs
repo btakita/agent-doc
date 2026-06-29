@@ -67,11 +67,6 @@ fn log_dispatch_inject(file: &Path, pane: &str, harness: &HarnessConfig, transpo
     );
 }
 
-/// Default bare-Enter resubmit cap when the routed trigger stays drafted in the
-/// composer (not yet submitted). With the 1s submit-acceptance window, this
-/// preserves a roughly 30s recovery budget while nudging at least once/second.
-const DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT: usize = 30;
-
 /// Max bare-Enter resubmits while the trigger is still visible (drafted, not
 /// submitted) — the supervisor "retry until the prompt is submitted" budget
 /// (`#jbclaudesubmit`). Each resubmit re-polls for the 1s acceptance window, so
@@ -226,45 +221,6 @@ fn pane_idle_dispatch_ready(content: &str, harness: &HarnessConfig) -> bool {
         .last_prompt_candidate(content)
         .map(|line| harness.is_dispatch_ready_prompt_line(&line))
         .unwrap_or(false)
-}
-
-/// `#jbcodexsubmit` / `#jbclaudesubmit`: decide whether a timed-out direct-pane
-/// submit warrants a bare submit-key re-submit. This is recovery for a visibly
-/// drafted trigger left by an older submit path or a missed submit key; the
-/// harness-specific eligibility lives in the shared tmux submit profile.
-/// Only re-send when the attempt timed out with the trigger still visible
-/// (an empty composer must not receive a stray bare submit key).
-pub(crate) fn direct_pane_needs_enter_resubmit(
-    harness_binary: &str,
-    status: CommandDispatchStatus,
-    trigger_visible: bool,
-) -> bool {
-    agent_doc_tmux_commands::tmux_submit_profile_for_harness(harness_binary)
-        .pending_draft_enter_resubmit()
-        && status == CommandDispatchStatus::TimedOut
-        && trigger_visible
-}
-
-fn direct_pane_can_continue_enter_resubmit(
-    harness_binary: &str,
-    status: CommandDispatchStatus,
-    trigger_visible: bool,
-    attempts_sent: usize,
-) -> bool {
-    attempts_sent < direct_pane_max_enter_resubmits()
-        && direct_pane_needs_enter_resubmit(harness_binary, status, trigger_visible)
-}
-
-/// A route reopen may already be drafted in the composer from a prior failed
-/// editor dispatch. In that case, append-free recovery is a single profile
-/// submit key.
-pub(crate) fn direct_pane_can_enter_existing_draft(
-    harness_binary: &str,
-    trigger_visible: bool,
-) -> bool {
-    agent_doc_tmux_commands::tmux_submit_profile_for_harness(harness_binary)
-        .pending_draft_enter_resubmit()
-        && trigger_visible
 }
 
 pub(crate) fn direct_pane_existing_draft_visible(
@@ -502,13 +458,18 @@ fn send_direct_pane_enter_resubmit_until_stable(
     let mut elapsed = initial.elapsed;
     let mut diagnostic_path = initial.diagnostic_path;
     let mut attempts_sent = 0usize;
+    let profile_allows_pending_draft_enter_resubmit =
+        agent_doc_tmux_commands::tmux_submit_profile_for_harness(&harness.binary)
+            .pending_draft_enter_resubmit();
+    let max_attempts = direct_pane_max_enter_resubmits();
 
-    while direct_pane_can_continue_enter_resubmit(
-        &harness.binary,
+    while direct_pane_can_continue_enter_resubmit(DirectPaneEnterResubmitAttemptFacts {
+        profile_allows_pending_draft_enter_resubmit,
         status,
         trigger_visible,
         attempts_sent,
-    ) {
+        max_attempts,
+    }) {
         attempts_sent += 1;
         let retry = send_direct_pane_enter_resubmit(
             tmux,
@@ -811,7 +772,12 @@ pub(crate) fn send_command_unchecked(
             diagnostic,
         );
     }
-    if direct_pane_can_enter_existing_draft(&harness.binary, existing_draft_visible) {
+    if direct_pane_can_enter_existing_draft(DirectPaneExistingDraftSubmitFacts {
+        profile_allows_pending_draft_enter_resubmit:
+            agent_doc_tmux_commands::tmux_submit_profile_for_harness(&harness.binary)
+                .pending_draft_enter_resubmit(),
+        trigger_visible: existing_draft_visible,
+    }) {
         let first = send_direct_pane_enter_resubmit_until_stable(
             tmux,
             pane,
@@ -1494,7 +1460,12 @@ fn try_late_direct_pane_enter_resubmit_after_unproven_dispatch(
             false
         }
     };
-    if !direct_pane_can_enter_existing_draft(&harness.binary, visible) {
+    if !direct_pane_can_enter_existing_draft(DirectPaneExistingDraftSubmitFacts {
+        profile_allows_pending_draft_enter_resubmit:
+            agent_doc_tmux_commands::tmux_submit_profile_for_harness(&harness.binary)
+                .pending_draft_enter_resubmit(),
+        trigger_visible: visible,
+    }) {
         return Ok(None);
     }
 
@@ -1924,79 +1895,6 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% used
     }
 
     #[test]
-    fn direct_pane_resubmit_only_on_timeout_with_trigger_visible() {
-        // `#jbcodexsubmit` / `#jbclaudesubmit`: a direct-pane submit that times out
-        // with the trigger still drafted in the composer earns a guarded blank-text
-        // Enter re-submit. The operator reported the non-submit on BOTH Codex and
-        // Claude panes; both use the same text+Enter submit path.
-        assert!(direct_pane_needs_enter_resubmit(
-            "codex",
-            CommandDispatchStatus::TimedOut,
-            true
-        ));
-        assert!(direct_pane_needs_enter_resubmit(
-            "claude",
-            CommandDispatchStatus::TimedOut,
-            true
-        ));
-        // Trigger consumed → no re-submit even on a timeout report (a stray bare
-        // Enter into an empty composer could fire an unintended submit).
-        assert!(!direct_pane_needs_enter_resubmit(
-            "codex",
-            CommandDispatchStatus::TimedOut,
-            false
-        ));
-        assert!(!direct_pane_needs_enter_resubmit(
-            "claude",
-            CommandDispatchStatus::TimedOut,
-            false
-        ));
-        // Accepted → already submitted, never re-send.
-        assert!(!direct_pane_needs_enter_resubmit(
-            "codex",
-            CommandDispatchStatus::Accepted,
-            true
-        ));
-        assert!(!direct_pane_needs_enter_resubmit(
-            "claude",
-            CommandDispatchStatus::Accepted,
-            true
-        ));
-        // OpenCode shares the same text + profile submit-key path, so a visible
-        // draft after timeout earns the same guarded Enter recovery.
-        assert!(direct_pane_needs_enter_resubmit(
-            "opencode",
-            CommandDispatchStatus::TimedOut,
-            true
-        ));
-    }
-    #[test]
-    fn direct_pane_resubmit_is_scoped_to_timed_out_visible_enter_harnesses() {
-        // #jbcodexsubmit / #jbclaudesubmit / #efscodexsubmit: a direct-pane submit
-        // that timed out with the trigger STILL VISIBLE (the composer left the routed
-        // prompt drafted) warrants bounded blank-text Enter re-submits. Scoped to the
-        // harnesses that submit via the text+Enter path.
-        for harness in ["codex", "claude", "opencode"] {
-            assert!(
-                direct_pane_needs_enter_resubmit(harness, CommandDispatchStatus::TimedOut, true),
-                "{harness} timed-out-with-visible-trigger must earn one Enter re-submit"
-            );
-            // Already accepted ⇒ the prompt submitted, nothing to re-send.
-            assert!(!direct_pane_needs_enter_resubmit(
-                harness,
-                CommandDispatchStatus::Accepted,
-                true
-            ));
-            // Timed out but the trigger was consumed (not visible) ⇒ not a non-submit;
-            // a bare submit key here could fire an unintended empty submit, so don't re-send.
-            assert!(!direct_pane_needs_enter_resubmit(
-                harness,
-                CommandDispatchStatus::TimedOut,
-                false
-            ));
-        }
-    }
-    #[test]
     fn pane_idle_dispatch_ready_distinguishes_non_dispatch_from_fast_submit() {
         // #jbrundispatch directive 2: an empty composer at an idle prompt means the
         // trigger never landed (re-send the full trigger); a processing pane means a
@@ -2013,60 +1911,6 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% used
         assert!(
             !pane_idle_dispatch_ready("Working… (esc to interrupt)\n", &h),
             "a processing pane is not idle — a fast submit must not be re-sent"
-        );
-    }
-
-    #[test]
-    fn direct_pane_enter_resubmit_is_bounded_while_trigger_remains_visible() {
-        let cap = direct_pane_max_enter_resubmits();
-        assert!(
-            cap >= DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT,
-            "default resubmit budget should honor `retry until submitted` (#jbclaudesubmit)"
-        );
-        for attempts_sent in 0..cap {
-            assert!(
-                direct_pane_can_continue_enter_resubmit(
-                    "codex",
-                    CommandDispatchStatus::TimedOut,
-                    true,
-                    attempts_sent,
-                ),
-                "attempt {attempts_sent} should still be eligible while the trigger remains visible"
-            );
-        }
-        assert!(!direct_pane_can_continue_enter_resubmit(
-            "codex",
-            CommandDispatchStatus::TimedOut,
-            true,
-            cap,
-        ));
-        assert!(!direct_pane_can_continue_enter_resubmit(
-            "codex",
-            CommandDispatchStatus::Accepted,
-            true,
-            0,
-        ));
-        assert!(!direct_pane_can_continue_enter_resubmit(
-            "codex",
-            CommandDispatchStatus::TimedOut,
-            false,
-            0,
-        ));
-    }
-
-    #[test]
-    fn direct_pane_enter_resubmit_retries_at_least_once_per_second() {
-        let timeout = direct_pane_submit_acceptance_timeout();
-        assert!(
-            timeout <= Duration::from_secs(1),
-            "visible drafted triggers should earn another submit key at least once/second; timeout={timeout:?}"
-        );
-
-        let default_total_ms =
-            timeout.as_millis() * u128::from(DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT as u64);
-        assert!(
-            default_total_ms >= 30_000,
-            "default retry budget should preserve a roughly 30s recovery window"
         );
     }
 
@@ -2156,11 +2000,6 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% used
             ),
             "a cancelled route trigger in scrollback must not receive Enter when a newer composer draft exists"
         );
-
-        assert!(direct_pane_can_enter_existing_draft("codex", true));
-        assert!(direct_pane_can_enter_existing_draft("claude", true));
-        assert!(direct_pane_can_enter_existing_draft("opencode", true));
-        assert!(!direct_pane_can_enter_existing_draft("codex", false));
     }
     #[test]
     fn direct_pane_existing_draft_detection_handles_wrapped_codex_path() {

@@ -30,6 +30,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Direct-pane acceptance polling moved to `agent-doc-controller`.** The stable-empty-capture window and "visible draft disappeared" acceptance state machine now live beside the direct-pane submit outcome policy in `agent_doc_controller::dispatch`. `route/dispatch.rs` still captures panes and writes diagnostics, but it adapts each poll observation into the focused controller state instead of owning the transition rule.
 
+- **Direct-pane Enter-resubmit policy moved to `agent-doc-controller`.** The default retry cap, visible-draft eligibility, bounded re-submit continuation rule, and existing-draft submit gate now live in `agent_doc_controller::dispatch`. Route keeps the env override and tmux submit-profile adapter, but no longer owns direct-pane re-submit policy wrappers.
+
 - **Dispatch-only retry budgets moved to `agent-doc-controller`.** The authoritative-actor ready retry budget and dispatch-only starting-pane ready/recovery timeouts now live in `agent_doc_controller::dispatch`. Route still applies the operator `--wait-for-ready` override and performs tmux polling, but the harness/test-mode timeout table is no longer owned by `flow::routed_reopen` or route-local wrappers.
 
 - **Starting-timeout recovery policy moved to `agent-doc-controller`.** The durable `starting_actor_timeout` reason, blocked-actor facts, and prompt-proof recovery classifier now live in `agent_doc_controller::dispatch`. Route still persists timeout sidecars and polls tmux panes, but it adapts actor records into the focused controller policy directly instead of owning the recovery rule.

@@ -582,6 +582,7 @@ pub enum DirectPaneSubmitStatus {
 }
 
 pub const DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR: Duration = Duration::from_millis(900);
+pub const DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT: usize = 30;
 
 pub fn direct_pane_submit_acceptance_timeout() -> Duration {
     Duration::from_secs(1)
@@ -638,6 +639,48 @@ pub fn direct_pane_acceptance_poll_status(
     } else {
         None
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DirectPaneEnterResubmitFacts {
+    pub profile_allows_pending_draft_enter_resubmit: bool,
+    pub status: DirectPaneSubmitStatus,
+    pub trigger_visible: bool,
+}
+
+pub fn direct_pane_needs_enter_resubmit(facts: DirectPaneEnterResubmitFacts) -> bool {
+    facts.profile_allows_pending_draft_enter_resubmit
+        && facts.status == DirectPaneSubmitStatus::TimedOut
+        && facts.trigger_visible
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DirectPaneEnterResubmitAttemptFacts {
+    pub profile_allows_pending_draft_enter_resubmit: bool,
+    pub status: DirectPaneSubmitStatus,
+    pub trigger_visible: bool,
+    pub attempts_sent: usize,
+    pub max_attempts: usize,
+}
+
+pub fn direct_pane_can_continue_enter_resubmit(facts: DirectPaneEnterResubmitAttemptFacts) -> bool {
+    facts.attempts_sent < facts.max_attempts
+        && direct_pane_needs_enter_resubmit(DirectPaneEnterResubmitFacts {
+            profile_allows_pending_draft_enter_resubmit: facts
+                .profile_allows_pending_draft_enter_resubmit,
+            status: facts.status,
+            trigger_visible: facts.trigger_visible,
+        })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DirectPaneExistingDraftSubmitFacts {
+    pub profile_allows_pending_draft_enter_resubmit: bool,
+    pub trigger_visible: bool,
+}
+
+pub fn direct_pane_can_enter_existing_draft(facts: DirectPaneExistingDraftSubmitFacts) -> bool {
+    facts.profile_allows_pending_draft_enter_resubmit && facts.trigger_visible
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1414,6 +1457,101 @@ mod tests {
             direct_pane_acceptance_poll_status(&mut state, Duration::from_millis(300), false),
             Some(DirectPaneSubmitStatus::Accepted)
         );
+    }
+
+    #[test]
+    fn direct_pane_resubmit_only_on_timeout_with_visible_trigger() {
+        assert!(direct_pane_needs_enter_resubmit(
+            DirectPaneEnterResubmitFacts {
+                profile_allows_pending_draft_enter_resubmit: true,
+                status: DirectPaneSubmitStatus::TimedOut,
+                trigger_visible: true,
+            }
+        ));
+        assert!(!direct_pane_needs_enter_resubmit(
+            DirectPaneEnterResubmitFacts {
+                profile_allows_pending_draft_enter_resubmit: false,
+                status: DirectPaneSubmitStatus::TimedOut,
+                trigger_visible: true,
+            }
+        ));
+        assert!(!direct_pane_needs_enter_resubmit(
+            DirectPaneEnterResubmitFacts {
+                profile_allows_pending_draft_enter_resubmit: true,
+                status: DirectPaneSubmitStatus::Accepted,
+                trigger_visible: true,
+            }
+        ));
+        assert!(!direct_pane_needs_enter_resubmit(
+            DirectPaneEnterResubmitFacts {
+                profile_allows_pending_draft_enter_resubmit: true,
+                status: DirectPaneSubmitStatus::TimedOut,
+                trigger_visible: false,
+            }
+        ));
+    }
+
+    #[test]
+    fn direct_pane_resubmit_is_bounded_by_attempt_budget() {
+        for attempts_sent in 0..DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT {
+            assert!(
+                direct_pane_can_continue_enter_resubmit(DirectPaneEnterResubmitAttemptFacts {
+                    profile_allows_pending_draft_enter_resubmit: true,
+                    status: DirectPaneSubmitStatus::TimedOut,
+                    trigger_visible: true,
+                    attempts_sent,
+                    max_attempts: DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT,
+                }),
+                "attempt {attempts_sent} should still be eligible while the trigger remains visible"
+            );
+        }
+        assert!(!direct_pane_can_continue_enter_resubmit(
+            DirectPaneEnterResubmitAttemptFacts {
+                profile_allows_pending_draft_enter_resubmit: true,
+                status: DirectPaneSubmitStatus::TimedOut,
+                trigger_visible: true,
+                attempts_sent: DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT,
+                max_attempts: DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT,
+            }
+        ));
+    }
+
+    #[test]
+    fn direct_pane_enter_resubmit_retries_at_least_once_per_second() {
+        let timeout = direct_pane_submit_acceptance_timeout();
+        assert!(
+            timeout <= Duration::from_secs(1),
+            "visible drafted triggers should earn another submit key at least once/second; timeout={timeout:?}"
+        );
+
+        let default_total_ms =
+            timeout.as_millis() * u128::from(DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT as u64);
+        assert!(
+            default_total_ms >= 30_000,
+            "default retry budget should preserve a roughly 30s recovery window"
+        );
+    }
+
+    #[test]
+    fn direct_pane_existing_draft_submit_requires_visible_draft_and_profile() {
+        assert!(direct_pane_can_enter_existing_draft(
+            DirectPaneExistingDraftSubmitFacts {
+                profile_allows_pending_draft_enter_resubmit: true,
+                trigger_visible: true,
+            }
+        ));
+        assert!(!direct_pane_can_enter_existing_draft(
+            DirectPaneExistingDraftSubmitFacts {
+                profile_allows_pending_draft_enter_resubmit: false,
+                trigger_visible: true,
+            }
+        ));
+        assert!(!direct_pane_can_enter_existing_draft(
+            DirectPaneExistingDraftSubmitFacts {
+                profile_allows_pending_draft_enter_resubmit: true,
+                trigger_visible: false,
+            }
+        ));
     }
 
     #[test]

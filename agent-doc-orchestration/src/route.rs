@@ -187,7 +187,8 @@ use agent_doc_controller::dispatch::{
     CloseoutBlockDispatchFacts, DirectPaneSubmitStatus as CommandDispatchStatus,
     DispatchActorState, DispatchDrainRetryDecision, DispatchRuntimeHealth,
     DispatchStartProofDecision, DispatchStartProofFacts, RetryBudget, RoutedDispatchStartProof,
-    STARTING_ACTOR_TIMEOUT_REASON, StartingTimeoutActorFacts, actor_blocked_by_starting_timeout,
+    STARTING_ACTOR_TIMEOUT_REASON, StartingTimeoutActorFacts, StartupMissRouteFacts,
+    actor_blocked_by_starting_timeout,
     authoritative_actor_dispatch_guard_reason as controller_authoritative_actor_dispatch_guard_reason,
     authoritative_actor_ready_retry_budget, classify_closeout_block_dispatch,
     classify_dispatch_start_proof, direct_pane_submit_acceptance_budget,
@@ -198,7 +199,9 @@ use agent_doc_controller::dispatch::{
     dispatch_only_starting_pane_ready_timeout_for_binary,
     dispatch_only_starting_pane_recovery_retry_budget,
     dispatch_only_starting_pane_recovery_timeout_for_binary, effective_authoritative_actor_state,
-    starting_timeout_blocked_actor_can_recover,
+    starting_timeout_blocked_actor_can_recover, startup_miss_requires_fresh_start,
+    startup_miss_should_fail_closed, startup_miss_should_restart_live_owner,
+    startup_miss_superseded_by_later_open_start,
 };
 use agent_doc_frontmatter::frontmatter;
 use tmux_router::Tmux;
@@ -1771,63 +1774,30 @@ fn reapply_codex_launch_contract_before_reuse(
     )
 }
 
-fn startup_miss_requires_fresh_start(
-    registered_pane: &str,
-    live_owner: Option<&str>,
-    supervisor_health: SupervisorHealth,
-) -> bool {
-    if live_owner == Some(registered_pane) {
-        return false;
-    }
-    matches!(
-        supervisor_health,
-        SupervisorHealth::Unreachable | SupervisorHealth::NoSocket
-    )
-}
-
-fn startup_miss_superseded_by_later_open_start(
+fn startup_miss_route_facts(
     miss: &crate::startup_miss::StartupMiss,
     registered_pane: &str,
-    log_status: Option<&crate::startup_miss::SessionLogStatus>,
-) -> bool {
-    log_status.is_some_and(|status| {
-        status.latest_session_open()
-            && status.latest_start_pane.as_deref() == Some(registered_pane)
-            && crate::startup_miss::latest_open_run_timestamp(status)
-                .is_some_and(|ts| ts > miss.timestamp)
-    })
-}
-
-fn startup_miss_should_restart_live_owner(
-    miss: &crate::startup_miss::StartupMiss,
-    registered_pane: &str,
-    live_owner: Option<&str>,
-    log_status: Option<&crate::startup_miss::SessionLogStatus>,
-) -> bool {
-    live_owner == Some(registered_pane)
-        && log_status.is_some_and(|status| {
-            status.latest_session_closed()
-                && status.latest_start_pane.as_deref() == Some(registered_pane)
-                && status
-                    .latest_start_timestamp
-                    .is_some_and(|ts| ts <= miss.timestamp)
-        })
-}
-
-fn startup_miss_should_fail_closed(
     pane_alive: bool,
-    registered_pane: &str,
     live_owner: Option<&str>,
     supervisor_health: SupervisorHealth,
     log_status: Option<&crate::startup_miss::SessionLogStatus>,
-) -> bool {
-    pane_alive
-        && live_owner != Some(registered_pane)
-        && matches!(
-            supervisor_health,
-            SupervisorHealth::Unreachable | SupervisorHealth::NoSocket
-        )
-        && log_status.is_some_and(crate::startup_miss::SessionLogStatus::latest_session_open)
+) -> StartupMissRouteFacts {
+    StartupMissRouteFacts {
+        miss_timestamp: miss.timestamp,
+        registered_pane_is_live_owner: live_owner == Some(registered_pane),
+        pane_alive,
+        supervisor_health: dispatch_runtime_health(supervisor_health),
+        latest_start_matches_registered_pane: log_status
+            .and_then(|status| status.latest_start_pane.as_deref())
+            == Some(registered_pane),
+        latest_session_open: log_status
+            .is_some_and(crate::startup_miss::SessionLogStatus::latest_session_open),
+        latest_session_closed: log_status
+            .is_some_and(crate::startup_miss::SessionLogStatus::latest_session_closed),
+        latest_start_timestamp: log_status.and_then(|status| status.latest_start_timestamp),
+        latest_open_run_timestamp: log_status
+            .and_then(crate::startup_miss::latest_open_run_timestamp),
+    }
 }
 
 fn startup_miss_route_provenance(
@@ -7950,30 +7920,53 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
     }
     #[test]
     fn startup_miss_requires_fresh_start_only_without_matching_live_owner() {
-        assert!(startup_miss_requires_fresh_start(
+        let miss = crate::startup_miss::StartupMiss {
+            file: "test.md".to_string(),
+            pane_id: "%42".to_string(),
+            session_id: "session-123".to_string(),
+            harness: "codex".to_string(),
+            timestamp: 10,
+            origin: crate::startup_miss::StartupMissOrigin::RoutedTrigger,
+            cycle_baseline_id: Some("cycle-abc".to_string()),
+        };
+        assert!(startup_miss_requires_fresh_start(startup_miss_route_facts(
+            &miss,
             "%42",
+            true,
             None,
-            SupervisorHealth::NoSocket
-        ));
-        assert!(startup_miss_requires_fresh_start(
+            SupervisorHealth::NoSocket,
+            None,
+        )));
+        assert!(startup_miss_requires_fresh_start(startup_miss_route_facts(
+            &miss,
             "%42",
+            true,
             Some("%99"),
-            SupervisorHealth::Unreachable
-        ));
-        assert!(!startup_miss_requires_fresh_start(
-            "%42",
-            Some("%42"),
-            SupervisorHealth::NoSocket
-        ));
-        assert!(!startup_miss_requires_fresh_start(
-            "%42",
+            SupervisorHealth::Unreachable,
             None,
-            SupervisorHealth::Restartable
+        )));
+        assert!(!startup_miss_requires_fresh_start(
+            startup_miss_route_facts(
+                &miss,
+                "%42",
+                true,
+                Some("%42"),
+                SupervisorHealth::NoSocket,
+                None,
+            )
         ));
         assert!(!startup_miss_requires_fresh_start(
-            "%42",
-            None,
-            SupervisorHealth::Healthy
+            startup_miss_route_facts(
+                &miss,
+                "%42",
+                true,
+                None,
+                SupervisorHealth::Restartable,
+                None,
+            )
+        ));
+        assert!(!startup_miss_requires_fresh_start(
+            startup_miss_route_facts(&miss, "%42", true, None, SupervisorHealth::Healthy, None,)
         ));
     }
     #[test]
@@ -8015,30 +8008,57 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
         };
 
         assert!(startup_miss_should_restart_live_owner(
-            &miss,
-            "%42",
-            Some("%42"),
-            Some(&closed_same_start)
+            startup_miss_route_facts(
+                &miss,
+                "%42",
+                true,
+                Some("%42"),
+                SupervisorHealth::NoSocket,
+                Some(&closed_same_start),
+            )
         ));
         assert!(!startup_miss_should_restart_live_owner(
-            &miss,
-            "%42",
-            Some("%42"),
-            Some(&newer_open_start)
+            startup_miss_route_facts(
+                &miss,
+                "%42",
+                true,
+                Some("%42"),
+                SupervisorHealth::NoSocket,
+                Some(&newer_open_start),
+            )
         ));
         assert!(startup_miss_superseded_by_later_open_start(
-            &miss,
-            "%42",
-            Some(&newer_open_start)
+            startup_miss_route_facts(
+                &miss,
+                "%42",
+                true,
+                Some("%42"),
+                SupervisorHealth::NoSocket,
+                Some(&newer_open_start),
+            )
         ));
         assert!(!startup_miss_superseded_by_later_open_start(
-            &miss,
-            "%42",
-            Some(&closed_same_start)
+            startup_miss_route_facts(
+                &miss,
+                "%42",
+                true,
+                Some("%42"),
+                SupervisorHealth::NoSocket,
+                Some(&closed_same_start),
+            )
         ));
     }
     #[test]
     fn startup_miss_fail_closed_only_for_alive_open_no_socket_sessions() {
+        let miss = crate::startup_miss::StartupMiss {
+            file: "test.md".to_string(),
+            pane_id: "%42".to_string(),
+            session_id: "session-123".to_string(),
+            harness: "codex".to_string(),
+            timestamp: 10,
+            origin: crate::startup_miss::StartupMissOrigin::RoutedTrigger,
+            cycle_baseline_id: Some("cycle-abc".to_string()),
+        };
         let open = crate::startup_miss::SessionLogStatus {
             latest_start_pane: Some("%42".to_string()),
             latest_start_timestamp: Some(1),
@@ -8064,41 +8084,46 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
             saw_session_end_after_latest_run: true,
         };
 
-        assert!(startup_miss_should_fail_closed(
-            true,
+        assert!(startup_miss_should_fail_closed(startup_miss_route_facts(
+            &miss,
             "%42",
+            true,
             None,
             SupervisorHealth::NoSocket,
-            Some(&open)
-        ));
-        assert!(!startup_miss_should_fail_closed(
-            true,
+            Some(&open),
+        )));
+        assert!(!startup_miss_should_fail_closed(startup_miss_route_facts(
+            &miss,
             "%42",
+            true,
             Some("%42"),
             SupervisorHealth::NoSocket,
-            Some(&open)
-        ));
-        assert!(!startup_miss_should_fail_closed(
-            true,
+            Some(&open),
+        )));
+        assert!(!startup_miss_should_fail_closed(startup_miss_route_facts(
+            &miss,
             "%42",
+            true,
             None,
             SupervisorHealth::Healthy,
-            Some(&open)
-        ));
-        assert!(!startup_miss_should_fail_closed(
+            Some(&open),
+        )));
+        assert!(!startup_miss_should_fail_closed(startup_miss_route_facts(
+            &miss,
+            "%42",
             true,
-            "%42",
             None,
             SupervisorHealth::NoSocket,
-            Some(&closed)
-        ));
-        assert!(!startup_miss_should_fail_closed(
+            Some(&closed),
+        )));
+        assert!(!startup_miss_should_fail_closed(startup_miss_route_facts(
+            &miss,
+            "%42",
             false,
-            "%42",
             None,
             SupervisorHealth::NoSocket,
-            Some(&open)
-        ));
+            Some(&open),
+        )));
     }
     #[test]
     fn startup_miss_diagnostic_message_includes_retry_command() {

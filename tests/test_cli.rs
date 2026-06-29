@@ -3662,6 +3662,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     .unwrap();
     let route_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+    let route_pane_resolution_source = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/route/pane_resolution.rs"),
+    )
+    .unwrap();
     let flow_routed_reopen_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/routed_reopen.rs"))
             .unwrap();
@@ -3699,6 +3703,11 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub struct StartingTimeoutActorFacts",
         "pub fn actor_blocked_by_starting_timeout(",
         "pub fn starting_timeout_blocked_actor_can_recover(",
+        "pub struct StartupMissRouteFacts",
+        "pub fn startup_miss_requires_fresh_start(",
+        "pub fn startup_miss_superseded_by_later_open_start(",
+        "pub fn startup_miss_should_restart_live_owner(",
+        "pub fn startup_miss_should_fail_closed(",
         "pub enum DirectPaneSubmitStatus",
         "pub fn direct_pane_submit_acceptance_timeout(",
         "pub fn direct_pane_submit_acceptance_budget(",
@@ -3727,6 +3736,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn dispatch_only_starting_pane_recovery_timeout(",
         "fn actor_blocked_by_starting_timeout(",
         "fn starting_timeout_blocked_actor_can_recover(",
+        "fn startup_miss_requires_fresh_start(",
+        "fn startup_miss_superseded_by_later_open_start(",
+        "fn startup_miss_should_restart_live_owner(",
+        "fn startup_miss_should_fail_closed(",
         "fn direct_pane_submit_acceptance_timeout(",
         "fn direct_pane_submit_acceptance_budget(",
         "fn direct_pane_submit_outcome(",
@@ -3761,6 +3774,11 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub struct StartingTimeoutActorFacts",
         "pub fn actor_blocked_by_starting_timeout(",
         "pub fn starting_timeout_blocked_actor_can_recover(",
+        "pub struct StartupMissRouteFacts",
+        "pub fn startup_miss_requires_fresh_start(",
+        "pub fn startup_miss_superseded_by_later_open_start(",
+        "pub fn startup_miss_should_restart_live_owner(",
+        "pub fn startup_miss_should_fail_closed(",
         "pub enum DirectPaneSubmitStatus",
         "pub fn direct_pane_submit_acceptance_timeout(",
         "pub fn direct_pane_submit_acceptance_budget(",
@@ -3796,12 +3814,26 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("StartingTimeoutActorFacts")
             && route_source.contains("actor_blocked_by_starting_timeout")
             && route_source.contains("starting_timeout_blocked_actor_can_recover")
+            && route_source.contains("StartupMissRouteFacts")
+            && route_source.contains("startup_miss_requires_fresh_start")
+            && route_source.contains("startup_miss_superseded_by_later_open_start")
+            && route_source.contains("startup_miss_should_restart_live_owner")
+            && route_source.contains("startup_miss_should_fail_closed")
             && route_source.contains("DispatchActorState")
             && route_source.contains("dispatch_only_busy_should_wait_for_ready(")
             && route_source.contains("dispatch_only_should_probe_active_turn_cue(")
             && route_source.contains("DispatchDrainRetryDecision")
             && route_source.contains("dispatch_drain_retry_decision("),
         "route.rs should call focused controller dispatch policy directly"
+    );
+    assert!(
+        route_pane_resolution_source.contains("startup_miss_route_facts(")
+            && route_pane_resolution_source.contains("startup_miss_requires_fresh_start(")
+            && route_pane_resolution_source
+                .contains("startup_miss_superseded_by_later_open_start(")
+            && route_pane_resolution_source.contains("startup_miss_should_restart_live_owner(")
+            && route_pane_resolution_source.contains("startup_miss_should_fail_closed("),
+        "route pane resolution should adapt startup-miss sidecars into focused controller policy"
     );
     let sim_world = fs::read_to_string(manifest_dir.join("src/sim_world/engine.rs")).unwrap();
     assert!(

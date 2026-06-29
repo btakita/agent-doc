@@ -105,6 +105,54 @@ pub fn effective_authoritative_actor_state(
     runtime_state.unwrap_or(record_state)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StartupMissRouteFacts {
+    pub miss_timestamp: u64,
+    pub registered_pane_is_live_owner: bool,
+    pub pane_alive: bool,
+    pub supervisor_health: DispatchRuntimeHealth,
+    pub latest_start_matches_registered_pane: bool,
+    pub latest_session_open: bool,
+    pub latest_session_closed: bool,
+    pub latest_start_timestamp: Option<u64>,
+    pub latest_open_run_timestamp: Option<u64>,
+}
+
+fn startup_miss_runtime_missing(health: DispatchRuntimeHealth) -> bool {
+    matches!(
+        health,
+        DispatchRuntimeHealth::Unreachable | DispatchRuntimeHealth::NoSocket
+    )
+}
+
+pub fn startup_miss_requires_fresh_start(facts: StartupMissRouteFacts) -> bool {
+    !facts.registered_pane_is_live_owner && startup_miss_runtime_missing(facts.supervisor_health)
+}
+
+pub fn startup_miss_superseded_by_later_open_start(facts: StartupMissRouteFacts) -> bool {
+    facts.latest_session_open
+        && facts.latest_start_matches_registered_pane
+        && facts
+            .latest_open_run_timestamp
+            .is_some_and(|ts| ts > facts.miss_timestamp)
+}
+
+pub fn startup_miss_should_restart_live_owner(facts: StartupMissRouteFacts) -> bool {
+    facts.registered_pane_is_live_owner
+        && facts.latest_session_closed
+        && facts.latest_start_matches_registered_pane
+        && facts
+            .latest_start_timestamp
+            .is_some_and(|ts| ts <= facts.miss_timestamp)
+}
+
+pub fn startup_miss_should_fail_closed(facts: StartupMissRouteFacts) -> bool {
+    facts.pane_alive
+        && !facts.registered_pane_is_live_owner
+        && startup_miss_runtime_missing(facts.supervisor_health)
+        && facts.latest_session_open
+}
+
 pub const STARTING_ACTOR_TIMEOUT_REASON: &str = "starting_actor_timeout";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -766,6 +814,93 @@ mod tests {
             effective_authoritative_actor_state(ActorLifecycleState::Busy, None),
             ActorLifecycleState::Busy
         );
+    }
+
+    fn startup_miss_facts() -> StartupMissRouteFacts {
+        StartupMissRouteFacts {
+            miss_timestamp: 10,
+            registered_pane_is_live_owner: false,
+            pane_alive: true,
+            supervisor_health: DispatchRuntimeHealth::NoSocket,
+            latest_start_matches_registered_pane: true,
+            latest_session_open: true,
+            latest_session_closed: false,
+            latest_start_timestamp: Some(10),
+            latest_open_run_timestamp: Some(10),
+        }
+    }
+
+    #[test]
+    fn startup_miss_requires_fresh_start_only_without_matching_live_owner() {
+        assert!(startup_miss_requires_fresh_start(startup_miss_facts()));
+        assert!(!startup_miss_requires_fresh_start(StartupMissRouteFacts {
+            registered_pane_is_live_owner: true,
+            ..startup_miss_facts()
+        }));
+        assert!(!startup_miss_requires_fresh_start(StartupMissRouteFacts {
+            supervisor_health: DispatchRuntimeHealth::Healthy,
+            ..startup_miss_facts()
+        }));
+        assert!(!startup_miss_requires_fresh_start(StartupMissRouteFacts {
+            supervisor_health: DispatchRuntimeHealth::Restartable,
+            ..startup_miss_facts()
+        }));
+    }
+
+    #[test]
+    fn startup_miss_live_owner_restart_requires_closed_unsuperseded_start() {
+        assert!(startup_miss_should_restart_live_owner(
+            StartupMissRouteFacts {
+                registered_pane_is_live_owner: true,
+                latest_session_open: false,
+                latest_session_closed: true,
+                ..startup_miss_facts()
+            }
+        ));
+        assert!(!startup_miss_should_restart_live_owner(
+            StartupMissRouteFacts {
+                registered_pane_is_live_owner: true,
+                latest_session_open: true,
+                latest_session_closed: false,
+                latest_open_run_timestamp: Some(11),
+                ..startup_miss_facts()
+            }
+        ));
+        assert!(startup_miss_superseded_by_later_open_start(
+            StartupMissRouteFacts {
+                latest_open_run_timestamp: Some(11),
+                ..startup_miss_facts()
+            }
+        ));
+        assert!(!startup_miss_superseded_by_later_open_start(
+            StartupMissRouteFacts {
+                latest_session_open: false,
+                latest_session_closed: true,
+                ..startup_miss_facts()
+            }
+        ));
+    }
+
+    #[test]
+    fn startup_miss_fail_closed_only_for_alive_open_missing_runtime_sessions() {
+        assert!(startup_miss_should_fail_closed(startup_miss_facts()));
+        assert!(!startup_miss_should_fail_closed(StartupMissRouteFacts {
+            registered_pane_is_live_owner: true,
+            ..startup_miss_facts()
+        }));
+        assert!(!startup_miss_should_fail_closed(StartupMissRouteFacts {
+            supervisor_health: DispatchRuntimeHealth::Healthy,
+            ..startup_miss_facts()
+        }));
+        assert!(!startup_miss_should_fail_closed(StartupMissRouteFacts {
+            latest_session_open: false,
+            latest_session_closed: true,
+            ..startup_miss_facts()
+        }));
+        assert!(!startup_miss_should_fail_closed(StartupMissRouteFacts {
+            pane_alive: false,
+            ..startup_miss_facts()
+        }));
     }
 
     #[test]

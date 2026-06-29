@@ -543,13 +543,15 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
                 file_path, miss.origin, miss_ts, provenance
             ),
         );
-        if startup_miss_should_fail_closed(
-            true,
+        let startup_facts = startup_miss_route_facts(
+            &miss,
             registered_pane,
+            true,
             live_owner.as_deref(),
             supervisor_health,
             log_status.as_ref(),
-        ) {
+        );
+        if startup_miss_should_fail_closed(startup_facts) {
             eprintln!(
                 "[route] startup-miss for {} is stranded, not crashed: {}",
                 file_path, provenance
@@ -568,16 +570,9 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
                 provenance
             );
         }
-        if startup_miss_requires_fresh_start(
-            registered_pane,
-            live_owner.as_deref(),
-            supervisor_health,
-        ) || startup_miss_should_restart_live_owner(
-            &miss,
-            registered_pane,
-            live_owner.as_deref(),
-            log_status.as_ref(),
-        ) {
+        if startup_miss_requires_fresh_start(startup_facts)
+            || startup_miss_should_restart_live_owner(startup_facts)
+        {
             eprintln!(
                 "[route] registered pane {} has an unresolved startup-miss marker from {} for {} — deregistering and starting fresh",
                 registered_pane, miss_ts, file_path
@@ -614,8 +609,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
             );
         }
 
-        if startup_miss_superseded_by_later_open_start(&miss, registered_pane, log_status.as_ref())
-        {
+        if startup_miss_superseded_by_later_open_start(startup_facts) {
             eprintln!(
                 "[route] registered pane {} proves a newer open harness run after startup-miss {} for {} — clearing stale marker",
                 registered_pane, miss_ts, file_path

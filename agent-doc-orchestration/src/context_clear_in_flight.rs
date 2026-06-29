@@ -33,7 +33,7 @@ fn now_secs() -> u64 {
 }
 
 fn marker_path(file: &Path) -> Result<Option<PathBuf>> {
-    let Some(root) = crate::fs_util::find_project_root(file) else {
+    let Some(root) = agent_doc_fs::find_project_root(file) else {
         return Ok(None);
     };
     let hash = crate::snapshot::doc_hash(file)?;

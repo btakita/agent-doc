@@ -187,7 +187,7 @@ pub(crate) enum StartupLockAcquire {
 
 pub(crate) fn starting_dir_for(file: &Path) -> Option<std::path::PathBuf> {
     let canonical = std::fs::canonicalize(file).ok()?;
-    let base = snapshot::find_project_root(&canonical)
+    let base = agent_doc_fs::find_project_root(&canonical)
         .or_else(|| canonical.parent().map(|p| p.to_path_buf()))?;
     Some(base.join(".agent-doc/starting"))
 }

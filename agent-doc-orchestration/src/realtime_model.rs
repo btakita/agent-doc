@@ -352,7 +352,7 @@ pub fn broadcast_editor_change(
     }
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let canonical_str = canonical.to_string_lossy().to_string();
-    let Some(project_root) = crate::fs_util::find_project_root(&canonical) else {
+    let Some(project_root) = agent_doc_fs::find_project_root(&canonical) else {
         return Ok(Vec::new());
     };
     let patches_dir = project_root.join(".agent-doc/patches");

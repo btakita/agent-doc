@@ -260,7 +260,7 @@ pub fn run_with_reap_policy(
     let (fm, _body) = frontmatter_io::parse_for_file_with_context(&updated_content, file, &rc)?;
     let global_config = config::load().unwrap_or_default();
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-    let project_root = snapshot::find_project_root(&canonical).unwrap_or_else(|| {
+    let project_root = agent_doc_fs::find_project_root(&canonical).unwrap_or_else(|| {
         std::env::current_dir()
             .ok()
             .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf())

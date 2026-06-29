@@ -109,7 +109,7 @@ fn ops_log_tracking_suffix(file: &Path, rc: Option<&RunContext>) -> String {
 
 /// Append a timestamped log line to `.agent-doc/logs/ops.log`.
 ///
-/// Finds the project root by walking up from `file` (`fs_util::find_project_root`).
+/// Finds the project root by walking up from `file` (`agent_doc_fs::find_project_root`).
 /// Best-effort: silently returns on any I/O error.
 pub fn log_op(file: &Path, message: &str) {
     log_op_with_context(file, message, None);
@@ -193,7 +193,7 @@ fn try_log_cycle(
     file_content: Option<&str>,
 ) -> Option<()> {
     let canonical = file.canonicalize().ok()?;
-    let project_root = crate::fs_util::find_project_root(&canonical)?;
+    let project_root = agent_doc_fs::find_project_root(&canonical)?;
     let logs_dir = project_root.join(".agent-doc/logs");
     std::fs::create_dir_all(&logs_dir).ok()?;
     let log_path = logs_dir.join("cycles.jsonl");
@@ -227,7 +227,7 @@ fn try_log_op(file: &Path, message: &str, rc: Option<&RunContext>) -> Option<()>
         Some(rc) => rc.project_root()?,
         None => {
             let canonical = file.canonicalize().ok()?;
-            crate::fs_util::find_project_root(&canonical)?
+            agent_doc_fs::find_project_root(&canonical)?
         }
     };
     let logs_dir = project_root.join(".agent-doc/logs");

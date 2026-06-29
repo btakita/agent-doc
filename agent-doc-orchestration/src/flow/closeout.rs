@@ -414,7 +414,7 @@ pub(crate) fn compact_archive_pointers(content: &str) -> Vec<&str> {
 
 pub(crate) fn read_head_compact_archive(file: &Path, pointer: &str) -> Option<String> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let project_root = crate::snapshot::find_project_root(&canonical)?;
+    let project_root = agent_doc_fs::find_project_root(&canonical)?;
     let archive_root = project_root
         .join(".agent-doc/archives")
         .canonicalize()
@@ -525,7 +525,7 @@ pub(crate) fn record_terminal_closeout_proof(file: &Path, did_commit: bool) -> R
     let canonical = file
         .canonicalize()
         .with_context(|| format!("terminal proof: failed to canonicalize {}", file.display()))?;
-    let Some(project_root) = crate::fs_util::find_project_root(&canonical) else {
+    let Some(project_root) = agent_doc_fs::find_project_root(&canonical) else {
         eprintln!(
             "[commit] warning: terminal proof ledger unavailable for {}: project root not found",
             file.display()
@@ -1112,7 +1112,7 @@ fn closeout_editor_ipc_evidence(file: &Path, visible: &str) -> CloseoutEditorIpc
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let file_key = canonical.to_string_lossy().to_string();
     let live_buffers = agent_doc_debounce::live_buffer_snapshots(&file_key);
-    let socket_degraded = crate::snapshot::find_project_root(&canonical)
+    let socket_degraded = agent_doc_fs::find_project_root(&canonical)
         .and_then(|root| crate::write::ipc_direct_disk_degraded_for_file(&root, &canonical).ok())
         .unwrap_or(false);
     if let Some(diverged) =

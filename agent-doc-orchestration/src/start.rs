@@ -146,7 +146,7 @@ use agent_doc_queue::queue::{
 #[cfg(unix)]
 use agent_doc_supervisor_process::ReexecState;
 
-use crate::{config, project_config_io, sessions, snapshot};
+use crate::{config, project_config_io, sessions};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum RouteOwnedReapPolicy {
@@ -477,7 +477,7 @@ fn idle_queue_head_slash_command(active_head: &str) -> Option<String> {
 }
 
 fn turn_active_for_owned_pane(file: &Path, shared: &SupervisorShared) -> bool {
-    let Some(root) = crate::snapshot::find_project_root(file) else {
+    let Some(root) = agent_doc_fs::find_project_root(file) else {
         return false;
     };
     let Some(marker) = crate::turn_status::read_turn_active_marker(&root) else {

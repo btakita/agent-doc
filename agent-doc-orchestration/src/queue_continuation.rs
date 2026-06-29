@@ -154,7 +154,7 @@ pub fn document_queue_controller_paused(file: &Path) -> bool {
 /// operator intent or transient drain-coordination state. Same best-effort,
 /// read-only error handling as [`document_queue_controller_paused`].
 pub fn document_queue_controller_pause_reason(file: &Path) -> Option<String> {
-    let root = crate::snapshot::find_project_root(file)?;
+    let root = agent_doc_fs::find_project_root(file)?;
     let db_path = agent_doc_sqlite::state_store::state_db_path(&root);
     if !db_path.exists() {
         // No control plane has ever run for this project: nothing can be paused.
@@ -325,7 +325,7 @@ pub struct ContinuationMarker {
 }
 
 fn marker_path(file: &Path) -> Result<Option<PathBuf>> {
-    let Some(root) = crate::fs_util::find_project_root(file) else {
+    let Some(root) = agent_doc_fs::find_project_root(file) else {
         return Ok(None);
     };
     let hash = crate::snapshot::doc_hash(file)?;
@@ -413,7 +413,7 @@ pub fn clear_marker(file: &Path) -> Result<()> {
 }
 
 fn cooldown_marker_path(file: &Path) -> Result<Option<PathBuf>> {
-    let Some(root) = crate::fs_util::find_project_root(file) else {
+    let Some(root) = agent_doc_fs::find_project_root(file) else {
         return Ok(None);
     };
     let hash = crate::snapshot::doc_hash(file)?;
@@ -477,7 +477,7 @@ pub struct DeferredOperatorClear {
 }
 
 fn deferred_clear_marker_path(file: &Path) -> Result<Option<PathBuf>> {
-    let Some(root) = crate::fs_util::find_project_root(file) else {
+    let Some(root) = agent_doc_fs::find_project_root(file) else {
         return Ok(None);
     };
     let hash = crate::snapshot::doc_hash(file)?;

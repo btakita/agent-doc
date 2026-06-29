@@ -1277,7 +1277,7 @@ fn save_blocked_repair_payload(
     reason: &str,
 ) -> Result<std::path::PathBuf> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let root = crate::snapshot::find_project_root(&canonical)
+    let root = agent_doc_fs::find_project_root(&canonical)
         .or_else(|| canonical.parent().map(Path::to_path_buf))
         .context("resolve project root for blocked repair payload")?;
     let dir = root.join(".agent-doc/repair-blocked");
@@ -2213,7 +2213,7 @@ mod tests {
 
     fn age_cycle_state(file: &Path, age_secs: u64) {
         let canonical = file.canonicalize().unwrap();
-        let root = crate::snapshot::find_project_root(&canonical).unwrap();
+        let root = agent_doc_fs::find_project_root(&canonical).unwrap();
         let hash = crate::snapshot::doc_hash(&canonical).unwrap();
         let path = root
             .join(".agent-doc/state/cycles")

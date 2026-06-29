@@ -730,11 +730,11 @@ pub fn last_ops_event(file: &Path) -> Result<Option<String>> {
         Ok(p) => p,
         Err(_) => return Ok(None),
     };
-    let Some(project_root) = crate::snapshot::find_project_root(&canonical) else {
+    let Some(project_root) = agent_doc_fs::find_project_root(&canonical) else {
         return Ok(None);
     };
     let log_path = project_root.join(".agent-doc/logs/ops.log");
-    let Some(content) = crate::fs_util::read_optional_text(&log_path)? else {
+    let Some(content) = agent_doc_fs::read_optional_text(&log_path)? else {
         return Ok(None);
     };
     let canonical_display = canonical.display().to_string();
@@ -756,11 +756,11 @@ pub fn latest_ipc_proof_diagnostic(file: &Path) -> Result<Option<String>> {
         Ok(p) => p,
         Err(_) => return Ok(None),
     };
-    let Some(project_root) = crate::snapshot::find_project_root(&canonical) else {
+    let Some(project_root) = agent_doc_fs::find_project_root(&canonical) else {
         return Ok(None);
     };
     let log_path = project_root.join(".agent-doc/logs/ops.log");
-    let Some(content) = crate::fs_util::read_optional_text(&log_path)? else {
+    let Some(content) = agent_doc_fs::read_optional_text(&log_path)? else {
         return Ok(None);
     };
     let canonical_display = canonical.display().to_string();

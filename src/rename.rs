@@ -73,7 +73,7 @@ pub fn run(old_path: &Path, new_path: &Path) -> Result<()> {
 
     // Find project root from the new path
     let canonical_new = new_path.canonicalize()?;
-    let project_root = snapshot::find_project_root(&canonical_new)
+    let project_root = agent_doc_fs::find_project_root(&canonical_new)
         .context("no .agent-doc/ directory found above new path")?;
 
     // Migrate each state file type

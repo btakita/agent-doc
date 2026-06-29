@@ -33,7 +33,6 @@ use lazily::{CellHandle, Context, SlotHandle};
 use sha2::{Digest, Sha256};
 
 use crate::cycle_state::CycleState;
-use crate::fs_util;
 use crate::project_config_io;
 use crate::{config, sessions};
 
@@ -118,7 +117,7 @@ impl RunContext {
             let cp = canonical_path;
             move |ctx: &Context| -> Option<PathBuf> {
                 let path: PathBuf = ctx.get(&cp);
-                fs_util::find_project_root(&path)
+                agent_doc_fs::find_project_root(&path)
             }
         });
 

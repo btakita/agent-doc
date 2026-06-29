@@ -1209,7 +1209,7 @@ pub fn launch_lock_path(project_root: &Path) -> PathBuf {
 
 pub fn read_bootstrap(project_root: &Path) -> Result<Option<ControllerBootstrap>> {
     let path = state_path(project_root);
-    let Some(content) = crate::fs_util::read_optional_text(&path)? else {
+    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
         return Ok(None);
     };
     serde_json::from_str(&content)
@@ -1392,7 +1392,7 @@ fn legacy_actor_projection(
     project_root: &Path,
 ) -> Result<Option<BTreeMap<String, crate::session_actor::ActorRecord>>> {
     let path = actor_projection_path(project_root);
-    let Some(content) = crate::fs_util::read_optional_text(&path)? else {
+    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
         return Ok(None);
     };
     let store = serde_json::from_str(&content)
@@ -1403,7 +1403,7 @@ fn legacy_actor_projection(
 /// Migrate a legacy `session-actors.json` projection into empty sqlite state.
 ///
 /// Glue: the count gate and JSON load stay in orchestration (the `.json`
-/// read goes through `crate::fs_util`); the actual transition+document
+/// read goes through `agent_doc_fs`); the actual transition+document
 /// transaction lives in `state_store`, fed the lifted `read_bootstrap`
 /// `launch_mode`/`controller_epoch` tendril.
 fn migrate_legacy_actor_projection(project_root: &Path, conn: &mut Connection) -> Result<()> {
@@ -1514,7 +1514,7 @@ pub fn persist_session_actor_closeout(file: &Path) -> Result<bool> {
     let Some(state) = crate::cycle_state::load(file)? else {
         return Ok(false);
     };
-    let Some(project_root) = crate::snapshot::find_project_root(file) else {
+    let Some(project_root) = agent_doc_fs::find_project_root(file) else {
         return Ok(false);
     };
     let document_id =
@@ -2610,7 +2610,7 @@ fn migrate_legacy_layout_projection(project_root: &Path, conn: &Connection) -> R
     }
 
     let path = layout_projection_path(project_root);
-    let Some(content) = crate::fs_util::read_optional_text(&path)? else {
+    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
         return Ok(());
     };
     match serde_json::from_str::<Vec<String>>(&content) {

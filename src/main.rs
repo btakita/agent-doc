@@ -3096,7 +3096,7 @@ fn main() -> anyhow::Result<()> {
         } => migrate::run(&files, all, dry_run),
         Commands::Claims => {
             let cwd = std::env::current_dir()?;
-            if let Some(root) = agent_doc_orchestration::snapshot::find_project_root(&cwd) {
+            if let Some(root) = agent_doc_fs::find_project_root(&cwd) {
                 let log_path = root.join(".agent-doc/claims.log");
                 if let Ok(contents) = std::fs::read_to_string(&log_path)
                     && !contents.is_empty()
@@ -3337,14 +3337,12 @@ fn main() -> anyhow::Result<()> {
                     Some(r) => r,
                     None => {
                         let cwd = std::env::current_dir()?;
-                        agent_doc_orchestration::fs_util::find_project_root(&cwd).ok_or_else(
-                            || {
-                                anyhow::anyhow!(
-                                    ".agent-doc/ project root not found from {}",
-                                    cwd.display()
-                                )
-                            },
-                        )?
+                        agent_doc_fs::find_project_root(&cwd).ok_or_else(|| {
+                            anyhow::anyhow!(
+                                ".agent-doc/ project root not found from {}",
+                                cwd.display()
+                            )
+                        })?
                     }
                 };
                 let threshold =
@@ -3909,7 +3907,7 @@ fn main() -> anyhow::Result<()> {
                 s
             } else {
                 let cwd = std::env::current_dir()?;
-                agent_doc_orchestration::snapshot::find_project_root(&cwd).unwrap_or(cwd)
+                agent_doc_fs::find_project_root(&cwd).unwrap_or(cwd)
             };
             let total =
                 agent_doc_orchestration::pending_cmd::resolve_gate_scan(&gate_type, &scan_root)?;
@@ -3976,7 +3974,7 @@ fn main() -> anyhow::Result<()> {
                 let cwd = std::env::current_dir()?;
                 let root_path = root
                     .map(PathBuf::from)
-                    .or_else(|| agent_doc_orchestration::snapshot::find_project_root(&cwd))
+                    .or_else(|| agent_doc_fs::find_project_root(&cwd))
                     .context("could not find project root")?;
                 agent_doc_orchestration::callback::cleanup_expired(&root_path, 300)
             }

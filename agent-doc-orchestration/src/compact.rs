@@ -1323,10 +1323,10 @@ pub fn create_pre_mutation_tag(file: &Path, slug: &str, tag_override: Option<&st
 }
 
 /// Find project root by walking up to find `.agent-doc/`.
-/// Delegates to [`crate::fs_util::find_project_root_canonical`] with a
+/// Delegates to [`agent_doc_fs::find_project_root_canonical`] with a
 /// fallback to the file's parent directory when no `.agent-doc/` is found.
 fn find_project_root(file: &Path) -> Result<std::path::PathBuf> {
-    match crate::fs_util::find_project_root_canonical(file) {
+    match agent_doc_fs::find_project_root_canonical(file) {
         Some(root) => Ok(root),
         None => {
             let canonical = file

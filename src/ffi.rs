@@ -254,12 +254,12 @@ fn resolve_admin_root(
         return Ok(PathBuf::from(root));
     }
     if let Some(document) = document
-        && let Some(root) = agent_doc_orchestration::fs_util::find_project_root(document)
+        && let Some(root) = agent_doc_fs::find_project_root(document)
     {
         return Ok(root);
     }
     let cwd = std::env::current_dir().context("failed to read current directory")?;
-    agent_doc_orchestration::fs_util::find_project_root(&cwd)
+    agent_doc_fs::find_project_root(&cwd)
         .with_context(|| format!("no .agent-doc project root found from {}", cwd.display()))
 }
 
@@ -2139,9 +2139,9 @@ pub unsafe extern "C" fn agent_doc_admin_repair_projection_json(
 }
 
 /// Walk up from `path` to find the nearest ancestor containing `.agent-doc/`.
-/// Delegates to [`agent_doc_orchestration::fs_util::find_project_root`].
+/// Delegates to [`agent_doc_fs::find_project_root`].
 fn find_project_root_ffi(path: &std::path::Path) -> Option<std::path::PathBuf> {
-    agent_doc_orchestration::fs_util::find_project_root(path)
+    agent_doc_fs::find_project_root(path)
 }
 
 /// Resolve a file's agent-doc project root and the path relative to that root.

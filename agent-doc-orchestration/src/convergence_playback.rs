@@ -183,7 +183,7 @@ impl ConvergencePlayback {
 pub fn playback_artifact_path(file: &Path, cycle_id: &str) -> Result<PathBuf> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let hash = crate::snapshot::doc_hash(&canonical)?;
-    let project_root = crate::snapshot::find_project_root(&canonical)
+    let project_root = agent_doc_fs::find_project_root(&canonical)
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
     let dir = project_root.join(".agent-doc/playback").join(hash);
     Ok(dir.join(format!("{cycle_id}.json")))

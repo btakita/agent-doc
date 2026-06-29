@@ -419,7 +419,7 @@ mod tests {
         let snap_rel = crate::snapshot::path_for(&doc).unwrap();
         // The snapshot path is computed against the project root (walks for .agent-doc).
         // For this test, ensure the .agent-doc dir exists at the outer root and write the snapshot there.
-        let project_root = crate::snapshot::find_project_root(&doc.canonicalize().unwrap())
+        let project_root = agent_doc_fs::find_project_root(&doc.canonicalize().unwrap())
             .unwrap_or_else(|| outer.to_path_buf());
         let snap_abs = project_root.join(&snap_rel);
         fs::create_dir_all(snap_abs.parent().unwrap()).unwrap();

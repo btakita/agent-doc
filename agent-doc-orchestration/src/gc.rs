@@ -753,7 +753,7 @@ fn clean_orphaned_sockets(project_root: &Path, dry_run: bool) -> Result<(usize, 
 
 fn find_project_root_from_cwd() -> Result<PathBuf> {
     let cwd = std::env::current_dir().context("failed to get CWD")?;
-    crate::fs_util::find_project_root(&cwd)
+    agent_doc_fs::find_project_root(&cwd)
         .context("no .agent-doc/ directory found (walked up from CWD)")
 }
 

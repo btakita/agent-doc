@@ -92,7 +92,7 @@ fn run_pending_maintenance_with_options(
     let mut snapshot_mutated = false;
     let mut saw_completed_before = false;
     let project_root = file.canonicalize().ok().and_then(|canonical| {
-        snapshot::find_project_root(&canonical)
+        agent_doc_fs::find_project_root(&canonical)
             .or_else(|| canonical.parent().map(std::path::Path::to_path_buf))
     });
     let already_done_ids = collect_agent_done_ids_with_root(&content, project_root.as_deref());
@@ -849,7 +849,7 @@ fn run_gate_verify_with_options(
     }
 
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-    let ops_log = snapshot::find_project_root(&canonical)
+    let ops_log = agent_doc_fs::find_project_root(&canonical)
         .or_else(|| canonical.parent().map(std::path::Path::to_path_buf))
         .and_then(|root| std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).ok())
         .unwrap_or_default();
@@ -1418,7 +1418,7 @@ fn record_selected_queue_head_state(
             file.display()
         )
     })?;
-    let Some(project_root) = crate::fs_util::find_project_root(&canonical) else {
+    let Some(project_root) = agent_doc_fs::find_project_root(&canonical) else {
         return Ok(());
     };
     let Some(node_key) = selected_queue_head_node_key(content, head_text) else {
@@ -1465,7 +1465,7 @@ fn record_deferred_queue_head_state(
             file.display()
         )
     })?;
-    let Some(project_root) = crate::fs_util::find_project_root(&canonical) else {
+    let Some(project_root) = agent_doc_fs::find_project_root(&canonical) else {
         return Ok(());
     };
     let Some(node_key) = selected_queue_head_node_key(content, head_text) else {
@@ -1610,7 +1610,7 @@ fn record_queue_worklist_state(
             file.display()
         )
     })?;
-    let Some(project_root) = crate::fs_util::find_project_root(&canonical) else {
+    let Some(project_root) = agent_doc_fs::find_project_root(&canonical) else {
         return Ok(());
     };
     let document_hash = crate::pending_cmd::doc_id_for(&canonical);
@@ -2025,7 +2025,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // on a completed ref. `agent:done` is not mutated by any queue maintenance
     // step, so this set is valid for both the sync filter and the later strike.
     let project_root = file.canonicalize().ok().and_then(|canonical| {
-        snapshot::find_project_root(&canonical)
+        agent_doc_fs::find_project_root(&canonical)
             .or_else(|| canonical.parent().map(std::path::Path::to_path_buf))
     });
     let done_ids = collect_agent_done_ids_with_root(&content, project_root.as_deref());
@@ -3669,7 +3669,7 @@ pub(crate) fn sync_same_cycle_pending_adds_into_go_queue(file: &Path) -> Result<
     }
 
     let project_root = file.canonicalize().ok().and_then(|canonical| {
-        snapshot::find_project_root(&canonical)
+        agent_doc_fs::find_project_root(&canonical)
             .or_else(|| canonical.parent().map(std::path::Path::to_path_buf))
     });
     let done_ids: std::collections::HashSet<String> =

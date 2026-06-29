@@ -1097,7 +1097,7 @@ pub(crate) fn host_supervisor_stale_warning_message(supervisor_pid: u32) -> Stri
 /// PID, a dead PID, an unreadable `/proc/<pid>`, or any stat error yields `None` so this
 /// read-only check can never block a live cycle.
 pub(crate) fn host_supervisor_stale_warning_for_doc(file: &Path) -> Option<String> {
-    let project_root = crate::snapshot::find_project_root(file)?;
+    let project_root = agent_doc_fs::find_project_root(file)?;
     let record = authoritative_actor_binding(&project_root, file)
         .ok()
         .flatten()?;
@@ -1130,7 +1130,7 @@ pub(crate) fn host_supervisor_stale_warning_for_doc(file: &Path) -> Option<Strin
 /// an unreachable controller, a missing lease, or any stat error yields `None` so the
 /// read-only check can never block a cycle.
 pub(crate) fn stale_supervisor_warning_for_doc(file: &Path) -> Option<String> {
-    let project_root = crate::snapshot::find_project_root(file)?;
+    let project_root = agent_doc_fs::find_project_root(file)?;
     if let Ok(status) = status(&project_root)
         && let Some(message) = supervisor_stale_warning_message(&status)
     {
@@ -1275,7 +1275,7 @@ pub(crate) fn supervisor_auto_install_enabled(doc: &std::path::Path) -> bool {
 /// inherit dogfood build/install policy just because the crate is nearby.
 pub(crate) fn dogfood_agent_doc_crate_root(file: &Path) -> Option<PathBuf> {
     let file = file.canonicalize().ok()?;
-    let project_root = crate::fs_util::find_project_root(&file)?;
+    let project_root = agent_doc_fs::find_project_root(&file)?;
     for candidate in [project_root.clone(), project_root.join("src/agent-doc")] {
         let cargo = candidate.join("Cargo.toml");
         if let Ok(content) = std::fs::read_to_string(&cargo)
@@ -4320,7 +4320,7 @@ pub fn project_root_from_arg(root: Option<&Path>) -> Result<PathBuf> {
         None => cwd,
     };
     let start = start.canonicalize().unwrap_or(start);
-    crate::snapshot::find_project_root(&start)
+    agent_doc_fs::find_project_root(&start)
         .or_else(|| {
             if start.join(".git").exists() || start.join(".agent-doc").exists() {
                 Some(start.to_path_buf())

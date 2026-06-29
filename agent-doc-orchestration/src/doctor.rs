@@ -284,7 +284,7 @@ fn gather_facts(
     let canonical = file
         .canonicalize()
         .with_context(|| format!("failed to canonicalize {}", file.display()))?;
-    let project_root = crate::fs_util::find_project_root(&canonical);
+    let project_root = agent_doc_fs::find_project_root(&canonical);
     let document_hash = crate::snapshot::doc_hash(&canonical).ok();
     let preflight = read_preflight_facts(options.preflight_json.as_deref())?;
     let mut session_check = read_session_check_json_facts(options.session_check_json.as_deref())?;
@@ -422,7 +422,7 @@ fn read_ops_log(
         return OpsLogDoctorFacts::default();
     };
     let path = root.join(".agent-doc/logs/ops.log");
-    let content = match crate::fs_util::read_optional_text(&path) {
+    let content = match agent_doc_fs::read_optional_text(&path) {
         Ok(Some(content)) => content,
         Ok(None) => return OpsLogDoctorFacts::default(),
         Err(err) => {

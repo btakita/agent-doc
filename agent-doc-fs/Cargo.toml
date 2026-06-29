@@ -1,0 +1,13 @@
+[package]
+name = "agent-doc-fs"
+version = "0.34.65"
+edition = "2024"
+description = "Filesystem helpers for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_fs"
+
+[dependencies]
+anyhow = "1"

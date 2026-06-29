@@ -29,7 +29,7 @@ const TOMBSTONE_DIR: &str = ".agent-doc/queue-tombstones";
 pub(crate) fn tombstone_path_for(doc: &Path) -> Option<PathBuf> {
     let canonical = doc.canonicalize().ok()?;
     let hash = crate::snapshot::doc_hash_from_str(&canonical.to_string_lossy());
-    let project_root = crate::fs_util::find_project_root(&canonical)
+    let project_root = agent_doc_fs::find_project_root(&canonical)
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
     Some(
         project_root

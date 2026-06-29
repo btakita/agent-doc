@@ -235,7 +235,7 @@ pub fn run(active: bool) -> anyhow::Result<()> {
 /// `.agent-doc` ancestor.
 fn resolve_marker_base() -> Option<PathBuf> {
     let cwd = std::env::current_dir().ok()?;
-    crate::fs_util::find_project_root(&cwd)
+    agent_doc_fs::find_project_root(&cwd)
 }
 
 #[cfg(test)]

@@ -771,7 +771,7 @@ fn dedup(items: &mut Vec<String>) {
 
 fn project_root(file: &Path) -> Result<PathBuf> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    agent_doc_orchestration::snapshot::find_project_root(&canonical)
+    agent_doc_fs::find_project_root(&canonical)
         .with_context(|| format!("could not find .agent-doc root for {}", file.display()))
 }
 

@@ -58,7 +58,7 @@ pub struct QueueJournalEntry {
 /// "no journal" rather than an error.
 fn journal_path(file: &Path) -> Option<PathBuf> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let root = crate::snapshot::find_project_root(&canonical)?;
+    let root = agent_doc_fs::find_project_root(&canonical)?;
     let hash = crate::snapshot::doc_hash(&canonical).ok()?;
     Some(root.join(QUEUE_JOURNAL_DIR).join(format!("{hash}.jsonl")))
 }

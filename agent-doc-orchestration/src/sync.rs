@@ -575,7 +575,7 @@ fn load_live_authoritative_actor_record_uncached(
         .canonicalize()
         .ok()
         .unwrap_or_else(|| file.to_path_buf());
-    let base_dir = crate::snapshot::find_project_root(&canonical)?;
+    let base_dir = agent_doc_fs::find_project_root(&canonical)?;
     let record = crate::project_controller::authoritative_actor_binding(&base_dir, &canonical)
         .ok()
         .flatten()?;
@@ -1430,11 +1430,11 @@ fn sync_scope_root(col_args: &[String], focus: Option<&str>) -> Option<PathBuf> 
             focus
                 .map(str::trim)
                 .filter(|path| !path.is_empty())
-                .and_then(|path| crate::snapshot::find_project_root(Path::new(path)))
+                .and_then(|path| agent_doc_fs::find_project_root(Path::new(path)))
         })
         .or_else(|| {
             let cwd = std::env::current_dir().ok()?;
-            crate::snapshot::find_project_root(&cwd)
+            agent_doc_fs::find_project_root(&cwd)
                 .or_else(|| cwd.join(".agent-doc").is_dir().then_some(cwd))
         })
 }
@@ -1942,7 +1942,7 @@ fn run_with_options_internal(
     // Check for new build and clear stale caches
     check_build_stamp();
     if let Ok(cwd) = std::env::current_dir()
-        && let Some(project_root) = crate::snapshot::find_project_root(&cwd)
+        && let Some(project_root) = agent_doc_fs::find_project_root(&cwd)
     {
         match crate::project_controller::close_stale_starting_actors_for_caller(
             &project_root,
@@ -4197,7 +4197,7 @@ struct SupervisorIdentity {
 }
 
 fn query_supervisor_identity(file: &Path, session_id: &str) -> Option<SupervisorIdentity> {
-    let project_root = crate::snapshot::find_project_root(file)?;
+    let project_root = agent_doc_fs::find_project_root(file)?;
     let sock = crate::supervisor::ipc::socket_path(&project_root, session_id);
     if !sock.exists() {
         return None;
@@ -4258,7 +4258,7 @@ fn pane_project_root(tmux: &Tmux, pane_id: &str) -> Option<PathBuf> {
         return None;
     }
     let path = PathBuf::from(current_path);
-    crate::snapshot::find_project_root(&path).or(Some(path))
+    agent_doc_fs::find_project_root(&path).or(Some(path))
 }
 
 fn registry_entry_matches_document_root(
@@ -4269,7 +4269,7 @@ fn registry_entry_matches_document_root(
     if cwd.as_os_str().is_empty() {
         return false;
     }
-    crate::snapshot::find_project_root(cwd)
+    agent_doc_fs::find_project_root(cwd)
         .or_else(|| cwd.is_dir().then_some(cwd.to_path_buf()))
         .is_some_and(|root| root == project_root)
 }
@@ -4425,7 +4425,7 @@ fn find_alive_pane_via_supervisor_pid(
     file: &Path,
     session_id: &str,
 ) -> Option<String> {
-    let project_root = crate::snapshot::find_project_root(file)?;
+    let project_root = agent_doc_fs::find_project_root(file)?;
     let sock = crate::supervisor::ipc::socket_path(&project_root, session_id);
     if !sock.exists() {
         return None;
@@ -4502,7 +4502,7 @@ fn find_alive_pane_via_open_session_log(
         return None;
     }
 
-    let project_root = crate::snapshot::find_project_root(file)?;
+    let project_root = agent_doc_fs::find_project_root(file)?;
     if !pane_assignment_matches_document_root(tmux, pane_id, &project_root) {
         return None;
     }
@@ -4536,7 +4536,7 @@ fn find_alive_pane_via_registry_rebind_successor(
         return None;
     }
 
-    let project_root = crate::snapshot::find_project_root(file)?;
+    let project_root = agent_doc_fs::find_project_root(file)?;
     if !pane_assignment_matches_document_root(tmux, pane_id, &project_root) {
         return None;
     }

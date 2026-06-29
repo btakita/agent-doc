@@ -9,12 +9,12 @@
 //! plan.
 //!
 //! Wave 0 (scaffold) + Wave 1a: `ipc_socket` (the one dependency-free leaf).
-//! Direction A, increment 2: `env`, `fs_util`, `secret_redact` — three more
+//! Direction A, increment 2: `env`, `secret_redact` — two more
 //! zero-dependency foundation leaves (no `crate::` refs).
 //! Direction A, increment 3: `config`, `project_config_io`.
 //! Direction A, increment 4: `ops_log` — best-effort operational logging.
-//! Pulled `find_project_root` (a pure path walk) down into `fs_util` so
-//! `ops_log` no longer reaches back into the main crate's `snapshot` module.
+//! Pulled project-root discovery and optional file reads into `agent-doc-fs`
+//! so effectful adapters no longer reach through `snapshot`.
 //! Direction A, increment 5: `input_diag` — structured tmux/supervisor input
 //! diagnostics (production-dep on `ops_log` only). Brings a self-contained
 //! `#[cfg(test)] test_support` (crate-local `TEST_ENV_LOCK`) for its
@@ -38,7 +38,6 @@
 // Foundation utilities (increments 1–5).
 pub mod config;
 pub mod env;
-pub mod fs_util;
 pub mod input_diag;
 pub mod ipc_socket;
 pub mod ops_log;

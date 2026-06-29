@@ -67,7 +67,7 @@ fn resolve_root(project_root: Option<&Path>) -> Result<PathBuf> {
         return Ok(root.to_path_buf());
     }
     let cwd = std::env::current_dir().context("failed to read current directory")?;
-    crate::fs_util::find_project_root(&cwd)
+    agent_doc_fs::find_project_root(&cwd)
         .with_context(|| format!("no .agent-doc project root found from {}", cwd.display()))
 }
 
@@ -79,7 +79,7 @@ fn resolve_root_for_target(
         return Ok(root.to_path_buf());
     }
     if let Some(document) = document
-        && let Some(root) = crate::snapshot::find_project_root(document)
+        && let Some(root) = agent_doc_fs::find_project_root(document)
     {
         return Ok(root);
     }

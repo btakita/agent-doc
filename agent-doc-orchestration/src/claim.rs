@@ -360,7 +360,7 @@ pub fn run(
             // own one document. The lease lookup is keyed by the canonical
             // document path (the controller's `document_id`); errors / absent
             // state degrade to `false` (no guard fired).
-            let fresh_foreign_lease = crate::snapshot::find_project_root(file)
+            let fresh_foreign_lease = agent_doc_fs::find_project_root(file)
                 .map(|project_root| {
                     crate::project_controller::fresh_foreign_supervisor_lease_holds_document(
                         &project_root,
@@ -604,7 +604,7 @@ pub fn run(
     // Append to claims log so the skill can display it on next invocation
     let log_line = format!("Claimed {} for pane {}\n", file_str, pane_id);
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let project_root = crate::snapshot::find_project_root(&canonical)
+    let project_root = agent_doc_fs::find_project_root(&canonical)
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
     let log_path = project_root.join(".agent-doc/claims.log");
     if let Some(parent) = log_path.parent()

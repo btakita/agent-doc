@@ -1339,7 +1339,7 @@ fn save_blocked_stop_payload(
     last_prompt: Option<&str>,
 ) -> Result<PathBuf> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let root = crate::snapshot::find_project_root(&canonical)
+    let root = agent_doc_fs::find_project_root(&canonical)
         .or_else(|| canonical.parent().map(Path::to_path_buf))
         .context("resolve project root for blocked stop payload")?;
     let dir = root.join(".agent-doc/codex-hooks/blocked-stop");
@@ -1419,12 +1419,12 @@ fn parse_agent_doc_invocation_line(line: &str) -> Option<&str> {
 #[cfg(test)]
 fn project_root_for(path: &Path) -> Option<PathBuf> {
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    crate::snapshot::find_project_root(&canonical)
+    agent_doc_fs::find_project_root(&canonical)
 }
 
 fn project_roots_for(path: &Path) -> Vec<PathBuf> {
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let Some(nearest_root) = crate::snapshot::find_project_root(&canonical) else {
+    let Some(nearest_root) = agent_doc_fs::find_project_root(&canonical) else {
         return Vec::new();
     };
     let mut roots = vec![nearest_root.clone()];

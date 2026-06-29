@@ -1470,7 +1470,7 @@ Run `agent-doc orchestrate {parent_doc} --mode dag --resume-schedule {schedule_i
 
 fn project_root(file: &Path) -> Result<PathBuf> {
     let canonical = file.canonicalize()?;
-    snapshot::find_project_root(&canonical)
+    agent_doc_fs::find_project_root(&canonical)
         .with_context(|| format!("could not find .agent-doc root for {}", file.display()))
 }
 

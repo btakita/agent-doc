@@ -33,6 +33,7 @@ dependencies = [
  "agent-doc-element-queue",
  "agent-doc-ffi",
  "agent-doc-frontmatter",
+ "agent-doc-fs",
  "agent-doc-markdown-ast",
  "agent-doc-merge",
  "agent-doc-model-tier",
@@ -264,6 +265,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-doc-fs"
+version = "0.34.65"
+dependencies = [
+ "anyhow",
+]
+
+[[package]]
 name = "agent-doc-log-time"
 version = "0.34.65"
 
@@ -315,6 +323,7 @@ dependencies = [
  "agent-doc-element-boundary",
  "agent-doc-element-queue",
  "agent-doc-frontmatter",
+ "agent-doc-fs",
  "agent-doc-log-time",
  "agent-doc-markdown-ast",
  "agent-doc-merge",

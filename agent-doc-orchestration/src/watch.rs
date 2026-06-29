@@ -280,7 +280,7 @@ pub fn ensure_running() -> Result<bool> {
 
     // Resolve project root (where .agent-doc/ lives)
     let cwd = std::env::current_dir().unwrap_or_default();
-    let project_root = crate::snapshot::find_project_root(&cwd)
+    let project_root = agent_doc_fs::find_project_root(&cwd)
         .context("could not find .agent-doc/ directory — not in an agent-doc project")?;
 
     // Spawn daemon in background from project root
@@ -324,7 +324,7 @@ pub fn ensure_running() -> Result<bool> {
 pub fn start(config: &Config, watch_config: WatchConfig) -> Result<()> {
     // Resolve project root and cd there (critical for finding .agent-doc/)
     let cwd = std::env::current_dir().unwrap_or_default();
-    if let Some(root) = crate::fs_util::find_project_root(&cwd)
+    if let Some(root) = agent_doc_fs::find_project_root(&cwd)
         && root != cwd
     {
         std::env::set_current_dir(&root)
@@ -466,7 +466,7 @@ fn run_event_loop(
 
     let config_toml_path = std::env::current_dir()
         .ok()
-        .and_then(|d| crate::fs_util::find_project_root(&d))
+        .and_then(|d| agent_doc_fs::find_project_root(&d))
         .map(|r| r.join(".agent-doc").join("config.toml"));
     let base_dir = std::env::current_dir().context("resolve watch daemon project root")?;
 

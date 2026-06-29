@@ -126,7 +126,7 @@ pub fn local_actor_projection_pane_for_document(
         .canonicalize()
         .ok()
         .unwrap_or_else(|| file.to_path_buf());
-    let base_dir = crate::snapshot::find_project_root(&canonical)?;
+    let base_dir = agent_doc_fs::find_project_root(&canonical)?;
     let record = crate::session_actor::load_record_in(&base_dir, &canonical.to_string_lossy())
         .ok()
         .flatten()?;

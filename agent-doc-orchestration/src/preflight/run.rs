@@ -95,7 +95,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // Checks .agent-doc/gc.stamp — if missing or >24 hours old, runs lightweight GC.
     if !options.probe {
         let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-        if let Some(root) = snapshot::find_project_root(&canonical) {
+        if let Some(root) = agent_doc_fs::find_project_root(&canonical) {
             match crate::project_controller::close_stale_starting_actors_for_caller(
                 &root,
                 std::time::Duration::from_secs(3600),
@@ -433,7 +433,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // from any document in the project will pick it up.
     if !options.probe {
         let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-        if let Some(root) = snapshot::find_project_root(&canonical)
+        if let Some(root) = agent_doc_fs::find_project_root(&canonical)
             && let Ok(registry) = sessions::load_in(&root)
         {
             let current_owner = current_sweep_owner(file, &root, &registry, &canonical);
@@ -542,7 +542,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     }
     if !options.probe {
         let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-        if let Some(root) = snapshot::find_project_root(&canonical) {
+        if let Some(root) = agent_doc_fs::find_project_root(&canonical) {
             match crate::project_controller::close_stale_dead_pane_actors_with_tmux_for_caller(
                 &root,
                 false,

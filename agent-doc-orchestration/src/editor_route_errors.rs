@@ -21,7 +21,7 @@ fn route_error_path_for_file(file: &Path) -> Option<PathBuf> {
         .canonicalize()
         .ok()
         .unwrap_or_else(|| file.to_path_buf());
-    let project_root = crate::snapshot::find_project_root(&canonical)?;
+    let project_root = agent_doc_fs::find_project_root(&canonical)?;
     let relative = canonical
         .strip_prefix(&project_root)
         .ok()

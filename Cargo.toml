@@ -8,6 +8,7 @@ members = [
     "agent-doc-ffi",
     "agent-doc-syntax",
     "agent-doc-topic",
+    "agent-doc-fs",
     "agent-doc-model-tier",
     "agent-doc-secret-redact",
     "agent-doc-element",
@@ -77,6 +78,7 @@ agent-doc-element-backlog = { path = "agent-doc-element-backlog", version = "0.3
 agent-doc-element-boundary = { path = "agent-doc-element-boundary", version = "0.34.65" }
 agent-doc-ffi = { path = "agent-doc-ffi", version = "0.34.65" }
 agent-doc-frontmatter = { path = "agent-doc-frontmatter", version = "0.34.65" }
+agent-doc-fs = { path = "agent-doc-fs", version = "0.34.65" }
 agent-doc-markdown-ast = { path = "agent-doc-markdown-ast", version = "0.34.65" }
 agent-doc-merge = { path = "agent-doc-merge", version = "0.34.65" }
 agent-doc-model-tier = { path = "agent-doc-model-tier", version = "0.34.65" }

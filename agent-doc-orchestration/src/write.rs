@@ -228,8 +228,8 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 use similar::{ChangeTag, TextDiff};
 
-use crate::snapshot::find_project_root;
 use agent_doc_element::element::{self, is_backlog_component};
+use agent_doc_fs::find_project_root;
 
 use crate::{
     flow::document_mutation::{TemplateStructureGuardReason, log_template_structure_guard_event},
@@ -4658,7 +4658,7 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
         && !agent_doc_document_realtime::write_authority::within_owner_scope()
     {
         log_fence_count_drop_if_any(path, content);
-        let base_dir = crate::fs_util::find_project_root(path)
+        let base_dir = agent_doc_fs::find_project_root(path)
             .unwrap_or_else(|| path.parent().unwrap_or(Path::new(".")).to_path_buf());
         let file = path.to_string_lossy().to_string();
         let result = crate::write_queue::serialized_atomic_write(&base_dir, &file, path, content);

@@ -663,7 +663,7 @@ fn infer_write_scope(text: &str) -> Vec<String> {
 
 fn tsift_context_plan(file: &Path) -> TsiftContextPlan {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let root = agent_doc_orchestration::snapshot::find_project_root(&canonical)
+    let root = agent_doc_fs::find_project_root(&canonical)
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
     let status = if root.join(".tsift/index.db").exists() {
         "available"

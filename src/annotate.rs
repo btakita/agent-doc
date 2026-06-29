@@ -90,7 +90,7 @@ fn sidecar_path(doc: &Path) -> Result<PathBuf> {
     let canonical = std::fs::canonicalize(doc)
         .with_context(|| format!("failed to canonicalize {}", doc.display()))?;
     let hash = snapshot::doc_hash(&canonical)?;
-    let root = snapshot::find_project_root(&canonical)
+    let root = agent_doc_fs::find_project_root(&canonical)
         .unwrap_or_else(|| doc.parent().unwrap_or(Path::new(".")).to_path_buf());
     let dir = root.join(ANNOTATION_DIR);
     let _ = std::fs::create_dir_all(&dir);
@@ -165,7 +165,7 @@ pub fn generate(doc: &Path, force: bool) -> Result<PathBuf> {
     }
 
     // Build relative file path for the sidecar.
-    let root = snapshot::find_project_root(&canonical)
+    let root = agent_doc_fs::find_project_root(&canonical)
         .unwrap_or_else(|| doc.parent().unwrap_or(Path::new(".")).to_path_buf());
     let relative = canonical
         .strip_prefix(&root)

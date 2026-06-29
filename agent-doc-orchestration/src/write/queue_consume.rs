@@ -173,7 +173,7 @@ pub(crate) fn record_queue_consumption_proofs(
     let canonical = file
         .canonicalize()
         .with_context(|| format!("queue consume: failed to canonicalize {}", file.display()))?;
-    let Some(project_root) = crate::fs_util::find_project_root(&canonical) else {
+    let Some(project_root) = agent_doc_fs::find_project_root(&canonical) else {
         eprintln!(
             "[queue] warning: proof ledger unavailable for {}: project root not found",
             file.display()

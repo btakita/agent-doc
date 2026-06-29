@@ -206,7 +206,7 @@ pub(crate) fn persist_dead_pane_capture(
         .canonicalize()
         .ok()
         .unwrap_or_else(|| file.to_path_buf());
-    let root = crate::snapshot::find_project_root(&canonical)?;
+    let root = agent_doc_fs::find_project_root(&canonical)?;
     let dir = root.join(".agent-doc/logs/dead-panes");
     std::fs::create_dir_all(&dir).ok()?;
     let timestamp = std::time::SystemTime::now()

@@ -34,7 +34,7 @@
 //! loads ops via `editor_ops_for_base`, passes them to `merge_with_editor_ops`,
 //! and clears the sidecar after the merge.
 
-use crate::fs_util::read_optional_text;
+use agent_doc_fs::read_optional_text;
 use agent_doc_merge::crdt::EditorOp;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -128,7 +128,7 @@ pub fn content_hash(text: &str) -> String {
 fn op_capture_path_for(doc: &Path) -> Result<PathBuf> {
     let canonical = doc.canonicalize()?;
     let hash = crate::snapshot::doc_hash(&canonical)?;
-    let project_root = crate::snapshot::find_project_root(&canonical)
+    let project_root = agent_doc_fs::find_project_root(&canonical)
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
     Ok(project_root
         .join(OP_CAPTURE_SUBDIR)

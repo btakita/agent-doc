@@ -22,8 +22,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 
-use crate::fs_util::find_project_root;
 use crate::snapshot::doc_hash;
+use agent_doc_fs::find_project_root;
 
 const CONTROL_DIR: &str = ".agent-doc/control";
 const SELFKILL_SUFFIX: &str = "supervisor-selfkill";

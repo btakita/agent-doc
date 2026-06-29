@@ -78,7 +78,7 @@ fn log_path(file: &Path, session_id: &str) -> Result<Option<PathBuf>> {
         Ok(path) => path,
         Err(_) => return Ok(None),
     };
-    let Some(root) = crate::snapshot::find_project_root(&canonical) else {
+    let Some(root) = agent_doc_fs::find_project_root(&canonical) else {
         return Ok(None);
     };
     Ok(Some(
@@ -178,7 +178,7 @@ fn legacy_generation_for_document(file: &Path, session_id_hint: Option<&str>) ->
     let Some(path) = log_path(&canonical, &session_id)? else {
         return Ok(0);
     };
-    let Some(content) = crate::fs_util::read_optional_text(&path)? else {
+    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
         return Ok(0);
     };
     Ok(infer_latest_generation_from_content(&content))
@@ -314,7 +314,7 @@ pub fn record_session_start_direct(
     generation: u64,
 ) -> Result<ActorRecord> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let Some(base_dir) = crate::snapshot::find_project_root(&canonical) else {
+    let Some(base_dir) = agent_doc_fs::find_project_root(&canonical) else {
         anyhow::bail!(
             "failed to locate project root for actor record {}",
             canonical.display()
@@ -426,7 +426,7 @@ pub fn transition_state_direct(
     reason: &str,
 ) -> Result<ActorRecord> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let Some(base_dir) = crate::snapshot::find_project_root(&canonical) else {
+    let Some(base_dir) = agent_doc_fs::find_project_root(&canonical) else {
         anyhow::bail!(
             "failed to locate project root for actor record {}",
             canonical.display()
@@ -492,7 +492,7 @@ pub fn infer_latest_generation(file: &Path, session_id: &str) -> Result<u64> {
         .canonicalize()
         .ok()
         .and_then(|canonical| {
-            crate::snapshot::find_project_root(&canonical).and_then(|root| {
+            agent_doc_fs::find_project_root(&canonical).and_then(|root| {
                 load_record_in(&root, &canonical.to_string_lossy())
                     .ok()
                     .flatten()
@@ -520,7 +520,7 @@ pub fn infer_latest_generation(file: &Path, session_id: &str) -> Result<u64> {
     let Some(path) = log_path(file, session_id)? else {
         return Ok(0);
     };
-    let Some(content) = crate::fs_util::read_optional_text(&path)? else {
+    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
         return Ok(0);
     };
     Ok(infer_latest_generation_from_content(&content))

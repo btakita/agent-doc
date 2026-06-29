@@ -29,9 +29,9 @@ pub fn load_project_for_doc(file: &Path) -> ProjectConfig {
 }
 
 /// Resolve the nearest project root for a document by walking up to `.agent-doc/`.
-/// Delegates to [`crate::fs_util::find_project_root`].
+/// Delegates to [`agent_doc_fs::find_project_root`].
 pub fn project_root_for_doc(file: &Path) -> Option<PathBuf> {
-    crate::fs_util::find_project_root(file)
+    agent_doc_fs::find_project_root(file)
 }
 
 /// Resolve the optional project-default document used for dogfooding

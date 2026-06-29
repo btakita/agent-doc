@@ -270,7 +270,7 @@ fn resolve_target_file(file: &Path) -> Result<PathBuf> {
 /// Resolve the `.agent-doc` project root for a target file.
 /// Falls back to the current working directory when no `.agent-doc/` ancestor is found.
 fn resolve_registry_root(target: &Path) -> PathBuf {
-    crate::snapshot::find_project_root(target)
+    agent_doc_fs::find_project_root(target)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
@@ -541,7 +541,7 @@ fn pane_project_root(tmux: &Tmux, pane_id: &str) -> Option<PathBuf> {
         return None;
     }
     let path = PathBuf::from(current_path);
-    crate::snapshot::find_project_root(&path).or(Some(path))
+    agent_doc_fs::find_project_root(&path).or(Some(path))
 }
 
 fn registry_for_project_root<'a>(

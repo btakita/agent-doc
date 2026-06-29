@@ -1447,7 +1447,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
 
 fn vcs_refresh_signal_path(file: &Path) -> Option<PathBuf> {
     let canonical = file.canonicalize().ok()?;
-    let project_root = crate::snapshot::find_project_root(&canonical)
+    let project_root = agent_doc_fs::find_project_root(&canonical)
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
     let signal_file = project_root.join(".agent-doc/patches/vcs-refresh.signal");
     signal_file.parent().filter(|p| p.exists())?;
@@ -1902,7 +1902,7 @@ fn refresh_live_closeout_sidecars(
     }
 
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let Some(root) = crate::snapshot::find_project_root(&canonical) else {
+    let Some(root) = agent_doc_fs::find_project_root(&canonical) else {
         return Ok(None);
     };
 
@@ -7677,7 +7677,7 @@ Duplicate replay should stay live.
         // Modify the file and create snapshot
         let new_content = "---\nagent_doc_session: test\n---\n\n## Assistant\n\nresponse\n\n## Assistant\n\nupdated\n\n## User\n\n";
         fs::write(&doc_real, new_content).unwrap();
-        let project_root = crate::snapshot::find_project_root(&doc_real.canonicalize().unwrap())
+        let project_root = agent_doc_fs::find_project_root(&doc_real.canonicalize().unwrap())
             .unwrap_or_else(|| outer.to_path_buf());
         let snap_rel = crate::snapshot::path_for(&doc_real).unwrap();
         let snap_abs = project_root.join(&snap_rel);

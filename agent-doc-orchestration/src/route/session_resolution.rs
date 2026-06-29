@@ -264,7 +264,7 @@ pub(crate) fn registry_base_dir_for_file(file: &Path, fallback: &Path) -> std::p
     std::fs::canonicalize(file)
         .ok()
         .and_then(|path| {
-            crate::snapshot::find_project_root(&path)
+            agent_doc_fs::find_project_root(&path)
                 .or_else(|| path.parent().map(|parent| parent.to_path_buf()))
         })
         .unwrap_or_else(|| fallback.to_path_buf())

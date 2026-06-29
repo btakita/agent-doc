@@ -1298,7 +1298,7 @@ pub(crate) fn canonical_registered_file(entry: &sessions::SessionEntry) -> std::
 
 pub(crate) fn registry_base_dir_for_dispatch(file_path: &str) -> std::path::PathBuf {
     let requested = canonical_dispatch_file(std::path::Path::new(file_path));
-    crate::snapshot::find_project_root(&requested)
+    agent_doc_fs::find_project_root(&requested)
         .or_else(|| requested.parent().map(std::path::Path::to_path_buf))
         .unwrap_or_else(|| {
             std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))

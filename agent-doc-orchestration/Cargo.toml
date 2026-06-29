@@ -26,6 +26,7 @@ agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "
 agent-doc-element-boundary = { path = "../agent-doc-element-boundary", version = "0.34.65" }
 agent-doc-element-queue = { path = "../agent-doc-element-queue", version = "0.34.65" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.65" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.65" }
 agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.34.65" }
 agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.65" }
 agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.65" }

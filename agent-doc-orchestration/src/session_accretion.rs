@@ -560,7 +560,7 @@ fn recent_cycle_metrics(file: &Path, now: u64) -> Result<(usize, usize)> {
     let Some(path) = cycles_log_path(file)? else {
         return Ok((0, 0));
     };
-    let Some(content) = crate::fs_util::read_optional_text(&path)? else {
+    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
         return Ok((0, 0));
     };
     let Some(relative_file) = relative_file_key(file) else {
@@ -611,7 +611,7 @@ fn recent_restart_metrics(file: &Path, session_id: &str, now: u64) -> Result<usi
     let Some(path) = session_log_path(file, session_id)? else {
         return Ok(0);
     };
-    let Some(content) = crate::fs_util::read_optional_text(&path)? else {
+    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
         return Ok(0);
     };
     let window_start = now.saturating_sub(RECENT_WINDOW_SECS);
@@ -656,7 +656,7 @@ fn cycles_log_path(file: &Path) -> Result<Option<PathBuf>> {
         Ok(path) => path,
         Err(_) => return Ok(None),
     };
-    let Some(root) = crate::snapshot::find_project_root(&canonical) else {
+    let Some(root) = agent_doc_fs::find_project_root(&canonical) else {
         return Ok(None);
     };
     Ok(Some(root.join(".agent-doc/logs/cycles.jsonl")))
@@ -667,7 +667,7 @@ fn recent_exchange_compaction_path(file: &Path) -> Result<Option<PathBuf>> {
         Ok(path) => path,
         Err(_) => return Ok(None),
     };
-    let Some(root) = crate::snapshot::find_project_root(&canonical) else {
+    let Some(root) = agent_doc_fs::find_project_root(&canonical) else {
         return Ok(None);
     };
     let hash = crate::snapshot::doc_hash(&canonical)?;
@@ -681,7 +681,7 @@ fn load_recent_exchange_compaction(file: &Path) -> Result<Option<RecentExchangeC
     let Some(path) = recent_exchange_compaction_path(file)? else {
         return Ok(None);
     };
-    let Some(content) = crate::fs_util::read_optional_text(&path)? else {
+    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
         return Ok(None);
     };
     let marker: RecentExchangeCompaction = serde_json::from_str(&content)?;
@@ -693,7 +693,7 @@ fn session_log_path(file: &Path, session_id: &str) -> Result<Option<PathBuf>> {
         Ok(path) => path,
         Err(_) => return Ok(None),
     };
-    let Some(root) = crate::snapshot::find_project_root(&canonical) else {
+    let Some(root) = agent_doc_fs::find_project_root(&canonical) else {
         return Ok(None);
     };
     Ok(Some(
@@ -704,7 +704,7 @@ fn session_log_path(file: &Path, session_id: &str) -> Result<Option<PathBuf>> {
 
 fn relative_file_key(file: &Path) -> Option<String> {
     let canonical = file.canonicalize().ok()?;
-    let root = crate::snapshot::find_project_root(&canonical)?;
+    let root = agent_doc_fs::find_project_root(&canonical)?;
     Some(
         canonical
             .strip_prefix(&root)

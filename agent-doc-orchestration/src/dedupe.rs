@@ -43,7 +43,7 @@ pub fn run(file: &Path) -> Result<()> {
     // Clean up any stale patch file so the plugin doesn't re-apply the removed content.
     // Without this, processPendingPatches() on plugin restart would re-duplicate.
     if let Ok(hash) = crate::snapshot::doc_hash(file)
-        && let Some(project_root) = crate::snapshot::find_project_root(file)
+        && let Some(project_root) = agent_doc_fs::find_project_root(file)
     {
         let patch_file = project_root
             .join(".agent-doc/patches")

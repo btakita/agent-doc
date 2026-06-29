@@ -34,7 +34,7 @@ const TURN_SCOPE_DIR: &str = ".agent-doc/turn-scope";
 pub fn path_for(doc: &Path) -> Result<PathBuf> {
     let hash = crate::snapshot::doc_hash(doc)?;
     let canonical = doc.canonicalize()?;
-    let project_root = crate::snapshot::find_project_root(&canonical)
+    let project_root = agent_doc_fs::find_project_root(&canonical)
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
     Ok(project_root
         .join(TURN_SCOPE_DIR)

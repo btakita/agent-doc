@@ -50,7 +50,7 @@ fn check_target_ownership(target: &Path) -> Result<()> {
         return Ok(());
     }
 
-    let project_root = match snapshot::find_project_root(target) {
+    let project_root = match agent_doc_fs::find_project_root(target) {
         Some(r) => r,
         None => return Ok(()),
     };

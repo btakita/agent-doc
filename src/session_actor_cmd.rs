@@ -209,7 +209,7 @@ pub fn history(file: &Path) -> Result<()> {
     }
 
     let path = session_log_path(&ctx.base_dir, &ctx.session_id);
-    let Some(content) = agent_doc_orchestration::fs_util::read_optional_text(&path)? else {
+    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
         println!(
             "No session log recorded for {}",
             ctx.canonical_file.display()
@@ -256,14 +256,13 @@ pub fn debug(file: Option<&Path>, json: bool) -> Result<()> {
     let base_dir = match file {
         Some(f) => {
             let canonical = f.canonicalize().unwrap_or_else(|_| f.to_path_buf());
-            agent_doc_orchestration::snapshot::find_project_root(&canonical).with_context(|| {
+            agent_doc_fs::find_project_root(&canonical).with_context(|| {
                 format!("failed to locate project root for {}", canonical.display())
             })?
         }
         None => {
             let cwd = std::env::current_dir().context("failed to read current directory")?;
-            agent_doc_orchestration::snapshot::find_project_root(&cwd.join("agent-doc.md"))
-                .unwrap_or(cwd)
+            agent_doc_fs::find_project_root(&cwd.join("agent-doc.md")).unwrap_or(cwd)
         }
     };
 
@@ -2769,13 +2768,12 @@ fn build_context(file: &Path) -> Result<SessionContext> {
                 .and_then(|(fm, _)| fm.session)
         })
         .with_context(|| format!("{} has no agent_doc_session", canonical_file.display()))?;
-    let base_dir = agent_doc_orchestration::snapshot::find_project_root(&canonical_file)
-        .with_context(|| {
-            format!(
-                "failed to locate project root for {}",
-                canonical_file.display()
-            )
-        })?;
+    let base_dir = agent_doc_fs::find_project_root(&canonical_file).with_context(|| {
+        format!(
+            "failed to locate project root for {}",
+            canonical_file.display()
+        )
+    })?;
     let harness = agent_doc_orchestration::session_actor::detect_document_harness_in(
         &base_dir,
         &canonical_file.to_string_lossy(),

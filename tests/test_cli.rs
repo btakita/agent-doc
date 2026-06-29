@@ -2159,6 +2159,7 @@ fn test_manifest_uses_publishable_dependency_contract() {
         "agent-doc-markdown-ast",
         "agent-doc-ffi",
         "agent-doc-frontmatter",
+        "agent-doc-fs",
         "agent-doc-merge",
         "agent-doc-model-tier",
         "agent-doc-orchestration",
@@ -2608,6 +2609,62 @@ fn test_project_config_io_tmux_helpers_have_no_config_facade() {
             assert!(
                 !contains_path_segment(&source, forbidden_snippet),
                 "{relative} must call project_config_io helpers directly: {forbidden_snippet}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_snapshot_has_no_find_project_root_facade() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let snapshot_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/snapshot.rs")).unwrap();
+    assert!(
+        !snapshot_source.contains("pub use agent_doc_fs::find_project_root"),
+        "snapshot.rs must not re-export the agent-doc-fs project-root helper"
+    );
+    assert!(
+        snapshot_source.contains("use agent_doc_fs::find_project_root;"),
+        "snapshot.rs should import the agent-doc-fs project-root helper privately"
+    );
+
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod fs_util"),
+        "orchestration must not keep an fs_util facade over agent-doc-fs"
+    );
+
+    fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                collect_rs_files(&path, out);
+            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    let mut source_files = Vec::new();
+    collect_rs_files(
+        &manifest_dir.join("agent-doc-orchestration/src"),
+        &mut source_files,
+    );
+    collect_rs_files(&manifest_dir.join("src"), &mut source_files);
+    for path in source_files {
+        let source = fs::read_to_string(&path).unwrap();
+        let relative = path.strip_prefix(manifest_dir).unwrap().display();
+        for forbidden_snippet in [
+            "snapshot::find_project_root",
+            "crate::snapshot::find_project_root",
+            "agent_doc_orchestration::snapshot::find_project_root",
+            "crate::fs_util::find_project_root",
+            "agent_doc_orchestration::fs_util::find_project_root",
+        ] {
+            assert!(
+                !source.contains(forbidden_snippet),
+                "{relative} must call agent_doc_fs::find_project_root directly: {forbidden_snippet}"
             );
         }
     }

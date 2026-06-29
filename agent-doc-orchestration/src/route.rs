@@ -516,7 +516,7 @@ fn editor_route_attempt_id() -> Option<String> {
 
 fn route_current_actor_generation(file: &Path) -> Option<u64> {
     let canonical = file.canonicalize().ok()?;
-    let root = crate::snapshot::find_project_root(&canonical)?;
+    let root = agent_doc_fs::find_project_root(&canonical)?;
     crate::session_actor::load_record_in(&root, canonical.to_string_lossy().as_ref())
         .ok()
         .flatten()
@@ -525,7 +525,7 @@ fn route_current_actor_generation(file: &Path) -> Option<u64> {
 
 fn route_ops_log_path(file: &Path) -> Option<PathBuf> {
     let canonical = file.canonicalize().ok()?;
-    let root = crate::snapshot::find_project_root(&canonical)?;
+    let root = agent_doc_fs::find_project_root(&canonical)?;
     Some(root.join(".agent-doc/logs/ops.log"))
 }
 
@@ -590,7 +590,7 @@ fn preserve_route_pane_snapshot(
         let canonical = file
             .canonicalize()
             .with_context(|| format!("failed to canonicalize {}", file.display()))?;
-        let root = crate::snapshot::find_project_root(&canonical)
+        let root = agent_doc_fs::find_project_root(&canonical)
             .with_context(|| format!("could not find .agent-doc root for {}", file.display()))?;
         let dir = root.join(".agent-doc/logs/route-submit");
         std::fs::create_dir_all(&dir)
@@ -1383,7 +1383,7 @@ fn authoritative_actor_dispatch_target_eligible(actor: &AuthoritativeActorDispat
 
 fn supervisor_socket_path(file: &Path, session_id: &str) -> Option<std::path::PathBuf> {
     let canonical = file.canonicalize().ok()?;
-    let project_root = snapshot::find_project_root(&canonical)?;
+    let project_root = agent_doc_fs::find_project_root(&canonical)?;
     Some(crate::supervisor::ipc::socket_path(
         &project_root,
         session_id,
@@ -1454,7 +1454,7 @@ fn restart_via_supervisor_with_mode(file: &Path, session_id: &str, mode: &str) -
         Ok(c) => c,
         Err(_) => return false,
     };
-    let project_root = match snapshot::find_project_root(&canonical) {
+    let project_root = match agent_doc_fs::find_project_root(&canonical) {
         Some(r) => r,
         None => return false,
     };
@@ -3061,7 +3061,7 @@ fn activate_existing_route_queue_head(
 fn route_queue_lock_path(file: &Path) -> Result<PathBuf> {
     let canonical = std::fs::canonicalize(file)
         .with_context(|| format!("failed to canonicalize {}", file.display()))?;
-    let base = snapshot::find_project_root(&canonical)
+    let base = agent_doc_fs::find_project_root(&canonical)
         .or_else(|| canonical.parent().map(Path::to_path_buf))
         .ok_or_else(|| {
             anyhow::anyhow!("failed to resolve queue lock root for {}", file.display())
@@ -3197,7 +3197,7 @@ fn failed_route_registry_root(file: &Path) -> Option<std::path::PathBuf> {
     let canonical = std::fs::canonicalize(file)
         .ok()
         .unwrap_or_else(|| file.to_path_buf());
-    snapshot::find_project_root(&canonical)
+    agent_doc_fs::find_project_root(&canonical)
         .or_else(|| canonical.parent().map(|parent| parent.to_path_buf()))
 }
 

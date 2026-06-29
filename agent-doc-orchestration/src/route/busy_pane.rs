@@ -45,7 +45,7 @@ pub(crate) fn maybe_run_test_busy_auto_fix_hook(
     file: &Path,
     pane: &str,
 ) -> Result<bool> {
-    let Some(project_root) = snapshot::find_project_root(file)
+    let Some(project_root) = agent_doc_fs::find_project_root(file)
         .or_else(|| file.parent().map(|parent| parent.to_path_buf()))
     else {
         return Ok(false);
@@ -79,7 +79,7 @@ pub(crate) fn maybe_run_test_busy_interrupt_hook(
     file: &Path,
     pane: &str,
 ) -> Result<bool> {
-    let Some(project_root) = snapshot::find_project_root(file)
+    let Some(project_root) = agent_doc_fs::find_project_root(file)
         .or_else(|| file.parent().map(|parent| parent.to_path_buf()))
     else {
         return Ok(false);

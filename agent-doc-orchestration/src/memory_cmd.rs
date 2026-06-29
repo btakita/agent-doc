@@ -15,7 +15,6 @@ use tsift_memory::{
     default_memory_db_path, read_memory_events,
 };
 
-use crate::fs_util;
 use crate::snapshot;
 use agent_doc_element::element;
 use agent_doc_element_backlog::backlog::{self, PendingItem, PendingListMarker, PendingState};
@@ -853,7 +852,7 @@ fn read_done_archive(file: &Path, archive: &str) -> Result<Option<(PathBuf, Stri
     {
         bail!("agent:done archive={archive} must be repo-relative");
     }
-    let root = fs_util::find_project_root_canonical(file)
+    let root = agent_doc_fs::find_project_root_canonical(file)
         .with_context(|| format!("failed to find project root for {}", file.display()))?;
     let target = root.join(relative);
     if let Ok(canonical_target) = target.canonicalize()
@@ -872,7 +871,7 @@ fn resolve_memory_db_path(file: &Path, db: Option<&Path>) -> Result<PathBuf> {
     if let Some(db) = db {
         return Ok(db.to_path_buf());
     }
-    let root = fs_util::find_project_root_canonical(file)
+    let root = agent_doc_fs::find_project_root_canonical(file)
         .or_else(|| std::env::current_dir().ok())
         .with_context(|| format!("failed to resolve memory DB root for {}", file.display()))?;
     Ok(default_memory_db_path(&root))

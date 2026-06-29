@@ -266,7 +266,7 @@ fn collect_patch_sources(file: &Path, sources: &mut Vec<QueueSource>) {
     let Ok(hash) = snapshot::doc_hash(file) else {
         return;
     };
-    let Some(project_root) = snapshot::find_project_root(file) else {
+    let Some(project_root) = agent_doc_fs::find_project_root(file) else {
         return;
     };
     let patches_dir = project_root.join(".agent-doc/patches");

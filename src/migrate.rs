@@ -217,7 +217,7 @@ fn migrate_comment(comment: &str) -> String {
 
 fn discover_session_docs() -> Result<Vec<PathBuf>> {
     let cwd = std::env::current_dir()?;
-    let root = snapshot::find_project_root(&cwd).unwrap_or_else(|| cwd.clone());
+    let root = agent_doc_fs::find_project_root(&cwd).unwrap_or_else(|| cwd.clone());
 
     let snapshots_dir = root.join(".agent-doc/snapshots");
     if !snapshots_dir.is_dir() {

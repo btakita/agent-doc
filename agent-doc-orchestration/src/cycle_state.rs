@@ -364,7 +364,7 @@ pub fn load(file: &Path) -> Result<Option<CycleState>> {
     let Some(path) = state_path(file)? else {
         return Ok(None);
     };
-    let Some(content) = crate::fs_util::read_optional_text(&path)? else {
+    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
         return Ok(None);
     };
     let state: CycleState = serde_json::from_str(&content)?;
@@ -1335,7 +1335,7 @@ fn state_path(file: &Path) -> Result<Option<PathBuf>> {
         Ok(p) => p,
         Err(_) => return Ok(None),
     };
-    let Some(root) = crate::snapshot::find_project_root(&canonical) else {
+    let Some(root) = agent_doc_fs::find_project_root(&canonical) else {
         return Ok(None);
     };
     let hash = crate::snapshot::doc_hash(&canonical)?;

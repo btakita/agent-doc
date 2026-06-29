@@ -144,9 +144,9 @@ fn canonicalize_dir(candidate: &Path, base: Option<&Path>, context_label: &str) 
 /// Returns the containing directory on hit. Returns `None` if the walk
 /// reaches the filesystem root without finding `.agent-doc/`.
 ///
-/// Delegates to [`crate::fs_util::find_project_root`].
+/// Delegates to [`agent_doc_fs::find_project_root`].
 fn find_project_root(start: &Path) -> Option<PathBuf> {
-    crate::fs_util::find_project_root(start)
+    agent_doc_fs::find_project_root(start)
 }
 
 #[cfg(test)]

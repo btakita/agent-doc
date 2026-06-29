@@ -3,8 +3,6 @@
 //! ## Spec
 //! - `doc_hash(doc)`: compute SHA-256 hex of the document's canonical absolute path.
 //!   Used as a stable, collision-resistant filename key for all per-doc state files.
-//! - `find_project_root(path)`: walk up directory tree to find the directory containing
-//!   `.agent-doc/`. Returns `None` if not found (e.g., in tests without project scaffolding).
 //! - `path_for(doc)`: compute snapshot path `<project_root>/.agent-doc/snapshots/<hash>.md`.
 //!   Falls back to a relative path when no project root is found.
 //! - `lock_path_for(doc)`: compute advisory lock path `<project_root>/.agent-doc/locks/<hash>.lock`.
@@ -98,6 +96,8 @@ use sha2::{Digest, Sha256};
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 
+use agent_doc_fs::find_project_root;
+
 const SNAP_DIR: &str = ".agent-doc/snapshots";
 const BASELINE_DIR: &str = ".agent-doc/baselines";
 const LOCK_DIR: &str = ".agent-doc/locks";
@@ -146,11 +146,6 @@ pub fn pending_path_for(doc: &Path) -> Result<PathBuf> {
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
     Ok(project_root.join(PENDING_DIR).join(format!("{}.md", hash)))
 }
-
-// `find_project_root` moved to `agent_doc_orchestration::fs_util` (Direction A,
-// increment 4). Re-exported here so `snapshot::find_project_root` call sites and
-// this module's internal unqualified callers resolve unchanged.
-pub use crate::fs_util::find_project_root;
 
 // ---------------------------------------------------------------------------
 // Advisory file lock for snapshot operations
@@ -440,7 +435,7 @@ pub fn save_baseline_model(doc: &Path, content: &str) -> Result<()> {
 /// projection only when it is byte-identical to the legacy base.
 pub fn load_baseline_model(doc: &Path, md_baseline: Option<&str>) -> Result<Option<String>> {
     let path = baseline_overlay_path_for(doc)?;
-    let bytes = match crate::fs_util::read_optional_bytes(&path)
+    let bytes = match agent_doc_fs::read_optional_bytes(&path)
         .with_context(|| format!("failed to read baseline overlay {}", path.display()))?
     {
         Some(b) => b,
@@ -930,7 +925,7 @@ pub fn save_pre_response(doc: &Path, content: &str) -> Result<()> {
 /// Load the pre-response snapshot for a document.
 pub fn load_pre_response(doc: &Path) -> Result<Option<String>> {
     let path = pre_response_path_for(doc)?;
-    crate::fs_util::read_optional_text(&path)
+    agent_doc_fs::read_optional_text(&path)
 }
 
 /// Delete the pre-response snapshot for a document.
@@ -1000,7 +995,7 @@ fn crdt_path_for_filename(doc: &Path, filename: String) -> Result<PathBuf> {
 pub fn load_crdt(doc: &Path) -> Result<Option<Vec<u8>>> {
     let path = crdt_path_for(doc)?;
     let _lock = acquire_crdt_lock(doc)?;
-    crate::fs_util::read_optional_bytes(&path)
+    agent_doc_fs::read_optional_bytes(&path)
         .with_context(|| format!("failed to read CRDT state {}", path.display()))
 }
 
@@ -1008,7 +1003,7 @@ pub fn load_crdt(doc: &Path) -> Result<Option<Vec<u8>>> {
 pub fn load_overlay_crdt(doc: &Path) -> Result<Option<Vec<u8>>> {
     let path = overlay_crdt_path_for(doc)?;
     let _lock = acquire_crdt_lock(doc)?;
-    crate::fs_util::read_optional_bytes(&path)
+    agent_doc_fs::read_optional_bytes(&path)
         .with_context(|| format!("failed to read overlay CRDT state {}", path.display()))
 }
 
@@ -1037,7 +1032,7 @@ fn rebuild_overlay_crdt_locked(path: &Path, markdown: &str) -> Result<usize> {
 pub fn load_multinode_crdt(doc: &Path) -> Result<Option<Vec<u8>>> {
     let path = multinode_crdt_path_for(doc)?;
     let _lock = acquire_crdt_lock(doc)?;
-    crate::fs_util::read_optional_bytes(&path)
+    agent_doc_fs::read_optional_bytes(&path)
         .with_context(|| format!("failed to read per-node CRDT state {}", path.display()))
 }
 
@@ -1061,7 +1056,7 @@ pub fn multinode_crdt_state(
 ) -> Result<agent_doc_merge::crdt::MultiNodeState> {
     let _lock = acquire_crdt_lock(doc)?;
     let nodes_path = multinode_crdt_path_for(doc)?;
-    if let Some(bytes) = crate::fs_util::read_optional_bytes(&nodes_path).with_context(|| {
+    if let Some(bytes) = agent_doc_fs::read_optional_bytes(&nodes_path).with_context(|| {
         format!(
             "failed to read per-node CRDT state {}",
             nodes_path.display()
@@ -1074,7 +1069,7 @@ pub fn multinode_crdt_state(
     }
     // No per-node sidecar yet — migrate the legacy whole-doc blob if present.
     let legacy_path = crdt_path_for(doc)?;
-    if let Some(bytes) = crate::fs_util::read_optional_bytes(&legacy_path)
+    if let Some(bytes) = agent_doc_fs::read_optional_bytes(&legacy_path)
         .with_context(|| format!("failed to read CRDT state {}", legacy_path.display()))?
     {
         return Ok(agent_doc_merge::crdt::MultiNodeState::decode_or_migrate(
@@ -1218,7 +1213,7 @@ fn rebuild_overlay_to_baseline(doc: &Path, path: &Path, baseline: &str) {
 pub fn crdt_merge_base_state(doc: &Path, fallback_markdown: &str) -> Result<CrdtMergeBase> {
     let path = overlay_crdt_path_for(doc)?;
     let _lock = acquire_crdt_lock(doc)?;
-    let overlay_bytes = crate::fs_util::read_optional_bytes(&path)
+    let overlay_bytes = agent_doc_fs::read_optional_bytes(&path)
         .with_context(|| format!("failed to read overlay CRDT state {}", path.display()))?;
 
     let (markdown, source) = match overlay_bytes {

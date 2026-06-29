@@ -160,7 +160,7 @@ impl RunStderrRedirect {
         let canonical = file
             .canonicalize()
             .with_context(|| format!("failed to canonicalize {}", file.display()))?;
-        let project_root = crate::snapshot::find_project_root(&canonical)
+        let project_root = agent_doc_fs::find_project_root(&canonical)
             .with_context(|| format!("failed to resolve project root for {}", file.display()))?;
         let logs_dir = project_root.join(".agent-doc").join("logs");
         std::fs::create_dir_all(&logs_dir)
@@ -936,7 +936,7 @@ fn active_queue_prompt_state(file: &Path) -> Result<ActiveQueuePromptState> {
 
 fn typed_queue_prompt_state(file: &Path, content: &str) -> Option<ActiveQueuePromptState> {
     let canonical = file.canonicalize().ok()?;
-    let project_root = snapshot::find_project_root(&canonical)?;
+    let project_root = agent_doc_fs::find_project_root(&canonical)?;
     let document_hash = snapshot::doc_hash(&canonical).ok()?;
     let ledger = crate::project_controller::load_state_event_ledger(&project_root).ok()?;
     let projection = ledger.project_document(&document_hash)?;
@@ -1683,7 +1683,7 @@ fn run_dispatch_timeout_diagnostic(file: &Path, agent_name: &str) -> String {
 
 fn actor_record_for_file(file: &Path) -> Result<Option<crate::session_actor::ActorRecord>> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let Some(project_root) = snapshot::find_project_root(&canonical) else {
+    let Some(project_root) = agent_doc_fs::find_project_root(&canonical) else {
         return Ok(None);
     };
     let file_arg = canonical.to_string_lossy();

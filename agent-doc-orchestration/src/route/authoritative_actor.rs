@@ -683,7 +683,7 @@ pub(crate) enum StartingActorTimeoutLogDecision {
 
 pub(crate) fn starting_actor_timeout_paths(file_path: &str) -> Option<(PathBuf, PathBuf)> {
     let requested = PathBuf::from(file_path);
-    let root = crate::snapshot::find_project_root(&requested)?;
+    let root = agent_doc_fs::find_project_root(&requested)?;
     let hash = crate::snapshot::doc_hash_from_str(file_path);
     let state_dir = root.join(".agent-doc/state/route-starting-timeouts");
     let lock_dir = root.join(".agent-doc/locks");

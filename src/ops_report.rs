@@ -115,7 +115,7 @@ pub fn run_summary(project_root: Option<&Path>, limit: usize, json: bool) -> Res
     let cwd = std::env::current_dir()?;
     let root = match project_root {
         Some(root) => root.to_path_buf(),
-        None => agent_doc_orchestration::snapshot::find_project_root(&cwd).unwrap_or(cwd),
+        None => agent_doc_fs::find_project_root(&cwd).unwrap_or(cwd),
     };
     let log_path = root.join(".agent-doc/logs/ops.log");
     let contents = std::fs::read_to_string(&log_path)
@@ -372,12 +372,12 @@ fn resolve_diagnosis_root(project_root: Option<&Path>, file: Option<&Path>) -> R
         return Ok(root.to_path_buf());
     }
     if let Some(file) = file
-        && let Some(root) = agent_doc_orchestration::snapshot::find_project_root(file)
+        && let Some(root) = agent_doc_fs::find_project_root(file)
     {
         return Ok(root);
     }
     let cwd = std::env::current_dir()?;
-    Ok(agent_doc_orchestration::snapshot::find_project_root(&cwd).unwrap_or(cwd))
+    Ok(agent_doc_fs::find_project_root(&cwd).unwrap_or(cwd))
 }
 
 fn normalize_file_query(file: &Path, root: &Path) -> String {

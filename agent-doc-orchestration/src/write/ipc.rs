@@ -1288,7 +1288,7 @@ pub(crate) fn preserve_ipcfullprompt_forensic(
     let Ok(canonical) = file.canonicalize() else {
         return;
     };
-    let Some(root) = crate::fs_util::find_project_root(&canonical) else {
+    let Some(root) = agent_doc_fs::find_project_root(&canonical) else {
         return;
     };
     let dir = root.join(".agent-doc/logs/ipcfullprompt");

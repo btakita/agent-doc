@@ -52,7 +52,8 @@ pub struct PendingCallback {
 
 /// Compute the callback directory path for a document.
 fn callback_dir_for(doc: &Path) -> Result<PathBuf> {
-    let root = snapshot::find_project_root(doc).context("could not find .agent-doc directory")?;
+    let root =
+        agent_doc_fs::find_project_root(doc).context("could not find .agent-doc directory")?;
     let hash = snapshot::doc_hash(doc)?;
     Ok(root.join(".agent-doc").join("callbacks").join(hash))
 }
@@ -228,7 +229,7 @@ pub fn scan_pending_callbacks(project_root: Option<&str>) -> Result<Vec<PendingC
         PathBuf::from(root).join(".agent-doc/callbacks")
     } else {
         let cwd = std::env::current_dir()?;
-        let Some(root) = snapshot::find_project_root(&cwd) else {
+        let Some(root) = agent_doc_fs::find_project_root(&cwd) else {
             return Ok(Vec::new());
         };
         root.join(".agent-doc/callbacks")

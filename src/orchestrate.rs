@@ -837,7 +837,7 @@ fn queue_task_batch(file: &Path, doc: &str) -> Result<ResolvedTaskBatch> {
             file.display()
         )
     })?;
-    let project_root = snapshot::find_project_root(&canonical).ok_or_else(|| {
+    let project_root = agent_doc_fs::find_project_root(&canonical).ok_or_else(|| {
         anyhow::anyhow!(
             "typed queue dispatch requires a .agent-doc project root for {}",
             file.display()

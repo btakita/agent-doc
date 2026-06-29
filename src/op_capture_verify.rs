@@ -29,7 +29,7 @@ fn verify(file: &Path, expect_cafe_demo: bool) -> Result<OpCaptureVerification> 
     let canonical = file
         .canonicalize()
         .with_context(|| format!("failed to canonicalize {}", file.display()))?;
-    let project_root = agent_doc_orchestration::fs_util::find_project_root(&canonical)
+    let project_root = agent_doc_fs::find_project_root(&canonical)
         .with_context(|| format!("no .agent-doc project root found for {}", file.display()))?;
     let ops_log = project_root.join(".agent-doc/logs/ops.log");
     let log = std::fs::read_to_string(&ops_log)

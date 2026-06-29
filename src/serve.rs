@@ -141,7 +141,7 @@ impl ServeState {
             Some(target) => target,
             None => {
                 let cwd = std::env::current_dir().context("failed to get current directory")?;
-                agent_doc_orchestration::snapshot::find_project_root(&cwd).unwrap_or(cwd)
+                agent_doc_fs::find_project_root(&cwd).unwrap_or(cwd)
             }
         };
         if !raw_target.exists() {
@@ -151,7 +151,7 @@ impl ServeState {
             .canonicalize()
             .with_context(|| format!("failed to canonicalize {}", raw_target.display()))?;
         if canonical.is_file() {
-            let root = agent_doc_orchestration::snapshot::find_project_root(&canonical)
+            let root = agent_doc_fs::find_project_root(&canonical)
                 .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
             Ok(Self {
                 root,
@@ -160,8 +160,7 @@ impl ServeState {
                 auth,
             })
         } else {
-            let root = agent_doc_orchestration::snapshot::find_project_root(&canonical)
-                .unwrap_or(canonical);
+            let root = agent_doc_fs::find_project_root(&canonical).unwrap_or(canonical);
             Ok(Self {
                 root,
                 default_doc: None,

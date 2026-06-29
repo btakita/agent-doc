@@ -28,7 +28,6 @@ use std::time::{Duration, Instant};
 
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_orchestration::sessions::Tmux;
-use agent_doc_orchestration::snapshot;
 
 /// Configuration for a deep run.
 pub struct ParallelConfig {
@@ -87,7 +86,7 @@ pub fn run(file: &Path, config: ParallelConfig) -> Result<()> {
     let canonical = file
         .canonicalize()
         .with_context(|| format!("failed to canonicalize {}", file.display()))?;
-    let project_root = snapshot::find_project_root(&canonical).ok_or_else(|| {
+    let project_root = agent_doc_fs::find_project_root(&canonical).ok_or_else(|| {
         anyhow::anyhow!("no .agent-doc/ project root found for {}", file.display())
     })?;
 

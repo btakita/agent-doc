@@ -1250,7 +1250,7 @@ fn maybe_auto_resync_on_drift(file: &std::path::Path, layout_issues: &[String]) 
     let Ok(canonical) = file.canonicalize() else {
         return;
     };
-    let Some(project_root) = snapshot::find_project_root(&canonical) else {
+    let Some(project_root) = agent_doc_fs::find_project_root(&canonical) else {
         return;
     };
     let state_dir = project_root.join(".agent-doc/state");
@@ -1344,7 +1344,7 @@ fn clear_base_index_repair_counter(file: &std::path::Path) {
     let Ok(canonical) = file.canonicalize() else {
         return;
     };
-    let Some(project_root) = snapshot::find_project_root(&canonical) else {
+    let Some(project_root) = agent_doc_fs::find_project_root(&canonical) else {
         return;
     };
     let counter_path = project_root.join(".agent-doc/state/base-index-repair.count");
@@ -2759,7 +2759,7 @@ fn resolve_done_archive_target(file: &Path, archive_path: &str) -> Result<PathBu
     }
 
     let canonical_file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let root = crate::snapshot::find_project_root(&canonical_file).with_context(|| {
+    let root = agent_doc_fs::find_project_root(&canonical_file).with_context(|| {
         format!(
             "failed to find repository root for done archive resolution from {}",
             file.display()
@@ -2848,7 +2848,7 @@ fn render_done_archive_entry(
 fn claims_log_path(file: &Path) -> Option<std::path::PathBuf> {
     // Canonicalize to find project root reliably.
     let canonical = file.canonicalize().ok()?;
-    let root = snapshot::find_project_root(&canonical)?;
+    let root = agent_doc_fs::find_project_root(&canonical)?;
 
     Some(root.join(".agent-doc/claims.log"))
 }
@@ -3307,7 +3307,7 @@ mod th {
     }
     pub(crate) fn age_cycle_state(file: &Path, age_secs: u64) {
         let canonical = file.canonicalize().unwrap();
-        let root = crate::snapshot::find_project_root(&canonical).unwrap();
+        let root = agent_doc_fs::find_project_root(&canonical).unwrap();
         let hash = crate::snapshot::doc_hash(&canonical).unwrap();
         let path = root
             .join(".agent-doc/state/cycles")

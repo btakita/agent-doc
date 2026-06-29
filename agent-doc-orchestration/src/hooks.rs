@@ -145,7 +145,7 @@ pub fn fire_post_commit(file: &Path, session_id: &str) {
 /// files logs nothing. Logs a one-line ops summary only when it reaps > 0.
 fn reap_stale_jetbrains_consumers_closeout(file: &Path) {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let Some(project_root) = crate::snapshot::find_project_root(&canonical) else {
+    let Some(project_root) = agent_doc_fs::find_project_root(&canonical) else {
         return;
     };
     let reaped = reap_stale_jetbrains_consumers(&project_root);
@@ -230,7 +230,7 @@ fn capture_tsift_memory_closeout(file: &Path) {
         }
     };
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let Some(project_root) = crate::snapshot::find_project_root(&canonical) else {
+    let Some(project_root) = agent_doc_fs::find_project_root(&canonical) else {
         return;
     };
     if !project_root.join(".tsift/memory.db").exists() {
@@ -339,7 +339,7 @@ fn reap_command_args(lease_file: Option<&str>, host: Option<&str>) -> Vec<String
 /// concurrent live extractor's lease.
 pub(crate) fn reap_local_model_leases(file: &Path) -> ReapOutcome {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let Some(project_root) = crate::snapshot::find_project_root(&canonical) else {
+    let Some(project_root) = agent_doc_fs::find_project_root(&canonical) else {
         return ReapOutcome::SkippedNoProjectRoot;
     };
     if !project_root.join(DEFAULT_LEASE_REGISTRY_RELATIVE).exists() {

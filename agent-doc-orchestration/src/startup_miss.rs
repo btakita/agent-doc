@@ -127,7 +127,7 @@ fn state_path(file: &Path) -> Result<Option<PathBuf>> {
         Ok(p) => p,
         Err(_) => return Ok(None),
     };
-    let Some(root) = crate::snapshot::find_project_root(&canonical) else {
+    let Some(root) = agent_doc_fs::find_project_root(&canonical) else {
         return Ok(None);
     };
     let hash = crate::snapshot::doc_hash(&canonical)?;
@@ -142,7 +142,7 @@ fn log_path(file: &Path, session_id: &str) -> Result<Option<PathBuf>> {
         Ok(p) => p,
         Err(_) => return Ok(None),
     };
-    let Some(root) = crate::snapshot::find_project_root(&canonical) else {
+    let Some(root) = agent_doc_fs::find_project_root(&canonical) else {
         return Ok(None);
     };
     Ok(Some(
@@ -155,7 +155,7 @@ fn project_root(file: &Path) -> Option<PathBuf> {
     let canonical = std::fs::canonicalize(file)
         .ok()
         .unwrap_or_else(|| file.to_path_buf());
-    crate::snapshot::find_project_root(&canonical)
+    agent_doc_fs::find_project_root(&canonical)
 }
 
 pub fn append_session_log_event(file: &Path, session_id: &str, event: &str) -> Result<bool> {
@@ -226,7 +226,7 @@ pub fn load(file: &Path) -> Result<Option<StartupMiss>> {
     let Some(path) = state_path(file)? else {
         return Ok(None);
     };
-    let Some(content) = crate::fs_util::read_optional_text(&path)? else {
+    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
         return Ok(None);
     };
     let marker: StartupMiss = serde_json::from_str(&content)?;
@@ -291,7 +291,7 @@ pub fn session_log_status(file: &Path, session_id: &str) -> Result<Option<Sessio
     let Some(path) = log_path(file, session_id)? else {
         return Ok(None);
     };
-    let Some(content) = crate::fs_util::read_optional_text(&path)? else {
+    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
         return Ok(None);
     };
     let mut saw_start = false;
@@ -420,7 +420,7 @@ fn session_log_has_event_after_latest_start_matching(
     let Some(path) = log_path(file, session_id)? else {
         return Ok(false);
     };
-    let Some(content) = crate::fs_util::read_optional_text(&path)? else {
+    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
         return Ok(false);
     };
     let mut found_after_latest_start = false;
@@ -597,7 +597,7 @@ fn recent_session_loss_window_at(
     let Some(path) = log_path(file, session_id)? else {
         return Ok(None);
     };
-    let Some(content) = crate::fs_util::read_optional_text(&path)? else {
+    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
         return Ok(None);
     };
     let cutoff = now_epoch_secs.saturating_sub(RECENT_SESSION_LOSS_WINDOW_SECS);

@@ -30,7 +30,7 @@ pub(crate) fn safe_passive_local_actor_record_state(
         .canonicalize()
         .ok()
         .unwrap_or_else(|| focus_path.to_path_buf());
-    let base_dir = crate::snapshot::find_project_root(&canonical)?;
+    let base_dir = agent_doc_fs::find_project_root(&canonical)?;
     crate::session_actor::load_record_in(&base_dir, &canonical.to_string_lossy()).ok()
 }
 
@@ -42,7 +42,7 @@ pub(crate) fn safe_passive_registry_pane_state(
         .canonicalize()
         .ok()
         .unwrap_or_else(|| focus_path.to_path_buf());
-    let base_dir = crate::snapshot::find_project_root(&canonical)?;
+    let base_dir = agent_doc_fs::find_project_root(&canonical)?;
     crate::sessions::lookup_in(&base_dir, session_id).ok()
 }
 

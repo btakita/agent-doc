@@ -35,7 +35,6 @@ use anyhow::{Context, Result};
 
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_orchestration::sessions;
-use agent_doc_orchestration::snapshot;
 use agent_doc_orchestration::supervisor::ipc as supervisor_ipc;
 
 /// Classification of a queue/orchestration item.
@@ -116,7 +115,7 @@ impl DispatchContext {
         let doc = std::fs::read_to_string(file)
             .with_context(|| format!("failed to read {}", file.display()))?;
         let (fm, _) = frontmatter::parse(&doc)?;
-        let project_root = snapshot::find_project_root(file);
+        let project_root = agent_doc_fs::find_project_root(file);
 
         let pane_id = if let (Some(root), Some(session)) = (&project_root, &fm.session) {
             lookup_pane(root, session)

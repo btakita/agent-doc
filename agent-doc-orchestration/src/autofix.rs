@@ -132,7 +132,7 @@ pub fn autofix(file: &Path, options: &WorkflowAutofixOptions) -> Result<Workflow
     let canonical = file
         .canonicalize()
         .with_context(|| format!("failed to canonicalize {}", file.display()))?;
-    let project_root = crate::fs_util::find_project_root(&canonical);
+    let project_root = agent_doc_fs::find_project_root(&canonical);
     let mut warnings = doctor.warnings.clone();
     let ledger_path = project_root
         .as_deref()

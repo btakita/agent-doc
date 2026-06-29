@@ -146,7 +146,7 @@ use agent_doc_queue::queue::{
 #[cfg(unix)]
 use agent_doc_supervisor_process::ReexecState;
 
-use crate::{config, sessions, snapshot};
+use crate::{config, project_config_io, sessions, snapshot};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum RouteOwnedReapPolicy {
@@ -2734,7 +2734,7 @@ fn rebind_project_tmux_session_if_expected_dead(
     if actual_session == expected_session || tmux.session_alive(expected_session) {
         return;
     }
-    match config::update_project_tmux_session(&actual_session) {
+    match project_config_io::update_project_tmux_session(&actual_session) {
         Ok(()) => eprintln!(
             "[start] configured project session '{}' is dead — rebound tmux_session to '{}'",
             expected_session, actual_session

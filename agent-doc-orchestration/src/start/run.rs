@@ -469,7 +469,7 @@ pub fn run_with_reap_policy(
     // a fresh session in this pane. If a live owner already exists elsewhere, moving the
     // launcher pane first can rip it out of its original tmux window/session before the
     // reuse path returns.
-    if let Some(expected_session) = config::project_tmux_session()
+    if let Some(expected_session) = crate::project_config_io::project_tmux_session()
         && !relocate_if_wrong_session(&tmux, &pane_id, &expected_session)
     {
         rebind_project_tmux_session_if_expected_dead(&tmux, &pane_id, &expected_session);

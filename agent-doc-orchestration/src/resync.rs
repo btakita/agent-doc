@@ -13,7 +13,7 @@
 //!   problem classes: `InStash` (pane parked in a stash window), `WrongProcess`
 //!   (pane running a non-agent process such as `corky watch`), `WrongSession`
 //!   (pane's tmux session differs from the document's `tmux_session` frontmatter
-//!   field, or from `config::project_tmux_session()` when frontmatter field is absent),
+//!   field, or from `project_config_io::project_tmux_session()` when frontmatter field is absent),
 //!   `NoLiveOwner` (alive registered pane no longer proves ownership of its
 //!   document), and `WrongWindow` (panes for the same tmux session are scattered
 //!   across multiple non-stash windows, determined by majority-window vote).
@@ -99,7 +99,7 @@ use std::time::{Duration, Instant};
 use crate::sessions::{self, PaneMoveOp, Tmux};
 use agent_doc_frontmatter::frontmatter;
 
-use crate::{config, frontmatter_io};
+use crate::{frontmatter_io, project_config_io};
 
 /// Valid process names for agent-doc panes.
 const AGENT_PROCESSES: &[&str] = &["agent-doc", "claude", "codex", "node"];
@@ -463,7 +463,7 @@ fn recover_target_document_pane_in(
         return Ok(TargetDocumentFixOutcome::default());
     };
 
-    let preferred_window = config::project_tmux_session()
+    let preferred_window = project_config_io::project_tmux_session()
         .as_deref()
         .and_then(|session| tmux.active_window(session));
     let candidates = crate::sync::filter_associated_panes_for_document(
@@ -761,7 +761,7 @@ fn detect_issues_in_registry(tmux: &Tmux, registry: &sessions::SessionRegistry) 
         // Use frontmatter `tmux_session` if present; otherwise fall back to project config.
         // This ensures cross-session drift is detected even when documents lack a
         // `tmux_session` frontmatter field (the common case).
-        let expected_session = frontmatter_session.or_else(config::project_tmux_session);
+        let expected_session = frontmatter_session.or_else(project_config_io::project_tmux_session);
 
         if let Some(ref expected) = expected_session {
             match tmux.pane_session(&entry.pane) {

@@ -2,9 +2,8 @@
 //! pure [`agent_doc_frontmatter::project_config`] surface. Kept out of
 //! `agent-doc-frontmatter` so the focused crate stays parse-only.
 //!
-//! Re-exported through the main crate's `project_config` shim so the ~25
-//! existing call sites in main (session_check, session_accretion, mode,
-//! claim, patch, lint_gate, etc.) continue resolving unchanged.
+//! Orchestration and the CLI shell call this module directly for file-backed
+//! project configuration effects.
 
 #![allow(dead_code)]
 

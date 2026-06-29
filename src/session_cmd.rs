@@ -28,11 +28,11 @@
 
 use anyhow::{Context, Result};
 
-use agent_doc_orchestration::{config, resync, sessions::Tmux};
+use agent_doc_orchestration::{project_config_io, resync, sessions::Tmux};
 
 /// Show the currently configured tmux session.
 pub fn show() -> Result<()> {
-    let session = config::project_tmux_session();
+    let session = project_config_io::project_tmux_session();
     match session {
         Some(s) => println!("{}", s),
         None => println!("(auto-detect)"),
@@ -42,17 +42,17 @@ pub fn show() -> Result<()> {
 
 /// Clear the configured tmux session, returning to auto-detect mode.
 pub fn clear() -> Result<()> {
-    config::clear_project_tmux_session()?;
+    project_config_io::clear_project_tmux_session()?;
     Ok(())
 }
 
 /// Set the tmux session and migrate all registered panes.
 pub fn set(name: &str) -> Result<()> {
     let tmux = Tmux::default_server();
-    let old_session = config::project_tmux_session();
+    let old_session = project_config_io::project_tmux_session();
 
     // Update config first
-    config::update_project_tmux_session(name)?;
+    project_config_io::update_project_tmux_session(name)?;
 
     // Try to move the agent-doc window from old session to new session
     if let Some(ref old) = old_session {

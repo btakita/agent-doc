@@ -27,15 +27,6 @@ use std::path::PathBuf;
 use agent_doc_frontmatter::frontmatter::CodexNetworkAccess;
 use agent_doc_model_tier::ModelConfig;
 
-// Re-export project-level tmux helpers from the sibling I/O module (for
-// convenience). Consumed across the crate boundary by the main `agent-doc`
-// crate (start/claim/route/resync via `crate::config::*`), so the
-// orchestration crate's own compilation can't see the uses.
-#[allow(unused_imports)]
-pub use crate::project_config_io::{
-    clear_project_tmux_session, project_tmux_session, update_project_tmux_session,
-};
-
 /// Execution mode for skill-level parallelism.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

@@ -348,7 +348,7 @@ pub fn run(
             .ok()
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
             .unwrap_or_default();
-        if let Some(configured) = crate::config::project_tmux_session()
+        if let Some(configured) = project_config_io::project_tmux_session()
             && !pane_tmux_session.is_empty()
             && pane_tmux_session != configured
         {

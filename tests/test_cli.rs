@@ -2553,6 +2553,67 @@ fn test_agent_doc_work_graph_is_source_agnostic_boundary() {
 }
 
 #[test]
+fn test_project_config_io_tmux_helpers_have_no_config_facade() {
+    fn contains_path_segment(source: &str, needle: &str) -> bool {
+        source.match_indices(needle).any(|(index, _)| {
+            let previous = source[..index].chars().next_back();
+            !matches!(previous, Some(c) if c.is_ascii_alphanumeric() || c == '_')
+        })
+    }
+
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let config_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/config.rs")).unwrap();
+    for forbidden_snippet in [
+        "pub use crate::project_config_io",
+        "project_tmux_session,",
+        "clear_project_tmux_session",
+        "update_project_tmux_session",
+    ] {
+        assert!(
+            !config_source.contains(forbidden_snippet),
+            "config.rs must not re-export project-config IO helpers: {forbidden_snippet}"
+        );
+    }
+
+    let project_config_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/project_config_io.rs"))
+            .unwrap();
+    for required_snippet in [
+        "pub fn project_tmux_session()",
+        "pub fn update_project_tmux_session(",
+        "pub fn clear_project_tmux_session()",
+    ] {
+        assert!(
+            project_config_source.contains(required_snippet),
+            "project_config_io must own file-backed project tmux helper: {required_snippet}"
+        );
+    }
+
+    for relative in [
+        "src/session_cmd.rs",
+        "agent-doc-orchestration/src/claim.rs",
+        "agent-doc-orchestration/src/route/session_resolution.rs",
+        "agent-doc-orchestration/src/resync.rs",
+        "agent-doc-orchestration/src/start.rs",
+        "agent-doc-orchestration/src/start/run.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        for forbidden_snippet in [
+            "config::project_tmux_session",
+            "config::clear_project_tmux_session",
+            "config::update_project_tmux_session",
+            "crate::config::project_tmux_session",
+        ] {
+            assert!(
+                !contains_path_segment(&source, forbidden_snippet),
+                "{relative} must call project_config_io helpers directly: {forbidden_snippet}"
+            );
+        }
+    }
+}
+
+#[test]
 fn test_agent_doc_merge_is_pure_workspace_boundary() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();

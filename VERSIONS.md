@@ -56,6 +56,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Route latency policy moved to `agent-doc-controller`.** The route latency budget status classifier and structured `route_latency` log formatter now live in `agent_doc_controller::dispatch`. Route still measures elapsed time and emits ops-log/stderr records, but it adapts those timings into the focused controller policy.
 
+- **Route dispatch diagnostic message policy moved to `agent-doc-controller`.** Startup-miss, busy-route, queued-busy, and dispatch-only busy-refusal operator message templates now live beside controller dispatch policy. Route still supplies file, harness, recovery-hint, wait-time, and outcome-field facts, but no longer owns those diagnostic templates.
+
 - **Tmux submit profile policy moved to `agent-doc-tmux-commands`.** The harness submit profile, submit-mode/key vocabulary, trailing-newline trimming, and text/Enter command builders now live in `agent_doc_tmux_commands`. `sessions` remains the effect adapter that executes tmux commands, while route/start/idle-watch import the focused command policy directly instead of routing through `sessions`.
 
 - **Route submit diagnostics no longer use an orchestration wrapper.** Route dispatch now calls `agent_doc_tmux_commands::tmux_submit_transform_for_harness` and `tmux_submit_key_for_harness` directly for text-submit diagnostics. The local `routed_trigger_submit_diagnostic` facade is deleted and covered by the tmux command boundary guard.

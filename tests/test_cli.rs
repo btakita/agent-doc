@@ -3790,6 +3790,14 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub struct RouteLatencyFacts",
         "pub fn route_latency_status(",
         "pub fn route_latency_message(",
+        "pub struct RouteStartupMissDiagnosticFacts",
+        "pub fn route_startup_miss_diagnostic_message(",
+        "pub struct RouteBusyDiagnosticFacts",
+        "pub fn route_busy_diagnostic_message(",
+        "pub struct RouteBusyQueuedDiagnosticFacts",
+        "pub fn route_busy_queued_diagnostic_message(",
+        "pub struct DispatchOnlyBusyRefusalFacts",
+        "pub fn dispatch_only_busy_refusal_message(",
     ] {
         assert!(
             controller_dispatch.contains(required_snippet),
@@ -3827,6 +3835,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn route_submit_issue_message(",
         "fn route_latency_status(",
         "fn route_latency_message(",
+        "fn startup_miss_diagnostic_message(",
+        "fn busy_route_diagnostic_message(",
+        "fn busy_route_queued_diagnostic_message(",
+        "fn dispatch_only_busy_refusal_message(",
     ] {
         assert!(
             !route_source.contains(forbidden_snippet),
@@ -3939,6 +3951,14 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("RouteLatencyStatus")
             && route_source.contains("route_latency_message(")
             && route_source.contains("route_latency_status(")
+            && route_source.contains("RouteStartupMissDiagnosticFacts")
+            && route_source.contains("route_startup_miss_diagnostic_message(")
+            && route_source.contains("RouteBusyDiagnosticFacts")
+            && route_source.contains("route_busy_diagnostic_message(")
+            && route_source.contains("RouteBusyQueuedDiagnosticFacts")
+            && route_source.contains("route_busy_queued_diagnostic_message(")
+            && route_source.contains("DispatchOnlyBusyRefusalFacts")
+            && route_source.contains("controller_dispatch_only_busy_refusal_message(")
             && route_source.contains("DispatchActorState")
             && route_source.contains("dispatch_only_busy_should_wait_for_ready(")
             && route_source.contains("dispatch_only_should_probe_active_turn_cue(")

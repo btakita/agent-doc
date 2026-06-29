@@ -188,9 +188,10 @@ use agent_doc_controller::dispatch::{
     DirectPaneAcceptancePollState, DirectPaneDispatchStartProofFacts,
     DirectPaneEnterResubmitAttemptFacts, DirectPaneExistingDraftSubmitFacts,
     DirectPaneResubmitProofFacts, DirectPaneSubmitStatus as CommandDispatchStatus,
-    DispatchActorState, DispatchDrainRetryDecision, DispatchRuntimeHealth,
-    DispatchStartProofDecision, DispatchStartProofFacts, MissingCycleAckFacts, RetryBudget,
-    RouteLatencyFacts, RouteLatencyStatus, RouteSubmitObservation,
+    DispatchActorState, DispatchDrainRetryDecision, DispatchOnlyBusyRefusalFacts,
+    DispatchRuntimeHealth, DispatchStartProofDecision, DispatchStartProofFacts,
+    MissingCycleAckFacts, RetryBudget, RouteBusyDiagnosticFacts, RouteBusyQueuedDiagnosticFacts,
+    RouteLatencyFacts, RouteLatencyStatus, RouteStartupMissDiagnosticFacts, RouteSubmitObservation,
     RouteSubmitObservationFacts as ControllerRouteSubmitObservationFacts, RoutedCycleAckFacts,
     RoutedDispatchStartProof, RoutedTriggerPayloadFacts, STARTING_ACTOR_TIMEOUT_REASON,
     StartingTimeoutActorFacts, StartupMissRouteFacts, actor_blocked_by_starting_timeout,
@@ -201,13 +202,15 @@ use agent_doc_controller::dispatch::{
     direct_pane_resubmit_proof_line, direct_pane_should_await_dispatch_start_proof,
     direct_pane_submit_acceptance_budget, direct_pane_submit_acceptance_timeout,
     direct_pane_submit_outcome, dispatch_drain_retry_decision,
+    dispatch_only_busy_refusal_message as controller_dispatch_only_busy_refusal_message,
     dispatch_only_busy_should_wait_for_ready,
     dispatch_only_dispatch_start_proof_required as controller_dispatch_only_dispatch_start_proof_required,
     dispatch_only_should_probe_active_turn_cue,
     dispatch_only_starting_pane_ready_timeout_for_binary,
     dispatch_only_starting_pane_recovery_retry_budget,
     dispatch_only_starting_pane_recovery_timeout_for_binary, effective_authoritative_actor_state,
-    route_latency_message, route_latency_status, route_submit_issue_message,
+    route_busy_diagnostic_message, route_busy_queued_diagnostic_message, route_latency_message,
+    route_latency_status, route_startup_miss_diagnostic_message, route_submit_issue_message,
     route_submit_observation_message, routed_trigger_payload_rejection,
     should_optimistically_accept_missing_cycle_ack, should_require_routed_cycle_ack,
     starting_timeout_blocked_actor_can_recover, startup_miss_requires_fresh_start,
@@ -1751,23 +1754,6 @@ fn startup_miss_route_provenance(
 const STARTUP_MISS_DIAGNOSTIC_DISPLAY_MS: &str = "10000";
 const BUSY_ROUTE_DIAGNOSTIC_DISPLAY_MS: &str = "10000";
 
-fn startup_miss_diagnostic_message(file: &Path, reason: &str) -> String {
-    format!(
-        "[agent-doc] startup-miss: {}. Run 'agent-doc start {}' to retry.",
-        reason,
-        file.display()
-    )
-}
-
-fn busy_route_diagnostic_message(file: &Path, harness: &HarnessConfig) -> String {
-    format!(
-        "[agent-doc] routed follow-up for {} is still pending because the live {} session is busy. Finish or interrupt the current task, then rerun `Run Agent Doc` or `agent-doc route {}`.",
-        file.display(),
-        harness.binary,
-        file.display()
-    )
-}
-
 fn fail_if_recent_session_loss_window(file: &Path, session_id: &str) -> Result<()> {
     let Some(window) = crate::startup_miss::recent_session_loss_window(file, session_id)? else {
         return Ok(());
@@ -1800,7 +1786,11 @@ fn fail_if_recent_session_loss_window(file: &Path, session_id: &str) -> Result<(
 }
 
 fn emit_startup_miss_diagnostic(tmux: &Tmux, pane_id: &str, file: &Path, reason: &str) {
-    let msg = startup_miss_diagnostic_message(file, reason);
+    let file_display = file.display().to_string();
+    let msg = route_startup_miss_diagnostic_message(RouteStartupMissDiagnosticFacts {
+        file_display: &file_display,
+        reason,
+    });
     if let Err(e) = tmux
         .cmd()
         .args([
@@ -1821,7 +1811,11 @@ fn emit_startup_miss_diagnostic(tmux: &Tmux, pane_id: &str, file: &Path, reason:
 }
 
 fn emit_busy_route_diagnostic(tmux: &Tmux, pane_id: &str, file: &Path, harness: &HarnessConfig) {
-    let msg = busy_route_diagnostic_message(file, harness);
+    let file_display = file.display().to_string();
+    let msg = route_busy_diagnostic_message(RouteBusyDiagnosticFacts {
+        file_display: &file_display,
+        harness_binary: &harness.binary,
+    });
     if let Err(e) = tmux
         .cmd()
         .args([
@@ -1839,23 +1833,6 @@ fn emit_busy_route_diagnostic(tmux: &Tmux, pane_id: &str, file: &Path, harness: 
             pane_id, e
         );
     }
-}
-
-/// `#claude-busy-status-during-active-turn` (decision: status-surfacing only):
-/// message for the dispatch-only path where the routed Run Agent Doc landed on a
-/// pane that is busy on an active turn and was *queued* rather than refused. The
-/// queued path previously returned `Ok` silently, so the operator saw nothing and
-/// the session looked idle/unresponsive while a turn was in flight. This makes the
-/// turn-in-progress state and the auto-queue outcome visible. Unlike the generic
-/// busy diagnostic it does NOT tell the operator to rerun — the prompt will run on
-/// its own when the current turn finishes.
-fn busy_route_queued_diagnostic_message(file: &Path, harness: &HarnessConfig) -> String {
-    format!(
-        "[agent-doc] turn in progress — the live {} session is busy, so Run Agent Doc for {} was queued and will run when the current turn finishes. No need to rerun. {}",
-        harness.binary,
-        file.display(),
-        user_outcome_fields(crate::flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner)
-    )
 }
 
 fn user_outcome_fields(kind: crate::flow::outcome::UserFacingOutcomeKind) -> String {
@@ -1879,7 +1856,14 @@ fn emit_busy_route_queued_diagnostic(
     file: &Path,
     harness: &HarnessConfig,
 ) {
-    let msg = busy_route_queued_diagnostic_message(file, harness);
+    let file_display = file.display().to_string();
+    let user_outcome =
+        user_outcome_fields(crate::flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner);
+    let msg = route_busy_queued_diagnostic_message(RouteBusyQueuedDiagnosticFacts {
+        file_display: &file_display,
+        harness_binary: &harness.binary,
+        user_outcome_fields: &user_outcome,
+    });
     if let Err(e) = tmux
         .cmd()
         .args([
@@ -3223,49 +3207,6 @@ fn controller_dispatch_actor_state(
     }
 }
 
-/// Build the dispatch-only busy refusal message. When the live pane proved a
-/// genuine active turn (`active_turn_busy_cue`), the busy ready-wait was skipped
-/// (#jb-run-agent-doc-busy-active-turn-stall), so the "after waiting Ns" wording
-/// would be misleading — word it as a busy active turn instead. Otherwise keep
-/// the cold-start ready-wait wording.
-fn dispatch_only_busy_refusal_message(
-    harness: &HarnessConfig,
-    generation: u64,
-    file: &Path,
-    dispatch_pane: &str,
-    reason: &str,
-    active_turn_busy_cue: Option<&str>,
-    actor_state: agent_doc_sqlite::state_store::ActorState,
-) -> String {
-    match active_turn_busy_cue {
-        Some(cue) => format!(
-            "authoritative actor generation {} for {} owns pane {} but dispatch-only route will not inject a new trigger because the pane is busy on an active {} turn ({}), not at a dispatch-ready prompt. {} {}",
-            generation,
-            file.display(),
-            dispatch_pane,
-            harness.binary,
-            cue,
-            authoritative_actor_dispatch_recovery_hint(actor_state, file),
-            blocked_with_unblocker_fields("wait_for_owner_turn_to_finish")
-        ),
-        None => format!(
-            "authoritative actor generation {} for {} owns pane {} but dispatch-only route will not inject a new trigger because {} did not return to a dispatch-ready prompt in the current generation after waiting {}s. {} {}",
-            generation,
-            file.display(),
-            dispatch_pane,
-            reason,
-            dispatch_only_busy_refusal_wait_secs(
-                dispatch_only_starting_pane_recovery_timeout_for_binary(
-                    Some(harness.binary.as_str()),
-                    cfg!(test),
-                )
-            ),
-            authoritative_actor_dispatch_recovery_hint(actor_state, file),
-            blocked_with_unblocker_fields("wait_for_dispatch_ready_prompt")
-        ),
-    }
-}
-
 fn wait_for_authoritative_actor_ready(
     tmux: &Tmux,
     file: &Path,
@@ -4089,17 +4030,32 @@ fn route_via_authoritative_actor(
                     file,
                     RoutedReopenGuardReason::DispatchOnlyBusyActorNotReady,
                 );
+                let file_display = file.display().to_string();
+                let recovery_hint = authoritative_actor_dispatch_recovery_hint(actor_state, file);
+                let unblocker = if active_turn_busy_cue.is_some() {
+                    "wait_for_owner_turn_to_finish"
+                } else {
+                    "wait_for_dispatch_ready_prompt"
+                };
+                let blocked_outcome = blocked_with_unblocker_fields(unblocker);
                 anyhow::bail!(
                     "{}",
-                    dispatch_only_busy_refusal_message(
-                        harness,
-                        actor.record.generation,
-                        file,
-                        &dispatch_pane,
+                    controller_dispatch_only_busy_refusal_message(DispatchOnlyBusyRefusalFacts {
+                        generation: actor.record.generation,
+                        file_display: &file_display,
+                        dispatch_pane: &dispatch_pane,
+                        harness_binary: &harness.binary,
                         reason,
-                        active_turn_busy_cue.as_deref(),
-                        actor_state,
-                    )
+                        wait_secs: dispatch_only_busy_refusal_wait_secs(
+                            dispatch_only_starting_pane_recovery_timeout_for_binary(
+                                Some(harness.binary.as_str()),
+                                cfg!(test),
+                            )
+                        ),
+                        recovery_hint: &recovery_hint,
+                        active_turn_busy_cue: active_turn_busy_cue.as_deref(),
+                        blocked_outcome_fields: &blocked_outcome,
+                    })
                 );
             }
             eprintln!(
@@ -4186,17 +4142,32 @@ fn route_via_authoritative_actor(
                 );
                 Ok(dispatch_pane)
             } else {
+                let file_display = file.display().to_string();
+                let recovery_hint = authoritative_actor_dispatch_recovery_hint(actor_state, file);
+                let unblocker = if active_turn_busy_cue.is_some() {
+                    "wait_for_owner_turn_to_finish"
+                } else {
+                    "wait_for_dispatch_ready_prompt"
+                };
+                let blocked_outcome = blocked_with_unblocker_fields(unblocker);
                 anyhow::bail!(
                     "{}",
-                    dispatch_only_busy_refusal_message(
-                        harness,
-                        actor.record.generation,
-                        file,
-                        &dispatch_pane,
+                    controller_dispatch_only_busy_refusal_message(DispatchOnlyBusyRefusalFacts {
+                        generation: actor.record.generation,
+                        file_display: &file_display,
+                        dispatch_pane: &dispatch_pane,
+                        harness_binary: &harness.binary,
                         reason,
-                        active_turn_busy_cue.as_deref(),
-                        actor_state,
-                    )
+                        wait_secs: dispatch_only_busy_refusal_wait_secs(
+                            dispatch_only_starting_pane_recovery_timeout_for_binary(
+                                Some(harness.binary.as_str()),
+                                cfg!(test),
+                            )
+                        ),
+                        recovery_hint: &recovery_hint,
+                        active_turn_busy_cue: active_turn_busy_cue.as_deref(),
+                        blocked_outcome_fields: &blocked_outcome,
+                    })
                 )
             }
         }
@@ -6743,54 +6714,6 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         );
     }
     #[test]
-    fn dispatch_only_busy_refusal_message_distinguishes_active_turn_from_cold_wait() {
-        use agent_doc_sqlite::state_store::ActorState;
-        let harness = HarnessConfig::claude();
-        let file = std::path::Path::new("/tmp/sampleorders.md");
-
-        let active = dispatch_only_busy_refusal_message(
-            &harness,
-            282,
-            file,
-            "%1",
-            "actor not ready",
-            Some("Working (7m 29s · esc to interrupt)"),
-            ActorState::Busy,
-        );
-        assert!(
-            active.contains("busy on an active") && active.contains("esc to interrupt"),
-            "active-turn refusal must name the busy turn cue: {active}"
-        );
-        assert!(
-            active.contains("ui_outcome=blocked_with_exact_unblocker")
-                && active.contains("unblocker=wait_for_owner_turn_to_finish"),
-            "active-turn refusal must carry the typed unblocker outcome: {active}"
-        );
-        assert!(
-            !active.contains("after waiting"),
-            "active-turn refusal must not claim a ready-wait that was skipped: {active}"
-        );
-
-        let cold = dispatch_only_busy_refusal_message(
-            &harness,
-            282,
-            file,
-            "%1",
-            "actor not ready",
-            None,
-            ActorState::Busy,
-        );
-        assert!(
-            cold.contains("after waiting") && cold.contains("dispatch-ready prompt"),
-            "no-cue refusal keeps the cold-start ready-wait wording: {cold}"
-        );
-        assert!(
-            cold.contains("ui_outcome=blocked_with_exact_unblocker")
-                && cold.contains("unblocker=wait_for_dispatch_ready_prompt"),
-            "cold-wait refusal must carry the typed unblocker outcome: {cold}"
-        );
-    }
-    #[test]
     fn plain_trigger_override_uses_bare_agent_doc_reopen_for_route() {
         let mut claude = HarnessConfig::claude();
         apply_plain_trigger_override(&mut claude);
@@ -7911,16 +7834,6 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
         )));
     }
     #[test]
-    fn startup_miss_diagnostic_message_includes_retry_command() {
-        let doc = std::path::Path::new("tasks/agent-doc/agent-doc-bugs2.md");
-        let message = startup_miss_diagnostic_message(
-            doc,
-            "routed trigger accepted but no document cycle started for pending #smdq",
-        );
-        assert!(message.contains("[agent-doc] startup-miss:"));
-        assert!(message.contains("agent-doc start tasks/agent-doc/agent-doc-bugs2.md"));
-    }
-    #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn startup_miss_diagnostic_does_not_queue_shell_echo_in_pane() {
         let dir = tempfile::tempdir().unwrap();
@@ -8352,22 +8265,5 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
             failclosed_wait_context(&claude, Some("active claude turn"), 12),
             "the pane is busy on an active claude turn (active claude turn), not cold-starting"
         );
-    }
-    #[test]
-    fn busy_route_queued_diagnostic_names_turn_in_progress_and_no_rerun() {
-        // #claude-busy-status-during-active-turn: the dispatch-only queued path
-        // surfaces a turn-in-progress + queued status (not the generic "rerun" busy
-        // message), so the operator sees why Run Agent Doc did not start now and that
-        // it will run on its own when the current turn finishes.
-        let claude = crate::harness::HarnessConfig::claude();
-        let msg = busy_route_queued_diagnostic_message(std::path::Path::new("plan.md"), &claude);
-        assert!(msg.contains("turn in progress"), "{msg}");
-        assert!(msg.contains("queued"), "{msg}");
-        assert!(msg.contains("plan.md"), "{msg}");
-        assert!(msg.contains("claude"), "{msg}");
-        assert!(msg.contains("ui_outcome=queued_behind_owner"), "{msg}");
-        assert!(msg.contains("No need to rerun"), "{msg}");
-        // Must NOT carry the generic busy diagnostic's rerun instruction.
-        assert!(!msg.contains("rerun `Run Agent Doc`"), "{msg}");
     }
 }

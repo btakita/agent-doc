@@ -379,6 +379,84 @@ pub fn route_latency_message(facts: RouteLatencyFacts<'_>) -> String {
     message
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RouteStartupMissDiagnosticFacts<'a> {
+    pub file_display: &'a str,
+    pub reason: &'a str,
+}
+
+pub fn route_startup_miss_diagnostic_message(facts: RouteStartupMissDiagnosticFacts<'_>) -> String {
+    format!(
+        "[agent-doc] startup-miss: {}. Run 'agent-doc start {}' to retry.",
+        facts.reason, facts.file_display
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RouteBusyDiagnosticFacts<'a> {
+    pub file_display: &'a str,
+    pub harness_binary: &'a str,
+}
+
+pub fn route_busy_diagnostic_message(facts: RouteBusyDiagnosticFacts<'_>) -> String {
+    format!(
+        "[agent-doc] routed follow-up for {} is still pending because the live {} session is busy. Finish or interrupt the current task, then rerun `Run Agent Doc` or `agent-doc route {}`.",
+        facts.file_display, facts.harness_binary, facts.file_display
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RouteBusyQueuedDiagnosticFacts<'a> {
+    pub file_display: &'a str,
+    pub harness_binary: &'a str,
+    pub user_outcome_fields: &'a str,
+}
+
+pub fn route_busy_queued_diagnostic_message(facts: RouteBusyQueuedDiagnosticFacts<'_>) -> String {
+    format!(
+        "[agent-doc] turn in progress — the live {} session is busy, so Run Agent Doc for {} was queued and will run when the current turn finishes. No need to rerun. {}",
+        facts.harness_binary, facts.file_display, facts.user_outcome_fields
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DispatchOnlyBusyRefusalFacts<'a> {
+    pub generation: u64,
+    pub file_display: &'a str,
+    pub dispatch_pane: &'a str,
+    pub harness_binary: &'a str,
+    pub reason: &'a str,
+    pub wait_secs: u64,
+    pub recovery_hint: &'a str,
+    pub active_turn_busy_cue: Option<&'a str>,
+    pub blocked_outcome_fields: &'a str,
+}
+
+pub fn dispatch_only_busy_refusal_message(facts: DispatchOnlyBusyRefusalFacts<'_>) -> String {
+    match facts.active_turn_busy_cue {
+        Some(cue) => format!(
+            "authoritative actor generation {} for {} owns pane {} but dispatch-only route will not inject a new trigger because the pane is busy on an active {} turn ({}), not at a dispatch-ready prompt. {} {}",
+            facts.generation,
+            facts.file_display,
+            facts.dispatch_pane,
+            facts.harness_binary,
+            cue,
+            facts.recovery_hint,
+            facts.blocked_outcome_fields
+        ),
+        None => format!(
+            "authoritative actor generation {} for {} owns pane {} but dispatch-only route will not inject a new trigger because {} did not return to a dispatch-ready prompt in the current generation after waiting {}s. {} {}",
+            facts.generation,
+            facts.file_display,
+            facts.dispatch_pane,
+            facts.reason,
+            facts.wait_secs,
+            facts.recovery_hint,
+            facts.blocked_outcome_fields
+        ),
+    }
+}
+
 pub const STARTING_ACTOR_TIMEOUT_REASON: &str = "starting_actor_timeout";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1487,6 +1565,98 @@ mod tests {
         assert!(slow.contains("status=over_budget"), "{slow}");
         assert!(slow.contains("outcome=unproven_but_accepted"), "{slow}");
         assert!(slow.contains("editor_attempt_id=attempt_1_2"), "{slow}");
+    }
+
+    #[test]
+    fn route_startup_miss_diagnostic_names_retry_command() {
+        let message = route_startup_miss_diagnostic_message(RouteStartupMissDiagnosticFacts {
+            file_display: "tasks/agent-doc/agent-doc-bugs2.md",
+            reason: "routed trigger accepted but no document cycle started for pending #smdq",
+        });
+        assert!(message.contains("[agent-doc] startup-miss:"), "{message}");
+        assert!(
+            message.contains("agent-doc start tasks/agent-doc/agent-doc-bugs2.md"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn route_busy_diagnostic_names_rerun_and_busy_harness() {
+        let message = route_busy_diagnostic_message(RouteBusyDiagnosticFacts {
+            file_display: "plan.md",
+            harness_binary: "claude",
+        });
+        assert!(message.contains("live claude session is busy"), "{message}");
+        assert!(message.contains("agent-doc route plan.md"), "{message}");
+        assert!(message.contains("rerun `Run Agent Doc`"), "{message}");
+    }
+
+    #[test]
+    fn route_busy_queued_diagnostic_names_turn_in_progress_and_no_rerun() {
+        let message = route_busy_queued_diagnostic_message(RouteBusyQueuedDiagnosticFacts {
+            file_display: "plan.md",
+            harness_binary: "claude",
+            user_outcome_fields: "ui_outcome=queued_behind_owner",
+        });
+        assert!(message.contains("turn in progress"), "{message}");
+        assert!(message.contains("queued"), "{message}");
+        assert!(message.contains("plan.md"), "{message}");
+        assert!(message.contains("claude"), "{message}");
+        assert!(
+            message.contains("ui_outcome=queued_behind_owner"),
+            "{message}"
+        );
+        assert!(message.contains("No need to rerun"), "{message}");
+        assert!(!message.contains("rerun `Run Agent Doc`"), "{message}");
+    }
+
+    #[test]
+    fn dispatch_only_busy_refusal_message_distinguishes_active_turn_from_cold_wait() {
+        let active = dispatch_only_busy_refusal_message(DispatchOnlyBusyRefusalFacts {
+            generation: 282,
+            file_display: "/tmp/sampleorders.md",
+            dispatch_pane: "%1",
+            harness_binary: "claude",
+            reason: "actor not ready",
+            wait_secs: 8,
+            recovery_hint: "Run `agent-doc session interrupt-clear /tmp/sampleorders.md`.",
+            active_turn_busy_cue: Some("Working (7m 29s · esc to interrupt)"),
+            blocked_outcome_fields: "ui_outcome=blocked_with_exact_unblocker unblocker=wait_for_owner_turn_to_finish",
+        });
+        assert!(
+            active.contains("busy on an active") && active.contains("esc to interrupt"),
+            "active-turn refusal must name the busy turn cue: {active}"
+        );
+        assert!(
+            active.contains("ui_outcome=blocked_with_exact_unblocker")
+                && active.contains("unblocker=wait_for_owner_turn_to_finish"),
+            "active-turn refusal must carry the typed unblocker outcome: {active}"
+        );
+        assert!(
+            !active.contains("after waiting"),
+            "active-turn refusal must not claim a ready-wait that was skipped: {active}"
+        );
+
+        let cold = dispatch_only_busy_refusal_message(DispatchOnlyBusyRefusalFacts {
+            generation: 282,
+            file_display: "/tmp/sampleorders.md",
+            dispatch_pane: "%1",
+            harness_binary: "claude",
+            reason: "actor not ready",
+            wait_secs: 8,
+            recovery_hint: "Run `agent-doc session interrupt-clear /tmp/sampleorders.md`.",
+            active_turn_busy_cue: None,
+            blocked_outcome_fields: "ui_outcome=blocked_with_exact_unblocker unblocker=wait_for_dispatch_ready_prompt",
+        });
+        assert!(
+            cold.contains("after waiting") && cold.contains("dispatch-ready prompt"),
+            "no-cue refusal keeps the cold-start ready-wait wording: {cold}"
+        );
+        assert!(
+            cold.contains("ui_outcome=blocked_with_exact_unblocker")
+                && cold.contains("unblocker=wait_for_dispatch_ready_prompt"),
+            "cold-wait refusal must carry the typed unblocker outcome: {cold}"
+        );
     }
 
     #[test]

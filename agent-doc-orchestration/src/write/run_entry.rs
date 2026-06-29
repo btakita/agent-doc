@@ -27,7 +27,7 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
 
     // Strip leading "## Assistant" heading if present — the write command adds its own
-    let response = strip_assistant_heading(&response);
+    let response = agent_doc_turn::response_text::strip_assistant_heading(&response);
     prewrite_pending_capture_check(file, &response, &flags)?;
     auto_apply_pending_done_if_enabled(file, &response, &flags, &mut current_content)?;
     prewrite_pending_done_check(file, &response, &flags)?;
@@ -1461,7 +1461,7 @@ fn save_recovery_snapshot(file: &Path, content: &str, use_crdt: bool) -> Result<
 /// Apply an append-mode response from a string (not stdin).
 /// Used by `repair` to apply orphaned responses.
 pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
-    let response = strip_assistant_heading(response);
+    let response = agent_doc_turn::response_text::strip_assistant_heading(response);
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let use_crdt = content_uses_crdt_write(&content);

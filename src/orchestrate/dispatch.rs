@@ -196,7 +196,7 @@ pub(crate) fn run_ordered_task_step(
     let response_text = if mode.is_template() {
         response
     } else {
-        write::strip_assistant_heading(&response)
+        agent_doc_turn::response_text::strip_assistant_heading(&response)
     };
     let finalize_text = if mode.is_template() {
         let normalization =
@@ -209,7 +209,7 @@ pub(crate) fn run_ordered_task_step(
         );
         normalization.response
     } else {
-        write::strip_assistant_heading(&finalize_response)
+        agent_doc_turn::response_text::strip_assistant_heading(&finalize_response)
     };
 
     write::enforce_imperative_response_contract_for_diff(file, &injected_diff, &response_text)?;

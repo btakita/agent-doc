@@ -783,7 +783,7 @@ fn run_once(
     };
 
     let response_text = match run_mode {
-        RunMode::Append => write::strip_assistant_heading(&response.text),
+        RunMode::Append => agent_doc_turn::response_text::strip_assistant_heading(&response.text),
         RunMode::Template => response.text.clone(),
     };
     write::enforce_imperative_response_contract_for_diff(file, &the_diff, &response_text)?;

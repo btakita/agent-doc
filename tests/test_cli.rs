@@ -2788,6 +2788,43 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
             "{relative} must not route closeout signal policy through session_check"
         );
     }
+
+    let turn_response_text =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn/src/response_text.rs")).unwrap();
+    assert!(
+        turn_response_text.contains("pub fn strip_assistant_heading"),
+        "agent-doc-turn must own append response heading normalization"
+    );
+    let turn_lib = fs::read_to_string(manifest_dir.join("agent-doc-turn/src/lib.rs")).unwrap();
+    assert!(
+        turn_lib.contains("pub mod response_text;"),
+        "agent-doc-turn should expose response text policy through its owning module"
+    );
+    assert!(
+        !turn_lib.contains("pub use response_text"),
+        "agent-doc-turn should not add a response_text root facade"
+    );
+    let write_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    assert!(
+        !write_source.contains("pub fn strip_assistant_heading"),
+        "orchestration write must not re-own append response heading normalization"
+    );
+    for relative in [
+        "agent-doc-orchestration/src/write/run_entry.rs",
+        "agent-doc-orchestration/src/run.rs",
+        "src/orchestrate/dispatch.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("agent_doc_turn::response_text::strip_assistant_heading"),
+            "{relative} should call focused append response heading normalization directly"
+        );
+        assert!(
+            !source.contains("write::strip_assistant_heading"),
+            "{relative} must not route append response heading normalization through write"
+        );
+    }
 }
 
 #[test]

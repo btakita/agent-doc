@@ -107,9 +107,9 @@
 //!   `<!-- /agent:NAME -->` markers appearing in patch content before the
 //!   component parser can treat them as real delimiters.
 //!
-//! - `strip_assistant_heading`: strips a leading `## Assistant` heading and/or
-//!   trailing `## User` heading from a response string. Prevents duplicate
-//!   headings when the agent echoes them.
+//! - `agent_doc_turn::response_text`: strips leading `## Assistant` and
+//!   trailing `## User` headings from append responses before this module adds
+//!   the canonical transcript headings.
 //!
 //! - `atomic_write_pub`: public thin wrapper around the internal `atomic_write`
 //!   (write to temp file + rename). Used by `compact` and other modules.
@@ -3734,34 +3734,6 @@ pub use ipc::*;
 // ---------------------------------------------------------------------------
 // Internal helpers (same patterns as submit.rs)
 // ---------------------------------------------------------------------------
-
-/// Strip leading `## Assistant` and trailing `## User` headings from response text.
-///
-/// The `agent-doc write` command adds its own `## Assistant\n\n` prefix and
-/// `\n## User\n\n` suffix, so if the agent response includes these headings,
-/// we'd get duplicates. This strips them to prevent that.
-pub fn strip_assistant_heading(response: &str) -> String {
-    let mut result = response.to_string();
-
-    // Strip leading ## Assistant
-    let trimmed = result.trim_start();
-    if let Some(rest) = trimmed.strip_prefix("## Assistant") {
-        let rest = rest.strip_prefix('\n').unwrap_or(rest);
-        let rest = rest.trim_start_matches('\n');
-        result = rest.to_string();
-    }
-
-    // Strip trailing ## User (with optional whitespace/newlines after)
-    let trimmed_end = result.trim_end();
-    if let Some(before) = trimmed_end.strip_suffix("## User") {
-        result = before.trim_end_matches('\n').to_string();
-        if !result.ends_with('\n') {
-            result.push('\n');
-        }
-    }
-
-    result
-}
 
 fn acquire_doc_lock(path: &Path) -> Result<std::fs::File> {
     let lock_path = crate::snapshot::lock_path_for(path)?;

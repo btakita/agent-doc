@@ -73,7 +73,13 @@ mod tests {
             outcome: child_event.outcome,
             proof: child_event.reason.clone(),
         };
-        assert!(orchestration_batch::batch_should_continue(false, &child));
+        assert_eq!(
+            agent_doc_work_graph::classify_batch_progress(
+                false,
+                child.outcome == FlowOutcome::Completed
+            ),
+            agent_doc_work_graph::BatchProgressDecision::Continue
+        );
 
         let auto_dag_event = orchestration_batch::auto_dag_schedule_event(
             agent_doc_work_graph::AutoDagScheduleDecision::SessionReviewBlocked,

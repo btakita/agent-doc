@@ -315,14 +315,15 @@ pub(crate) fn run_ordered_tasks_internal(
                     &child_result,
                 );
                 if idx + 1 < tasks.len()
-                    && !agent_doc_orchestration::flow::orchestration_batch::batch_should_continue(
+                    && agent_doc_work_graph::classify_batch_progress(
                         options
                             .exchange_source
                             .map(|source| exchange_task_source_changed(file, source))
                             .transpose()?
                             .unwrap_or(false),
-                        &child_result,
-                    )
+                        child_result.outcome
+                            == agent_doc_orchestration::flow::types::FlowOutcome::Completed,
+                    ) != agent_doc_work_graph::BatchProgressDecision::Continue
                 {
                     finalize_orchestration_batch_changed(file, idx + 1, tasks.len(), lifecycle)?;
                 }

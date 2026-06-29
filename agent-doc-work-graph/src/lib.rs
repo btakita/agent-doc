@@ -136,6 +136,36 @@ impl AutoDagScheduleDecision {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BatchProgressDecision {
+    Continue,
+    StopSourceChanged,
+    StopChildNotCompleted,
+}
+
+impl BatchProgressDecision {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Continue => "continue",
+            Self::StopSourceChanged => "source_changed_after_child",
+            Self::StopChildNotCompleted => "child_not_completed",
+        }
+    }
+}
+
+pub fn classify_batch_progress(
+    source_changed_after_child: bool,
+    child_completed: bool,
+) -> BatchProgressDecision {
+    if source_changed_after_child {
+        return BatchProgressDecision::StopSourceChanged;
+    }
+    if !child_completed {
+        return BatchProgressDecision::StopChildNotCompleted;
+    }
+    BatchProgressDecision::Continue
+}
+
 const LANES_IN_ORDER: [Lane; 5] = [
     Lane::Implementable,
     Lane::LiveVerify,
@@ -299,6 +329,39 @@ mod tests {
         assert_eq!(
             AutoDagScheduleDecision::SessionReviewBlocked.as_str(),
             "session_review_blocked"
+        );
+    }
+
+    #[test]
+    fn batch_progress_decision_labels_are_stable() {
+        assert_eq!(BatchProgressDecision::Continue.as_str(), "continue");
+        assert_eq!(
+            BatchProgressDecision::StopSourceChanged.as_str(),
+            "source_changed_after_child"
+        );
+        assert_eq!(
+            BatchProgressDecision::StopChildNotCompleted.as_str(),
+            "child_not_completed"
+        );
+    }
+
+    #[test]
+    fn batch_progress_stops_on_source_change_before_child_outcome() {
+        assert_eq!(
+            classify_batch_progress(true, true),
+            BatchProgressDecision::StopSourceChanged
+        );
+        assert_eq!(
+            classify_batch_progress(true, false),
+            BatchProgressDecision::StopSourceChanged
+        );
+        assert_eq!(
+            classify_batch_progress(false, false),
+            BatchProgressDecision::StopChildNotCompleted
+        );
+        assert_eq!(
+            classify_batch_progress(false, true),
+            BatchProgressDecision::Continue
         );
     }
 

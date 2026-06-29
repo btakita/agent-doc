@@ -3351,7 +3351,12 @@ fn test_agent_doc_work_graph_is_source_agnostic_boundary() {
     );
     let work_graph_source =
         fs::read_to_string(manifest_dir.join("agent-doc-work-graph/src/lib.rs")).unwrap();
-    for required in ["pub enum AutoDagScheduleDecision", "pub const fn as_str"] {
+    for required in [
+        "pub enum AutoDagScheduleDecision",
+        "pub enum BatchProgressDecision",
+        "pub fn classify_batch_progress",
+        "pub const fn as_str",
+    ] {
         assert!(
             work_graph_source.contains(required),
             "agent-doc-work-graph must own Auto-DAG scheduling policy: {required}"
@@ -3366,8 +3371,18 @@ fn test_agent_doc_work_graph_is_source_agnostic_boundary() {
         "orchestration batch flow must not re-own Auto-DAG scheduling policy"
     );
     assert!(
+        !orchestration_batch.contains("pub enum BatchProgressDecision")
+            && !orchestration_batch.contains("pub fn classify_batch_progress"),
+        "orchestration batch flow must not re-own batch progress policy"
+    );
+    assert!(
         orchestration_batch.contains("agent_doc_work_graph::AutoDagScheduleDecision"),
         "orchestration batch flow should call the focused Auto-DAG scheduling policy directly"
+    );
+    assert!(
+        orchestration_batch.contains("agent_doc_work_graph::classify_batch_progress")
+            && orchestration_batch.contains("use agent_doc_work_graph::BatchProgressDecision;"),
+        "orchestration batch flow should call focused batch progress policy directly"
     );
     assert!(
         !manifest_dir

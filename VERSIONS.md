@@ -22,6 +22,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   live beside the source-agnostic Auto-DAG model. Orchestration batch flow keeps
   only event rendering and logging.
 
+- **Orchestration batch progress policy moved to `agent-doc-work-graph`.** The
+  continue/source-changed/child-not-completed decision and stable labels now live
+  beside the source-agnostic work graph model. Orchestration adapts child
+  closeout outcomes into the focused boolean input and keeps only flow-event
+  formatting.
+
 - **Append response heading normalization moved to `agent-doc-turn`.** The helper
   that strips echoed `## Assistant` / trailing `## User` headings before append
   writes now lives in `agent_doc_turn::response_text`; orchestration calls the

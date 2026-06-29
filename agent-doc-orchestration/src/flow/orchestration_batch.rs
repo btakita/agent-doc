@@ -1,5 +1,6 @@
 use super::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
 use agent_doc_template::patchback;
+use agent_doc_work_graph::BatchProgressDecision;
 use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -7,40 +8,6 @@ pub struct BatchChildResult {
     pub label: String,
     pub outcome: FlowOutcome,
     pub proof: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BatchProgressDecision {
-    Continue,
-    StopSourceChanged,
-    StopChildNotCompleted,
-}
-
-impl BatchProgressDecision {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Continue => "continue",
-            Self::StopSourceChanged => "source_changed_after_child",
-            Self::StopChildNotCompleted => "child_not_completed",
-        }
-    }
-}
-
-pub fn classify_batch_progress(
-    source_changed_after_child: bool,
-    child: &BatchChildResult,
-) -> BatchProgressDecision {
-    if source_changed_after_child {
-        return BatchProgressDecision::StopSourceChanged;
-    }
-    if child.outcome != FlowOutcome::Completed {
-        return BatchProgressDecision::StopChildNotCompleted;
-    }
-    BatchProgressDecision::Continue
-}
-
-pub fn batch_should_continue(source_changed_after_child: bool, child: &BatchChildResult) -> bool {
-    classify_batch_progress(source_changed_after_child, child) == BatchProgressDecision::Continue
 }
 
 pub fn queue_freeze_event(task_count: usize, from_exchange: bool) -> FlowEvent {
@@ -176,9 +143,11 @@ mod tests {
         };
 
         assert_eq!(
-            classify_batch_progress(true, &child),
+            agent_doc_work_graph::classify_batch_progress(
+                true,
+                child.outcome == FlowOutcome::Completed
+            ),
             BatchProgressDecision::StopSourceChanged
         );
-        assert!(!batch_should_continue(true, &child));
     }
 }

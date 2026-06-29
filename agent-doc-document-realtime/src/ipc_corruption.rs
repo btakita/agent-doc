@@ -1,5 +1,7 @@
 //! # Module: ipc_corruption
 //!
+//! Pure realtime-document corruption forensics.
+//!
 //! ## Spec
 //! Forensic detector for the `#ipcfullprompt` corruption shape: a full-document
 //! editor-side IPC mutation (e.g. `PatchWatcher.setText`) that **deletes** or

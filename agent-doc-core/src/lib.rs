@@ -17,7 +17,6 @@ pub mod frontmatter;
 pub mod gate_verify;
 pub mod heuristics;
 pub mod id;
-pub mod ipc_corruption;
 pub mod log_time;
 pub mod model_tier;
 pub mod op_log;

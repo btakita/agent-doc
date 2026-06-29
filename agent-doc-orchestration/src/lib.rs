@@ -119,9 +119,10 @@ pub mod turn_status;
 // zero-dep). Re-exported so `crate::heuristics::*` call sites resolve unchanged.
 pub use agent_doc_core::heuristics;
 pub mod hooks;
-// Relocated to `agent-doc-core` (#ipcfullprompt-recur2 — pure, zero-dep forensic
-// detector). Re-exported so `crate::ipc_corruption::*` call sites resolve.
-pub use agent_doc_core::ipc_corruption;
+// Relocated to `agent-doc-document-realtime` (#ipcfullprompt-recur2 — pure
+// realtime-document forensic detector). Re-exported so
+// `crate::ipc_corruption::*` call sites resolve.
+pub use agent_doc_document_realtime::ipc_corruption;
 // Relocated to `agent-doc-core` (#optverify — pure gate-verify predicate scan).
 // Re-exported so `crate::gate_verify::*` call sites resolve unchanged.
 pub use agent_doc_core::gate_verify;

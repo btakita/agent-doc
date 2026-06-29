@@ -806,117 +806,12 @@ pub fn first_unstarted_prompt_bearing_change(
         Err(_) => return Ok(None),
     };
 
-    let prompt_bearing_body = |content: &str| {
-        let body = agent_doc_frontmatter::frontmatter::parse(content)
-            .map(|(_, body)| body.to_string())
-            .unwrap_or_else(|_| content.to_string());
-        agent_doc_diff::strip_comments(&strip_queue_components_for_unstarted_prompt_guard(&body))
-    };
     let norm = |s: &str| crate::git::normalize_committed_exchange_artifacts(s);
-    let snap_norm = norm(&prompt_bearing_body(&baseline));
-    let cur_norm = norm(&prompt_bearing_body(&current));
+    let snap_norm =
+        norm(&agent_doc_diff::prompt_bearing_body_for_unstarted_prompt_guard(&baseline));
+    let cur_norm = norm(&agent_doc_diff::prompt_bearing_body_for_unstarted_prompt_guard(&current));
     let Some(diff_text) = agent_doc_diff::unified_diff_from_contents(&snap_norm, &cur_norm) else {
         return Ok(None);
     };
-    let changes = agent_doc_diff::classify_prompt_bearing_changes(&diff_text);
-    let mut skip_answered_response_run = false;
-    for (idx, change) in changes.iter().enumerate() {
-        match change.kind {
-            agent_doc_diff::PromptBearingChangeKind::RecoveryArtifact
-            | agent_doc_diff::PromptBearingChangeKind::BoundaryArtifact => continue,
-            agent_doc_diff::PromptBearingChangeKind::PromptTarget => {
-                if skip_answered_response_run {
-                    let preview = change
-                        .text
-                        .lines()
-                        .find(|line| !line.trim().is_empty())
-                        .unwrap_or(change.text.as_str())
-                        .trim();
-                    if !agent_doc_diff::line_looks_like_fresh_prompt_after_response(preview) {
-                        continue;
-                    }
-                }
-                if agent_doc_diff::prompt_change_is_already_answered(&change.text)
-                    || agent_doc_diff::prompt_change_is_answered_by_later_response(&changes, idx)
-                    || prompt_target_is_immediately_before_existing_response(&current, &change.text)
-                {
-                    skip_answered_response_run = true;
-                    continue;
-                }
-                return Ok(Some(change.clone()));
-            }
-            agent_doc_diff::PromptBearingChangeKind::ContentEdit => {
-                continue;
-            }
-        }
-    }
-    Ok(None)
-}
-
-pub(crate) fn strip_queue_components_for_unstarted_prompt_guard(body: &str) -> String {
-    let Ok(components) = agent_doc_element::element::parse(body) else {
-        return body.to_string();
-    };
-    let mut result = body.to_string();
-    for component in components.iter().rev() {
-        if component.name == "queue" {
-            result = component.replace_content(&result, "");
-        }
-    }
-    result
-}
-
-pub(crate) fn prompt_target_is_immediately_before_existing_response(
-    current_doc: &str,
-    change_text: &str,
-) -> bool {
-    let target_line = change_text
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .map(|line| line.trim().to_string());
-    let answered_prompt_marker = target_line
-        .as_deref()
-        .is_some_and(|line| line.starts_with('❯'));
-    let target = target_line
-        .as_deref()
-        .map(|line| line.trim_start_matches('❯').trim().to_string());
-    let Some(target) = target else {
-        return false;
-    };
-    if target.is_empty() {
-        return false;
-    }
-    let body = agent_doc_frontmatter::frontmatter::parse(current_doc)
-        .map(|(_, body)| body.to_string())
-        .unwrap_or_else(|_| current_doc.to_string());
-    let Ok(components) = agent_doc_element::element::parse(&body) else {
-        return false;
-    };
-    let Some(exchange) = components
-        .iter()
-        .find(|component| component.name == "exchange")
-    else {
-        return false;
-    };
-    let lines: Vec<&str> = exchange.content(&body).lines().collect();
-    for (idx, line) in lines.iter().enumerate() {
-        let normalized = line.trim().trim_start_matches('❯').trim();
-        if normalized != target {
-            continue;
-        }
-        for next in lines.iter().skip(idx + 1) {
-            let trimmed = next.trim();
-            if trimmed.is_empty() || trimmed.starts_with("<!--") {
-                continue;
-            }
-            if agent_doc_turn::closeout_signal::is_exchange_response_heading(trimmed) {
-                return true;
-            }
-            if answered_prompt_marker {
-                continue;
-            }
-            return false;
-        }
-    }
-    false
+    Ok(agent_doc_diff::first_unstarted_prompt_bearing_change_from_diff(&diff_text, &current))
 }

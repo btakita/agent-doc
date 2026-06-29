@@ -3733,6 +3733,48 @@ fn test_agent_doc_diff_owns_partial_staging_pure_policy() {
 }
 
 #[test]
+fn test_agent_doc_diff_owns_unstarted_prompt_bearing_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let diff_source = fs::read_to_string(manifest_dir.join("agent-doc-diff/src/lib.rs")).unwrap();
+    for required in [
+        "pub fn prompt_bearing_body_for_unstarted_prompt_guard",
+        "pub fn strip_queue_components_for_unstarted_prompt_guard",
+        "pub fn prompt_target_is_immediately_before_existing_response",
+        "pub fn first_unstarted_prompt_bearing_change_from_diff",
+    ] {
+        assert!(
+            diff_source.contains(required),
+            "agent-doc-diff must own unstarted prompt-bearing diff policy: {required}"
+        );
+    }
+
+    let closeout_guards = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/closeout_guards.rs"),
+    )
+    .unwrap();
+    for forbidden in [
+        "pub(crate) fn strip_queue_components_for_unstarted_prompt_guard",
+        "pub(crate) fn prompt_target_is_immediately_before_existing_response",
+        "fn strip_queue_components_for_unstarted_prompt_guard",
+        "fn prompt_target_is_immediately_before_existing_response",
+    ] {
+        assert!(
+            !closeout_guards.contains(forbidden),
+            "session_check closeout guards must not re-own unstarted prompt-bearing policy"
+        );
+    }
+    for required in [
+        "agent_doc_diff::prompt_bearing_body_for_unstarted_prompt_guard",
+        "agent_doc_diff::first_unstarted_prompt_bearing_change_from_diff",
+    ] {
+        assert!(
+            closeout_guards.contains(required),
+            "session_check closeout guards should call the focused diff helper directly: {required}"
+        );
+    }
+}
+
+#[test]
 fn test_project_config_io_tmux_helpers_have_no_config_facade() {
     fn contains_path_segment(source: &str, needle: &str) -> bool {
         source.match_indices(needle).any(|(index, _)| {

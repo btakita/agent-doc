@@ -138,6 +138,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   heading now lives beside the prompt-bearing diff classifier. Session-check
   closeout guards call `agent_doc_diff` directly and no longer own a local copy.
 
+- **Unstarted prompt-bearing diff selection moved to `agent-doc-diff`.** The
+  queue/comment/frontmatter filtering helper, answered-existing-response
+  suppression, and first actionable prompt-bearing change selector now live
+  beside the prompt-bearing diff classifier. Session-check keeps snapshot,
+  HEAD, and current-file adapters only.
+
 - **Lease TTL freshness moved to `agent-doc-lease`.** Drain-owner, plugin-owner, queue-edit-owner, recycle-yield, and recycle-inflight sidecars now call `agent_doc_lease::timestamp_is_fresh` directly instead of each re-owning the same saturating timestamp policy. The domain modules keep only lease/request bodies, paths, TTL env knobs, and side-effect adapters, with boundary coverage preventing local `*_is_fresh` wrappers from returning.
 
 - **Managed capability-proof retry policy moved to `agent-doc-turn-executor`.** The proof retry budget, probe timeout defaults, frontmatter/config precedence, and exponential backoff decision now live in `agent_doc_turn_executor::capability_proof`. The supervisor start path gathers frontmatter/config facts and calls the focused API directly, while `agent::mod` keeps only backend resolution/runtime helpers and no longer owns the policy or retry decision.

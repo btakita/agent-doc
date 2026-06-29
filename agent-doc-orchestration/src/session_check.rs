@@ -3803,10 +3803,12 @@ Body\n\
             "Fixed.\n",
             "<!-- /agent:exchange -->\n",
         );
-        assert!(prompt_target_is_immediately_before_existing_response(
-            current,
-            "❯ JB `/clear` on this document error:"
-        ));
+        assert!(
+            agent_doc_diff::prompt_target_is_immediately_before_existing_response(
+                current,
+                "❯ JB `/clear` on this document error:"
+            )
+        );
     }
     #[test]
     fn active_session_drift_allows_answered_exchange_and_backlog_metadata() {

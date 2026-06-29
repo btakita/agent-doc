@@ -114,6 +114,9 @@
 //! - `classify_prompt_bearing_changes(diff)`: extracts ordered user-authored changes that need
 //!   prompt-aware handling. Each item is typed as `prompt_target`, `content_edit`,
 //!   `recovery_artifact`, or `boundary_artifact`.
+//! - `first_unstarted_prompt_bearing_change_from_diff(diff, current_doc)`: selects
+//!   the first still-unanswered prompt-bearing change from an already-built diff,
+//!   including answered-prompt suppression against the current exchange body.
 //! - `extract_required_response_blocks_multiple_prompts`: changed exchange tail with two prompt
 //!   starts → both blocks returned oldest-first
 //! - `extract_required_response_blocks_preserves_code_fence_context`: prompt block followed by an
@@ -837,6 +840,125 @@ pub fn prompt_change_is_answered_by_later_response(
     }
 
     false
+}
+
+pub fn strip_queue_components_for_unstarted_prompt_guard(body: &str) -> String {
+    let Ok(components) = element::parse(body) else {
+        return body.to_string();
+    };
+    let mut result = body.to_string();
+    for component in components.iter().rev() {
+        if component.name == "queue" {
+            result = component.replace_content(&result, "");
+        }
+    }
+    result
+}
+
+pub fn prompt_bearing_body_for_unstarted_prompt_guard(content: &str) -> String {
+    let body = agent_doc_frontmatter::frontmatter::parse(content)
+        .map(|(_, body)| body.to_string())
+        .unwrap_or_else(|_| content.to_string());
+    strip_comments(&strip_queue_components_for_unstarted_prompt_guard(&body))
+}
+
+pub fn prompt_target_is_immediately_before_existing_response(
+    current_doc: &str,
+    change_text: &str,
+) -> bool {
+    let target_line = change_text
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .map(|line| line.trim().to_string());
+    let answered_prompt_marker = target_line
+        .as_deref()
+        .is_some_and(|line| line.starts_with('❯'));
+    let target = target_line
+        .as_deref()
+        .map(|line| line.trim_start_matches('❯').trim().to_string());
+    let Some(target) = target else {
+        return false;
+    };
+    if target.is_empty() {
+        return false;
+    }
+    let body = agent_doc_frontmatter::frontmatter::parse(current_doc)
+        .map(|(_, body)| body.to_string())
+        .unwrap_or_else(|_| current_doc.to_string());
+    let Ok(components) = element::parse(&body) else {
+        return false;
+    };
+    let Some(exchange) = components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return false;
+    };
+    let lines: Vec<&str> = exchange.content(&body).lines().collect();
+    for (idx, line) in lines.iter().enumerate() {
+        let normalized = line.trim().trim_start_matches('❯').trim();
+        if normalized != target {
+            continue;
+        }
+        for next in lines.iter().skip(idx + 1) {
+            let trimmed = next.trim();
+            if trimmed.is_empty() || trimmed.starts_with("<!--") {
+                continue;
+            }
+            if is_exchange_response_heading(trimmed) {
+                return true;
+            }
+            if answered_prompt_marker {
+                continue;
+            }
+            return false;
+        }
+    }
+    false
+}
+
+pub fn first_unstarted_prompt_bearing_change_from_diff(
+    diff_text: &str,
+    current_doc: &str,
+) -> Option<PromptBearingChange> {
+    let changes = classify_prompt_bearing_changes(diff_text);
+    let mut skip_answered_response_run = false;
+    for (idx, change) in changes.iter().enumerate() {
+        match change.kind {
+            PromptBearingChangeKind::RecoveryArtifact
+            | PromptBearingChangeKind::BoundaryArtifact => {
+                continue;
+            }
+            PromptBearingChangeKind::PromptTarget => {
+                if skip_answered_response_run {
+                    let preview = change
+                        .text
+                        .lines()
+                        .find(|line| !line.trim().is_empty())
+                        .unwrap_or(change.text.as_str())
+                        .trim();
+                    if !line_looks_like_fresh_prompt_after_response(preview) {
+                        continue;
+                    }
+                }
+                if prompt_change_is_already_answered(&change.text)
+                    || prompt_change_is_answered_by_later_response(&changes, idx)
+                    || prompt_target_is_immediately_before_existing_response(
+                        current_doc,
+                        &change.text,
+                    )
+                {
+                    skip_answered_response_run = true;
+                    continue;
+                }
+                return Some(change.clone());
+            }
+            PromptBearingChangeKind::ContentEdit => {
+                continue;
+            }
+        }
+    }
+    None
 }
 
 fn suppress_answered_prompt_runs(changes: Vec<PromptBearingChange>) -> Vec<PromptBearingChange> {
@@ -3794,6 +3916,83 @@ Done.\n\
         assert_eq!(changes[2].text, "<!-- agent:boundary:test-boundary -->");
         assert_eq!(changes[3].kind, PromptBearingChangeKind::PromptTarget);
         assert_eq!(changes[3].text, "Why was the `❯` prefix omitted here?");
+    }
+
+    #[test]
+    fn prompt_bearing_body_for_unstarted_prompt_guard_strips_frontmatter_comments_and_queue() {
+        let content = concat!(
+            "---\nagent_doc_session: sid\nqueue: start\n---\n\n",
+            "Visible.\n",
+            "<!-- hidden prompt? -->\n",
+            "<!-- agent:queue auto -->\n",
+            "do #queued\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let body = prompt_bearing_body_for_unstarted_prompt_guard(content);
+
+        assert!(!body.contains("agent_doc_session"));
+        assert!(!body.contains("hidden prompt?"));
+        assert!(!body.contains("do #queued"));
+        assert!(body.contains("Visible."));
+        assert!(body.contains("<!-- agent:queue auto -->"));
+    }
+
+    #[test]
+    fn first_unstarted_prompt_bearing_change_from_diff_detects_plain_tail_prompt() {
+        let snapshot = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:stale -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:stale -->\n",
+            "Please fix the markdown parser.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let diff = unified_diff_from_contents(snapshot, current).expect("diff");
+
+        let change = first_unstarted_prompt_bearing_change_from_diff(&diff, current)
+            .expect("plain exchange-tail prompt should remain actionable");
+
+        assert_eq!(change.kind, PromptBearingChangeKind::PromptTarget);
+        assert_eq!(change.text, "Please fix the markdown parser.");
+    }
+
+    #[test]
+    fn first_unstarted_prompt_bearing_change_from_diff_ignores_answered_existing_response() {
+        let snapshot = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ JB `/clear` on this document error:\n",
+            "```\n",
+            "clear refused while actor was starting\n",
+            "```\n\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ JB `/clear` on this document error:\n",
+            "```\n",
+            "clear refused while actor was starting\n",
+            "```\n\n",
+            "❯ This prompt was duplicated.\n",
+            "### Re: live typing duplicate and clear refusal — gpt-5 (HEAD)\n\n",
+            "Fixed.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let diff = unified_diff_from_contents(snapshot, current).expect("diff");
+
+        let change = first_unstarted_prompt_bearing_change_from_diff(&diff, current);
+
+        assert!(
+            change.is_none(),
+            "answered prompt immediately before an existing response should not stay actionable"
+        );
     }
 
     #[test]

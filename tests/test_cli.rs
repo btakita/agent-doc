@@ -3732,6 +3732,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     .unwrap();
     let supervisor_config =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/config.rs")).unwrap();
+    let supervisor_crash_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/crash_policy.rs")).unwrap();
     for required_snippet in [
         "pub const STALE_INSTALL_GRACE_SECS",
         "pub fn classify_stale_install_artifacts",
@@ -3778,6 +3780,37 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         preflight.contains("agent_doc_supervisor::config::classify_stale_install_artifacts")
             && preflight.contains("agent_doc_supervisor::config::STALE_INSTALL_GRACE_SECS"),
         "preflight should call focused stale-install policy directly"
+    );
+    for required_snippet in [
+        "pub enum SupervisorPromptDecision",
+        "pub fn classify_supervisor_prompt_input",
+        "pub fn supervisor_policy_exit_code",
+    ] {
+        assert!(
+            supervisor_crash_policy.contains(required_snippet),
+            "agent-doc-supervisor crash_policy should own supervisor prompt/exit-code policy directly: {required_snippet}"
+        );
+    }
+    let start_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
+    let start_run_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/run.rs")).unwrap();
+    for forbidden_snippet in [
+        "enum PromptDecision",
+        "fn classify_prompt_decision",
+        "fn policy_exit_code_for_supervisor",
+    ] {
+        assert!(
+            !start_source.contains(forbidden_snippet),
+            "start.rs must not re-own pure supervisor prompt/exit-code policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        start_source.contains("classify_supervisor_prompt_input")
+            && start_source.contains("SupervisorPromptDecision")
+            && start_source.contains("supervisor_policy_exit_code")
+            && start_run_source.contains("supervisor_policy_exit_code("),
+        "start paths should call focused supervisor prompt/exit-code policy directly"
     );
 
     for relative in [
@@ -3877,8 +3910,6 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     let idle_watch =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
             .unwrap();
-    let start_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
     assert!(
         idle_watch.contains("agent_doc_supervisor::{")
             && idle_watch.contains("idle_reconcile::{")

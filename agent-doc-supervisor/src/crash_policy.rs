@@ -105,6 +105,42 @@ pub enum RestartAction {
     Halt,
 }
 
+/// Parsed operator response to the supervisor restart/quit prompt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupervisorPromptDecision {
+    RestartFresh,
+    Quit,
+    QuitEof,
+    Invalid,
+}
+
+/// Classify raw stdin input for the supervisor restart/quit prompt.
+pub fn classify_supervisor_prompt_input(
+    bytes_read: usize,
+    input: &str,
+) -> SupervisorPromptDecision {
+    if bytes_read == 0 {
+        return SupervisorPromptDecision::QuitEof;
+    }
+    let trimmed = input.trim();
+    if trimmed.eq_ignore_ascii_case("q") {
+        return SupervisorPromptDecision::Quit;
+    }
+    if trimmed.is_empty() {
+        return SupervisorPromptDecision::RestartFresh;
+    }
+    SupervisorPromptDecision::Invalid
+}
+
+/// Normalize intentional forwarded Ctrl-C shutdowns onto the clean-exit path.
+pub fn supervisor_policy_exit_code(exit_code: i32, ctrl_c_forwarded_interrupt: bool) -> i32 {
+    if ctrl_c_forwarded_interrupt {
+        0
+    } else {
+        exit_code
+    }
+}
+
 /// A single exit event recorded in the ring buffer.
 #[derive(Debug, Clone)]
 pub struct ExitRecord {
@@ -287,6 +323,49 @@ mod tests {
         let action = policy.on_exit_at(0, Instant::now());
         assert_eq!(action, RestartAction::PromptUser);
         assert_eq!(policy.state, SupervisorState::Healthy);
+    }
+
+    #[test]
+    fn classify_supervisor_prompt_input_quits_on_q() {
+        assert_eq!(
+            classify_supervisor_prompt_input(2, "q\n"),
+            SupervisorPromptDecision::Quit
+        );
+        assert_eq!(
+            classify_supervisor_prompt_input(2, "Q\n"),
+            SupervisorPromptDecision::Quit
+        );
+    }
+
+    #[test]
+    fn classify_supervisor_prompt_input_restarts_on_blank_line() {
+        assert_eq!(
+            classify_supervisor_prompt_input(1, "\n"),
+            SupervisorPromptDecision::RestartFresh
+        );
+    }
+
+    #[test]
+    fn classify_supervisor_prompt_input_quits_on_eof() {
+        assert_eq!(
+            classify_supervisor_prompt_input(0, ""),
+            SupervisorPromptDecision::QuitEof
+        );
+    }
+
+    #[test]
+    fn classify_supervisor_prompt_input_rejects_unrecognized_input() {
+        assert_eq!(
+            classify_supervisor_prompt_input(4, "yes\n"),
+            SupervisorPromptDecision::Invalid
+        );
+    }
+
+    #[test]
+    fn forwarded_ctrl_c_uses_clean_exit_code_for_policy() {
+        assert_eq!(supervisor_policy_exit_code(1, true), 0);
+        assert_eq!(supervisor_policy_exit_code(130, true), 0);
+        assert_eq!(supervisor_policy_exit_code(1, false), 1);
     }
 
     #[test]

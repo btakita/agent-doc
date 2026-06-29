@@ -141,7 +141,10 @@ use agent_doc_queue::queue::{
     IdleQueueContextResetDecision, IdleQueueDrainDecision, clean_session_head_forces_context_reset,
     idle_queue_context_reset_decision, idle_queue_drain_decision,
 };
-use agent_doc_supervisor::crash_policy::{CrashPolicy, RestartAction, SupervisorState};
+use agent_doc_supervisor::crash_policy::{
+    CrashPolicy, RestartAction, SupervisorPromptDecision, SupervisorState,
+    classify_supervisor_prompt_input, supervisor_policy_exit_code,
+};
 use agent_doc_supervisor::idle_reconcile::ready_busy_conflict_reconcile_decision;
 #[cfg(unix)]
 use agent_doc_supervisor_process::ReexecState;
@@ -670,14 +673,6 @@ enum RestartContinueExitStrategy {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PromptDecision {
-    RestartFresh,
-    Quit,
-    QuitEof,
-    Invalid,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PromptOutcome {
     RestartFresh,
     Quit,
@@ -687,20 +682,6 @@ enum PromptOutcome {
 enum PromptEofPolicy {
     Quit,
     RestartFresh,
-}
-
-fn classify_prompt_decision(bytes_read: usize, input: &str) -> PromptDecision {
-    if bytes_read == 0 {
-        return PromptDecision::QuitEof;
-    }
-    let trimmed = input.trim();
-    if trimmed.eq_ignore_ascii_case("q") {
-        return PromptDecision::Quit;
-    }
-    if trimmed.is_empty() {
-        return PromptDecision::RestartFresh;
-    }
-    PromptDecision::Invalid
 }
 
 fn prompt_input_summary(input: &str) -> String {
@@ -745,12 +726,12 @@ fn prompt_for_restart_or_quit(
                 return PromptOutcome::Quit;
             }
         };
-        match classify_prompt_decision(bytes_read, &input) {
-            PromptDecision::Quit => {
+        match classify_supervisor_prompt_input(bytes_read, &input) {
+            SupervisorPromptDecision::Quit => {
                 log_event(session_log, quit_event);
                 return PromptOutcome::Quit;
             }
-            PromptDecision::QuitEof => match eof_policy {
+            SupervisorPromptDecision::QuitEof => match eof_policy {
                 PromptEofPolicy::Quit => {
                     log_event(
                         session_log,
@@ -766,7 +747,7 @@ fn prompt_for_restart_or_quit(
                     return PromptOutcome::RestartFresh;
                 }
             },
-            PromptDecision::RestartFresh => {
+            SupervisorPromptDecision::RestartFresh => {
                 log_event(
                     session_log,
                     &format!(
@@ -778,7 +759,7 @@ fn prompt_for_restart_or_quit(
                 );
                 return PromptOutcome::RestartFresh;
             }
-            PromptDecision::Invalid => {
+            SupervisorPromptDecision::Invalid => {
                 eprintln!("Unrecognized input. Press Enter to restart fresh, or 'q' to exit.");
                 log_event(
                     session_log,
@@ -1189,14 +1170,6 @@ fn is_forwarded_ctrl_c_interrupt_exit(
             signal.eq_ignore_ascii_case("Interrupt") || signal.eq_ignore_ascii_case("SIGINT")
         })
         || status.exit_code() == 130
-}
-
-fn policy_exit_code_for_supervisor(exit_code: i32, ctrl_c_forwarded_interrupt: bool) -> i32 {
-    if ctrl_c_forwarded_interrupt {
-        0
-    } else {
-        exit_code
-    }
 }
 
 fn sleep_with_stop(stop: &AtomicBool, total: Duration) -> bool {
@@ -3512,12 +3485,6 @@ Done.
         );
     }
     #[test]
-    fn forwarded_ctrl_c_uses_clean_exit_code_for_policy() {
-        assert_eq!(policy_exit_code_for_supervisor(1, true), 0);
-        assert_eq!(policy_exit_code_for_supervisor(130, true), 0);
-        assert_eq!(policy_exit_code_for_supervisor(1, false), 1);
-    }
-    #[test]
     fn restart_continue_strategy_prompts_after_forwarded_ctrl_c_interrupt() {
         assert_eq!(
             restart_continue_exit_strategy(true, false, false, 0, false),
@@ -3941,29 +3908,6 @@ Done.
             false,
             AutoTriggerOutcome::Cancelled
         ));
-    }
-    #[test]
-    fn classify_prompt_decision_quits_on_q() {
-        assert_eq!(classify_prompt_decision(2, "q\n"), PromptDecision::Quit);
-        assert_eq!(classify_prompt_decision(2, "Q\n"), PromptDecision::Quit);
-    }
-    #[test]
-    fn classify_prompt_decision_restarts_on_blank_line() {
-        assert_eq!(
-            classify_prompt_decision(1, "\n"),
-            PromptDecision::RestartFresh
-        );
-    }
-    #[test]
-    fn classify_prompt_decision_quits_on_eof() {
-        assert_eq!(classify_prompt_decision(0, ""), PromptDecision::QuitEof);
-    }
-    #[test]
-    fn classify_prompt_decision_rejects_unrecognized_input() {
-        assert_eq!(
-            classify_prompt_decision(4, "yes\n"),
-            PromptDecision::Invalid
-        );
     }
     #[cfg(unix)]
     #[test]

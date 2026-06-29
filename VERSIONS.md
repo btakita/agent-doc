@@ -14,6 +14,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Stale install-artifact policy moved to `agent-doc-supervisor`.** The `#install-stale-guard` grace window and timestamp classifier now live in `agent_doc_supervisor::config` beside auto-install/stale-binary policy. Preflight still discovers artifact mtimes and formats the warning, but calls the focused supervisor API directly instead of owning the staleness rule.
 
+- **Supervisor prompt/exit-code policy moved to `agent-doc-supervisor`.** Restart/quit prompt input classification and forwarded Ctrl-C clean-exit normalization now live in `agent_doc_supervisor::crash_policy` beside the child crash/restart policy. The start supervisor loop still owns stdin, tty, and child status adapters, but calls the focused supervisor API directly.
+
 - **No-follow-up closeout heuristic moved to `agent-doc-turn`.** Explicit "no actionable follow-up" response detection now lives in `agent_doc_turn::heuristics` beside pending-capture recommendation detection. Session-check and pre-commit guards import the focused turn API directly, and boundary coverage prevents `prompt_contract` from re-owning the phrase policy.
 
 - **Reaped directive response-loss detection moved to `agent-doc-turn`.** The pure detector that decides whether a reaped `do #id` queue head lost its `### Re:` response now lives in `agent_doc_turn::closeout_signal`. Session-check still gathers cycle state, live exchange text, and HEAD compact archives, but calls the focused turn API directly and keeps only guard formatting/ops-log adapters.

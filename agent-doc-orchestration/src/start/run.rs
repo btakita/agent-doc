@@ -1536,7 +1536,7 @@ pub fn run_with_reap_policy(
         // Forwarded operator Ctrl+C is an intentional shutdown request, not a
         // supervisor crash signal, so keep the policy state on the clean-exit
         // path and surface the same restart/quit prompt as Ctrl+D.
-        let policy_exit_code = policy_exit_code_for_supervisor(code, ctrl_c_forwarded_interrupt);
+        let policy_exit_code = supervisor_policy_exit_code(code, ctrl_c_forwarded_interrupt);
         let action = policy.on_exit(policy_exit_code);
         *shared.supervisor_state.lock().unwrap() = policy.state;
         let action_name = match &action {

@@ -2554,6 +2554,50 @@ fn test_agent_doc_work_graph_is_source_agnostic_boundary() {
 }
 
 #[test]
+fn test_agent_doc_diff_owns_partial_staging_pure_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let diff_source = fs::read_to_string(manifest_dir.join("agent-doc-diff/src/lib.rs")).unwrap();
+    for required in [
+        "pub fn is_partial_staging_relevant_path",
+        "pub fn partial_staging_paths_look_related",
+        "pub fn extract_changed_string_literals",
+    ] {
+        assert!(
+            diff_source.contains(required),
+            "agent-doc-diff must own partial-staging pure diff/path policy: {required}"
+        );
+    }
+
+    let partial_staging = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/partial_staging.rs"),
+    )
+    .unwrap();
+    for forbidden in [
+        "pub(crate) fn is_partial_staging_relevant_path",
+        "pub(crate) fn partial_staging_paths_look_related",
+        "pub(crate) fn path_looks_test_like",
+        "pub(crate) fn extract_changed_string_literals",
+        "pub(crate) fn extract_string_literals_from_line",
+        "pub(crate) fn interesting_changed_literal",
+    ] {
+        assert!(
+            !partial_staging.contains(forbidden),
+            "session_check partial-staging must stay an adapter, not re-own pure diff/path policy"
+        );
+    }
+    for required in [
+        "agent_doc_diff::is_partial_staging_relevant_path",
+        "agent_doc_diff::partial_staging_paths_look_related",
+        "agent_doc_diff::extract_changed_string_literals",
+    ] {
+        assert!(
+            partial_staging.contains(required),
+            "session_check partial-staging should call focused diff helpers directly: {required}"
+        );
+    }
+}
+
+#[test]
 fn test_project_config_io_tmux_helpers_have_no_config_facade() {
     fn contains_path_segment(source: &str, needle: &str) -> bool {
         source.match_indices(needle).any(|(index, _)| {

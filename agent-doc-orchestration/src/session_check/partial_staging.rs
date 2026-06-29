@@ -209,7 +209,7 @@ pub(crate) fn partial_staging_finding_for_repo(
         ],
     )?
     .into_iter()
-    .filter(|path| is_partial_staging_relevant_path(path))
+    .filter(|path| agent_doc_diff::is_partial_staging_relevant_path(path))
     .collect::<Vec<_>>();
     if committed_paths.is_empty() {
         return Ok(None);
@@ -222,11 +222,12 @@ pub(crate) fn partial_staging_finding_for_repo(
     )?);
     dirty_paths = dirty_paths
         .into_iter()
-        .filter(|path| is_partial_staging_relevant_path(path))
+        .filter(|path| agent_doc_diff::is_partial_staging_relevant_path(path))
         .collect::<Vec<_>>();
     dirty_paths.sort();
     dirty_paths.dedup();
-    if dirty_paths.is_empty() || !partial_staging_paths_look_related(&committed_paths, &dirty_paths)
+    if dirty_paths.is_empty()
+        || !agent_doc_diff::partial_staging_paths_look_related(&committed_paths, &dirty_paths)
     {
         return Ok(None);
     }
@@ -241,8 +242,8 @@ pub(crate) fn partial_staging_finding_for_repo(
         dirty_diff.push_str(&cached);
     }
 
-    let committed_literals = extract_changed_string_literals(&committed_diff);
-    let dirty_literals = extract_changed_string_literals(&dirty_diff);
+    let committed_literals = agent_doc_diff::extract_changed_string_literals(&committed_diff);
+    let dirty_literals = agent_doc_diff::extract_changed_string_literals(&dirty_diff);
     let mut overlap = committed_literals
         .intersection(&dirty_literals)
         .cloned()
@@ -309,127 +310,6 @@ pub(crate) fn parse_porcelain_path(line: &str) -> Option<String> {
     }
     let path = raw.rsplit(" -> ").next().unwrap_or(raw).trim();
     Some(path.trim_matches('"').to_string())
-}
-
-pub(crate) fn is_partial_staging_relevant_path(path: &str) -> bool {
-    let normalized = path.replace('\\', "/");
-    if normalized.starts_with(".agent-doc/")
-        || normalized.starts_with(".git/")
-        || normalized.ends_with(".lock")
-    {
-        return false;
-    }
-    let lower = normalized.to_ascii_lowercase();
-    let Some(ext) = lower.rsplit('.').next() else {
-        return false;
-    };
-    matches!(
-        ext,
-        "rs" | "kt"
-            | "kts"
-            | "java"
-            | "py"
-            | "js"
-            | "jsx"
-            | "ts"
-            | "tsx"
-            | "go"
-            | "rb"
-            | "swift"
-            // `#partial-staging-guard-cross-doc-noise`: markdown is NOT source/test
-            // code. In a multi-session superproject the latest commit is usually a
-            // session DOCUMENT (`.md`) and the dirty companions are other session
-            // docs; their shared prose vocabulary (e.g. "make check", "agent-doc")
-            // is incidental, not a source+test partial-staging signal, so including
-            // `md` made the guard WARN on nearly every closeout. The guard targets
-            // source+test code partial staging; documents are excluded.
-            | "txt"
-            | "snap"
-            | "json"
-            | "toml"
-            | "yaml"
-            | "yml"
-    )
-}
-
-pub(crate) fn partial_staging_paths_look_related(committed: &[String], dirty: &[String]) -> bool {
-    if committed
-        .iter()
-        .any(|committed_path| dirty.iter().any(|dirty_path| dirty_path == committed_path))
-    {
-        return true;
-    }
-    let dirty_has_test = dirty.iter().any(|path| path_looks_test_like(path));
-    let committed_has_source = committed.iter().any(|path| !path_looks_test_like(path));
-    dirty_has_test && committed_has_source
-}
-
-pub(crate) fn path_looks_test_like(path: &str) -> bool {
-    let lower = path.replace('\\', "/").to_ascii_lowercase();
-    lower.starts_with("tests/")
-        || lower.contains("/tests/")
-        || lower.starts_with("test/")
-        || lower.contains("/test/")
-        || lower.ends_with("_test.rs")
-        || lower.ends_with("_tests.rs")
-        || lower.ends_with(".snap")
-        || lower
-            .rsplit('/')
-            .next()
-            .is_some_and(|name| name.contains("test"))
-}
-
-pub(crate) fn extract_changed_string_literals(diff: &str) -> std::collections::BTreeSet<String> {
-    let mut literals = std::collections::BTreeSet::new();
-    for line in diff.lines() {
-        if !(line.starts_with('+') || line.starts_with('-'))
-            || line.starts_with("+++")
-            || line.starts_with("---")
-        {
-            continue;
-        }
-        for literal in extract_string_literals_from_line(&line[1..]) {
-            if interesting_changed_literal(&literal) {
-                literals.insert(literal);
-            }
-        }
-    }
-    literals
-}
-
-pub(crate) fn extract_string_literals_from_line(line: &str) -> Vec<String> {
-    let mut result = Vec::new();
-    let mut chars = line.chars();
-    while let Some(ch) = chars.next() {
-        if ch != '"' && ch != '`' {
-            continue;
-        }
-        let quote = ch;
-        let mut escaped = false;
-        let mut literal = String::new();
-        for next in chars.by_ref() {
-            if escaped {
-                literal.push(next);
-                escaped = false;
-                continue;
-            }
-            if quote == '"' && next == '\\' {
-                escaped = true;
-                continue;
-            }
-            if next == quote {
-                break;
-            }
-            literal.push(next);
-        }
-        result.push(literal);
-    }
-    result
-}
-
-pub(crate) fn interesting_changed_literal(literal: &str) -> bool {
-    let trimmed = literal.trim();
-    trimmed.len() >= 4 && trimmed.chars().any(|ch| ch.is_ascii_alphanumeric())
 }
 
 pub(crate) fn preview_items(items: &[String], limit: usize) -> String {

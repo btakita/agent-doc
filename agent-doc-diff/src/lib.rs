@@ -2814,6 +2814,127 @@ fn truncate_for_reason(s: &str) -> &str {
     if s.len() <= 80 { s } else { &s[..80] }
 }
 
+/// True when a path can participate in the partial-staging closeout guard.
+///
+/// The guard targets source/test code partial staging, not session document
+/// churn. Markdown is intentionally excluded to avoid cross-document prose
+/// overlap producing false positives.
+pub fn is_partial_staging_relevant_path(path: &str) -> bool {
+    let normalized = path.replace('\\', "/");
+    if normalized.starts_with(".agent-doc/")
+        || normalized.starts_with(".git/")
+        || normalized.ends_with(".lock")
+    {
+        return false;
+    }
+    let lower = normalized.to_ascii_lowercase();
+    let Some(ext) = lower.rsplit('.').next() else {
+        return false;
+    };
+    matches!(
+        ext,
+        "rs" | "kt"
+            | "kts"
+            | "java"
+            | "py"
+            | "js"
+            | "jsx"
+            | "ts"
+            | "tsx"
+            | "go"
+            | "rb"
+            | "swift"
+            | "txt"
+            | "snap"
+            | "json"
+            | "toml"
+            | "yaml"
+            | "yml"
+    )
+}
+
+/// True when committed and dirty path sets look like source/test companions.
+pub fn partial_staging_paths_look_related(committed: &[String], dirty: &[String]) -> bool {
+    if committed
+        .iter()
+        .any(|committed_path| dirty.iter().any(|dirty_path| dirty_path == committed_path))
+    {
+        return true;
+    }
+    let dirty_has_test = dirty.iter().any(|path| path_looks_test_like(path));
+    let committed_has_source = committed.iter().any(|path| !path_looks_test_like(path));
+    dirty_has_test && committed_has_source
+}
+
+pub fn path_looks_test_like(path: &str) -> bool {
+    let lower = path.replace('\\', "/").to_ascii_lowercase();
+    lower.starts_with("tests/")
+        || lower.contains("/tests/")
+        || lower.starts_with("test/")
+        || lower.contains("/test/")
+        || lower.ends_with("_test.rs")
+        || lower.ends_with("_tests.rs")
+        || lower.ends_with(".snap")
+        || lower
+            .rsplit('/')
+            .next()
+            .is_some_and(|name| name.contains("test"))
+}
+
+/// Extract changed string/backtick literals from a unified diff.
+pub fn extract_changed_string_literals(diff: &str) -> std::collections::BTreeSet<String> {
+    let mut literals = std::collections::BTreeSet::new();
+    for line in diff.lines() {
+        if !(line.starts_with('+') || line.starts_with('-'))
+            || line.starts_with("+++")
+            || line.starts_with("---")
+        {
+            continue;
+        }
+        for literal in extract_string_literals_from_line(&line[1..]) {
+            if interesting_changed_literal(&literal) {
+                literals.insert(literal);
+            }
+        }
+    }
+    literals
+}
+
+fn extract_string_literals_from_line(line: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut chars = line.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '"' && ch != '`' {
+            continue;
+        }
+        let quote = ch;
+        let mut escaped = false;
+        let mut literal = String::new();
+        for next in chars.by_ref() {
+            if escaped {
+                literal.push(next);
+                escaped = false;
+                continue;
+            }
+            if quote == '"' && next == '\\' {
+                escaped = true;
+                continue;
+            }
+            if next == quote {
+                break;
+            }
+            literal.push(next);
+        }
+        result.push(literal);
+    }
+    result
+}
+
+fn interesting_changed_literal(literal: &str) -> bool {
+    let trimmed = literal.trim();
+    trimmed.len() >= 4 && trimmed.chars().any(|ch| ch.is_ascii_alphanumeric())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2840,6 +2961,53 @@ mod tests {
             .iter_all_changes()
             .any(|c| c.tag() == ChangeTag::Delete);
         assert!(has_delete);
+    }
+
+    #[test]
+    fn partial_staging_relevant_paths_exclude_markdown_and_sidecars() {
+        assert!(is_partial_staging_relevant_path("src/lib.rs"));
+        assert!(is_partial_staging_relevant_path("tests/flow.snap"));
+        assert!(!is_partial_staging_relevant_path(
+            "tasks/agent-doc/session.md"
+        ));
+        assert!(!is_partial_staging_relevant_path(".agent-doc/state.json"));
+        assert!(!is_partial_staging_relevant_path("Cargo.lock"));
+    }
+
+    #[test]
+    fn partial_staging_paths_match_same_file_or_source_with_dirty_test() {
+        assert!(partial_staging_paths_look_related(
+            &["src/lib.rs".to_string()],
+            &["src/lib.rs".to_string()]
+        ));
+        assert!(partial_staging_paths_look_related(
+            &["src/lib.rs".to_string()],
+            &["tests/lib_test.rs".to_string()]
+        ));
+        assert!(!partial_staging_paths_look_related(
+            &["tests/lib_test.rs".to_string()],
+            &["src/lib.rs".to_string()]
+        ));
+    }
+
+    #[test]
+    fn changed_string_literals_extracts_only_interesting_changed_literals() {
+        let diff = "\
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,3 +1,3 @@
+-let old = \"stable literal\";
++let new = \"stable literal\";
++let raw = `retry closeout`;
++let short = \"x\";
+ context = \"ignored context\";
+";
+        let literals = extract_changed_string_literals(diff);
+        assert!(literals.contains("stable literal"));
+        assert!(literals.contains("retry closeout"));
+        assert!(!literals.contains("x"));
+        assert!(!literals.contains("ignored context"));
     }
 
     #[test]

@@ -2164,6 +2164,7 @@ fn test_manifest_uses_publishable_dependency_contract() {
         "agent-doc-orchestration",
         "agent-doc-template",
         "agent-doc-turn",
+        "agent-doc-work-graph",
     ] {
         let dependency = dependencies[crate_name].as_table().unwrap();
         assert!(
@@ -2217,6 +2218,62 @@ fn test_manifest_uses_publishable_dependency_contract() {
         tmux_router.get("version").and_then(toml::Value::as_str),
         Some("0.3.11")
     );
+}
+
+#[test]
+fn test_agent_doc_work_graph_is_source_agnostic_boundary() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-work-graph")),
+        "agent-doc-work-graph must stay a first-class workspace crate"
+    );
+    assert!(
+        manifest_dir
+            .join("agent-doc-work-graph/src/lib.rs")
+            .exists(),
+        "work-graph analysis should live in the focused crate"
+    );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-document/src/auto_dag.rs")
+            .exists(),
+        "Auto-DAG graph policy should not live under the markdown document projection crate"
+    );
+
+    let root_dependencies = workspace["dependencies"].as_table().unwrap();
+    assert!(
+        root_dependencies.contains_key("agent-doc-work-graph"),
+        "the CLI should call the focused work-graph crate directly"
+    );
+
+    let work_graph_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-work-graph/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&work_graph_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+
+    assert!(dependencies.contains_key("agent-doc-element"));
+    assert!(dependencies.contains_key("agent-doc-element-backlog"));
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-document",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-work-graph must stay source-agnostic and free of document, orchestration, git, editor IPC, sqlite, or tmux crates"
+        );
+    }
 }
 
 #[test]

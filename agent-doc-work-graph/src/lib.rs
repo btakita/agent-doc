@@ -1,9 +1,11 @@
-//! Pure Auto-DAG analysis and rendering for tracked work items.
+//! Pure work-graph analysis and rendering for tracked work items.
 //!
-//! This module is document-text in, typed graph/string renderings out. It does
-//! not read files, write documents, inspect git, dispatch agents, or commit.
+//! This crate is source work-items in, typed graph/string renderings out. It
+//! also exposes a document-text adapter for the current markdown session
+//! format, but it does not read files, write documents, inspect git, dispatch
+//! agents, or commit.
 
-use agent_doc_element_backlog::backlog::{self, PendingItem, PendingState};
+use agent_doc_element_backlog::backlog::{self, PendingState};
 use anyhow::{Context, Result};
 use serde::Serialize;
 
@@ -98,7 +100,16 @@ pub struct DagItem {
     pub summary: String,
 }
 
-/// The full classified work-graph for a document.
+/// One work item from any source adapter: a markdown document, another document,
+/// or an external project-management integration.
+#[derive(Debug, Clone)]
+pub struct SourceWorkItem {
+    pub id: String,
+    pub text: String,
+    pub done: bool,
+}
+
+/// The full classified work-graph for source work items.
 #[derive(Debug, Clone, Serialize)]
 pub struct AutoDag {
     pub items: Vec<DagItem>,
@@ -118,8 +129,8 @@ const LANES_IN_ORDER: [Lane; 5] = [
     Lane::LikelyDone,
 ];
 
-fn summarize(item: &PendingItem) -> String {
-    let first = item.text.lines().next().unwrap_or("").trim();
+fn summarize_text(text: &str) -> String {
+    let first = text.lines().next().unwrap_or("").trim();
     let bounded: String = first.chars().take(100).collect();
     if first.chars().count() > 100 {
         format!("{bounded}…")
@@ -128,11 +139,25 @@ fn summarize(item: &PendingItem) -> String {
     }
 }
 
-/// Build the classified work-graph from a document's content.
-pub fn analyze(content: &str) -> Result<AutoDag> {
+/// Build the classified work-graph from source-adapter work items.
+pub fn analyze_items(items: impl IntoIterator<Item = SourceWorkItem>) -> AutoDag {
+    let items = items
+        .into_iter()
+        .filter(|item| !item.done)
+        .map(|item| DagItem {
+            id: item.id,
+            lane: classify(&item.text),
+            summary: summarize_text(&item.text),
+        })
+        .collect();
+    AutoDag { items }
+}
+
+/// Build the classified work-graph from the current markdown document format.
+pub fn analyze_document(content: &str) -> Result<AutoDag> {
     let components =
         agent_doc_element::element::parse(content).context("auto-dag: parse components")?;
-    let mut items = Vec::new();
+    let mut source_items = Vec::new();
     for comp in &components {
         if !matches!(comp.name.as_str(), "backlog" | "review" | "icebox") {
             continue;
@@ -140,17 +165,14 @@ pub fn analyze(content: &str) -> Result<AutoDag> {
         let body = &content[comp.open_end..comp.close_start];
         let (_, parsed, _) = backlog::parse_items(body);
         for item in &parsed {
-            if matches!(item.state, PendingState::Done) {
-                continue;
-            }
-            items.push(DagItem {
+            source_items.push(SourceWorkItem {
                 id: item.id.clone(),
-                lane: classify(&item.text),
-                summary: summarize(item),
+                text: item.text.clone(),
+                done: matches!(item.state, PendingState::Done),
             });
         }
     }
-    Ok(AutoDag { items })
+    Ok(analyze_items(source_items))
 }
 
 /// Render the work-graph as a Mermaid `graph TD`.
@@ -231,10 +253,29 @@ mod tests {
             "3. [x] [#cccc] already reaped\n",
             "<!-- /agent:review -->\n",
         );
-        let dag = analyze(content).unwrap();
+        let dag = analyze_document(content).unwrap();
         assert_eq!(dag.items.len(), 2, "the reaped [x] item is skipped");
         assert_eq!(dag.lane_items(Lane::LiveVerify).len(), 1);
         assert_eq!(dag.lane_items(Lane::Implementable).len(), 1);
+    }
+
+    #[test]
+    fn analyze_items_accepts_non_document_sources() {
+        let dag = analyze_items([
+            SourceWorkItem {
+                id: "pm-123".into(),
+                text: "live-verify the imported PM task".into(),
+                done: false,
+            },
+            SourceWorkItem {
+                id: "pm-456".into(),
+                text: "already reaped".into(),
+                done: true,
+            },
+        ]);
+        assert_eq!(dag.items.len(), 1);
+        assert_eq!(dag.items[0].id, "pm-123");
+        assert_eq!(dag.items[0].lane, Lane::LiveVerify);
     }
 
     #[test]

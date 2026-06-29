@@ -27,6 +27,7 @@ members = [
     "agent-doc-sqlite",
     "agent-doc-document",
     "agent-doc-document-realtime",
+    "agent-doc-work-graph",
     "agent-doc-turn",
     "agent-doc-turn-executor",
     "agent-doc-turn-executor-tmux",
@@ -85,6 +86,7 @@ agent-doc-secret-redact = { path = "agent-doc-secret-redact", version = "0.34.65
 agent-doc-sqlite = { path = "agent-doc-sqlite", version = "0.34.65" }
 agent-doc-template = { path = "agent-doc-template", version = "0.34.65" }
 agent-doc-turn = { path = "agent-doc-turn", version = "0.34.65" }
+agent-doc-work-graph = { path = "agent-doc-work-graph", version = "0.34.65" }
 anyhow = "1"
 base64 = "0.22"
 clap = { version = "4", features = ["derive"] }

@@ -41,6 +41,7 @@ dependencies = [
  "agent-doc-sqlite",
  "agent-doc-template",
  "agent-doc-turn",
+ "agent-doc-work-graph",
  "agent-kit",
  "anyhow",
  "assert_cmd",
@@ -495,6 +496,16 @@ version = "0.34.65"
 dependencies = [
  "agent-doc-tmux",
  "agent-doc-turn-executor",
+]
+
+[[package]]
+name = "agent-doc-work-graph"
+version = "0.34.65"
+dependencies = [
+ "agent-doc-element",
+ "agent-doc-element-backlog",
+ "anyhow",
+ "serde",
 ]
 
 [[package]]

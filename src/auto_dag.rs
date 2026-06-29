@@ -13,6 +13,24 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const SCHEDULE_CONTRACT_VERSION: &str = "agent-doc-auto-dag-schedule-v1";
 
+/// `agent-doc auto-dag <FILE>` entry point for first-class backlog/review graph
+/// planning. Pure graph analysis/rendering lives in `agent-doc-work-graph`; the
+/// binary owns file IO and terminal output.
+pub(crate) fn run_command(file: &Path, json: bool) -> Result<()> {
+    let content = std::fs::read_to_string(file)
+        .with_context(|| format!("auto-dag: read {}", file.display()))?;
+    let dag = agent_doc_work_graph::analyze_document(&content)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&dag)?);
+    } else {
+        println!("# Auto-DAG: completion work-graph for {}\n", file.display());
+        println!("{}", agent_doc_work_graph::render_mermaid(&dag));
+        println!("## Completion order\n");
+        print!("{}", agent_doc_work_graph::render_nested_list(&dag));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct AutoDagSchedule {
     pub(crate) contract_version: String,

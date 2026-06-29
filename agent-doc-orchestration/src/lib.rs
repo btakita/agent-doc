@@ -55,7 +55,6 @@ pub mod security;
 pub mod admin;
 pub mod admit;
 pub mod agent;
-pub mod auto_dag;
 pub mod autofix;
 pub mod callback;
 pub mod capture;

@@ -2633,7 +2633,7 @@ fn main() -> anyhow::Result<()> {
             }
         }
         Commands::Outline { file, json } => outline::run(&file, json),
-        Commands::AutoDag { file, json } => agent_doc_orchestration::auto_dag::run(&file, json),
+        Commands::AutoDag { file, json } => auto_dag::run_command(&file, json),
         Commands::Resync { file, fix, session } => {
             if fix {
                 agent_doc_orchestration::resync::run_fix(file.as_deref(), session.as_deref())

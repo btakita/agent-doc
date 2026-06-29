@@ -280,6 +280,7 @@ version = "0.34.65"
 dependencies = [
  "agent-doc-element",
  "agent-doc-element-queue",
+ "agent-doc-frontmatter",
  "agent-doc-markdown-ast",
  "anyhow",
  "lazily 0.13.1",

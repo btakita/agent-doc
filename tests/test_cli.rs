@@ -2386,7 +2386,16 @@ fn test_agent_doc_merge_is_pure_workspace_boundary() {
     );
     assert!(dependencies.contains_key("agent-doc-element"));
     assert!(dependencies.contains_key("agent-doc-element-queue"));
+    assert!(dependencies.contains_key("agent-doc-frontmatter"));
     assert!(dependencies.contains_key("agent-doc-markdown-ast"));
+    let orchestration_merge =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/merge.rs")).unwrap();
+    for forbidden_snippet in ["pub fn merge_contents_crdt(", "fn merge_frontmatter_aware"] {
+        assert!(
+            !orchestration_merge.contains(forbidden_snippet),
+            "orchestration must not re-own pure frontmatter-aware CRDT merge policy: {forbidden_snippet}"
+        );
+    }
     for forbidden in [
         "agent-doc-core",
         "agent-doc-orchestration",

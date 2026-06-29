@@ -1,7 +1,7 @@
 //! # Module: merge
 //!
 //! ## Spec
-//! - `merge_contents_crdt(base_state, ours, theirs)`: conflict-free merge using Yrs CRDT.
+//! - `agent_doc_merge::merge_contents_crdt(base_state, ours, theirs)`: conflict-free merge using Yrs CRDT.
 //!   Delegates to `crdt::merge_by_component` (#hap7/#qcellmerge1) so each `agent:*`
 //!   component — and each keyed child inside a list/exchange component — reconciles against
 //!   its own base instead of merging the whole document as one blob; a concurrent operator
@@ -19,13 +19,13 @@
 //!   markers intact. Returns `(resolved_content, has_remaining_conflicts)`.
 //!
 //! ## Agentic Contracts
-//! - `merge_contents_crdt` never returns conflict markers — CRDT guarantees a conflict-free
+//! - `agent_doc_merge::merge_contents_crdt` never returns conflict markers — CRDT guarantees a conflict-free
 //!   result for all concurrent append/edit combinations.
-//! - `merge_contents_crdt` always returns a non-empty `state` vec usable as `base_state` in
+//! - `agent_doc_merge::merge_contents_crdt` always returns a non-empty `state` vec usable as `base_state` in
 //!   the next merge cycle; state encodes the full merged text, including user edits.
 //! - `merge_contents` returns `Ok` even when conflicts remain — callers must inspect the
 //!   content for `<<<<<<<` markers if they need to detect unresolved conflicts.
-//! - When `base_state` is `None`, `merge_contents_crdt` bootstraps from an empty CRDT doc
+//! - When `base_state` is `None`, `agent_doc_merge::merge_contents_crdt` bootstraps from an empty CRDT doc
 //!   and still produces a valid merged result.
 //! - Agent content always appears before user content at the same insertion point.
 //! - Returned CRDT state after a merge includes all user edits from the merge; using it as
@@ -59,107 +59,9 @@
 use anyhow::{Context, Result};
 use std::process::Command;
 
-/// CRDT-based merge: conflict-free merge using Yrs CRDT.
-///
-/// Returns (merged_text, new_crdt_state).
-/// `base_state` is the CRDT state from the last write (None on first use).
-/// Agent content (client_id=2) naturally appears before human content (client_id=1)
-/// at the same insertion point — no post-merge reorder needed.
-pub fn merge_contents_crdt(
-    base_state: Option<&[u8]>,
-    ours: &str,
-    theirs: &str,
-) -> Result<(String, Vec<u8>)> {
-    // Per-structural-node scoping (#hap7/#qcellmerge1): reconcile each `agent:*`
-    // component (and, inside list/exchange components, each keyed child) against
-    // its own base instead of merging the whole document as one text blob. A
-    // concurrent operator edit to one queue item can no longer duplicate or
-    // corrupt an adjacent component/item. `merge_by_component` falls back to the
-    // whole-doc `merge` internally on structural divergence or inline-mode docs.
-    //
-    // `#fmreset`: the leading YAML frontmatter region is reconciled field-wise
-    // (operator-authoritative) instead of as a text blob, so an operator's
-    // frontmatter edit is never reverted to the snapshot/base value.
-    let merged = merge_frontmatter_aware(base_state, ours, theirs)?;
-    // Build fresh CRDT state from the merged result
-    let doc = agent_doc_merge::crdt::CrdtDoc::from_text(&merged);
-    let state = doc.encode_state();
-    eprintln!("[write] CRDT merge successful — no conflicts possible.");
-    Ok((merged, state))
-}
-
-/// Frontmatter-aware per-component CRDT merge (`#fmreset`).
-///
-/// Wraps [`agent_doc_merge::crdt::merge_by_component`] so the leading YAML frontmatter
-/// region is reconciled FIELD-WISE (operator-authoritative) via
-/// [`agent_doc_frontmatter::frontmatter::merge_frontmatter_3way`] instead of as a text blob.
-///
-/// The whole-document text CRDT merges frontmatter as the leading interstitial
-/// node, which (in the absent/stale-base epoch) can duplicate keys or splice the
-/// frontmatter into the body — silently reverting or corrupting an operator's
-/// hand-edit (`queue:`, `claude_model:`, `prompt_presets:`, custom keys, …). The
-/// field-wise merge keeps an operator edit to an operator-owned key, keeps an
-/// agent managed-key write (session/resume/pipeline), and merges a concurrent
-/// operator-edit + agent-write key-by-key without either being lost.
-///
-/// Engages only when the agent and operator sides actually disagree on the
-/// frontmatter block (`ours_fm != theirs_fm`); otherwise the call is byte-for-byte
-/// equivalent to the plain `merge_by_component` path, so unchanged-frontmatter
-/// cycles keep their exact behavior (and frontmatter is never reformatted unless
-/// it genuinely changed). The body is still reconciled by the per-component merge.
-fn merge_frontmatter_aware(base_state: Option<&[u8]>, ours: &str, theirs: &str) -> Result<String> {
-    use agent_doc_frontmatter::frontmatter as fm;
-
-    let (ours_fm, ours_body) = fm::split_frontmatter_parts(ours);
-    let (theirs_fm, theirs_body) = fm::split_frontmatter_parts(theirs);
-
-    // No operator/agent frontmatter divergence → exact legacy behavior.
-    if ours_fm == theirs_fm {
-        return agent_doc_merge::crdt::merge_by_component(base_state, ours, theirs)
-            .context("CRDT merge failed");
-    }
-
-    // Resolve the base frontmatter + body from the decoded base state (if any).
-    let base_text = match base_state {
-        Some(bytes) => agent_doc_merge::crdt::CrdtDoc::decode_state(bytes)
-            .map(|d| d.to_text())
-            .ok(),
-        None => None,
-    };
-    let (base_fm, base_body) = match base_text.as_deref() {
-        Some(t) => {
-            let (f, b) = fm::split_frontmatter_parts(t);
-            (f.map(str::to_string), Some(b.to_string()))
-        }
-        None => (None, None),
-    };
-
-    let Some(merged_fm) = fm::merge_frontmatter_3way(base_fm.as_deref(), ours_fm, theirs_fm) else {
-        // No side actually had frontmatter (shouldn't happen here) — fall back.
-        return agent_doc_merge::crdt::merge_by_component(base_state, ours, theirs)
-            .context("CRDT merge failed");
-    };
-
-    // Merge the bodies independently against a body-only base state. The
-    // per-component merge only uses base_state to recover the base TEXT, so a
-    // freshly-encoded body-only state is equivalent to the original minus the
-    // frontmatter region.
-    let body_base_state = base_body
-        .as_deref()
-        .map(|b| agent_doc_merge::crdt::CrdtDoc::from_text(b).encode_state());
-    let merged_body = agent_doc_merge::crdt::merge_by_component(
-        body_base_state.as_deref(),
-        ours_body,
-        theirs_body,
-    )
-    .context("CRDT merge failed (body)")?;
-
-    Ok(format!("{merged_fm}{merged_body}"))
-}
-
 /// Op-capture–aware CRDT merge (`#qnodemerge4wire` part 3).
 ///
-/// Same contract and return shape as [`merge_contents_crdt`], but for the
+/// Same contract and return shape as [`agent_doc_merge::merge_contents_crdt`], but for the
 /// `theirs` (editor) side it prefers the editor's *real* captured operations
 /// over a Myers diff-guess when they are available and provably aligned. This
 /// is the live wiring that makes the op-capture supply chain
@@ -171,7 +73,7 @@ fn merge_frontmatter_aware(base_state: Option<&[u8]>, ours: &str, theirs: &str) 
 ///      ([`op_capture::editor_ops_for_base`]), and
 ///   2. replaying the ops onto that base reproduces `theirs` byte-for-byte
 ///      ([`agent_doc_merge::crdt::merge_with_editor_ops`]'s acceptance gate).
-///      Otherwise the merge is byte-identical to [`merge_contents_crdt`]: with no
+///      Otherwise the merge is byte-identical to [`agent_doc_merge::merge_contents_crdt`]: with no
 ///      sidecar (the production state until the editor reporters land), or with
 ///      stale/misaligned ops, this delegates to the exact same `crdt::merge` path.
 ///
@@ -233,7 +135,7 @@ pub fn merge_contents_crdt_with_ops(
         // side can no longer duplicate structure across components/items
         // (#hap7/#qcellmerge1). The op-replay branch above stays whole-doc because
         // captured ops carry whole-document byte offsets.
-        None => merge_frontmatter_aware(base_state, ours, theirs)?,
+        None => agent_doc_merge::merge_contents_crdt(base_state, ours, theirs)?.0,
     };
 
     // Consume the sidecar — the ops belonged to this base epoch (used or stale).
@@ -580,7 +482,8 @@ User line 2.
         let base_doc = agent_doc_merge::crdt::CrdtDoc::from_text(base);
         let base_state = base_doc.encode_state();
 
-        let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
+        let (merged, _state) =
+            agent_doc_merge::merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
         assert!(merged.contains("Agent response."));
         assert!(merged.contains("User addition."));
         assert!(merged.contains("Base content."));
@@ -601,7 +504,8 @@ User line 2.
             "<!-- agent:backlog -->\n- [ ] [#abcd-2] do the thing\n<!-- /agent:backlog -->\n";
 
         let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state();
-        let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
+        let (merged, _state) =
+            agent_doc_merge::merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
         assert!(
             merged.contains("[#abcd-2] do the thing"),
             "user's renamed id must survive the merge:\n{merged}"
@@ -623,7 +527,8 @@ User line 2.
         let theirs = "---\nagent_doc_format: template\nclaude_model: opus\n---\n\n# Title\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
 
         let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state();
-        let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
+        let (merged, _state) =
+            agent_doc_merge::merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
         assert!(
             merged.contains("claude_model: opus"),
             "operator's edited frontmatter value must survive the merge:\n{merged}"
@@ -642,7 +547,7 @@ User line 2.
         let ours = "---\nagent_doc_format: template\nclaude_model: sonnet\n---\n\n# Title\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
         let theirs = "---\nagent_doc_format: template\nclaude_model: opus\n---\n\n# Title\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
 
-        let (merged, _state) = merge_contents_crdt(None, ours, theirs).unwrap();
+        let (merged, _state) = agent_doc_merge::merge_contents_crdt(None, ours, theirs).unwrap();
         assert!(
             merged.contains("claude_model: opus"),
             "operator's edited frontmatter value must survive the no-base merge:\n{merged}"
@@ -670,7 +575,8 @@ User line 2.
         let theirs = "---\nagent_doc_format: template\nclaude_model: opus\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
 
         let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state();
-        let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
+        let (merged, _state) =
+            agent_doc_merge::merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
         assert!(
             merged.contains("### Re: topic"),
             "agent response must survive:\n{merged}"
@@ -694,7 +600,8 @@ User line 2.
         let theirs = "---\nagent_doc_format: template\nprompt_presets:\n  \"#1\": |\n    new line\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
 
         let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state();
-        let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
+        let (merged, _state) =
+            agent_doc_merge::merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
         assert!(
             merged.contains("new line"),
             "operator's edited preset must survive:\n{merged}"
@@ -713,7 +620,8 @@ User line 2.
         let ours = "---\nagent_doc_session: sid\nresume: conv-123\nclaude_model: sonnet\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
         let theirs = base; // operator untouched
         let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state();
-        let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
+        let (merged, _state) =
+            agent_doc_merge::merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
         assert!(
             merged.contains("resume: conv-123"),
             "agent-managed resume write must apply:\n{merged}"
@@ -729,7 +637,8 @@ User line 2.
         let ours = "---\nagent_doc_session: sid\nresume: conv-123\nclaude_model: sonnet\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
         let theirs = "---\nagent_doc_session: sid\nclaude_model: opus\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
         let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state();
-        let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
+        let (merged, _state) =
+            agent_doc_merge::merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
         assert!(
             merged.contains("resume: conv-123"),
             "agent-managed resume write must apply:\n{merged}"
@@ -748,7 +657,8 @@ User line 2.
         let ours = base;
         let theirs = "---\nagent_doc_format: template\nmy_custom_key: hello\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
         let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state();
-        let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
+        let (merged, _state) =
+            agent_doc_merge::merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
         assert!(
             merged.contains("my_custom_key: hello"),
             "operator's custom frontmatter key must survive:\n{merged}"
@@ -774,7 +684,8 @@ User line 2.
                     <!-- agent:queue -->\n- do [#aaaa]\n- do [#bbbb]\n<!-- /agent:queue -->\n";
 
         let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state();
-        let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
+        let (merged, _state) =
+            agent_doc_merge::merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
 
         assert!(
             merged.contains("### Re: topic"),
@@ -809,7 +720,8 @@ User line 2.
 <!-- agent:queue -->\n- do [#aaaa] keep\n<!-- /agent:queue -->\n";
 
         let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state();
-        let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
+        let (merged, _state) =
+            agent_doc_merge::merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
 
         assert!(
             merged.contains("[#aaaa]"),
@@ -836,7 +748,8 @@ User line 2.
 <!-- agent:queue -->\n- :pushpin: All upload preview dialogs should be full screen. deploy\n<!-- /agent:queue -->\n";
 
         let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state();
-        let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
+        let (merged, _state) =
+            agent_doc_merge::merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
 
         assert!(
             merged.contains("### Re: topic"),
@@ -865,7 +778,8 @@ User line 2.
         let base_doc = agent_doc_merge::crdt::CrdtDoc::from_text(base);
         let base_state = base_doc.encode_state();
 
-        let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
+        let (merged, _state) =
+            agent_doc_merge::merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
         // Both preserved, deterministic ordering, no conflict
         assert!(merged.contains("Agent"));
         assert!(merged.contains("User"));
@@ -878,7 +792,7 @@ User line 2.
         let ours = "Agent content.\n";
         let theirs = "User content.\n";
 
-        let (merged, state) = merge_contents_crdt(None, ours, theirs).unwrap();
+        let (merged, state) = agent_doc_merge::merge_contents_crdt(None, ours, theirs).unwrap();
         assert!(merged.contains("Agent content."));
         assert!(merged.contains("User content."));
         assert!(!state.is_empty());
@@ -1020,7 +934,8 @@ User line 2.
 
         let (with_ops, _) =
             merge_contents_crdt_with_ops(&doc, Some(&base_state), ours, theirs).unwrap();
-        let (plain, _) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
+        let (plain, _) =
+            agent_doc_merge::merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
         assert_eq!(
             with_ops, plain,
             "stale-base ops must not change the merge result"
@@ -1036,7 +951,8 @@ User line 2.
         let base_state = base_doc.encode_state();
 
         let ours = "Original.\nAgent added.\n";
-        let (merged, _) = merge_contents_crdt(Some(&base_state), ours, base).unwrap();
+        let (merged, _) =
+            agent_doc_merge::merge_contents_crdt(Some(&base_state), ours, base).unwrap();
         assert_eq!(merged, ours);
     }
 
@@ -1077,7 +993,8 @@ User line 2.
         let theirs_cycle1 = "Why were the videos not public?\nuser-edit-abc\n";
 
         let (merged1, state1) =
-            merge_contents_crdt(Some(&initial_state), ours_cycle1, theirs_cycle1).unwrap();
+            agent_doc_merge::merge_contents_crdt(Some(&initial_state), ours_cycle1, theirs_cycle1)
+                .unwrap();
 
         // Both edits present after cycle 1
         assert!(
@@ -1093,7 +1010,8 @@ User line 2.
         let theirs_cycle2 = merged1.clone();
 
         let (merged2, _state2) =
-            merge_contents_crdt(Some(&state1), &ours_cycle2, &theirs_cycle2).unwrap();
+            agent_doc_merge::merge_contents_crdt(Some(&state1), &ours_cycle2, &theirs_cycle2)
+                .unwrap();
 
         // The user's edit should appear exactly ONCE, not duplicated
         let edit_count = merged2.matches("user-edit-abc").count();
@@ -1121,14 +1039,16 @@ User line 2.
         // Flush 1: Agent starts responding, user adds a note
         let ours1 = "# Doc\n\nQuestion here.\n\n### Re: Answer\n\nFirst paragraph.\n";
         let theirs1 = "# Doc\n\nQuestion here.\n\n> user note\n";
-        let (merged1, state1) = merge_contents_crdt(Some(&state0), ours1, theirs1).unwrap();
+        let (merged1, state1) =
+            agent_doc_merge::merge_contents_crdt(Some(&state0), ours1, theirs1).unwrap();
         assert!(merged1.contains("First paragraph."));
         assert!(merged1.contains("> user note"));
 
         // Flush 2: Agent continues, user adds another note
         let ours2 = format!("{}\nSecond paragraph.\n", merged1);
         let theirs2 = format!("{}\n> another note\n", merged1);
-        let (merged2, _state2) = merge_contents_crdt(Some(&state1), &ours2, &theirs2).unwrap();
+        let (merged2, _state2) =
+            agent_doc_merge::merge_contents_crdt(Some(&state1), &ours2, &theirs2).unwrap();
 
         // Each piece of content appears exactly once
         assert_eq!(

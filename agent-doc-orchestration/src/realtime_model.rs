@@ -214,7 +214,8 @@ pub fn compute_broadcast(
         });
     }
     let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state();
-    let (merged, _state) = crate::merge::merge_contents_crdt(Some(&base_state), originator, peer)?;
+    let (merged, _state) =
+        agent_doc_merge::merge_contents_crdt(Some(&base_state), originator, peer)?;
     let originator_echo_suppressed = merged == originator;
     Ok(BroadcastMerge {
         merged,

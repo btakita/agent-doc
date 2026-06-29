@@ -10,6 +10,7 @@ pub mod ownership;
 pub mod cell_doc;
 pub mod crdt;
 pub mod crdt_sync;
+pub mod frontmatter_crdt;
 
 pub use agent_doc_markdown_ast::semantic_merge::{
     AckReason, AckRequest, NodeOutcome, OutcomeKind, SemanticMerge, semantic_merge,
@@ -18,6 +19,7 @@ pub use cell_doc::{
     CellConflict, CellMergeOutcome, ConflictKind, ConflictPolicy, component_conflict_policy,
     merge_3way as cell_merge_3way,
 };
+pub use frontmatter_crdt::merge_contents_crdt;
 
 /// Merge implementation to use for a pure three-way merge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

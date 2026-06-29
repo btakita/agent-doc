@@ -1908,8 +1908,11 @@ fn apply_template_response(
         {
             eprintln!("[crdt] disk-demotion reconcile failed (non-fatal): {e}");
         }
-        let (merged, state) =
-            merge::merge_contents_crdt(Some(&base_state), &content_ours, &content_current)?;
+        let (merged, state) = agent_doc_merge::merge_contents_crdt(
+            Some(&base_state),
+            &content_ours,
+            &content_current,
+        )?;
         (merged, Some(state))
     } else {
         eprintln!("File was modified during run. Merging changes...");

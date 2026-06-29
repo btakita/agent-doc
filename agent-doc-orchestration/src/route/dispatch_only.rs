@@ -406,7 +406,7 @@ pub(crate) fn dispatch_only_send_reopen(
             harness,
             SupervisorIpcDispatchOptions {
                 await_start_proof: dispatch_only_dispatch_start_proof_required(file, harness),
-                print_unproven_progress: should_print_dispatch_only_unproven_progress(),
+                print_unproven_progress: dispatch_only_should_print_unproven_progress(),
             },
         )?,
         DispatchOnlyReopenDelivery::DirectPaneSubmit => dispatch_routed_reopen_with_mode(
@@ -417,7 +417,7 @@ pub(crate) fn dispatch_only_send_reopen(
             harness,
             DirectPaneDispatchOptions {
                 await_start_proof: dispatch_only_dispatch_start_proof_required(file, harness),
-                print_unproven_progress: should_print_dispatch_only_unproven_progress(),
+                print_unproven_progress: dispatch_only_should_print_unproven_progress(),
             },
         )?,
     };
@@ -428,31 +428,18 @@ pub(crate) fn dispatch_only_send_reopen(
         delivery,
         dispatch_start,
     )?;
-    crate::ops_log::log_op(
-        file,
-        &route_dispatch_only_sent_log_message(
-            file,
-            &dispatch_pane,
-            harness,
-            delivery,
-            dispatch_start,
-        ),
-    );
-    eprintln!(
-        "{}",
-        route_dispatch_only_sent_console_message(
-            file,
-            &dispatch_pane,
-            harness,
-            delivery,
-            dispatch_start,
-        )
-    );
+    let file_display = file.display().to_string();
+    let proof_facts = DispatchOnlyProofOutcomeFacts {
+        file_display: &file_display,
+        pane: &dispatch_pane,
+        harness_binary: &harness.binary,
+        delivery,
+        dispatch_start,
+        timeout_secs: routed_dispatch_start_timeout(harness).as_secs(),
+    };
+    crate::ops_log::log_op(file, &dispatch_only_sent_log_message(proof_facts));
+    eprintln!("{}", dispatch_only_sent_console_message(proof_facts));
     Ok(dispatch_pane)
-}
-
-pub(crate) fn should_print_dispatch_only_unproven_progress() -> bool {
-    flow_should_print_dispatch_only_unproven_progress()
 }
 
 pub(crate) fn dispatch_only_dispatch_start_proof_required(
@@ -521,7 +508,8 @@ pub(crate) fn require_dispatch_only_dispatch_start_proof(
     anyhow::bail!(accepted_only_dispatch_start_refusal_message(facts));
 }
 
-pub(crate) fn route_dispatch_only_sent_log_message(
+#[cfg(test)]
+fn dispatch_only_test_sent_log_message(
     file: &Path,
     pane: &str,
     harness: &HarnessConfig,
@@ -530,27 +518,9 @@ pub(crate) fn route_dispatch_only_sent_log_message(
 ) -> String {
     let file_display = file.display().to_string();
     dispatch_only_sent_log_message(DispatchOnlyProofOutcomeFacts {
-        file_display: file_display.as_str(),
+        file_display: &file_display,
         pane,
-        harness_binary: harness.binary.as_str(),
-        delivery,
-        dispatch_start,
-        timeout_secs: routed_dispatch_start_timeout(harness).as_secs(),
-    })
-}
-
-pub(crate) fn route_dispatch_only_sent_console_message(
-    file: &Path,
-    pane: &str,
-    harness: &HarnessConfig,
-    delivery: DispatchOnlyReopenDelivery,
-    dispatch_start: RoutedDispatchStartProof,
-) -> String {
-    let file_display = file.display().to_string();
-    dispatch_only_sent_console_message(DispatchOnlyProofOutcomeFacts {
-        file_display: file_display.as_str(),
-        pane,
-        harness_binary: harness.binary.as_str(),
+        harness_binary: &harness.binary,
         delivery,
         dispatch_start,
         timeout_secs: routed_dispatch_start_timeout(harness).as_secs(),
@@ -1027,11 +997,11 @@ mod tests {
         std::fs::write(&doc, "# Session\n").unwrap();
 
         assert!(
-            should_print_dispatch_only_unproven_progress(),
+            dispatch_only_should_print_unproven_progress(),
             "dispatch-only reroutes report accepted-delivery progress the same way for all harnesses"
         );
         assert!(
-            should_print_dispatch_only_unproven_progress(),
+            dispatch_only_should_print_unproven_progress(),
             "Codex hook visibility does not change the dispatch-only progress policy"
         );
     }
@@ -1090,7 +1060,7 @@ mod tests {
             "Codex without hook tracking may accept text+Enter delivery for dispatch-only reroutes",
         );
 
-        let message = route_dispatch_only_sent_log_message(
+        let message = dispatch_only_test_sent_log_message(
             &doc,
             "%4",
             &HarnessConfig::codex(),
@@ -1204,7 +1174,7 @@ mod tests {
     }
     #[test]
     fn dispatch_only_sent_log_marks_claude_accepted_only_scope() {
-        let message = route_dispatch_only_sent_log_message(
+        let message = dispatch_only_test_sent_log_message(
             Path::new("/tmp/robert-ross.md"),
             "%7",
             &HarnessConfig::claude(),
@@ -1218,7 +1188,7 @@ mod tests {
     }
     #[test]
     fn dispatch_only_sent_log_marks_opencode_accepted_only_scope() {
-        let message = route_dispatch_only_sent_log_message(
+        let message = dispatch_only_test_sent_log_message(
             Path::new("/tmp/sampleorders.md"),
             "%13",
             &HarnessConfig::opencode(),
@@ -1232,7 +1202,7 @@ mod tests {
     }
     #[test]
     fn dispatch_only_sent_log_marks_opencode_pane_state_dispatch_scope() {
-        let message = route_dispatch_only_sent_log_message(
+        let message = dispatch_only_test_sent_log_message(
             Path::new("/tmp/sampleorders.md"),
             "%13",
             &HarnessConfig::opencode(),
@@ -1279,7 +1249,7 @@ mod tests {
     }
     #[test]
     fn dispatch_only_sent_log_marks_codex_hook_proof_scope() {
-        let message = route_dispatch_only_sent_log_message(
+        let message = dispatch_only_test_sent_log_message(
             Path::new("/tmp/agent-doc-bugs2.md"),
             "%1",
             &HarnessConfig::codex(),

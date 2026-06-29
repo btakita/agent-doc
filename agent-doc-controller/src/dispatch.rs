@@ -543,6 +543,99 @@ pub fn route_dispatch_bug_report_item(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DispatchOnlyReopenDelivery {
+    SupervisorIpcOnce,
+    DirectPaneSubmit,
+}
+
+impl DispatchOnlyReopenDelivery {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::SupervisorIpcOnce => "supervisor_ipc_once",
+            Self::DirectPaneSubmit => "direct_pane_submit",
+        }
+    }
+
+    pub const fn submit_mode_for_harness(self, harness_binary: &str) -> &'static str {
+        match self {
+            Self::SupervisorIpcOnce => "supervisor_normalized_submit",
+            Self::DirectPaneSubmit => {
+                agent_doc_tmux_commands::tmux_submit_mode_for_harness(harness_binary)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DispatchOnlyProofOutcomeFacts<'a> {
+    pub file_display: &'a str,
+    pub pane: &'a str,
+    pub harness_binary: &'a str,
+    pub delivery: DispatchOnlyReopenDelivery,
+    pub dispatch_start: RoutedDispatchStartProof,
+    pub timeout_secs: u64,
+}
+
+pub const fn dispatch_only_should_print_unproven_progress() -> bool {
+    true
+}
+
+pub fn dispatch_only_sent_log_message(facts: DispatchOnlyProofOutcomeFacts<'_>) -> String {
+    format!(
+        "route_dispatch_only_sent file={} pane={} harness={} delivery={} submit_mode={} proof={} proof_scope={}",
+        facts.file_display,
+        facts.pane,
+        facts.harness_binary,
+        facts.delivery.label(),
+        facts.delivery.submit_mode_for_harness(facts.harness_binary),
+        facts.dispatch_start.dispatch_stage_label(),
+        facts.dispatch_start.proof_scope_label()
+    )
+}
+
+pub fn dispatch_only_sent_console_message(facts: DispatchOnlyProofOutcomeFacts<'_>) -> String {
+    format!(
+        "[route] dispatch-only {} reopen for {} was sent to pane {} via {} ({}) with {} proof ({})",
+        facts.harness_binary,
+        facts.file_display,
+        facts.pane,
+        facts.delivery.label(),
+        facts.delivery.submit_mode_for_harness(facts.harness_binary),
+        facts.dispatch_start.dispatch_stage_label(),
+        facts.dispatch_start.proof_scope_description()
+    )
+}
+
+pub fn accepted_only_dispatch_start_log_message(
+    facts: DispatchOnlyProofOutcomeFacts<'_>,
+) -> String {
+    format!(
+        "route_dispatch_only_submit_unproven file={} pane={} harness={} delivery={} submit_mode={} proof=accepted proof_scope=accepted_only timeout_secs={}",
+        facts.file_display,
+        facts.pane,
+        facts.harness_binary,
+        facts.delivery.label(),
+        facts.delivery.submit_mode_for_harness(facts.harness_binary),
+        facts.timeout_secs
+    )
+}
+
+pub fn accepted_only_dispatch_start_refusal_message(
+    facts: DispatchOnlyProofOutcomeFacts<'_>,
+) -> String {
+    format!(
+        "dispatch-only {} reopen for {} was accepted in pane {} via {} ({}), but only pane-input acceptance proof was available after waiting {}s; treating this as not dispatched because no dispatch-start proof was recorded. Restore an idle {} prompt or restart the session and reroute again",
+        facts.harness_binary,
+        facts.file_display,
+        facts.pane,
+        facts.delivery.label(),
+        facts.delivery.submit_mode_for_harness(facts.harness_binary),
+        facts.timeout_secs,
+        facts.harness_binary
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DispatchOnlyBusyRefusalFacts<'a> {
     pub generation: u64,
     pub file_display: &'a str,
@@ -1786,6 +1879,61 @@ mod tests {
         assert!(
             item.contains("[symptom-key invariant=run_agent_doc_route_dispatch_failure"),
             "{item}"
+        );
+    }
+
+    #[test]
+    fn dispatch_only_proof_policy_accepts_enter_delivery_for_all_harnesses() {
+        assert!(dispatch_only_should_print_unproven_progress());
+    }
+
+    #[test]
+    fn dispatch_only_sent_messages_preserve_proof_scope() {
+        let facts = DispatchOnlyProofOutcomeFacts {
+            file_display: "/tmp/doc.md",
+            pane: "%7",
+            harness_binary: "codex",
+            delivery: DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            dispatch_start: RoutedDispatchStartProof::CommandAcceptedOnly,
+            timeout_secs: 10,
+        };
+
+        let log = dispatch_only_sent_log_message(facts);
+        assert!(log.contains("submit_mode=tmux_text_enter"));
+        assert!(log.contains("proof=accepted"));
+        assert!(log.contains("proof_scope=accepted_only"));
+
+        let console = dispatch_only_sent_console_message(facts);
+        assert!(console.contains("accepted proof"));
+        assert!(console.contains("accepted-only"));
+
+        let unproven = accepted_only_dispatch_start_log_message(facts);
+        assert!(unproven.contains("route_dispatch_only_submit_unproven"));
+        assert!(unproven.contains("proof_scope=accepted_only"));
+
+        let refusal = accepted_only_dispatch_start_refusal_message(facts);
+        assert!(refusal.contains("tmux_text_enter"));
+        assert!(refusal.contains("only pane-input acceptance proof was available"));
+        assert!(refusal.contains("treating this as not dispatched"));
+    }
+
+    #[test]
+    fn dispatch_only_direct_submit_mode_is_harness_specific() {
+        assert_eq!(
+            DispatchOnlyReopenDelivery::DirectPaneSubmit.submit_mode_for_harness("codex"),
+            "tmux_text_enter"
+        );
+        assert_eq!(
+            DispatchOnlyReopenDelivery::DirectPaneSubmit.submit_mode_for_harness("opencode"),
+            "tmux_text_enter"
+        );
+        assert_eq!(
+            DispatchOnlyReopenDelivery::DirectPaneSubmit.submit_mode_for_harness("claude"),
+            "tmux_text_enter"
+        );
+        assert_eq!(
+            DispatchOnlyReopenDelivery::SupervisorIpcOnce.submit_mode_for_harness("codex"),
+            "supervisor_normalized_submit"
         );
     }
 

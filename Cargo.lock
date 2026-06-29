@@ -86,6 +86,7 @@ version = "0.34.65"
 dependencies = [
  "agent-doc-element-backlog",
  "agent-doc-supervisor",
+ "agent-doc-tmux-commands",
  "agent-doc-turn",
  "hex",
  "serde",

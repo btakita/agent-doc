@@ -3702,6 +3702,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     let route_dispatch_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch.rs"))
             .unwrap();
+    let route_dispatch_only_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch_only.rs"))
+            .unwrap();
     let route_startup_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/startup.rs"))
             .unwrap();
@@ -3803,6 +3806,13 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn duplicate_pane_policy_error_message(",
         "pub struct RouteDispatchBugReportItemFacts",
         "pub fn route_dispatch_bug_report_item(",
+        "pub enum DispatchOnlyReopenDelivery",
+        "pub struct DispatchOnlyProofOutcomeFacts",
+        "pub const fn dispatch_only_should_print_unproven_progress(",
+        "pub fn dispatch_only_sent_log_message(",
+        "pub fn dispatch_only_sent_console_message(",
+        "pub fn accepted_only_dispatch_start_log_message(",
+        "pub fn accepted_only_dispatch_start_refusal_message(",
         "pub struct DispatchOnlyBusyRefusalFacts",
         "pub fn dispatch_only_busy_refusal_message(",
     ] {
@@ -3898,6 +3908,13 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub struct RouteSubmitObservationFacts",
         "pub fn route_submit_observation_message(",
         "pub fn route_submit_issue_message(",
+        "pub enum DispatchOnlyReopenDelivery",
+        "pub struct DispatchOnlyProofOutcomeFacts",
+        "pub fn dispatch_only_sent_log_message(",
+        "pub fn dispatch_only_sent_console_message(",
+        "pub fn accepted_only_dispatch_start_log_message(",
+        "pub fn accepted_only_dispatch_start_refusal_message(",
+        "pub fn should_print_dispatch_only_unproven_progress(",
         "pub enum RouteLatencyStatus",
         "pub struct RouteLatencyFacts",
         "pub fn route_latency_status(",
@@ -3968,6 +3985,13 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("route_busy_queued_diagnostic_message(")
             && route_source.contains("RouteDispatchBugReportItemFacts")
             && route_source.contains("route_dispatch_bug_report_item(")
+            && route_source.contains("DispatchOnlyReopenDelivery")
+            && route_source.contains("DispatchOnlyProofOutcomeFacts")
+            && route_source.contains("dispatch_only_sent_log_message")
+            && route_source.contains("dispatch_only_sent_console_message")
+            && route_source.contains("accepted_only_dispatch_start_log_message")
+            && route_source.contains("accepted_only_dispatch_start_refusal_message")
+            && route_source.contains("dispatch_only_should_print_unproven_progress")
             && route_source.contains("DispatchOnlyBusyRefusalFacts")
             && route_source.contains("controller_dispatch_only_busy_refusal_message(")
             && route_source.contains("DispatchActorState")
@@ -4011,6 +4035,26 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_dispatch_source.contains("RoutedTriggerPayloadFacts")
             && route_dispatch_source.contains("routed_trigger_payload_rejection("),
         "route/dispatch.rs should adapt tmux captures into focused controller direct-pane policy"
+    );
+    for forbidden_snippet in [
+        "fn route_dispatch_only_sent_log_message(",
+        "fn route_dispatch_only_sent_console_message(",
+        "pub fn dispatch_only_sent_log_message(",
+        "pub fn accepted_only_dispatch_start_refusal_message(",
+    ] {
+        assert!(
+            !route_dispatch_only_source.contains(forbidden_snippet),
+            "route/dispatch_only.rs must not re-own dispatch-only proof outcome policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        route_dispatch_only_source.contains("DispatchOnlyProofOutcomeFacts")
+            && route_dispatch_only_source.contains("dispatch_only_sent_log_message(")
+            && route_dispatch_only_source.contains("dispatch_only_sent_console_message(")
+            && route_dispatch_only_source.contains("accepted_only_dispatch_start_log_message(")
+            && route_dispatch_only_source.contains("accepted_only_dispatch_start_refusal_message(")
+            && route_dispatch_only_source.contains("dispatch_only_should_print_unproven_progress("),
+        "route/dispatch_only.rs should adapt route facts into focused controller dispatch-only proof policy"
     );
     assert!(
         route_pane_resolution_source.contains("startup_miss_route_facts(")

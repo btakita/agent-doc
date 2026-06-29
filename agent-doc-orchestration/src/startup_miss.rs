@@ -169,7 +169,7 @@ pub fn append_session_log_event(file: &Path, session_id: &str, event: &str) -> R
         .create(true)
         .append(true)
         .open(&path)?;
-    let timestamp = crate::ops_log::format_log_timestamp(
+    let timestamp = agent_doc_log_time::format_log_timestamp(
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -319,7 +319,7 @@ pub fn session_log_status(file: &Path, session_id: &str) -> Result<Option<Sessio
         let timestamp = line
             .strip_prefix('[')
             .and_then(|rest| rest.split_once(']'))
-            .and_then(|(ts, _)| crate::ops_log::parse_log_timestamp(ts));
+            .and_then(|(ts, _)| agent_doc_log_time::parse_log_timestamp(ts));
 
         if event.starts_with("session_start ") {
             saw_start = true;
@@ -619,7 +619,7 @@ fn recent_session_loss_window_at(
         let Some(timestamp) = line
             .strip_prefix('[')
             .and_then(|rest| rest.split_once(']'))
-            .and_then(|(ts, _)| crate::ops_log::parse_log_timestamp(ts))
+            .and_then(|(ts, _)| agent_doc_log_time::parse_log_timestamp(ts))
         else {
             continue;
         };

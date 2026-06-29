@@ -165,17 +165,13 @@ fn git_head_hash(file: &Path) -> Option<String> {
     }
 }
 
-/// Human-readable log timestamp helpers (`#opslogts`) live in
-/// `agent-doc-log-time` so crate-local writers share one implementation.
-pub use agent_doc_log_time::{format_log_timestamp, parse_log_timestamp};
-
 /// Get the current timestamp in ISO 8601 (UTC) format.
 fn iso_timestamp() -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    format_log_timestamp(now)
+    agent_doc_log_time::format_log_timestamp(now)
 }
 
 /// Append a structured cycle entry to `.agent-doc/logs/cycles.jsonl`.
@@ -249,7 +245,14 @@ fn try_log_op(file: &Path, message: &str, rc: Option<&RunContext>) -> Option<()>
     // `#opslogtrack`: append doc/session/turn attribution so interleaved entries
     // from multiple documents in one project ops.log are traceable.
     let suffix = ops_log_tracking_suffix(file, rc);
-    writeln!(f, "[{}] {}{}", format_log_timestamp(ts), message, suffix).ok()
+    writeln!(
+        f,
+        "[{}] {}{}",
+        agent_doc_log_time::format_log_timestamp(ts),
+        message,
+        suffix
+    )
+    .ok()
 }
 
 #[cfg(test)]
@@ -306,7 +309,7 @@ mod tests {
             "ops.log timestamp should be ISO-8601 UTC, got {inner:?}"
         );
         assert!(
-            parse_log_timestamp(inner).is_some(),
+            agent_doc_log_time::parse_log_timestamp(inner).is_some(),
             "the ops.log timestamp must round-trip through parse_log_timestamp"
         );
     }

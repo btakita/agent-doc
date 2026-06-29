@@ -12,6 +12,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Drain-stall turn policy no longer routes through an orchestration re-export.** `preflight` imports `classify_stall`, `StallFacts`, and `StallVerdict` directly from `agent_doc_turn::drain_stall`; `agent-doc-orchestration::drain_stall` now owns only the one-shot continuation marker sidecar IO. Added a boundary guard to keep the pure classifier in `agent-doc-turn`.
 
+- **Log timestamp helpers no longer route through `ops_log`.** Orchestration log writers and readers call `agent_doc_log_time::{format_log_timestamp, parse_log_timestamp}` directly, while `ops_log` keeps only operation-log persistence/content concerns. Added a boundary guard so the timestamp facade does not return.
+
 ## 0.34.64
 
 - **`#suprestassoc` — `restart-supervisor` registry re-association is scoped to the requested document, not just the reused session id.** The CLI restart path now resolves registry entries by exact canonical document path first and only keeps the legacy session-id fallback for fileless registry rows; registry keys that explicitly name another document are rejected, so restarting `sampleportal.md` cannot adopt a stale `agent-doc-bugs2.md` pane/session projection that happens to carry the same session id. Coverage: deterministic registry lookup regressions for rejecting a foreign same-session entry and preferring the exact target document entry. Live editor/pane confirmation remains an `[operator-verify]` follow-up.

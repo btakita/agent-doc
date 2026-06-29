@@ -3685,7 +3685,7 @@ fn log_dedup(file: &Path, context: &str) {
         .append(true)
         .open("/tmp/agent-doc-write-dedup.log")
     {
-        let ts = crate::ops_log::format_log_timestamp(
+        let ts = agent_doc_log_time::format_log_timestamp(
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())

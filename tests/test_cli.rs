@@ -2356,6 +2356,73 @@ fn test_agent_doc_turn_owns_drain_stall_policy() {
 }
 
 #[test]
+fn test_agent_doc_log_time_has_no_ops_log_facade() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-log-time")),
+        "agent-doc-log-time must stay a first-class workspace crate"
+    );
+
+    let ops_log_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/ops_log.rs")).unwrap();
+    for forbidden_snippet in [
+        "pub use agent_doc_log_time",
+        "pub fn format_log_timestamp",
+        "pub fn parse_log_timestamp",
+    ] {
+        assert!(
+            !ops_log_source.contains(forbidden_snippet),
+            "ops_log must not re-export or re-own log timestamp helpers: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        ops_log_source.contains("agent_doc_log_time::format_log_timestamp"),
+        "ops_log should call the focused log-time crate directly"
+    );
+
+    for relative in [
+        "agent-doc-orchestration/src/ops_log.rs",
+        "agent-doc-orchestration/src/session_accretion.rs",
+        "agent-doc-orchestration/src/start.rs",
+        "agent-doc-orchestration/src/startup_miss.rs",
+        "agent-doc-orchestration/src/sync.rs",
+        "agent-doc-orchestration/src/write.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            !source.contains("crate::ops_log::format_log_timestamp")
+                && !source.contains("crate::ops_log::parse_log_timestamp"),
+            "{relative} must call agent_doc_log_time helpers directly"
+        );
+    }
+
+    let log_time_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-log-time/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&log_time_manifest).unwrap();
+    let dependencies = parsed.get("dependencies").and_then(toml::Value::as_table);
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            dependencies.is_none_or(|dependencies| !dependencies.contains_key(forbidden)),
+            "agent-doc-log-time must stay pure and free of core, orchestration, git, editor IPC, sqlite, or tmux crates"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_work_graph_is_source_agnostic_boundary() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();

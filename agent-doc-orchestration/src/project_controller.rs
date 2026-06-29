@@ -2003,12 +2003,10 @@ pub fn close_stale_dead_pane_actors_with_tmux_for_caller(
     caller: &str,
     reason: &str,
 ) -> Result<(usize, usize)> {
-    let tmux = crate::sessions::Tmux::default_server();
-    if let Err(err) = <crate::sessions::Tmux as crate::sessions::Multiplexer>::list_panes(
-        &tmux,
-        None,
-        "#{pane_id}",
-    ) {
+    let tmux = tmux_router::Tmux::default_server();
+    if let Err(err) =
+        <tmux_router::Tmux as crate::sessions::Multiplexer>::list_panes(&tmux, None, "#{pane_id}")
+    {
         crate::ops_log::log_op(
             project_root,
             &format!(
@@ -2711,7 +2709,7 @@ fn emit_sessions_projection(
                 "retry_pending",
                 &format!("failed to load projection: {err}"),
             );
-            crate::sessions::SessionRegistry::new()
+            tmux_router::Registry::new()
         }
     };
     let live_actor_panes: BTreeSet<String> = store
@@ -2810,10 +2808,10 @@ fn emit_sessions_projection(
 fn sessions_projection_entry(
     project_root: &Path,
     record: &agent_doc_sqlite::state_store::ActorRecord,
-    prior: Option<&crate::sessions::SessionEntry>,
+    prior: Option<&tmux_router::RegistryEntry>,
     hint: Option<&SessionsProjectionHint>,
     lease: Option<SupervisorLeaseStatus>,
-) -> crate::sessions::SessionEntry {
+) -> tmux_router::RegistryEntry {
     let pid = prior
         .map(|entry| entry.pid)
         .filter(|pid| *pid != 0)
@@ -2852,7 +2850,7 @@ fn sessions_projection_entry(
         .unwrap_or("")
         .to_string();
 
-    crate::sessions::SessionEntry {
+    tmux_router::RegistryEntry {
         pane: record.pane_id.clone(),
         pid,
         cwd,
@@ -3364,10 +3362,10 @@ mod tests {
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         std::fs::write(&doc, "body").unwrap();
         let document_id = doc.to_string_lossy().to_string();
-        let mut registry = crate::sessions::SessionRegistry::new();
+        let mut registry = tmux_router::Registry::new();
         registry.insert(
             document_id.clone(),
-            crate::sessions::SessionEntry {
+            tmux_router::RegistryEntry {
                 pane: "%old".to_string(),
                 pid: 123,
                 cwd: dir.path().to_string_lossy().to_string(),
@@ -3401,10 +3399,10 @@ mod tests {
         std::fs::write(&doc_b, "b").unwrap();
         let document_a = doc_a.to_string_lossy().to_string();
         let document_b = doc_b.to_string_lossy().to_string();
-        let mut registry = crate::sessions::SessionRegistry::new();
+        let mut registry = tmux_router::Registry::new();
         registry.insert(
             document_a.clone(),
-            crate::sessions::SessionEntry {
+            tmux_router::RegistryEntry {
                 pane: "%70".to_string(),
                 pid: 100,
                 cwd: dir.path().to_string_lossy().to_string(),
@@ -3417,7 +3415,7 @@ mod tests {
         );
         registry.insert(
             document_b.clone(),
-            crate::sessions::SessionEntry {
+            tmux_router::RegistryEntry {
                 pane: "%old".to_string(),
                 pid: 200,
                 cwd: dir.path().to_string_lossy().to_string(),

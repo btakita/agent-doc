@@ -21,7 +21,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::admin::{AdminActor, AdminFinding};
-use crate::sessions::{self, Tmux};
+use crate::sessions;
+use tmux_router::Tmux;
 
 /// Default refresh interval for the live dashboard loop (~1s, per the plan).
 pub const DEFAULT_INTERVAL_MS: u64 = 1000;

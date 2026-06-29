@@ -30,9 +30,10 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::sessions::{self, RegistryLock};
+use crate::sessions;
 use crate::snapshot;
 use crate::supervisor::ipc;
+use tmux_router::RegistryLock;
 
 pub struct GcResult {
     pub deleted: usize,
@@ -760,8 +761,8 @@ fn find_project_root_from_cwd() -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sessions::{SessionEntry, SessionRegistry};
     use tempfile::TempDir;
+    use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry};
 
     #[test]
     fn gc_removes_orphaned_snapshots() {

@@ -3056,10 +3056,10 @@ mod tests {
         let doc = dir.path().join("session.md");
         std::fs::write(&doc, "# Session\n").unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-        let mut registry = sessions::SessionRegistry::default();
+        let mut registry = tmux_router::Registry::default();
         registry.insert(
             file_path.clone(),
-            sessions::SessionEntry {
+            tmux_router::RegistryEntry {
                 pane: stale_pane.clone(),
                 pid: 0,
                 cwd: dir.path().to_string_lossy().to_string(),
@@ -3686,7 +3686,7 @@ mod tests {
         let clear_handle = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(200));
             let registry_path = sessions::registry_path_in(&registry_root);
-            let _lock = sessions::RegistryLock::acquire(&registry_path).unwrap();
+            let _lock = tmux_router::RegistryLock::acquire(&registry_path).unwrap();
             let mut registry = sessions::load_in(&registry_root).unwrap();
             let key = registry
                 .iter()
@@ -4014,10 +4014,10 @@ mod tests {
         std::fs::write(&doc, "# Session\n").unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-supervisor-restart";
-        let mut registry = sessions::SessionRegistry::default();
+        let mut registry = tmux_router::Registry::default();
         registry.insert(
             file_path.clone(),
-            sessions::SessionEntry {
+            tmux_router::RegistryEntry {
                 pane: pane.clone(),
                 pid: 0,
                 cwd: dir.path().to_string_lossy().to_string(),

@@ -444,7 +444,7 @@ fn idle_queue_resubmit_pending_payload(
         "idle_queue_pending_payload_submit_key",
         submit_key,
     );
-    let tmux = crate::sessions::Tmux::default_server();
+    let tmux = tmux_router::Tmux::default_server();
     match crate::sessions::send_submitted_text_for_harness(&tmux, &pane, "", &harness.binary) {
         Ok(()) => {
             crate::ops_log::log_op(

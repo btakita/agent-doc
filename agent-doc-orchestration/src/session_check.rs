@@ -4715,10 +4715,10 @@ Body\n\
             .join(".agent-doc/state/startup-miss")
             .join(format!("{}.json", crate::snapshot::doc_hash(&doc).unwrap()));
         fs::write(&miss_path, serde_json::to_string_pretty(&miss).unwrap()).unwrap();
-        let mut registry = crate::sessions::SessionRegistry::new();
+        let mut registry = tmux_router::Registry::new();
         registry.insert(
             doc.display().to_string(),
-            crate::sessions::SessionEntry {
+            tmux_router::RegistryEntry {
                 pane: "%408".to_string(),
                 pid: 1,
                 cwd: tmp.path().display().to_string(),

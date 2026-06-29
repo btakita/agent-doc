@@ -39,8 +39,8 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 use std::path::Path;
 
-use crate::sessions::{SessionRegistry, Tmux};
 use agent_doc_frontmatter::frontmatter;
+use tmux_router::{Registry as SessionRegistry, Tmux};
 
 use crate::sessions;
 
@@ -894,7 +894,7 @@ sleep 1
         )
         .unwrap();
 
-        let tmux = crate::sessions::IsolatedTmux::new("prompt-opencode-tab-answer");
+        let tmux = tmux_router::IsolatedTmux::new("prompt-opencode-tab-answer");
         let pane = tmux
             .new_session("prompt-opencode-tab-answer", tmp.path())
             .unwrap();
@@ -910,11 +910,11 @@ sleep 1
             "mock OpenCode prompt did not become active"
         );
 
-        let mut registry = crate::sessions::SessionRegistry::new();
+        let mut registry = tmux_router::Registry::new();
         let key = crate::sessions::canonical_registry_key_in(tmp.path(), "prompt.md");
         registry.insert(
             key,
-            crate::sessions::SessionEntry {
+            tmux_router::RegistryEntry {
                 pane: pane.clone(),
                 pid: std::process::id(),
                 cwd: tmp.path().to_string_lossy().to_string(),

@@ -96,8 +96,9 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use crate::sessions::{self, PaneMoveOp, Tmux};
+use crate::sessions;
 use agent_doc_frontmatter::frontmatter;
+use tmux_router::{PaneMoveOp, Tmux};
 
 use crate::{frontmatter_io, project_config_io};
 
@@ -308,9 +309,9 @@ fn registry_file_for_target(target: &Path, base_dir: &Path) -> String {
 }
 
 fn filter_registry_for_target(
-    registry: &sessions::SessionRegistry,
+    registry: &tmux_router::Registry,
     target: &Path,
-) -> sessions::SessionRegistry {
+) -> tmux_router::Registry {
     registry
         .iter()
         .filter(|(key, entry)| {
@@ -320,7 +321,7 @@ fn filter_registry_for_target(
         .collect()
 }
 
-fn registry_entry_session_id<'a>(key: &'a str, entry: &'a sessions::SessionEntry) -> &'a str {
+fn registry_entry_session_id<'a>(key: &'a str, entry: &'a tmux_router::RegistryEntry) -> &'a str {
     if entry.session_id.is_empty() {
         key
     } else {
@@ -517,7 +518,7 @@ pub use prune::*;
 
 #[derive(Default)]
 struct PaneProjectContextCache {
-    registries: std::collections::HashMap<PathBuf, sessions::SessionRegistry>,
+    registries: std::collections::HashMap<PathBuf, tmux_router::Registry>,
     live_supervisors: std::collections::HashMap<PathBuf, Vec<(String, u32)>>,
 }
 
@@ -547,7 +548,7 @@ fn pane_project_root(tmux: &Tmux, pane_id: &str) -> Option<PathBuf> {
 fn registry_for_project_root<'a>(
     cache: &'a mut PaneProjectContextCache,
     project_root: &Path,
-) -> &'a sessions::SessionRegistry {
+) -> &'a tmux_router::Registry {
     cache
         .registries
         .entry(project_root.to_path_buf())
@@ -570,7 +571,7 @@ fn live_supervisors_for_project_root<'a>(
 fn live_owned_registered_file_for_pane(
     tmux: &Tmux,
     pane_id: &str,
-    registry: &sessions::SessionRegistry,
+    registry: &tmux_router::Registry,
 ) -> Option<String> {
     registry.values().find_map(|entry| {
         if entry.file.is_empty() {
@@ -679,7 +680,7 @@ struct PaneInfo {
 }
 
 /// Detect issues in a given registry (testable without disk I/O).
-fn detect_issues_in_registry(tmux: &Tmux, registry: &sessions::SessionRegistry) -> Vec<Issue> {
+fn detect_issues_in_registry(tmux: &Tmux, registry: &tmux_router::Registry) -> Vec<Issue> {
     let mut issues = Vec::new();
     let proof_cache = crate::sync::SyncProofCache::default();
 
@@ -967,7 +968,7 @@ fn pane_session_name(tmux: &Tmux, pane_id: &str) -> Option<String> {
 
 /// Distinct tmux sessions hosting alive registered panes — the auto-resync
 /// drift candidate set. Order is first-seen for determinism.
-pub fn registered_pane_sessions(tmux: &Tmux, registry: &sessions::SessionRegistry) -> Vec<String> {
+pub fn registered_pane_sessions(tmux: &Tmux, registry: &tmux_router::Registry) -> Vec<String> {
     let mut sessions = Vec::new();
     for entry in registry.values() {
         if let Some(session) = pane_session_name(tmux, &entry.pane)
@@ -986,7 +987,7 @@ pub fn registered_pane_sessions(tmux: &Tmux, registry: &sessions::SessionRegistr
 /// currently runs a live agent-doc process.
 pub fn canonical_session_for_document(
     tmux: &Tmux,
-    registry: &sessions::SessionRegistry,
+    registry: &tmux_router::Registry,
     file: &Path,
 ) -> Option<String> {
     let target = file.canonicalize().ok();
@@ -1055,7 +1056,7 @@ struct TargetFixScope<'a> {
 
 fn refresh_target_no_live_owner_registry_entry(
     tmux: &Tmux,
-    registry: &mut sessions::SessionRegistry,
+    registry: &mut tmux_router::Registry,
     scope: TargetFixScope<'_>,
     key: &str,
     file: &str,
@@ -1090,7 +1091,7 @@ fn refresh_target_no_live_owner_registry_entry(
 
 fn refresh_registry_runtime_for_pane(
     tmux: &Tmux,
-    registry: &mut sessions::SessionRegistry,
+    registry: &mut tmux_router::Registry,
     key: &str,
     pane: &str,
 ) -> bool {
@@ -1153,7 +1154,7 @@ fn apply_fixes_with_base(
 fn apply_fixes_to_registry(
     tmux: &Tmux,
     issues: &[Issue],
-    registry: &mut sessions::SessionRegistry,
+    registry: &mut tmux_router::Registry,
     relocate_session: Option<&str>,
     target_scope: Option<TargetFixScope<'_>>,
 ) -> usize {
@@ -1785,7 +1786,7 @@ pub fn stash_ttl_prune_targets(candidates: &[StashTtlCandidate], ttl_secs: u64) 
 #[cfg(test)]
 mod th {
     use super::*;
-    use sessions::{IsolatedTmux, SessionEntry};
+    use tmux_router::{IsolatedTmux, RegistryEntry as SessionEntry};
     pub(crate) static TMUX_START_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
     pub(crate) struct ScopedCurrentDir {
         prev_cwd: std::path::PathBuf,
@@ -2095,7 +2096,7 @@ pub(crate) use th::{
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use sessions::{IsolatedTmux, SessionEntry, SessionRegistry};
+    use tmux_router::{IsolatedTmux, Registry as SessionRegistry, RegistryEntry as SessionEntry};
     #[test]
     fn pane_process_kind_uses_prefetched_command_without_sampling() {
         assert!(matches!(

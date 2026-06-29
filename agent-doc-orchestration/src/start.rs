@@ -1551,7 +1551,7 @@ fn normalize_supervisor_inject_bytes(bytes: &str) -> Vec<u8> {
 }
 
 fn dispatch_submit_text_to_tmux(
-    tmux: &crate::sessions::Tmux,
+    tmux: &tmux_router::Tmux,
     pane: &str,
     text: &str,
     harness: &str,
@@ -1561,7 +1561,7 @@ fn dispatch_submit_text_to_tmux(
 }
 
 fn dispatch_submit_text_to_pane(pane: &str, text: &str, harness: &str) -> Result<()> {
-    let tmux = crate::sessions::Tmux::default_server();
+    let tmux = tmux_router::Tmux::default_server();
     dispatch_submit_text_to_tmux(&tmux, pane, text, harness)
 }
 
@@ -2118,7 +2118,7 @@ fn managed_capability_proof_status_message(harness_binary: &str, event: &str) ->
 }
 
 fn display_managed_capability_proof_status(
-    tmux: &sessions::Tmux,
+    tmux: &tmux_router::Tmux,
     pane_id: &str,
     harness_binary: &str,
     event: &str,
@@ -2138,7 +2138,7 @@ fn surface_managed_capability_proof_status(
         eprintln!("{message}");
         return;
     };
-    let tmux = sessions::Tmux::default_server();
+    let tmux = tmux_router::Tmux::default_server();
     if let Err(err) = display_managed_capability_proof_status(&tmux, pane_id, harness_binary, event)
     {
         eprintln!(
@@ -2154,7 +2154,7 @@ enum ExistingSessionPaneAction {
 }
 
 fn existing_session_pane_action(
-    tmux: &sessions::Tmux,
+    tmux: &tmux_router::Tmux,
     session_id: &str,
     file: &Path,
     current_pane: &str,
@@ -2175,9 +2175,9 @@ fn existing_session_pane_action(
 }
 
 fn existing_session_pane_action_from_entry(
-    tmux: &sessions::Tmux,
+    tmux: &tmux_router::Tmux,
     current_pane: &str,
-    entry: Option<&sessions::SessionEntry>,
+    entry: Option<&tmux_router::RegistryEntry>,
     live_owner: Option<&str>,
 ) -> Option<ExistingSessionPaneAction> {
     if let Some(owner) = live_owner
@@ -2194,7 +2194,7 @@ fn existing_session_pane_action_from_entry(
 }
 
 fn format_existing_pane_conflict_error(
-    tmux: &sessions::Tmux,
+    tmux: &tmux_router::Tmux,
     file: &Path,
     current_pane: &str,
     conflicting_pane: &str,
@@ -2677,7 +2677,7 @@ fn resolve_agent_args(
 /// Returns `true` if relocation succeeded or was unnecessary; `false` if relocation failed.
 /// Falls back to warn-only on failure so the start isn't aborted.
 pub fn relocate_if_wrong_session(
-    tmux: &sessions::Tmux,
+    tmux: &tmux_router::Tmux,
     pane_id: &str,
     expected_session: &str,
 ) -> bool {
@@ -2693,7 +2693,7 @@ pub fn relocate_if_wrong_session(
         pane_id, actual_session, expected_session
     );
     if let Some(anchor) = tmux.active_pane(expected_session) {
-        match sessions::PaneMoveOp::new(tmux, pane_id, &anchor)
+        match tmux_router::PaneMoveOp::new(tmux, pane_id, &anchor)
             .allow_cross_session("auto-relocate to project session on start")
             .join("-dh")
         {
@@ -2723,7 +2723,7 @@ pub fn relocate_if_wrong_session(
 }
 
 fn rebind_project_tmux_session_if_expected_dead(
-    tmux: &sessions::Tmux,
+    tmux: &tmux_router::Tmux,
     pane_id: &str,
     expected_session: &str,
 ) {
@@ -2750,8 +2750,8 @@ fn rebind_project_tmux_session_if_expected_dead(
 mod th {
     use super::*;
     use crate::config::Config;
-    use crate::sessions::IsolatedTmux;
     use agent_doc_frontmatter::frontmatter::Frontmatter;
+    use tmux_router::IsolatedTmux;
     pub(crate) struct ScopedCurrentDir {
         prev_cwd: std::path::PathBuf,
         _env_guard: crate::test_support::ProcessGlobalLockGuard,
@@ -2937,10 +2937,10 @@ mod tests {
     use crate::config::Config;
     use crate::hooks::fire_doc_hooks;
     use crate::project_config_io as project_config;
-    use crate::sessions::IsolatedTmux;
     use agent_doc_frontmatter::frontmatter::Frontmatter;
     use std::collections::HashMap;
     use tempfile::TempDir;
+    use tmux_router::IsolatedTmux;
     #[cfg(unix)]
     #[test]
     fn reexec_candidates_prefer_fresh_then_current_exe_then_path() {

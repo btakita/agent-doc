@@ -63,7 +63,7 @@ use std::path::Path;
 
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_orchestration::sessions;
-use agent_doc_orchestration::sessions::{PaneMoveOp, Tmux};
+use tmux_router::{PaneMoveOp, Tmux};
 
 /// Split direction for the mirror window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

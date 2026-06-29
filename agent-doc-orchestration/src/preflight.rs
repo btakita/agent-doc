@@ -1308,7 +1308,7 @@ fn maybe_auto_resync_on_drift(file: &std::path::Path, layout_issues: &[String]) 
 /// blocks a cycle, and `close_superseded_session` preserves any session with a
 /// live agent or an unmanaged user window.
 fn close_superseded_drift_sessions(file: &std::path::Path) {
-    let tmux = sessions::Tmux::default_server();
+    let tmux = tmux_router::Tmux::default_server();
     let registry = match sessions::load() {
         Ok(registry) => registry,
         Err(e) => {
@@ -1354,7 +1354,7 @@ fn clear_base_index_repair_counter(file: &std::path::Path) {
 }
 
 fn current_tmux_session_name() -> Option<String> {
-    sessions::Tmux::default_server().current_session()
+    tmux_router::Tmux::default_server().current_session()
 }
 
 fn maybe_auto_repair_base_index(file: &std::path::Path, layout_issues: &[String]) -> bool {
@@ -1394,7 +1394,7 @@ fn maybe_auto_repair_base_index(file: &std::path::Path, layout_issues: &[String]
         file,
         &format!("auto_repair_base_index immediate session={}", name),
     );
-    let tmux = sessions::Tmux::default_server();
+    let tmux = tmux_router::Tmux::default_server();
     if let Err(e) = sync::repair_layout(&tmux, &name, "agent-doc") {
         eprintln!(
             "[preflight] auto repair_layout failed: {}; run `agent-doc session doctor {} --repair`",
@@ -1422,7 +1422,7 @@ pub fn check_layout() -> Vec<String> {
 
     // Get the owning pane's current session name. Bare display-message can
     // follow another attached client and report the wrong session.
-    let Some(session_name) = sessions::Tmux::default_server().current_session() else {
+    let Some(session_name) = tmux_router::Tmux::default_server().current_session() else {
         return issues;
     };
 
@@ -2349,7 +2349,7 @@ fn actor_sweep_owner(audit_file: &Path, root: &Path, doc_path: &Path) -> ActorSw
 
 fn registry_sweep_owner(
     root: &Path,
-    registry: &sessions::SessionRegistry,
+    registry: &tmux_router::Registry,
     doc_path: &Path,
 ) -> Option<SweepOwner> {
     let key = sessions::canonical_registry_key_in(root, &doc_path.to_string_lossy());
@@ -2364,7 +2364,7 @@ fn registry_sweep_owner(
 fn sweep_owner_for_doc(
     audit_file: &Path,
     root: &Path,
-    registry: &sessions::SessionRegistry,
+    registry: &tmux_router::Registry,
     doc_path: &Path,
 ) -> Option<SweepOwner> {
     match actor_sweep_owner(audit_file, root, doc_path) {
@@ -2378,7 +2378,7 @@ fn sweep_owner_for_doc(
 fn current_sweep_owner(
     audit_file: &Path,
     root: &Path,
-    registry: &sessions::SessionRegistry,
+    registry: &tmux_router::Registry,
     current_doc: &Path,
 ) -> Option<SweepOwner> {
     sweep_owner_for_doc(audit_file, root, registry, current_doc)

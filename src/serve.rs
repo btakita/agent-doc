@@ -625,11 +625,7 @@ fn list_sessions(state: &ServeState) -> Result<Vec<ServeSession>> {
     Ok(by_path.into_values().collect())
 }
 
-fn registry_entry_path(
-    root: &Path,
-    key: &str,
-    entry: &agent_doc_orchestration::sessions::SessionEntry,
-) -> PathBuf {
+fn registry_entry_path(root: &Path, key: &str, entry: &tmux_router::RegistryEntry) -> PathBuf {
     if !entry.file.is_empty() {
         let file = Path::new(&entry.file);
         if file.is_absolute() {
@@ -1489,10 +1485,10 @@ mod tests {
         .unwrap();
         std::fs::write(root.join("registered.md"), "# registered\n").unwrap();
 
-        let mut registry = agent_doc_orchestration::sessions::SessionRegistry::new();
+        let mut registry = tmux_router::Registry::new();
         registry.insert(
             root.join("registered.md").display().to_string(),
-            agent_doc_orchestration::sessions::SessionEntry {
+            tmux_router::RegistryEntry {
                 pane: "%1".to_string(),
                 pid: 1,
                 cwd: root.display().to_string(),

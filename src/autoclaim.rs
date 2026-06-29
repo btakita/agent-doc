@@ -50,8 +50,9 @@
 
 use anyhow::Result;
 
-use agent_doc_orchestration::sessions::{self, Tmux};
+use agent_doc_orchestration::sessions;
 use agent_doc_orchestration::sync;
+use tmux_router::Tmux;
 
 pub fn run() -> Result<()> {
     run_with_tmux(&Tmux::default_server())
@@ -76,7 +77,7 @@ fn run_with_tmux_in_for_pane(tmux: &Tmux, base_dir: &std::path::Path, pane_id: &
     let mut registry = sessions::load_in(base_dir)?;
 
     // Find all entries mapped to the current pane
-    let all_claimed: Vec<(String, sessions::SessionEntry)> = registry
+    let all_claimed: Vec<(String, tmux_router::RegistryEntry)> = registry
         .iter()
         .filter(|(_, entry)| entry.pane == pane_id)
         .map(|(k, v)| (k.clone(), v.clone()))
@@ -89,7 +90,7 @@ fn run_with_tmux_in_for_pane(tmux: &Tmux, base_dir: &std::path::Path, pane_id: &
 
     // Validate file existence — prune stale entries (renamed/deleted files)
     let mut stale_keys: Vec<String> = Vec::new();
-    let mut claimed: Vec<(String, sessions::SessionEntry)> = Vec::new();
+    let mut claimed: Vec<(String, tmux_router::RegistryEntry)> = Vec::new();
     for (registry_key, entry) in all_claimed {
         let file_path = std::path::Path::new(&entry.file);
         let exists = if file_path.is_absolute() {
@@ -144,7 +145,7 @@ fn run_with_tmux_in_for_pane(tmux: &Tmux, base_dir: &std::path::Path, pane_id: &
 
     // Sync tmux layout so pane arrangement reflects claimed files.
     // Without this, the layout remains stale after context compaction.
-    let claimed_refs: Vec<(&String, &sessions::SessionEntry)> =
+    let claimed_refs: Vec<(&String, &tmux_router::RegistryEntry)> =
         claimed.iter().map(|(k, v)| (k, v)).collect();
     sync_after_autoclaim_in(tmux, pane_id, &claimed_refs, base_dir);
 
@@ -170,7 +171,7 @@ fn run_with_tmux_in_for_pane(tmux: &Tmux, base_dir: &std::path::Path, pane_id: &
 fn sync_after_autoclaim_in(
     tmux: &Tmux,
     pane_id: &str,
-    _claimed: &[(&String, &sessions::SessionEntry)],
+    _claimed: &[(&String, &tmux_router::RegistryEntry)],
     base_dir: &std::path::Path,
 ) {
     let window_id = match tmux.pane_window(pane_id) {
@@ -216,9 +217,8 @@ fn sync_after_autoclaim_in(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_doc_orchestration::sessions::{SessionEntry, SessionRegistry};
     use tempfile::TempDir;
-    use tmux_router::IsolatedTmux;
+    use tmux_router::{IsolatedTmux, Registry as SessionRegistry, RegistryEntry as SessionEntry};
 
     fn env_lock() -> crate::test_support::ProcessGlobalLockGuard {
         crate::test_support::env_lock()

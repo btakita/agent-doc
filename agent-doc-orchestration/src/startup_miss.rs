@@ -1012,10 +1012,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let doc = setup_project(tmp.path());
         fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
-        let mut registry = crate::sessions::SessionRegistry::new();
+        let mut registry = tmux_router::Registry::new();
         registry.insert(
             "session-123".to_string(),
-            crate::sessions::SessionEntry {
+            tmux_router::RegistryEntry {
                 pane: "%408".to_string(),
                 pid: 1,
                 cwd: tmp.path().display().to_string(),
@@ -1060,10 +1060,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let doc = setup_project(tmp.path());
         fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
-        let mut registry = crate::sessions::SessionRegistry::new();
+        let mut registry = tmux_router::Registry::new();
         registry.insert(
             doc.display().to_string(),
-            crate::sessions::SessionEntry {
+            tmux_router::RegistryEntry {
                 pane: "%408".to_string(),
                 pid: 1,
                 cwd: tmp.path().display().to_string(),
@@ -1108,10 +1108,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let doc = setup_project(tmp.path());
         fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
-        let mut registry = crate::sessions::SessionRegistry::new();
+        let mut registry = tmux_router::Registry::new();
         registry.insert(
             "session-123".to_string(),
-            crate::sessions::SessionEntry {
+            tmux_router::RegistryEntry {
                 pane: "%408".to_string(),
                 pid: 1,
                 cwd: tmp.path().display().to_string(),

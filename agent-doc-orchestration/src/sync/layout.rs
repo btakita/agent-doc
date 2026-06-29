@@ -238,7 +238,7 @@ pub(crate) fn apply_focus_only_expansion_policy(
 pub(crate) fn lookup_registry_entry_for_file_session(
     file: &Path,
     session_id: &str,
-) -> Option<sessions::SessionEntry> {
+) -> Option<tmux_router::RegistryEntry> {
     let (_, _project_root, registry_key) = registry_location_for_file(file)?;
     let rc = crate::graph::RunContext::new(file.to_path_buf());
     let registry = rc.session_registry();
@@ -250,7 +250,7 @@ pub(crate) fn lookup_registry_entry_for_file_session(
 pub(crate) struct SyntheticRegistryCandidate {
     pub(crate) session_id: String,
     pub(crate) file_path: PathBuf,
-    pub(crate) entry: sessions::SessionEntry,
+    pub(crate) entry: tmux_router::RegistryEntry,
     pub(crate) live_owner_match: bool,
     pub(crate) pane_root_match: bool,
 }
@@ -346,9 +346,9 @@ pub(crate) fn filter_duplicate_synthetic_registry_candidates(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::sessions::IsolatedTmux;
     use std::process::Command as ProcessCommand;
     use std::time::Duration;
+    use tmux_router::IsolatedTmux;
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn recover_existing_associated_pane_reuses_latest_open_session_log_owner() {
@@ -987,13 +987,13 @@ mod tests {
         )
         .unwrap();
 
-        let mut registry = sessions::SessionRegistry::new();
+        let mut registry = tmux_router::Registry::new();
         let canonical = doc.canonicalize().unwrap();
         let key =
             sessions::canonical_registry_key_in(&subroot, canonical.to_string_lossy().as_ref());
         registry.insert(
             key,
-            sessions::SessionEntry {
+            tmux_router::RegistryEntry {
                 pane: "%44".to_string(),
                 pid: 2374580,
                 cwd: subroot.to_string_lossy().to_string(),

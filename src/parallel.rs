@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use agent_doc_frontmatter::frontmatter;
-use agent_doc_orchestration::sessions::Tmux;
+use tmux_router::Tmux;
 
 /// Configuration for a deep run.
 pub struct ParallelConfig {

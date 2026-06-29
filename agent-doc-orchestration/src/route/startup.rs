@@ -2740,10 +2740,10 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-        let mut registry = sessions::SessionRegistry::default();
+        let mut registry = tmux_router::Registry::default();
         registry.insert(
             file_path.clone(),
-            sessions::SessionEntry {
+            tmux_router::RegistryEntry {
                 pane: stale_pane.clone(),
                 pid: 0,
                 cwd: dir.path().to_string_lossy().to_string(),
@@ -4470,7 +4470,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             let replacement_pane = iso.auto_start(session, dir.path())?;
             iso.stash_pane(&replacement_pane, session)?;
 
-            let previous = sessions::SessionEntry {
+            let previous = tmux_router::RegistryEntry {
                 pane: old_pane.clone(),
                 pid: std::process::id(),
                 cwd: dir.path().to_string_lossy().to_string(),
@@ -4557,7 +4557,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             let replacement_pane = iso.auto_start(session, dir.path())?;
             iso.stash_pane(&replacement_pane, session)?;
 
-            let previous = sessions::SessionEntry {
+            let previous = tmux_router::RegistryEntry {
                 pane: busy_pane.clone(),
                 pid: std::process::id(),
                 cwd: dir.path().to_string_lossy().to_string(),

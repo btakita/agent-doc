@@ -4,11 +4,10 @@
 //! and supervisor metadata.
 //!
 //! Registry lives at `.agent-doc/sessions.json` relative to the project root.
-//! Re-exports `Tmux`, `IsolatedTmux`, `RegistryEntry` (as `SessionEntry`),
-//! `RegistryLock`, and `Registry` (as `SessionRegistry`) from `tmux-router`.
 //! Agent-doc-specific operations (registry load/save with the hardcoded
 //! `.agent-doc/sessions.json` path, pane/window queries, positional pane
-//! resolution) live here. Thin tmux interaction shims delegate to tmux-router.
+//! resolution) live here. Callers that need tmux-router types import them from
+//! `tmux_router` directly.
 //!
 //! ## Spec
 //! - `registry_path()` returns the canonical `.agent-doc/sessions.json` path.
@@ -87,12 +86,11 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-// Re-export Tmux types from tmux-router.
 #[cfg(test)]
-pub use tmux_router::IsolatedTmux;
-pub use tmux_router::PaneMoveOp;
-pub use tmux_router::Tmux;
-pub use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry, RegistryLock};
+use tmux_router::IsolatedTmux;
+use tmux_router::{
+    PaneMoveOp, Registry as SessionRegistry, RegistryEntry as SessionEntry, RegistryLock, Tmux,
+};
 
 const SESSIONS_FILE: &str = ".agent-doc/sessions.json";
 

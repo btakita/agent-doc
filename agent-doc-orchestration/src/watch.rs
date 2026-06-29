@@ -462,7 +462,7 @@ fn run_event_loop(
     let mut last_rescan = Instant::now();
     let mut idle_since: Option<Instant> = None;
 
-    let tmux = sessions::Tmux::default_server();
+    let tmux = tmux_router::Tmux::default_server();
 
     let config_toml_path = std::env::current_dir()
         .ok()

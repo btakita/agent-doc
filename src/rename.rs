@@ -134,7 +134,7 @@ pub fn run(old_path: &Path, new_path: &Path) -> Result<()> {
     let old_key = sessions::canonical_registry_key_in(&project_root, &old_path_str);
     let new_key = sessions::canonical_registry_key_in(&project_root, &new_path_str);
 
-    let _lock = sessions::RegistryLock::acquire(&sessions::registry_path())?;
+    let _lock = tmux_router::RegistryLock::acquire(&sessions::registry_path())?;
     let mut registry = sessions::load()?;
     let mut updated_sessions = 0u32;
     if let Some(mut entry) = registry.remove(&old_key) {

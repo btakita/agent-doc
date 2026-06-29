@@ -190,9 +190,9 @@ use crate::flow::routed_reopen::{
     starting_actor_terminal_log_line, starting_actor_timeout_coalesced_log_line,
 };
 use crate::harness::HarnessConfig;
-use crate::sessions::Tmux;
 use crate::supervisor::ipc::IpcMethod;
 use agent_doc_frontmatter::frontmatter;
+use tmux_router::Tmux;
 
 use crate::{frontmatter_io, prompt, resync, sessions, snapshot, sync};
 use std::cell::Cell;
@@ -4683,8 +4683,8 @@ pub(crate) fn test_registry_entry(
     pane: &str,
     file: &str,
     cwd: &std::path::Path,
-) -> sessions::SessionEntry {
-    sessions::SessionEntry {
+) -> tmux_router::RegistryEntry {
+    tmux_router::RegistryEntry {
         pane: pane.to_string(),
         pid: 1234,
         cwd: cwd.to_string_lossy().to_string(),
@@ -4861,7 +4861,7 @@ pub(crate) fn wait_for_shell(iso: &IsolatedTmux, pane: &str, timeout: std::time:
 // --- Routing logic tests ---
 // --- Integration tests (IsolatedTmux) ---
 #[cfg(test)]
-use sessions::IsolatedTmux;
+use tmux_router::IsolatedTmux;
 /// Create a mock agent script: blocks for delay, then prints ❯ prompt on its own line.
 /// Uses `cat` to keep the process alive after showing the prompt.
 #[cfg(test)]
@@ -6712,7 +6712,7 @@ mod tests {
         let doc = tasks.join("claudescore-3.md");
         std::fs::write(&doc, "# session\n").unwrap();
 
-        let mut registry = sessions::SessionRegistry::new();
+        let mut registry = tmux_router::Registry::new();
         registry.insert(
             "session-a".to_string(),
             test_registry_entry("%401", "tasks/claudescore-3.md", &submodule),

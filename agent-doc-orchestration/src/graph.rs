@@ -69,7 +69,7 @@ pub type HarnessSlot = SlotHandle<String>;
 pub type GlobalConfigSlot = SlotHandle<Arc<config::Config>>;
 /// Phase 10 (#lr-actor-10): cached session registry for the current document's
 /// project root. Read-modify-write callers still load under `RegistryLock`.
-pub type SessionRegistrySlot = SlotHandle<Arc<sessions::SessionRegistry>>;
+pub type SessionRegistrySlot = SlotHandle<Arc<tmux_router::Registry>>;
 
 pub struct SshContextValue {
     pub config: Arc<ProjectConfig>,
@@ -319,7 +319,7 @@ impl RunContext {
 
         let session_registry = ctx.slot({
             let pr = project_root;
-            move |ctx: &Context| -> Arc<sessions::SessionRegistry> {
+            move |ctx: &Context| -> Arc<tmux_router::Registry> {
                 let root: Option<PathBuf> = ctx.get(&pr);
                 let loaded = match root {
                     Some(ref root) => sessions::load_in(root).map_err(|e| {
@@ -336,7 +336,7 @@ impl RunContext {
                     Ok(registry) => registry,
                     Err(e) => {
                         eprintln!("[graph] {e}");
-                        sessions::SessionRegistry::new()
+                        tmux_router::Registry::new()
                     }
                 })
             }
@@ -459,7 +459,7 @@ impl RunContext {
     /// Phase 10 (#lr-actor-10): cached session registry for this document's
     /// project root. This is for read-only point-in-time queries; mutation paths
     /// must continue to load while holding `RegistryLock`.
-    pub fn session_registry(&self) -> Arc<sessions::SessionRegistry> {
+    pub fn session_registry(&self) -> Arc<tmux_router::Registry> {
         self.ctx.get(&self.session_registry)
     }
 
@@ -737,8 +737,8 @@ mod tests {
         }
     }
 
-    fn registry_entry(pane: &str, session_id: &str, file: &Path) -> sessions::SessionEntry {
-        sessions::SessionEntry {
+    fn registry_entry(pane: &str, session_id: &str, file: &Path) -> tmux_router::RegistryEntry {
+        tmux_router::RegistryEntry {
             pane: pane.to_string(),
             pid: 12345,
             cwd: file
@@ -1417,7 +1417,7 @@ mod tests {
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let mut first_registry = sessions::SessionRegistry::new();
+        let mut first_registry = tmux_router::Registry::new();
         first_registry.insert("first".to_string(), registry_entry("%1", "first", &doc));
         sessions::save_in(dir.path(), &first_registry).unwrap();
 
@@ -1427,7 +1427,7 @@ mod tests {
         assert!(first.values().any(|entry| entry.pane == "%1"));
         assert!(rc.is_session_registry_cached());
 
-        let mut second_registry = sessions::SessionRegistry::new();
+        let mut second_registry = tmux_router::Registry::new();
         second_registry.insert("second".to_string(), registry_entry("%2", "second", &doc));
         sessions::save_in(dir.path(), &second_registry).unwrap();
 
@@ -1454,7 +1454,7 @@ mod tests {
         assert!(ac.context().session_registry().is_empty());
         assert!(ac.context().is_session_registry_cached());
 
-        let mut registry = sessions::SessionRegistry::new();
+        let mut registry = tmux_router::Registry::new();
         registry.insert("live".to_string(), registry_entry("%9", "live", &doc));
         sessions::save_in(dir.path(), &registry).unwrap();
 

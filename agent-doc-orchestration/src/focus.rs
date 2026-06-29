@@ -64,8 +64,8 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use crate::sessions::Tmux;
 use agent_doc_frontmatter::frontmatter;
+use tmux_router::Tmux;
 
 use crate::sessions;
 
@@ -309,8 +309,9 @@ pub fn run_with_tmux_opts(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sessions::{self, IsolatedTmux};
+    use crate::sessions;
     use std::path::{Path, PathBuf};
+    use tmux_router::IsolatedTmux;
 
     struct ScopedCurrentDir {
         prev_cwd: PathBuf,

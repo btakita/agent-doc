@@ -173,7 +173,7 @@ pub(crate) fn supervisor_pane_dispatch_ready(
         .inject_pane
         .clone()
         .or_else(|| shared.actor_runtime.as_ref().map(|r| r.pane_id.clone()))?;
-    let tmux = crate::sessions::Tmux::default_server();
+    let tmux = tmux_router::Tmux::default_server();
     let content = crate::sessions::capture_pane(&tmux, &pane).ok()?;
     Some(crate::route::ready_prompt_candidate(&content, harness).is_some())
 }
@@ -207,7 +207,7 @@ pub(crate) fn supervisor_pane_has_busy_cue(
         .inject_pane
         .clone()
         .or_else(|| shared.actor_runtime.as_ref().map(|r| r.pane_id.clone()))?;
-    let tmux = crate::sessions::Tmux::default_server();
+    let tmux = tmux_router::Tmux::default_server();
     let content = crate::sessions::capture_pane(&tmux, &pane).ok()?;
     Some(harness.has_busy_cue(&content))
 }
@@ -307,7 +307,7 @@ pub(crate) fn supervisor_pane_payload_already_pending(
         .inject_pane
         .clone()
         .or_else(|| shared.actor_runtime.as_ref().map(|r| r.pane_id.clone()))?;
-    let tmux = crate::sessions::Tmux::default_server();
+    let tmux = tmux_router::Tmux::default_server();
     let content = crate::sessions::capture_pane(&tmux, &pane).ok()?;
     Some(supervisor_pane_payload_pending_in_content(
         &content, payload, harness,
@@ -433,10 +433,10 @@ mod tests {
     use crate::config::Config;
     use crate::hooks::fire_doc_hooks;
     use crate::project_config_io as project_config;
-    use crate::sessions::IsolatedTmux;
     use agent_doc_frontmatter::frontmatter::Frontmatter;
     use std::collections::HashMap;
     use tempfile::TempDir;
+    use tmux_router::IsolatedTmux;
     #[test]
     fn stale_busy_reconcile_fires_after_debounce_over_idle_pane() {
         // Actor wedged busy, live pane shows no busy cue, cooldown clear, and the

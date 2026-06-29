@@ -194,7 +194,7 @@ pub(crate) fn evict_previous_stash_pane(
 pub(crate) fn evict_previous_stash_pane_entry(
     tmux: &Tmux,
     session_id: &str,
-    previous: &sessions::SessionEntry,
+    previous: &tmux_router::RegistryEntry,
     replacement_pane: &str,
     target_session: &str,
     harness: &HarnessConfig,

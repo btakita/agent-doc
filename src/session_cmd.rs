@@ -28,7 +28,8 @@
 
 use anyhow::{Context, Result};
 
-use agent_doc_orchestration::{project_config_io, resync, sessions::Tmux};
+use agent_doc_orchestration::{project_config_io, resync};
+use tmux_router::Tmux;
 
 /// Show the currently configured tmux session.
 pub fn show() -> Result<()> {

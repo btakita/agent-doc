@@ -1286,7 +1286,7 @@ pub(crate) fn canonical_dispatch_file(path: &std::path::Path) -> std::path::Path
     std::fs::canonicalize(&resolved).unwrap_or(resolved)
 }
 
-pub(crate) fn canonical_registered_file(entry: &sessions::SessionEntry) -> std::path::PathBuf {
+pub(crate) fn canonical_registered_file(entry: &tmux_router::RegistryEntry) -> std::path::PathBuf {
     let path = std::path::Path::new(&entry.file);
     let resolved = if path.is_absolute() || entry.cwd.is_empty() {
         path.to_path_buf()
@@ -1313,7 +1313,7 @@ pub(crate) fn lookup_dispatch_registration(
     sessions::lookup_in(&base_dir, session_id)
 }
 
-pub(crate) fn load_dispatch_registry(file_path: &str) -> Result<sessions::SessionRegistry> {
+pub(crate) fn load_dispatch_registry(file_path: &str) -> Result<tmux_router::Registry> {
     let base_dir = registry_base_dir_for_dispatch(file_path);
     sessions::load_in(&base_dir)
 }
@@ -1321,7 +1321,7 @@ pub(crate) fn load_dispatch_registry(file_path: &str) -> Result<sessions::Sessio
 pub(crate) fn deregister_dispatch_registration(file_path: &str, session_id: &str) -> Result<bool> {
     let base_dir = registry_base_dir_for_dispatch(file_path);
     let registry_path = sessions::registry_path_in(&base_dir);
-    let _lock = sessions::RegistryLock::acquire(&registry_path)?;
+    let _lock = tmux_router::RegistryLock::acquire(&registry_path)?;
     let mut registry = sessions::load_in(&base_dir)?;
     let removed_key = registry.iter().find_map(|(key, entry)| {
         ((entry.session_id == session_id) || (entry.session_id.is_empty() && key == session_id))
@@ -1395,7 +1395,7 @@ pub(crate) fn ensure_dispatch_target_can_bind_file(
 }
 
 pub(crate) fn pane_registration_matches_file(
-    registry: &sessions::SessionRegistry,
+    registry: &tmux_router::Registry,
     pane: &str,
     file_path: &str,
 ) -> bool {

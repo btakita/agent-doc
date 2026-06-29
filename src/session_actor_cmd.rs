@@ -4,9 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use agent_doc_orchestration::flow::operator_clear::OperatorClearInputState;
-use agent_doc_orchestration::sessions::{
-    SessionEntry, SessionRegistry, Tmux, tmux_submit_mode_for_harness,
-};
+use agent_doc_orchestration::sessions::tmux_submit_mode_for_harness;
 use agent_doc_orchestration::startup_miss::{SessionLogStatus, StartupMiss};
 use agent_doc_orchestration::supervisor::ipc::IpcMethod;
 #[cfg(test)]
@@ -14,6 +12,7 @@ use agent_doc_sqlite::state_store::SupervisorLeaseStatus;
 use agent_doc_sqlite::state_store::{
     ActorRecord, ActorState, ActorTransitionStatus, SessionOperatorStatus,
 };
+use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry, Tmux};
 
 const SUPERVISOR_INJECT_SUBMIT_MODE: &str = "supervisor_normalized_submit";
 const CLEAR_DIRECT_SUBMIT_ACCEPTANCE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -1663,7 +1662,7 @@ fn force_close_actor_record(ctx: &SessionContext) -> bool {
 
 fn force_remove_registry_projection(ctx: &SessionContext) -> Result<bool> {
     let registry_path = agent_doc_orchestration::sessions::registry_path_in(&ctx.base_dir);
-    let _lock = agent_doc_orchestration::sessions::RegistryLock::acquire(&registry_path)?;
+    let _lock = tmux_router::RegistryLock::acquire(&registry_path)?;
     let mut registry = agent_doc_orchestration::sessions::load_in(&ctx.base_dir)?;
     let canonical = ctx.canonical_file.to_string_lossy().to_string();
     let mut session_ids = BTreeSet::new();

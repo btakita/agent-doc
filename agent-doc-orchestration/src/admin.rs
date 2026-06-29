@@ -23,8 +23,9 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use crate::sessions::{self, SessionRegistry, Tmux};
+use crate::sessions;
 use agent_doc_sqlite::state_store::ActorState;
+use tmux_router::{Registry as SessionRegistry, Tmux};
 
 type ActorStore = BTreeMap<String, agent_doc_sqlite::state_store::ActorRecord>;
 
@@ -150,7 +151,7 @@ pub fn build_actor_list(
     registry: &SessionRegistry,
     pane_alive: impl Fn(&str) -> bool,
 ) -> Vec<AdminActor> {
-    let by_session: BTreeMap<&str, &sessions::SessionEntry> = registry
+    let by_session: BTreeMap<&str, &tmux_router::RegistryEntry> = registry
         .values()
         .map(|entry| (entry.session_id.as_str(), entry))
         .collect();
@@ -500,8 +501,8 @@ mod tests {
             .collect()
     }
 
-    fn entry(session_id: &str, pane: &str, pid: u32, cwd: &str) -> sessions::SessionEntry {
-        sessions::SessionEntry {
+    fn entry(session_id: &str, pane: &str, pid: u32, cwd: &str) -> tmux_router::RegistryEntry {
+        tmux_router::RegistryEntry {
             pane: pane.to_string(),
             pid,
             cwd: cwd.to_string(),

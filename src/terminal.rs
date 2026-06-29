@@ -39,7 +39,7 @@ use std::path::Path;
 use std::process::Command;
 
 use agent_doc_orchestration::config;
-use agent_doc_orchestration::sessions::Tmux;
+use tmux_router::Tmux;
 
 /// Run the terminal command: ensure tmux session exists, launch terminal if needed.
 pub fn run(file: &Path, session_name: Option<&str>) -> Result<()> {

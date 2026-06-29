@@ -248,7 +248,7 @@ fn normalize_claim_path(path: &Path) -> std::path::PathBuf {
 fn registry_entry_matches_claimed_document(
     file: &Path,
     registry_key: &str,
-    entry: &sessions::SessionEntry,
+    entry: &tmux_router::RegistryEntry,
     session_id: &str,
 ) -> bool {
     if entry.session_id == session_id {
@@ -263,7 +263,7 @@ fn registry_entry_matches_claimed_document(
     normalize_claim_path(Path::new(&entry.file)) == file
 }
 
-fn claimed_session_label(registry_key: &str, entry: &sessions::SessionEntry) -> String {
+fn claimed_session_label(registry_key: &str, entry: &tmux_router::RegistryEntry) -> String {
     let owner = if entry.session_id.is_empty() {
         registry_key
     } else {
@@ -336,7 +336,7 @@ pub fn run(
 
     // tmux_session frontmatter field is deprecated — no longer written on claim.
     // Session targeting now uses current_tmux_session() at route time.
-    let tmux = sessions::Tmux::default_server();
+    let tmux = tmux_router::Tmux::default_server();
 
     // Validate claiming pane is in the configured target session.
     // Reject cross-session claims unless --force is passed.
@@ -658,14 +658,14 @@ pub fn run(
 fn validate_file_claim(file: &Path) {
     let file_str = file.to_string_lossy();
     let registry_path = sessions::registry_path();
-    let Ok(_lock) = sessions::RegistryLock::acquire(&registry_path) else {
+    let Ok(_lock) = tmux_router::RegistryLock::acquire(&registry_path) else {
         return;
     };
     let Ok(registry) = sessions::load() else {
         return;
     };
 
-    let tmux = sessions::Tmux::default_server();
+    let tmux = tmux_router::Tmux::default_server();
 
     // Find entries pointing to this file with dead panes
     let stale_keys: Vec<(String, String)> = registry
@@ -784,7 +784,7 @@ fn run_isolate(file: &Path) -> Result<()> {
 /// Pure logic for finding an alive window in a registry.
 /// Separated from I/O for testability.
 fn find_alive_window_in_registry(
-    registry: &sessions::SessionRegistry,
+    registry: &tmux_router::Registry,
     cwd: &str,
     check_alive: impl Fn(&str) -> bool,
 ) -> Option<String> {
@@ -803,8 +803,8 @@ fn find_alive_window_in_registry(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sessions::{SessionEntry, SessionRegistry};
     use tempfile::tempdir;
+    use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry};
 
     fn make_entry(cwd: &str, window: &str) -> SessionEntry {
         SessionEntry {

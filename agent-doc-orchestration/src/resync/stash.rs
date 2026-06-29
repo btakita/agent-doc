@@ -8,15 +8,13 @@ pub(crate) fn return_stashed_panes(tmux: &Tmux) {
 }
 
 /// Testable inner function that accepts a registry parameter.
-pub(crate) fn return_stashed_panes_with_registry(
-    tmux: &Tmux,
-    registry: &sessions::SessionRegistry,
-) {
+pub(crate) fn return_stashed_panes_with_registry(tmux: &Tmux, registry: &tmux_router::Registry) {
     // Build a map from pane_id → (key, entry) for quick lookup
-    let pane_to_entry: std::collections::HashMap<&str, (&str, &sessions::SessionEntry)> = registry
-        .iter()
-        .map(|(k, e)| (e.pane.as_str(), (k.as_str(), e)))
-        .collect();
+    let pane_to_entry: std::collections::HashMap<&str, (&str, &tmux_router::RegistryEntry)> =
+        registry
+            .iter()
+            .map(|(k, e)| (e.pane.as_str(), (k.as_str(), e)))
+            .collect();
 
     // List all windows to find stash windows
     let output = tmux
@@ -413,7 +411,7 @@ pub(crate) fn purge_unregistered_dead_non_stash_panes(tmux: &Tmux) {
 
 pub(crate) fn purge_unregistered_dead_non_stash_panes_with_registry(
     tmux: &Tmux,
-    registry: &sessions::SessionRegistry,
+    registry: &tmux_router::Registry,
 ) {
     let output = tmux
         .cmd()
@@ -454,7 +452,7 @@ pub(crate) fn purge_unregistered_dead_non_stash_panes_bulk(tmux: &Tmux, panes: &
 pub(crate) fn purge_unregistered_dead_non_stash_panes_bulk_with_registry(
     tmux: &Tmux,
     panes: &PaneMeta,
-    registry: &sessions::SessionRegistry,
+    registry: &tmux_router::Registry,
 ) {
     let registered_panes: std::collections::HashSet<&str> =
         registry.values().map(|entry| entry.pane.as_str()).collect();
@@ -508,10 +506,11 @@ pub(crate) fn purge_unregistered_dead_non_stash_panes_bulk_with_registry(
 #[allow(dead_code)]
 pub(crate) fn return_stashed_panes_bulk(tmux: &Tmux, windows: &WindowMeta, panes: &PaneMeta) {
     let registry = sessions::load().unwrap_or_default();
-    let pane_to_entry: std::collections::HashMap<&str, (&str, &sessions::SessionEntry)> = registry
-        .iter()
-        .map(|(k, e)| (e.pane.as_str(), (k.as_str(), e)))
-        .collect();
+    let pane_to_entry: std::collections::HashMap<&str, (&str, &tmux_router::RegistryEntry)> =
+        registry
+            .iter()
+            .map(|(k, e)| (e.pane.as_str(), (k.as_str(), e)))
+            .collect();
 
     // Find stash windows from pre-fetched metadata
     let stash_windows: std::collections::HashSet<&str> = windows
@@ -613,7 +612,7 @@ pub(crate) fn return_stashed_panes_bulk(tmux: &Tmux, windows: &WindowMeta, panes
 /// Bulk variant of `find_return_target` — uses pre-fetched metadata instead of subprocess calls.
 #[allow(dead_code)]
 pub(crate) fn find_return_target_bulk(
-    entry: &sessions::SessionEntry,
+    entry: &tmux_router::RegistryEntry,
     windows: &WindowMeta,
     panes: &PaneMeta,
 ) -> Option<String> {
@@ -678,7 +677,10 @@ pub(crate) fn find_return_target_bulk(
 /// 1. The entry's original window (if alive and not a stash window)
 /// 2. The first non-stash window in the tmux session from frontmatter
 /// 3. The first non-stash window in any session with a matching name
-pub(crate) fn find_return_target(tmux: &Tmux, entry: &sessions::SessionEntry) -> Option<String> {
+pub(crate) fn find_return_target(
+    tmux: &Tmux,
+    entry: &tmux_router::RegistryEntry,
+) -> Option<String> {
     // 1. Try the original window from the registry entry
     if !entry.window.is_empty()
         && let Ok(panes) = tmux.list_window_panes(&entry.window)
@@ -766,7 +768,7 @@ pub(crate) fn purge_orphaned_agent_panes(tmux: &Tmux) {
 
 pub(crate) fn purge_orphaned_agent_panes_with_registry(
     tmux: &Tmux,
-    registry: &sessions::SessionRegistry,
+    registry: &tmux_router::Registry,
 ) {
     let current_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let live_supervisors = crate::supervisor::ipc::active_supervisor_pids(&current_root);
@@ -899,7 +901,7 @@ pub(crate) fn purge_orphaned_agent_panes_with_registry(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use sessions::{IsolatedTmux, SessionEntry, SessionRegistry};
+    use tmux_router::{IsolatedTmux, Registry as SessionRegistry, RegistryEntry as SessionEntry};
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn purge_unregistered_stash_panes_bulk_kills_unregistered_agent_without_live_owner() {

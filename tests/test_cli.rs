@@ -2776,6 +2776,68 @@ fn test_project_controller_has_no_sqlite_status_facade() {
 }
 
 #[test]
+fn test_sessions_has_no_tmux_router_type_facade() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let sessions_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sessions.rs")).unwrap();
+    assert!(
+        !sessions_source.contains("pub use tmux_router"),
+        "sessions.rs must not re-export tmux-router types"
+    );
+    assert!(
+        sessions_source.contains("use tmux_router::{"),
+        "sessions.rs should import tmux-router types privately for its adapter helpers"
+    );
+
+    fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                collect_rs_files(&path, out);
+            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    let mut source_files = Vec::new();
+    collect_rs_files(
+        &manifest_dir.join("agent-doc-orchestration/src"),
+        &mut source_files,
+    );
+    collect_rs_files(&manifest_dir.join("src"), &mut source_files);
+    for path in source_files {
+        let source = fs::read_to_string(&path).unwrap();
+        let relative = path.strip_prefix(manifest_dir).unwrap().display();
+        for forbidden_snippet in [
+            "sessions::Tmux",
+            "sessions::IsolatedTmux",
+            "sessions::PaneMoveOp",
+            "sessions::RegistryLock",
+            "sessions::SessionRegistry",
+            "sessions::SessionEntry",
+            "agent_doc_orchestration::sessions::Tmux",
+            "agent_doc_orchestration::sessions::IsolatedTmux",
+            "agent_doc_orchestration::sessions::PaneMoveOp",
+            "agent_doc_orchestration::sessions::RegistryLock",
+            "agent_doc_orchestration::sessions::SessionRegistry",
+            "agent_doc_orchestration::sessions::SessionEntry",
+            "crate::sessions::Tmux",
+            "crate::sessions::IsolatedTmux",
+            "crate::sessions::PaneMoveOp",
+            "crate::sessions::RegistryLock",
+            "crate::sessions::SessionRegistry",
+            "crate::sessions::SessionEntry",
+        ] {
+            assert!(
+                !source.contains(forbidden_snippet),
+                "{relative} must import tmux-router types from tmux_router directly: {forbidden_snippet}"
+            );
+        }
+    }
+}
+
+#[test]
 fn test_agent_doc_merge_is_pure_workspace_boundary() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();

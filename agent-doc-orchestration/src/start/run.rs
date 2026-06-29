@@ -370,7 +370,7 @@ pub fn run_with_reap_policy(
     }
 
     let pane_id = sessions::current_pane()?;
-    let tmux = sessions::Tmux::default_server();
+    let tmux = tmux_router::Tmux::default_server();
 
     // `#recursion-guard-wedge-escape` (part 1): hard-refuse a recursive
     // self-owned-pane start. When `agent-doc start <FILE>` runs inside the Codex
@@ -1859,10 +1859,10 @@ mod tests {
     use crate::config::Config;
     use crate::hooks::fire_doc_hooks;
     use crate::project_config_io as project_config;
-    use crate::sessions::IsolatedTmux;
     use agent_doc_frontmatter::frontmatter::Frontmatter;
     use std::collections::HashMap;
     use tempfile::TempDir;
+    use tmux_router::IsolatedTmux;
 
     #[test]
     fn route_owned_start_status_logs_without_printing_by_default() {
@@ -2026,7 +2026,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let pane_a = iso.new_session("test", tmp.path()).unwrap();
         let pane_b = iso.split_window(&pane_a, tmp.path(), "-dh").unwrap();
-        let entry = crate::sessions::SessionEntry {
+        let entry = tmux_router::RegistryEntry {
             pane: pane_a.clone(),
             pid: 0,
             cwd: tmp.path().display().to_string(),
@@ -2051,7 +2051,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let owner_pane = iso.new_session("sess-a", tmp.path()).unwrap();
         let launcher_pane = iso.new_session("sess-b", tmp.path()).unwrap();
-        let entry = crate::sessions::SessionEntry {
+        let entry = tmux_router::RegistryEntry {
             pane: owner_pane.clone(),
             pid: 0,
             cwd: tmp.path().display().to_string(),
@@ -2085,7 +2085,7 @@ mod tests {
         let iso = IsolatedTmux::new("start-duplicate-same-pane");
         let tmp = tempfile::TempDir::new().unwrap();
         let pane = iso.new_session("test", tmp.path()).unwrap();
-        let entry = crate::sessions::SessionEntry {
+        let entry = tmux_router::RegistryEntry {
             pane: pane.clone(),
             pid: 0,
             cwd: tmp.path().display().to_string(),
@@ -2106,7 +2106,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let pane_a = iso.new_session("test", tmp.path()).unwrap();
         let pane_b = iso.split_window(&pane_a, tmp.path(), "-dh").unwrap();
-        let entry = crate::sessions::SessionEntry {
+        let entry = tmux_router::RegistryEntry {
             pane: pane_a.clone(),
             pid: 0,
             cwd: tmp.path().display().to_string(),
@@ -2129,7 +2129,7 @@ mod tests {
         let iso = IsolatedTmux::new("start-duplicate-dead-pane");
         let tmp = tempfile::TempDir::new().unwrap();
         let pane = iso.new_session("test", tmp.path()).unwrap();
-        let entry = crate::sessions::SessionEntry {
+        let entry = tmux_router::RegistryEntry {
             pane: "%999999".to_string(),
             pid: 0,
             cwd: tmp.path().display().to_string(),

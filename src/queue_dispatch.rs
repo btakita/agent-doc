@@ -338,7 +338,7 @@ fn try_tmux_dispatch(item: &QueueItem, ctx: &DispatchContext) -> Result<Option<D
         ),
     );
 
-    let tmux = sessions::Tmux::default();
+    let tmux = tmux_router::Tmux::default();
     let profile = sessions::tmux_submit_profile_for_harness(&ctx.harness);
 
     // Send the command text through the canonical tmux submit path.

@@ -456,9 +456,9 @@ pub(crate) fn repair_missing_registered_pane(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::sessions::IsolatedTmux;
     use std::process::Command as ProcessCommand;
     use std::time::Duration;
+    use tmux_router::IsolatedTmux;
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn sync_proof_cache_reuses_actor_lookup_within_one_sync_cycle() {
@@ -1062,14 +1062,14 @@ mod tests {
         let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
         let child_pane = iso.split_window(&root_pane, &subroot, "-dh").unwrap();
 
-        let mut root_registry = sessions::SessionRegistry::new();
+        let mut root_registry = tmux_router::Registry::new();
         let root_key = sessions::canonical_registry_key_in(
             root,
             root_doc.canonicalize().unwrap().to_string_lossy().as_ref(),
         );
         root_registry.insert(
             root_key,
-            sessions::SessionEntry {
+            tmux_router::RegistryEntry {
                 pane: root_pane.clone(),
                 pid: pane_pid_from_tmux(&iso, &root_pane).unwrap(),
                 cwd: root.to_string_lossy().to_string(),
@@ -1082,14 +1082,14 @@ mod tests {
         );
         sessions::save_in(root, &root_registry).unwrap();
 
-        let mut child_registry = sessions::SessionRegistry::new();
+        let mut child_registry = tmux_router::Registry::new();
         let child_key = sessions::canonical_registry_key_in(
             &subroot,
             child_doc.canonicalize().unwrap().to_string_lossy().as_ref(),
         );
         child_registry.insert(
             child_key,
-            sessions::SessionEntry {
+            tmux_router::RegistryEntry {
                 pane: child_pane.clone(),
                 pid: pane_pid_from_tmux(&iso, &child_pane).unwrap(),
                 cwd: subroot.to_string_lossy().to_string(),

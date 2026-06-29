@@ -193,8 +193,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tempfile::NamedTempFile;
 
-use crate::sessions::{PaneMoveOp, Tmux};
 use agent_doc_element::element;
+use tmux_router::{PaneMoveOp, Tmux};
 
 use agent_doc_frontmatter::frontmatter;
 
@@ -3432,7 +3432,7 @@ fn register_synced_files_with_cache(
             continue;
         };
         let registry_path = sessions::registry_path_in(&project_root);
-        let Ok(_lock) = sessions::RegistryLock::acquire(&registry_path) else {
+        let Ok(_lock) = tmux_router::RegistryLock::acquire(&registry_path) else {
             continue;
         };
         let Ok(mut registry) = sessions::load_in(&project_root) else {
@@ -3561,7 +3561,7 @@ fn register_synced_files_with_cache(
             );
             registry.insert(
                 registry_key,
-                sessions::SessionEntry {
+                tmux_router::RegistryEntry {
                     pane: pane_id.to_string(),
                     pid: pane_pid,
                     cwd,
@@ -4262,7 +4262,7 @@ fn pane_project_root(tmux: &Tmux, pane_id: &str) -> Option<PathBuf> {
 }
 
 fn registry_entry_matches_document_root(
-    entry: &sessions::SessionEntry,
+    entry: &tmux_router::RegistryEntry,
     project_root: &Path,
 ) -> bool {
     let cwd = Path::new(entry.cwd.trim());
@@ -4888,9 +4888,9 @@ pub fn is_file_rename(registered_path: &str, current_path: &str) -> bool {
 #[cfg(test)]
 mod th {
     use super::*;
-    use crate::sessions::IsolatedTmux;
     use std::process::Command as ProcessCommand;
     use std::time::Duration;
+    use tmux_router::IsolatedTmux;
     pub(crate) fn list_windows(tmux: &Tmux, session: &str) -> Vec<(String, String)> {
         let output = tmux
             .raw_cmd(&[
@@ -5002,7 +5002,7 @@ mod th {
         SyntheticRegistryCandidate {
             session_id: session_id.to_string(),
             file_path: PathBuf::from(file_path),
-            entry: sessions::SessionEntry {
+            entry: tmux_router::RegistryEntry {
                 pane: pane_id.to_string(),
                 pid: 1000,
                 cwd: "/tmp/project".to_string(),
@@ -5163,9 +5163,9 @@ pub(crate) use th::*;
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::sessions::IsolatedTmux;
     use std::process::Command as ProcessCommand;
     use std::time::Duration;
+    use tmux_router::IsolatedTmux;
     // `#tmuxsynccrash`: a destructive doctor repair within the min interval of a
     // prior one must be throttled (skipped) so a rapid `Sync Tmux Layout` burst /
     // supersede re-run cannot storm tmux into a crash.
@@ -6808,7 +6808,7 @@ mod tests {
         // Load registry directly from the temp path (avoid CWD dependency)
         let reg_content =
             std::fs::read_to_string(tmp.path().join(".agent-doc/sessions.json")).unwrap();
-        let registry: sessions::SessionRegistry = serde_json::from_str(&reg_content).unwrap();
+        let registry: tmux_router::Registry = serde_json::from_str(&reg_content).unwrap();
         let has_registry_entry = registry.contains_key("orphan-uuid-123");
         assert!(!has_registry_entry, "should NOT have a registry entry");
 
@@ -6864,7 +6864,7 @@ mod tests {
         // Load registry directly from the temp path (avoid CWD dependency)
         let reg_content =
             std::fs::read_to_string(tmp.path().join(".agent-doc/sessions.json")).unwrap();
-        let registry: sessions::SessionRegistry = serde_json::from_str(&reg_content).unwrap();
+        let registry: tmux_router::Registry = serde_json::from_str(&reg_content).unwrap();
         let has_registry_entry = registry.contains_key("claimed-uuid-456");
         assert!(has_registry_entry, "should have a registry entry");
 
@@ -7490,7 +7490,7 @@ mod tests {
         );
 
         // Verify we can load the entry and see the old path
-        let reg: sessions::SessionRegistry = serde_json::from_str(
+        let reg: tmux_router::Registry = serde_json::from_str(
             &std::fs::read_to_string(project.join(".agent-doc/sessions.json")).unwrap(),
         )
         .unwrap();
@@ -7974,14 +7974,14 @@ mod tests {
         let root_pane = iso.new_session("test", root).unwrap();
         let child_pane = iso.split_window(&root_pane, &subroot, "-dh").unwrap();
 
-        let mut child_registry = sessions::SessionRegistry::new();
+        let mut child_registry = tmux_router::Registry::new();
         let bad_key = sessions::canonical_registry_key_in(
             &subroot,
             "src/session-share/tasks/claudescore-3.md",
         );
         child_registry.insert(
             bad_key,
-            sessions::SessionEntry {
+            tmux_router::RegistryEntry {
                 pane: child_pane.clone(),
                 pid: pane_pid_from_tmux(&iso, &child_pane).unwrap(),
                 cwd: root.to_string_lossy().to_string(),
@@ -8074,10 +8074,10 @@ mod tests {
             root,
             root_doc.canonicalize().unwrap().to_string_lossy().as_ref(),
         );
-        let mut root_registry = sessions::SessionRegistry::new();
+        let mut root_registry = tmux_router::Registry::new();
         root_registry.insert(
             root_key,
-            sessions::SessionEntry {
+            tmux_router::RegistryEntry {
                 pane: root_pane.clone(),
                 pid: pane_pid_from_tmux(&iso, &root_pane).unwrap(),
                 cwd: root.to_string_lossy().to_string(),
@@ -8094,10 +8094,10 @@ mod tests {
             &subroot,
             child_doc.canonicalize().unwrap().to_string_lossy().as_ref(),
         );
-        let mut child_registry = sessions::SessionRegistry::new();
+        let mut child_registry = tmux_router::Registry::new();
         child_registry.insert(
             child_key,
-            sessions::SessionEntry {
+            tmux_router::RegistryEntry {
                 pane: root_pane.clone(),
                 pid: pane_pid_from_tmux(&iso, &root_pane).unwrap(),
                 cwd: root.to_string_lossy().to_string(),
@@ -8188,10 +8188,10 @@ mod tests {
             &subroot,
             child_doc.canonicalize().unwrap().to_string_lossy().as_ref(),
         );
-        let mut child_registry = sessions::SessionRegistry::new();
+        let mut child_registry = tmux_router::Registry::new();
         child_registry.insert(
             child_key,
-            sessions::SessionEntry {
+            tmux_router::RegistryEntry {
                 pane: child_pane.clone(),
                 pid: pane_pid_from_tmux(&iso, &child_pane).unwrap(),
                 cwd: subroot.to_string_lossy().to_string(),

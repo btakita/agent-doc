@@ -3,14 +3,14 @@
 use super::*;
 
 pub(crate) fn prune_dead_entries_for_target_in_registry<F>(
-    registry: &mut sessions::SessionRegistry,
+    registry: &mut tmux_router::Registry,
     target: &Path,
     mut pane_alive: F,
-) -> Vec<(String, sessions::SessionEntry)>
+) -> Vec<(String, tmux_router::RegistryEntry)>
 where
     F: FnMut(&str) -> bool,
 {
-    let removed: Vec<(String, sessions::SessionEntry)> = registry
+    let removed: Vec<(String, tmux_router::RegistryEntry)> = registry
         .iter()
         .filter(|(key, entry)| {
             (same_document_path(target, &entry.file) || same_document_path(target, key))
@@ -30,7 +30,7 @@ pub(crate) fn prune_targeted_in(
     tmux: &Tmux,
     target: &Path,
     base_dir: &Path,
-) -> Result<Vec<(String, sessions::SessionEntry)>> {
+) -> Result<Vec<(String, tmux_router::RegistryEntry)>> {
     let registry_path = sessions::registry_path_in(base_dir);
     let _lock = tmux_router::RegistryLock::acquire(&registry_path)?;
     let mut registry = sessions::load_in(base_dir)?;
@@ -233,7 +233,7 @@ pub(crate) fn purge_unregistered_stash_panes(tmux: &Tmux) {
 /// Testable inner function that accepts a registry parameter.
 pub(crate) fn purge_unregistered_stash_panes_with_registry(
     tmux: &Tmux,
-    registry: &sessions::SessionRegistry,
+    registry: &tmux_router::Registry,
 ) {
     let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let live_supervisors = crate::supervisor::ipc::active_supervisor_pids(&project_root);
@@ -242,7 +242,7 @@ pub(crate) fn purge_unregistered_stash_panes_with_registry(
 
 pub(crate) fn purge_unregistered_stash_panes_with_registry_and_supervisors(
     tmux: &Tmux,
-    registry: &sessions::SessionRegistry,
+    registry: &tmux_router::Registry,
     live_supervisors: &[(String, u32)],
 ) {
     let current_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -393,7 +393,7 @@ pub(crate) fn purge_unregistered_stash_panes_with_registry_and_supervisors(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use sessions::{IsolatedTmux, SessionEntry, SessionRegistry};
+    use tmux_router::{IsolatedTmux, Registry as SessionRegistry, RegistryEntry as SessionEntry};
     #[test]
     fn prune_dead_entries_for_target_only_removes_matching_file() {
         let dir = tempfile::tempdir().unwrap();

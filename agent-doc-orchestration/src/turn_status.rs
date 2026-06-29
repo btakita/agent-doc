@@ -15,7 +15,6 @@
 //! `pane-border-status` is enabled. The command is best-effort — it never fails
 //! the turn: outside tmux, or on any tmux error, it succeeds quietly.
 
-use crate::sessions;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -202,7 +201,7 @@ pub fn run(active: bool) -> anyhow::Result<()> {
         .map(|base| supervisor_stale(&base))
         .unwrap_or(false);
     let title = pane_title_for_status(active, stale);
-    let tmux = sessions::Tmux::default_server();
+    let tmux = tmux_router::Tmux::default_server();
     if let Err(e) = tmux
         .cmd()
         .args(["select-pane", "-t", &pane, "-T", &title])

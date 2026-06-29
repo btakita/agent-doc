@@ -681,10 +681,10 @@ mod tests {
     use crate::config::Config;
     use crate::hooks::fire_doc_hooks;
     use crate::project_config_io as project_config;
-    use crate::sessions::IsolatedTmux;
     use agent_doc_frontmatter::frontmatter::Frontmatter;
     use std::collections::HashMap;
     use tempfile::TempDir;
+    use tmux_router::IsolatedTmux;
     // --- `#crdtauth5` end-to-end fan-out over the NEW IPC path -------------------
 
     /// A throwaway tracked document under a temp project root so `doc_hash` /

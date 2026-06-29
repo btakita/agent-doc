@@ -334,9 +334,9 @@ pub(crate) fn safe_passive_focus_actor_after_sync_lock(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::sessions::IsolatedTmux;
     use std::process::Command as ProcessCommand;
     use std::time::Duration;
+    use tmux_router::IsolatedTmux;
     #[test]
     fn safe_passive_lock_contention_message_is_retryable_and_visible() {
         let message = safe_passive_lock_contention_message(

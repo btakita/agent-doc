@@ -711,7 +711,7 @@ pub fn try_migrate_renamed(doc: &Path) -> Result<bool> {
     let canonical_str = canonical.to_string_lossy().to_string();
     let registry_path = crate::sessions::registry_path();
     if registry_path.exists()
-        && let Ok(_lock) = crate::sessions::RegistryLock::acquire(&registry_path)
+        && let Ok(_lock) = tmux_router::RegistryLock::acquire(&registry_path)
         && let Ok(mut registry) = crate::sessions::load()
     {
         let mut updated = 0u32;

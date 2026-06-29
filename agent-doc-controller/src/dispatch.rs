@@ -153,6 +153,26 @@ pub fn startup_miss_should_fail_closed(facts: StartupMissRouteFacts) -> bool {
         && facts.latest_session_open
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RoutedCycleAckFacts {
+    pub baseline_cycle_open: bool,
+    pub prompt_bearing_marker_present: bool,
+}
+
+pub fn should_require_routed_cycle_ack(facts: RoutedCycleAckFacts) -> bool {
+    facts.prompt_bearing_marker_present && !facts.baseline_cycle_open
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MissingCycleAckFacts<'a> {
+    pub harness_binary: &'a str,
+    pub live_child_for_file: bool,
+}
+
+pub fn should_optimistically_accept_missing_cycle_ack(facts: MissingCycleAckFacts<'_>) -> bool {
+    facts.harness_binary == "codex" && facts.live_child_for_file
+}
+
 pub const STARTING_ACTOR_TIMEOUT_REASON: &str = "starting_actor_timeout";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -901,6 +921,44 @@ mod tests {
             pane_alive: false,
             ..startup_miss_facts()
         }));
+    }
+
+    #[test]
+    fn routed_cycle_ack_required_only_for_prompt_bearing_closed_baselines() {
+        assert!(!should_require_routed_cycle_ack(RoutedCycleAckFacts {
+            baseline_cycle_open: false,
+            prompt_bearing_marker_present: false,
+        }));
+        assert!(!should_require_routed_cycle_ack(RoutedCycleAckFacts {
+            baseline_cycle_open: true,
+            prompt_bearing_marker_present: true,
+        }));
+        assert!(should_require_routed_cycle_ack(RoutedCycleAckFacts {
+            baseline_cycle_open: false,
+            prompt_bearing_marker_present: true,
+        }));
+    }
+
+    #[test]
+    fn missing_cycle_ack_optimism_is_codex_live_child_only() {
+        assert!(should_optimistically_accept_missing_cycle_ack(
+            MissingCycleAckFacts {
+                harness_binary: "codex",
+                live_child_for_file: true,
+            }
+        ));
+        assert!(!should_optimistically_accept_missing_cycle_ack(
+            MissingCycleAckFacts {
+                harness_binary: "codex",
+                live_child_for_file: false,
+            }
+        ));
+        assert!(!should_optimistically_accept_missing_cycle_ack(
+            MissingCycleAckFacts {
+                harness_binary: "opencode",
+                live_child_for_file: true,
+            }
+        ));
     }
 
     #[test]

@@ -3666,6 +3666,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         manifest_dir.join("agent-doc-orchestration/src/route/pane_resolution.rs"),
     )
     .unwrap();
+    let route_cycle_ack_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/cycle_ack.rs"))
+            .unwrap();
     let flow_routed_reopen_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/routed_reopen.rs"))
             .unwrap();
@@ -3719,6 +3722,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub struct CloseoutBlockDispatchFacts",
         "pub enum CloseoutBlockDispatchDecision",
         "pub fn classify_closeout_block_dispatch(",
+        "pub struct RoutedCycleAckFacts",
+        "pub fn should_require_routed_cycle_ack(",
+        "pub struct MissingCycleAckFacts",
+        "pub fn should_optimistically_accept_missing_cycle_ack(",
     ] {
         assert!(
             controller_dispatch.contains(required_snippet),
@@ -3786,6 +3793,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub struct CloseoutBlockDispatchFacts",
         "pub enum CloseoutBlockDispatchDecision",
         "pub fn classify_closeout_block_dispatch(",
+        "pub struct RoutedCycleAckFacts",
+        "pub fn should_require_routed_cycle_ack(",
+        "pub struct MissingCycleAckFacts",
+        "pub fn should_optimistically_accept_missing_cycle_ack(",
     ] {
         assert!(
             !flow_routed_reopen_source.contains(forbidden_snippet),
@@ -3819,6 +3830,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("startup_miss_superseded_by_later_open_start")
             && route_source.contains("startup_miss_should_restart_live_owner")
             && route_source.contains("startup_miss_should_fail_closed")
+            && route_source.contains("RoutedCycleAckFacts")
+            && route_source.contains("should_require_routed_cycle_ack")
+            && route_source.contains("MissingCycleAckFacts")
+            && route_source.contains("should_optimistically_accept_missing_cycle_ack")
             && route_source.contains("DispatchActorState")
             && route_source.contains("dispatch_only_busy_should_wait_for_ready(")
             && route_source.contains("dispatch_only_should_probe_active_turn_cue(")
@@ -3834,6 +3849,22 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_pane_resolution_source.contains("startup_miss_should_restart_live_owner(")
             && route_pane_resolution_source.contains("startup_miss_should_fail_closed("),
         "route pane resolution should adapt startup-miss sidecars into focused controller policy"
+    );
+    for forbidden_snippet in [
+        "pub(crate) fn should_require_routed_cycle_ack(",
+        "pub(crate) fn should_optimistically_accept_missing_cycle_ack(",
+    ] {
+        assert!(
+            !route_cycle_ack_source.contains(forbidden_snippet),
+            "route/cycle_ack.rs must not re-own pure controller dispatch policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        route_cycle_ack_source.contains("RoutedCycleAckFacts")
+            && route_cycle_ack_source.contains("should_require_routed_cycle_ack(")
+            && route_cycle_ack_source.contains("MissingCycleAckFacts")
+            && route_cycle_ack_source.contains("should_optimistically_accept_missing_cycle_ack("),
+        "route/cycle_ack.rs should adapt cycle and harness facts into focused controller policy"
     );
     let sim_world = fs::read_to_string(manifest_dir.join("src/sim_world/engine.rs")).unwrap();
     assert!(

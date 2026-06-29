@@ -99,7 +99,10 @@ pub(crate) fn retry_routed_cycle_ack_after_fresh_restart(
             ),
         );
         emit_busy_route_diagnostic(tmux, &dispatch_pane, file, harness);
-        if should_optimistically_accept_missing_cycle_ack(harness, true) {
+        if should_optimistically_accept_missing_cycle_ack(MissingCycleAckFacts {
+            harness_binary: &harness.binary,
+            live_child_for_file: true,
+        }) {
             let baseline_id = baseline.map(|b| b.cycle_id.as_str());
             let miss = crate::startup_miss::record(
                 file,
@@ -193,7 +196,10 @@ pub(crate) fn retry_routed_cycle_ack_after_fresh_restart(
             Ok(Some(dispatch_pane))
         }
         None => {
-            if should_optimistically_accept_missing_cycle_ack(harness, true) {
+            if should_optimistically_accept_missing_cycle_ack(MissingCycleAckFacts {
+                harness_binary: &harness.binary,
+                live_child_for_file: true,
+            }) {
                 let baseline_id = baseline.map(|b| b.cycle_id.as_str());
                 let miss = crate::startup_miss::record(
                     file,
@@ -260,20 +266,6 @@ pub(crate) fn routed_cycle_ack_timeout(live_child_for_file: bool) -> Duration {
     crate::flow::routed_reopen::routed_cycle_ack_timeout(live_child_for_file, cfg!(test))
 }
 
-pub(crate) fn should_require_routed_cycle_ack(
-    baseline: Option<&crate::cycle_state::CycleState>,
-    prompt_bearing_marker: Option<&str>,
-) -> bool {
-    prompt_bearing_marker.is_some() && !baseline.is_some_and(|state| state.is_open())
-}
-
-pub(crate) fn should_optimistically_accept_missing_cycle_ack(
-    harness: &HarnessConfig,
-    live_child_for_file: bool,
-) -> bool {
-    harness.binary == "codex" && live_child_for_file
-}
-
 pub(crate) fn pending_prompt_bearing_context_for_route(
     file: &Path,
     baseline: Option<&crate::cycle_state::CycleState>,
@@ -319,7 +311,10 @@ pub(crate) fn require_routed_cycle_ack(
     live_child_for_file: bool,
     dispatch_start: RoutedDispatchStartProof,
 ) -> Result<Option<String>> {
-    if !should_require_routed_cycle_ack(baseline, prompt_bearing_marker) {
+    if !should_require_routed_cycle_ack(RoutedCycleAckFacts {
+        baseline_cycle_open: baseline.is_some_and(|state| state.is_open()),
+        prompt_bearing_marker_present: prompt_bearing_marker.is_some(),
+    }) {
         return Ok(None);
     }
 
@@ -373,7 +368,10 @@ pub(crate) fn require_routed_cycle_ack(
                 "missing",
             );
             let optimistic_allowed =
-                should_optimistically_accept_missing_cycle_ack(harness, live_child_for_file);
+                should_optimistically_accept_missing_cycle_ack(MissingCycleAckFacts {
+                    harness_binary: &harness.binary,
+                    live_child_for_file,
+                });
             if live_child_for_file
                 && let Some(dispatch_pane) = retry_routed_cycle_ack_after_fresh_restart(
                     tmux,
@@ -822,7 +820,10 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
     }
     #[test]
     fn routed_cycle_ack_only_required_for_prompt_bearing_drift_on_closed_cycle() {
-        assert!(!should_require_routed_cycle_ack(None, None));
+        assert!(!should_require_routed_cycle_ack(RoutedCycleAckFacts {
+            baseline_cycle_open: false,
+            prompt_bearing_marker_present: false,
+        }));
 
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -830,10 +831,10 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
         std::fs::write(&doc, "# Session\n").unwrap();
         crate::cycle_state::start_preflight(&doc, None, Some("# Session\n")).unwrap();
         let open_state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert!(!should_require_routed_cycle_ack(
-            Some(&open_state),
-            Some("prompt_target: ❯ follow-up question"),
-        ));
+        assert!(!should_require_routed_cycle_ack(RoutedCycleAckFacts {
+            baseline_cycle_open: open_state.is_open(),
+            prompt_bearing_marker_present: true,
+        }));
 
         crate::cycle_state::mark_committed(
             &doc,
@@ -843,10 +844,10 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
         )
         .unwrap();
         let committed_state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert!(should_require_routed_cycle_ack(
-            Some(&committed_state),
-            Some("prompt_target: ❯ follow-up question"),
-        ));
+        assert!(should_require_routed_cycle_ack(RoutedCycleAckFacts {
+            baseline_cycle_open: committed_state.is_open(),
+            prompt_bearing_marker_present: true,
+        }));
     }
     #[test]
     fn routed_cycle_ack_timeout_extends_for_live_children() {

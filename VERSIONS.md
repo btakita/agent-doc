@@ -120,6 +120,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Route startup-miss recovery policy moved to `agent-doc-controller`.** The fresh-start, live-owner restart, newer-open-start supersession, and stranded-session fail-closed decisions now live in `agent_doc_controller::dispatch`. Route keeps the startup-miss sidecar/log IO and maps those records into focused controller facts before acting.
 
+- **Fresh-start ack outcome policy moved to `agent-doc-controller`.** The
+  no-cycle fresh-start decision that keeps dispatch-ready idle no-ops but reaps
+  genuine startup misses now lives in `agent_doc_controller::dispatch`. Route
+  startup still captures panes and detects dispatch-ready prompts, then passes
+  those facts into the focused controller policy.
+
 - **Routed cycle-ack policy moved to `agent-doc-controller`.** The decision that prompt-bearing reroutes require a new cycle ack only when no baseline cycle is already open, and the Codex live-child missing-ack optimism rule, now live in `agent_doc_controller::dispatch`. Route still waits on cycle-state sidecars and records startup-miss evidence, but it adapts cycle/harness facts into the focused controller policy.
 
 - **Route submit-observation policy moved to `agent-doc-controller`.** The accepted/trigger-still-visible/capture-failed/dispatch-proof observation vocabulary, issue mapping, and structured route-submit log rendering now live in `agent_doc_controller::dispatch`. Route remains the ops-log adapter that supplies file, harness, elapsed-time, and editor-attempt facts.

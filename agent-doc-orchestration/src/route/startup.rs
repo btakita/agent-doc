@@ -1,6 +1,7 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use agent_doc_controller::dispatch::{FreshStartAckOutcome, fresh_start_ack_outcome};
 
 /// `#jbtsiftnosub`: bounded re-verify window for the auto-start cold-start gate.
 /// After `wait_for_agent_ready` reports ready, the pane should already show a
@@ -898,27 +899,6 @@ pub(crate) fn ready_prompt_candidate(content: &str, harness: &HarnessConfig) -> 
 /// already-tested [`ready_prompt_candidate`] discriminator avoids reaping a
 /// healthy session just because it had nothing to do ("I cannot start
 /// lazily-rs.md, killed immediately").
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FreshStartAckOutcome {
-    CycleAcknowledged,
-    IdleNoOpKeep,
-    GenuineMissReap,
-}
-
-pub(crate) fn fresh_start_ack_outcome(
-    cycle_acknowledged: bool,
-    pane_capture: &str,
-    harness: &HarnessConfig,
-) -> FreshStartAckOutcome {
-    if cycle_acknowledged {
-        FreshStartAckOutcome::CycleAcknowledged
-    } else if ready_prompt_candidate(pane_capture, harness).is_some() {
-        FreshStartAckOutcome::IdleNoOpKeep
-    } else {
-        FreshStartAckOutcome::GenuineMissReap
-    }
-}
-
 /// Best-effort: capture `pane` and report whether a no-cycle fresh start should
 /// be kept as a live idle session (the pane is back at a dispatch-ready prompt).
 /// A capture failure returns `false` so the caller falls back to reaping a
@@ -930,7 +910,7 @@ pub(crate) fn fresh_start_pane_idle_ready(
 ) -> bool {
     match sessions::capture_pane(tmux, pane) {
         Ok(content) => matches!(
-            fresh_start_ack_outcome(false, &content, harness),
+            fresh_start_ack_outcome(false, ready_prompt_candidate(&content, harness).is_some()),
             FreshStartAckOutcome::IdleNoOpKeep
         ),
         Err(_) => false,
@@ -1690,53 +1670,6 @@ Starting codex...
         assert!(
             ready_prompt_candidate(content, &harness).is_none(),
             "Codex hook-review chrome requires operator approval before route can dispatch"
-        );
-    }
-    #[test]
-    fn fresh_start_ack_outcome_keeps_idle_no_op_and_reaps_genuine_miss() {
-        // #route-reaps-idle-fresh-start: a fresh start whose trigger was dispatched
-        // but produced no document cycle is KEPT as a live idle session when the pane
-        // returned to a dispatch-ready prompt (a legitimate no-op first cycle —
-        // empty/halted queue, preflight no_changes), and REAPED only when the pane is
-        // not dispatch-ready (a genuine startup miss).
-        let harness = HarnessConfig::codex();
-
-        // A document cycle was acknowledged → normal start regardless of pane content.
-        assert_eq!(
-            fresh_start_ack_outcome(true, "", &harness),
-            FreshStartAckOutcome::CycleAcknowledged
-        );
-
-        // No cycle, but the pane is back at a Codex dispatch-ready prompt → KEEP.
-        let idle_ready = "\
-Starting codex...
-› Run /review on my current changes
-gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
-";
-        assert_eq!(
-            fresh_start_ack_outcome(false, idle_ready, &harness),
-            FreshStartAckOutcome::IdleNoOpKeep,
-            "a ready+dispatched fresh start with a no-op first cycle must be kept, not reaped"
-        );
-
-        // No cycle, but Codex is back at bottom idle status chrome → KEEP.
-        let footer_only_idle = "\
-gpt-5.5 high · ~/work/btakita/agent-loop · Context 70% used
-";
-        assert_eq!(
-            fresh_start_ack_outcome(false, footer_only_idle, &harness),
-            FreshStartAckOutcome::IdleNoOpKeep,
-            "a ready+dispatched fresh start with only idle status chrome must be kept, not reaped"
-        );
-
-        // No cycle and no dispatch-ready evidence → genuine miss.
-        let not_ready = "\
-Starting codex...
-";
-        assert_eq!(
-            fresh_start_ack_outcome(false, not_ready, &harness),
-            FreshStartAckOutcome::GenuineMissReap,
-            "a fresh start with no cycle and no dispatch-ready evidence is a genuine miss to reap"
         );
     }
     #[test]

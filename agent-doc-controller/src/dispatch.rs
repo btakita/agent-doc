@@ -633,6 +633,26 @@ pub fn startup_miss_should_fail_closed(facts: StartupMissRouteFacts) -> bool {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FreshStartAckOutcome {
+    CycleAcknowledged,
+    IdleNoOpKeep,
+    GenuineMissReap,
+}
+
+pub const fn fresh_start_ack_outcome(
+    cycle_acknowledged: bool,
+    pane_dispatch_ready: bool,
+) -> FreshStartAckOutcome {
+    if cycle_acknowledged {
+        FreshStartAckOutcome::CycleAcknowledged
+    } else if pane_dispatch_ready {
+        FreshStartAckOutcome::IdleNoOpKeep
+    } else {
+        FreshStartAckOutcome::GenuineMissReap
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RoutedCycleAckFacts {
     pub baseline_cycle_open: bool,
     pub prompt_bearing_marker_present: bool,
@@ -2039,6 +2059,25 @@ mod tests {
             pane_alive: false,
             ..startup_miss_facts()
         }));
+    }
+
+    #[test]
+    fn fresh_start_ack_outcome_keeps_idle_no_op_and_reaps_genuine_miss() {
+        assert_eq!(
+            fresh_start_ack_outcome(true, false),
+            FreshStartAckOutcome::CycleAcknowledged,
+            "a document cycle ack is a normal fresh start regardless of pane prompt state"
+        );
+        assert_eq!(
+            fresh_start_ack_outcome(false, true),
+            FreshStartAckOutcome::IdleNoOpKeep,
+            "a no-cycle fresh start that returns to dispatch-ready is a legitimate idle no-op"
+        );
+        assert_eq!(
+            fresh_start_ack_outcome(false, false),
+            FreshStartAckOutcome::GenuineMissReap,
+            "a no-cycle fresh start without dispatch-ready proof is a genuine startup miss"
+        );
     }
 
     #[test]

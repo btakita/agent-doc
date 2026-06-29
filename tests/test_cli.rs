@@ -4077,6 +4077,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn startup_miss_superseded_by_later_open_start(",
         "pub fn startup_miss_should_restart_live_owner(",
         "pub fn startup_miss_should_fail_closed(",
+        "pub enum FreshStartAckOutcome",
+        "pub const fn fresh_start_ack_outcome(",
         "pub enum DirectPaneSubmitStatus",
         "pub fn direct_pane_submit_acceptance_timeout(",
         "pub fn direct_pane_submit_acceptance_budget(",
@@ -4485,6 +4487,23 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         route_startup_source.contains("DuplicatePanePolicyErrorFacts")
             && route_startup_source.contains("duplicate_pane_policy_error_message("),
         "route startup should adapt tmux/session facts into focused duplicate-pane diagnostic policy"
+    );
+    for forbidden_snippet in [
+        "pub(crate) enum FreshStartAckOutcome",
+        "pub(crate) fn fresh_start_ack_outcome(",
+    ] {
+        assert!(
+            !route_startup_source.contains(forbidden_snippet),
+            "route/startup.rs must not re-own fresh-start ack policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        route_startup_source.contains(
+            "use agent_doc_controller::dispatch::{FreshStartAckOutcome, fresh_start_ack_outcome};"
+        ) && route_startup_source.contains(
+            "fresh_start_ack_outcome(false, ready_prompt_candidate(&content, harness).is_some())"
+        ),
+        "route/startup.rs should adapt pane prompt detection into focused fresh-start ack policy"
     );
     for forbidden_snippet in [
         "pub(crate) fn should_require_routed_cycle_ack(",

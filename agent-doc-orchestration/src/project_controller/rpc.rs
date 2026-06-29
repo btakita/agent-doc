@@ -3,11 +3,10 @@
 use super::*;
 use agent_doc_controller::dispatch::{
     DISPATCH_COALESCED_IN_FLIGHT_MARKER, DISPATCH_STALE_GENERATION_REDIRECT_MARKER,
-    DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER, STALE_QUEUE_PAUSE_INVARIANT_ID,
-    STALE_QUEUE_PAUSE_NEXT_ACTION, dispatch_command_kind_is_operator_reopen,
-    dispatch_error_stale_generation_redirect_target, dispatch_should_coalesce_in_flight,
-    pause_reason_is_stale_supervisor_churn_stop, spent_preset_id_from_pause_reason,
-    stale_queue_pause_pid_from_dispatch_error, stale_supervisor_pid_from_pause_reason,
+    DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER, StaleQueuePauseRecovery,
+    dispatch_command_kind_is_operator_reopen, dispatch_error_stale_generation_redirect_target,
+    dispatch_should_coalesce_in_flight, pause_reason_is_stale_supervisor_churn_stop,
+    spent_preset_id_from_pause_reason, stale_supervisor_pid_from_pause_reason,
 };
 
 pub(crate) fn connect(project_root: &Path) -> Result<interprocess::local_socket::Stream> {
@@ -335,48 +334,6 @@ pub fn authoritative_actor_binding(
             ActorBindingStatus::NotFound => Ok(None),
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct StaleQueuePauseRecovery {
-    pub stale_pid: u32,
-    pub outcome: crate::flow::outcome::BinaryOutcome,
-}
-
-impl StaleQueuePauseRecovery {
-    fn new(stale_pid: u32) -> Self {
-        Self {
-            stale_pid,
-            outcome: crate::flow::outcome::BinaryOutcome::recoverable(
-                STALE_QUEUE_PAUSE_INVARIANT_ID,
-                DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER,
-                STALE_QUEUE_PAUSE_NEXT_ACTION,
-            )
-            .expect("static stale queue pause outcome tokens are field-safe"),
-        }
-    }
-}
-
-/// `#jbrestale`: classify a failed dispatch as a recoverable stale-supervisor
-/// churn-stop and extract the stale supervisor PID named in the bail (`stale_pid=<N>`
-/// in current errors, or `stale ... pid<N>` in legacy markerless errors; `0` when
-/// the pause reason did not name one) for the `route_dispatch_recovery …
-/// stale_pid=<pid>` proof line.
-///
-/// New controllers tag recoverable bails with
-/// [`DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER`]. Older route-owned supervisors can
-/// still produce the pre-marker shape:
-/// `failed_stage=queue_paused reason=#qchurn ... stale host supervisor pid<N> ...`.
-/// Route consumes both shapes through this one classifier so stale-controller
-/// compatibility does not become a second route policy.
-///
-/// Returns `None` for every other failure so a deliberate operator pause, a
-/// spent-preset pause, or a genuinely-wedged queue stays terminal and never triggers a
-/// restart. Pure and UTF-8 safe.
-pub(crate) fn dispatch_error_stale_queue_pause_recovery(
-    message: &str,
-) -> Option<StaleQueuePauseRecovery> {
-    stale_queue_pause_pid_from_dispatch_error(message).map(StaleQueuePauseRecovery::new)
 }
 
 pub fn authorize_dispatch(
@@ -5644,8 +5601,11 @@ mod tests {
     }
     #[test]
     fn dispatch_error_supervisor_restart_redirect_classification() {
-        use super::dispatch_error_stale_queue_pause_recovery as recover;
-        use agent_doc_controller::dispatch::stale_queue_pause_pid_from_dispatch_error as r;
+        use agent_doc_controller::dispatch::{
+            DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER, DispatchRecoveryOutcomeClass,
+            stale_queue_pause_pid_from_dispatch_error as r,
+            stale_queue_pause_recovery_from_dispatch_error as recover,
+        };
         // `#jbrestale`: a queue_paused bail tagged with the restart-redirect marker is
         // recoverable; the named stale pid is extracted for the proof line.
         let tagged = "project controller command `dispatch` failed: dispatch blocked for x.md: failed_stage=queue_paused reason=churn-stop: stale supervisor pid1368698; needs operator recycle receipt_id=42 supervisor_restart_redirect stale_pid=1368698";
@@ -5654,12 +5614,12 @@ mod tests {
         assert_eq!(tagged_recovery.stale_pid, 1368698);
         assert_eq!(
             tagged_recovery.outcome.class,
-            crate::flow::outcome::BinaryOutcomeClass::Recoverable
+            DispatchRecoveryOutcomeClass::Recoverable
         );
         assert_eq!(tagged_recovery.outcome.invariant_id, "stale_queue_pause");
         assert_eq!(
             tagged_recovery.outcome.proof_marker,
-            agent_doc_controller::dispatch::DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER
+            DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER
         );
         assert_eq!(
             tagged_recovery.outcome.next_action,

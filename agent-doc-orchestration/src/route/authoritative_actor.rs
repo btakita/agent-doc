@@ -479,7 +479,7 @@ pub(crate) fn authorize_controller_dispatch(
         // falls through to the terminal arm.
         Err(err) => {
             if let Some(recovery) =
-                crate::project_controller::dispatch_error_stale_queue_pause_recovery(
+                agent_doc_controller::dispatch::stale_queue_pause_recovery_from_dispatch_error(
                     &err.to_string(),
                 )
             {
@@ -510,7 +510,7 @@ fn recover_dispatch_via_supervisor_restart(
     session_id: &str,
     base_dir: &Path,
     generation: u64,
-    recovery: crate::project_controller::StaleQueuePauseRecovery,
+    recovery: agent_doc_controller::dispatch::StaleQueuePauseRecovery,
     dispatch_request: &dyn Fn() -> crate::project_controller::DispatchRequest,
     original_err: anyhow::Error,
 ) -> Result<RouteDispatchAuthorization> {

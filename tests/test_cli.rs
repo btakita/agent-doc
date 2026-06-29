@@ -3180,6 +3180,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub(crate) fn pause_reason_is_stale_supervisor_churn_stop",
         "pub(crate) fn stale_supervisor_pid_from_pause_reason",
         "pub(crate) fn spent_preset_id_from_pause_reason",
+        "pub(crate) struct StaleQueuePauseRecovery",
+        "pub(crate) fn dispatch_error_stale_queue_pause_recovery",
         "pub(crate) fn recycle_debounce_decision",
         "pub(crate) fn force_overrides_in_flight_gate",
     ] {
@@ -3200,6 +3202,12 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     assert!(
         authoritative_actor.contains("agent_doc_controller::dispatch::dispatch_error_is_coalesced"),
         "route authorization should call the focused controller dispatch classifier directly"
+    );
+    assert!(
+        authoritative_actor.contains(
+            "agent_doc_controller::dispatch::stale_queue_pause_recovery_from_dispatch_error"
+        ),
+        "route authorization should call the focused stale-queue recovery classifier directly"
     );
     let sim_world = fs::read_to_string(manifest_dir.join("src/sim_world/engine.rs")).unwrap();
     assert!(

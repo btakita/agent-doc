@@ -44,6 +44,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Supervisor config and controller recycle policy facades removed from `project_controller::rpc`.** File/env-backed orchestration adapters now call `agent_doc_supervisor::config` and `agent_doc_controller::recycle` directly. Boundary coverage prevents the pure precedence/debounce/force-bypass wrappers from returning.
 
+- **Stale-queue dispatch recovery moved fully to `agent-doc-controller`.** `agent_doc_controller::dispatch` now owns the typed stale-queue recovery record and binary proof vocabulary, route authorization calls the focused classifier directly, and `project_controller::rpc` no longer wraps that recovery policy. Boundary coverage prevents the RPC facade from returning.
+
 ## 0.34.64
 
 - **`#suprestassoc` — `restart-supervisor` registry re-association is scoped to the requested document, not just the reused session id.** The CLI restart path now resolves registry entries by exact canonical document path first and only keeps the legacy session-id fallback for fileless registry rows; registry keys that explicitly name another document are rejected, so restarting `sampleportal.md` cannot adopt a stale `agent-doc-bugs2.md` pane/session projection that happens to carry the same session id. Coverage: deterministic registry lookup regressions for rejecting a foreign same-session entry and preferring the exact target document entry. Live editor/pane confirmation remains an `[operator-verify]` follow-up.

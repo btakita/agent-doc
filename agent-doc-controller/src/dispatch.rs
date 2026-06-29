@@ -5,6 +5,66 @@ pub const DISPATCH_STALE_GENERATION_REDIRECT_MARKER: &str = "stale_generation_re
 pub const DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER: &str = "supervisor_restart_redirect";
 pub const STALE_QUEUE_PAUSE_INVARIANT_ID: &str = "stale_queue_pause";
 pub const STALE_QUEUE_PAUSE_NEXT_ACTION: &str = "restart_supervisor_once_and_retry";
+pub const DISPATCH_RECOVERY_OUTCOME_CONTRACT_VERSION: &str = "binary-outcome-v1";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DispatchRecoveryOutcomeClass {
+    Recoverable,
+}
+
+impl DispatchRecoveryOutcomeClass {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Recoverable => "recoverable",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct DispatchRecoveryOutcome {
+    pub contract_version: &'static str,
+    pub class: DispatchRecoveryOutcomeClass,
+    pub invariant_id: &'static str,
+    pub proof_marker: &'static str,
+    pub next_action: &'static str,
+}
+
+impl DispatchRecoveryOutcome {
+    pub const fn stale_queue_pause() -> Self {
+        Self {
+            contract_version: DISPATCH_RECOVERY_OUTCOME_CONTRACT_VERSION,
+            class: DispatchRecoveryOutcomeClass::Recoverable,
+            invariant_id: STALE_QUEUE_PAUSE_INVARIANT_ID,
+            proof_marker: DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER,
+            next_action: STALE_QUEUE_PAUSE_NEXT_ACTION,
+        }
+    }
+
+    pub fn log_fields(&self) -> String {
+        format!(
+            "binary_outcome={} invariant={} proof_marker={} next_action={}",
+            self.class.as_str(),
+            self.invariant_id,
+            self.proof_marker,
+            self.next_action
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct StaleQueuePauseRecovery {
+    pub stale_pid: u32,
+    pub outcome: DispatchRecoveryOutcome,
+}
+
+impl StaleQueuePauseRecovery {
+    pub fn new(stale_pid: u32) -> Self {
+        Self {
+            stale_pid,
+            outcome: DispatchRecoveryOutcome::stale_queue_pause(),
+        }
+    }
+}
 
 pub fn dispatch_should_coalesce_in_flight(
     in_flight_same_cycle: bool,
@@ -79,6 +139,12 @@ pub fn stale_queue_pause_pid_from_dispatch_error(message: &str) -> Option<u32> {
         return Some(stale_supervisor_pid_from_pause_reason(message).unwrap_or(0));
     }
     None
+}
+
+pub fn stale_queue_pause_recovery_from_dispatch_error(
+    message: &str,
+) -> Option<StaleQueuePauseRecovery> {
+    stale_queue_pause_pid_from_dispatch_error(message).map(StaleQueuePauseRecovery::new)
 }
 
 pub fn spent_preset_id_from_pause_reason(reason: &str) -> Option<String> {
@@ -194,6 +260,25 @@ mod tests {
         let marked =
             "dispatch blocked: supervisor_restart_redirect stale_pid=42 failed_stage=queue_paused";
         assert_eq!(stale_queue_pause_pid_from_dispatch_error(marked), Some(42));
+        let recovery = stale_queue_pause_recovery_from_dispatch_error(marked).unwrap();
+        assert_eq!(recovery.stale_pid, 42);
+        assert_eq!(
+            recovery.outcome.class,
+            DispatchRecoveryOutcomeClass::Recoverable
+        );
+        assert_eq!(
+            recovery.outcome.invariant_id,
+            STALE_QUEUE_PAUSE_INVARIANT_ID
+        );
+        assert_eq!(
+            recovery.outcome.proof_marker,
+            DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER
+        );
+        assert_eq!(recovery.outcome.next_action, STALE_QUEUE_PAUSE_NEXT_ACTION);
+        assert_eq!(
+            recovery.outcome.log_fields(),
+            "binary_outcome=recoverable invariant=stale_queue_pause proof_marker=supervisor_restart_redirect next_action=restart_supervisor_once_and_retry"
+        );
 
         let legacy =
             "dispatch blocked: failed_stage=queue_paused reason=stale host supervisor pid 9";

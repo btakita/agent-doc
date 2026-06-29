@@ -3717,6 +3717,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn direct_pane_submit_acceptance_timeout(",
         "pub fn direct_pane_submit_acceptance_budget(",
         "pub fn direct_pane_submit_outcome(",
+        "pub struct DirectPaneDispatchStartProofFacts",
+        "pub fn direct_pane_should_await_dispatch_start_proof(",
         "pub const DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR",
         "pub struct DirectPaneAcceptancePollState",
         "pub fn direct_pane_acceptance_poll_status(",
@@ -3770,6 +3772,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn direct_pane_submit_acceptance_timeout(",
         "fn direct_pane_submit_acceptance_budget(",
         "fn direct_pane_submit_outcome(",
+        "fn direct_pane_should_await_dispatch_start_proof(",
         "const DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR",
         "struct DirectPaneAcceptancePollState",
         "fn direct_pane_acceptance_poll_status(",
@@ -3852,6 +3855,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("classify_dispatch_start_proof")
             && route_source.contains("DirectPaneSubmitStatus as CommandDispatchStatus")
             && route_source.contains("direct_pane_submit_outcome")
+            && route_source.contains("DirectPaneDispatchStartProofFacts")
+            && route_source.contains("direct_pane_should_await_dispatch_start_proof")
             && route_source.contains("DirectPaneAcceptancePollState")
             && route_source.contains("direct_pane_acceptance_poll_status")
             && route_source.contains("DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT")
@@ -3903,6 +3908,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn direct_pane_needs_enter_resubmit(",
         "fn direct_pane_can_continue_enter_resubmit(",
         "fn direct_pane_can_enter_existing_draft(",
+        "fn direct_pane_should_await_dispatch_start_proof(",
     ] {
         assert!(
             !route_dispatch_source.contains(forbidden_snippet),
@@ -3916,7 +3922,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_dispatch_source.contains("DirectPaneEnterResubmitAttemptFacts")
             && route_dispatch_source.contains("direct_pane_can_continue_enter_resubmit(")
             && route_dispatch_source.contains("DirectPaneExistingDraftSubmitFacts")
-            && route_dispatch_source.contains("direct_pane_can_enter_existing_draft("),
+            && route_dispatch_source.contains("direct_pane_can_enter_existing_draft(")
+            && route_dispatch_source.contains("DirectPaneDispatchStartProofFacts")
+            && route_dispatch_source.contains("direct_pane_should_await_dispatch_start_proof("),
         "route/dispatch.rs should adapt tmux captures into focused controller direct-pane policy"
     );
     assert!(

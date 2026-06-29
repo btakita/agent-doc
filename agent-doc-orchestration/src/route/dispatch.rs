@@ -1610,7 +1610,10 @@ pub(crate) fn dispatch_routed_reopen_with_mode(
         );
         return Ok(RoutedDispatchStartProof::CommandAcceptedOnly);
     };
-    if !direct_pane_should_await_dispatch_start_proof(options, submit_result.status) {
+    if !direct_pane_should_await_dispatch_start_proof(DirectPaneDispatchStartProofFacts {
+        await_start_proof: options.await_start_proof,
+        submit_status: submit_result.status,
+    }) {
         log_route_latency(
             file,
             "direct_pane_submit",
@@ -1803,13 +1806,6 @@ pub(crate) struct DirectPaneDispatchOptions {
     pub(crate) print_unproven_progress: bool,
 }
 
-fn direct_pane_should_await_dispatch_start_proof(
-    options: DirectPaneDispatchOptions,
-    submit_status: CommandDispatchStatus,
-) -> bool {
-    options.await_start_proof || submit_status != CommandDispatchStatus::Accepted
-}
-
 pub(crate) fn routed_trigger_payload(trigger: &str) -> String {
     trigger.to_string()
 }
@@ -1911,37 +1907,6 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% used
         assert!(
             !pane_idle_dispatch_ready("Working… (esc to interrupt)\n", &h),
             "a processing pane is not idle — a fast submit must not be re-sent"
-        );
-    }
-
-    #[test]
-    fn dispatch_only_direct_pane_accepted_submit_skips_optional_proof_wait() {
-        let dispatch_only = DirectPaneDispatchOptions {
-            await_start_proof: false,
-            print_unproven_progress: true,
-        };
-        assert!(
-            !direct_pane_should_await_dispatch_start_proof(
-                dispatch_only,
-                CommandDispatchStatus::Accepted
-            ),
-            "dispatch-only editor reroutes must not pay the 10s optional proof timeout after accepted input"
-        );
-        assert!(
-            direct_pane_should_await_dispatch_start_proof(
-                dispatch_only,
-                CommandDispatchStatus::TimedOut
-            ),
-            "when submit acceptance is unobserved, the route may still wait for stronger dispatch-start proof"
-        );
-
-        let startup = DirectPaneDispatchOptions {
-            await_start_proof: true,
-            print_unproven_progress: true,
-        };
-        assert!(
-            direct_pane_should_await_dispatch_start_proof(startup, CommandDispatchStatus::Accepted),
-            "fresh/startup dispatch still requires dispatch-start proof after accepted input"
         );
     }
 

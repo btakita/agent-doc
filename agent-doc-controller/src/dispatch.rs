@@ -606,6 +606,18 @@ pub fn direct_pane_submit_outcome(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DirectPaneDispatchStartProofFacts {
+    pub await_start_proof: bool,
+    pub submit_status: DirectPaneSubmitStatus,
+}
+
+pub fn direct_pane_should_await_dispatch_start_proof(
+    facts: DirectPaneDispatchStartProofFacts,
+) -> bool {
+    facts.await_start_proof || facts.submit_status != DirectPaneSubmitStatus::Accepted
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct DirectPaneAcceptancePollState {
     saw_trigger_visible: bool,
@@ -1412,6 +1424,31 @@ mod tests {
                 Some(RoutedDispatchStartProof::HookStateAdvanced),
             ),
             "acceptance_unobserved_dispatch_proven"
+        );
+    }
+
+    #[test]
+    fn direct_pane_accepted_dispatch_only_submit_skips_optional_start_proof() {
+        assert!(
+            !direct_pane_should_await_dispatch_start_proof(DirectPaneDispatchStartProofFacts {
+                await_start_proof: false,
+                submit_status: DirectPaneSubmitStatus::Accepted,
+            }),
+            "dispatch-only editor reroutes must not pay the optional proof timeout after accepted input"
+        );
+        assert!(
+            direct_pane_should_await_dispatch_start_proof(DirectPaneDispatchStartProofFacts {
+                await_start_proof: false,
+                submit_status: DirectPaneSubmitStatus::TimedOut,
+            }),
+            "when submit acceptance is unobserved, route may still wait for stronger dispatch-start proof"
+        );
+        assert!(
+            direct_pane_should_await_dispatch_start_proof(DirectPaneDispatchStartProofFacts {
+                await_start_proof: true,
+                submit_status: DirectPaneSubmitStatus::Accepted,
+            }),
+            "startup dispatch still requires dispatch-start proof after accepted input"
         );
     }
 

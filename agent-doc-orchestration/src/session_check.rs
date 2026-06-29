@@ -1438,20 +1438,6 @@ mod tests {
             .unwrap();
         doc
     }
-    // --- #z2jy bkx9-pure-detector: dormant pure per-id loss detector ---
-    fn loss_input<'a>(
-        directive_ids: &'a [String],
-        reaped_ids: &'a [String],
-        content: &'a str,
-        archives: &'a [String],
-    ) -> ReapedResponseLossInput<'a> {
-        ReapedResponseLossInput {
-            directive_ids,
-            reaped_ids,
-            content,
-            archives,
-        }
-    }
     fn write_backlog_doc(path: &Path, backlog_body: &str) {
         let content = format!(
             "---\nagent_doc_session: target\n---\n\n<!-- agent:backlog -->\n{backlog_body}<!-- /agent:backlog -->\n"
@@ -3020,106 +3006,6 @@ Body\n\
         assert!(
             matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
             "a non-directive reaped id is not a queue-head response loss"
-        );
-    }
-    #[test]
-    fn pure_detector_flags_reap_only_loss() {
-        // The reap-only silent-loss shape: the id was reaped this cycle but no
-        // `### Re: ... #id` heading exists anywhere — flag it.
-        let directive = vec!["lostresp".to_string()];
-        let reaped = vec!["lostresp".to_string()];
-        let content = "### Re: prior — gpt-5\n\nAnswered something else.\n";
-        let archives: Vec<String> = Vec::new();
-        assert_eq!(
-            reaped_directive_ids_without_response(&loss_input(
-                &directive, &reaped, content, &archives
-            )),
-            vec!["lostresp".to_string()],
-        );
-    }
-    #[test]
-    fn pure_detector_flags_captured_but_id_lost() {
-        // The #bkx9 residual: a response WAS captured this cycle (the `#kept`
-        // heading is present), but `#lost` lost its own `### Re:` in a CRDT
-        // merge. The pure detector ignores capture state, so it surfaces `#lost`
-        // even though a sibling id materialized in the same cycle.
-        let directive = vec!["kept".to_string(), "lost".to_string()];
-        let reaped = vec!["kept".to_string(), "lost".to_string()];
-        let content = "### Re: do #kept — opus-4-8\n\nShipped the kept fix.\n";
-        let archives: Vec<String> = Vec::new();
-        assert_eq!(
-            reaped_directive_ids_without_response(&loss_input(
-                &directive, &reaped, content, &archives
-            )),
-            vec!["lost".to_string()],
-        );
-    }
-    #[test]
-    fn pure_detector_passes_when_materialized_in_archive() {
-        // A legitimate prior-cycle reap whose `### Re:` was compacted into a HEAD
-        // archive (absent from the live exchange) is not a loss.
-        let directive = vec!["archived".to_string()];
-        let reaped = vec!["archived".to_string()];
-        let content = "### Re: prior — gpt-5\n\nUnrelated live response.\n";
-        let archives = vec!["### Re: do #archived — opus-4-8\n\nShipped earlier.\n".to_string()];
-        assert!(
-            reaped_directive_ids_without_response(&loss_input(
-                &directive, &reaped, content, &archives
-            ))
-            .is_empty(),
-            "a reaped id materialized in a HEAD compact archive is not a loss"
-        );
-    }
-    #[test]
-    fn pure_detector_ignores_unreaped_directive() {
-        // A directive head that was NOT reaped this cycle carries no
-        // response-landing expectation, even without a materialized heading.
-        let directive = vec!["pending".to_string()];
-        let reaped: Vec<String> = Vec::new();
-        let content = "### Re: prior — gpt-5\n\nAnswered.\n";
-        let archives: Vec<String> = Vec::new();
-        assert!(
-            reaped_directive_ids_without_response(&loss_input(
-                &directive, &reaped, content, &archives
-            ))
-            .is_empty(),
-            "an unreaped directive id is not a loss"
-        );
-    }
-    #[test]
-    fn pure_detector_multi_directive_single_heading_false_positive() {
-        // KNOWN false-positive class (pinned so the #bkx9 wiring must address it
-        // before going live): a single `### Re:` heading legitimately answers
-        // `do #a` + `do #b` in one cycle but names only `#a` in the heading line,
-        // addressing `#b` in the body. The heading-scoped detector cannot see the
-        // body mention, so it flags `#b` as lost — a false positive.
-        let directive = vec!["a".to_string(), "b".to_string()];
-        let reaped = vec!["a".to_string(), "b".to_string()];
-        let single_heading = "### Re: do #a — opus-4-8\n\nFixed #a; also addressed #b inline.\n";
-        let archives: Vec<String> = Vec::new();
-        assert_eq!(
-            reaped_directive_ids_without_response(&loss_input(
-                &directive,
-                &reaped,
-                single_heading,
-                &archives
-            )),
-            vec!["b".to_string()],
-            "documents the multi-directive-single-heading false positive"
-        );
-
-        // When the grouped heading names BOTH ids, neither is flagged — the
-        // recommended shape that avoids the false positive.
-        let grouped_heading = "### Re: do #a, #b — opus-4-8\n\nFixed both.\n";
-        assert!(
-            reaped_directive_ids_without_response(&loss_input(
-                &directive,
-                &reaped,
-                grouped_heading,
-                &archives
-            ))
-            .is_empty(),
-            "a grouped heading naming both ids is not a loss"
         );
     }
     #[test]

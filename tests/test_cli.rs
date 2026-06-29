@@ -2370,6 +2370,11 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     let turn_source =
         fs::read_to_string(manifest_dir.join("agent-doc-turn/src/closeout_signal.rs")).unwrap();
     for required in [
+        "pub enum ResponseSource",
+        "pub struct ReapedResponseLossInput",
+        "pub fn directive_response_source",
+        "pub fn content_has_re_heading_for_id",
+        "pub fn reaped_directive_ids_without_response",
         "pub fn response_clearly_completes_pending_id",
         "pub fn response_heading_resolves_to_pending_id",
         "pub fn explicit_done_signal_ids",
@@ -2384,6 +2389,38 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         turn_source.contains("agent_doc_element_backlog::backlog::extract_pending_hash_ids"),
         "closeout signal policy should reuse tracked-work #id scanning"
     );
+
+    let detect_source = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/detect.rs"),
+    )
+    .unwrap();
+    for forbidden in [
+        "pub(crate) enum ResponseSource",
+        "pub(crate) struct ReapedResponseLossInput",
+        "pub(crate) fn directive_response_source",
+        "pub(crate) fn content_has_re_heading_for_id",
+        "pub(crate) fn reaped_directive_ids_without_response",
+    ] {
+        assert!(
+            !detect_source.contains(forbidden),
+            "session_check::detect must not re-own closeout response-loss policy: {forbidden}"
+        );
+    }
+
+    let queue_head_guards = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/queue_head_guards.rs"),
+    )
+    .unwrap();
+    for required in [
+        "agent_doc_turn::closeout_signal::directive_response_source",
+        "agent_doc_turn::closeout_signal::reaped_directive_ids_without_response",
+        "agent_doc_turn::closeout_signal::ReapedResponseLossInput",
+    ] {
+        assert!(
+            queue_head_guards.contains(required),
+            "queue_head_guards should call focused closeout signal policy directly: {required}"
+        );
+    }
 
     let done_signals = fs::read_to_string(
         manifest_dir.join("agent-doc-orchestration/src/session_check/done_signals.rs"),

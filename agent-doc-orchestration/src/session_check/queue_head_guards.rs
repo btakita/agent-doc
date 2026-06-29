@@ -205,25 +205,31 @@ pub(crate) fn check_reaped_queue_head_without_response(
     // is catchable from ops.log and a multi-id-under-one-heading cycle (found=true
     // for each id) proves no false positive — no live-verify needed.
     for id in &ordered_ids {
-        let source = directive_response_source(&content, &archives, id);
+        let source =
+            agent_doc_turn::closeout_signal::directive_response_source(&content, &archives, id);
         crate::ops_log::log_op(
             file,
             &format!(
                 "bkx9 directive_response_materialized id={} found={} source={}",
                 id,
                 source.is_some(),
-                source.map_or("none", ResponseSource::as_str),
+                source.map_or(
+                    "none",
+                    agent_doc_turn::closeout_signal::ResponseSource::as_str
+                ),
             ),
         );
     }
 
     // Canonical lost set via the now-wired per-id detector (#z2jy bkx9-pure-detector).
-    let lost = reaped_directive_ids_without_response(&ReapedResponseLossInput {
-        directive_ids: &ordered_ids,
-        reaped_ids: &ordered_ids,
-        content: &content,
-        archives: &archives,
-    });
+    let lost = agent_doc_turn::closeout_signal::reaped_directive_ids_without_response(
+        &agent_doc_turn::closeout_signal::ReapedResponseLossInput {
+            directive_ids: &ordered_ids,
+            reaped_ids: &ordered_ids,
+            content: &content,
+            archives: &archives,
+        },
+    );
 
     // Guard ESCALATION stays scoped to reap-only / bookkeeping closeouts: when a
     // response was captured this cycle the diagnostic above still records any

@@ -4,6 +4,119 @@
 //! turn policy that decides whether response text completes a tracked-work id
 //! and whether prompt text carries explicit done/resolved signals.
 
+/// Where a directive id's response heading materialized.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ResponseSource {
+    Exchange,
+    Archive,
+}
+
+impl ResponseSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ResponseSource::Exchange => "exchange",
+            ResponseSource::Archive => "archive",
+        }
+    }
+}
+
+/// Resolve where `id`'s `### Re:` response heading materialized, if anywhere.
+///
+/// Pure over already-resolved `content` (the live committed exchange) and
+/// `archives` (HEAD compact-archive bodies). The caller owns all file/archive
+/// IO and passes the string bodies here.
+pub fn directive_response_source(
+    content: &str,
+    archives: &[String],
+    id: &str,
+) -> Option<ResponseSource> {
+    if content_has_re_heading_for_id(content, id) {
+        return Some(ResponseSource::Exchange);
+    }
+    if archives
+        .iter()
+        .any(|archive| content_has_re_heading_for_id(archive, id))
+    {
+        return Some(ResponseSource::Archive);
+    }
+    None
+}
+
+/// True when any `### Re:` heading line in `content` references `#id` / `[#id]`.
+///
+/// `do #id` responses always render under a `### Re: ... #id` heading, so a
+/// heading-scoped match avoids false matches against queue-prompt echoes or
+/// backlog lines that merely mention the id.
+pub fn content_has_re_heading_for_id(content: &str, id: &str) -> bool {
+    if id.is_empty() {
+        return false;
+    }
+    let needle = format!("#{}", id.to_ascii_lowercase());
+    content.lines().any(|line| {
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with("### Re:") && !trimmed.starts_with("###Re") {
+            return false;
+        }
+        let lower = trimmed.to_ascii_lowercase();
+        match lower.find(&needle) {
+            None => false,
+            Some(pos) => {
+                // Reject a longer-id prefix collision (`#ab` must not match `#abc`).
+                let after = &lower[pos + needle.len()..];
+                !after
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            }
+        }
+    })
+}
+
+/// Pure inputs for per-id queue directive response-loss detection.
+///
+/// All ids are normalized (no leading `#`, lowercased) before they reach this
+/// policy. The caller resolves `content` and `archives` up front so this logic
+/// stays deterministic and IO-free.
+#[derive(Clone, Debug)]
+pub struct ReapedResponseLossInput<'a> {
+    /// `do #id` directive target ids active this cycle.
+    pub directive_ids: &'a [String],
+    /// Pending ids reaped into `agent:done` this cycle.
+    pub reaped_ids: &'a [String],
+    /// Live committed exchange content.
+    pub content: &'a str,
+    /// HEAD-referenced compact-archive bodies (each searched like `content`).
+    pub archives: &'a [String],
+}
+
+/// Reaped `do #id` directive ids whose `### Re: ... #id` response did not land.
+///
+/// Returns the directive ids whose response heading did not materialize in the
+/// live exchange `content` or in any HEAD compact `archives` entry. Order follows
+/// `directive_ids`; duplicates are collapsed.
+pub fn reaped_directive_ids_without_response(input: &ReapedResponseLossInput<'_>) -> Vec<String> {
+    let reaped: std::collections::HashSet<&str> =
+        input.reaped_ids.iter().map(String::as_str).collect();
+    let mut lost: Vec<String> = Vec::new();
+    for id in input.directive_ids {
+        if id.is_empty() || !reaped.contains(id.as_str()) {
+            continue;
+        }
+        let materialized = content_has_re_heading_for_id(input.content, id)
+            || input
+                .archives
+                .iter()
+                .any(|archive| content_has_re_heading_for_id(archive, id));
+        if materialized {
+            continue;
+        }
+        if !lost.iter().any(|existing| existing == id) {
+            lost.push(id.clone());
+        }
+    }
+    lost
+}
+
 /// True when response text clearly completes `id`.
 ///
 /// Completion is signalled by a response HEADING whose topic RESOLVES to exactly
@@ -157,6 +270,126 @@ fn normalize_done_signal_text(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn loss_input<'a>(
+        directive_ids: &'a [String],
+        reaped_ids: &'a [String],
+        content: &'a str,
+        archives: &'a [String],
+    ) -> ReapedResponseLossInput<'a> {
+        ReapedResponseLossInput {
+            directive_ids,
+            reaped_ids,
+            content,
+            archives,
+        }
+    }
+
+    #[test]
+    fn reaped_directive_response_loss_flags_reap_only_loss() {
+        let directive = vec!["lostresp".to_string()];
+        let reaped = vec!["lostresp".to_string()];
+        let content = "### Re: prior — gpt-5\n\nAnswered something else.\n";
+        let archives: Vec<String> = Vec::new();
+        assert_eq!(
+            reaped_directive_ids_without_response(&loss_input(
+                &directive, &reaped, content, &archives
+            )),
+            vec!["lostresp".to_string()],
+        );
+    }
+
+    #[test]
+    fn reaped_directive_response_loss_flags_captured_but_id_lost() {
+        let directive = vec!["kept".to_string(), "lost".to_string()];
+        let reaped = vec!["kept".to_string(), "lost".to_string()];
+        let content = "### Re: do #kept — opus-4-8\n\nShipped the kept fix.\n";
+        let archives: Vec<String> = Vec::new();
+        assert_eq!(
+            reaped_directive_ids_without_response(&loss_input(
+                &directive, &reaped, content, &archives
+            )),
+            vec!["lost".to_string()],
+        );
+    }
+
+    #[test]
+    fn reaped_directive_response_loss_accepts_archive_materialization() {
+        let directive = vec!["archived".to_string()];
+        let reaped = vec!["archived".to_string()];
+        let content = "### Re: prior — gpt-5\n\nUnrelated live response.\n";
+        let archives = vec!["### Re: do #archived — opus-4-8\n\nShipped earlier.\n".to_string()];
+        assert!(
+            reaped_directive_ids_without_response(&loss_input(
+                &directive, &reaped, content, &archives
+            ))
+            .is_empty(),
+            "a reaped id materialized in a HEAD compact archive is not a loss"
+        );
+    }
+
+    #[test]
+    fn directive_response_source_resolves_found_and_source() {
+        let archives = vec!["### Re: do #archived — opus-4-8\n\nShipped earlier.\n".to_string()];
+
+        let exchange = "### Re: do #live — opus-4-8\n\nShipped the live fix.\n";
+        assert_eq!(
+            directive_response_source(exchange, &archives, "live"),
+            Some(ResponseSource::Exchange)
+        );
+
+        let unrelated = "### Re: prior — gpt-5\n\nUnrelated live response.\n";
+        assert_eq!(
+            directive_response_source(unrelated, &archives, "archived"),
+            Some(ResponseSource::Archive)
+        );
+        assert!(directive_response_source(unrelated, &archives, "lost").is_none());
+    }
+
+    #[test]
+    fn reaped_directive_response_loss_ignores_unreaped_directive() {
+        let directive = vec!["pending".to_string()];
+        let reaped: Vec<String> = Vec::new();
+        let content = "### Re: prior — gpt-5\n\nAnswered.\n";
+        let archives: Vec<String> = Vec::new();
+        assert!(
+            reaped_directive_ids_without_response(&loss_input(
+                &directive, &reaped, content, &archives
+            ))
+            .is_empty(),
+            "an unreaped directive id is not a loss"
+        );
+    }
+
+    #[test]
+    fn reaped_directive_response_loss_pins_multi_directive_single_heading_shape() {
+        let directive = vec!["a".to_string(), "b".to_string()];
+        let reaped = vec!["a".to_string(), "b".to_string()];
+        let single_heading = "### Re: do #a — opus-4-8\n\nFixed #a; also addressed #b inline.\n";
+        let archives: Vec<String> = Vec::new();
+        assert_eq!(
+            reaped_directive_ids_without_response(&loss_input(
+                &directive,
+                &reaped,
+                single_heading,
+                &archives
+            )),
+            vec!["b".to_string()],
+            "documents the multi-directive-single-heading false positive"
+        );
+
+        let grouped_heading = "### Re: do #a, #b — opus-4-8\n\nFixed both.\n";
+        assert!(
+            reaped_directive_ids_without_response(&loss_input(
+                &directive,
+                &reaped,
+                grouped_heading,
+                &archives
+            ))
+            .is_empty(),
+            "a grouped heading naming both ids is not a loss"
+        );
+    }
 
     #[test]
     fn response_completion_requires_matching_heading_and_completion_marker() {

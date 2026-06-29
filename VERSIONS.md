@@ -10,6 +10,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **No-follow-up closeout heuristic moved to `agent-doc-turn`.** Explicit "no actionable follow-up" response detection now lives in `agent_doc_turn::heuristics` beside pending-capture recommendation detection. Session-check and pre-commit guards import the focused turn API directly, and boundary coverage prevents `prompt_contract` from re-owning the phrase policy.
 
+- **Reaped directive response-loss detection moved to `agent-doc-turn`.** The pure detector that decides whether a reaped `do #id` queue head lost its `### Re:` response now lives in `agent_doc_turn::closeout_signal`. Session-check still gathers cycle state, live exchange text, and HEAD compact archives, but calls the focused turn API directly and keeps only guard formatting/ops-log adapters.
+
 - **Supervisor idle-reconcile policy moved to `agent-doc-supervisor`.** The stale busy-over-idle and ready-with-queued-draft reconcile decisions now live in `agent_doc_supervisor::idle_reconcile`. `start` and idle-watch gather pane/harness facts and pass their debounce thresholds directly to the focused policy; boundary coverage prevents the orchestration decision functions from returning.
 
 - **Manual queue-addition compatibility shim deleted.** `agent-doc-queue` now exposes only `operator_authored_prompt_identities` for the operator-added prompt identity path; the unused `annotate_manual_queue_additions` shim is removed and covered by a source guard.

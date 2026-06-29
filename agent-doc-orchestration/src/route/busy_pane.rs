@@ -2,10 +2,6 @@
 
 use super::*;
 
-pub(crate) fn existing_pane_ready_timeout() -> Duration {
-    crate::flow::routed_reopen::existing_pane_ready_timeout(cfg!(test))
-}
-
 pub(crate) fn format_busy_existing_pane_error(
     file: &Path,
     pane: &str,
@@ -320,7 +316,12 @@ pub(crate) fn attempt_busy_existing_pane_interrupt_recovery(
     std::thread::sleep(Duration::from_millis(100));
     let _ = maybe_run_test_busy_interrupt_hook(tmux, file, pane)?;
 
-    let ready = wait_for_agent_ready_outcome(tmux, pane, fresh_route_start_ack_timeout(), harness);
+    let ready = wait_for_agent_ready_outcome(
+        tmux,
+        pane,
+        fresh_route_start_ack_timeout(cfg!(test)),
+        harness,
+    );
     let recovered = ready.is_ready();
     crate::ops_log::log_op(
         file,
@@ -372,12 +373,21 @@ pub(crate) fn attempt_opencode_busy_interrupt_recovery(
 
     let _ = tmux.send_keys_raw(pane, "Escape");
     std::thread::sleep(Duration::from_millis(200));
-    let mut ready =
-        wait_for_agent_ready_outcome(tmux, pane, fresh_route_start_ack_timeout(), harness);
+    let mut ready = wait_for_agent_ready_outcome(
+        tmux,
+        pane,
+        fresh_route_start_ack_timeout(cfg!(test)),
+        harness,
+    );
     if !ready.is_ready() {
         let _ = tmux.send_keys_raw(pane, "Escape");
         std::thread::sleep(Duration::from_millis(100));
-        ready = wait_for_agent_ready_outcome(tmux, pane, fresh_route_start_ack_timeout(), harness);
+        ready = wait_for_agent_ready_outcome(
+            tmux,
+            pane,
+            fresh_route_start_ack_timeout(cfg!(test)),
+            harness,
+        );
     }
     let recovered = ready.is_ready();
     crate::ops_log::log_op(
@@ -412,7 +422,7 @@ pub(crate) fn ensure_existing_pane_ready_for_dispatch(
     prompt_bearing_marker: Option<&str>,
 ) -> Result<ExistingPaneDispatchReadiness> {
     let ready_outcome =
-        wait_for_agent_ready_outcome(tmux, pane, existing_pane_ready_timeout(), harness);
+        wait_for_agent_ready_outcome(tmux, pane, existing_pane_ready_timeout(cfg!(test)), harness);
     if ready_outcome.is_ready() {
         return Ok(ExistingPaneDispatchReadiness::Ready);
     }

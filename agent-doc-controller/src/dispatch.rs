@@ -635,6 +635,54 @@ pub fn accepted_only_dispatch_start_refusal_message(
     )
 }
 
+pub fn routed_dispatch_start_timeout(test_mode: bool) -> Duration {
+    routed_dispatch_start_timeout_for_binary(None, test_mode)
+}
+
+pub fn routed_dispatch_start_timeout_for_binary(binary: Option<&str>, test_mode: bool) -> Duration {
+    if test_mode {
+        if matches!(binary, Some("opencode")) {
+            Duration::from_secs(2)
+        } else {
+            Duration::from_secs(1)
+        }
+    } else if matches!(binary, Some("opencode")) {
+        Duration::from_secs(15)
+    } else {
+        Duration::from_secs(10)
+    }
+}
+
+pub fn fresh_route_start_ack_timeout(test_mode: bool) -> Duration {
+    if test_mode {
+        Duration::from_secs(2)
+    } else {
+        Duration::from_secs(30)
+    }
+}
+
+pub fn routed_cycle_ack_timeout(live_child_for_file: bool, test_mode: bool) -> Duration {
+    if test_mode {
+        if live_child_for_file {
+            Duration::from_secs(2)
+        } else {
+            Duration::from_secs(1)
+        }
+    } else if live_child_for_file {
+        Duration::from_secs(30)
+    } else {
+        Duration::from_secs(15)
+    }
+}
+
+pub fn existing_pane_ready_timeout(test_mode: bool) -> Duration {
+    if test_mode {
+        Duration::from_secs(2)
+    } else {
+        Duration::from_secs(15)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DispatchOnlyBusyRefusalFacts<'a> {
     pub generation: u64,
@@ -1935,6 +1983,51 @@ mod tests {
             DispatchOnlyReopenDelivery::SupervisorIpcOnce.submit_mode_for_harness("codex"),
             "supervisor_normalized_submit"
         );
+    }
+
+    #[test]
+    fn routed_dispatch_start_timeout_uses_opencode_redraw_budget() {
+        assert_eq!(
+            routed_dispatch_start_timeout_for_binary(Some("opencode"), false),
+            Duration::from_secs(15)
+        );
+        assert_eq!(
+            routed_dispatch_start_timeout_for_binary(Some("codex"), false),
+            Duration::from_secs(10)
+        );
+        assert_eq!(
+            routed_dispatch_start_timeout_for_binary(Some("opencode"), true),
+            Duration::from_secs(2)
+        );
+        assert_eq!(routed_dispatch_start_timeout(true), Duration::from_secs(1));
+    }
+
+    #[test]
+    fn route_ack_timeouts_extend_for_startup_and_live_children() {
+        assert_eq!(fresh_route_start_ack_timeout(true), Duration::from_secs(2));
+        assert_eq!(
+            fresh_route_start_ack_timeout(false),
+            Duration::from_secs(30)
+        );
+        assert_eq!(
+            routed_cycle_ack_timeout(false, true),
+            Duration::from_secs(1)
+        );
+        assert_eq!(routed_cycle_ack_timeout(true, true), Duration::from_secs(2));
+        assert_eq!(
+            routed_cycle_ack_timeout(false, false),
+            Duration::from_secs(15)
+        );
+        assert_eq!(
+            routed_cycle_ack_timeout(true, false),
+            Duration::from_secs(30)
+        );
+    }
+
+    #[test]
+    fn existing_pane_ready_timeout_is_shortened_in_tests() {
+        assert_eq!(existing_pane_ready_timeout(true), Duration::from_secs(2));
+        assert_eq!(existing_pane_ready_timeout(false), Duration::from_secs(15));
     }
 
     #[test]

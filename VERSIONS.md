@@ -68,6 +68,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Dispatch-only proof outcome policy moved to `agent-doc-controller`.** Dispatch-only delivery vocabulary, unproven-progress policy, accepted-only proof log lines, sent-console text, and accepted-only refusal text now live in `agent_doc_controller::dispatch`. Route dispatch keeps tmux/file side effects and imports the focused controller templates directly without route-local message wrappers.
 
+- **Routed reopen timeout budgets moved to `agent-doc-controller`.** Dispatch-start proof, fresh-start ack, routed-cycle ack, and existing-pane readiness timeout tables now live in `agent_doc_controller::dispatch`. Route modules pass harness/live-child/test-mode facts directly and no longer wrap the budget functions through `flow::routed_reopen`.
+
 - **Tmux submit profile policy moved to `agent-doc-tmux-commands`.** The harness submit profile, submit-mode/key vocabulary, trailing-newline trimming, and text/Enter command builders now live in `agent_doc_tmux_commands`. `sessions` remains the effect adapter that executes tmux commands, while route/start/idle-watch import the focused command policy directly instead of routing through `sessions`.
 
 - **Route submit diagnostics no longer use an orchestration wrapper.** Route dispatch now calls `agent_doc_tmux_commands::tmux_submit_transform_for_harness` and `tmux_submit_key_for_harness` directly for text-submit diagnostics. The local `routed_trigger_submit_diagnostic` facade is deleted and covered by the tmux command boundary guard.

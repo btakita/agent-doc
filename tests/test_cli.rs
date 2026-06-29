@@ -3705,6 +3705,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     let route_dispatch_only_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch_only.rs"))
             .unwrap();
+    let route_busy_pane_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/busy_pane.rs"))
+            .unwrap();
     let route_startup_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/startup.rs"))
             .unwrap();
@@ -3813,6 +3816,11 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn dispatch_only_sent_console_message(",
         "pub fn accepted_only_dispatch_start_log_message(",
         "pub fn accepted_only_dispatch_start_refusal_message(",
+        "pub fn routed_dispatch_start_timeout(",
+        "pub fn routed_dispatch_start_timeout_for_binary(",
+        "pub fn fresh_route_start_ack_timeout(",
+        "pub fn routed_cycle_ack_timeout(",
+        "pub fn existing_pane_ready_timeout(",
         "pub struct DispatchOnlyBusyRefusalFacts",
         "pub fn dispatch_only_busy_refusal_message(",
     ] {
@@ -3857,6 +3865,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn busy_route_queued_diagnostic_message(",
         "fn format_duplicate_pane_policy_error(",
         "fn route_dispatch_bug_report_item(",
+        "fn routed_dispatch_start_timeout(",
         "fn dispatch_only_busy_refusal_message(",
     ] {
         assert!(
@@ -3915,6 +3924,11 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn accepted_only_dispatch_start_log_message(",
         "pub fn accepted_only_dispatch_start_refusal_message(",
         "pub fn should_print_dispatch_only_unproven_progress(",
+        "pub fn routed_dispatch_start_timeout(",
+        "pub fn routed_dispatch_start_timeout_for_binary(",
+        "pub fn fresh_route_start_ack_timeout(",
+        "pub fn routed_cycle_ack_timeout(",
+        "pub fn existing_pane_ready_timeout(",
         "pub enum RouteLatencyStatus",
         "pub struct RouteLatencyFacts",
         "pub fn route_latency_status(",
@@ -3992,6 +4006,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("accepted_only_dispatch_start_log_message")
             && route_source.contains("accepted_only_dispatch_start_refusal_message")
             && route_source.contains("dispatch_only_should_print_unproven_progress")
+            && route_source.contains("routed_dispatch_start_timeout_for_binary")
+            && route_source.contains("fresh_route_start_ack_timeout")
+            && route_source.contains("routed_cycle_ack_timeout")
+            && route_source.contains("existing_pane_ready_timeout")
             && route_source.contains("DispatchOnlyBusyRefusalFacts")
             && route_source.contains("controller_dispatch_only_busy_refusal_message(")
             && route_source.contains("DispatchActorState")
@@ -4032,6 +4050,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_dispatch_source.contains("direct_pane_should_await_dispatch_start_proof(")
             && route_dispatch_source.contains("DirectPaneResubmitProofFacts")
             && route_dispatch_source.contains("direct_pane_resubmit_proof_line(")
+            && route_dispatch_source.contains("routed_dispatch_start_timeout_for_binary(")
+            && route_dispatch_source.contains("Some(harness.binary.as_str())")
+            && route_dispatch_source.contains("cfg!(test)")
             && route_dispatch_source.contains("RoutedTriggerPayloadFacts")
             && route_dispatch_source.contains("routed_trigger_payload_rejection("),
         "route/dispatch.rs should adapt tmux captures into focused controller direct-pane policy"
@@ -4053,8 +4074,32 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_dispatch_only_source.contains("dispatch_only_sent_console_message(")
             && route_dispatch_only_source.contains("accepted_only_dispatch_start_log_message(")
             && route_dispatch_only_source.contains("accepted_only_dispatch_start_refusal_message(")
+            && route_dispatch_only_source.contains("routed_dispatch_start_timeout_for_binary(")
+            && route_dispatch_only_source.contains("Some(harness.binary.as_str())")
+            && route_dispatch_only_source.contains("cfg!(test)")
             && route_dispatch_only_source.contains("dispatch_only_should_print_unproven_progress("),
         "route/dispatch_only.rs should adapt route facts into focused controller dispatch-only proof policy"
+    );
+    for forbidden_snippet in [
+        "pub(crate) fn fresh_route_start_ack_timeout(",
+        "pub(crate) fn routed_cycle_ack_timeout(",
+    ] {
+        assert!(
+            !route_cycle_ack_source.contains(forbidden_snippet),
+            "route/cycle_ack.rs must not wrap focused route timeout policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        route_cycle_ack_source.contains("fresh_route_start_ack_timeout(cfg!(test))")
+            && route_cycle_ack_source
+                .contains("routed_cycle_ack_timeout(live_child_for_file, cfg!(test))"),
+        "route/cycle_ack.rs should pass route/test facts into focused controller timeout policy"
+    );
+    assert!(
+        !route_busy_pane_source.contains("fn existing_pane_ready_timeout(")
+            && route_busy_pane_source.contains("existing_pane_ready_timeout(cfg!(test))")
+            && route_busy_pane_source.contains("fresh_route_start_ack_timeout(cfg!(test))"),
+        "route/busy_pane.rs should pass route/test facts into focused controller timeout policy without wrappers"
     );
     assert!(
         route_pane_resolution_source.contains("startup_miss_route_facts(")

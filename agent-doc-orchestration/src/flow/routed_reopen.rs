@@ -2,54 +2,6 @@ use super::types::{FlowEvent, FlowName, FlowOutcome, FlowStage, RouteDecision};
 use std::path::Path;
 use std::time::Duration;
 
-pub fn routed_dispatch_start_timeout(test_mode: bool) -> Duration {
-    routed_dispatch_start_timeout_for_binary(None, test_mode)
-}
-
-pub fn routed_dispatch_start_timeout_for_binary(binary: Option<&str>, test_mode: bool) -> Duration {
-    if test_mode {
-        if matches!(binary, Some("opencode")) {
-            Duration::from_secs(2)
-        } else {
-            Duration::from_secs(1)
-        }
-    } else if matches!(binary, Some("opencode")) {
-        Duration::from_secs(15)
-    } else {
-        Duration::from_secs(10)
-    }
-}
-
-pub fn fresh_route_start_ack_timeout(test_mode: bool) -> Duration {
-    if test_mode {
-        Duration::from_secs(2)
-    } else {
-        Duration::from_secs(30)
-    }
-}
-
-pub fn routed_cycle_ack_timeout(live_child_for_file: bool, test_mode: bool) -> Duration {
-    if test_mode {
-        if live_child_for_file {
-            Duration::from_secs(2)
-        } else {
-            Duration::from_secs(1)
-        }
-    } else if live_child_for_file {
-        Duration::from_secs(30)
-    } else {
-        Duration::from_secs(15)
-    }
-}
-
-pub fn existing_pane_ready_timeout(test_mode: bool) -> Duration {
-    if test_mode {
-        Duration::from_secs(2)
-    } else {
-        Duration::from_secs(15)
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActorDispatchState {
     Ready,
@@ -990,22 +942,6 @@ mod tests {
         assert!(message.contains("supervisor_health=no_socket"));
         assert!(message.contains("runtime_actor_state=missing"));
         assert!(message.contains("reason=supervisor health is no_socket"));
-    }
-
-    #[test]
-    fn routed_dispatch_start_timeout_uses_opencode_redraw_budget() {
-        assert_eq!(
-            routed_dispatch_start_timeout_for_binary(Some("opencode"), false),
-            Duration::from_secs(15)
-        );
-        assert_eq!(
-            routed_dispatch_start_timeout_for_binary(Some("codex"), false),
-            Duration::from_secs(10)
-        );
-        assert_eq!(
-            routed_dispatch_start_timeout_for_binary(Some("opencode"), true),
-            Duration::from_secs(2)
-        );
     }
 
     #[test]

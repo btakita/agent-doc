@@ -613,7 +613,7 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
             return Ok(Some(dispatch_pane));
         }
 
-        let ack_timeout = fresh_route_start_ack_timeout();
+        let ack_timeout = fresh_route_start_ack_timeout(cfg!(test));
         match wait_for_start_ack(file, cycle_baseline.as_ref(), ack_timeout) {
             Some(state) => {
                 crate::ops_log::log_op(

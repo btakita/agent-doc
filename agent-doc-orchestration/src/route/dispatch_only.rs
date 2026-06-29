@@ -435,7 +435,11 @@ pub(crate) fn dispatch_only_send_reopen(
         harness_binary: &harness.binary,
         delivery,
         dispatch_start,
-        timeout_secs: routed_dispatch_start_timeout(harness).as_secs(),
+        timeout_secs: routed_dispatch_start_timeout_for_binary(
+            Some(harness.binary.as_str()),
+            cfg!(test),
+        )
+        .as_secs(),
     };
     crate::ops_log::log_op(file, &dispatch_only_sent_log_message(proof_facts));
     eprintln!("{}", dispatch_only_sent_console_message(proof_facts));
@@ -468,7 +472,9 @@ pub(crate) fn require_dispatch_only_dispatch_start_proof(
         return Ok(());
     }
 
-    let timeout = routed_dispatch_start_timeout(harness).as_secs();
+    let timeout =
+        routed_dispatch_start_timeout_for_binary(Some(harness.binary.as_str()), cfg!(test))
+            .as_secs();
     let file_display = file.display().to_string();
     let facts = DispatchOnlyProofOutcomeFacts {
         file_display: file_display.as_str(),
@@ -501,7 +507,10 @@ pub(crate) fn require_dispatch_only_dispatch_start_proof(
         phase: "dispatch_only_dispatch_start_proof",
         issue: "accepted_without_dispatch_start_proof",
         result: "accepted_without_dispatch_start_proof",
-        elapsed: routed_dispatch_start_timeout(harness),
+        elapsed: routed_dispatch_start_timeout_for_binary(
+            Some(harness.binary.as_str()),
+            cfg!(test),
+        ),
         proof: Some(dispatch_start),
         diagnostic_path: None,
     });
@@ -523,7 +532,11 @@ fn dispatch_only_test_sent_log_message(
         harness_binary: &harness.binary,
         delivery,
         dispatch_start,
-        timeout_secs: routed_dispatch_start_timeout(harness).as_secs(),
+        timeout_secs: routed_dispatch_start_timeout_for_binary(
+            Some(harness.binary.as_str()),
+            cfg!(test),
+        )
+        .as_secs(),
     })
 }
 

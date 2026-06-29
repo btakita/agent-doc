@@ -209,10 +209,12 @@ use agent_doc_controller::dispatch::{
     dispatch_only_starting_pane_ready_timeout_for_binary,
     dispatch_only_starting_pane_recovery_retry_budget,
     dispatch_only_starting_pane_recovery_timeout_for_binary, duplicate_pane_policy_error_message,
-    effective_authoritative_actor_state, route_busy_diagnostic_message,
+    effective_authoritative_actor_state, existing_pane_ready_timeout,
+    fresh_route_start_ack_timeout, route_busy_diagnostic_message,
     route_busy_queued_diagnostic_message, route_dispatch_bug_report_item, route_latency_message,
     route_latency_status, route_startup_miss_diagnostic_message, route_submit_issue_message,
-    route_submit_observation_message, routed_trigger_payload_rejection,
+    route_submit_observation_message, routed_cycle_ack_timeout,
+    routed_dispatch_start_timeout_for_binary, routed_trigger_payload_rejection,
     should_optimistically_accept_missing_cycle_ack, should_require_routed_cycle_ack,
     starting_timeout_blocked_actor_can_recover, startup_miss_requires_fresh_start,
     startup_miss_should_fail_closed, startup_miss_should_restart_live_owner,
@@ -950,13 +952,6 @@ fn build_routed_dispatch_start_tracker(
     }
 }
 
-fn routed_dispatch_start_timeout(harness: &HarnessConfig) -> Duration {
-    crate::flow::routed_reopen::routed_dispatch_start_timeout_for_binary(
-        Some(harness.binary.as_str()),
-        cfg!(test),
-    )
-}
-
 fn codex_state_advanced(
     tracker: &RoutedDispatchStartTracker,
     state: &crate::codex_hook::ActiveSessionState,
@@ -1400,7 +1395,7 @@ fn reapply_harness_launch_contract_after_clear(
     if !wait_for_agent_ready(
         tmux,
         &dispatch_pane,
-        fresh_route_start_ack_timeout(),
+        fresh_route_start_ack_timeout(cfg!(test)),
         harness,
     ) {
         anyhow::bail!(
@@ -1566,7 +1561,7 @@ fn reapply_capability_contract_before_reuse(
     if !wait_for_agent_ready(
         tmux,
         &dispatch_pane,
-        fresh_route_start_ack_timeout(),
+        fresh_route_start_ack_timeout(cfg!(test)),
         harness,
     ) {
         anyhow::bail!(

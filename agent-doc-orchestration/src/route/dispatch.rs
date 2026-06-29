@@ -1038,7 +1038,8 @@ pub(crate) fn dispatch_via_supervisor_ipc_with_mode(
         return Ok(RoutedDispatchStartProof::CommandAcceptedOnly);
     };
 
-    let timeout = routed_dispatch_start_timeout(harness);
+    let timeout =
+        routed_dispatch_start_timeout_for_binary(Some(harness.binary.as_str()), cfg!(test));
     let proof_start = Instant::now();
     if let Some(proof) = wait_for_routed_dispatch_start(tmux, file, &tracker, harness, timeout)? {
         log_route_latency(
@@ -1613,7 +1614,8 @@ pub(crate) fn dispatch_routed_reopen_with_mode(
         return Ok(RoutedDispatchStartProof::CommandAcceptedOnly);
     }
 
-    let timeout = routed_dispatch_start_timeout(harness);
+    let timeout =
+        routed_dispatch_start_timeout_for_binary(Some(harness.binary.as_str()), cfg!(test));
     let proof_start = Instant::now();
     if let Some(proof) = wait_for_routed_dispatch_start(tmux, file, &tracker, harness, timeout)? {
         log_route_latency(

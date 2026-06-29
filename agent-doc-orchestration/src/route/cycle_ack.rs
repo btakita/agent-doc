@@ -80,7 +80,7 @@ pub(crate) fn retry_routed_cycle_ack_after_fresh_restart(
     let ready = wait_for_agent_ready_outcome(
         tmux,
         &dispatch_pane,
-        fresh_route_start_ack_timeout(),
+        fresh_route_start_ack_timeout(cfg!(test)),
         harness,
     );
     if !ready.is_ready() {
@@ -121,7 +121,7 @@ pub(crate) fn retry_routed_cycle_ack_after_fresh_restart(
                     dispatch_pane,
                     harness.binary,
                     marker,
-                    fresh_route_start_ack_timeout().as_secs(),
+                    fresh_route_start_ack_timeout(cfg!(test)).as_secs(),
                     miss_ts
                 ),
             );
@@ -129,7 +129,7 @@ pub(crate) fn retry_routed_cycle_ack_after_fresh_restart(
                 "[route] fresh-restart retry for {} never restored a dispatch-ready prompt in pane {} after {}s, but the earlier reopen was already accepted — keeping the reroute optimistic",
                 file.display(),
                 dispatch_pane,
-                fresh_route_start_ack_timeout().as_secs()
+                fresh_route_start_ack_timeout(cfg!(test)).as_secs()
             );
             return Ok(Some(dispatch_pane));
         }
@@ -148,7 +148,7 @@ pub(crate) fn retry_routed_cycle_ack_after_fresh_restart(
                 file.display(),
                 pane,
                 dispatch_pane,
-                fresh_route_start_ack_timeout().as_secs()
+                fresh_route_start_ack_timeout(cfg!(test)).as_secs()
             ),
             AgentReadyWaitOutcome::Ready => unreachable!("checked above"),
         };
@@ -258,14 +258,6 @@ pub(crate) fn cycle_phase_name(phase: agent_doc_turn::CyclePhase) -> &'static st
     }
 }
 
-pub(crate) fn fresh_route_start_ack_timeout() -> Duration {
-    crate::flow::routed_reopen::fresh_route_start_ack_timeout(cfg!(test))
-}
-
-pub(crate) fn routed_cycle_ack_timeout(live_child_for_file: bool) -> Duration {
-    crate::flow::routed_reopen::routed_cycle_ack_timeout(live_child_for_file, cfg!(test))
-}
-
 pub(crate) fn pending_prompt_bearing_context_for_route(
     file: &Path,
     baseline: Option<&crate::cycle_state::CycleState>,
@@ -319,7 +311,7 @@ pub(crate) fn require_routed_cycle_ack(
     }
 
     let marker = prompt_bearing_marker.expect("marker checked above");
-    let ack_timeout = routed_cycle_ack_timeout(live_child_for_file);
+    let ack_timeout = routed_cycle_ack_timeout(live_child_for_file, cfg!(test));
     if live_child_for_file {
         eprintln!(
             "[route] live agent-doc child active in pane {} for {} — waiting up to {}s for a new cycle ack for pending {}",
@@ -851,12 +843,21 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
     }
     #[test]
     fn routed_cycle_ack_timeout_extends_for_live_children() {
-        assert_eq!(routed_cycle_ack_timeout(false), Duration::from_secs(1));
-        assert_eq!(routed_cycle_ack_timeout(true), Duration::from_secs(2));
+        assert_eq!(
+            routed_cycle_ack_timeout(false, cfg!(test)),
+            Duration::from_secs(1)
+        );
+        assert_eq!(
+            routed_cycle_ack_timeout(true, cfg!(test)),
+            Duration::from_secs(2)
+        );
     }
     #[test]
     fn fresh_route_start_ack_timeout_allows_restart_slack() {
-        assert_eq!(fresh_route_start_ack_timeout(), Duration::from_secs(2));
+        assert_eq!(
+            fresh_route_start_ack_timeout(cfg!(test)),
+            Duration::from_secs(2)
+        );
     }
     #[test]
     fn pending_prompt_bearing_context_for_route_ignores_frontmatter_only_drift() {

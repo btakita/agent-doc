@@ -121,7 +121,6 @@
 
 use anyhow::{Context, Result};
 use portable_pty::PtySize;
-use std::collections::VecDeque;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU32, AtomicU64, Ordering};
@@ -142,8 +141,11 @@ use agent_doc_queue::queue::{
     idle_queue_context_reset_decision, idle_queue_drain_decision,
 };
 use agent_doc_supervisor::crash_policy::{
-    CrashPolicy, RestartAction, SupervisorPromptDecision, SupervisorState,
-    classify_supervisor_prompt_input, supervisor_policy_exit_code,
+    CrashPolicy, FAILED_RESUME_WINDOW, FailedResumeTracker, RestartAction,
+    SupervisorCleanExitResolution, SupervisorPromptDecision, SupervisorRestartContinueExitStrategy,
+    SupervisorState, classify_supervisor_prompt_input, restart_continue_exit_strategy,
+    supervisor_clean_exit_before_prompt_seen, supervisor_clean_exit_resolution,
+    supervisor_policy_exit_code, supervisor_resume_handoff_failed,
 };
 use agent_doc_supervisor::idle_reconcile::ready_busy_conflict_reconcile_decision;
 #[cfg(unix)]
@@ -252,8 +254,6 @@ fn exit_provenance_fields(status: &portable_pty::ExitStatus) -> String {
     }
 }
 
-const FAILED_RESUME_WINDOW: Duration = Duration::from_secs(15 * 60);
-const FAILED_RESUME_THRESHOLD: usize = 2;
 const AUTO_TRIGGER_INITIAL_DELAY: Duration = Duration::from_secs(2);
 const AUTO_TRIGGER_POLL_INTERVAL: Duration = Duration::from_millis(500);
 /// Auto-trigger no-prompt dispatch-ready deadline (`#startupdeadline` /
@@ -629,49 +629,6 @@ fn log_idle_queue_drain_submit(
     );
 }
 
-#[derive(Debug, Default)]
-struct FailedResumeTracker {
-    events: VecDeque<Instant>,
-}
-
-impl FailedResumeTracker {
-    fn record(&mut self, now: Instant) -> usize {
-        self.events.push_back(now);
-        self.prune(now);
-        self.events.len()
-    }
-
-    fn reset(&mut self) {
-        self.events.clear();
-    }
-
-    fn prune(&mut self, now: Instant) {
-        let cutoff = now.checked_sub(FAILED_RESUME_WINDOW).unwrap_or(now);
-        while let Some(front) = self.events.front() {
-            if *front < cutoff {
-                self.events.pop_front();
-            } else {
-                break;
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CleanExitResolution {
-    PromptUser,
-    RestartContinue,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RestartContinueExitStrategy {
-    Resume,
-    RestartFresh,
-    CtrlCPromptUser,
-    CtrlDPromptUser,
-    PromptUser,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PromptOutcome {
     RestartFresh,
@@ -773,69 +730,6 @@ fn prompt_for_restart_or_quit(
             }
         }
     }
-}
-
-fn clean_exit_resolution(harness: &crate::harness::HarnessConfig) -> CleanExitResolution {
-    match harness.clean_exit_behavior {
-        crate::harness::CleanExitBehavior::PromptUser => CleanExitResolution::PromptUser,
-        crate::harness::CleanExitBehavior::RestartContinue => CleanExitResolution::RestartContinue,
-    }
-}
-
-fn clean_exit_resolution_for_start(
-    harness: &crate::harness::HarnessConfig,
-    route_owned: bool,
-) -> CleanExitResolution {
-    if route_owned {
-        return CleanExitResolution::PromptUser;
-    }
-    clean_exit_resolution(harness)
-}
-
-fn restart_continue_exit_strategy(
-    ctrl_c_forwarded_interrupt: bool,
-    failed_resume: bool,
-    ctrl_d_forwarded: bool,
-    recent_failed_resumes: usize,
-    clean_exit_before_prompt: bool,
-) -> RestartContinueExitStrategy {
-    if ctrl_c_forwarded_interrupt {
-        return RestartContinueExitStrategy::CtrlCPromptUser;
-    }
-    if ctrl_d_forwarded {
-        return RestartContinueExitStrategy::CtrlDPromptUser;
-    }
-    if clean_exit_before_prompt {
-        return RestartContinueExitStrategy::RestartFresh;
-    }
-    if failed_resume && recent_failed_resumes >= FAILED_RESUME_THRESHOLD {
-        return RestartContinueExitStrategy::PromptUser;
-    }
-    if failed_resume {
-        return RestartContinueExitStrategy::RestartFresh;
-    }
-    RestartContinueExitStrategy::Resume
-}
-
-fn resume_handoff_failed(
-    auto_trigger_enabled: bool,
-    ctrl_d_forwarded: bool,
-    outcome: AutoTriggerOutcome,
-) -> bool {
-    if !auto_trigger_enabled || ctrl_d_forwarded {
-        return false;
-    }
-    matches!(
-        outcome,
-        AutoTriggerOutcome::Pending
-            | AutoTriggerOutcome::Timeout
-            | AutoTriggerOutcome::SendFailed
-            | AutoTriggerOutcome::Cancelled
-    )
-}
-
-fn clean_exit_before_prompt_seen(auto_trigger_enabled: bool, prompt_visible_once: bool) -> bool {
-    !auto_trigger_enabled && !prompt_visible_once
 }
 
 fn route_owned_cycle_changed_after_start(
@@ -3271,50 +3165,6 @@ mod tests {
         let _ = std::fs::remove_file(&tmp);
     }
     #[test]
-    fn clean_exit_resolution_prompts_for_claude() {
-        assert_eq!(
-            clean_exit_resolution(&crate::harness::HarnessConfig::claude()),
-            CleanExitResolution::PromptUser
-        );
-    }
-    #[test]
-    fn clean_exit_resolution_auto_restarts_for_codex() {
-        assert_eq!(
-            clean_exit_resolution(&crate::harness::HarnessConfig::codex()),
-            CleanExitResolution::RestartContinue
-        );
-    }
-    #[test]
-    fn clean_exit_resolution_auto_restarts_for_opencode() {
-        assert_eq!(
-            clean_exit_resolution(&crate::harness::HarnessConfig::opencode()),
-            CleanExitResolution::RestartContinue
-        );
-    }
-    #[test]
-    fn route_owned_start_prompts_instead_of_auto_restarting_codex() {
-        assert_eq!(
-            clean_exit_resolution_for_start(&crate::harness::HarnessConfig::codex(), true),
-            CleanExitResolution::PromptUser,
-            "route-owned tmux autostart panes must not immediately restart a cleanly exited child"
-        );
-    }
-    #[test]
-    fn route_owned_start_prompts_instead_of_auto_restarting_opencode() {
-        assert_eq!(
-            clean_exit_resolution_for_start(&crate::harness::HarnessConfig::opencode(), true),
-            CleanExitResolution::PromptUser,
-            "route-owned tmux autostart panes must not immediately restart a cleanly exited child"
-        );
-    }
-    #[test]
-    fn non_route_owned_start_preserves_codex_auto_resume_policy() {
-        assert_eq!(
-            clean_exit_resolution_for_start(&crate::harness::HarnessConfig::codex(), false),
-            CleanExitResolution::RestartContinue
-        );
-    }
-    #[test]
     fn route_owned_cycle_completion_ignores_unchanged_committed_baseline() {
         let baseline = test_cycle("cycle-1", agent_doc_turn::CyclePhase::Committed, 10);
         let current = baseline.clone();
@@ -3478,41 +3328,6 @@ Done.
         assert!(!route_owned_exchange_tail_has_unresolved_prompt(body));
     }
     #[test]
-    fn restart_continue_strategy_prefers_resume_by_default() {
-        assert_eq!(
-            restart_continue_exit_strategy(false, false, false, 0, false),
-            RestartContinueExitStrategy::Resume
-        );
-    }
-    #[test]
-    fn restart_continue_strategy_prompts_after_forwarded_ctrl_c_interrupt() {
-        assert_eq!(
-            restart_continue_exit_strategy(true, false, false, 0, false),
-            RestartContinueExitStrategy::CtrlCPromptUser
-        );
-    }
-    #[test]
-    fn restart_continue_strategy_prompts_after_ctrl_d() {
-        assert_eq!(
-            restart_continue_exit_strategy(false, false, true, 0, false),
-            RestartContinueExitStrategy::CtrlDPromptUser
-        );
-    }
-    #[test]
-    fn restart_continue_strategy_still_prompts_after_ctrl_d_before_prompt() {
-        assert_eq!(
-            restart_continue_exit_strategy(false, false, true, 0, true),
-            RestartContinueExitStrategy::CtrlDPromptUser
-        );
-    }
-    #[test]
-    fn restart_continue_strategy_restarts_fresh_before_prompt_without_ctrl_d() {
-        assert_eq!(
-            restart_continue_exit_strategy(false, false, false, 0, true),
-            RestartContinueExitStrategy::RestartFresh
-        );
-    }
-    #[test]
     fn strip_stale_ctrl_d_before_prompt_drops_inherited_ctrl_d_bytes() {
         let filtered =
             strip_stale_ctrl_d_before_prompt(b"\x04status\x04", true, false).expect("filtered");
@@ -3527,27 +3342,6 @@ Done.
         assert!(
             strip_stale_ctrl_d_before_prompt(b"\x04", false, false).is_none(),
             "non-keepalive runs should not rewrite forwarded Ctrl+D"
-        );
-    }
-    #[test]
-    fn restart_continue_strategy_restarts_fresh_after_single_failed_resume() {
-        assert_eq!(
-            restart_continue_exit_strategy(false, true, false, 1, false),
-            RestartContinueExitStrategy::RestartFresh
-        );
-    }
-    #[test]
-    fn restart_continue_strategy_prompts_after_repeated_failed_resumes() {
-        assert_eq!(
-            restart_continue_exit_strategy(false, true, false, FAILED_RESUME_THRESHOLD, false,),
-            RestartContinueExitStrategy::PromptUser
-        );
-    }
-    #[test]
-    fn restart_continue_strategy_restarts_fresh_when_clean_exit_happens_before_prompt() {
-        assert_eq!(
-            restart_continue_exit_strategy(false, false, false, 0, true),
-            RestartContinueExitStrategy::RestartFresh
         );
     }
     #[test]
@@ -3567,61 +3361,6 @@ Done.
             AutoTriggerOutcome::from_u8(shared.auto_trigger_outcome.load(Ordering::Relaxed)),
             AutoTriggerOutcome::NotNeeded
         );
-    }
-    #[test]
-    fn failed_resume_tracker_prunes_old_events() {
-        let mut tracker = FailedResumeTracker::default();
-        let now = Instant::now();
-        tracker
-            .events
-            .push_back(now - FAILED_RESUME_WINDOW - Duration::from_secs(1));
-        tracker.events.push_back(now - Duration::from_secs(5));
-        let count = tracker.record(now);
-        assert_eq!(count, 2, "only recent failures should remain in the window");
-    }
-    #[test]
-    fn ctrl_d_overrides_codex_auto_restart() {
-        let harness = crate::harness::HarnessConfig::codex();
-        assert_eq!(
-            clean_exit_resolution(&harness),
-            CleanExitResolution::RestartContinue
-        );
-        assert_eq!(
-            restart_continue_exit_strategy(false, false, true, 0, false),
-            RestartContinueExitStrategy::CtrlDPromptUser
-        );
-    }
-    #[test]
-    fn ctrl_c_interrupt_overrides_codex_auto_restart() {
-        let harness = crate::harness::HarnessConfig::codex();
-        assert_eq!(
-            clean_exit_resolution(&harness),
-            CleanExitResolution::RestartContinue
-        );
-        assert_eq!(
-            restart_continue_exit_strategy(true, false, false, 0, false),
-            RestartContinueExitStrategy::CtrlCPromptUser
-        );
-    }
-    #[test]
-    fn ctrl_d_with_failed_resume_still_prompts_when_run_did_not_commit() {
-        assert_eq!(
-            restart_continue_exit_strategy(false, true, true, 1, false),
-            RestartContinueExitStrategy::CtrlDPromptUser
-        );
-    }
-    #[test]
-    fn ctrl_d_with_failed_resume_still_prompts_even_when_clean_exit_was_early() {
-        assert_eq!(
-            restart_continue_exit_strategy(false, true, true, 1, true),
-            RestartContinueExitStrategy::CtrlDPromptUser
-        );
-    }
-    #[test]
-    fn clean_exit_before_prompt_seen_only_applies_to_fresh_runs() {
-        assert!(clean_exit_before_prompt_seen(false, false));
-        assert!(!clean_exit_before_prompt_seen(false, true));
-        assert!(!clean_exit_before_prompt_seen(true, false));
     }
     #[test]
     fn idle_queue_turn_active_gate_is_scoped_to_owned_pane() {
@@ -3857,57 +3596,6 @@ Done.
         assert!(output.status.success());
         let subject = String::from_utf8_lossy(&output.stdout);
         assert!(subject.contains("agent-doc"), "{subject}");
-    }
-    #[test]
-    fn resume_handoff_failed_treats_cancelled_resume_as_failure() {
-        assert!(resume_handoff_failed(
-            true,
-            false,
-            AutoTriggerOutcome::Cancelled
-        ));
-        assert!(resume_handoff_failed(
-            true,
-            false,
-            AutoTriggerOutcome::Pending
-        ));
-        assert!(resume_handoff_failed(
-            true,
-            false,
-            AutoTriggerOutcome::Timeout
-        ));
-        assert!(resume_handoff_failed(
-            true,
-            false,
-            AutoTriggerOutcome::SendFailed
-        ));
-        assert!(!resume_handoff_failed(
-            true,
-            false,
-            AutoTriggerOutcome::Sent
-        ));
-        assert!(!resume_handoff_failed(
-            true,
-            false,
-            AutoTriggerOutcome::NotNeeded
-        ));
-        assert!(!resume_handoff_failed(
-            true,
-            false,
-            AutoTriggerOutcome::SkippedClearCooldown
-        ));
-    }
-    #[test]
-    fn resume_handoff_failed_ignores_ctrl_d_shutdown() {
-        assert!(!resume_handoff_failed(
-            true,
-            true,
-            AutoTriggerOutcome::Cancelled
-        ));
-        assert!(!resume_handoff_failed(
-            false,
-            false,
-            AutoTriggerOutcome::Cancelled
-        ));
     }
     #[cfg(unix)]
     #[test]

@@ -16,6 +16,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Supervisor prompt/exit-code policy moved to `agent-doc-supervisor`.** Restart/quit prompt input classification and forwarded Ctrl-C clean-exit normalization now live in `agent_doc_supervisor::crash_policy` beside the child crash/restart policy. The start supervisor loop still owns stdin, tty, and child status adapters, but calls the focused supervisor API directly.
 
+- **Supervisor restart-continuation policy moved to `agent-doc-supervisor`.** Clean-exit prompt-vs-continue resolution, failed resume handoff tracking, early clean-exit-before-prompt detection, and restart-continuation branch selection now live in `agent_doc_supervisor::crash_policy`. The start loop adapts harness and auto-trigger observations into the focused API and keeps only the prompt/tmux/process effects.
+
 - **No-follow-up closeout heuristic moved to `agent-doc-turn`.** Explicit "no actionable follow-up" response detection now lives in `agent_doc_turn::heuristics` beside pending-capture recommendation detection. Session-check and pre-commit guards import the focused turn API directly, and boundary coverage prevents `prompt_contract` from re-owning the phrase policy.
 
 - **Reaped directive response-loss detection moved to `agent-doc-turn`.** The pure detector that decides whether a reaped `do #id` queue head lost its `### Re:` response now lives in `agent_doc_turn::closeout_signal`. Session-check still gathers cycle state, live exchange text, and HEAD compact archives, but calls the focused turn API directly and keeps only guard formatting/ops-log adapters.

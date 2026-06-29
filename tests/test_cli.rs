@@ -3783,12 +3783,20 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     );
     for required_snippet in [
         "pub enum SupervisorPromptDecision",
+        "pub enum SupervisorCleanExitResolution",
+        "pub enum SupervisorRestartContinueExitStrategy",
+        "pub const FAILED_RESUME_WINDOW",
+        "pub struct FailedResumeTracker",
         "pub fn classify_supervisor_prompt_input",
         "pub fn supervisor_policy_exit_code",
+        "pub fn supervisor_clean_exit_resolution",
+        "pub fn restart_continue_exit_strategy",
+        "pub fn supervisor_resume_handoff_failed",
+        "pub fn supervisor_clean_exit_before_prompt_seen",
     ] {
         assert!(
             supervisor_crash_policy.contains(required_snippet),
-            "agent-doc-supervisor crash_policy should own supervisor prompt/exit-code policy directly: {required_snippet}"
+            "agent-doc-supervisor crash_policy should own supervisor restart policy directly: {required_snippet}"
         );
     }
     let start_source =
@@ -3799,18 +3807,31 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "enum PromptDecision",
         "fn classify_prompt_decision",
         "fn policy_exit_code_for_supervisor",
+        "enum CleanExitResolution",
+        "enum RestartContinueExitStrategy",
+        "struct FailedResumeTracker",
+        "const FAILED_RESUME_THRESHOLD",
+        "fn clean_exit_resolution",
+        "fn restart_continue_exit_strategy",
+        "fn resume_handoff_failed",
+        "fn clean_exit_before_prompt_seen",
     ] {
         assert!(
             !start_source.contains(forbidden_snippet),
-            "start.rs must not re-own pure supervisor prompt/exit-code policy: {forbidden_snippet}"
+            "start.rs must not re-own pure supervisor restart policy: {forbidden_snippet}"
         );
     }
     assert!(
         start_source.contains("classify_supervisor_prompt_input")
             && start_source.contains("SupervisorPromptDecision")
             && start_source.contains("supervisor_policy_exit_code")
-            && start_run_source.contains("supervisor_policy_exit_code("),
-        "start paths should call focused supervisor prompt/exit-code policy directly"
+            && start_source.contains("FailedResumeTracker")
+            && start_run_source.contains("supervisor_policy_exit_code(")
+            && start_run_source.contains("supervisor_clean_exit_resolution(")
+            && start_run_source.contains("restart_continue_exit_strategy(")
+            && start_run_source.contains("supervisor_resume_handoff_failed(")
+            && start_run_source.contains("supervisor_clean_exit_before_prompt_seen("),
+        "start paths should call focused supervisor restart policy directly"
     );
 
     for relative in [

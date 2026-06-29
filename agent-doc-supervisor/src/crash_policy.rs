@@ -105,6 +105,116 @@ pub enum RestartAction {
     Halt,
 }
 
+/// Clean child-exit behavior for a supervisor start loop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupervisorCleanExitResolution {
+    PromptUser,
+    RestartContinue,
+}
+
+/// Decide whether a clean child exit should prompt or restart in continue mode.
+pub fn supervisor_clean_exit_resolution(
+    harness_restarts_on_clean_exit: bool,
+    route_owned: bool,
+) -> SupervisorCleanExitResolution {
+    if route_owned {
+        return SupervisorCleanExitResolution::PromptUser;
+    }
+    if harness_restarts_on_clean_exit {
+        SupervisorCleanExitResolution::RestartContinue
+    } else {
+        SupervisorCleanExitResolution::PromptUser
+    }
+}
+
+/// Restart-continuation branch after a clean child exit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupervisorRestartContinueExitStrategy {
+    Resume,
+    RestartFresh,
+    CtrlCPromptUser,
+    CtrlDPromptUser,
+    PromptUser,
+}
+
+/// Window for escalating repeated failed resume handoffs to an operator prompt.
+pub const FAILED_RESUME_WINDOW: Duration = Duration::from_secs(15 * 60);
+
+/// Failed resume handoffs within [`FAILED_RESUME_WINDOW`] before prompting.
+pub const FAILED_RESUME_THRESHOLD: usize = 2;
+
+/// Bounded tracker for recent failed resume handoffs.
+#[derive(Debug, Default)]
+pub struct FailedResumeTracker {
+    events: VecDeque<Instant>,
+}
+
+impl FailedResumeTracker {
+    pub fn record(&mut self, now: Instant) -> usize {
+        self.events.push_back(now);
+        self.prune(now);
+        self.events.len()
+    }
+
+    pub fn reset(&mut self) {
+        self.events.clear();
+    }
+
+    fn prune(&mut self, now: Instant) {
+        let cutoff = now.checked_sub(FAILED_RESUME_WINDOW).unwrap_or(now);
+        while let Some(front) = self.events.front() {
+            if *front < cutoff {
+                self.events.pop_front();
+            } else {
+                break;
+            }
+        }
+    }
+}
+
+/// Decide whether an auto-trigger result proves that resume handoff failed.
+pub fn supervisor_resume_handoff_failed(
+    auto_trigger_enabled: bool,
+    ctrl_d_forwarded: bool,
+    auto_trigger_incomplete_or_failed: bool,
+) -> bool {
+    auto_trigger_enabled && !ctrl_d_forwarded && auto_trigger_incomplete_or_failed
+}
+
+/// Detect a clean fresh-child exit before the child ever surfaced a prompt.
+pub fn supervisor_clean_exit_before_prompt_seen(
+    auto_trigger_enabled: bool,
+    prompt_visible_once: bool,
+) -> bool {
+    !auto_trigger_enabled && !prompt_visible_once
+}
+
+/// Decide how to continue a supervisor that normally restarts clean exits.
+pub fn restart_continue_exit_strategy(
+    ctrl_c_forwarded_interrupt: bool,
+    failed_resume: bool,
+    ctrl_d_forwarded: bool,
+    recent_failed_resumes: usize,
+    clean_exit_before_prompt: bool,
+) -> SupervisorRestartContinueExitStrategy {
+    if ctrl_c_forwarded_interrupt {
+        return SupervisorRestartContinueExitStrategy::CtrlCPromptUser;
+    }
+    if ctrl_d_forwarded {
+        return SupervisorRestartContinueExitStrategy::CtrlDPromptUser;
+    }
+    if clean_exit_before_prompt {
+        return SupervisorRestartContinueExitStrategy::RestartFresh;
+    }
+    if failed_resume && recent_failed_resumes >= FAILED_RESUME_THRESHOLD {
+        return SupervisorRestartContinueExitStrategy::PromptUser;
+    }
+    if failed_resume {
+        return SupervisorRestartContinueExitStrategy::RestartFresh;
+    }
+    SupervisorRestartContinueExitStrategy::Resume
+}
+
 /// Parsed operator response to the supervisor restart/quit prompt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SupervisorPromptDecision {
@@ -323,6 +433,136 @@ mod tests {
         let action = policy.on_exit_at(0, Instant::now());
         assert_eq!(action, RestartAction::PromptUser);
         assert_eq!(policy.state, SupervisorState::Healthy);
+    }
+
+    #[test]
+    fn clean_exit_resolution_prompts_when_harness_requires_user() {
+        assert_eq!(
+            supervisor_clean_exit_resolution(false, false),
+            SupervisorCleanExitResolution::PromptUser
+        );
+    }
+
+    #[test]
+    fn clean_exit_resolution_auto_restarts_for_resume_harnesses() {
+        assert_eq!(
+            supervisor_clean_exit_resolution(true, false),
+            SupervisorCleanExitResolution::RestartContinue
+        );
+    }
+
+    #[test]
+    fn route_owned_clean_exit_prompts_instead_of_auto_restarting() {
+        assert_eq!(
+            supervisor_clean_exit_resolution(true, true),
+            SupervisorCleanExitResolution::PromptUser,
+            "route-owned tmux autostart panes must not immediately restart a cleanly exited child"
+        );
+    }
+
+    #[test]
+    fn restart_continue_strategy_prefers_resume_by_default() {
+        assert_eq!(
+            restart_continue_exit_strategy(false, false, false, 0, false),
+            SupervisorRestartContinueExitStrategy::Resume
+        );
+    }
+
+    #[test]
+    fn restart_continue_strategy_prompts_after_forwarded_ctrl_c_interrupt() {
+        assert_eq!(
+            restart_continue_exit_strategy(true, false, false, 0, false),
+            SupervisorRestartContinueExitStrategy::CtrlCPromptUser
+        );
+    }
+
+    #[test]
+    fn restart_continue_strategy_prompts_after_ctrl_d() {
+        assert_eq!(
+            restart_continue_exit_strategy(false, false, true, 0, false),
+            SupervisorRestartContinueExitStrategy::CtrlDPromptUser
+        );
+    }
+
+    #[test]
+    fn restart_continue_strategy_still_prompts_after_ctrl_d_before_prompt() {
+        assert_eq!(
+            restart_continue_exit_strategy(false, false, true, 0, true),
+            SupervisorRestartContinueExitStrategy::CtrlDPromptUser
+        );
+    }
+
+    #[test]
+    fn restart_continue_strategy_restarts_fresh_before_prompt_without_ctrl_d() {
+        assert_eq!(
+            restart_continue_exit_strategy(false, false, false, 0, true),
+            SupervisorRestartContinueExitStrategy::RestartFresh
+        );
+    }
+
+    #[test]
+    fn restart_continue_strategy_restarts_fresh_after_single_failed_resume() {
+        assert_eq!(
+            restart_continue_exit_strategy(false, true, false, 1, false),
+            SupervisorRestartContinueExitStrategy::RestartFresh
+        );
+    }
+
+    #[test]
+    fn restart_continue_strategy_prompts_after_repeated_failed_resumes() {
+        assert_eq!(
+            restart_continue_exit_strategy(false, true, false, FAILED_RESUME_THRESHOLD, false,),
+            SupervisorRestartContinueExitStrategy::PromptUser
+        );
+    }
+
+    #[test]
+    fn restart_continue_strategy_restarts_fresh_when_clean_exit_happens_before_prompt() {
+        assert_eq!(
+            restart_continue_exit_strategy(false, false, false, 0, true),
+            SupervisorRestartContinueExitStrategy::RestartFresh
+        );
+    }
+
+    #[test]
+    fn ctrl_d_with_failed_resume_still_prompts_when_run_did_not_commit() {
+        assert_eq!(
+            restart_continue_exit_strategy(false, true, true, 1, false),
+            SupervisorRestartContinueExitStrategy::CtrlDPromptUser
+        );
+    }
+
+    #[test]
+    fn ctrl_d_with_failed_resume_still_prompts_even_when_clean_exit_was_early() {
+        assert_eq!(
+            restart_continue_exit_strategy(false, true, true, 1, true),
+            SupervisorRestartContinueExitStrategy::CtrlDPromptUser
+        );
+    }
+
+    #[test]
+    fn failed_resume_tracker_prunes_old_events() {
+        let mut tracker = FailedResumeTracker::default();
+        let now = Instant::now();
+        tracker.record(now - FAILED_RESUME_WINDOW - Duration::from_secs(1));
+        tracker.record(now - Duration::from_secs(5));
+        let count = tracker.record(now);
+        assert_eq!(count, 2, "only recent failures should remain in the window");
+    }
+
+    #[test]
+    fn resume_handoff_failed_requires_enabled_non_ctrl_d_failed_trigger() {
+        assert!(supervisor_resume_handoff_failed(true, false, true));
+        assert!(!supervisor_resume_handoff_failed(false, false, true));
+        assert!(!supervisor_resume_handoff_failed(true, true, true));
+        assert!(!supervisor_resume_handoff_failed(true, false, false));
+    }
+
+    #[test]
+    fn clean_exit_before_prompt_seen_only_applies_to_fresh_runs() {
+        assert!(supervisor_clean_exit_before_prompt_seen(false, false));
+        assert!(!supervisor_clean_exit_before_prompt_seen(false, true));
+        assert!(!supervisor_clean_exit_before_prompt_seen(true, false));
     }
 
     #[test]

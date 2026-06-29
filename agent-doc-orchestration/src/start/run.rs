@@ -1522,10 +1522,19 @@ pub fn run_with_reap_policy(
             shared.ctrl_c_forwarded.load(Ordering::Relaxed),
         );
         let ctrl_d_forwarded = shared.ctrl_d_forwarded.load(Ordering::Relaxed);
-        let failed_resume =
-            resume_handoff_failed(auto_trigger, ctrl_d_forwarded, auto_trigger_outcome);
+        let failed_resume = supervisor_resume_handoff_failed(
+            auto_trigger,
+            ctrl_d_forwarded,
+            matches!(
+                auto_trigger_outcome,
+                AutoTriggerOutcome::Pending
+                    | AutoTriggerOutcome::Timeout
+                    | AutoTriggerOutcome::SendFailed
+                    | AutoTriggerOutcome::Cancelled
+            ),
+        );
         let clean_exit_before_prompt =
-            clean_exit_before_prompt_seen(auto_trigger, prompt_visible_once);
+            supervisor_clean_exit_before_prompt_seen(auto_trigger, prompt_visible_once);
         if matches!(
             auto_trigger_outcome,
             AutoTriggerOutcome::Sent | AutoTriggerOutcome::NotNeeded
@@ -1561,8 +1570,14 @@ pub fn run_with_reap_policy(
 
         match action {
             RestartAction::PromptUser => {
-                match clean_exit_resolution_for_start(&harness, route_owned) {
-                    CleanExitResolution::PromptUser => {
+                match supervisor_clean_exit_resolution(
+                    matches!(
+                        harness.clean_exit_behavior,
+                        crate::harness::CleanExitBehavior::RestartContinue
+                    ),
+                    route_owned,
+                ) {
+                    SupervisorCleanExitResolution::PromptUser => {
                         shared.transition_actor_state(
                             agent_doc_sqlite::state_store::ActorState::WaitingInput,
                             "supervisor",
@@ -1590,7 +1605,7 @@ pub fn run_with_reap_policy(
                             }
                         }
                     }
-                    CleanExitResolution::RestartContinue => {
+                    SupervisorCleanExitResolution::RestartContinue => {
                         let recent_failures = if failed_resume {
                             let now = Instant::now();
                             let recent_failures = failed_resume_tracker.record(now);
@@ -1618,7 +1633,7 @@ pub fn run_with_reap_policy(
                             recent_failures,
                             clean_exit_before_prompt,
                         ) {
-                            RestartContinueExitStrategy::CtrlCPromptUser => {
+                            SupervisorRestartContinueExitStrategy::CtrlCPromptUser => {
                                 shared.transition_actor_state(
                                     agent_doc_sqlite::state_store::ActorState::WaitingInput,
                                     "supervisor",
@@ -1648,7 +1663,7 @@ pub fn run_with_reap_policy(
                                     }
                                 }
                             }
-                            RestartContinueExitStrategy::CtrlDPromptUser => {
+                            SupervisorRestartContinueExitStrategy::CtrlDPromptUser => {
                                 shared.transition_actor_state(
                                     agent_doc_sqlite::state_store::ActorState::WaitingInput,
                                     "supervisor",
@@ -1678,7 +1693,7 @@ pub fn run_with_reap_policy(
                                     }
                                 }
                             }
-                            RestartContinueExitStrategy::PromptUser => {
+                            SupervisorRestartContinueExitStrategy::PromptUser => {
                                 shared.transition_actor_state(
                                     agent_doc_sqlite::state_store::ActorState::WaitingInput,
                                     "supervisor",
@@ -1709,7 +1724,7 @@ pub fn run_with_reap_policy(
                                     }
                                 }
                             }
-                            RestartContinueExitStrategy::RestartFresh => {
+                            SupervisorRestartContinueExitStrategy::RestartFresh => {
                                 suppress_stale_ctrl_d_until_prompt = false;
                                 if clean_exit_before_prompt {
                                     eprintln!(
@@ -1742,7 +1757,7 @@ pub fn run_with_reap_policy(
                                 auto_trigger_next_launch = auto_trigger;
                                 restart_count += 1;
                             }
-                            RestartContinueExitStrategy::Resume => {
+                            SupervisorRestartContinueExitStrategy::Resume => {
                                 suppress_stale_ctrl_d_until_prompt = false;
                                 eprintln!(
                                     "\n{} exited cleanly. Restarting in resume mode to keep the session attached...",

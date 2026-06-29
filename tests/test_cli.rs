@@ -2381,6 +2381,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub fn body_enumerates_multiple_gated_phases",
         "pub fn count_phase_markers",
         "pub fn body_already_split_into_child_ids",
+        "pub const QUEUE_AUDIT_SUBSTEP_COMPLETE_PHRASES",
+        "pub fn queue_audit_collapses_partial_completion",
+        "pub fn queue_audit_has_none_complete_claim",
         "pub fn response_clearly_completes_pending_id",
         "pub fn response_heading_resolves_to_pending_id",
         "pub fn explicit_done_signal_ids",
@@ -2436,6 +2439,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub(crate) fn body_enumerates_multiple_gated_phases",
         "pub(crate) fn count_phase_markers",
         "pub(crate) fn body_already_split_into_child_ids",
+        "pub(crate) const QUEUE_AUDIT_SUBSTEP_COMPLETE_PHRASES",
+        "pub(crate) fn queue_audit_collapses_partial_completion",
+        "pub(crate) fn queue_audit_has_none_complete_claim",
     ] {
         assert!(
             !closeout_guards.contains(forbidden),
@@ -2448,6 +2454,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "agent_doc_turn::closeout_signal::blocked_signal_tied_to_id",
         "agent_doc_turn::closeout_signal::body_enumerates_multiple_gated_phases",
         "agent_doc_turn::closeout_signal::body_already_split_into_child_ids",
+        "agent_doc_turn::closeout_signal::queue_audit_collapses_partial_completion",
     ] {
         assert!(
             closeout_guards.contains(required),

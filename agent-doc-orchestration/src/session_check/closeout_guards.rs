@@ -273,23 +273,6 @@ pub(crate) fn check_gated_phase_split_guard(
     ]))
 }
 
-/// Substep-completion phrases that evidence partial progress in a queue audit.
-pub(crate) const QUEUE_AUDIT_SUBSTEP_COMPLETE_PHRASES: &[&str] = &[
-    "is complete",
-    "was complete",
-    "are complete",
-    "were complete",
-    "is done",
-    "was done",
-    "was clean",
-    "is clean",
-    "is current",
-    "are current",
-    "passed",
-    "verified clean",
-    "already complete",
-];
-
 /// `#queue-audit-partial-completion`: detect a queue-completion audit response
 /// that collapses meaningful partial progress into a blanket "none complete."
 ///
@@ -331,7 +314,7 @@ pub(crate) fn check_queue_audit_partial_completion_guard(file: &Path) -> Result<
 
     let text = response_text_for_guards(&capture.response_body);
     let lower = text.to_ascii_lowercase();
-    if !queue_audit_collapses_partial_completion(&lower) {
+    if !agent_doc_turn::closeout_signal::queue_audit_collapses_partial_completion(&lower) {
         return Ok(GuardResult::None);
     }
 
@@ -347,38 +330,6 @@ pub(crate) fn check_queue_audit_partial_completion_guard(file: &Path) -> Result<
         "[session-check] warn: this queue-completion audit reports the queue as not complete while also citing several completed substeps, but never classifies any row as partially complete — meaningful partial progress is collapsed into \"none complete\"".to_string(),
         "[session-check] hint: classify each queue row as complete / partially complete / not-started, naming the completed substeps and the exact remaining condition for partial rows; recommend splitting a row with multiple gateable phases. Add `<!-- no-queue-audit-guard -->` if the all-or-none framing is intentional.".to_string(),
     ]))
-}
-
-/// True when a queue-audit response collapses partial completion: it is about the
-/// queue, makes a blanket none-complete claim, shows >=2 distinct substep
-/// completions, and never frames anything as "partial."
-pub(crate) fn queue_audit_collapses_partial_completion(lower: &str) -> bool {
-    if !lower.contains("queue") {
-        return false;
-    }
-    // Already broke it down — not a collapse.
-    if lower.contains("partial") {
-        return false;
-    }
-    if !queue_audit_has_none_complete_claim(lower) {
-        return false;
-    }
-    let substep_completions = QUEUE_AUDIT_SUBSTEP_COMPLETE_PHRASES
-        .iter()
-        .filter(|phrase| lower.contains(*phrase))
-        .count();
-    substep_completions >= 2
-}
-
-/// A blanket "none / not ... complete" claim about the queue items.
-pub(crate) fn queue_audit_has_none_complete_claim(lower: &str) -> bool {
-    static NONE_COMPLETE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        // "none of the queue items is/are (fully) complete", "no items are
-        // complete", "none are fully complete", etc. — a none/no quantifier
-        // within a short span before a complete/completed token.
-        regex::Regex::new(r"\b(none|no)\b[^.\n]{0,60}?\bcomplet(e|ed)\b").unwrap()
-    });
-    NONE_COMPLETE.is_match(lower)
 }
 
 pub(crate) fn single_open_review_item_id(file: &Path) -> Result<Option<String>> {

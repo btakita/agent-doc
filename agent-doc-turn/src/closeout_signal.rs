@@ -124,6 +124,55 @@ pub fn body_already_split_into_child_ids(body: &str, own_id: &str) -> bool {
     others.len() >= 2
 }
 
+/// Substep-completion phrases that evidence partial progress in a queue audit.
+pub const QUEUE_AUDIT_SUBSTEP_COMPLETE_PHRASES: &[&str] = &[
+    "is complete",
+    "was complete",
+    "are complete",
+    "were complete",
+    "is done",
+    "was done",
+    "was clean",
+    "is clean",
+    "is current",
+    "are current",
+    "passed",
+    "verified clean",
+    "already complete",
+];
+
+/// True when a queue-audit response collapses partial completion: it is about the
+/// queue, makes a blanket none-complete claim, shows >=2 distinct substep
+/// completions, and never frames anything as "partial."
+pub fn queue_audit_collapses_partial_completion(lower: &str) -> bool {
+    if !lower.contains("queue") {
+        return false;
+    }
+    // Already broke it down — not a collapse.
+    if lower.contains("partial") {
+        return false;
+    }
+    if !queue_audit_has_none_complete_claim(lower) {
+        return false;
+    }
+    let substep_completions = QUEUE_AUDIT_SUBSTEP_COMPLETE_PHRASES
+        .iter()
+        .filter(|phrase| lower.contains(*phrase))
+        .count();
+    substep_completions >= 2
+}
+
+/// A blanket "none / not ... complete" claim about the queue items.
+pub fn queue_audit_has_none_complete_claim(lower: &str) -> bool {
+    static NONE_COMPLETE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        // "none of the queue items is/are (fully) complete", "no items are
+        // complete", "none are fully complete", etc. — a none/no quantifier
+        // within a short span before a complete/completed token.
+        regex::Regex::new(r"\b(none|no)\b[^.\n]{0,60}?\bcomplet(e|ed)\b").unwrap()
+    });
+    NONE_COMPLETE.is_match(lower)
+}
+
 /// Where a directive id's response heading materialized.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ResponseSource {
@@ -498,6 +547,26 @@ mod tests {
         let body = "Remaining gated phases tracked as children: phase (2b) -> #childb, phase (3) -> #childc. Plan: tasks/x.md";
         assert!(body_enumerates_multiple_gated_phases(body));
         assert!(body_already_split_into_child_ids(body, "parentfix"));
+    }
+
+    #[test]
+    fn queue_audit_policy_flags_none_complete_collapse_with_substep_progress() {
+        let lower = "none of the six queue items are complete. same-day qa is complete and the url validate-only check was clean, but each row still has at least one remaining action.";
+        assert!(queue_audit_collapses_partial_completion(lower));
+        assert!(queue_audit_has_none_complete_claim(lower));
+    }
+
+    #[test]
+    fn queue_audit_policy_ignores_already_partial_or_unrelated_reports() {
+        assert!(!queue_audit_collapses_partial_completion(
+            "none of the queue items are fully complete, but several are partially complete: qa is complete and validate-only was clean."
+        ));
+        assert!(!queue_audit_collapses_partial_completion(
+            "none of the migration steps are complete. schema dump is complete and backup was clean."
+        ));
+        assert!(!queue_audit_collapses_partial_completion(
+            "none of the queue items are complete yet; every row is still blocked on input."
+        ));
     }
 
     #[test]

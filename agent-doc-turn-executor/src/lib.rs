@@ -7,6 +7,7 @@
 
 pub mod auto_trigger;
 pub mod capability_proof;
+pub mod codex_launch;
 
 use serde::{Deserialize, Serialize};
 

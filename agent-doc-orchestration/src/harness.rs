@@ -19,7 +19,8 @@
 
 use crate::config::Config;
 use agent_doc_frontmatter::frontmatter::Frontmatter;
-use anyhow::{Result, bail};
+use agent_doc_turn_executor::codex_launch::codex_resume_restart_args;
+use anyhow::Result;
 
 /// How the supervisor builds args on restart after a crash.
 #[derive(Debug, Clone, PartialEq)]
@@ -173,7 +174,7 @@ impl HarnessConfig {
             }
             RestartBehavior::Prepend(prefix) => {
                 if self.binary == "codex" {
-                    return codex_resume_restart_args(prefix, base_args);
+                    return Ok(codex_resume_restart_args(prefix, base_args)?);
                 }
                 let mut args = prefix.clone();
                 args.extend(base_args.iter().cloned());
@@ -869,96 +870,6 @@ fn is_opencode_box_art_line(trimmed: &str) -> bool {
 
 fn is_managed_capability_proof_line(trimmed: &str) -> bool {
     trimmed.contains("_capability_proof status=")
-}
-
-fn parse_sandbox_mode_config(value: &str) -> Option<String> {
-    let raw = value.trim();
-    let mode = raw.strip_prefix("sandbox_mode=")?;
-    let mode = mode.trim().trim_matches(|c| c == '"' || c == '\'');
-    if mode.is_empty() {
-        None
-    } else {
-        Some(mode.to_string())
-    }
-}
-
-fn record_codex_resume_sandbox_mode(seen: &mut Option<String>, mode: &str) -> Result<()> {
-    if let Some(existing) = seen
-        && existing != mode
-    {
-        bail!(
-            "Codex launch policy mismatch: resume args contain conflicting sandbox modes \
-             `{existing}` and `{mode}`. Refusing to resume because this could silently \
-             downgrade the requested sandbox before task work starts."
-        );
-    }
-    *seen = Some(mode.to_string());
-    Ok(())
-}
-
-fn push_codex_resume_sandbox_config(
-    args: &mut Vec<String>,
-    seen_sandbox_mode: &mut Option<String>,
-    mode: &str,
-) -> Result<()> {
-    record_codex_resume_sandbox_mode(seen_sandbox_mode, mode)?;
-    args.push("-c".to_string());
-    args.push(format!("sandbox_mode={mode:?}"));
-    Ok(())
-}
-
-fn codex_resume_restart_args(prefix: &[String], base_args: &[String]) -> Result<Vec<String>> {
-    let mut args = prefix.to_vec();
-    let mut base = base_args.iter().peekable();
-    let mut seen_sandbox_mode: Option<String> = None;
-    while let Some(arg) = base.next() {
-        match arg.as_str() {
-            "exec" | "--json" => {}
-            "-s" | "--sandbox" => {
-                let Some(mode) = base.next() else {
-                    bail!(
-                        "Codex launch policy mismatch: `{arg}` was provided without a sandbox \
-                         mode. Refusing to resume because the session could fall back to the \
-                         Codex default sandbox."
-                    );
-                };
-                push_codex_resume_sandbox_config(&mut args, &mut seen_sandbox_mode, mode)?;
-            }
-            "--add-dir" => {
-                // `codex resume` does not accept --add-dir. A resumed session must inherit
-                // writable roots from the original fresh launch.
-                let _ = base.next();
-            }
-            "-c" | "--config" => {
-                let Some(value) = base.next() else {
-                    bail!("Codex launch policy mismatch: `{arg}` was provided without a value.");
-                };
-                if let Some(mode) = parse_sandbox_mode_config(value) {
-                    record_codex_resume_sandbox_mode(&mut seen_sandbox_mode, &mode)?;
-                }
-                args.push(arg.clone());
-                args.push(value.clone());
-            }
-            _ if arg.starts_with("--sandbox=") => {
-                let mode = &arg["--sandbox=".len()..];
-                push_codex_resume_sandbox_config(&mut args, &mut seen_sandbox_mode, mode)?;
-            }
-            _ if arg.starts_with("--add-dir=") => {
-                // Same as --add-dir <DIR> above.
-            }
-            _ if arg.starts_with("--config=") => {
-                let value = &arg["--config=".len()..];
-                if let Some(mode) = parse_sandbox_mode_config(value) {
-                    record_codex_resume_sandbox_mode(&mut seen_sandbox_mode, &mode)?;
-                }
-                args.push(arg.clone());
-            }
-            _ => {
-                args.push(arg.clone());
-            }
-        }
-    }
-    Ok(args)
 }
 
 fn is_codex_idle_placeholder_prompt(trimmed: &str) -> bool {

@@ -14,6 +14,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Auto-trigger readiness policy moved to `agent-doc-turn-executor`.** The auto-trigger monitor, clear-cooldown deadline action, no-prompt hard-deadline action, and timeout/cancelled stop outcome now live in `agent_doc_turn_executor::auto_trigger`. The start supervisor thread keeps only sleep, pane inspection, logging, and startup-miss side effects while calling the focused executor API directly.
 
+- **Codex resume launch policy moved to `agent-doc-turn-executor`.** The `codex resume` restart argument transformation now lives in `agent_doc_turn_executor::codex_launch`, including sandbox flag translation, conflicting sandbox rejection, missing-value diagnostics, and `--add-dir` stripping for resume. `harness.rs` keeps only harness selection and calls the focused executor API directly.
+
 - **Context usage policy moved to `agent-doc-model-tier`.** Harness transcript token aggregation, Claude project transcript path composition, model-context window lookup, Codex `token_count` percentage parsing, and the clear/no-clear diagnostic decision now live in `agent_doc_model_tier::context_usage`. Orchestration's `context_pct` module keeps only file-backed transcript reads and newest-transcript discovery, and the Codex hook calls the focused clear-decision API directly.
 
 - **Preflight model attribution policy moved to `agent-doc-model-tier`.** Harness alias canonicalization, frontmatter-vs-active harness mismatch warning facts, short response-header model attribution, and deferred Claude Code `opus` attribution now live in the focused model-tier crate. Preflight keeps only JSON warning adaptation and calls the model-tier API directly.

@@ -4097,6 +4097,9 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
     let executor_auto_trigger =
         fs::read_to_string(manifest_dir.join("agent-doc-turn-executor/src/auto_trigger.rs"))
             .unwrap();
+    let executor_codex_launch =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn-executor/src/codex_launch.rs"))
+            .unwrap();
     for required_snippet in [
         "pub struct ManagedProofPolicy",
         "pub struct ManagedProofPolicyInputs",
@@ -4120,6 +4123,15 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         assert!(
             executor_auto_trigger.contains(required_snippet),
             "agent-doc-turn-executor should own auto-trigger readiness policy directly: {required_snippet}"
+        );
+    }
+    for required_snippet in [
+        "pub enum CodexResumeRestartArgsError",
+        "pub fn codex_resume_restart_args(",
+    ] {
+        assert!(
+            executor_codex_launch.contains(required_snippet),
+            "agent-doc-turn-executor should own Codex resume launch policy directly: {required_snippet}"
         );
     }
 
@@ -4174,6 +4186,23 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
             && start.contains("agent_doc_turn_executor::capability_proof::proof_retry_decision")
             && start.contains("agent_doc_turn_executor::auto_trigger::{"),
         "start should call focused turn-executor policy directly"
+    );
+    let harness =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/harness.rs")).unwrap();
+    for forbidden_snippet in [
+        "fn parse_sandbox_mode_config(",
+        "fn record_codex_resume_sandbox_mode(",
+        "fn push_codex_resume_sandbox_config(",
+        "fn codex_resume_restart_args(",
+    ] {
+        assert!(
+            !harness.contains(forbidden_snippet),
+            "harness.rs must not re-own pure Codex resume launch policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        harness.contains("use agent_doc_turn_executor::codex_launch::codex_resume_restart_args;"),
+        "harness.rs should call focused Codex resume launch policy directly"
     );
     let codex = fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/agent/codex.rs"))
         .unwrap();

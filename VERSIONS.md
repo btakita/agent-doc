@@ -42,6 +42,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Supervisor child crash/restart policy moved to `agent-doc-supervisor`.** `agent_doc_supervisor::crash_policy` now owns the child-exit classifier, bounded restart history, health state, and restart action decision. The start and in-process supervisor adapters import the focused policy directly, and the old `supervisor::state` orchestration module is deleted with boundary coverage preventing a facade from returning.
 
+- **Supervisor config and controller recycle policy facades removed from `project_controller::rpc`.** File/env-backed orchestration adapters now call `agent_doc_supervisor::config` and `agent_doc_controller::recycle` directly. Boundary coverage prevents the pure precedence/debounce/force-bypass wrappers from returning.
+
 ## 0.34.64
 
 - **`#suprestassoc` — `restart-supervisor` registry re-association is scoped to the requested document, not just the reused session id.** The CLI restart path now resolves registry entries by exact canonical document path first and only keeps the legacy session-id fallback for fileless registry rows; registry keys that explicitly name another document are rejected, so restarting `sampleportal.md` cannot adopt a stale `agent-doc-bugs2.md` pane/session projection that happens to carry the same session id. Coverage: deterministic registry lookup regressions for rejecting a foreign same-session entry and preferring the exact target document entry. Live editor/pane confirmation remains an `[operator-verify]` follow-up.

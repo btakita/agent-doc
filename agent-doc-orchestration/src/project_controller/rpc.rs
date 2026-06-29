@@ -1151,34 +1151,9 @@ pub(crate) fn recycle_idle_grace() -> Duration {
     Duration::from_secs(secs)
 }
 
-/// `#ctlrecycle` R3 / `#suprecyclequeue` — pure resolution of the supervisor
-/// auto-recycle policy from the env override and the project-config opt-in.
-///
-/// The env var `AGENT_DOC_SUPERVISOR_AUTO_RECYCLE` is an explicit operator override:
-/// truthy (`1`/`true`/`yes`/`on`) force-enables, falsey (`0`/`false`/`no`/`off`)
-/// force-disables. When it is unset or unrecognized, a per-document frontmatter
-/// opt-in/opt-out (`agent_doc_supervisor_auto_recycle`) decides; absent there, the
-/// project-config opt-in (`agent_doc_supervisor_auto_recycle` in
-/// `.agent-doc/config.toml`) decides; absent everywhere, the default is ON
-/// (`#supselfheal`). A stale supervisor self-retires at the next turn/queue-item
-/// boundary via the blue/green `execve` hot-reload, which preserves the live
-/// harness child + pane (zero-gap binary upgrade). This is the hands-off self-heal
-/// for the freshly-`cargo install`ed-but-still-running-the-old-binary case that
-/// otherwise re-files File Cache Conflict / IPC-drift dialogs forever
-/// (`#fcc0`/`#ipcdrift`). Opt out with the env/frontmatter/project knob set falsey to
-/// restore the deliberate-operator-restart behavior. Pure so the precedence is
-/// unit-testable.
-pub(crate) fn resolve_supervisor_auto_recycle(
-    env: Option<&str>,
-    frontmatter: Option<bool>,
-    project: Option<bool>,
-) -> bool {
-    agent_doc_supervisor::config::resolve_supervisor_auto_recycle(env, frontmatter, project)
-}
-
 /// `#ctlrecycle` R3 / `#suprecyclequeue` — is supervisor auto-recycle enabled for the
 /// supervisor hosting `doc`? Reads the env override, the document's frontmatter, and
-/// its project config, then resolves via [`resolve_supervisor_auto_recycle`]. Default ON
+/// its project config, then resolves via `agent_doc_supervisor::config`. Default ON
 /// (`#supselfheal`); opt out with a falsey env/frontmatter/project knob.
 pub(crate) fn supervisor_auto_recycle_enabled(doc: &std::path::Path) -> bool {
     let env = std::env::var(SUPERVISOR_AUTO_RECYCLE_ENV).ok();
@@ -1189,19 +1164,11 @@ pub(crate) fn supervisor_auto_recycle_enabled(doc: &std::path::Path) -> bool {
     });
     let project =
         crate::project_config_io::load_project_for_doc(doc).agent_doc_supervisor_auto_recycle;
-    resolve_supervisor_auto_recycle(env.as_deref(), frontmatter, project)
-}
-
-/// `#agentreloadrestart` — resolve the agent-change-restart knob with the same
-/// env > frontmatter > project > default precedence as auto-recycle. Default ON:
-/// a frontmatter `agent:` change should normally take effect on the next
-/// boundary without a manual restart.
-pub(crate) fn resolve_agent_change_restart(
-    env: Option<&str>,
-    frontmatter: Option<bool>,
-    project: Option<bool>,
-) -> bool {
-    agent_doc_supervisor::config::resolve_agent_change_restart(env, frontmatter, project)
+    agent_doc_supervisor::config::resolve_supervisor_auto_recycle(
+        env.as_deref(),
+        frontmatter,
+        project,
+    )
 }
 
 /// `#agentreloadrestart` — is agent-change-restart enabled for the supervisor
@@ -1216,46 +1183,12 @@ pub(crate) fn agent_change_restart_enabled(doc: &std::path::Path) -> bool {
     });
     let project =
         crate::project_config_io::load_project_for_doc(doc).agent_doc_agent_change_restart;
-    resolve_agent_change_restart(env.as_deref(), frontmatter, project)
-}
-
-/// `#supautoinstall` — pure: is agent-doc's OWN source newer than the installed binary?
-/// Both are unix-epoch seconds. True only when the source is STRICTLY newer (a
-/// build+install is pending). Equal timestamps (clock granularity / a just-installed
-/// binary) read as NOT newer — fail-open, source-ahead is an install hint and must never
-/// trigger a build on a boundary tie. Symmetric to [`process_binary_is_stale`] (which
-/// compares installed-binary-vs-running-process for the recycle rung).
-pub(crate) fn source_newer_than_installed_binary(
-    newest_source_secs: u64,
-    installed_binary_secs: u64,
-) -> bool {
-    agent_doc_supervisor::config::source_newer_than_installed_binary(
-        newest_source_secs,
-        installed_binary_secs,
-    )
-}
-
-/// `#supautoinstall` — pure precedence for the supervisor auto-install opt-in, mirroring
-/// [`resolve_supervisor_auto_recycle`]. The env var `AGENT_DOC_SUPERVISOR_AUTO_INSTALL`
-/// is an explicit operator override: truthy (`1`/`true`/`yes`/`on`) force-enables, falsey
-/// (`0`/`false`/`no`/`off`) force-disables. When it is unset or unrecognized, a per-document
-/// frontmatter opt-in/opt-out (`agent_doc_supervisor_auto_install`) decides; absent there,
-/// the project-config opt-in (`agent_doc_supervisor_auto_install` in `.agent-doc/config.toml`)
-/// decides; absent everywhere, the default is ON. This is safe to default ON because the
-/// auto-install ONLY fires for a dogfooding session (`dogfood_agent_doc_crate_root` resolves
-/// a crate root) — an ordinary user's document never triggers a build. Pure so the precedence
-/// is unit-testable.
-pub(crate) fn resolve_supervisor_auto_install(
-    env: Option<&str>,
-    frontmatter: Option<bool>,
-    project: Option<bool>,
-) -> bool {
-    agent_doc_supervisor::config::resolve_supervisor_auto_install(env, frontmatter, project)
+    agent_doc_supervisor::config::resolve_agent_change_restart(env.as_deref(), frontmatter, project)
 }
 
 /// `#supautoinstall` — is supervisor auto-install enabled for the supervisor hosting `doc`?
 /// Reads the env override, the document's frontmatter, and its project config, then resolves
-/// via [`resolve_supervisor_auto_install`]. Default ON; opt out with a falsey
+/// via `agent_doc_supervisor::config`. Default ON; opt out with a falsey
 /// env/frontmatter/project knob. (Never fires for a non-dogfooding document regardless.)
 pub(crate) fn supervisor_auto_install_enabled(doc: &std::path::Path) -> bool {
     let env = std::env::var(SUPERVISOR_AUTO_INSTALL_ENV).ok();
@@ -1266,7 +1199,11 @@ pub(crate) fn supervisor_auto_install_enabled(doc: &std::path::Path) -> bool {
     });
     let project =
         crate::project_config_io::load_project_for_doc(doc).agent_doc_supervisor_auto_install;
-    resolve_supervisor_auto_install(env.as_deref(), frontmatter, project)
+    agent_doc_supervisor::config::resolve_supervisor_auto_install(
+        env.as_deref(),
+        frontmatter,
+        project,
+    )
 }
 
 /// `#supautoinstall` — resolve the agent-doc crate source root for a DOGFOODING session
@@ -1634,26 +1571,6 @@ fn repair_spent_preset_pause_before_dispatch(
         return Ok(true);
     }
     Ok(false)
-}
-
-/// `#ctlrecycle` — pure debounce decision shared by controller (R1) and supervisor
-/// (R3). Given whether the process currently "wants recycle AND is idle", the
-/// instant staleness was first observed, the clock, and the grace window, returns
-/// `(should_recycle_now, next_stale_since)`. Pure so the recycle timing is unit
-/// testable without sleeping. Resets the timer the moment the process is no longer
-/// idle-and-stale, so transient busy windows restart the debounce.
-pub(crate) fn recycle_debounce_decision(
-    wants_recycle_and_idle: bool,
-    stale_since: Option<Instant>,
-    now: Instant,
-    grace: Duration,
-) -> (bool, Option<Instant>) {
-    agent_doc_controller::recycle::recycle_debounce_decision(
-        wants_recycle_and_idle,
-        stale_since,
-        now,
-        grace,
-    )
 }
 
 pub(crate) fn discover_stale_duplicate_pids(
@@ -2289,12 +2206,13 @@ pub(crate) fn serve_with_options(
                 // the common hot path stays an atomic load plus one binary `stat`.
                 let wants_recycle_and_idle =
                     controller_wants_recycle(&runtime) && controller_recycle_idle(&runtime);
-                let (do_recycle, next_since) = recycle_debounce_decision(
-                    wants_recycle_and_idle,
-                    recycle_stale_since,
-                    Instant::now(),
-                    recycle_grace,
-                );
+                let (do_recycle, next_since) =
+                    agent_doc_controller::recycle::recycle_debounce_decision(
+                        wants_recycle_and_idle,
+                        recycle_stale_since,
+                        Instant::now(),
+                        recycle_grace,
+                    );
                 recycle_stale_since = next_since;
                 if do_recycle {
                     let reason = if runtime.recycle_forced() {
@@ -2440,7 +2358,7 @@ pub(crate) fn controller_recycle_idle(runtime: &ControllerRuntime) -> bool {
     // open-dispatch idle probe so the recycle takes effect at the next serve-loop
     // tick even mid-turn. We still require `Stable` above so a forced recycle never
     // lands mid-handoff (which would strand the replacement controller).
-    if force_overrides_in_flight_gate(
+    if agent_doc_controller::recycle::force_overrides_in_flight_gate(
         runtime.recycle_forced(),
         bootstrap.handoff_state == ControllerHandoffState::Stable,
     ) {
@@ -2450,14 +2368,6 @@ pub(crate) fn controller_recycle_idle(runtime: &ControllerRuntime) -> bool {
         return false;
     };
     !state_store::has_any_open_in_flight_dispatch(&conn).unwrap_or(true)
-}
-
-/// `#recycleforce` — pure decision: should a forced recycle bypass the in-flight
-/// dispatch idle gate? True only when the operator asked for force AND the
-/// controller is `Stable` (never mid-handoff — a forced recycle must still not
-/// strand a half-promoted replacement). Side-effect free for deterministic tests.
-pub(crate) fn force_overrides_in_flight_gate(recycle_forced: bool, handoff_stable: bool) -> bool {
-    agent_doc_controller::recycle::force_overrides_in_flight_gate(recycle_forced, handoff_stable)
 }
 
 /// `#ctlrecycle` R1/R2 — record the recycle and let the serve loop exit so the next
@@ -4467,6 +4377,8 @@ mod tests {
     }
     #[test]
     fn force_overrides_in_flight_gate_only_when_forced_and_stable() {
+        use agent_doc_controller::recycle::force_overrides_in_flight_gate;
+
         // `#recycleforce`: the force bypass of the in-flight-dispatch idle gate fires
         // only when the operator asked for force AND the controller is `Stable`.
         assert!(force_overrides_in_flight_gate(true, true));
@@ -5643,7 +5555,8 @@ mod tests {
     }
     #[test]
     fn resolve_supervisor_auto_recycle_precedence() {
-        use super::resolve_supervisor_auto_recycle as r;
+        use agent_doc_supervisor::config::resolve_supervisor_auto_recycle as r;
+
         // `#suprecyclequeue` precedence: env > frontmatter > project config > default.
         // Env truthy force-enables regardless of frontmatter / project config.
         assert!(r(Some("1"), Some(false), Some(false)));
@@ -5667,7 +5580,8 @@ mod tests {
     }
     #[test]
     fn resolve_agent_change_restart_precedence() {
-        use super::resolve_agent_change_restart as r;
+        use agent_doc_supervisor::config::resolve_agent_change_restart as r;
+
         // Env wins.
         assert!(r(Some("on"), Some(false), Some(false)));
         assert!(!r(Some("off"), Some(true), Some(true)));
@@ -5788,6 +5702,8 @@ mod tests {
     }
     #[test]
     fn recycle_debounce_decision_requires_continuous_idle_grace() {
+        use agent_doc_controller::recycle::recycle_debounce_decision;
+
         // `#ctlrecycle` foundation: a recycle fires only after "wants-recycle AND
         // idle" holds continuously for the grace window, and any busy blip resets it.
         let grace = Duration::from_secs(5);
@@ -5821,6 +5737,8 @@ mod tests {
     }
     #[test]
     fn source_newer_than_installed_binary_strict() {
+        use agent_doc_supervisor::config::source_newer_than_installed_binary;
+
         // `#supautoinstall`: only a STRICTLY newer source triggers an install; equal
         // timestamps (a just-installed binary / clock granularity) read as not-newer so a
         // boundary tie never re-builds.
@@ -5831,6 +5749,8 @@ mod tests {
 
     #[test]
     fn resolve_supervisor_auto_install_default_on() {
+        use agent_doc_supervisor::config::resolve_supervisor_auto_install;
+
         // `#supautoinstall`: default ON (mirrors recycle); env > frontmatter > project >
         // built-in ON. Safe to default ON because the build only fires for an agent-doc
         // dogfood session document (crate-root resolves).

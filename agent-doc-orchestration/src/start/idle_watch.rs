@@ -1272,7 +1272,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             crate::project_controller::current_binary_identity().ok(),
                         ) {
                             (Some(src), Some(bin)) => {
-                                crate::project_controller::source_newer_than_installed_binary(
+                                agent_doc_supervisor::config::source_newer_than_installed_binary(
                                     src,
                                     bin.modified_secs,
                                 )
@@ -1288,7 +1288,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         // A build is heavy → always debounce (no head-pending immediate
                         // path): a momentary idle gap mid-edit must never trip it.
                         let (do_install, next_install_since) =
-                            crate::project_controller::recycle_debounce_decision(
+                            agent_doc_controller::recycle::recycle_debounce_decision(
                                 matches!(install_action, SupervisorInstallAction::Install),
                                 install_stale_since,
                                 std::time::Instant::now(),
@@ -1883,7 +1883,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // The idle-grace debounce only gates the no-head-pending path; an
                 // inter-queue-item recycle bypasses it.
                 let (recycle_debounced, next_recycle_since) =
-                    crate::project_controller::recycle_debounce_decision(
+                    agent_doc_controller::recycle::recycle_debounce_decision(
                         matches!(recycle_action, SupervisorRecycleAction::RecycleDebounced),
                         recycle_stale_since,
                         std::time::Instant::now(),

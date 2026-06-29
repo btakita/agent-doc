@@ -3180,6 +3180,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub(crate) fn pause_reason_is_stale_supervisor_churn_stop",
         "pub(crate) fn stale_supervisor_pid_from_pause_reason",
         "pub(crate) fn spent_preset_id_from_pause_reason",
+        "pub(crate) fn recycle_debounce_decision",
+        "pub(crate) fn force_overrides_in_flight_gate",
     ] {
         assert!(
             !rpc_source.contains(forbidden_snippet),
@@ -3272,6 +3274,21 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         !supervisor_mod.contains("pub mod state"),
         "orchestration supervisor module must not re-export crash policy state"
     );
+    let rpc_source = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/project_controller/rpc.rs"),
+    )
+    .unwrap();
+    for forbidden_snippet in [
+        "pub(crate) fn resolve_supervisor_auto_recycle",
+        "pub(crate) fn resolve_agent_change_restart",
+        "pub(crate) fn source_newer_than_installed_binary",
+        "pub(crate) fn resolve_supervisor_auto_install",
+    ] {
+        assert!(
+            !rpc_source.contains(forbidden_snippet),
+            "project_controller::rpc must not wrap pure supervisor config helpers: {forbidden_snippet}"
+        );
+    }
 
     for relative in [
         "agent-doc-orchestration/src/start.rs",

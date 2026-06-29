@@ -323,10 +323,7 @@ pub(crate) fn poll_starting_timeout_blocked_actor_dispatch_ready(
     if !actor_blocked_by_starting_timeout(actor) {
         return false;
     }
-    let budget = crate::flow::routed_reopen::authoritative_actor_ready_retry_budget(
-        Some(harness.binary.as_str()),
-        cfg!(test),
-    );
+    let budget = authoritative_actor_ready_retry_budget(Some(harness.binary.as_str()), cfg!(test));
     let deadline = Instant::now() + budget.timeout;
     loop {
         let prompt_ready = current_generation_ready_prompt_proven(tmux, actor, harness);

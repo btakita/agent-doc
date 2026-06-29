@@ -247,6 +247,79 @@ pub fn dispatch_only_dispatch_start_proof_required(_harness_binary: &str) -> boo
     false
 }
 
+pub fn dispatch_only_starting_pane_ready_timeout_for_binary(
+    binary: Option<&str>,
+    test_mode: bool,
+) -> Duration {
+    if test_mode {
+        Duration::from_millis(250)
+    } else if matches!(binary, Some("opencode")) {
+        Duration::from_secs(15)
+    } else {
+        Duration::from_secs(2)
+    }
+}
+
+pub fn dispatch_only_starting_pane_recovery_timeout_for_binary(
+    binary: Option<&str>,
+    test_mode: bool,
+) -> Duration {
+    if test_mode {
+        return Duration::from_millis(400);
+    }
+    match binary {
+        Some("opencode") => Duration::from_secs(15),
+        Some("claude") => Duration::from_secs(10),
+        Some("codex") => Duration::from_secs(8),
+        _ => Duration::from_secs(5),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RetryBudget {
+    pub timeout: Duration,
+    pub poll_interval: Duration,
+}
+
+impl RetryBudget {
+    pub const fn new(timeout: Duration, poll_interval: Duration) -> Self {
+        Self {
+            timeout,
+            poll_interval,
+        }
+    }
+}
+
+pub fn authoritative_actor_ready_retry_budget(
+    binary: Option<&str>,
+    test_mode: bool,
+) -> RetryBudget {
+    RetryBudget::new(
+        dispatch_only_starting_pane_recovery_timeout_for_binary(binary, test_mode),
+        Duration::from_millis(100),
+    )
+}
+
+pub fn dispatch_only_starting_pane_ready_retry_budget(
+    binary: Option<&str>,
+    test_mode: bool,
+) -> RetryBudget {
+    RetryBudget::new(
+        dispatch_only_starting_pane_ready_timeout_for_binary(binary, test_mode),
+        Duration::from_millis(100),
+    )
+}
+
+pub fn dispatch_only_starting_pane_recovery_retry_budget(
+    binary: Option<&str>,
+    test_mode: bool,
+) -> RetryBudget {
+    RetryBudget::new(
+        dispatch_only_starting_pane_recovery_timeout_for_binary(binary, test_mode),
+        Duration::from_millis(100),
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DirectPaneSubmitStatus {
     Accepted,
@@ -599,6 +672,34 @@ mod tests {
         assert!(!dispatch_only_dispatch_start_proof_required("codex"));
         assert!(!dispatch_only_dispatch_start_proof_required("opencode"));
         assert!(!dispatch_only_dispatch_start_proof_required("claude"));
+    }
+
+    #[test]
+    fn retry_budgets_are_centralized_by_harness_and_test_mode() {
+        assert_eq!(
+            authoritative_actor_ready_retry_budget(Some("codex"), true),
+            RetryBudget::new(Duration::from_millis(400), Duration::from_millis(100))
+        );
+        assert_eq!(
+            dispatch_only_starting_pane_ready_retry_budget(Some("codex"), true),
+            RetryBudget::new(Duration::from_millis(250), Duration::from_millis(100))
+        );
+        assert_eq!(
+            dispatch_only_starting_pane_ready_timeout_for_binary(Some("opencode"), false),
+            Duration::from_secs(15)
+        );
+        assert_eq!(
+            dispatch_only_starting_pane_recovery_retry_budget(Some("opencode"), false).timeout,
+            Duration::from_secs(15)
+        );
+        assert_eq!(
+            dispatch_only_starting_pane_recovery_timeout_for_binary(Some("claude"), false),
+            Duration::from_secs(10)
+        );
+        assert_eq!(
+            dispatch_only_starting_pane_recovery_timeout_for_binary(Some("codex"), false),
+            Duration::from_secs(8)
+        );
     }
 
     #[test]

@@ -168,15 +168,13 @@ use crate::flow::routed_reopen::{
     PromptReadyBarrierDecision, ReopenMode, RoutedReopenFacts, RoutedReopenGuardReason,
     StartingActorLogFacts, accepted_only_dispatch_start_log_message,
     accepted_only_dispatch_start_refusal_message, actor_dispatch_blocker_reason,
-    actor_recovery_hint, authoritative_actor_ready_retry_budget,
+    actor_recovery_hint,
     busy_existing_pane_auto_fix_outcome as flow_busy_existing_pane_auto_fix_outcome,
     busy_projection_repaired_by_ready_prompt, can_use_degraded_authoritative_actor,
     classify_authoritative_actor_dispatch_action, classify_authoritative_prompt_ready_barrier,
     decide_authoritative_reopen, degraded_authoritative_actor_direct_submit_log_message,
     dispatch_only_blocked_guard_reason, dispatch_only_focus_only_should_fail_closed,
-    dispatch_only_sent_console_message, dispatch_only_sent_log_message,
-    dispatch_only_starting_pane_ready_retry_budget,
-    dispatch_only_starting_pane_recovery_retry_budget, log_dispatch_proof_failed,
+    dispatch_only_sent_console_message, dispatch_only_sent_log_message, log_dispatch_proof_failed,
     log_prompt_ready_barrier_failed,
     should_print_dispatch_only_unproven_progress as flow_should_print_dispatch_only_unproven_progress,
     starting_actor_not_ready_log_line, starting_actor_ready_log_line,
@@ -187,13 +185,17 @@ use crate::supervisor::ipc::IpcMethod;
 use agent_doc_controller::dispatch::{
     AuthoritativeRuntimeFacts, DirectPaneSubmitStatus as CommandDispatchStatus, DispatchActorState,
     DispatchDrainRetryDecision, DispatchRuntimeHealth, DispatchStartProofDecision,
-    DispatchStartProofFacts, RoutedDispatchStartProof,
+    DispatchStartProofFacts, RetryBudget, RoutedDispatchStartProof,
     authoritative_actor_dispatch_guard_reason as controller_authoritative_actor_dispatch_guard_reason,
-    classify_dispatch_start_proof, direct_pane_submit_acceptance_budget,
-    direct_pane_submit_acceptance_timeout, direct_pane_submit_outcome,
-    dispatch_drain_retry_decision, dispatch_only_busy_should_wait_for_ready,
+    authoritative_actor_ready_retry_budget, classify_dispatch_start_proof,
+    direct_pane_submit_acceptance_budget, direct_pane_submit_acceptance_timeout,
+    direct_pane_submit_outcome, dispatch_drain_retry_decision,
+    dispatch_only_busy_should_wait_for_ready,
     dispatch_only_dispatch_start_proof_required as controller_dispatch_only_dispatch_start_proof_required,
     dispatch_only_should_probe_active_turn_cue,
+    dispatch_only_starting_pane_ready_timeout_for_binary,
+    dispatch_only_starting_pane_recovery_retry_budget,
+    dispatch_only_starting_pane_recovery_timeout_for_binary,
 };
 use agent_doc_frontmatter::frontmatter;
 use tmux_router::Tmux;
@@ -3170,13 +3172,6 @@ fn should_preserve_failed_route_pane(
         && tmux.pane_alive(pane_id)
 }
 
-fn dispatch_only_starting_pane_ready_timeout_for_binary(
-    binary: Option<&str>,
-    test_mode: bool,
-) -> Duration {
-    dispatch_only_starting_pane_ready_retry_budget(binary, test_mode).timeout
-}
-
 fn dispatch_only_starting_pane_ready_timeout(harness: &HarnessConfig) -> Duration {
     wait_for_ready_override().unwrap_or_else(|| {
         dispatch_only_starting_pane_ready_timeout_for_binary(
@@ -3184,14 +3179,6 @@ fn dispatch_only_starting_pane_ready_timeout(harness: &HarnessConfig) -> Duratio
             cfg!(test),
         )
     })
-}
-
-fn dispatch_only_starting_pane_recovery_timeout(harness: Option<&HarnessConfig>) -> Duration {
-    dispatch_only_starting_pane_recovery_retry_budget(
-        harness.map(|h| h.binary.as_str()),
-        cfg!(test),
-    )
-    .timeout
 }
 
 /// #route-busy-vs-starting-wording: word the authoritative-actor `FailClosed`
@@ -3373,9 +3360,12 @@ fn dispatch_only_busy_refusal_message(
             file.display(),
             dispatch_pane,
             reason,
-            dispatch_only_busy_refusal_wait_secs(dispatch_only_starting_pane_recovery_timeout(
-                Some(harness)
-            )),
+            dispatch_only_busy_refusal_wait_secs(
+                dispatch_only_starting_pane_recovery_timeout_for_binary(
+                    Some(harness.binary.as_str()),
+                    cfg!(test),
+                )
+            ),
             authoritative_actor_dispatch_recovery_hint(actor_state, file),
             blocked_with_unblocker_fields("wait_for_dispatch_ready_prompt")
         ),
@@ -3402,7 +3392,7 @@ fn wait_for_authoritative_actor_ready(
                     timeout.as_secs()
                 ),
             );
-            crate::flow::routed_reopen::RetryBudget::new(timeout, Duration::from_millis(100))
+            RetryBudget::new(timeout, Duration::from_millis(100))
         }
         None => authoritative_actor_ready_retry_budget(Some(harness.binary.as_str()), cfg!(test)),
     };
@@ -3786,9 +3776,12 @@ fn route_via_authoritative_actor(
             file.display(),
             harness.binary,
             cue,
-            dispatch_only_busy_refusal_wait_secs(dispatch_only_starting_pane_recovery_timeout(
-                Some(harness)
-            ))
+            dispatch_only_busy_refusal_wait_secs(
+                dispatch_only_starting_pane_recovery_timeout_for_binary(
+                    Some(harness.binary.as_str()),
+                    cfg!(test),
+                )
+            )
         );
     }
     let mut waited_and_timed_out = false;
@@ -4406,9 +4399,12 @@ fn route_via_authoritative_actor(
             let wait_context = failclosed_wait_context(
                 harness,
                 busy_cue.as_deref(),
-                dispatch_only_busy_refusal_wait_secs(dispatch_only_starting_pane_recovery_timeout(
-                    Some(harness),
-                )),
+                dispatch_only_busy_refusal_wait_secs(
+                    dispatch_only_starting_pane_recovery_timeout_for_binary(
+                        Some(harness.binary.as_str()),
+                        cfg!(test),
+                    ),
+                ),
             );
             anyhow::bail!(
                 "authoritative actor generation {} for {} owns pane {} but route will not inject a new trigger because {} ({}){}. {}",
@@ -8236,11 +8232,6 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
         assert!(!authoritative_actor_dispatch_target_eligible(&no_state));
     }
     #[test]
-    fn dispatch_only_starting_pane_recovery_timeout_default() {
-        let timeout = dispatch_only_starting_pane_recovery_timeout(None);
-        assert_eq!(timeout, Duration::from_millis(400));
-    }
-    #[test]
     fn dispatch_only_starting_pane_ready_timeout_production_values() {
         assert_eq!(
             dispatch_only_starting_pane_ready_timeout_for_binary(Some("opencode"), false),
@@ -8258,24 +8249,6 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
             dispatch_only_starting_pane_ready_timeout_for_binary(Some("opencode"), true),
             Duration::from_millis(250)
         );
-    }
-    #[test]
-    fn dispatch_only_starting_pane_recovery_timeout_opencode() {
-        let h = crate::harness::HarnessConfig::opencode();
-        let timeout = dispatch_only_starting_pane_recovery_timeout(Some(&h));
-        assert_eq!(timeout, Duration::from_millis(400));
-    }
-    #[test]
-    fn dispatch_only_starting_pane_recovery_timeout_claude() {
-        let h = crate::harness::HarnessConfig::claude();
-        let timeout = dispatch_only_starting_pane_recovery_timeout(Some(&h));
-        assert_eq!(timeout, Duration::from_millis(400));
-    }
-    #[test]
-    fn dispatch_only_starting_pane_recovery_timeout_codex() {
-        let h = crate::harness::HarnessConfig::codex();
-        let timeout = dispatch_only_starting_pane_recovery_timeout(Some(&h));
-        assert_eq!(timeout, Duration::from_millis(400));
     }
     #[test]
     fn route_starting_actor_not_ready_log_line_includes_typed_lifecycle_facts() {

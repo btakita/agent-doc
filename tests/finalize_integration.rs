@@ -486,7 +486,7 @@ fn ipc_timeout_retry_does_not_merge_from_stale_crdt_state() {
     let initial_head = head_blob(tmp.path());
     fs::write(&doc, &current).unwrap();
     let baseline = write_baseline(tmp.path(), base);
-    let stale_doc = agent_doc::crdt::CrdtDoc::from_text(stale);
+    let stale_doc = agent_doc_merge::crdt::CrdtDoc::from_text(stale);
     fs::write(crdt_path(tmp.path(), &doc), stale_doc.encode_state()).unwrap();
 
     // `#6b5hprimary`/`#g9d7`: this scenario models a LIVE editor — the "while

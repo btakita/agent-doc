@@ -76,7 +76,6 @@ pub mod crdt_relay;
 pub mod crdt_relay_host;
 pub mod cycle_state;
 pub mod dashboard;
-pub mod debounce;
 pub mod dedupe;
 pub mod diff_io;
 pub mod doctor;
@@ -134,9 +133,7 @@ pub mod sync;
 pub mod turn_scope_store;
 pub mod turn_status;
 pub mod watch;
-pub mod watch_authority;
 pub mod write;
-pub mod write_authority;
 pub mod write_queue;
 
 // Core-backed shim for the CRDT merge path (merge -> crdt).

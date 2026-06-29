@@ -9,7 +9,7 @@ use similar::{ChangeTag, TextDiff};
 use std::path::Path;
 
 use crate::snapshot;
-use agent_doc_core::diff::{is_stale_snapshot, strip_comments, unified_diff_from_contents};
+use agent_doc_diff::{is_stale_snapshot, strip_comments, unified_diff_from_contents};
 
 /// Diff result plus the exact snapshot/current document content used to compute it.
 pub struct ComputeResult {
@@ -145,7 +145,7 @@ pub fn wait_for_stable_content(doc: &Path, previous: &str) -> Result<String> {
     let doc_str = doc.to_string_lossy().to_string();
 
     // ── Editor-authoritative path ──
-    if let Some(state) = crate::debounce::editor_buffer_state(&doc_str) {
+    if let Some(state) = agent_doc_debounce::editor_buffer_state(&doc_str) {
         return wait_for_stable_content_editor(doc, &doc_str, &state);
     }
 
@@ -159,16 +159,16 @@ pub fn wait_for_stable_content(doc: &Path, previous: &str) -> Result<String> {
 fn wait_for_stable_content_editor(
     doc: &Path,
     doc_str: &str,
-    initial_state: &crate::debounce::EditorBufferState,
+    initial_state: &agent_doc_debounce::EditorBufferState,
 ) -> Result<String> {
     const EDITOR_DEBOUNCE_MS: u64 = 500;
     const EDITOR_TIMEOUT_MS: u64 = 6000;
 
     // If already stable (not dirty, or debounce elapsed), return immediately.
-    if let Some(stable) = crate::debounce::editor_buffer_stable(doc_str, EDITOR_DEBOUNCE_MS) {
+    if let Some(stable) = agent_doc_debounce::editor_buffer_stable(doc_str, EDITOR_DEBOUNCE_MS) {
         let current = std::fs::read_to_string(doc)?;
         if let Some(ref hash) = stable.hash {
-            let expected = crate::debounce::content_hash(&current);
+            let expected = agent_doc_debounce::content_hash(&current);
             if hash.eq_ignore_ascii_case(&expected) {
                 eprintln!(
                     "[diff] Editor buffer stable (version={}, hash match), returning immediately",
@@ -194,16 +194,18 @@ fn wait_for_stable_content_editor(
         "[diff] Editor buffer not yet stable (version={}, dirty={}), waiting up to {}ms",
         initial_state.version, initial_state.dirty, EDITOR_TIMEOUT_MS
     );
-    if let Some(stable) =
-        crate::debounce::await_editor_buffer_stable(doc_str, EDITOR_DEBOUNCE_MS, EDITOR_TIMEOUT_MS)
-    {
+    if let Some(stable) = agent_doc_debounce::await_editor_buffer_stable(
+        doc_str,
+        EDITOR_DEBOUNCE_MS,
+        EDITOR_TIMEOUT_MS,
+    ) {
         let current = std::fs::read_to_string(doc)?;
         eprintln!(
             "[diff] Editor buffer stabilised (version={}, dirty={})",
             stable.version, stable.dirty
         );
         if let Some(ref hash) = stable.hash {
-            let expected = crate::debounce::content_hash(&current);
+            let expected = agent_doc_debounce::content_hash(&current);
             if hash.eq_ignore_ascii_case(&expected) {
                 return Ok(current);
             }
@@ -735,17 +737,17 @@ mod tests {
             .unwrap_or_default()
             .as_millis();
 
-        let state = crate::debounce::EditorBufferState {
+        let state = agent_doc_debounce::EditorBufferState {
             path: doc_str.clone(),
             version: 1,
             dirty: false,
             last_edit_timestamp_ms: now,
             save_timestamp_ms: Some(now),
-            hash: Some(crate::debounce::content_hash(content)),
+            hash: Some(agent_doc_debounce::content_hash(content)),
             content_len: Some(content.len()),
             session_id: None,
         };
-        crate::debounce::record_editor_buffer_state(&state);
+        agent_doc_debounce::record_editor_buffer_state(&state);
 
         let previous = "";
         let start = std::time::Instant::now();

@@ -24,15 +24,23 @@ name = "agent-doc"
 version = "0.34.65"
 dependencies = [
  "agent-doc-core",
+ "agent-doc-debounce",
+ "agent-doc-diff",
+ "agent-doc-document-realtime",
  "agent-doc-element",
  "agent-doc-element-backlog",
  "agent-doc-element-boundary",
  "agent-doc-element-queue",
+ "agent-doc-ffi",
+ "agent-doc-frontmatter",
  "agent-doc-markdown-ast",
+ "agent-doc-merge",
  "agent-doc-orchestration",
  "agent-doc-queue",
  "agent-doc-secret-redact",
  "agent-doc-sqlite",
+ "agent-doc-template",
+ "agent-doc-turn",
  "agent-kit",
  "anyhow",
  "assert_cmd",
@@ -79,22 +87,33 @@ name = "agent-doc-core"
 version = "0.34.65"
 dependencies = [
  "agent-doc-element",
- "agent-doc-element-backlog",
  "agent-doc-element-queue",
  "agent-doc-model-tier",
- "anyhow",
- "clap",
- "indexmap",
- "lazily 0.13.1",
- "pulldown-cmark",
+]
+
+[[package]]
+name = "agent-doc-debounce"
+version = "0.34.65"
+dependencies = [
+ "agent-doc-log-time",
+ "hex",
+ "libc",
  "serde",
  "serde_json",
- "serde_yaml",
+ "sha2 0.11.0",
+ "tempfile",
+]
+
+[[package]]
+name = "agent-doc-diff"
+version = "0.34.65"
+dependencies = [
+ "agent-doc-element",
+ "agent-doc-element-backlog",
+ "serde",
+ "serde_json",
  "similar",
  "tempfile",
- "toml 1.1.2+spec-1.1.0",
- "uuid",
- "yrs",
 ]
 
 [[package]]
@@ -115,7 +134,7 @@ version = "0.34.65"
 dependencies = [
  "agent-doc-document",
  "agent-doc-merge",
- "lazily 0.13.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lazily 0.13.1",
  "serde",
 ]
 
@@ -174,7 +193,7 @@ name = "agent-doc-element-queue"
 version = "0.34.65"
 dependencies = [
  "agent-doc-element",
- "lazily 0.13.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lazily 0.13.1",
  "serde",
 ]
 
@@ -224,6 +243,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-doc-ffi"
+version = "0.34.65"
+dependencies = [
+ "agent-doc-element",
+ "agent-doc-frontmatter",
+ "agent-doc-merge",
+ "agent-doc-syntax",
+ "agent-doc-template",
+ "anyhow",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "agent-doc-frontmatter"
+version = "0.34.65"
+dependencies = [
+ "agent-doc-model-tier",
+ "anyhow",
+ "clap",
+ "indexmap",
+ "serde",
+ "serde_yaml",
+ "toml 1.1.2+spec-1.1.0",
+ "uuid",
+]
+
+[[package]]
 name = "agent-doc-log-time"
 version = "0.34.65"
 
@@ -240,10 +287,15 @@ dependencies = [
 name = "agent-doc-merge"
 version = "0.34.65"
 dependencies = [
- "agent-doc-core",
+ "agent-doc-element",
+ "agent-doc-element-queue",
  "agent-doc-markdown-ast",
- "lazily 0.13.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "anyhow",
+ "lazily 0.13.1",
  "serde",
+ "serde_json",
+ "similar",
+ "yrs",
 ]
 
 [[package]]
@@ -261,12 +313,15 @@ version = "0.34.65"
 dependencies = [
  "agent-doc-controller",
  "agent-doc-core",
+ "agent-doc-debounce",
+ "agent-doc-diff",
  "agent-doc-document",
  "agent-doc-document-realtime",
  "agent-doc-element",
  "agent-doc-element-backlog",
  "agent-doc-element-boundary",
  "agent-doc-element-queue",
+ "agent-doc-frontmatter",
  "agent-doc-log-time",
  "agent-doc-markdown-ast",
  "agent-doc-merge",
@@ -275,9 +330,11 @@ dependencies = [
  "agent-doc-sqlite",
  "agent-doc-supervisor",
  "agent-doc-supervisor-process",
+ "agent-doc-template",
  "agent-doc-tmux",
  "agent-doc-tmux-commands",
  "agent-doc-tmux-io",
+ "agent-doc-topic",
  "agent-doc-turn",
  "agent-doc-turn-executor-tmux",
  "agent-kit",
@@ -292,7 +349,7 @@ dependencies = [
  "indexmap",
  "instruction-files",
  "interprocess",
- "lazily 0.13.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lazily 0.13.1",
  "libc",
  "notify",
  "portable-pty",
@@ -329,6 +386,7 @@ dependencies = [
  "agent-doc-document",
  "agent-doc-element-backlog",
  "agent-doc-element-queue",
+ "agent-doc-frontmatter",
  "agent-doc-markdown-ast",
  "anyhow",
  "libc",
@@ -350,6 +408,9 @@ name = "agent-doc-sqlite"
 version = "0.34.65"
 dependencies = [
  "agent-doc-core",
+ "agent-doc-frontmatter",
+ "agent-doc-topic",
+ "agent-doc-turn",
  "anyhow",
  "rusqlite",
  "serde",
@@ -361,7 +422,7 @@ dependencies = [
 name = "agent-doc-supervisor"
 version = "0.34.65"
 dependencies = [
- "lazily 0.13.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lazily 0.13.1",
  "serde",
 ]
 
@@ -375,10 +436,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-doc-syntax"
+version = "0.34.65"
+dependencies = [
+ "agent-doc-element",
+ "serde",
+]
+
+[[package]]
+name = "agent-doc-template"
+version = "0.34.65"
+dependencies = [
+ "agent-doc-element",
+ "anyhow",
+ "serde",
+ "tempfile",
+ "uuid",
+]
+
+[[package]]
 name = "agent-doc-tmux"
 version = "0.34.65"
 dependencies = [
- "lazily 0.13.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lazily 0.13.1",
  "serde",
 ]
 
@@ -397,12 +477,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-doc-topic"
+version = "0.34.65"
+
+[[package]]
 name = "agent-doc-turn"
 version = "0.34.65"
 dependencies = [
- "lazily 0.13.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lazily 0.13.1",
  "proptest",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1717,15 +1802,6 @@ name = "lazily"
 version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7006d091eda7f35e3c9ecc605cad71e74e2f73b2c0680ef5321e205524e05166"
-dependencies = [
- "arc-swap",
- "parking_lot",
- "smallvec",
-]
-
-[[package]]
-name = "lazily"
-version = "0.13.1"
 dependencies = [
  "arc-swap",
  "parking_lot",

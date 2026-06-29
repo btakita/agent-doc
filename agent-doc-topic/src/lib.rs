@@ -8,8 +8,8 @@
 //!   from the parsed output.
 //!
 //! ## Agentic Contracts
-//! - Lives in `agent-doc-core` so both the compaction layer (orchestration) and the archive
-//!   index (the SQLite crate) can parse topic sections without a crate cycle.
+//! - Lives in `agent-doc-topic` so compaction/archive flows can parse topic sections without
+//!   depending on the `agent-doc-core` compatibility facade.
 //!
 //! ## Evals
 //! - parse_topic_sections_basic: `### Re:` headings split into sections

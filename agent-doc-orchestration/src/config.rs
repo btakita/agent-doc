@@ -27,8 +27,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 // Pure types from agent-doc-core (relocated under Direction A).
-use agent_doc_core::frontmatter::CodexNetworkAccess;
 use agent_doc_core::model_tier::ModelConfig;
+use agent_doc_frontmatter::frontmatter::CodexNetworkAccess;
 
 // Re-export project-level tmux helpers from the sibling I/O module (for
 // convenience). Consumed across the crate boundary by the main `agent-doc`

@@ -35,7 +35,7 @@ pub(crate) fn read_ack_content_sidecar(
 /// boilerplate. Returns the trimmed heading lines (without the trailing
 /// newline) in order of appearance.
 pub(crate) fn extract_response_headings_from_patches(
-    patches: &[agent_doc_core::template::PatchBlock],
+    patches: &[agent_doc_template::PatchBlock],
 ) -> Vec<String> {
     let mut out = Vec::new();
     for patch in patches {
@@ -66,7 +66,7 @@ pub(crate) fn extract_response_headings_from_patches(
 /// the mid-turn race.
 pub(crate) fn patch_response_headings_already_in_head(
     file: &Path,
-    patches: &[agent_doc_core::template::PatchBlock],
+    patches: &[agent_doc_template::PatchBlock],
 ) -> bool {
     let headings = extract_response_headings_from_patches(patches);
     if headings.is_empty() {
@@ -371,7 +371,7 @@ pub(crate) fn content_ours_merged_with_disk_edits(
                 "[write] WARNING: failed to load overlay CRDT merge base, falling back to baseline text: {}",
                 e
             );
-            agent_doc_core::crdt::CrdtDoc::from_text(base).encode_state()
+            agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state()
         }
     };
     match merge::merge_contents_crdt_with_ops(
@@ -1488,7 +1488,7 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
 
     repair_ipc_decision_visible_state(file, &repair_decision, Some(patch_id))?;
     snapshot::save(file, &repair_decision.snapshot_content)?;
-    let crdt_doc = agent_doc_core::crdt::CrdtDoc::from_text(&repair_decision.snapshot_content);
+    let crdt_doc = agent_doc_merge::crdt::CrdtDoc::from_text(&repair_decision.snapshot_content);
     snapshot::save_document_crdt(
         file,
         &crdt_doc.encode_state(),
@@ -1708,7 +1708,7 @@ fn redelivery_missing_operator_text_authority(
     let editor_id = live.editor_id.as_deref().unwrap_or("unknown");
     eprintln!(
         "[write] {label} editor repair skipped: live editor buffer {editor_id} lacks required capability {}",
-        crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY
+        agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY
     );
     crate::ops_log::log_op(
         file,
@@ -1716,7 +1716,7 @@ fn redelivery_missing_operator_text_authority(
             "{label}_editor_redelivery_skipped file={} patch_id={} skip=editor_capability_missing capability={} editor_id={} live_len={} live_hash={}",
             file.display(),
             source_patch_id.unwrap_or("-"),
-            crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+            agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
             editor_id,
             live.len,
             live.hash
@@ -1813,7 +1813,7 @@ pub(crate) fn redeliver_full_content_repair_to_editor(
         .to_string_lossy()
         .to_string();
     if let Some(live) =
-        crate::debounce::live_buffer_diverges_from_content(&indicator_path, expected_bad_state)
+        agent_doc_debounce::live_buffer_diverges_from_content(&indicator_path, expected_bad_state)
     {
         eprintln!(
             "[write] {} editor repair skipped: live editor buffer has unsaved edits ahead of the bad state",
@@ -3317,7 +3317,7 @@ mod ack_content_snapshot_tests {
         let original = "---\nsession: test\n---\n\n<!-- agent:exchange -->\ndo #jbpfx2\n<!-- agent:boundary:test-bnd-001 -->\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, original).unwrap();
 
-        let patch = agent_doc_core::template::PatchBlock::new("exchange", "agent response");
+        let patch = agent_doc_template::PatchBlock::new("exchange", "agent response");
 
         // content_ours has the ❯ prefix, but it is only an agent-owned candidate.
         let content_ours = "---\nsession: test\n---\n\n<!-- agent:exchange -->\n❯ do #jbpfx2\nagent response\n<!-- /agent:exchange -->\n";
@@ -3455,7 +3455,7 @@ do #bppfxstrip. spec-test-build-install-commit-push
 ";
         std::fs::write(&doc, original).unwrap();
 
-        let patch = agent_doc_core::template::PatchBlock::new("exchange", "agent response");
+        let patch = agent_doc_template::PatchBlock::new("exchange", "agent response");
         let content_ours = "\
 ---
 session: test
@@ -3562,7 +3562,7 @@ do [#normfallback]
 ";
         std::fs::write(&doc, original).unwrap();
 
-        let patch = agent_doc_core::template::PatchBlock::new(
+        let patch = agent_doc_template::PatchBlock::new(
             "exchange",
             "### Re: #normfallback — gpt-5\n\nCovered.",
         );
@@ -4039,13 +4039,13 @@ Stale response that the operator cleared.
 <!-- agent:exchange patch=append -->
 <!-- /agent:exchange -->
 ";
-        crate::debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
             &indicator_path,
             cleared_buffer,
             "jetbrains-capable-diverged",
             "jetbrains",
             "test",
-            &[crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
         )
         .unwrap();
 
@@ -4097,7 +4097,7 @@ Done.
             .unwrap_or_else(|_| doc.clone())
             .to_string_lossy()
             .to_string();
-        crate::debounce::record_live_buffer_digest_content_for_editor(
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor(
             &indicator_path,
             bad_state,
             Some("jetbrains-old-editor"),
@@ -4176,7 +4176,7 @@ Done.
         let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
             ops_log.contains("skip=editor_capability_missing")
-                && ops_log.contains(crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY),
+                && ops_log.contains(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY),
             "missing-capability redelivery skip should be logged:\n{ops_log}"
         );
         assert!(
@@ -4325,7 +4325,7 @@ do #splpend
 ";
         std::fs::write(&doc, on_disk_with_pending).unwrap();
 
-        let patch = agent_doc_core::template::PatchBlock::new("exchange", "agent response");
+        let patch = agent_doc_template::PatchBlock::new("exchange", "agent response");
         let content_ours = "\
 ---
 session: test
@@ -4431,7 +4431,7 @@ The tmux focus should be snappy.
 ";
         std::fs::write(&doc, original).unwrap();
 
-        let patch = agent_doc_core::template::PatchBlock::new("exchange", "agent response");
+        let patch = agent_doc_template::PatchBlock::new("exchange", "agent response");
         let content_ours = "\
 ---
 session: test
@@ -5069,7 +5069,7 @@ mod core_tests {
             crate::test_support::patch_with_heading("### Re: first topic — opus-4-7"),
             crate::test_support::patch_with_heading("### Re: second topic — opus-4-7"),
             // Patch with no Re: heading should be skipped.
-            agent_doc_core::template::PatchBlock::new("status", "Just a status update.\n"),
+            agent_doc_template::PatchBlock::new("status", "Just a status update.\n"),
         ];
         let headings = extract_response_headings_from_patches(&patches);
         assert_eq!(
@@ -5082,7 +5082,7 @@ mod core_tests {
     }
     #[test]
     fn extract_response_headings_picks_first_re_per_patch() {
-        let patch = agent_doc_core::template::PatchBlock::new(
+        let patch = agent_doc_template::PatchBlock::new(
             "exchange",
             "### Re: outer — opus-4-7\n\nbody mentioning ### Re: inner — opus-4-7 elsewhere\n",
         );
@@ -5323,7 +5323,7 @@ mod core_tests {
         record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p1"), "socket_ipc").unwrap();
         record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p2"), "socket_ipc").unwrap();
 
-        let patch = agent_doc_core::template::PatchBlock::new("exchange", "new content");
+        let patch = agent_doc_template::PatchBlock::new("exchange", "new content");
         let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
 
         assert!(
@@ -5401,7 +5401,7 @@ mod core_tests {
             }
         });
 
-        let patch = agent_doc_core::template::PatchBlock::new("exchange", "new content");
+        let patch = agent_doc_template::PatchBlock::new("exchange", "new content");
         let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
         assert!(
             result.success,

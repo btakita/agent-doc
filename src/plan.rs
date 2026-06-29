@@ -48,9 +48,9 @@ use std::path::Path;
 use agent_doc_element::element::{self, is_backlog_component, is_tracked_work_component};
 use agent_doc_element_backlog::backlog;
 
-use crate::frontmatter;
-use agent_doc_core::diff;
-use agent_doc_orchestration::{diff_io, security};
+use agent_doc_diff as diff;
+use agent_doc_frontmatter::frontmatter;
+use agent_doc_orchestration::{diff_io, frontmatter_io, security};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -172,7 +172,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
 
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    let (fm, _body) = frontmatter::parse_for_file(&content, file)
+    let (fm, _body) = frontmatter_io::parse_for_file(&content, file)
         .with_context(|| format!("failed to parse frontmatter in {}", file.display()))?;
 
     let doc_diff = diff_io::compute(file)?;

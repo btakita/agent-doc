@@ -29,12 +29,8 @@
 //! - new_boundary_id_with_summary_truncate: long summary → slug capped at 20 chars
 //! - format_boundary_marker: `"abc123"` → `"<!-- agent:boundary:abc123 -->"`
 
-pub mod crdt;
 pub mod ffi;
-pub mod frontmatter;
 pub mod model_tier;
-pub mod project_config;
-pub mod template;
 
 // Boundary ID helpers live with `agent-doc-element-boundary`; they are
 // re-exported through `agent_doc_core::id` for downstream compatibility.

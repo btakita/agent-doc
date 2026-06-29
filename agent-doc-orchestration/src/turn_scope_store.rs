@@ -22,7 +22,7 @@
 //!   cycle, and a missing sidecar makes the gate fall back to its coarse,
 //!   conservative behavior (block on any non-exchange drift).
 
-use agent_doc_core::turn_scope::TurnScope;
+use agent_doc_turn::turn_scope::TurnScope;
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
@@ -79,7 +79,7 @@ pub fn delete(doc: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_doc_core::turn_scope::Address;
+    use agent_doc_turn::turn_scope::Address;
     use tempfile::TempDir;
 
     fn doc_in(dir: &TempDir) -> PathBuf {

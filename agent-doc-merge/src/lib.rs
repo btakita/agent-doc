@@ -7,12 +7,16 @@
 
 pub mod ownership;
 
-pub use agent_doc_core::cell_doc::{
-    CellConflict, CellMergeOutcome, ConflictKind, ConflictPolicy, component_conflict_policy,
-    merge_3way as cell_merge_3way,
-};
+pub mod cell_doc;
+pub mod crdt;
+pub mod crdt_sync;
+
 pub use agent_doc_markdown_ast::semantic_merge::{
     AckReason, AckRequest, NodeOutcome, OutcomeKind, SemanticMerge, semantic_merge,
+};
+pub use cell_doc::{
+    CellConflict, CellMergeOutcome, ConflictKind, ConflictPolicy, component_conflict_policy,
+    merge_3way as cell_merge_3way,
 };
 
 /// Merge implementation to use for a pure three-way merge.
@@ -145,6 +149,30 @@ mod tests {
 
     #[test]
     fn cell_merge_is_exposed_as_a_pure_plan() {
+        let _guard = crate::cell_doc::CELL_MERGE_ENV_LOCK.lock().unwrap();
+        let prior_conflict_markers =
+            std::env::var(crate::cell_doc::CELL_MERGE_CONFLICT_MARKERS_ENV).ok();
+        struct RestoreConflictMarkers(Option<String>);
+        impl Drop for RestoreConflictMarkers {
+            fn drop(&mut self) {
+                unsafe {
+                    match self.0.take() {
+                        Some(value) => std::env::set_var(
+                            crate::cell_doc::CELL_MERGE_CONFLICT_MARKERS_ENV,
+                            value,
+                        ),
+                        None => {
+                            std::env::remove_var(crate::cell_doc::CELL_MERGE_CONFLICT_MARKERS_ENV)
+                        }
+                    }
+                }
+            }
+        }
+        let _restore_conflict_markers = RestoreConflictMarkers(prior_conflict_markers);
+        unsafe {
+            std::env::set_var(crate::cell_doc::CELL_MERGE_CONFLICT_MARKERS_ENV, "0");
+        }
+
         let agent = r#"<!-- agent:queue -->
 - [ ] [#task] agent text
 <!-- /agent:queue -->
@@ -166,6 +194,7 @@ mod tests {
     fn crate_manifest_excludes_realtime_and_turn_dependencies() {
         let manifest = include_str!("../Cargo.toml");
         for forbidden in [
+            "agent-doc-core",
             "agent-doc-orchestration",
             "git2",
             "interprocess",

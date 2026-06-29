@@ -75,12 +75,12 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
 
-use agent_doc_core::frontmatter;
 use agent_doc_element::element;
+use agent_doc_frontmatter::frontmatter;
 use agent_doc_sqlite::archive_index;
 
 use crate::snapshot;
-use agent_doc_core::topic::parse_topic_sections_with_tail;
+use agent_doc_topic::parse_topic_sections_with_tail;
 
 /// A parsed exchange pair (User prompt + Assistant response).
 #[derive(Debug)]
@@ -525,7 +525,7 @@ fn apply_compacted_document(
     snapshot::save(file, snapshot_content)?;
 
     if refresh_crdt {
-        let new_crdt = agent_doc_core::crdt::CrdtDoc::from_text(compacted).encode_state();
+        let new_crdt = agent_doc_merge::crdt::CrdtDoc::from_text(compacted).encode_state();
         snapshot::save_document_crdt(file, &new_crdt, compacted)?;
         eprintln!("[compact] CRDT state refreshed from post-compact content");
     }
@@ -615,9 +615,8 @@ fn run_component_compact_with_options(
     }
 
     let compacted = comp.replace_content(content, &visible_content);
-    let mut compacted =
-        agent_doc_core::template::repair_conversation_tail_outside_exchange(&compacted)?
-            .unwrap_or(compacted);
+    let mut compacted = agent_doc_template::repair_conversation_tail_outside_exchange(&compacted)?
+        .unwrap_or(compacted);
     if let Some(reconciled) = crate::status_cmd::reconcile_top_backlog_status_content(&compacted)? {
         compacted = reconciled;
     }
@@ -625,7 +624,7 @@ fn run_component_compact_with_options(
         compacted.clone()
     } else {
         let snapshot_content = comp.replace_content(content, &summary);
-        agent_doc_core::template::repair_conversation_tail_outside_exchange(&snapshot_content)?
+        agent_doc_template::repair_conversation_tail_outside_exchange(&snapshot_content)?
             .unwrap_or(snapshot_content)
     };
     if let Some(reconciled) =
@@ -750,9 +749,8 @@ fn run_component_compact_partial(
     }
 
     let compacted = comp.replace_content(content, &new_content);
-    let mut compacted =
-        agent_doc_core::template::repair_conversation_tail_outside_exchange(&compacted)?
-            .unwrap_or(compacted);
+    let mut compacted = agent_doc_template::repair_conversation_tail_outside_exchange(&compacted)?
+        .unwrap_or(compacted);
     if let Some(reconciled) = crate::status_cmd::reconcile_top_backlog_status_content(&compacted)? {
         compacted = reconciled;
     }
@@ -760,7 +758,7 @@ fn run_component_compact_partial(
         compacted.clone()
     } else {
         let snapshot_content = comp.replace_content(content, &base_new_content);
-        agent_doc_core::template::repair_conversation_tail_outside_exchange(&snapshot_content)?
+        agent_doc_template::repair_conversation_tail_outside_exchange(&snapshot_content)?
             .unwrap_or(snapshot_content)
     };
     if let Some(reconciled) =
@@ -1397,8 +1395,8 @@ fn is_leap_year(y: i64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_doc_core::topic::parse_topic_sections;
     use agent_doc_element::element::is_backlog_component;
+    use agent_doc_topic::parse_topic_sections;
 
     const COMPACTDROPITEM_DOC: &str = concat!(
         "---\nagent_doc_session: drop-test\nagent_doc_format: template\n---\n\n",
@@ -1436,14 +1434,14 @@ mod tests {
         let err = err.to_string();
         assert!(
             err.contains("lacks required capability")
-                && err.contains(crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY),
+                && err.contains(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY),
             "compact with an under-capable live editor buffer must fail closed: {err}"
         );
         assert!(
             ops_log.contains("compact_writeback")
                 && ops_log.contains("transport=blocked")
                 && ops_log.contains("reason=editor_capability_missing")
-                && ops_log.contains(crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY),
+                && ops_log.contains(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY),
             "under-capable compact refusal should be logged:\n{ops_log}"
         );
     }
@@ -2104,10 +2102,10 @@ mod tests {
         std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
         snapshot::save(&file, doc).unwrap();
         let file_str = file.canonicalize().unwrap().to_string_lossy().to_string();
-        crate::debounce::record_live_buffer_digest(
+        agent_doc_debounce::record_live_buffer_digest(
             &file_str,
             live_buffer.len(),
-            &crate::debounce::content_hash(&live_buffer),
+            &agent_doc_debounce::content_hash(&live_buffer),
         )
         .unwrap();
 
@@ -2152,10 +2150,10 @@ mod tests {
         std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
         snapshot::save(&file, stale_snapshot).unwrap();
         let file_str = file.canonicalize().unwrap().to_string_lossy().to_string();
-        crate::debounce::record_live_buffer_digest(
+        agent_doc_debounce::record_live_buffer_digest(
             &file_str,
             stale_snapshot.len(),
-            &crate::debounce::content_hash(stale_snapshot),
+            &agent_doc_debounce::content_hash(stale_snapshot),
         )
         .unwrap();
 
@@ -2249,7 +2247,7 @@ mod tests {
         snapshot::save(&file, &doc).unwrap();
         // Seed both the legacy and overlay CRDT sidecars from the large document,
         // mirroring a live CRDT session before compaction.
-        let legacy = agent_doc_core::crdt::CrdtDoc::from_text(&doc).encode_state();
+        let legacy = agent_doc_merge::crdt::CrdtDoc::from_text(&doc).encode_state();
         snapshot::save_document_crdt(&file, &legacy, &doc).unwrap();
 
         // Full compact (keep=None) in CRDT mode.
@@ -2635,7 +2633,7 @@ mod tests {
         snapshot::save(&file, doc).unwrap();
 
         // Create and save initial CRDT state
-        let initial_crdt = agent_doc_core::crdt::CrdtDoc::from_text(doc).encode_state();
+        let initial_crdt = agent_doc_merge::crdt::CrdtDoc::from_text(doc).encode_state();
         snapshot::save_document_crdt(&file, &initial_crdt, doc).unwrap();
 
         // Capture pending before compact
@@ -2770,7 +2768,7 @@ mod tests {
             .join("crdt")
             .join(format!("{}.yrs", snapshot::doc_hash(&file).unwrap()));
         if let Ok(bytes) = std::fs::read(&crdt_path) {
-            let round_tripped = agent_doc_core::crdt::CrdtDoc::decode_state(&bytes)
+            let round_tripped = agent_doc_merge::crdt::CrdtDoc::decode_state(&bytes)
                 .unwrap()
                 .to_text();
             assert!(

@@ -40,7 +40,7 @@ use serde::Serialize;
 use std::path::Path;
 
 use crate::sessions::{SessionRegistry, Tmux};
-use agent_doc_core::frontmatter;
+use agent_doc_frontmatter::frontmatter;
 
 use crate::sessions;
 

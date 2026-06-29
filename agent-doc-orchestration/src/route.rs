@@ -192,7 +192,7 @@ use crate::flow::routed_reopen::{
 use crate::harness::HarnessConfig;
 use crate::sessions::Tmux;
 use crate::supervisor::ipc::IpcMethod;
-use agent_doc_core::frontmatter;
+use agent_doc_frontmatter::frontmatter;
 
 use crate::{frontmatter_io, prompt, resync, sessions, snapshot, sync};
 use std::cell::Cell;
@@ -2306,13 +2306,13 @@ fn scrub_duplicate_prompt_comments_for_route(
     let mut removed_answered_tail = false;
     let mut removed_comment = false;
     if let Some(tail_cleaned) =
-        agent_doc_core::template::remove_duplicate_answered_exchange_prompt_tail(&cleaned_content)
+        agent_doc_template::remove_duplicate_answered_exchange_prompt_tail(&cleaned_content)
     {
         cleaned_content = tail_cleaned;
         removed_answered_tail = true;
     }
     if let Some(tail_cleaned) =
-        agent_doc_core::template::remove_post_exchange_duplicate_prompt_comments_preserving_docs(
+        agent_doc_template::remove_post_exchange_duplicate_prompt_comments_preserving_docs(
             &cleaned_content,
             preserve_docs,
         )
@@ -2320,7 +2320,7 @@ fn scrub_duplicate_prompt_comments_for_route(
         cleaned_content = tail_cleaned;
         removed_comment = true;
     }
-    agent_doc_core::template::guard_no_duplicate_prompt_residue_outside_exchange(&cleaned_content)
+    agent_doc_template::guard_no_duplicate_prompt_residue_outside_exchange(&cleaned_content)
         .context("route duplicate prompt residue guard failed")?;
     if removed_answered_tail || removed_comment {
         Ok(Some(RouteDuplicatePromptCleanup {
@@ -2905,14 +2905,14 @@ fn inactive_route_queue_head_in_content(file: &Path, content: &str) -> Result<Op
     let marker_control = agent_doc_queue::document_queue::marker_control(&queue_component.attrs);
     if matches!(
         marker_control,
-        Some(agent_doc_core::frontmatter::QueueControl::Stop)
+        Some(agent_doc_frontmatter::frontmatter::QueueControl::Stop)
     ) {
         return Ok(None);
     }
     let has_auto = agent_doc_queue::document_queue::has_auto_attr(&queue_component.attrs)
         || matches!(
             marker_control,
-            Some(agent_doc_core::frontmatter::QueueControl::Start)
+            Some(agent_doc_frontmatter::frontmatter::QueueControl::Start)
         );
     let body = &content[queue_component.open_end..queue_component.close_start];
     let entries = agent_doc_queue::document_queue::parse(body)?;

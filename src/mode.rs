@@ -29,7 +29,7 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use agent_doc_core::frontmatter::{self, AgentDocFormat, AgentDocWrite};
+use agent_doc_frontmatter::frontmatter::{self, AgentDocFormat, AgentDocWrite};
 
 pub fn run(file: &Path, set: Option<&str>) -> Result<()> {
     if !file.exists() {

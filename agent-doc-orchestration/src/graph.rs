@@ -25,9 +25,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use agent_doc_core::frontmatter::{self, Frontmatter};
-use agent_doc_core::project_config::ProjectConfig;
 use agent_doc_element::element::{self, Component};
+use agent_doc_frontmatter::frontmatter::{self, Frontmatter};
+use agent_doc_frontmatter::project_config::ProjectConfig;
 use hex;
 use lazily::{CellHandle, Context, SlotHandle};
 use sha2::{Digest, Sha256};
@@ -186,7 +186,7 @@ impl RunContext {
             move |ctx: &Context| -> Arc<Frontmatter> {
                 let content: String = ctx.get_cell(&dc);
                 let ssh: Arc<SshContextValue> = ctx.get(&sc);
-                let resolver = agent_doc_core::frontmatter::SshResolverContext {
+                let resolver = agent_doc_frontmatter::frontmatter::SshResolverContext {
                     project: &ssh.config,
                     doc_relative: &ssh.doc_relative,
                     file_display: &ssh.doc_relative,
@@ -609,8 +609,8 @@ impl SshContextValue {
     pub fn as_resolver_context<'a>(
         &'a self,
         file_display: &'a str,
-    ) -> agent_doc_core::frontmatter::SshResolverContext<'a> {
-        agent_doc_core::frontmatter::SshResolverContext {
+    ) -> agent_doc_frontmatter::frontmatter::SshResolverContext<'a> {
+        agent_doc_frontmatter::frontmatter::SshResolverContext {
             project: &self.config,
             doc_relative: &self.doc_relative,
             file_display,

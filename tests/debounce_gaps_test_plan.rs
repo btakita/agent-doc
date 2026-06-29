@@ -68,7 +68,7 @@ fn test_mtime_granularity_100ms_rapid_edits() {
     // Action: Simulate 10 rapid document_changed calls within 100ms
     let start = std::time::Instant::now();
     for i in 0..10 {
-        agent_doc_orchestration::debounce::document_changed(&doc_str);
+        agent_doc_debounce::document_changed(&doc_str);
         if i < 9 {
             std::thread::sleep(Duration::from_millis(5));
         }
@@ -78,20 +78,20 @@ fn test_mtime_granularity_100ms_rapid_edits() {
 
     // Validation 1: is_idle should return false for 1500ms window
     assert!(
-        !agent_doc_orchestration::debounce::is_idle(&doc_str, 1500),
+        !agent_doc_debounce::is_idle(&doc_str, 1500),
         "is_idle() should be false immediately after edits"
     );
 
     // Validation 2: is_typing_via_file should also return true
     assert!(
-        agent_doc_orchestration::debounce::is_typing_via_file(&doc_str, 1500),
+        agent_doc_debounce::is_typing_via_file(&doc_str, 1500),
         "is_typing_via_file() should detect active typing despite mtime granularity"
     );
 
     // Validation 3: After 1500ms, should be idle
     std::thread::sleep(Duration::from_millis(1500));
     assert!(
-        agent_doc_orchestration::debounce::is_idle(&doc_str, 100),
+        agent_doc_debounce::is_idle(&doc_str, 100),
         "is_idle() should be true after debounce period"
     );
 }
@@ -120,13 +120,13 @@ fn test_mtime_granularity_1s_coarse_system() {
     let doc_str = doc.to_string_lossy().to_string();
 
     // Action: Two document_changed calls 500ms apart
-    agent_doc_orchestration::debounce::document_changed(&doc_str);
+    agent_doc_debounce::document_changed(&doc_str);
     std::thread::sleep(Duration::from_millis(500));
-    agent_doc_orchestration::debounce::document_changed(&doc_str);
+    agent_doc_debounce::document_changed(&doc_str);
 
     // Validation: Both should still be captured despite mtime appearing to be the same
     assert!(
-        !agent_doc_orchestration::debounce::is_idle(&doc_str, 1500),
+        !agent_doc_debounce::is_idle(&doc_str, 1500),
         "is_idle() should track both edits in LAST_CHANGE, not rely on file mtime"
     );
 }
@@ -176,7 +176,7 @@ fn test_untracked_file_is_idle_returns_true() {
 
     // Validation: is_idle returns true for untracked files
     assert!(
-        agent_doc_orchestration::debounce::is_idle(untracked_file, 1500),
+        agent_doc_debounce::is_idle(untracked_file, 1500),
         "is_idle() must return true for untracked files to prevent infinite wait"
     );
 }
@@ -191,7 +191,7 @@ fn test_untracked_file_is_tracked_returns_false() {
     let untracked_file = "/tmp/never-tracked-test2.md";
 
     assert!(
-        !agent_doc_orchestration::debounce::is_tracked(untracked_file),
+        !agent_doc_debounce::is_tracked(untracked_file),
         "is_tracked() must return false for files with no document_changed() calls"
     );
 }
@@ -201,10 +201,10 @@ fn test_untracked_file_is_tracked_returns_false() {
 #[test]
 fn test_tracked_file_is_tracked_returns_true() {
     let tracked_file = "/tmp/just-tracked.md";
-    agent_doc_orchestration::debounce::document_changed(tracked_file);
+    agent_doc_debounce::document_changed(tracked_file);
 
     assert!(
-        agent_doc_orchestration::debounce::is_tracked(tracked_file),
+        agent_doc_debounce::is_tracked(tracked_file),
         "is_tracked() must return true after document_changed() is called"
     );
 }
@@ -221,7 +221,7 @@ fn test_probe_pattern_untracked_skips_await() {
     let untracked = "/tmp/untracked-probe-test.md";
 
     // Probe pattern: check is_tracked first
-    if !agent_doc_orchestration::debounce::is_tracked(untracked) {
+    if !agent_doc_debounce::is_tracked(untracked) {
         // Skip await_idle for untracked files
         return;
     }
@@ -404,7 +404,7 @@ fn test_reactive_mode_crdt_merge_failure_handling() {
 
     // Corrupted CRDT state → merge must return Err, not panic
     let corrupted_state: &[u8] = &[0xFF, 0xFE, 0xFD, 0xFC, 0x00, 0x01];
-    let result = agent_doc::crdt::merge(Some(corrupted_state), ours, theirs);
+    let result = agent_doc_merge::crdt::merge(Some(corrupted_state), ours, theirs);
     assert!(
         result.is_err(),
         "merge() must return error for corrupted state, got: {:?}",
@@ -412,7 +412,7 @@ fn test_reactive_mode_crdt_merge_failure_handling() {
     );
 
     // Empty state (None) → merge must succeed (bootstrap path)
-    let result = agent_doc::crdt::merge(None, ours, theirs);
+    let result = agent_doc_merge::crdt::merge(None, ours, theirs);
     assert!(
         result.is_ok(),
         "merge() with None base must succeed: {:?}",
@@ -420,9 +420,9 @@ fn test_reactive_mode_crdt_merge_failure_handling() {
     );
 
     // Valid state → merge must succeed
-    let doc = agent_doc::crdt::CrdtDoc::from_text(ours);
+    let doc = agent_doc_merge::crdt::CrdtDoc::from_text(ours);
     let valid_state = doc.encode_state();
-    let result = agent_doc::crdt::merge(Some(&valid_state), ours, theirs);
+    let result = agent_doc_merge::crdt::merge(Some(&valid_state), ours, theirs);
     assert!(
         result.is_ok(),
         "merge() with valid state must succeed: {:?}",
@@ -450,19 +450,19 @@ fn test_reactive_mode_infinite_loop_prevention() {
     // the same result, which is what the watch daemon's hash-based convergence
     // detection relies on to stop reactive loops.
     let base_content = "<!-- agent:exchange -->\nContent\n<!-- /agent:exchange -->\n";
-    let doc = agent_doc::crdt::CrdtDoc::from_text(base_content);
+    let doc = agent_doc_merge::crdt::CrdtDoc::from_text(base_content);
     let base_state = doc.encode_state();
 
     let ours = "<!-- agent:exchange -->\nContent\nAgent added.\n<!-- /agent:exchange -->\n";
     let theirs = "<!-- agent:exchange -->\nContent\nUser added.\n<!-- /agent:exchange -->\n";
 
     // First merge
-    let merged1 = agent_doc::crdt::merge(Some(&base_state), ours, theirs).unwrap();
+    let merged1 = agent_doc_merge::crdt::merge(Some(&base_state), ours, theirs).unwrap();
 
     // Second merge with same inputs (simulates watch re-trigger)
-    let merged1_doc = agent_doc::crdt::CrdtDoc::from_text(&merged1);
+    let merged1_doc = agent_doc_merge::crdt::CrdtDoc::from_text(&merged1);
     let state1 = merged1_doc.encode_state();
-    let merged2 = agent_doc::crdt::merge(Some(&state1), &merged1, &merged1).unwrap();
+    let merged2 = agent_doc_merge::crdt::merge(Some(&state1), &merged1, &merged1).unwrap();
 
     // Convergence: re-merging the merged result with itself must be idempotent
     assert_eq!(
@@ -473,7 +473,7 @@ fn test_reactive_mode_infinite_loop_prevention() {
     // Corrupted state must not panic (watch daemon would catch the error and
     // increment cycle counter instead of crashing)
     let corrupted: &[u8] = &[0xFF, 0xFE, 0xFD];
-    let result = agent_doc::crdt::merge(Some(corrupted), ours, theirs);
+    let result = agent_doc_merge::crdt::merge(Some(corrupted), ours, theirs);
     assert!(
         result.is_err(),
         "corrupted state must return Err for watch daemon to handle"
@@ -544,7 +544,7 @@ fn test_status_file_staleness_30s_timeout() {
 
     // Test case 1: 29 seconds old → still busy
     write_status_at_time(&status_file, "generating", 29_000);
-    let status = agent_doc_orchestration::debounce::get_status_via_file(&doc_str);
+    let status = agent_doc_debounce::get_status_via_file(&doc_str);
     assert_eq!(
         status, "generating",
         "Status 29s old should still be returned, not timed out"
@@ -552,7 +552,7 @@ fn test_status_file_staleness_30s_timeout() {
 
     // Test case 2: exactly 30 seconds old → timed out
     write_status_at_time(&status_file, "generating", 30_000);
-    let status = agent_doc_orchestration::debounce::get_status_via_file(&doc_str);
+    let status = agent_doc_debounce::get_status_via_file(&doc_str);
     assert_eq!(
         status, "idle",
         "Status exactly 30s old should be considered timed out"
@@ -560,7 +560,7 @@ fn test_status_file_staleness_30s_timeout() {
 
     // Test case 3: 31 seconds old → definitely timed out
     write_status_at_time(&status_file, "generating", 31_000);
-    let status = agent_doc_orchestration::debounce::get_status_via_file(&doc_str);
+    let status = agent_doc_debounce::get_status_via_file(&doc_str);
     assert_eq!(
         status, "idle",
         "Status 31s old should definitely be timed out"
@@ -581,7 +581,7 @@ fn test_status_file_write_includes_current_timestamp() {
     std::fs::write(&doc, "content").unwrap();
     let doc_str = doc.to_string_lossy().to_string();
 
-    agent_doc_orchestration::debounce::set_status(&doc_str, "generating");
+    agent_doc_debounce::set_status(&doc_str, "generating");
 
     let entries: Vec<_> = std::fs::read_dir(&status_dir).unwrap().collect();
     assert_eq!(entries.len(), 1, "set_status should create one status file");
@@ -695,7 +695,7 @@ fn test_preflight_3s_timeout_is_sufficient_for_debounce() {
 ///   - Trade-offs (responsiveness vs. battery/CPU)
 ///
 /// ## Current behavior
-/// - 30000ms (30s) status file timeout is documented in debounce.rs
+/// - 30000ms (30s) status file timeout is documented in agent-doc-debounce
 /// - 2000ms default preflight debounce is documented
 /// - 3000ms preflight timeout is NOT documented (only in preflight.rs comments)
 ///
@@ -703,12 +703,13 @@ fn test_preflight_3s_timeout_is_sufficient_for_debounce() {
 fn test_timing_constants_are_documented() {
     // This is a code review test, not an executable test
     // Verification:
-    // - grep -n "1500\|3000\|30000\|500" src/agent-doc/src/*.rs should show comments
+    // - grep -n "1500\|3000\|30000\|500" agent-doc-debounce/src/lib.rs \
+    //   agent-doc-orchestration/src/preflight{,/run}.rs should show comments
     // - Each constant should have a docstring or comment block explaining it
 
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let debounce_src =
-        std::fs::read_to_string(root.join("agent-doc-orchestration/src/debounce.rs")).unwrap();
+    let debounce_src = std::fs::read_to_string(root.join("agent-doc-debounce/src/lib.rs"))
+        .expect("agent-doc-debounce source should exist");
     let preflight_src =
         std::fs::read_to_string(root.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
     // The run entry points (with the `Default: 2000ms` debounce doc) were
@@ -719,6 +720,6 @@ fn test_timing_constants_are_documented() {
         debounce_src.contains("1500")
             && preflight_src.contains("3000")
             && preflight_run_src.contains("Default: 2000ms"),
-        "expected debounce.rs and preflight{{,/run}}.rs to retain the documented debounce-related timeout constants"
+        "expected agent-doc-debounce and preflight{{,/run}}.rs to retain the documented debounce-related timeout constants"
     );
 }

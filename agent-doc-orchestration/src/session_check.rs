@@ -132,11 +132,11 @@ fn operator_live_buffer_contains_heading(file: &Path, heading: &str) -> bool {
     if heading.is_empty() {
         return false;
     }
-    for snapshot in crate::debounce::live_buffer_snapshots(&file_key) {
-        if !snapshot.has_capability(crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY) {
+    for snapshot in agent_doc_debounce::live_buffer_snapshots(&file_key) {
+        if !snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY) {
             continue;
         }
-        if !crate::debounce::live_buffer_snapshot_editor_is_live(&snapshot) {
+        if !agent_doc_debounce::live_buffer_snapshot_editor_is_live(&snapshot) {
             continue;
         }
         let Some(content) = snapshot.content.as_deref() else {
@@ -1155,7 +1155,7 @@ fn blocked_closeout_editor_authority_note(
     let Ok(content) = std::fs::read_to_string(&canonical) else {
         return String::new();
     };
-    let Some(snapshot) = crate::debounce::live_buffer_delivery_missing_operator_text_authority(
+    let Some(snapshot) = agent_doc_debounce::live_buffer_delivery_missing_operator_text_authority(
         &canonical.to_string_lossy(),
         &content,
     ) else {
@@ -1164,7 +1164,7 @@ fn blocked_closeout_editor_authority_note(
     let editor_id = snapshot.editor_id.as_deref().unwrap_or("unknown");
     format!(
         " Live editor `{editor_id}` lacks required capability `{}`; reload or restart the editor plugin before retrying so delivery can preserve operator text.",
-        crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY
+        agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY
     )
 }
 
@@ -1768,13 +1768,13 @@ mod tests {
         );
         fs::write(&doc, visible_disk_lost_latest).unwrap();
         crate::snapshot::save(&doc, visible_disk_lost_latest).unwrap();
-        crate::debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
             &doc.to_string_lossy(),
             committed,
             "jetbrains-test",
             "jetbrains",
             "test",
-            &[crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
         )
         .unwrap();
         crate::cycle_state::start_preflight(
@@ -1974,7 +1974,7 @@ mod tests {
         );
         assert_eq!(
             resolve_pending_done_guard_mode_with_context(missing, &rc).unwrap(),
-            agent_doc_core::frontmatter::PendingCaptureGuardMode::Strict,
+            agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict,
         );
 
         let rc_off = crate::graph::RunContext::new(missing.to_path_buf());
@@ -1983,7 +1983,7 @@ mod tests {
         );
         assert_eq!(
             resolve_pending_done_guard_mode_with_context(missing, &rc_off).unwrap(),
-            agent_doc_core::frontmatter::PendingCaptureGuardMode::Off,
+            agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off,
         );
     }
     /// Phase 6 (#lr-content-6): the shared `ComponentsSlot` parses the same
@@ -2183,11 +2183,11 @@ Body\n\
         fs::write(&doc, current).unwrap();
         crate::snapshot::save(&doc, snapshot).unwrap();
 
-        assert!(agent_doc_core::diff::text_line_looks_like_prompt_target(
+        assert!(agent_doc_diff::text_line_looks_like_prompt_target(
             "Can we run specific rubrics for fine tuning?"
         ));
         assert!(
-            agent_doc_core::diff::prompt_change_is_already_answered(
+            agent_doc_diff::prompt_change_is_already_answered(
                 "Can we run specific rubrics for fine tuning?\n### Re: specific rubrics — gpt-5\n\nYes.\n"
             ),
             "fixture block should be recognized as already answered"
@@ -2227,7 +2227,7 @@ Body\n\
         fs::write(&doc, current).unwrap();
         crate::snapshot::save(&doc, snapshot).unwrap();
 
-        assert!(agent_doc_core::diff::prompt_change_is_already_answered(
+        assert!(agent_doc_diff::prompt_change_is_already_answered(
             "I renamed the repo to ClaudeScore/buildparty-investor-demo. Please update references\nI updated the repo-local references to the renamed GitHub repo.\n"
         ));
 
@@ -2259,10 +2259,12 @@ Body\n\
         fs::write(&doc, current).unwrap();
         crate::snapshot::save(&doc, snapshot).unwrap();
 
-        let changes = agent_doc_core::diff::classify_prompt_bearing_changes(
-            &agent_doc_core::diff::unified_diff_from_contents(
-                &agent_doc_core::frontmatter::parse(snapshot).unwrap().1,
-                &agent_doc_core::frontmatter::parse(&fs::read_to_string(&doc).unwrap())
+        let changes = agent_doc_diff::classify_prompt_bearing_changes(
+            &agent_doc_diff::unified_diff_from_contents(
+                &agent_doc_frontmatter::frontmatter::parse(snapshot)
+                    .unwrap()
+                    .1,
+                &agent_doc_frontmatter::frontmatter::parse(&fs::read_to_string(&doc).unwrap())
                     .unwrap()
                     .1,
             )
@@ -2271,7 +2273,7 @@ Body\n\
         assert_eq!(changes.len(), 1, "expected one content edit: {changes:?}");
         assert_eq!(
             changes[0].kind,
-            agent_doc_core::diff::PromptBearingChangeKind::ContentEdit
+            agent_doc_diff::PromptBearingChangeKind::ContentEdit
         );
 
         let change = first_unstarted_prompt_bearing_change(&doc).unwrap();
@@ -2344,7 +2346,7 @@ Body\n\
             .expect("plain exchange-tail prompt should remain actionable");
         assert_eq!(
             change.kind,
-            agent_doc_core::diff::PromptBearingChangeKind::PromptTarget
+            agent_doc_diff::PromptBearingChangeKind::PromptTarget
         );
         assert_eq!(
             change.text,
@@ -5279,7 +5281,7 @@ Body\n\
         let content = "---\nagent_doc_session: test\n---\n\n## Exchange\n\nPrompt\n";
         fs::write(&doc, content).unwrap();
         crate::snapshot::save(&doc, content).unwrap();
-        crate::debounce::record_live_buffer_digest_content_for_editor(
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor(
             &doc.to_string_lossy(),
             content,
             Some("jetbrains-old"),

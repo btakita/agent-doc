@@ -80,7 +80,7 @@ pub(crate) fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcRes
                 .map(|runtime| runtime.generation);
             let editor_sync = shared.actor_runtime.as_ref().map(|runtime| {
                 let file = runtime.file.display().to_string();
-                let statuses = crate::debounce::editor_sync_statuses(&file);
+                let statuses = agent_doc_debounce::editor_sync_statuses(&file);
                 let in_flight = statuses.iter().any(|status| status.in_flight);
                 serde_json::json!({
                     "file": file,
@@ -682,7 +682,7 @@ mod tests {
     use crate::hooks::fire_doc_hooks;
     use crate::project_config_io as project_config;
     use crate::sessions::IsolatedTmux;
-    use agent_doc_core::frontmatter::Frontmatter;
+    use agent_doc_frontmatter::frontmatter::Frontmatter;
     use std::collections::HashMap;
     use tempfile::TempDir;
     // --- `#crdtauth5` end-to-end fan-out over the NEW IPC path -------------------
@@ -709,7 +709,7 @@ mod tests {
 
     #[test]
     fn crdtauth5_end_to_end_fan_out_over_the_ipc_path() {
-        use agent_doc_core::crdt_sync::ReplicaState;
+        use agent_doc_merge::crdt_sync::ReplicaState;
         use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 
         let (_dir, doc) = crdt_temp_doc("fanout.md");
@@ -951,7 +951,7 @@ mod tests {
         let (_dir, doc) = crdt_temp_doc("state-editor-sync.md");
         let project_root = doc.parent().unwrap().to_path_buf();
         let file_str = doc.display().to_string();
-        crate::debounce::document_changed_with_content_for_editor(
+        agent_doc_debounce::document_changed_with_content_for_editor(
             &file_str,
             "disk plus unsaved editor text",
             Some("jetbrains:state"),

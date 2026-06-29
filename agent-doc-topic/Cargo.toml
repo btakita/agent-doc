@@ -1,0 +1,12 @@
+[package]
+name = "agent-doc-topic"
+version = "0.34.65"
+edition = "2024"
+description = "Pure exchange topic-section parsing for agent-doc documents"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_topic"
+
+[dependencies]

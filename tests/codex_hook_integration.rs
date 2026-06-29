@@ -277,7 +277,7 @@ fn codex_hook_cli_does_not_replay_over_editor_convergence_block() {
     init_git_repo(tmp.path(), &doc);
     let content = fs::read_to_string(&doc).unwrap();
     agent_doc_orchestration::snapshot::save(&doc, &content).unwrap();
-    agent_doc_orchestration::debounce::record_live_buffer_digest_content_for_editor(
+    agent_doc_debounce::record_live_buffer_digest_content_for_editor(
         &doc.to_string_lossy(),
         &content,
         Some("jetbrains-old"),

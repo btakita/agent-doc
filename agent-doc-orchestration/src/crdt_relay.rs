@@ -21,7 +21,7 @@
 //!   deregister and never reaches `.yrs` / git.
 //! - The **commit barrier is a consistent cut of the currently-live replicas**:
 //!   [`RelayHub::commit_barrier`] flushes only the live members (reusing
-//!   [`agent_doc_core::crdt_sync::flush_to_commit_barrier`]) and never blocks on a
+//!   [`agent_doc_merge::crdt_sync::flush_to_commit_barrier`]) and never blocks on a
 //!   slow / disconnected editor — a commit is a checkpoint, not a global lock. An
 //!   offline editor contributes its ops at next sync ([`RelayHub::reconnect`]).
 //! - **Offline → reconnect convergence**: a replica that missed updates while
@@ -40,7 +40,7 @@ use std::collections::{HashMap, VecDeque};
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 
-use agent_doc_core::crdt_sync::{ReplicaState, commit_barrier_ready, flush_to_commit_barrier};
+use agent_doc_merge::crdt_sync::{ReplicaState, commit_barrier_ready, flush_to_commit_barrier};
 
 use crate::crdt_authority::CrdtAuthority;
 
@@ -748,7 +748,7 @@ pub fn mint_client_id(identity: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_doc_core::crdt_sync::ReplicaState;
+    use agent_doc_merge::crdt_sync::ReplicaState;
 
     #[test]
     fn fan_out_reaches_every_other_live_replica() {

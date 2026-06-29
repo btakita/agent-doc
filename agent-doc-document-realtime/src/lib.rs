@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 
 pub mod convergence_gate;
 pub mod ipc_corruption;
+pub mod watch_authority;
+pub mod write_authority;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

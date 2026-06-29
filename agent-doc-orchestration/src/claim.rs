@@ -101,7 +101,7 @@ use anyhow::{Context, Result};
 use std::io::Write;
 use std::path::Path;
 
-use agent_doc_core::{frontmatter, project_config};
+use agent_doc_frontmatter::{frontmatter, project_config};
 
 use crate::{project_config_io, resync, route, sessions};
 

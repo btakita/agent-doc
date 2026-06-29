@@ -1007,7 +1007,7 @@ pub(crate) fn await_idle_with_max_wait(
     debounce: Duration,
     max_wait: Duration,
 ) -> Result<()> {
-    use crate::debounce::TypingIndicatorStatus;
+    use agent_doc_debounce::TypingIndicatorStatus;
     use std::time::Instant;
 
     let poll_interval = Duration::from_millis(100);
@@ -1016,7 +1016,7 @@ pub(crate) fn await_idle_with_max_wait(
     let file_str = file.to_string_lossy();
 
     loop {
-        let indicator = crate::debounce::typing_indicator_status(&file_str, debounce_ms);
+        let indicator = agent_doc_debounce::typing_indicator_status(&file_str, debounce_ms);
 
         // `#jb-run-agent-doc-double-debounce`: when an editor owns the typing
         // lifecycle and its indicator reports idle, the editor already debounced
@@ -1154,7 +1154,7 @@ mod tests {
         std::fs::write(&doc, "prompt in progress\n").unwrap();
 
         let doc_str = doc.to_string_lossy().to_string();
-        crate::debounce::document_changed(&doc_str);
+        agent_doc_debounce::document_changed(&doc_str);
 
         let err =
             await_idle_with_max_wait(&doc, Duration::from_millis(500), Duration::from_millis(25))
@@ -1173,7 +1173,7 @@ mod tests {
         std::fs::write(&doc, "settled prompt\n").unwrap();
 
         let doc_str = doc.to_string_lossy().to_string();
-        crate::debounce::document_changed(&doc_str);
+        agent_doc_debounce::document_changed(&doc_str);
 
         await_idle_with_max_wait(&doc, Duration::from_millis(10), Duration::from_millis(1000))
             .expect("route should proceed after mtime and typing indicator are both idle");
@@ -1192,12 +1192,12 @@ mod tests {
         let doc_str = doc.to_string_lossy().to_string();
 
         // Editor tracked typing, then went idle (indicator present but stale).
-        crate::debounce::document_changed(&doc_str);
+        agent_doc_debounce::document_changed(&doc_str);
         std::thread::sleep(Duration::from_millis(80)); // exceed the 50ms debounce window
 
         assert_eq!(
-            crate::debounce::typing_indicator_status(&doc_str, 50),
-            crate::debounce::TypingIndicatorStatus::Idle,
+            agent_doc_debounce::typing_indicator_status(&doc_str, 50),
+            agent_doc_debounce::TypingIndicatorStatus::Idle,
             "indicator should report idle after the debounce window elapses"
         );
 

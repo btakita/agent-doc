@@ -448,10 +448,9 @@ pub(crate) fn should_consume_queue_prompt_for_write(
     let Some(base) = baseline else {
         return Ok(false);
     };
-    let base_norm = agent_doc_core::diff::strip_comments(&strip_boundary_for_dedup(base));
-    let current_norm =
-        agent_doc_core::diff::strip_comments(&strip_boundary_for_dedup(current_content));
-    let diff_text = agent_doc_core::diff::unified_diff_from_contents(&base_norm, &current_norm);
+    let base_norm = agent_doc_diff::strip_comments(&strip_boundary_for_dedup(base));
+    let current_norm = agent_doc_diff::strip_comments(&strip_boundary_for_dedup(current_content));
+    let diff_text = agent_doc_diff::unified_diff_from_contents(&base_norm, &current_norm);
     should_consume_queue_prompt_for_diff_content(file, current_content, diff_text.as_deref())
 }
 
@@ -493,17 +492,17 @@ pub(crate) fn should_consume_queue_prompt_for_diff_content(
     let Some(diff_text) = diff_text else {
         return Ok(false);
     };
-    let prompt_changes: Vec<_> = agent_doc_core::diff::classify_prompt_bearing_changes(diff_text)
+    let prompt_changes: Vec<_> = agent_doc_diff::classify_prompt_bearing_changes(diff_text)
         .into_iter()
         .filter(|change| {
             matches!(
                 change.kind,
-                agent_doc_core::diff::PromptBearingChangeKind::PromptTarget
-                    | agent_doc_core::diff::PromptBearingChangeKind::ContentEdit
+                agent_doc_diff::PromptBearingChangeKind::PromptTarget
+                    | agent_doc_diff::PromptBearingChangeKind::ContentEdit
             )
         })
         .collect();
-    if agent_doc_core::diff::detect_queue_trigger(diff_text) {
+    if agent_doc_diff::detect_queue_trigger(diff_text) {
         return Ok(true);
     }
     if prompt_changes
@@ -555,11 +554,9 @@ pub(crate) fn cycle_answered_foreign_exchange_prompt(
     let Some(base) = baseline else {
         return false;
     };
-    let base_norm = agent_doc_core::diff::strip_comments(&strip_boundary_for_dedup(base));
-    let current_norm =
-        agent_doc_core::diff::strip_comments(&strip_boundary_for_dedup(current_content));
-    let Some(diff_text) =
-        agent_doc_core::diff::unified_diff_from_contents(&base_norm, &current_norm)
+    let base_norm = agent_doc_diff::strip_comments(&strip_boundary_for_dedup(base));
+    let current_norm = agent_doc_diff::strip_comments(&strip_boundary_for_dedup(current_content));
+    let Some(diff_text) = agent_doc_diff::unified_diff_from_contents(&base_norm, &current_norm)
     else {
         return false;
     };
@@ -880,7 +877,8 @@ pub(crate) fn head_id_is_registered_preset(content: &str, head_id: &str) -> bool
     let Ok((fm, _)) = frontmatter::parse(content) else {
         return false;
     };
-    agent_doc_core::frontmatter::resolve_prompt_preset_key(&fm.prompt_presets, head_id).is_some()
+    agent_doc_frontmatter::frontmatter::resolve_prompt_preset_key(&fm.prompt_presets, head_id)
+        .is_some()
 }
 
 /// True when `head_id` names an item tracked in `agent:backlog` or `agent:review`.
@@ -959,7 +957,7 @@ pub(crate) fn queue_head_is_free_text_prompt(content: &str) -> Result<bool> {
         }
         return Ok(false);
     }
-    if agent_doc_core::diff::detect_queue_trigger(&normalized_head) {
+    if agent_doc_diff::detect_queue_trigger(&normalized_head) {
         return Ok(false);
     }
     Ok(true)
@@ -980,7 +978,7 @@ pub(crate) fn queue_prompt_text_is_free_text(content: &str, text: &str) -> bool 
             .iter()
             .all(|id| head_id_is_registered_preset(content, id));
     }
-    !agent_doc_core::diff::detect_queue_trigger(&normalized)
+    !agent_doc_diff::detect_queue_trigger(&normalized)
 }
 
 /// Collapse a string to lowercase alphanumeric words separated by single spaces.

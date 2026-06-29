@@ -2762,9 +2762,9 @@ fn build_context(file: &Path) -> Result<SessionContext> {
         .unwrap_or_else(|_| agent_doc_orchestration::git::resolve_absolute_file_path(file));
     let content = std::fs::read_to_string(&canonical_file)
         .with_context(|| format!("failed to read {}", canonical_file.display()))?;
-    let session_id = crate::frontmatter::read_session_id(&canonical_file)
+    let session_id = agent_doc_orchestration::frontmatter_io::read_session_id(&canonical_file)
         .or_else(|| {
-            agent_doc_core::frontmatter::parse(&content)
+            agent_doc_frontmatter::frontmatter::parse(&content)
                 .ok()
                 .and_then(|(fm, _)| fm.session)
         })
@@ -3720,7 +3720,10 @@ fn capability_proof_status(ctx: &SessionContext) -> String {
         Ok(content) => content,
         Err(err) => return format!("unknown (failed to read document: {err})"),
     };
-    let fm = match crate::frontmatter::parse_for_file(&content, &ctx.canonical_file) {
+    let fm = match agent_doc_orchestration::frontmatter_io::parse_for_file(
+        &content,
+        &ctx.canonical_file,
+    ) {
         Ok((fm, _)) => fm,
         Err(err) => return format!("unknown (failed to parse frontmatter: {err})"),
     };

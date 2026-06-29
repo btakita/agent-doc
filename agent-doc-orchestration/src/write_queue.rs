@@ -61,7 +61,7 @@ where
         // `atomic_write_pub` of `serialized_atomic_write`, or any document write
         // performed inside `job`) takes the raw write path instead of
         // re-entering this blocking mailbox and deadlocking the owner thread.
-        let _owner_scope = crate::write_authority::owner_scope_guard();
+        let _owner_scope = agent_doc_document_realtime::write_authority::owner_scope_guard();
         job()
     })
 }
@@ -274,9 +274,9 @@ mod tests {
         seed(&dir, "doc.md", "x");
         let base = dir.path().to_path_buf();
 
-        assert!(!crate::write_authority::within_owner_scope());
+        assert!(!agent_doc_document_realtime::write_authority::within_owner_scope());
         let inside = run_serialized(&base, "doc.md", SessionOpKind::WriteSubmit, || {
-            crate::write_authority::within_owner_scope()
+            agent_doc_document_realtime::write_authority::within_owner_scope()
         })
         .unwrap();
         assert!(
@@ -284,7 +284,7 @@ mod tests {
             "owner thread must be marked in-scope so nested atomic_write stays raw"
         );
         assert!(
-            !crate::write_authority::within_owner_scope(),
+            !agent_doc_document_realtime::write_authority::within_owner_scope(),
             "owner scope must not leak to the submitting thread"
         );
     }

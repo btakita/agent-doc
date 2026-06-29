@@ -122,7 +122,7 @@ pub fn normalize_harness_name(raw: &str) -> String {
 }
 
 fn document_harness_from_content(content: &str) -> Option<String> {
-    agent_doc_core::frontmatter::parse(content)
+    agent_doc_frontmatter::frontmatter::parse(content)
         .ok()
         .and_then(|(fm, _)| fm.agent)
         .map(|value| normalize_harness_name(&value))

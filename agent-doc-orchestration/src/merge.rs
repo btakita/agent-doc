@@ -82,7 +82,7 @@ pub fn merge_contents_crdt(
     // frontmatter edit is never reverted to the snapshot/base value.
     let merged = merge_frontmatter_aware(base_state, ours, theirs)?;
     // Build fresh CRDT state from the merged result
-    let doc = agent_doc_core::crdt::CrdtDoc::from_text(&merged);
+    let doc = agent_doc_merge::crdt::CrdtDoc::from_text(&merged);
     let state = doc.encode_state();
     eprintln!("[write] CRDT merge successful — no conflicts possible.");
     Ok((merged, state))
@@ -90,9 +90,9 @@ pub fn merge_contents_crdt(
 
 /// Frontmatter-aware per-component CRDT merge (`#fmreset`).
 ///
-/// Wraps [`agent_doc_core::crdt::merge_by_component`] so the leading YAML frontmatter
+/// Wraps [`agent_doc_merge::crdt::merge_by_component`] so the leading YAML frontmatter
 /// region is reconciled FIELD-WISE (operator-authoritative) via
-/// [`agent_doc_core::frontmatter::merge_frontmatter_3way`] instead of as a text blob.
+/// [`agent_doc_frontmatter::frontmatter::merge_frontmatter_3way`] instead of as a text blob.
 ///
 /// The whole-document text CRDT merges frontmatter as the leading interstitial
 /// node, which (in the absent/stale-base epoch) can duplicate keys or splice the
@@ -108,20 +108,20 @@ pub fn merge_contents_crdt(
 /// cycles keep their exact behavior (and frontmatter is never reformatted unless
 /// it genuinely changed). The body is still reconciled by the per-component merge.
 fn merge_frontmatter_aware(base_state: Option<&[u8]>, ours: &str, theirs: &str) -> Result<String> {
-    use agent_doc_core::frontmatter as fm;
+    use agent_doc_frontmatter::frontmatter as fm;
 
     let (ours_fm, ours_body) = fm::split_frontmatter_parts(ours);
     let (theirs_fm, theirs_body) = fm::split_frontmatter_parts(theirs);
 
     // No operator/agent frontmatter divergence → exact legacy behavior.
     if ours_fm == theirs_fm {
-        return agent_doc_core::crdt::merge_by_component(base_state, ours, theirs)
+        return agent_doc_merge::crdt::merge_by_component(base_state, ours, theirs)
             .context("CRDT merge failed");
     }
 
     // Resolve the base frontmatter + body from the decoded base state (if any).
     let base_text = match base_state {
-        Some(bytes) => agent_doc_core::crdt::CrdtDoc::decode_state(bytes)
+        Some(bytes) => agent_doc_merge::crdt::CrdtDoc::decode_state(bytes)
             .map(|d| d.to_text())
             .ok(),
         None => None,
@@ -136,7 +136,7 @@ fn merge_frontmatter_aware(base_state: Option<&[u8]>, ours: &str, theirs: &str) 
 
     let Some(merged_fm) = fm::merge_frontmatter_3way(base_fm.as_deref(), ours_fm, theirs_fm) else {
         // No side actually had frontmatter (shouldn't happen here) — fall back.
-        return agent_doc_core::crdt::merge_by_component(base_state, ours, theirs)
+        return agent_doc_merge::crdt::merge_by_component(base_state, ours, theirs)
             .context("CRDT merge failed");
     };
 
@@ -146,8 +146,8 @@ fn merge_frontmatter_aware(base_state: Option<&[u8]>, ours: &str, theirs: &str) 
     // frontmatter region.
     let body_base_state = base_body
         .as_deref()
-        .map(|b| agent_doc_core::crdt::CrdtDoc::from_text(b).encode_state());
-    let merged_body = agent_doc_core::crdt::merge_by_component(
+        .map(|b| agent_doc_merge::crdt::CrdtDoc::from_text(b).encode_state());
+    let merged_body = agent_doc_merge::crdt::merge_by_component(
         body_base_state.as_deref(),
         ours_body,
         theirs_body,
@@ -170,7 +170,7 @@ fn merge_frontmatter_aware(base_state: Option<&[u8]>, ours: &str, theirs: &str) 
 ///   1. the sidecar's `base_hash` matches the resolved base text
 ///      ([`op_capture::editor_ops_for_base`]), and
 ///   2. replaying the ops onto that base reproduces `theirs` byte-for-byte
-///      ([`agent_doc_core::crdt::merge_with_editor_ops`]'s acceptance gate).
+///      ([`agent_doc_merge::crdt::merge_with_editor_ops`]'s acceptance gate).
 ///      Otherwise the merge is byte-identical to [`merge_contents_crdt`]: with no
 ///      sidecar (the production state until the editor reporters land), or with
 ///      stale/misaligned ops, this delegates to the exact same `crdt::merge` path.
@@ -188,7 +188,7 @@ pub fn merge_contents_crdt_with_ops(
     // resolves the same base internally; we mirror it here only to gate which
     // ops (if any) to even offer.
     let base_text = match base_state {
-        Some(bytes) => agent_doc_core::crdt::CrdtDoc::decode_state(bytes)
+        Some(bytes) => agent_doc_merge::crdt::CrdtDoc::decode_state(bytes)
             .map(|d| d.to_text())
             .unwrap_or_default(),
         None => String::new(),
@@ -225,7 +225,7 @@ pub fn merge_contents_crdt_with_ops(
                     summarize_editor_ops_for_log(ops)
                 ),
             );
-            agent_doc_core::crdt::merge_with_editor_ops(base_state, ours, theirs, Some(ops))
+            agent_doc_merge::crdt::merge_with_editor_ops(base_state, ours, theirs, Some(ops))
                 .context("CRDT merge (with editor ops) failed")?
         }
         // No captured editor ops (the common production path until the editor
@@ -244,25 +244,25 @@ pub fn merge_contents_crdt_with_ops(
         );
     }
 
-    let crdt_doc = agent_doc_core::crdt::CrdtDoc::from_text(&merged);
+    let crdt_doc = agent_doc_merge::crdt::CrdtDoc::from_text(&merged);
     let state = crdt_doc.encode_state();
     eprintln!("[write] CRDT merge successful — no conflicts possible.");
     Ok((merged, state))
 }
 
-fn summarize_editor_ops_for_log(ops: &[agent_doc_core::crdt::EditorOp]) -> String {
+fn summarize_editor_ops_for_log(ops: &[agent_doc_merge::crdt::EditorOp]) -> String {
     let mut offsets = Vec::new();
     let mut delete_bytes = 0usize;
     let mut insert_bytes = 0usize;
     let mut insert_non_ascii = false;
     for op in ops {
         match op {
-            agent_doc_core::crdt::EditorOp::Insert { offset, text } => {
+            agent_doc_merge::crdt::EditorOp::Insert { offset, text } => {
                 offsets.push(offset.to_string());
                 insert_bytes = insert_bytes.saturating_add(text.len());
                 insert_non_ascii |= !text.is_ascii();
             }
-            agent_doc_core::crdt::EditorOp::Delete { offset, len } => {
+            agent_doc_merge::crdt::EditorOp::Delete { offset, len } => {
                 offsets.push(offset.to_string());
                 delete_bytes = delete_bytes.saturating_add(*len);
             }
@@ -577,7 +577,7 @@ User line 2.
         let ours = "# Doc\n\nBase content.\n\nAgent response.\n";
         let theirs = "# Doc\n\nBase content.\n\nUser addition.\n";
 
-        let base_doc = agent_doc_core::crdt::CrdtDoc::from_text(base);
+        let base_doc = agent_doc_merge::crdt::CrdtDoc::from_text(base);
         let base_state = base_doc.encode_state();
 
         let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
@@ -600,7 +600,7 @@ User line 2.
         let theirs =
             "<!-- agent:backlog -->\n- [ ] [#abcd-2] do the thing\n<!-- /agent:backlog -->\n";
 
-        let base_state = agent_doc_core::crdt::CrdtDoc::from_text(base).encode_state();
+        let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state();
         let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
         assert!(
             merged.contains("[#abcd-2] do the thing"),
@@ -622,7 +622,7 @@ User line 2.
         let ours = base; // agent/snapshot side unchanged — still the old model
         let theirs = "---\nagent_doc_format: template\nclaude_model: opus\n---\n\n# Title\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
 
-        let base_state = agent_doc_core::crdt::CrdtDoc::from_text(base).encode_state();
+        let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state();
         let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
         assert!(
             merged.contains("claude_model: opus"),
@@ -669,7 +669,7 @@ User line 2.
         let ours = "---\nagent_doc_format: template\nclaude_model: sonnet\n---\n\n<!-- agent:exchange -->\n### Re: topic\nAgent response body.\n<!-- /agent:exchange -->\n";
         let theirs = "---\nagent_doc_format: template\nclaude_model: opus\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
 
-        let base_state = agent_doc_core::crdt::CrdtDoc::from_text(base).encode_state();
+        let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state();
         let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
         assert!(
             merged.contains("### Re: topic"),
@@ -693,7 +693,7 @@ User line 2.
         let ours = base;
         let theirs = "---\nagent_doc_format: template\nprompt_presets:\n  \"#1\": |\n    new line\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
 
-        let base_state = agent_doc_core::crdt::CrdtDoc::from_text(base).encode_state();
+        let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state();
         let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
         assert!(
             merged.contains("new line"),
@@ -712,7 +712,7 @@ User line 2.
         let base = "---\nagent_doc_session: sid\nclaude_model: sonnet\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
         let ours = "---\nagent_doc_session: sid\nresume: conv-123\nclaude_model: sonnet\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
         let theirs = base; // operator untouched
-        let base_state = agent_doc_core::crdt::CrdtDoc::from_text(base).encode_state();
+        let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state();
         let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
         assert!(
             merged.contains("resume: conv-123"),
@@ -728,7 +728,7 @@ User line 2.
         let base = "---\nagent_doc_session: sid\nclaude_model: sonnet\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
         let ours = "---\nagent_doc_session: sid\nresume: conv-123\nclaude_model: sonnet\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
         let theirs = "---\nagent_doc_session: sid\nclaude_model: opus\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
-        let base_state = agent_doc_core::crdt::CrdtDoc::from_text(base).encode_state();
+        let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state();
         let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
         assert!(
             merged.contains("resume: conv-123"),
@@ -747,7 +747,7 @@ User line 2.
         let base = "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
         let ours = base;
         let theirs = "---\nagent_doc_format: template\nmy_custom_key: hello\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
-        let base_state = agent_doc_core::crdt::CrdtDoc::from_text(base).encode_state();
+        let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state();
         let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
         assert!(
             merged.contains("my_custom_key: hello"),
@@ -773,7 +773,7 @@ User line 2.
         let theirs = "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n\
                     <!-- agent:queue -->\n- do [#aaaa]\n- do [#bbbb]\n<!-- /agent:queue -->\n";
 
-        let base_state = agent_doc_core::crdt::CrdtDoc::from_text(base).encode_state();
+        let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state();
         let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
 
         assert!(
@@ -808,7 +808,7 @@ User line 2.
         let theirs = "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n\
 <!-- agent:queue -->\n- do [#aaaa] keep\n<!-- /agent:queue -->\n";
 
-        let base_state = agent_doc_core::crdt::CrdtDoc::from_text(base).encode_state();
+        let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state();
         let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
 
         assert!(
@@ -835,7 +835,7 @@ User line 2.
         let theirs = "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n\
 <!-- agent:queue -->\n- :pushpin: All upload preview dialogs should be full screen. deploy\n<!-- /agent:queue -->\n";
 
-        let base_state = agent_doc_core::crdt::CrdtDoc::from_text(base).encode_state();
+        let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state();
         let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
 
         assert!(
@@ -862,7 +862,7 @@ User line 2.
         let ours = "Line 1\nAgent\nLine 3\n";
         let theirs = "Line 1\nUser\nLine 3\n";
 
-        let base_doc = agent_doc_core::crdt::CrdtDoc::from_text(base);
+        let base_doc = agent_doc_merge::crdt::CrdtDoc::from_text(base);
         let base_state = base_doc.encode_state();
 
         let (merged, _state) = merge_contents_crdt(Some(&base_state), ours, theirs).unwrap();
@@ -895,14 +895,14 @@ User line 2.
         std::fs::write(&doc, "# plan\n").unwrap();
 
         let base = "# Doc\n\nBase line.\n";
-        let base_state = agent_doc_core::crdt::CrdtDoc::from_text(base).encode_state();
+        let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state();
 
         // The editor appended "User edit.\n" — captured against the merge base.
         let base_hash = crate::op_capture::content_hash(base);
         crate::op_capture::record_editor_op(
             &doc,
             &base_hash,
-            agent_doc_core::crdt::EditorOp::Insert {
+            agent_doc_merge::crdt::EditorOp::Insert {
                 offset: base.len(),
                 text: "User edit.\n".to_string(),
             },
@@ -944,18 +944,18 @@ User line 2.
         std::fs::write(&doc, "# plan\n").unwrap();
 
         let base = "café 日本 😀\n";
-        let base_state = agent_doc_core::crdt::CrdtDoc::from_text(base).encode_state();
+        let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state();
         let base_hash = crate::op_capture::content_hash(base);
         crate::op_capture::record_editor_op(
             &doc,
             &base_hash,
-            agent_doc_core::crdt::EditorOp::Delete { offset: 6, len: 6 },
+            agent_doc_merge::crdt::EditorOp::Delete { offset: 6, len: 6 },
         )
         .unwrap();
         crate::op_capture::record_editor_op(
             &doc,
             &base_hash,
-            agent_doc_core::crdt::EditorOp::Insert {
+            agent_doc_merge::crdt::EditorOp::Insert {
                 offset: 6,
                 text: "世界".to_string(),
             },
@@ -1002,13 +1002,13 @@ User line 2.
         std::fs::write(&doc, "# plan\n").unwrap();
 
         let base = "# Doc\n\nBase line.\n";
-        let base_state = agent_doc_core::crdt::CrdtDoc::from_text(base).encode_state();
+        let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state();
 
         // Op recorded against a stale base that no longer matches the merge base.
         crate::op_capture::record_editor_op(
             &doc,
             &crate::op_capture::content_hash("a totally different base\n"),
-            agent_doc_core::crdt::EditorOp::Insert {
+            agent_doc_merge::crdt::EditorOp::Insert {
                 offset: 0,
                 text: "x".to_string(),
             },
@@ -1032,7 +1032,7 @@ User line 2.
     #[test]
     fn crdt_merge_one_side_unchanged() {
         let base = "Original.\n";
-        let base_doc = agent_doc_core::crdt::CrdtDoc::from_text(base);
+        let base_doc = agent_doc_merge::crdt::CrdtDoc::from_text(base);
         let base_state = base_doc.encode_state();
 
         let ours = "Original.\nAgent added.\n";
@@ -1068,7 +1068,7 @@ User line 2.
     fn crdt_state_includes_user_edits_no_duplicates() {
         // --- Cycle 1: Initial state, agent responds, user edits concurrently ---
         let initial = "Why were the videos not public?\n";
-        let initial_doc = agent_doc_core::crdt::CrdtDoc::from_text(initial);
+        let initial_doc = agent_doc_merge::crdt::CrdtDoc::from_text(initial);
         let initial_state = initial_doc.encode_state();
 
         // Agent appends a response
@@ -1115,7 +1115,7 @@ User line 2.
     #[test]
     fn crdt_multi_flush_no_duplicates() {
         let base = "# Doc\n\nQuestion here.\n";
-        let base_doc = agent_doc_core::crdt::CrdtDoc::from_text(base);
+        let base_doc = agent_doc_merge::crdt::CrdtDoc::from_text(base);
         let state0 = base_doc.encode_state();
 
         // Flush 1: Agent starts responding, user adds a note

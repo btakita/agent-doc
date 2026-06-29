@@ -2,30 +2,14 @@
 name = "agent-doc-core"
 version = "0.34.65"
 edition = "2024"
-description = "Pure document data layer for agent-doc (frontmatter, template, CRDT, diff classification, model tier)"
+description = "Compatibility facade and FFI exports for agent-doc"
 license = "MIT"
 repository = "https://github.com/btakita/agent-doc"
 
 [lib]
 name = "agent_doc_core"
 
-[dev-dependencies]
-tempfile = "3"
-
 [dependencies]
 agent-doc-element = { path = "../agent-doc-element", version = "0.34.65" }
-agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.65" }
 agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.34.65" }
 agent-doc-element-queue = { path = "../agent-doc-element-queue", version = "0.34.65" }
-anyhow = "1"
-clap = { version = "4", features = ["derive"] }
-indexmap = { version = "2", features = ["serde"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-serde_yaml = "0.9"
-toml = "1.1"
-uuid = { version = "1", features = ["v4"] }
-pulldown-cmark = "0.13"
-yrs = "0.27"
-similar = "3"
-lazily = { path = "../../lazily-rs", version = "0.13.1" }

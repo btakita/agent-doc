@@ -141,7 +141,7 @@ fn recent_exchange_compaction_timestamp_at(file: &Path, now: u64) -> Result<Opti
 /// drain does not churn the session or hit `/clear` rejected mid-turn.
 pub fn queue_context_reset_opted_in(file: &Path) -> bool {
     if let Ok(content) = std::fs::read_to_string(file)
-        && let Ok((fm, _)) = agent_doc_core::frontmatter::parse(&content)
+        && let Ok((fm, _)) = agent_doc_frontmatter::frontmatter::parse(&content)
         && let Some(flag) = fm.queue_context_reset
     {
         return flag;
@@ -166,7 +166,7 @@ pub const DEFAULT_CLEAR_THRESHOLD: u8 = 50;
 /// context usage against it and fail safe when no reliable percentage is known.
 pub fn clear_threshold_for_doc(file: &Path) -> u8 {
     if let Ok(content) = std::fs::read_to_string(file)
-        && let Ok((fm, _)) = agent_doc_core::frontmatter::parse(&content)
+        && let Ok((fm, _)) = agent_doc_frontmatter::frontmatter::parse(&content)
         && let Some(threshold) = fm.clear_threshold
     {
         return threshold.min(100);

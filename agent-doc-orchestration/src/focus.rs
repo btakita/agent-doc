@@ -65,7 +65,7 @@ use anyhow::{Context, Result};
 use std::path::Path;
 
 use crate::sessions::Tmux;
-use agent_doc_core::frontmatter;
+use agent_doc_frontmatter::frontmatter;
 
 use crate::sessions;
 

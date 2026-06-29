@@ -115,11 +115,11 @@ impl DocumentWatchGate {
         if !matches!(raw.kind, RawKind::Modify | RawKind::Create) {
             return WatchDelivery::Ignored;
         }
-        let hash = crate::debounce::content_hash(current_content);
+        let hash = agent_doc_debounce::content_hash(current_content);
 
         // Self-write echo: agent-doc just wrote exactly this content. Suppress so
         // the watcher never feeds our own write back as a user change.
-        if let Some(prov) = crate::debounce::write_provenance(&self.file)
+        if let Some(prov) = agent_doc_debounce::write_provenance(&self.file)
             && prov.actor == "agent"
             && prov.hash == hash
         {
@@ -218,7 +218,7 @@ pub fn route_event(
     };
     if let WatchDelivery::Change { generation } = delivery {
         let actor = document_actor_in(base_dir, file);
-        let content_hash = crate::debounce::content_hash(current_content);
+        let content_hash = agent_doc_debounce::content_hash(current_content);
         let event = crate::state_backbone::StateEvent::new(
             file_watch_event_id(doc_id, generation, &content_hash),
             crate::state_backbone::StateFact::FileWatchChangeObserved {
@@ -317,9 +317,15 @@ mod tests {
 
         // Record agent-doc's own write of the current content.
         let content = "agent wrote this\n";
-        let hash = crate::debounce::content_hash(content);
-        crate::debounce::record_write_provenance(&file_str, content.len(), &hash, "wid-1", "agent")
-            .unwrap();
+        let hash = agent_doc_debounce::content_hash(content);
+        agent_doc_debounce::record_write_provenance(
+            &file_str,
+            content.len(),
+            &hash,
+            "wid-1",
+            "agent",
+        )
+        .unwrap();
 
         let mut gate = DocumentWatchGate::new(file_str.clone());
         let raw = RawWatchEvent::modify(&file);

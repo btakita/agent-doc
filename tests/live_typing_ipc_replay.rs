@@ -229,7 +229,7 @@ fn apply_payload_to_file(payload: &Value, file: &Path) -> Option<String> {
                         .or_else(|| item.get("name"))
                         .and_then(Value::as_str)?;
                     let content = item.get("content").and_then(Value::as_str)?;
-                    Some(agent_doc::template::PatchBlock::new(name, content))
+                    Some(agent_doc_template::PatchBlock::new(name, content))
                 })
                 .collect::<Vec<_>>()
         })
@@ -238,7 +238,9 @@ fn apply_payload_to_file(payload: &Value, file: &Path) -> Option<String> {
         .get("unmatched")
         .and_then(Value::as_str)
         .unwrap_or("");
-    let after = agent_doc::template::apply_patches(&before, &patches, unmatched, file).ok()?;
+    let after =
+        agent_doc_orchestration::template_io::apply_patches(&before, &patches, unmatched, file)
+            .ok()?;
     fs::write(file, &after).ok()?;
     Some(after)
 }

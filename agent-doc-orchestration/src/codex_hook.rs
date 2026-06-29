@@ -701,14 +701,14 @@ fn try_recover_repeated_queue_head_response(
     last_prompt: Option<&str>,
 ) -> Result<RepeatedQueueHeadRecovery> {
     let payload =
-        agent_doc_core::replay_guard::classify_replay_payload(&input.last_assistant_message);
+        agent_doc_template::replay_guard::classify_replay_payload(&input.last_assistant_message);
     let response = match payload {
-        agent_doc_core::replay_guard::ReplayPayloadClassification::Empty => {
+        agent_doc_template::replay_guard::ReplayPayloadClassification::Empty => {
             return Ok(RepeatedQueueHeadRecovery::NotRecoverable {
                 note: capture_missing_stop_response(file, last_prompt),
             });
         }
-        agent_doc_core::replay_guard::ReplayPayloadClassification::Blocked(reason) => {
+        agent_doc_template::replay_guard::ReplayPayloadClassification::Blocked(reason) => {
             return Ok(RepeatedQueueHeadRecovery::NotRecoverable {
                 note: capture_blocked_stop_payload(
                     file,
@@ -718,7 +718,9 @@ fn try_recover_repeated_queue_head_response(
                 ),
             });
         }
-        agent_doc_core::replay_guard::ReplayPayloadClassification::Replayable(response) => response,
+        agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(response) => {
+            response
+        }
     };
 
     let response_to_write =
@@ -1103,16 +1105,16 @@ fn attempt_stop_closeout(
     input: &StopInput,
 ) -> Result<StopCloseAttempt> {
     let payload =
-        agent_doc_core::replay_guard::classify_replay_payload(&input.last_assistant_message);
+        agent_doc_template::replay_guard::classify_replay_payload(&input.last_assistant_message);
     let has_response = matches!(
         payload,
-        agent_doc_core::replay_guard::ReplayPayloadClassification::Replayable(_)
+        agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(_)
     );
     let has_bypassed_patchback =
         crate::session_check::detect_bypassed_response_write(file)?.is_some();
     if !has_response && !has_bypassed_patchback {
         return Ok(match payload {
-            agent_doc_core::replay_guard::ReplayPayloadClassification::Blocked(reason) => {
+            agent_doc_template::replay_guard::ReplayPayloadClassification::Blocked(reason) => {
                 StopCloseAttempt::StillOpen {
                     note: capture_blocked_stop_payload(
                         file,
@@ -1122,12 +1124,12 @@ fn attempt_stop_closeout(
                     ),
                 }
             }
-            agent_doc_core::replay_guard::ReplayPayloadClassification::Empty => {
+            agent_doc_template::replay_guard::ReplayPayloadClassification::Empty => {
                 StopCloseAttempt::StillOpen {
                     note: capture_missing_stop_response(file, Some(state.last_prompt.as_str())),
                 }
             }
-            agent_doc_core::replay_guard::ReplayPayloadClassification::Replayable(_) => {
+            agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(_) => {
                 StopCloseAttempt::NotPossible
             }
         });
@@ -1137,7 +1139,7 @@ fn attempt_stop_closeout(
         active_auto_queue_prompt(file)?.is_some() && open_cycle_started_from_unchanged_file(file)?;
     let captured_response_targets_queue_head = if queue_synthetic_cycle {
         match &payload {
-            agent_doc_core::replay_guard::ReplayPayloadClassification::Replayable(response) => {
+            agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(response) => {
                 crate::write::response_explicitly_targets_active_queue_head(
                     file,
                     response.as_ref(),
@@ -1150,7 +1152,7 @@ fn attempt_stop_closeout(
     };
     let queue_completion_ids = if queue_synthetic_cycle && captured_response_targets_queue_head {
         match &payload {
-            agent_doc_core::replay_guard::ReplayPayloadClassification::Replayable(response) => {
+            agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(response) => {
                 let content_before_repair = std::fs::read_to_string(file)
                     .with_context(|| format!("failed to read {}", file.display()))?;
                 crate::write::queue_targeted_completion_id_for_current_head(
@@ -1171,14 +1173,14 @@ fn attempt_stop_closeout(
 
     let mut note = String::new();
     match payload {
-        agent_doc_core::replay_guard::ReplayPayloadClassification::Replayable(response) => {
+        agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(response) => {
             crate::repair::save_pending(file, response.as_ref())?;
             crate::ops_log::log_op(file, "codex_stop_capture_saved");
             note.push_str(
                 " The latest assistant text was captured into the pending/capture ledger before auto-close.",
             );
         }
-        agent_doc_core::replay_guard::ReplayPayloadClassification::Blocked(reason) => {
+        agent_doc_template::replay_guard::ReplayPayloadClassification::Blocked(reason) => {
             note.push_str(&capture_blocked_stop_payload(
                 file,
                 &input.last_assistant_message,
@@ -1186,7 +1188,7 @@ fn attempt_stop_closeout(
                 Some(state.last_prompt.as_str()),
             ));
         }
-        agent_doc_core::replay_guard::ReplayPayloadClassification::Empty => {}
+        agent_doc_template::replay_guard::ReplayPayloadClassification::Empty => {}
     }
 
     let repair_outcome = crate::repair::run_with_queue_completion_ids(file, &queue_completion_ids)?;
@@ -1246,11 +1248,11 @@ fn attempt_stop_closeout(
 }
 
 fn capture_assistant_text(file: &Path, state: &SessionState, input: &StopInput) -> String {
-    match agent_doc_core::replay_guard::classify_replay_payload(&input.last_assistant_message) {
-        agent_doc_core::replay_guard::ReplayPayloadClassification::Empty => {
+    match agent_doc_template::replay_guard::classify_replay_payload(&input.last_assistant_message) {
+        agent_doc_template::replay_guard::ReplayPayloadClassification::Empty => {
             capture_missing_stop_response(file, Some(state.last_prompt.as_str()))
         }
-        agent_doc_core::replay_guard::ReplayPayloadClassification::Replayable(response) => {
+        agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(response) => {
             match crate::repair::save_pending(file, response.as_ref()) {
                 Ok(()) => {
                     crate::ops_log::log_op(file, "codex_stop_capture_saved");
@@ -1261,7 +1263,7 @@ fn capture_assistant_text(file: &Path, state: &SessionState, input: &StopInput) 
                 ),
             }
         }
-        agent_doc_core::replay_guard::ReplayPayloadClassification::Blocked(reason) => {
+        agent_doc_template::replay_guard::ReplayPayloadClassification::Blocked(reason) => {
             capture_blocked_stop_payload(
                 file,
                 &input.last_assistant_message,

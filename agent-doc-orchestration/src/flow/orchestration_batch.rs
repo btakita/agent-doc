@@ -173,7 +173,7 @@ pub struct ChildPatchbackNormalization {
 }
 
 pub fn normalize_child_template_response(response: String) -> ChildPatchbackNormalization {
-    let Ok((patches, unmatched)) = agent_doc_core::template::parse_patches(&response) else {
+    let Ok((patches, unmatched)) = agent_doc_template::parse_patches(&response) else {
         return ChildPatchbackNormalization {
             response,
             decision: ChildPatchbackNormalizationDecision::KeptUnparseable,

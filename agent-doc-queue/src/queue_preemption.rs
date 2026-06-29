@@ -16,7 +16,7 @@
 //! (gated) is the operator live-verify on a busy auto-looping Codex pane.
 //! See `tasks/agent-doc/plan-autoloop-command-preemption.md`.
 
-use agent_doc_core::frontmatter::{self, QueueControl};
+use agent_doc_frontmatter::frontmatter::{self, QueueControl};
 use anyhow::Result;
 
 /// What an operator command should do with an active auto-queue loop.

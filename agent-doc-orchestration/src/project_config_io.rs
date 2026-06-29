@@ -1,8 +1,6 @@
-//! Project-config I/O — `&Path`-taking and `std::fs`-using wrappers
-//! around the pure [`agent_doc_core::project_config`] surface. Kept out of
-//! `agent-doc-core` so it can satisfy plan acceptance criterion #3 ("no
-//! `&Path` or `std::fs` in core"). Wave 5 / `#bjrv` of `#adcr`; relocated to
-//! `agent-doc-orchestration` under `#adoc-orchestration-crate` Direction A.
+//! Project-config I/O — `&Path`-taking and `std::fs`-using wrappers around the
+//! pure [`agent_doc_frontmatter::project_config`] surface. Kept out of
+//! `agent-doc-frontmatter` so the focused crate stays parse-only.
 //!
 //! Re-exported through the main crate's `project_config` shim so the ~25
 //! existing call sites in main (session_check, session_accretion, mode,
@@ -14,7 +12,7 @@ use anyhow::Result;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use agent_doc_core::project_config::{
+use agent_doc_frontmatter::project_config::{
     ComponentConfig, ProjectConfig, parse_legacy_components_toml, parse_project_toml,
 };
 

@@ -6,7 +6,7 @@ pub(crate) fn check_expect_done_or_gate_guard(
 ) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): resolve guard mode from the cached frontmatter slot.
     let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
-    if mode == agent_doc_core::frontmatter::PendingCaptureGuardMode::Off {
+    if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
     }
 
@@ -101,21 +101,23 @@ pub(crate) fn check_expect_done_or_gate_guard(
     );
 
     Ok(match mode {
-        agent_doc_core::frontmatter::PendingCaptureGuardMode::Warn => GuardResult::Warn(vec![
-            warn_line,
-            format!(
-                "[session-check] hint: repair with `{}`, run `--pending-gate <id>` if review/external validation remains, or add `pending_done_guard: off` when the item should stay open",
-                repair
-            ),
-        ]),
-        agent_doc_core::frontmatter::PendingCaptureGuardMode::Strict => {
+        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Warn => {
+            GuardResult::Warn(vec![
+                warn_line,
+                format!(
+                    "[session-check] hint: repair with `{}`, run `--pending-gate <id>` if review/external validation remains, or add `pending_done_guard: off` when the item should stay open",
+                    repair
+                ),
+            ])
+        }
+        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict => {
             GuardResult::Error(format!(
                 "{}\n[session-check] hint: repair with `{}`, run `--pending-gate <id>` if review/external validation remains, or set pending_done_guard = \"warn\" to downgrade",
                 warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
                 repair
             ))
         }
-        agent_doc_core::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
+        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
     })
 }
 
@@ -164,7 +166,7 @@ pub(crate) fn check_queue_head_removal_guard(
 ) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): resolve guard mode from the cached frontmatter slot.
     let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
-    if mode == agent_doc_core::frontmatter::PendingCaptureGuardMode::Off {
+    if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
     }
     let Some(state) = crate::cycle_state::load(file)? else {
@@ -288,17 +290,19 @@ pub(crate) fn check_queue_head_removal_guard(
     );
 
     Ok(match mode {
-        agent_doc_core::frontmatter::PendingCaptureGuardMode::Warn => GuardResult::Warn(vec![
-            warn_line,
-            format!("[session-check] hint: {repair} (see #queue-clear-unrun-items)"),
-        ]),
-        agent_doc_core::frontmatter::PendingCaptureGuardMode::Strict => {
+        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Warn => {
+            GuardResult::Warn(vec![
+                warn_line,
+                format!("[session-check] hint: {repair} (see #queue-clear-unrun-items)"),
+            ])
+        }
+        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict => {
             GuardResult::Error(format!(
                 "{}\n[session-check] hint: {repair} (see #queue-clear-unrun-items)",
                 warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
             ))
         }
-        agent_doc_core::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
+        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
     })
 }
 
@@ -314,7 +318,7 @@ pub(crate) fn check_free_text_queue_head_provenance(
     rc: &crate::graph::RunContext,
 ) -> Result<GuardResult> {
     let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
-    if mode == agent_doc_core::frontmatter::PendingCaptureGuardMode::Off {
+    if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
     }
     let Some(state) = crate::cycle_state::load(file)? else {
@@ -445,17 +449,19 @@ pub(crate) fn check_free_text_queue_head_provenance(
         file.display()
     );
     Ok(match mode {
-        agent_doc_core::frontmatter::PendingCaptureGuardMode::Warn => GuardResult::Warn(vec![
-            warn_line,
-            format!("[session-check] hint: {repair} (see #lr-queue-patchback-miss)"),
-        ]),
-        agent_doc_core::frontmatter::PendingCaptureGuardMode::Strict => {
+        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Warn => {
+            GuardResult::Warn(vec![
+                warn_line,
+                format!("[session-check] hint: {repair} (see #lr-queue-patchback-miss)"),
+            ])
+        }
+        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict => {
             GuardResult::Error(format!(
                 "{}\n[session-check] hint: {repair} (see #lr-queue-patchback-miss)",
                 warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
             ))
         }
-        agent_doc_core::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
+        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
     })
 }
 

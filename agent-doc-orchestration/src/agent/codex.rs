@@ -61,7 +61,7 @@ use std::time::{Duration, Instant};
 
 use super::streaming::{StreamChunk, StreamingAgent};
 use super::{Agent, AgentResponse};
-use agent_doc_core::frontmatter::{CodexNetworkAccess, Frontmatter};
+use agent_doc_frontmatter::frontmatter::{CodexNetworkAccess, Frontmatter};
 
 #[derive(Clone)]
 pub struct Codex {

@@ -1125,7 +1125,7 @@ fn reconcile_list_item_lifecycle(
     theirs: &KeyedChild,
     base: Option<&KeyedChild>,
 ) -> String {
-    use crate::queue_item_lifecycle::QueueItemLifecycle;
+    use agent_doc_element_queue::QueueItemLifecycle;
 
     // The preamble child (leading text before the first list item) carries no
     // item lifecycle — reconcile it as a plain leaf merge.

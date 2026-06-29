@@ -235,7 +235,8 @@ use crate::{
     flow::document_mutation::{TemplateStructureGuardReason, log_template_structure_guard_event},
     flow::types::FlowOutcome,
 };
-use agent_doc_core::{frontmatter, template};
+use agent_doc_frontmatter::frontmatter;
+use agent_doc_template as template;
 
 use crate::{merge, repair, sessions, snapshot};
 
@@ -380,23 +381,22 @@ fn snapshot_persist_mode(
         return SnapshotPersistMode::FinalContent;
     }
 
-    let ours_prompt_norm = agent_doc_core::diff::strip_comments(&ours_norm);
-    let final_prompt_norm = agent_doc_core::diff::strip_comments(&final_norm);
+    let ours_prompt_norm = agent_doc_diff::strip_comments(&ours_norm);
+    let final_prompt_norm = agent_doc_diff::strip_comments(&final_norm);
     let Some(diff_text) =
-        agent_doc_core::diff::unified_diff_from_contents(&ours_prompt_norm, &final_prompt_norm)
+        agent_doc_diff::unified_diff_from_contents(&ours_prompt_norm, &final_prompt_norm)
     else {
         return SnapshotPersistMode::FinalContent;
     };
-    let has_prompt_bearing_user_drift =
-        agent_doc_core::diff::classify_prompt_bearing_changes(&diff_text)
-            .iter()
-            .any(|change| {
-                matches!(
-                    change.kind,
-                    agent_doc_core::diff::PromptBearingChangeKind::PromptTarget
-                        | agent_doc_core::diff::PromptBearingChangeKind::ContentEdit
-                )
-            });
+    let has_prompt_bearing_user_drift = agent_doc_diff::classify_prompt_bearing_changes(&diff_text)
+        .iter()
+        .any(|change| {
+            matches!(
+                change.kind,
+                agent_doc_diff::PromptBearingChangeKind::PromptTarget
+                    | agent_doc_diff::PromptBearingChangeKind::ContentEdit
+            )
+        });
 
     if has_prompt_bearing_user_drift {
         SnapshotPersistMode::ContentOurs
@@ -475,23 +475,23 @@ fn has_prompt_bearing_user_drift(base: &str, current: &str) -> bool {
 fn prompt_bearing_user_changes_between(
     base: &str,
     current: &str,
-) -> Vec<agent_doc_core::diff::PromptBearingChange> {
+) -> Vec<agent_doc_diff::PromptBearingChange> {
     let base_norm = strip_boundary_for_dedup(base);
     let current_norm = strip_boundary_for_dedup(current);
-    let base_prompt_norm = agent_doc_core::diff::strip_comments(&base_norm);
-    let current_prompt_norm = agent_doc_core::diff::strip_comments(&current_norm);
+    let base_prompt_norm = agent_doc_diff::strip_comments(&base_norm);
+    let current_prompt_norm = agent_doc_diff::strip_comments(&current_norm);
     let Some(diff_text) =
-        agent_doc_core::diff::unified_diff_from_contents(&base_prompt_norm, &current_prompt_norm)
+        agent_doc_diff::unified_diff_from_contents(&base_prompt_norm, &current_prompt_norm)
     else {
         return Vec::new();
     };
-    let mut changes: Vec<_> = agent_doc_core::diff::classify_prompt_bearing_changes(&diff_text)
+    let mut changes: Vec<_> = agent_doc_diff::classify_prompt_bearing_changes(&diff_text)
         .into_iter()
         .filter(|change| {
             matches!(
                 change.kind,
-                agent_doc_core::diff::PromptBearingChangeKind::PromptTarget
-                    | agent_doc_core::diff::PromptBearingChangeKind::ContentEdit
+                agent_doc_diff::PromptBearingChangeKind::PromptTarget
+                    | agent_doc_diff::PromptBearingChangeKind::ContentEdit
             )
         })
         .collect();
@@ -503,8 +503,7 @@ fn prompt_bearing_user_changes_between(
             return false;
         }
         let trimmed = added.trim();
-        trimmed.starts_with('❯')
-            || agent_doc_core::diff::text_line_looks_like_prompt_target(trimmed)
+        trimmed.starts_with('❯') || agent_doc_diff::text_line_looks_like_prompt_target(trimmed)
     }) {
         for line in diff_text.lines() {
             let Some(added) = line.strip_prefix('+') else {
@@ -515,7 +514,7 @@ fn prompt_bearing_user_changes_between(
             }
             let trimmed = added.trim();
             if trimmed.starts_with('❯')
-                || agent_doc_core::diff::text_line_looks_like_prompt_target(trimmed)
+                || agent_doc_diff::text_line_looks_like_prompt_target(trimmed)
             {
                 let text = trimmed
                     .strip_prefix('❯')
@@ -523,11 +522,11 @@ fn prompt_bearing_user_changes_between(
                     .trim()
                     .to_string();
                 if !changes.iter().any(|change| {
-                    change.kind == agent_doc_core::diff::PromptBearingChangeKind::PromptTarget
+                    change.kind == agent_doc_diff::PromptBearingChangeKind::PromptTarget
                         && change.text.trim() == text
                 }) {
-                    changes.push(agent_doc_core::diff::PromptBearingChange {
-                        kind: agent_doc_core::diff::PromptBearingChangeKind::PromptTarget,
+                    changes.push(agent_doc_diff::PromptBearingChange {
+                        kind: agent_doc_diff::PromptBearingChangeKind::PromptTarget,
                         text,
                     });
                 }
@@ -538,8 +537,8 @@ fn prompt_bearing_user_changes_between(
 }
 
 fn prompt_bearing_change_owned_by_content_ours(
-    change: &agent_doc_core::diff::PromptBearingChange,
-    owned_changes: &[agent_doc_core::diff::PromptBearingChange],
+    change: &agent_doc_diff::PromptBearingChange,
+    owned_changes: &[agent_doc_diff::PromptBearingChange],
 ) -> bool {
     let text = normalized_prompt_line(&change.text);
     owned_changes
@@ -605,8 +604,8 @@ pub(crate) fn line_is_carry_forward_signal(line: &str) -> bool {
         return false;
     }
     let candidate = carry_forward_signal_candidate(trimmed).unwrap_or(trimmed);
-    if agent_doc_core::diff::text_line_looks_like_prompt_target(trimmed)
-        || agent_doc_core::diff::text_line_looks_like_prompt_target(candidate)
+    if agent_doc_diff::text_line_looks_like_prompt_target(trimmed)
+        || agent_doc_diff::text_line_looks_like_prompt_target(candidate)
     {
         return true;
     }
@@ -807,7 +806,7 @@ fn dropped_prompt_lines_after_content_ours(
         // Only a new prompt target (a `do #id` / `❯ ...` / prompt-shaped line) is
         // an unambiguously dropped user prompt. Multi-line content edits are
         // noisy diff context, not a discrete prompt to recover.
-        .filter(|change| change.kind == agent_doc_core::diff::PromptBearingChangeKind::PromptTarget)
+        .filter(|change| change.kind == agent_doc_diff::PromptBearingChangeKind::PromptTarget)
         .filter(|change| !prompt_bearing_change_owned_by_content_ours(change, &owned_changes))
         .map(|change| change.text.trim().to_string())
         .filter(|text| !text.is_empty() && !text.contains('\n'))
@@ -1075,16 +1074,15 @@ fn prompt_targets_added_to_backlog(
             .map(|component| component.content(base))
             .unwrap_or("");
         let current_body = current_component.content(current);
-        let Some(diff_text) =
-            agent_doc_core::diff::unified_diff_from_contents(base_body, current_body)
+        let Some(diff_text) = agent_doc_diff::unified_diff_from_contents(base_body, current_body)
         else {
             continue;
         };
         let component_targets: Vec<String> =
-            agent_doc_core::diff::classify_prompt_bearing_changes(&diff_text)
+            agent_doc_diff::classify_prompt_bearing_changes(&diff_text)
                 .into_iter()
                 .filter(|change| {
-                    change.kind == agent_doc_core::diff::PromptBearingChangeKind::PromptTarget
+                    change.kind == agent_doc_diff::PromptBearingChangeKind::PromptTarget
                 })
                 .map(|change| change.text)
                 .collect();
@@ -1615,7 +1613,7 @@ fn pending_kept_open_ids_from_options(options: &CommandOptions) -> Vec<String> {
 
 fn enforce_review_done_guard(file: &Path, id: &str) -> Result<()> {
     let mode = crate::session_check::resolve_review_done_guard_mode(file)?;
-    if mode == agent_doc_core::frontmatter::PendingCaptureGuardMode::Off {
+    if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(());
     }
     let Some(component_name) = crate::pending_cmd::open_item_component_name(file, id)? else {
@@ -1631,11 +1629,11 @@ fn enforce_review_done_guard(file: &Path, id: &str) -> Result<()> {
         normalized, component_name, normalized
     );
     match mode {
-        agent_doc_core::frontmatter::PendingCaptureGuardMode::Warn => {
+        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Warn => {
             eprintln!("[write] warning: {}", message);
             Ok(())
         }
-        agent_doc_core::frontmatter::PendingCaptureGuardMode::Strict => {
+        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict => {
             log_closeout_guard(
                 file,
                 crate::flow::types::FlowStage::PreWriteGuard,
@@ -1644,12 +1642,12 @@ fn enforce_review_done_guard(file: &Path, id: &str) -> Result<()> {
             );
             anyhow::bail!("{}", message)
         }
-        agent_doc_core::frontmatter::PendingCaptureGuardMode::Off => Ok(()),
+        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off => Ok(()),
     }
 }
 
 pub fn guard_no_exchange_compaction_request_for_diff(file: &Path, diff_text: &str) -> Result<()> {
-    if agent_doc_core::diff::detect_exchange_compaction_request(diff_text) {
+    if agent_doc_diff::detect_exchange_compaction_request(diff_text) {
         anyhow::bail!(
             "bare `compact exchange` directive detected in the current diff; close this turn \
              through the binary compaction path instead: `{}` \
@@ -1671,8 +1669,7 @@ fn guard_no_exchange_compaction_request_between(
     let Some(base) = baseline_owned.as_deref() else {
         return Ok(());
     };
-    let Some(diff_text) = agent_doc_core::diff::unified_diff_from_contents(base, current_content)
-    else {
+    let Some(diff_text) = agent_doc_diff::unified_diff_from_contents(base, current_content) else {
         return Ok(());
     };
     guard_no_exchange_compaction_request_for_diff(file, &diff_text)
@@ -2822,7 +2819,7 @@ pub use normalize::*;
 
 fn enforce_orchestrate_template_patch_contract(
     origin: Option<&str>,
-    patches: &[agent_doc_core::template::PatchBlock],
+    patches: &[agent_doc_template::PatchBlock],
     unmatched: &str,
 ) -> Result<()> {
     crate::flow::document_mutation::enforce_orchestrate_patchback_contract(
@@ -2976,7 +2973,7 @@ fn repair_duplicate_prompt_artifacts(
     }
 
     if let Some(answered_tail_deduped) =
-        agent_doc_core::template::remove_duplicate_answered_exchange_prompt_tail(&repaired)
+        agent_doc_template::remove_duplicate_answered_exchange_prompt_tail(&repaired)
     {
         repaired = answered_tail_deduped;
         report.answered_tail = true;
@@ -3095,7 +3092,7 @@ pub fn repair_commit_prompt_artifacts_against_snapshot(
 }
 
 fn enforce_no_duplicate_prompt_residue(file: &Path, content: &str, context: &str) -> Result<()> {
-    match agent_doc_core::template::guard_no_duplicate_prompt_residue_outside_exchange(content) {
+    match agent_doc_template::guard_no_duplicate_prompt_residue_outside_exchange(content) {
         Ok(()) => Ok(()),
         Err(err) => {
             log_template_structure_guard_event(
@@ -3127,9 +3124,7 @@ pub fn normalize_template_structure_or_fail_preserving(
     // survived the patch application phase (e.g., via CRDT/git merge).
     let deduped_openers = {
         let mut result = lifted;
-        while let Some(merged) =
-            agent_doc_core::template::repair_duplicate_exchange_opener(&result)?
-        {
+        while let Some(merged) = agent_doc_template::repair_duplicate_exchange_opener(&result)? {
             eprintln!("[write] normalize_template_structure: merged duplicate exchange opener");
             result = merged;
         }
@@ -3140,7 +3135,7 @@ pub fn normalize_template_structure_or_fail_preserving(
         file,
         DuplicatePromptRepairOptions::new("structure").preserving(preserve_doc),
     )?;
-    match agent_doc_core::template::guard_no_conversation_tail_outside_exchange(&normalized) {
+    match agent_doc_template::guard_no_conversation_tail_outside_exchange(&normalized) {
         Ok(()) => Ok(normalized),
         Err(err)
             if err.chain().any(|cause| {
@@ -3150,7 +3145,7 @@ pub fn normalize_template_structure_or_fail_preserving(
             }) =>
         {
             if let Some(repaired) =
-                agent_doc_core::template::repair_duplicate_exchange_close_scaffold(&normalized)?
+                agent_doc_template::repair_duplicate_exchange_close_scaffold(&normalized)?
             {
                 log_template_structure_guard_event(
                     file,
@@ -3163,17 +3158,15 @@ pub fn normalize_template_structure_or_fail_preserving(
                     DuplicatePromptRepairOptions::new("duplicate-scaffold repair")
                         .preserving(preserve_doc),
                 )?;
-                agent_doc_core::template::guard_no_conversation_tail_outside_exchange(&repaired)
+                agent_doc_template::guard_no_conversation_tail_outside_exchange(&repaired)
                     .context(format!(
                         "template structure guard failed for {} after duplicate-scaffold repair",
                         file.display()
                     ))?;
                 return Ok(repaired);
             }
-            if agent_doc_core::template::repair_duplicate_exchange_close_mixed_scaffold_tail(
-                &normalized,
-            )?
-            .is_some()
+            if agent_doc_template::repair_duplicate_exchange_close_mixed_scaffold_tail(&normalized)?
+                .is_some()
             {
                 log_template_structure_guard_event(
                     file,
@@ -3186,7 +3179,7 @@ pub fn normalize_template_structure_or_fail_preserving(
                 );
             }
             if let Some(repaired) =
-                agent_doc_core::template::repair_duplicate_exchange_close_tail(&normalized)?
+                agent_doc_template::repair_duplicate_exchange_close_tail(&normalized)?
             {
                 log_template_structure_guard_event(
                     file,
@@ -3199,7 +3192,7 @@ pub fn normalize_template_structure_or_fail_preserving(
                     DuplicatePromptRepairOptions::new("duplicate-close repair")
                         .preserving(preserve_doc),
                 )?;
-                agent_doc_core::template::guard_no_conversation_tail_outside_exchange(&repaired)
+                agent_doc_template::guard_no_conversation_tail_outside_exchange(&repaired)
                     .context(format!(
                         "template structure guard failed for {} after duplicate-close repair",
                         file.display()
@@ -3324,7 +3317,7 @@ fn guard_visible_write_idle_with_budget(
         .to_string_lossy()
         .to_string();
     let idle_reached =
-        crate::debounce::await_idle_via_file(&indicator_path, debounce_ms, timeout_ms);
+        agent_doc_debounce::await_idle_via_file(&indicator_path, debounce_ms, timeout_ms);
     let facts = crate::flow::document_mutation::VisibleWriteTypingFacts {
         idle_reached,
         timeout_ms,
@@ -3421,7 +3414,7 @@ fn guard_visible_write_reconcile(
     let actual_current = std::fs::read_to_string(file)
         .with_context(|| format!("failed to re-read {}", file.display()))?;
     if let Some(live) =
-        crate::debounce::live_buffer_diverges_from_content(&indicator_path, expected_current)
+        agent_doc_debounce::live_buffer_diverges_from_content(&indicator_path, expected_current)
     {
         // #nm1x provenance suppression: when the editor-visible buffer matches the
         // current on-disk content, the editor holds no unsaved edits *ahead* of
@@ -3899,7 +3892,7 @@ fn capture_locked_pre_response(path: &Path) -> Result<(std::fs::File, String)> {
 }
 
 fn normalize_component_content_for_delta(content: &str) -> String {
-    agent_doc_core::diff::strip_comments(&strip_boundary_for_dedup(content))
+    agent_doc_diff::strip_comments(&strip_boundary_for_dedup(content))
 }
 
 fn containment_line(line: &str) -> Option<String> {
@@ -4135,9 +4128,7 @@ pub fn strip_prompt_prefix_from_response_body_first_lines(content: &str) -> Opti
             }
             if let Some(rest) = line.strip_prefix("❯ ") {
                 let response_shaped_tail =
-                    agent_doc_core::diff::line_looks_like_plain_response_after_prompt(
-                        rest.trim_start(),
-                    );
+                    agent_doc_diff::line_looks_like_plain_response_after_prompt(rest.trim_start());
                 if !saw_unprefixed_response_body_line || response_shaped_tail {
                     stripped_any = true;
                     repaired_lines.push(rest.to_string());
@@ -4664,8 +4655,8 @@ fn count_code_fence_openings(content: &str) -> usize {
 /// session-actor owner thread take the raw path directly (the latter prevents a
 /// re-entrant mailbox deadlock).
 fn atomic_write(path: &Path, content: &str) -> Result<()> {
-    if crate::write_authority::is_visible_document(path)
-        && !crate::write_authority::within_owner_scope()
+    if agent_doc_document_realtime::write_authority::is_visible_document(path)
+        && !agent_doc_document_realtime::write_authority::within_owner_scope()
     {
         log_fence_count_drop_if_any(path, content);
         let base_dir = crate::fs_util::find_project_root(path)
@@ -4717,7 +4708,7 @@ fn atomic_write_raw(path: &Path, content: &str) -> Result<()> {
 /// disk change from any agent-doc writer is positively attributed instead of
 /// inferred from the `LIVE_BUFFER_STALE_SKEW_MS` mtime heuristic.
 pub(crate) fn record_document_write_provenance(path: &Path, content: &str) {
-    if !crate::write_authority::is_visible_document(path) {
+    if !agent_doc_document_realtime::write_authority::is_visible_document(path) {
         return;
     }
     let canonical = path
@@ -4726,8 +4717,8 @@ pub(crate) fn record_document_write_provenance(path: &Path, content: &str) {
         .to_string_lossy()
         .to_string();
     let write_id = uuid::Uuid::new_v4().to_string();
-    let hash = crate::debounce::content_hash(content);
-    if let Err(e) = crate::debounce::record_write_provenance(
+    let hash = agent_doc_debounce::content_hash(content);
+    if let Err(e) = agent_doc_debounce::record_write_provenance(
         &canonical,
         content.len(),
         &hash,
@@ -4767,10 +4758,13 @@ mod tests {
             .unwrap_or(doc.clone())
             .to_string_lossy()
             .to_string();
-        let prov = crate::debounce::write_provenance(&doc_key)
+        let prov = agent_doc_debounce::write_provenance(&doc_key)
             .expect("document write should record provenance");
         assert_eq!(prov.len, "hello document".len());
-        assert_eq!(prov.hash, crate::debounce::content_hash("hello document"));
+        assert_eq!(
+            prov.hash,
+            agent_doc_debounce::content_hash("hello document")
+        );
         assert_eq!(prov.actor, "agent");
         assert!(!prov.write_id.is_empty());
 
@@ -4784,7 +4778,7 @@ mod tests {
             .to_string_lossy()
             .to_string();
         assert!(
-            crate::debounce::write_provenance(&sidecar_key).is_none(),
+            agent_doc_debounce::write_provenance(&sidecar_key).is_none(),
             "an .agent-doc/ sidecar write must not record document provenance"
         );
     }
@@ -4835,7 +4829,7 @@ mod tests {
 
         crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
         let editor_visible = format!("{committed}\neditor-only mutation\n");
-        crate::debounce::document_changed_with_content_for_editor(
+        agent_doc_debounce::document_changed_with_content_for_editor(
             &doc.display().to_string(),
             &editor_visible,
             Some("jetbrains:test"),
@@ -4943,7 +4937,7 @@ mod tests {
             .to_string_lossy()
             .to_string();
         assert!(
-            crate::debounce::write_provenance(&key).is_some(),
+            agent_doc_debounce::write_provenance(&key).is_some(),
             "the routed write's inner raw path records provenance"
         );
     }
@@ -5010,7 +5004,7 @@ mod tests {
         );
         assert_eq!(
             payload["baseline_hash"].as_str(),
-            Some(crate::debounce::content_hash(content).as_str()),
+            Some(agent_doc_debounce::content_hash(content).as_str()),
             "queued reposition patch must tag the baseline content hash it targets"
         );
         // Reposition-only invariant: no response body re-materialized.
@@ -5255,9 +5249,9 @@ mod tests {
         fs::write(&doc, "body\n").unwrap();
 
         let doc_str = doc.to_string_lossy().to_string();
-        crate::debounce::document_changed(&doc_str);
+        agent_doc_debounce::document_changed(&doc_str);
         for _ in 0..50 {
-            if crate::debounce::is_typing_via_file(&doc_str, 60_000) {
+            if agent_doc_debounce::is_typing_via_file(&doc_str, 60_000) {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
@@ -5422,13 +5416,13 @@ mod tests {
             "- [ ] [#operator] unsaved operator edit\n<!-- /agent:backlog -->",
         );
         let doc_str = doc.to_string_lossy().to_string();
-        crate::debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
             &doc_str,
             &live_operator_buffer,
             "test-editor",
             "test",
             "1",
-            &[crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
         )
         .unwrap();
 
@@ -5554,10 +5548,10 @@ scratch
         );
         fs::write(&doc, expected).unwrap();
         let doc_str = doc.canonicalize().unwrap().to_string_lossy().to_string();
-        crate::debounce::record_live_buffer_digest(
+        agent_doc_debounce::record_live_buffer_digest(
             &doc_str,
             live_buffer.len(),
-            &crate::debounce::content_hash(&live_buffer),
+            &agent_doc_debounce::content_hash(&live_buffer),
         )
         .unwrap();
 
@@ -5598,10 +5592,10 @@ scratch
         );
         fs::write(&doc, &drifted).unwrap();
         let doc_str = doc.canonicalize().unwrap().to_string_lossy().to_string();
-        crate::debounce::record_live_buffer_digest(
+        agent_doc_debounce::record_live_buffer_digest(
             &doc_str,
             drifted.len(),
-            &crate::debounce::content_hash(&drifted),
+            &agent_doc_debounce::content_hash(&drifted),
         )
         .unwrap();
 
@@ -6176,7 +6170,7 @@ scratch
         // Build a patch whose application against the current file is a no-op
         // (replace exchange with the same content it already has).
         let exchange_body = "### Re: topic — gpt-5\n\nImplemented.\n";
-        let patch = agent_doc_core::template::PatchBlock::new("exchange", exchange_body);
+        let patch = agent_doc_template::PatchBlock::new("exchange", exchange_body);
 
         let started = std::time::Instant::now();
         let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
@@ -6221,7 +6215,7 @@ scratch
         let doc = dir.path().join("test.md");
         fs::write(&doc, "content").unwrap();
 
-        let patches: Vec<agent_doc_core::template::PatchBlock> = vec![];
+        let patches: Vec<agent_doc_template::PatchBlock> = vec![];
         let result = try_ipc(&doc, &patches, "", None, None, None, None, None).unwrap();
         assert!(
             !result.success,
@@ -6241,7 +6235,7 @@ scratch
         let doc = dir.path().join("test.md");
         fs::write(&doc, "---\nsession: test\n---\n\n<!-- agent:exchange -->\ncontent\n<!-- /agent:exchange -->\n").unwrap();
 
-        let patch = agent_doc_core::template::PatchBlock::new("exchange", "new content");
+        let patch = agent_doc_template::PatchBlock::new("exchange", "new content");
 
         // This will timeout after 2s — patch file is written but never consumed
         let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
@@ -6280,7 +6274,7 @@ scratch
         let doc = dir.path().join("test.md");
         fs::write(&doc, "---\nsession: test\n---\n\n<!-- agent:exchange -->\ncontent\n<!-- /agent:exchange -->\n").unwrap();
 
-        let patch = agent_doc_core::template::PatchBlock::new("exchange", "new content");
+        let patch = agent_doc_template::PatchBlock::new("exchange", "new content");
 
         // Spawn "plugin" thread that watches for patch files, writes content, then deletes
         let patches_dir = agent_doc_dir.join("patches");
@@ -6330,7 +6324,7 @@ scratch
         );
         fs::write(&doc, original).unwrap();
 
-        let patch = agent_doc_core::template::PatchBlock::new(
+        let patch = agent_doc_template::PatchBlock::new(
             "exchange",
             "### Re: missed patchback - gpt-5\n\nRecovered answer.",
         );
@@ -6527,7 +6521,7 @@ scratch
             }
         });
 
-        let patch = agent_doc_core::template::PatchBlock::new(
+        let patch = agent_doc_template::PatchBlock::new(
             "exchange",
             "### Re: live prompt — gpt-5\n\nHandled.",
         );
@@ -6630,7 +6624,7 @@ scratch
             }
         });
 
-        let patch = agent_doc_core::template::PatchBlock::new(
+        let patch = agent_doc_template::PatchBlock::new(
             "exchange",
             "### Re: Please reply — gpt-5\n\nAnswered.",
         );
@@ -6734,7 +6728,7 @@ scratch
             }
         });
 
-        let patch = agent_doc_core::template::PatchBlock::new(
+        let patch = agent_doc_template::PatchBlock::new(
             "exchange",
             "### Re: Please reply — gpt-5\n\nAnswered.",
         );
@@ -6971,7 +6965,7 @@ scratch
             }
         });
 
-        let patch = agent_doc_core::template::PatchBlock::new(
+        let patch = agent_doc_template::PatchBlock::new(
             "exchange",
             "### Re: Please reply — gpt-5\n\nAnswered.",
         );
@@ -7061,7 +7055,7 @@ scratch
             }
         });
 
-        let patch = agent_doc_core::template::PatchBlock::new("exchange", "live prompt\n");
+        let patch = agent_doc_template::PatchBlock::new("exchange", "live prompt\n");
         let result = try_ipc(
             &doc,
             &[patch],
@@ -7254,7 +7248,7 @@ scratch
         let original = "---\nsession: test\n---\n\n<!-- agent:exchange -->\noriginal content\n<!-- agent:boundary:test-boundary-123 -->\n<!-- /agent:exchange -->\n";
         fs::write(&doc, original).unwrap();
 
-        let patch = agent_doc_core::template::PatchBlock::new("exchange", "agent response content");
+        let patch = agent_doc_template::PatchBlock::new("exchange", "agent response content");
 
         let content_ours = "---\nsession: test\n---\n\n<!-- agent:exchange -->\nagent response content\n<!-- /agent:exchange -->\n";
 
@@ -7572,7 +7566,7 @@ scratch
         fs::write(&doc, &doc_content).unwrap();
 
         // No explicit patches (simulates skill sending raw content)
-        let patches: Vec<agent_doc_core::template::PatchBlock> = vec![];
+        let patches: Vec<agent_doc_template::PatchBlock> = vec![];
         // Unmatched content is identical to what's already in the exchange
         let result = build_ipc_patches_json(&doc, &patches, existing, None, None).unwrap();
 
@@ -7594,7 +7588,7 @@ scratch
             "<!-- agent:exchange patch=append -->\nExisting content.\n<!-- /agent:exchange -->\n";
         fs::write(&doc, doc_content).unwrap();
 
-        let patches: Vec<agent_doc_core::template::PatchBlock> = vec![];
+        let patches: Vec<agent_doc_template::PatchBlock> = vec![];
         let new_content = "Completely new agent response.";
         let result = build_ipc_patches_json(&doc, &patches, new_content, None, None).unwrap();
 
@@ -7628,7 +7622,7 @@ scratch
         );
         fs::write(&doc, doc_content).unwrap();
 
-        let patches = vec![agent_doc_core::template::PatchBlock::new(
+        let patches = vec![agent_doc_template::PatchBlock::new(
             "exchange",
             "```\nresponse body\n```\n",
         )];
@@ -7655,7 +7649,7 @@ scratch
             "<!-- agent:exchange patch=append -->\nPrevious response.\n<!-- /agent:exchange -->\n";
         fs::write(&doc, doc_content).unwrap();
 
-        let patches: Vec<agent_doc_core::template::PatchBlock> = vec![];
+        let patches: Vec<agent_doc_template::PatchBlock> = vec![];
         let unmatched = "do #expatch. spec-test-build-install-commit-push\n### Re: #expatch — gpt-5\n\nImplemented.\n";
         let prefix_lines = vec!["do #expatch. spec-test-build-install-commit-push".to_string()];
         let result = build_ipc_patches_json(
@@ -7880,7 +7874,7 @@ scratch
         // When synthesis consumes the unmatched content (patches input was empty,
         // ipc_patches output is non-empty), effective_unmatched should be "".
         // This prevents the plugin from applying the content twice (IPC duplicate bug).
-        let patches: Vec<agent_doc_core::template::PatchBlock> = vec![];
+        let patches: Vec<agent_doc_template::PatchBlock> = vec![];
         let unmatched = "some response content";
 
         // Case 1: synthesis happened (patches empty → ipc_patches non-empty)
@@ -7899,7 +7893,7 @@ scratch
         );
 
         // Case 2: explicit patches (no synthesis) — unmatched passes through
-        let explicit_patch = agent_doc_core::template::PatchBlock::new("exchange", "response");
+        let explicit_patch = agent_doc_template::PatchBlock::new("exchange", "response");
         let patches_explicit = [explicit_patch];
         let ipc_explicit: Vec<serde_json::Value> = vec![serde_json::json!({
             "component": "exchange",

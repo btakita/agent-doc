@@ -69,7 +69,6 @@ mod parallel;
 mod patch;
 mod plan;
 mod plugin;
-mod project_config;
 mod queue_dispatch;
 mod queue_recovery;
 mod read;
@@ -90,10 +89,8 @@ mod undo;
 mod upgrade;
 mod worktree;
 
-// Re-export library modules so binary-internal modules can use `crate::` paths
-pub(crate) use agent_doc::frontmatter;
-pub(crate) use agent_doc::template;
-
+use agent_doc_frontmatter::frontmatter;
+use agent_doc_orchestration::template_io;
 use anyhow::Context;
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use std::ffi::OsString;
@@ -2835,7 +2832,7 @@ fn main() -> anyhow::Result<()> {
             )
         }
         Commands::TemplateInfo { file } => {
-            let info = template::template_info(&file)?;
+            let info = template_io::template_info(&file)?;
             println!("{}", serde_json::to_string_pretty(&info)?);
             Ok(())
         }

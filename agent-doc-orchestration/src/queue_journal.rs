@@ -121,7 +121,7 @@ pub fn record(file: &Path, content: &str) -> Result<()> {
 ///
 /// The JB / VS Code plugins already report the operator's full editor buffer to
 /// `.agent-doc/live-buffer/<hash>` on every keystroke (debounced) via
-/// [`crate::debounce::document_changed_with_content`]. This reads that durable
+/// [`agent_doc_debounce::document_changed_with_content`]. This reads that durable
 /// editor-buffer sidecar and journals any operator queue prompt it contains that
 /// is not already journaled, so the prompt enters the **same** `#qdurcrash`
 /// journal substrate and is replayed by [`replay_missing`] on the next cycle /
@@ -137,7 +137,7 @@ pub fn record_live_buffer(file: &Path) -> Result<()> {
     // Each open editor reports its own sidecar; journal the prompts from every
     // one so a multi-editor session never drops one editor's pending add.
     let mut prompts: Vec<agent_doc_queue::document_queue::QueuePrompt> = Vec::new();
-    for snapshot in crate::debounce::live_buffer_snapshots(file_str) {
+    for snapshot in agent_doc_debounce::live_buffer_snapshots(file_str) {
         let Some(buffer) = snapshot.content.as_deref() else {
             // len/hash-only sidecar: we cannot recover the prompt text from a
             // digest, so there is nothing to journal from it.
@@ -546,7 +546,7 @@ mod tests {
         // editor buffer (disk queue + the new operator line) to the live-buffer
         // sidecar. The add never reaches disk.
         let editor_buffer = doc_body(&["- do [#alpha]", "- investigate the prod outage"]);
-        crate::debounce::document_changed_with_content(&file_str, &editor_buffer);
+        agent_doc_debounce::document_changed_with_content(&file_str, &editor_buffer);
 
         // Step 3: capture the editor-buffer add into the durable journal.
         record_live_buffer(&path).unwrap();
@@ -592,7 +592,7 @@ mod tests {
 
         // Operator's editor buffer held a free-text add; journal it from the buffer.
         let editor_buffer = doc_body(&["- do [#alpha]", "- review the migration plan"]);
-        crate::debounce::document_changed_with_content(&file_str, &editor_buffer);
+        agent_doc_debounce::document_changed_with_content(&file_str, &editor_buffer);
         record_live_buffer(&path).unwrap();
 
         // The add was later worked and struck on disk — replay must treat it as

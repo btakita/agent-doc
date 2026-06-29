@@ -2154,8 +2154,16 @@ fn test_manifest_uses_publishable_dependency_contract() {
 
     for crate_name in [
         "agent-doc-core",
+        "agent-doc-debounce",
+        "agent-doc-diff",
+        "agent-doc-document-realtime",
         "agent-doc-markdown-ast",
+        "agent-doc-ffi",
+        "agent-doc-frontmatter",
+        "agent-doc-merge",
         "agent-doc-orchestration",
+        "agent-doc-template",
+        "agent-doc-turn",
     ] {
         let dependency = dependencies[crate_name].as_table().unwrap();
         assert!(
@@ -2169,6 +2177,46 @@ fn test_manifest_uses_publishable_dependency_contract() {
             dependency.get("version").and_then(toml::Value::as_str),
             package_version,
             "{crate_name} must also carry a registry version for cargo publish"
+        );
+    }
+
+    let core_manifest =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("agent-doc-core/Cargo.toml"))
+            .unwrap();
+    let core_parsed: toml::Value = toml::from_str(&core_manifest).unwrap();
+    let core_dependencies = core_parsed["dependencies"].as_table().unwrap();
+    for crate_name in [
+        "agent-doc-element",
+        "agent-doc-model-tier",
+        "agent-doc-element-queue",
+    ] {
+        let dependency = core_dependencies[crate_name].as_table().unwrap();
+        assert!(
+            dependency
+                .get("path")
+                .and_then(toml::Value::as_str)
+                .is_some(),
+            "{crate_name} should keep a local path for workspace builds"
+        );
+        assert_eq!(
+            dependency.get("version").and_then(toml::Value::as_str),
+            package_version,
+            "{crate_name} must carry a registry version for cargo publish"
+        );
+    }
+    for crate_name in [
+        "agent-doc-template",
+        "agent-doc-diff",
+        "agent-doc-frontmatter",
+        "agent-doc-turn",
+        "agent-doc-syntax",
+        "agent-doc-topic",
+        "agent-doc-merge",
+        "agent-doc-ffi",
+    ] {
+        assert!(
+            !core_dependencies.contains_key(crate_name),
+            "{crate_name} must not be retained as an agent-doc-core facade dependency"
         );
     }
 
@@ -2215,9 +2263,15 @@ fn test_agent_doc_merge_is_pure_workspace_boundary() {
     let parsed: toml::Value = toml::from_str(&merge_manifest).unwrap();
     let dependencies = parsed["dependencies"].as_table().unwrap();
 
-    assert!(dependencies.contains_key("agent-doc-core"));
+    assert!(
+        !dependencies.contains_key("agent-doc-core"),
+        "agent-doc-merge owns pure merge policy directly and must not depend on the core facade"
+    );
+    assert!(dependencies.contains_key("agent-doc-element"));
+    assert!(dependencies.contains_key("agent-doc-element-queue"));
     assert!(dependencies.contains_key("agent-doc-markdown-ast"));
     for forbidden in [
+        "agent-doc-core",
         "agent-doc-orchestration",
         "git2",
         "interprocess",
@@ -2228,6 +2282,93 @@ fn test_agent_doc_merge_is_pure_workspace_boundary() {
         assert!(
             !dependencies.contains_key(forbidden),
             "agent-doc-merge must not depend on realtime, turn, git, editor, or sqlite crates"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_debounce_is_sidecar_boundary() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-debounce")),
+        "agent-doc-debounce must stay a first-class workspace crate"
+    );
+
+    let package_version = workspace["package"]["version"].as_str();
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
+    let dependency = orchestration_dependencies["agent-doc-debounce"]
+        .as_table()
+        .unwrap();
+    assert_eq!(
+        dependency.get("path").and_then(toml::Value::as_str),
+        Some("../agent-doc-debounce")
+    );
+    assert_eq!(
+        dependency.get("version").and_then(toml::Value::as_str),
+        package_version
+    );
+
+    let debounce_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-debounce/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&debounce_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+
+    assert!(dependencies.contains_key("agent-doc-log-time"));
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-debounce must not depend on core, orchestration, git, editor IPC, sqlite, or tmux crates"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_document_realtime_owns_authority_boundaries() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let realtime_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&realtime_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+
+    assert!(
+        manifest_dir
+            .join("agent-doc-document-realtime/src/write_authority.rs")
+            .exists()
+    );
+    assert!(
+        manifest_dir
+            .join("agent-doc-document-realtime/src/watch_authority.rs")
+            .exists()
+    );
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-document-realtime authority policy must not depend on core, orchestration, git, editor IPC, sqlite, or tmux crates"
         );
     }
 }

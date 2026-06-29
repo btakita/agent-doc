@@ -41,14 +41,16 @@ use std::process::Command;
 
 use agent_doc_element::element;
 
-use crate::{PatchMode, project_config};
+use crate::PatchMode;
+use agent_doc_frontmatter::project_config::ComponentConfig;
 use agent_doc_orchestration::graph::RunContext;
+use agent_doc_orchestration::project_config_io;
 use agent_doc_orchestration::snapshot;
 
 fn load_configs_with_context(
     file: &Path,
     rc: Option<&RunContext>,
-) -> Result<HashMap<String, project_config::ComponentConfig>> {
+) -> Result<HashMap<String, ComponentConfig>> {
     if let Some(rc) = rc {
         return Ok(rc
             .project_config()
@@ -62,7 +64,7 @@ fn load_configs_with_context(
     loop {
         let candidate = current.join(".agent-doc").join("config.toml");
         if candidate.exists() {
-            let cfg = project_config::load_project_from(&candidate);
+            let cfg = project_config_io::load_project_from(&candidate);
             return Ok(cfg.components.into_iter().collect());
         }
         match current.parent() {
@@ -71,7 +73,7 @@ fn load_configs_with_context(
         }
     }
     // Fall back to CWD-based resolution
-    let proj_cfg = project_config::load_project();
+    let proj_cfg = project_config_io::load_project();
     Ok(proj_cfg.components.into_iter().collect())
 }
 

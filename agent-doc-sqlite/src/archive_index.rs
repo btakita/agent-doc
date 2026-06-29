@@ -765,7 +765,7 @@ fn parse_turns(body: &str) -> Vec<ArchiveTurn> {
         return exchange_turns;
     }
 
-    let (preamble, sections) = agent_doc_core::topic::parse_topic_sections(body);
+    let (preamble, sections) = agent_doc_topic::parse_topic_sections(body);
     if !sections.is_empty() {
         let mut turns = Vec::new();
         let mut ordinal = 1;
@@ -959,7 +959,7 @@ fn is_backlog_id_char(ch: char) -> bool {
 fn current_session_id(file: &Path) -> Result<Option<String>> {
     let content =
         fs::read_to_string(file).with_context(|| format!("failed to read {}", file.display()))?;
-    let Ok((frontmatter, _)) = agent_doc_core::frontmatter::parse(&content) else {
+    let Ok((frontmatter, _)) = agent_doc_frontmatter::frontmatter::parse(&content) else {
         return Ok(None);
     };
     Ok(frontmatter.session)

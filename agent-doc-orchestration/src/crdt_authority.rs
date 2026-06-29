@@ -227,11 +227,11 @@ fn document_has_live_editor_transport(projection: &DocumentStateProjection) -> b
 /// actually ran.
 pub fn sync_under_authority(
     authority: CrdtAuthority,
-    a: &agent_doc_core::crdt_sync::ReplicaState,
-    b: &agent_doc_core::crdt_sync::ReplicaState,
+    a: &agent_doc_merge::crdt_sync::ReplicaState,
+    b: &agent_doc_merge::crdt_sync::ReplicaState,
 ) -> anyhow::Result<bool> {
     if authority.editor_attached() {
-        agent_doc_core::crdt_sync::sync(a, b)?;
+        agent_doc_merge::crdt_sync::sync(a, b)?;
         Ok(true)
     } else {
         Ok(false)
@@ -250,11 +250,11 @@ pub fn sync_under_authority(
 /// snapshot is safe to commit.
 pub fn commit_barrier_under_authority(
     authority: CrdtAuthority,
-    canonical: &agent_doc_core::crdt_sync::ReplicaState,
-    editors: &[&agent_doc_core::crdt_sync::ReplicaState],
+    canonical: &agent_doc_merge::crdt_sync::ReplicaState,
+    editors: &[&agent_doc_merge::crdt_sync::ReplicaState],
 ) -> anyhow::Result<bool> {
     if authority.editor_attached() {
-        agent_doc_core::crdt_sync::flush_to_commit_barrier(canonical, editors)
+        agent_doc_merge::crdt_sync::flush_to_commit_barrier(canonical, editors)
     } else {
         Ok(true)
     }
@@ -264,7 +264,7 @@ pub fn commit_barrier_under_authority(
 mod tests {
     use super::*;
     use crate::merge_control_state_machine::OwnershipLiveness;
-    use agent_doc_core::crdt_sync::ReplicaState;
+    use agent_doc_merge::crdt_sync::ReplicaState;
 
     const ALL_PHASES: [MergeOwnershipPhase; 6] = [
         MergeOwnershipPhase::Detached,

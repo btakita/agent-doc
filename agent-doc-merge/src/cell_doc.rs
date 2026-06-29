@@ -46,8 +46,8 @@ use crate::crdt::{
     EditorOp, PREAMBLE_KEY, is_list_component, replay_editor_ops, split_exchange_children,
     split_list_children,
 };
-use crate::queue_item_lifecycle::QueueItemLifecycle;
 use agent_doc_element::element::{self, Component};
+use agent_doc_element_queue::QueueItemLifecycle;
 
 /// Environment variable that gates the live CRDT merge per-cell
 /// 3-way path ([`merge_3way`], routed from [`crate::crdt::merge_by_component`]).

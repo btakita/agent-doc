@@ -54,7 +54,7 @@ use anyhow::Result;
 use indexmap::IndexMap;
 
 use crate::env::{EnvMap, expand_values};
-use agent_doc_core::frontmatter::Frontmatter;
+use agent_doc_frontmatter::frontmatter::Frontmatter;
 
 /// Declarative description of how to build the child env.
 ///

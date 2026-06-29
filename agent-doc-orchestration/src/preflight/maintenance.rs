@@ -9,12 +9,12 @@ use super::*;
 /// document mirror behind). Returns `None` when neither is present.
 pub(crate) fn resolve_pipeline_state(
     file: &Path,
-) -> Result<Option<agent_doc_core::frontmatter::AgentDocPipeline>> {
+) -> Result<Option<agent_doc_frontmatter::frontmatter::AgentDocPipeline>> {
     if let Some(state) = crate::cycle_state::load(file)? {
         return Ok(Some(state.to_pipeline()));
     }
     let current = std::fs::read_to_string(file).unwrap_or_default();
-    Ok(match agent_doc_core::frontmatter::parse(&current) {
+    Ok(match agent_doc_frontmatter::frontmatter::parse(&current) {
         Ok((fm, _)) if !fm.pipeline.is_empty() => Some(fm.pipeline),
         _ => None,
     })
@@ -1694,7 +1694,8 @@ fn adopt_live_buffer_queue_deletions(file: &Path, disk_content: &mut String) -> 
     let Some(file_str) = file.to_str() else {
         return Ok(false);
     };
-    let Some(snapshot) = crate::debounce::live_buffer_diverges_from_content(file_str, disk_content)
+    let Some(snapshot) =
+        agent_doc_debounce::live_buffer_diverges_from_content(file_str, disk_content)
     else {
         return Ok(false);
     };
@@ -1788,15 +1789,15 @@ pub(crate) fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<Que
     let marker_control = agent_doc_queue::document_queue::marker_control(&comp.attrs);
     let marker_stop = matches!(
         marker_control,
-        Some(agent_doc_core::frontmatter::QueueControl::Stop)
+        Some(agent_doc_frontmatter::frontmatter::QueueControl::Stop)
     );
     let has_auto = agent_doc_queue::document_queue::has_auto_attr(&comp.attrs)
         || matches!(
             marker_control,
-            Some(agent_doc_core::frontmatter::QueueControl::Start)
+            Some(agent_doc_frontmatter::frontmatter::QueueControl::Start)
         );
     let exchange_triggered = diff
-        .map(agent_doc_core::diff::detect_queue_trigger)
+        .map(agent_doc_diff::detect_queue_trigger)
         .unwrap_or(false);
     let (fm, _) = frontmatter::parse(&content).unwrap_or_default();
     let persisted_active = fm.queue_active.unwrap_or(false);
@@ -2193,12 +2194,12 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         // loop converges when no Open backlog item remains.
         let queue_go_mode = matches!(
             agent_doc_queue::document_queue::marker_control(&comp.attrs),
-            Some(agent_doc_core::frontmatter::QueueControl::Start)
+            Some(agent_doc_frontmatter::frontmatter::QueueControl::Start)
         ) || frontmatter::parse(&content)
             .ok()
             .and_then(|(fm, _)| fm.queue)
-            .and_then(|q| agent_doc_core::frontmatter::QueueControl::parse(&q))
-            .map(|c| matches!(c, agent_doc_core::frontmatter::QueueControl::Start))
+            .and_then(|q| agent_doc_frontmatter::frontmatter::QueueControl::parse(&q))
+            .map(|c| matches!(c, agent_doc_frontmatter::frontmatter::QueueControl::Start))
             .unwrap_or(false);
         // `#backlog-queue-attr-populates-in-go-mode`: a plain persisted-active
         // queue (no `go`/`start`) still holds freshly-added backlog ids out of the
@@ -2406,15 +2407,15 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     let marker_control = agent_doc_queue::document_queue::marker_control(&comp.attrs);
     let marker_stop = matches!(
         marker_control,
-        Some(agent_doc_core::frontmatter::QueueControl::Stop)
+        Some(agent_doc_frontmatter::frontmatter::QueueControl::Stop)
     );
     let has_auto = agent_doc_queue::document_queue::has_auto_attr(&comp.attrs)
         || matches!(
             marker_control,
-            Some(agent_doc_core::frontmatter::QueueControl::Start)
+            Some(agent_doc_frontmatter::frontmatter::QueueControl::Start)
         );
     let exchange_triggered = diff
-        .map(agent_doc_core::diff::detect_queue_trigger)
+        .map(agent_doc_diff::detect_queue_trigger)
         .unwrap_or(false);
     let (fm, _) = frontmatter::parse(&current_content).unwrap_or_default();
     let persisted_active = fm.queue_active.unwrap_or(false);
@@ -2446,7 +2447,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // accumulate as orphaned residue. Drop any such displaced struck-queue line
     // (outside every agent component span) before the rest of queue maintenance.
     if let Some(repaired) =
-        agent_doc_core::template::repair_queue_struck_items_escaped_below_marker(&current_content)
+        agent_doc_template::repair_queue_struck_items_escaped_below_marker(&current_content)
     {
         current_content = repaired;
         mutated = true;
@@ -3042,7 +3043,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 // the loop on every settled head edit). The pause is retained
                 // only while a live typing indicator proves the buffer is still
                 // being edited, so we never grab a half-typed head.
-                let head_edit_mid_typing = crate::debounce::is_typing_via_file(
+                let head_edit_mid_typing = agent_doc_debounce::is_typing_via_file(
                     &file.to_string_lossy(),
                     preflight_debounce_ms(file),
                 );
@@ -3617,11 +3618,11 @@ pub(crate) fn sync_same_cycle_pending_adds_into_go_queue(file: &Path) -> Result<
     let queue_control = fm
         .queue
         .as_deref()
-        .and_then(agent_doc_core::frontmatter::QueueControl::parse);
+        .and_then(agent_doc_frontmatter::frontmatter::QueueControl::parse);
     let marker_control = agent_doc_queue::document_queue::marker_control(&queue_component.attrs);
     let queue_go_mode = matches!(
         marker_control.or(queue_control),
-        Some(agent_doc_core::frontmatter::QueueControl::Start)
+        Some(agent_doc_frontmatter::frontmatter::QueueControl::Start)
     );
     let queue_active = fm.queue_active.unwrap_or(false) || queue_go_mode;
     if !queue_active || !queue_go_mode {
@@ -3998,6 +3999,19 @@ mod tests {
     use std::io::Write;
     use std::process::Command;
     use tempfile::TempDir;
+
+    fn wait_for_typing_indicator(file: &std::path::Path) {
+        let file_str = file.to_string_lossy();
+        let debounce_ms = crate::preflight::preflight_debounce_ms(file);
+        for _ in 0..50 {
+            if agent_doc_debounce::is_typing_via_file(&file_str, debounce_ms) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("typing indicator was not written for {}", file.display());
+    }
+
     #[test]
     fn inspect_queue_state_simulates_activation_without_persisting() {
         let dir = setup_project();
@@ -4179,8 +4193,11 @@ mod tests {
             "- :pushpin: do [#dup]\n",
             1,
         );
-        crate::debounce::record_live_buffer_digest_content(&doc.to_string_lossy(), &live_content)
-            .unwrap();
+        agent_doc_debounce::record_live_buffer_digest_content(
+            &doc.to_string_lossy(),
+            &live_content,
+        )
+        .unwrap();
 
         let _ = run_queue_maintenance(&doc, None).unwrap();
 
@@ -5981,7 +5998,8 @@ mod tests {
         // A live editor is actively mid-edit on the head prompt, so the loop
         // must still pause/halt rather than adopt a half-typed head
         // (#queue-no-stall-on-head-edit gates adopt on a settled buffer).
-        crate::debounce::document_changed(&doc.to_string_lossy());
+        agent_doc_debounce::document_changed(&doc.to_string_lossy());
+        wait_for_typing_indicator(&doc);
 
         let state = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(state.queue_halted, Some("item_modified".into()));
@@ -6079,7 +6097,8 @@ mod tests {
 
         // Mark the document as actively being typed so the head edit reads as
         // a half-typed buffer.
-        crate::debounce::document_changed(&doc.to_string_lossy());
+        agent_doc_debounce::document_changed(&doc.to_string_lossy());
+        wait_for_typing_indicator(&doc);
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 

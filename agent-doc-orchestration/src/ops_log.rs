@@ -61,7 +61,7 @@ fn cached_session_id(file: &Path, rc: Option<&RunContext>) -> Option<String> {
         Some(rc) => rc.doc_content(),
         None => std::fs::read_to_string(file).ok()?,
     };
-    let session = agent_doc_core::frontmatter::parse(&content)
+    let session = agent_doc_frontmatter::frontmatter::parse(&content)
         .ok()?
         .0
         .session?;

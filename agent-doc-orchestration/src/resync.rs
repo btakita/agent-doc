@@ -97,7 +97,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::sessions::{self, PaneMoveOp, Tmux};
-use agent_doc_core::frontmatter;
+use agent_doc_frontmatter::frontmatter;
 
 use crate::{config, frontmatter_io};
 

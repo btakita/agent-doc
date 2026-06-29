@@ -277,13 +277,13 @@ mod tests {
             "<!-- /agent:status -->\n",
         );
         std::fs::write(&doc, source).unwrap();
-        crate::debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
             &doc.to_string_lossy(),
             &format!("{source}\noperator typed text\n"),
             "jetbrains-new",
             "jetbrains",
             "0.2.197",
-            &[crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
         )
         .unwrap();
 

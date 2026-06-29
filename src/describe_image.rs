@@ -428,7 +428,7 @@ pub fn run(
     api_key: Option<&str>,
     prompt: Option<&str>,
 ) -> Result<()> {
-    let project_config = crate::project_config::load_project_for_doc(image);
+    let project_config = agent_doc_orchestration::project_config_io::load_project_for_doc(image);
     let vision = &project_config.vision;
     let (provider, api_key, model) = resolve_vision_config(
         provider,

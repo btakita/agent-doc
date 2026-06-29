@@ -77,14 +77,14 @@ fn gather_convergence_facts(
 fn editor_typing_active_for_idle_queue(file: &std::path::Path) -> bool {
     let debounce_ms = crate::preflight::preflight_debounce_ms(file);
     let file_str = file.to_string_lossy();
-    if crate::debounce::is_typing_via_file(&file_str, debounce_ms) {
+    if agent_doc_debounce::is_typing_via_file(&file_str, debounce_ms) {
         return true;
     }
     let absolute = crate::git::resolve_absolute_file_path(file);
     if absolute == file {
         return false;
     }
-    crate::debounce::is_typing_via_file(&absolute.to_string_lossy(), debounce_ms)
+    agent_doc_debounce::is_typing_via_file(&absolute.to_string_lossy(), debounce_ms)
 }
 
 /// `#fbwire` / `#fullboundary` Phase 2 — the convergence gate could not be
@@ -775,7 +775,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // surfaced so `agent:` edits are observable + operator-verifiable.
                 if agent_change_restart_enabled
                     && let Ok(content) = std::fs::read_to_string(&path)
-                    && let Ok((fm, _)) = agent_doc_core::frontmatter::parse(&content)
+                    && let Ok((fm, _)) = agent_doc_frontmatter::frontmatter::parse(&content)
                 {
                     let global = crate::config::load().unwrap_or_default();
                     let resolved = crate::harness::HarnessConfig::from_context(&fm, &global);
@@ -3110,7 +3110,7 @@ mod tests {
         std::fs::write(&doc, "body\n").unwrap();
         let relative_doc = doc.strip_prefix(&cwd).unwrap();
 
-        crate::debounce::document_changed(doc.to_string_lossy().as_ref());
+        agent_doc_debounce::document_changed(doc.to_string_lossy().as_ref());
         for _ in 0..50 {
             if super::editor_typing_active_for_idle_queue(relative_doc) {
                 return;

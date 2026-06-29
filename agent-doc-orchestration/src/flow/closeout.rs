@@ -1111,11 +1111,13 @@ fn closeout_queue_only_drift_evidence(
 fn closeout_editor_ipc_evidence(file: &Path, visible: &str) -> CloseoutEditorIpcEvidence {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let file_key = canonical.to_string_lossy().to_string();
-    let live_buffers = crate::debounce::live_buffer_snapshots(&file_key);
+    let live_buffers = agent_doc_debounce::live_buffer_snapshots(&file_key);
     let socket_degraded = crate::snapshot::find_project_root(&canonical)
         .and_then(|root| crate::write::ipc_direct_disk_degraded_for_file(&root, &canonical).ok())
         .unwrap_or(false);
-    if let Some(diverged) = crate::debounce::live_buffer_diverges_from_content(&file_key, visible) {
+    if let Some(diverged) =
+        agent_doc_debounce::live_buffer_diverges_from_content(&file_key, visible)
+    {
         return CloseoutEditorIpcEvidence::DivergedLiveBuffer {
             live_buffer_count: live_buffers.len().max(1),
             editor_id: diverged.editor_id,
@@ -1586,7 +1588,7 @@ fn apply_metadata_drift_recovery(
 /// next stable post-commit point).
 fn rebuild_sidecars_from_content(file: &Path, content: &str) -> Result<()> {
     crate::snapshot::save(file, content)?;
-    let crdt = agent_doc_core::crdt::CrdtDoc::from_text(content).encode_state();
+    let crdt = agent_doc_merge::crdt::CrdtDoc::from_text(content).encode_state();
     crate::snapshot::save_document_crdt(file, &crdt, content)?;
     Ok(())
 }
@@ -1973,7 +1975,7 @@ mod tests {
 
     #[test]
     fn complete_required_closeout_blocks_until_live_replica_delivery_is_acked() {
-        use agent_doc_core::crdt_sync::ReplicaState;
+        use agent_doc_merge::crdt_sync::ReplicaState;
 
         let base = concat!(
             "---\nagent_doc_format: template\nsession: test\n---\n\n",
@@ -2376,7 +2378,7 @@ mod tests {
         let visible = format!("{base}\n{response}");
         std::fs::write(&doc, &visible).unwrap();
         let canonical = doc.canonicalize().unwrap();
-        crate::debounce::record_live_buffer_digest_content(
+        agent_doc_debounce::record_live_buffer_digest_content(
             canonical.to_string_lossy().as_ref(),
             &visible,
         )

@@ -121,7 +121,9 @@ use std::time::{Duration, Instant};
 
 use agent_doc_element::element;
 
-use agent_doc_core::{diff, frontmatter, template};
+use agent_doc_diff as diff;
+use agent_doc_frontmatter::frontmatter;
+use agent_doc_template as template;
 
 use crate::{
     agent, config::Config, diff_io, frontmatter_io, git, merge, snapshot, template_io, write,
@@ -1444,7 +1446,7 @@ fn owner_pane_queue_edit_should_defer_until_closeout(
     };
     let document_path = file.to_string_lossy().to_string();
     let ops = crate::preflight::build_ops_from_semantic_diff(&document_path, None, "", &summary);
-    let affectedness = agent_doc_core::turn_scope::classify_cycle(&ops, &scope);
+    let affectedness = agent_doc_turn::turn_scope::classify_cycle(&ops, &scope);
     !affectedness.turn_affected
 }
 
@@ -1886,7 +1888,7 @@ fn apply_template_response(
     let content_current = std::fs::read_to_string(file)?;
     let (final_content, crdt_state) = if content_current == baseline {
         let state = if use_crdt {
-            Some(agent_doc_core::crdt::CrdtDoc::from_text(&content_ours).encode_state())
+            Some(agent_doc_merge::crdt::CrdtDoc::from_text(&content_ours).encode_state())
         } else {
             None
         };
@@ -3158,7 +3160,7 @@ old status\n\
         std::fs::write(&doc, baseline).unwrap();
         snapshot::save(&doc, snapshot).unwrap();
 
-        let diff_text = agent_doc_core::diff::unified_diff_from_contents(snapshot, baseline)
+        let diff_text = agent_doc_diff::unified_diff_from_contents(snapshot, baseline)
             .expect("snapshot and baseline differ");
         let normalized = normalize_direct_run_prompt_prefixes(&doc, baseline, &diff_text)
             .expect("direct-run baseline prompt normalization should succeed");
@@ -3264,10 +3266,13 @@ old status\n\
             .unwrap_or_else(|_| path.clone())
             .to_string_lossy()
             .to_string();
-        let prov = crate::debounce::write_provenance(&key)
+        let prov = agent_doc_debounce::write_provenance(&key)
             .expect("direct-run document write should record provenance");
         assert_eq!(prov.len, "direct run body".len());
-        assert_eq!(prov.hash, crate::debounce::content_hash("direct run body"));
+        assert_eq!(
+            prov.hash,
+            agent_doc_debounce::content_hash("direct run body")
+        );
         assert_eq!(prov.actor, "agent");
         assert!(!prov.write_id.is_empty());
     }

@@ -433,7 +433,7 @@ mod tests {
     use crate::hooks::fire_doc_hooks;
     use crate::project_config_io as project_config;
     use crate::sessions::IsolatedTmux;
-    use agent_doc_core::frontmatter::Frontmatter;
+    use agent_doc_frontmatter::frontmatter::Frontmatter;
     use std::collections::HashMap;
     use tempfile::TempDir;
     #[test]

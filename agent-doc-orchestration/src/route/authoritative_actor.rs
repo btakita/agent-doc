@@ -228,7 +228,7 @@ fn document_declares_expected_harness(file: &Path, expected_harness: &str) -> bo
     let Ok(content) = std::fs::read_to_string(file) else {
         return false;
     };
-    let Ok((fm, _)) = agent_doc_core::frontmatter::parse(&content) else {
+    let Ok((fm, _)) = agent_doc_frontmatter::frontmatter::parse(&content) else {
         return false;
     };
     let Some(agent) = fm.agent.as_deref() else {

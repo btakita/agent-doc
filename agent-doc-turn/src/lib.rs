@@ -7,6 +7,9 @@ use lazily::{ThreadSafeContext, ThreadSafeStateMachine};
 use serde::{Deserialize, Serialize};
 
 pub mod drain_stall;
+pub mod heuristics;
+pub mod op_log;
+pub mod turn_scope;
 pub mod wait_machine;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

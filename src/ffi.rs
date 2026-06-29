@@ -274,7 +274,7 @@ fn resolve_admin_root(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn agent_doc_document_changed(file_path: *const c_char) {
     if let Ok(path) = unsafe { CStr::from_ptr(file_path) }.to_str() {
-        agent_doc_orchestration::debounce::document_changed(path);
+        agent_doc_debounce::document_changed(path);
     }
 }
 
@@ -305,7 +305,7 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest(
     let Ok(len) = usize::try_from(content_len) else {
         return;
     };
-    agent_doc_orchestration::debounce::document_changed_with_digest(path, len, hash);
+    agent_doc_debounce::document_changed_with_digest(path, len, hash);
 }
 
 /// Record a document change plus digest for one editor instance.
@@ -336,12 +336,7 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest_for_editor(
     let Ok(len) = usize::try_from(content_len) else {
         return;
     };
-    agent_doc_orchestration::debounce::document_changed_with_digest_for_editor(
-        path,
-        len,
-        hash,
-        Some(editor),
-    );
+    agent_doc_debounce::document_changed_with_digest_for_editor(path, len, hash, Some(editor));
 }
 
 /// Record a document change plus the editor's FULL visible buffer content (#pcp6).
@@ -369,7 +364,7 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest_content(
         Ok(text) => text,
         Err(_) => return,
     };
-    agent_doc_orchestration::debounce::document_changed_with_content(path, text);
+    agent_doc_debounce::document_changed_with_content(path, text);
 }
 
 /// Record a document change plus full visible buffer content for one editor
@@ -397,11 +392,7 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor(
         Ok(editor) => editor,
         Err(_) => return,
     };
-    agent_doc_orchestration::debounce::document_changed_with_content_for_editor(
-        path,
-        text,
-        Some(editor),
-    );
+    agent_doc_debounce::document_changed_with_content_for_editor(path, text, Some(editor));
     match agent_doc_orchestration::realtime_model::broadcast_editor_change(
         Path::new(path),
         editor,
@@ -469,9 +460,9 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor_v2
         .map(str::trim)
         .filter(|capability| !capability.is_empty())
         .collect();
-    agent_doc_orchestration::debounce::document_changed(path);
+    agent_doc_debounce::document_changed(path);
     if let Err(err) =
-        agent_doc_orchestration::debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
             path,
             text,
             editor,
@@ -518,9 +509,7 @@ pub unsafe extern "C" fn agent_doc_document_closed_for_editor(
         Ok(editor) => editor,
         Err(_) => return,
     };
-    if let Err(e) =
-        agent_doc_orchestration::debounce::clear_live_buffer_for_editor(path, Some(editor))
-    {
+    if let Err(e) = agent_doc_debounce::clear_live_buffer_for_editor(path, Some(editor)) {
         eprintln!("[ffi] clear live buffer for editor failed for {path}: {e}");
     }
 }
@@ -541,14 +530,14 @@ pub unsafe extern "C" fn agent_doc_is_tracked(file_path: *const c_char) -> i32 {
         Ok(s) => s,
         Err(_) => return 0,
     };
-    agent_doc_orchestration::debounce::is_tracked(path) as i32
+    agent_doc_debounce::is_tracked(path) as i32
 }
 
 /// Return the number of files tracked in the debounce state.
 /// Used by IDE plugins for state diagnostics.
 #[unsafe(no_mangle)]
 pub extern "C" fn agent_doc_tracked_count() -> u32 {
-    agent_doc_orchestration::debounce::tracked_count() as u32
+    agent_doc_debounce::tracked_count() as u32
 }
 
 /// `#cancel-orphans-preflight-cycle`: explicit run-cancel reclaim seam.
@@ -599,16 +588,15 @@ pub unsafe extern "C" fn agent_doc_is_idle(file_path: *const c_char, debounce_ms
         Ok(s) => s,
         Err(_) => return 1, // Invalid path — don't block callers
     };
-    let in_process_idle = agent_doc_orchestration::debounce::is_idle(path, debounce_ms as u64);
+    let in_process_idle = agent_doc_debounce::is_idle(path, debounce_ms as u64);
     if !in_process_idle {
         return 0;
     }
     // In-process says idle. If the file was never tracked in this process (e.g., after
     // plugin restart), also check the file-based indicator so cross-process typing state
     // from another plugin instance isn't silently lost.
-    if !agent_doc_orchestration::debounce::is_tracked(path) {
-        return (!agent_doc_orchestration::debounce::is_typing_via_file(path, debounce_ms as u64))
-            as i32;
+    if !agent_doc_debounce::is_tracked(path) {
+        return (!agent_doc_debounce::is_typing_via_file(path, debounce_ms as u64)) as i32;
     }
     1
 }
@@ -633,15 +621,11 @@ pub unsafe extern "C" fn agent_doc_await_idle(
     };
     // When the file is untracked in-process (e.g., after plugin restart), bridge to
     // file-based indicator so cross-process typing state isn't silently ignored.
-    if !agent_doc_orchestration::debounce::is_tracked(path) {
-        return agent_doc_orchestration::debounce::await_idle_via_file(
-            path,
-            debounce_ms as u64,
-            timeout_ms as u64,
-        ) as i32;
+    if !agent_doc_debounce::is_tracked(path) {
+        return agent_doc_debounce::await_idle_via_file(path, debounce_ms as u64, timeout_ms as u64)
+            as i32;
     }
-    agent_doc_orchestration::debounce::await_idle(path, debounce_ms as u64, timeout_ms as u64)
-        as i32
+    agent_doc_debounce::await_idle(path, debounce_ms as u64, timeout_ms as u64) as i32
 }
 
 /// Check if a plugin in another process has typed recently (cross-process).
@@ -666,7 +650,7 @@ pub unsafe extern "C" fn agent_doc_is_typing_via_file(
         Ok(s) => s,
         Err(_) => return 0,
     };
-    agent_doc_orchestration::debounce::is_typing_via_file(path, debounce_ms as u64) as i32
+    agent_doc_debounce::is_typing_via_file(path, debounce_ms as u64) as i32
 }
 
 /// Block until the file-based typing indicator shows idle, or timeout expires.
@@ -688,11 +672,7 @@ pub unsafe extern "C" fn agent_doc_await_idle_via_file(
         Ok(s) => s,
         Err(_) => return 1, // Invalid path — don't block
     };
-    agent_doc_orchestration::debounce::await_idle_via_file(
-        path,
-        debounce_ms as u64,
-        timeout_ms as u64,
-    ) as i32
+    agent_doc_debounce::await_idle_via_file(path, debounce_ms as u64, timeout_ms as u64) as i32
 }
 
 /// Set the response status for a file (Option B: in-process).
@@ -713,7 +693,7 @@ pub unsafe extern "C" fn agent_doc_set_status(file_path: *const c_char, status: 
         Ok(s) => s,
         Err(_) => return,
     };
-    agent_doc_orchestration::debounce::set_status(path, st);
+    agent_doc_debounce::set_status(path, st);
 }
 
 /// Get the response status for a file (file-based).
@@ -730,7 +710,7 @@ pub unsafe extern "C" fn agent_doc_get_status(file_path: *const c_char) -> *mut 
         Ok(s) => s,
         Err(_) => return CString::new("idle").unwrap().into_raw(),
     };
-    let status = agent_doc_orchestration::debounce::get_status(path);
+    let status = agent_doc_debounce::get_status(path);
     CString::new(status)
         .unwrap_or_else(|_| CString::new("idle").unwrap())
         .into_raw()
@@ -750,7 +730,7 @@ pub unsafe extern "C" fn agent_doc_is_busy(file_path: *const c_char) -> i32 {
         Ok(s) => s,
         Err(_) => return 0,
     };
-    agent_doc_orchestration::debounce::is_busy(path) as i32
+    agent_doc_debounce::is_busy(path) as i32
 }
 
 /// Check whether a `.md` file is an opted-in agent-doc session document.
@@ -841,7 +821,7 @@ pub unsafe extern "C" fn agent_doc_report_editor_state(
     } else {
         Some(save_timestamp_ms as u128)
     };
-    let state = agent_doc_orchestration::debounce::EditorBufferState {
+    let state = agent_doc_debounce::EditorBufferState {
         path: path.to_string(),
         version,
         dirty: dirty != 0,
@@ -851,7 +831,7 @@ pub unsafe extern "C" fn agent_doc_report_editor_state(
         content_len: len,
         session_id: sid,
     };
-    agent_doc_orchestration::debounce::record_editor_buffer_state(&state);
+    agent_doc_debounce::record_editor_buffer_state(&state);
 }
 
 /// Get the current editor buffer state for a document as JSON.
@@ -869,7 +849,7 @@ pub unsafe extern "C" fn agent_doc_get_editor_state(file_path: *const c_char) ->
         Ok(s) => s,
         Err(_) => return ptr::null_mut(),
     };
-    match agent_doc_orchestration::debounce::editor_buffer_state(path) {
+    match agent_doc_debounce::editor_buffer_state(path) {
         Some(state) => match serde_json::to_string(&state) {
             Ok(json) => CString::new(json).unwrap().into_raw(),
             Err(_) => ptr::null_mut(),
@@ -896,8 +876,7 @@ pub unsafe extern "C" fn agent_doc_is_editor_stable(
         Ok(s) => s,
         Err(_) => return 0,
     };
-    agent_doc_orchestration::debounce::editor_buffer_stable(path, debounce_ms as u64).is_some()
-        as i32
+    agent_doc_debounce::editor_buffer_stable(path, debounce_ms as u64).is_some() as i32
 }
 
 /// Try to acquire the sync lock. Returns `true` if acquired, `false` if already held.
@@ -1291,7 +1270,7 @@ pub unsafe extern "C" fn agent_doc_plugin_watch_readonly(file_path: *const c_cha
         Ok(s) => s,
         Err(_) => return 0,
     };
-    if agent_doc_orchestration::watch_authority::plugin_watch_is_readonly() {
+    if agent_doc_document_realtime::watch_authority::plugin_watch_is_readonly() {
         agent_doc_orchestration::ops_log::log_op(
             std::path::Path::new(file),
             "plugin_watch_readonly skipped file-apply (controller-owned watcher is sole writer) #dsqa",
@@ -1526,7 +1505,7 @@ pub unsafe extern "C" fn agent_doc_record_editor_op(
                 );
                 return 0;
             };
-            agent_doc_core::crdt::EditorOp::Insert {
+            agent_doc_merge::crdt::EditorOp::Insert {
                 offset,
                 text: text.to_string(),
             }
@@ -1538,7 +1517,7 @@ pub unsafe extern "C" fn agent_doc_record_editor_op(
                 );
                 return 0;
             };
-            agent_doc_core::crdt::EditorOp::Delete { offset, len }
+            agent_doc_merge::crdt::EditorOp::Delete { offset, len }
         }
         other => {
             eprintln!(
@@ -1549,12 +1528,12 @@ pub unsafe extern "C" fn agent_doc_record_editor_op(
     };
 
     let op_log_summary = match &op {
-        agent_doc_core::crdt::EditorOp::Insert { text, .. } => format!(
+        agent_doc_merge::crdt::EditorOp::Insert { text, .. } => format!(
             "insert_bytes={} insert_non_ascii={}",
             text.len(),
             !text.is_ascii()
         ),
-        agent_doc_core::crdt::EditorOp::Delete { len, .. } => {
+        agent_doc_merge::crdt::EditorOp::Delete { len, .. } => {
             format!("delete_len={len}")
         }
     };
@@ -2235,10 +2214,10 @@ pub unsafe extern "C" fn agent_doc_resolve_project_path(
 ///
 // `agent_doc_free_string` and `agent_doc_free_state` moved to
 // `agent_doc_core::ffi` (Wave 5 / `#k9e1` proof-of-concept). They are
-// re-exported below via `pub use agent_doc_core::ffi::*;`. The
+// re-exported below via `pub use agent_doc_ffi::*;`. The
 // `force_link_core_ffi_symbols` function below references them to
 // prevent the static linker from stripping them out of the main cdylib.
-pub use agent_doc_core::ffi::*;
+pub use agent_doc_ffi::*;
 
 #[derive(Debug, serde::Deserialize)]
 struct IpcNodePatchJson {
@@ -2336,7 +2315,7 @@ pub unsafe extern "C" fn agent_doc_apply_node_patches(
 /// linker keeps them in the cdylib export table.
 #[allow(dead_code)]
 fn force_link_core_ffi_symbols() {
-    use agent_doc_core::ffi::{
+    use agent_doc_ffi::{
         FfiComponentList, FfiMergeResult, FfiPatchResult, agent_doc_apply_patch,
         agent_doc_apply_patch_with_boundary, agent_doc_apply_patch_with_caret,
         agent_doc_converge_queue_auto, agent_doc_crdt_merge, agent_doc_free_state,
@@ -2666,14 +2645,14 @@ mod tests {
         assert_eq!(ops.len(), 2);
         assert_eq!(
             ops[0],
-            agent_doc_core::crdt::EditorOp::Insert {
+            agent_doc_merge::crdt::EditorOp::Insert {
                 offset: 5,
                 text: "!".into()
             }
         );
         assert_eq!(
             ops[1],
-            agent_doc_core::crdt::EditorOp::Delete { offset: 0, len: 3 }
+            agent_doc_merge::crdt::EditorOp::Delete { offset: 0, len: 3 }
         );
 
         // Unknown kind and negative offset fail closed (return 0, record nothing).
@@ -2754,8 +2733,8 @@ mod tests {
         assert_eq!(
             ops,
             vec![
-                agent_doc_core::crdt::EditorOp::Delete { offset: 6, len: 6 },
-                agent_doc_core::crdt::EditorOp::Insert {
+                agent_doc_merge::crdt::EditorOp::Delete { offset: 6, len: 6 },
+                agent_doc_merge::crdt::EditorOp::Insert {
                     offset: 6,
                     text: "世界".into()
                 },

@@ -1259,7 +1259,7 @@ pub(crate) fn resolve_supervisor_auto_recycle(
 pub(crate) fn supervisor_auto_recycle_enabled(doc: &std::path::Path) -> bool {
     let env = std::env::var(SUPERVISOR_AUTO_RECYCLE_ENV).ok();
     let frontmatter = std::fs::read_to_string(doc).ok().and_then(|content| {
-        agent_doc_core::frontmatter::parse(&content)
+        agent_doc_frontmatter::frontmatter::parse(&content)
             .ok()
             .and_then(|(fm, _)| fm.supervisor_auto_recycle)
     });
@@ -1286,7 +1286,7 @@ pub(crate) fn resolve_agent_change_restart(
 pub(crate) fn agent_change_restart_enabled(doc: &std::path::Path) -> bool {
     let env = std::env::var(AGENT_CHANGE_RESTART_ENV).ok();
     let frontmatter = std::fs::read_to_string(doc).ok().and_then(|content| {
-        agent_doc_core::frontmatter::parse(&content)
+        agent_doc_frontmatter::frontmatter::parse(&content)
             .ok()
             .and_then(|(fm, _)| fm.agent_change_restart)
     });
@@ -1336,7 +1336,7 @@ pub(crate) fn resolve_supervisor_auto_install(
 pub(crate) fn supervisor_auto_install_enabled(doc: &std::path::Path) -> bool {
     let env = std::env::var(SUPERVISOR_AUTO_INSTALL_ENV).ok();
     let frontmatter = std::fs::read_to_string(doc).ok().and_then(|content| {
-        agent_doc_core::frontmatter::parse(&content)
+        agent_doc_frontmatter::frontmatter::parse(&content)
             .ok()
             .and_then(|(fm, _)| fm.supervisor_auto_install)
     });

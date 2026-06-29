@@ -229,7 +229,48 @@ pub fn strip_comments(content: &str) -> String {
     // edit. Both sides of every diff pass through this, so a pipeline-only delta
     // cancels to `no_changes`. Shared with the write-side splice so the strip and
     // the write agree byte-for-byte on the block boundary.
-    crate::frontmatter::strip_pipeline_block_lines(&element::strip_comments(content))
+    strip_pipeline_block_lines(&element::strip_comments(content))
+}
+
+/// Byte-precise removal of the managed `agent_doc_pipeline:` frontmatter block
+/// for diff comparison. The full frontmatter parser still lives behind
+/// `agent-doc-core` while that seam is extracted; this local pure helper keeps
+/// diff classification independent of the core facade.
+fn strip_pipeline_block_lines(content: &str) -> String {
+    let lines: Vec<&str> = content.split('\n').collect();
+    if lines.first().map(|line| line.trim_end()) != Some("---") {
+        return content.to_string();
+    };
+    let Some(close_idx) = lines
+        .iter()
+        .enumerate()
+        .skip(1)
+        .find(|(_, line)| line.trim_end() == "---")
+        .map(|(idx, _)| idx)
+    else {
+        return content.to_string();
+    };
+    let mut out: Vec<&str> = Vec::with_capacity(lines.len());
+    let mut skipping = false;
+    for (idx, line) in lines.iter().enumerate() {
+        if idx == 0 || idx >= close_idx {
+            skipping = false;
+            out.push(line);
+            continue;
+        }
+        if skipping {
+            if line.starts_with(' ') || line.starts_with('\t') {
+                continue;
+            }
+            skipping = false;
+        }
+        if line.trim_start().starts_with("agent_doc_pipeline:") {
+            skipping = true;
+            continue;
+        }
+        out.push(line);
+    }
+    out.join("\n")
 }
 
 /// Annotate a unified diff with content-source markers.

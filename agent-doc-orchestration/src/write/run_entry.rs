@@ -826,8 +826,9 @@ pub fn run_stream(
 
     // Apply frontmatter patch if present (fixes #16 — disk write path was missing this)
     if let Some(fm_patch) = patches.iter().find(|p| p.name == "frontmatter") {
-        content_ours = agent_doc_core::frontmatter::merge_fields(&content_ours, &fm_patch.content)
-            .context("failed to merge frontmatter patch")?;
+        content_ours =
+            agent_doc_frontmatter::frontmatter::merge_fields(&content_ours, &fm_patch.content)
+                .context("failed to merge frontmatter patch")?;
     }
 
     // Normalize user input in exchange: add ❯  prefix to user-added lines.
@@ -865,11 +866,11 @@ pub fn run_stream(
             eprintln!(
                 "[write] response already present in current file; adopting normalized current content"
             );
-            let doc = agent_doc_core::crdt::CrdtDoc::from_text(&repaired_current);
+            let doc = agent_doc_merge::crdt::CrdtDoc::from_text(&repaired_current);
             (repaired_current, doc.encode_state())
         } else if content_current == base {
             // No edits — build CRDT state from result
-            let doc = agent_doc_core::crdt::CrdtDoc::from_text(&content_ours);
+            let doc = agent_doc_merge::crdt::CrdtDoc::from_text(&content_ours);
             (content_ours.clone(), doc.encode_state())
         } else {
             eprintln!("[write] File was modified during response generation. CRDT merging...");
@@ -895,7 +896,7 @@ pub fn run_stream(
                         e
                     );
                     let spliced = splice_pending_component(&content_ours, content_current);
-                    let doc = agent_doc_core::crdt::CrdtDoc::from_text(&spliced);
+                    let doc = agent_doc_merge::crdt::CrdtDoc::from_text(&spliced);
                     (spliced, doc.encode_state())
                 }
             }
@@ -921,7 +922,7 @@ pub fn run_stream(
                 file,
                 Some(content_current),
             )?;
-            crdt_state = agent_doc_core::crdt::CrdtDoc::from_text(&final_content).encode_state();
+            crdt_state = agent_doc_merge::crdt::CrdtDoc::from_text(&final_content).encode_state();
         }
         Ok((final_content, crdt_state, cleaned_applied))
     };
@@ -991,7 +992,7 @@ pub fn run_stream(
         snapshot_content = plan.new_snapshot.clone();
     }
     let snapshot_crdt_state =
-        agent_doc_core::crdt::CrdtDoc::from_text(&snapshot_content).encode_state();
+        agent_doc_merge::crdt::CrdtDoc::from_text(&snapshot_content).encode_state();
 
     // Save snapshot BEFORE document write (#wcf5): external watchers (IDE
     // file-change listeners, git hooks) trigger on the document rename and may
@@ -1242,9 +1243,9 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
         "baseline": ipc_baseline.unwrap_or(""),
     });
     ipc_payload["baseline_hash"] =
-        serde_json::Value::String(crate::debounce::content_hash(&content_at_start));
+        serde_json::Value::String(agent_doc_debounce::content_hash(&content_at_start));
     ipc_payload["baseline_normalized_hash"] =
-        serde_json::Value::String(crate::debounce::content_hash(
+        serde_json::Value::String(agent_doc_debounce::content_hash(
             &crate::git::normalize_transient_agent_doc_markers(&content_at_start),
         ));
     ipc_payload["patch_id"] = serde_json::Value::String(patch_id.clone());
@@ -1323,7 +1324,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
                 &patches,
                 &unmatched,
             );
-            let crdt_doc = agent_doc_core::crdt::CrdtDoc::from_text(&content);
+            let crdt_doc = agent_doc_merge::crdt::CrdtDoc::from_text(&content);
             snapshot::save_document_crdt(file, &crdt_doc.encode_state(), &content)?;
             drop(doc_lock);
             repair::clear_pending(file)?;
@@ -1443,7 +1444,7 @@ fn merge_recovery_content(
 fn save_recovery_snapshot(file: &Path, content: &str, use_crdt: bool) -> Result<()> {
     snapshot::save(file, content)?;
     if use_crdt {
-        let doc = agent_doc_core::crdt::CrdtDoc::from_text(content);
+        let doc = agent_doc_merge::crdt::CrdtDoc::from_text(content);
         snapshot::save_document_crdt(file, &doc.encode_state(), content)?;
     }
     Ok(())
@@ -1862,7 +1863,7 @@ mod tests {
             "<!-- agent:exchange patch=append -->\nPrior response.\n<!-- /agent:exchange -->\n";
         fs::write(&doc, doc_content).unwrap();
 
-        let patches = vec![agent_doc_core::template::PatchBlock::new(
+        let patches = vec![agent_doc_template::PatchBlock::new(
             "exchange",
             "### Re: fix\n\nNew response body.",
         )];

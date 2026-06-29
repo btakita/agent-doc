@@ -1,21 +1,24 @@
 //! # Module: project_config
 //!
-//! Project-level configuration loaded from `.agent-doc/config.toml`.
-//! Shared between binary and library for consistent project config handling.
+//! Pure project-level configuration schema and parsing helpers.
+//! File-backed `.agent-doc/config.toml` loading and saving lives in
+//! `agent-doc-orchestration`.
 //!
 //! ## Spec
 //! - Defines `ProjectConfig`: per-project settings (tmux_session, components).
 //! - Defines `ComponentConfig`: per-component patch configuration (mode, timestamps, hooks).
-//! - `load_project()` reads and parses the project config file. On absence, I/O error, or parse
-//!   error, returns `ProjectConfig::default()` and emits a warning to stderr (never panics).
-//! - `project_tmux_session()` is a convenience wrapper returning the configured tmux session name.
-//! - `save_project()` serialises `ProjectConfig` to TOML and writes it to
-//!   `.agent-doc/config.toml`, creating the directory if needed.
+//! - `parse_project_toml()` parses a TOML string into a `ProjectConfig`.
+//! - `parse_legacy_components_toml()` parses legacy `components.toml` bodies.
+//! - `is_agent_doc_document()` applies the pure document opt-in predicate from
+//!   resolved config, relative path, and document content.
 //!
 //! ## Agentic Contracts
-//! - Never panics on missing config: `load_project()` returns defaults when the file is absent.
-//! - Project config errors are non-fatal: errors are surfaced as stderr warnings, not propagated.
-//! - Atomic-safe directory creation: `save_project()` calls `create_dir_all` before writing.
+//! - No filesystem or current-directory access: callers provide config/document
+//!   content and project-relative paths explicitly.
+//! - Parse failures are returned as `Err`; defaulting and warning policy belongs
+//!   to the orchestration IO adapter.
+//! - Document opt-in evaluation is deterministic for a given config, path, and
+//!   content.
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};

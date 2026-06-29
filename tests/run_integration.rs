@@ -1,7 +1,7 @@
-use agent_doc_core::turn_scope::{Address, TurnScope};
 use agent_doc_orchestration::{
     cycle_state, project_controller, snapshot, state_backbone, turn_scope_store,
 };
+use agent_doc_turn::turn_scope::{Address, TurnScope};
 use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;

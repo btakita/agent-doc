@@ -5731,10 +5731,14 @@ fn ipc_snapshot_guard_blocks_live_queue_drift_after_preflight() {
         .unwrap();
     let baseline = world.doc.clone();
     let response = response_patch("live queue IPC race");
-    let (patches, unmatched) = agent_doc_core::template::parse_patches(&response).unwrap();
-    let content_ours =
-        crate::template::apply_patches(&baseline, &patches, &unmatched, Path::new("sim.md"))
-            .unwrap();
+    let (patches, unmatched) = agent_doc_template::parse_patches(&response).unwrap();
+    let content_ours = agent_doc_orchestration::template_io::apply_patches(
+        &baseline,
+        &patches,
+        &unmatched,
+        Path::new("sim.md"),
+    )
+    .unwrap();
     let live_queue_prompt = "- do #liveipcrace. #spec-test-build-install-commit-push";
     let ack_candidate = content_ours.replace(
         "<!-- agent:queue -->\n<!-- /agent:queue -->",
@@ -5780,9 +5784,10 @@ fn closeout_recovery_transition_scenarios_cover_simworld_inputs() {
         .unwrap();
     let baseline = queue_world.doc.clone();
     let response = response_patch("transition queue drift");
-    let (patches, unmatched) = agent_doc_core::template::parse_patches(&response).unwrap();
+    let (patches, unmatched) = agent_doc_template::parse_patches(&response).unwrap();
     let content_ours =
-        crate::template::apply_patches(&baseline, &patches, &unmatched, file).unwrap();
+        agent_doc_orchestration::template_io::apply_patches(&baseline, &patches, &unmatched, file)
+            .unwrap();
     let live_queue_prompt = "- do #transitionqueue. spec-test-build-install-commit-push";
     let queue_candidate = content_ours.replace(
         "<!-- agent:queue -->\n<!-- /agent:queue -->",
@@ -6478,11 +6483,8 @@ impl SimEditor {
     /// cycle falls back to disk (`editor_absent`). Uses the production
     /// `debounce::clear_live_buffer` editor-close primitive.
     fn close(self) -> Result<()> {
-        agent_doc_orchestration::debounce::clear_live_buffer_for_editor(
-            &self.key,
-            Some(&self.editor_id),
-        )
-        .map_err(|err| anyhow!("SimEditor close clear sidecar: {err}"))
+        agent_doc_debounce::clear_live_buffer_for_editor(&self.key, Some(&self.editor_id))
+            .map_err(|err| anyhow!("SimEditor close clear sidecar: {err}"))
     }
 
     /// Adopt a CRDT-merged document broadcast back from a peer editor (Slice 3,
@@ -6614,7 +6616,7 @@ impl SimEditor {
     }
 
     fn record_buffer(&self) -> Result<()> {
-        agent_doc_orchestration::debounce::record_live_buffer_digest_content_for_editor(
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor(
             &self.key,
             &self.buffer,
             Some(&self.editor_id),

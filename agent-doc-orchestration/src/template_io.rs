@@ -14,11 +14,11 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use agent_doc_core::project_config::{ComponentConfig, ProjectConfig};
-use agent_doc_core::template::{
+use agent_doc_element::element;
+use agent_doc_frontmatter::project_config::{ComponentConfig, ProjectConfig};
+use agent_doc_template::{
     ComponentInfo, PatchBlock, TemplateInfo, apply_patches_pure, apply_patches_with_overrides_pure,
 };
-use agent_doc_element::element;
 
 use crate::graph::RunContext;
 use crate::project_config_io;
@@ -99,7 +99,7 @@ pub fn template_info_with_context(file: &Path, rc: Option<&RunContext>) -> Resul
     let doc = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
 
-    let (fm, _body) = agent_doc_core::frontmatter::parse(&doc)?;
+    let (fm, _body) = agent_doc_frontmatter::frontmatter::parse(&doc)?;
     let template_mode = fm.resolve_mode().is_template();
 
     let components = element::parse(&doc)
@@ -201,7 +201,7 @@ mod tests {
         std::fs::write(&doc_path, doc).unwrap();
         let rc = RunContext::new(doc_path.clone());
 
-        let (patches, unmatched) = agent_doc_core::template::parse_patches(
+        let (patches, unmatched) = agent_doc_template::parse_patches(
             "<!-- patch:exchange -->\nnew\n<!-- /patch:exchange -->\n",
         )
         .unwrap();

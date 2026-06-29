@@ -90,7 +90,7 @@ fn same_file(lhs: &Path, rhs: &Path) -> bool {
 }
 
 fn synthetic_diff_from_body(body: &str) -> String {
-    agent_doc_core::diff::synthetic_added_lines_diff(body, "harness")
+    agent_doc_diff::synthetic_added_lines_diff(body, "harness")
 }
 
 fn parse_agent_doc_invocation(prompt: &str, cwd: &Path) -> Option<ParsedInvocation> {

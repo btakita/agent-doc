@@ -18,7 +18,7 @@ pub(crate) struct SemanticComponentSnapshot {
 pub(crate) fn semantic_diff_summary(
     previous: &str,
     current: &str,
-    prompt_bearing_changes: &[agent_doc_core::diff::PromptBearingChange],
+    prompt_bearing_changes: &[agent_doc_diff::PromptBearingChange],
 ) -> Option<SemanticDiffSummary> {
     let mut changed_components = BTreeSet::new();
     let mut component_changes = semantic_component_changes(previous, current);
@@ -90,8 +90,8 @@ pub(crate) fn build_ops_from_semantic_diff(
     origin_session: Option<&str>,
     recorded_at: &str,
     summary: &SemanticDiffSummary,
-) -> Vec<agent_doc_core::op_log::DocumentOp> {
-    use agent_doc_core::op_log::{CausalClock, DocumentOp, OpSource, classify_actor};
+) -> Vec<agent_doc_turn::op_log::DocumentOp> {
+    use agent_doc_turn::op_log::{CausalClock, DocumentOp, OpSource, classify_actor};
     let actor = classify_actor(OpSource::SnapshotDiff);
     summary
         .node_events
@@ -170,10 +170,10 @@ pub(crate) fn op_log_timestamp() -> u64 {
 /// did not run (`op_affectedness` is `None`, e.g. a semantic-diff parse skip),
 /// this stays conservative and falls back to the managed-state filter only.
 pub(crate) fn compute_user_intent_prompt_changes(
-    prompt_bearing_changes: &[agent_doc_core::diff::PromptBearingChange],
+    prompt_bearing_changes: &[agent_doc_diff::PromptBearingChange],
     diff_from_queue_head_only: bool,
-    op_affectedness: Option<&agent_doc_core::turn_scope::CycleAffectedness>,
-) -> Vec<agent_doc_core::diff::PromptBearingChange> {
+    op_affectedness: Option<&agent_doc_turn::turn_scope::CycleAffectedness>,
+) -> Vec<agent_doc_diff::PromptBearingChange> {
     if diff_from_queue_head_only {
         // Synthetic auto-queue continuation only — no user intent this cycle.
         return Vec::new();
@@ -187,7 +187,7 @@ pub(crate) fn compute_user_intent_prompt_changes(
     }
     prompt_bearing_changes
         .iter()
-        .filter(|change| !agent_doc_core::diff::change_is_managed_state_only(change))
+        .filter(|change| !agent_doc_diff::change_is_managed_state_only(change))
         .cloned()
         .collect()
 }
@@ -198,14 +198,14 @@ pub(crate) fn compute_user_intent_prompt_changes(
 pub(crate) fn derive_turn_scope(
     content: &str,
     prompt_targets: &[String],
-) -> Option<agent_doc_core::turn_scope::TurnScope> {
+) -> Option<agent_doc_turn::turn_scope::TurnScope> {
     if prompt_targets.is_empty() {
         return None;
     }
     let driver = resolve_driver_address(content, prompt_targets);
     let exchange_tail_floor = exchange_node_count(content);
     Some(
-        agent_doc_core::turn_scope::TurnScope::for_driver_with_exchange_tail(
+        agent_doc_turn::turn_scope::TurnScope::for_driver_with_exchange_tail(
             driver,
             exchange_tail_floor,
         ),
@@ -229,7 +229,7 @@ pub(crate) fn exchange_node_count(content: &str) -> Option<usize> {
 pub(crate) fn resolve_driver_address(
     content: &str,
     prompt_targets: &[String],
-) -> Option<agent_doc_core::turn_scope::Address> {
+) -> Option<agent_doc_turn::turn_scope::Address> {
     let nodes = agent_doc_markdown_ast::mutations::all_item_nodes(content);
     for target in prompt_targets {
         let Some(id) = extract_target_id(target) else {
@@ -240,7 +240,7 @@ pub(crate) fn resolve_driver_address(
             .find(|node| node.component == "queue" && node.item.id == id)
         {
             let occurrence = component_occurrence_from_node_key(&node.node_key);
-            return Some(agent_doc_core::turn_scope::Address::node(
+            return Some(agent_doc_turn::turn_scope::Address::node(
                 "queue",
                 occurrence,
                 &node.node_key,
@@ -494,8 +494,8 @@ pub(crate) fn push_unique_strings(target: &mut Vec<String>, extras: Vec<String>)
 }
 
 pub(crate) fn push_unique_prompt_bearing_changes(
-    target: &mut Vec<agent_doc_core::diff::PromptBearingChange>,
-    extras: Vec<agent_doc_core::diff::PromptBearingChange>,
+    target: &mut Vec<agent_doc_diff::PromptBearingChange>,
+    extras: Vec<agent_doc_diff::PromptBearingChange>,
 ) {
     for value in extras {
         if !target.iter().any(|existing| existing == &value) {
@@ -536,8 +536,8 @@ mod tests {
             "- [ ] [#task] new wording\n",
             "<!-- /agent:backlog -->\n"
         );
-        let prompt_changes = vec![agent_doc_core::diff::PromptBearingChange {
-            kind: agent_doc_core::diff::PromptBearingChangeKind::PromptTarget,
+        let prompt_changes = vec![agent_doc_diff::PromptBearingChange {
+            kind: agent_doc_diff::PromptBearingChangeKind::PromptTarget,
             text: "do [#beta]".to_string(),
         }];
 
@@ -574,7 +574,7 @@ mod tests {
         }));
         assert_eq!(
             summary.prompt_changes[0].kind,
-            agent_doc_core::diff::PromptBearingChangeKind::PromptTarget
+            agent_doc_diff::PromptBearingChangeKind::PromptTarget
         );
         assert_eq!(summary.prompt_changes[0].text_preview, "do [#beta]");
     }
@@ -594,7 +594,7 @@ mod tests {
         let ops = build_ops_from_semantic_diff("plan.md", Some("sess-1"), "", &summary);
         // The turn is answering driver-a.
         let scope = derive_turn_scope(after, &["do [#driver-a]".to_string()]).unwrap();
-        let affectedness = agent_doc_core::turn_scope::classify_cycle(&ops, &scope);
+        let affectedness = agent_doc_turn::turn_scope::classify_cycle(&ops, &scope);
         assert!(
             !affectedness.turn_affected,
             "a sibling queue insert must not affect the turn"
@@ -603,7 +603,7 @@ mod tests {
             affectedness
                 .classified
                 .iter()
-                .all(|op| op.class == agent_doc_core::turn_scope::AffectednessClass::Independent)
+                .all(|op| op.class == agent_doc_turn::turn_scope::AffectednessClass::Independent)
         );
     }
     #[test]
@@ -640,7 +640,7 @@ mod tests {
         );
         let summary = semantic_diff_summary(base, &old_edit, &[]).unwrap();
         let ops = build_ops_from_semantic_diff("plan.md", Some("sess-1"), "", &summary);
-        let affectedness = agent_doc_core::turn_scope::classify_cycle(&ops, &scope);
+        let affectedness = agent_doc_turn::turn_scope::classify_cycle(&ops, &scope);
         assert!(
             !affectedness.turn_affected,
             "editing an old exchange block must not affect the turn: {:?}",
@@ -654,7 +654,7 @@ mod tests {
         );
         let summary2 = semantic_diff_summary(base, &tail_append, &[]).unwrap();
         let ops2 = build_ops_from_semantic_diff("plan.md", Some("sess-1"), "", &summary2);
-        let affectedness2 = agent_doc_core::turn_scope::classify_cycle(&ops2, &scope);
+        let affectedness2 = agent_doc_turn::turn_scope::classify_cycle(&ops2, &scope);
         assert!(
             affectedness2.turn_affected,
             "a new tail-appended exchange prompt must still affect the turn: {:?}",
@@ -675,11 +675,11 @@ mod tests {
         // driver is read (input) and written (the strike).
         assert!(scope.read_set.contains(driver));
         assert!(scope.write_set.contains(driver));
-        for &component in agent_doc_core::turn_scope::MANAGED_OUTPUT_COMPONENTS {
+        for &component in agent_doc_turn::turn_scope::MANAGED_OUTPUT_COMPONENTS {
             assert!(
                 scope
                     .write_set
-                    .contains(&agent_doc_core::turn_scope::Address::component(
+                    .contains(&agent_doc_turn::turn_scope::Address::component(
                         component, 0
                     )),
                 "turn scope write set should include managed output component {component}"
@@ -734,8 +734,8 @@ mod tests {
     fn user_intent_filters_managed_state_when_turn_affected() {
         // Even when the turn is affected, managed-component bookkeeping (a backlog
         // item line) stays filtered — it is not a real prompt.
-        let changes = vec![agent_doc_core::diff::PromptBearingChange {
-            kind: agent_doc_core::diff::PromptBearingChangeKind::ContentEdit,
+        let changes = vec![agent_doc_diff::PromptBearingChange {
+            kind: agent_doc_diff::PromptBearingChangeKind::ContentEdit,
             text: "- [ ] [#newitem] track a follow-up".to_string(),
         }];
         let out = compute_user_intent_prompt_changes(&changes, false, Some(&affectedness(true)));
@@ -772,7 +772,7 @@ mod tests {
             .iter()
             .find(|op| op.node_key == "queue:0:beta:0")
             .expect("beta op present");
-        assert_eq!(beta.actor, agent_doc_core::op_log::OpActor::User);
+        assert_eq!(beta.actor, agent_doc_turn::op_log::OpActor::User);
         assert_eq!(beta.op_kind, "insert");
         assert_eq!(beta.component, "queue");
         assert_eq!(beta.clock.origin_session.as_deref(), Some("sess-1"));

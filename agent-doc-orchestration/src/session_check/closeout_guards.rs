@@ -6,7 +6,7 @@ pub(crate) fn check_blocked_closeout_followup_guard(
 ) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): resolve guard mode from the cached frontmatter slot.
     let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
-    if mode == agent_doc_core::frontmatter::PendingCaptureGuardMode::Off {
+    if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
     }
 
@@ -132,14 +132,16 @@ pub(crate) fn check_blocked_closeout_followup_guard(
     );
 
     Ok(match mode {
-        agent_doc_core::frontmatter::PendingCaptureGuardMode::Warn => GuardResult::Warn(vec![
-            warn_line,
-            format!(
-                "[session-check] hint: keep the work tracked with `{}`, split a new follow-up via `{}`, add an explicit \"no additional backlog follow-up is needed because ...\" phrase for a true review-only gate, or add `<!-- no-blocked-followup-guard -->`",
-                repair, add_after_hint
-            ),
-        ]),
-        agent_doc_core::frontmatter::PendingCaptureGuardMode::Strict => {
+        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Warn => {
+            GuardResult::Warn(vec![
+                warn_line,
+                format!(
+                    "[session-check] hint: keep the work tracked with `{}`, split a new follow-up via `{}`, add an explicit \"no additional backlog follow-up is needed because ...\" phrase for a true review-only gate, or add `<!-- no-blocked-followup-guard -->`",
+                    repair, add_after_hint
+                ),
+            ])
+        }
+        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict => {
             GuardResult::Error(format!(
                 "{}\n[session-check] hint: keep the work tracked with `{}`, split a new follow-up via `{}`, add an explicit \"no additional backlog follow-up is needed because ...\" phrase for a true review-only gate, or set pending_done_guard = \"warn\" to downgrade",
                 warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
@@ -147,7 +149,7 @@ pub(crate) fn check_blocked_closeout_followup_guard(
                 add_after_hint
             ))
         }
-        agent_doc_core::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
+        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
     })
 }
 
@@ -579,7 +581,7 @@ pub(crate) fn exchange_has_new_appended_content(snapshot: &str, current: &str) -
     }
     if appended
         .lines()
-        .any(agent_doc_core::diff::text_line_looks_like_prompt_target)
+        .any(agent_doc_diff::text_line_looks_like_prompt_target)
     {
         return false;
     }
@@ -587,7 +589,7 @@ pub(crate) fn exchange_has_new_appended_content(snapshot: &str, current: &str) -
 }
 
 pub(crate) fn extract_normalized_exchange_body(doc: &str) -> Option<String> {
-    let (_, body) = agent_doc_core::frontmatter::parse(doc).ok()?;
+    let (_, body) = agent_doc_frontmatter::frontmatter::parse(doc).ok()?;
     let components = agent_doc_element::element::parse(body).ok()?;
     for component in &components {
         if component.name == "exchange" {
@@ -629,11 +631,10 @@ pub(crate) fn promptless_comment_only_drift(snapshot: &str, current: &str) -> bo
     if snapshot == current {
         return true;
     }
-    crate::git::normalize_transient_agent_doc_markers(&agent_doc_core::diff::strip_comments(
-        snapshot,
-    )) == crate::git::normalize_transient_agent_doc_markers(&agent_doc_core::diff::strip_comments(
-        current,
-    ))
+    crate::git::normalize_transient_agent_doc_markers(&agent_doc_diff::strip_comments(snapshot))
+        == crate::git::normalize_transient_agent_doc_markers(&agent_doc_diff::strip_comments(
+            current,
+        ))
 }
 
 pub(crate) fn mask_exchange_component_content(doc: &str) -> Option<String> {
@@ -836,7 +837,7 @@ pub fn detect_bypassed_response_write_between(
         return None;
     }
 
-    let diff_text = agent_doc_core::diff::unified_diff_from_contents(&snap_norm, &cur_norm)?;
+    let diff_text = agent_doc_diff::unified_diff_from_contents(&snap_norm, &cur_norm)?;
 
     let diff = similar::TextDiff::from_lines(&snap_norm, &cur_norm);
     for change in diff.iter_all_changes() {
@@ -877,7 +878,7 @@ pub(crate) fn first_bare_prompt_prefix_target_before_marker(
         prefix_diff.push_str(line);
         prefix_diff.push('\n');
     }
-    agent_doc_core::diff::first_bare_prompt_prefix_target(&prefix_diff)
+    agent_doc_diff::first_bare_prompt_prefix_target(&prefix_diff)
 }
 
 pub(crate) fn has_new_response_heading_marker(snapshot_doc: &str, current_doc: &str) -> bool {
@@ -989,14 +990,14 @@ pub(crate) fn unresolved_exchange_prompt_in_content(content: &str) -> Option<Str
                 // post-commit worktree corruption strips its `### Re:` heading and
                 // fence and leaves the bare line in the exchange tail. Match is
                 // token-specific so a real prompt mentioning IPC/drift is kept.
-                && !agent_doc_core::diff::line_is_binary_authored_ipc_proof_diagnostic(line)
+                && !agent_doc_diff::line_is_binary_authored_ipc_proof_diagnostic(line)
                 // `#provauth3`: a binary-authored compaction Session Summary line
                 // (heading / archive pointer / archived-topic item) is not a user
                 // prompt, even when an earlier content-inference repair pass stamped
                 // it with a `❯` prefix. Origin is known (the binary authored the
                 // compaction), so it must never INTERRUPT closeout as an unresolved
                 // prompt-only tail.
-                && !agent_doc_core::diff::line_is_binary_authored_compact_summary(line)
+                && !agent_doc_diff::line_is_binary_authored_compact_summary(line)
         })
         .map(normalized_prompt_for_match)
         .filter(|line| !line.is_empty())
@@ -1055,10 +1056,10 @@ pub fn detect_unstarted_prompt_bearing_diff(file: &Path) -> Result<Option<String
         return Ok(None);
     };
     let label = match change.kind {
-        agent_doc_core::diff::PromptBearingChangeKind::PromptTarget => "prompt_target",
-        agent_doc_core::diff::PromptBearingChangeKind::ContentEdit => "content_edit",
-        agent_doc_core::diff::PromptBearingChangeKind::RecoveryArtifact
-        | agent_doc_core::diff::PromptBearingChangeKind::BoundaryArtifact => return Ok(None),
+        agent_doc_diff::PromptBearingChangeKind::PromptTarget => "prompt_target",
+        agent_doc_diff::PromptBearingChangeKind::ContentEdit => "content_edit",
+        agent_doc_diff::PromptBearingChangeKind::RecoveryArtifact
+        | agent_doc_diff::PromptBearingChangeKind::BoundaryArtifact => return Ok(None),
     };
     let preview = change
         .text
@@ -1071,7 +1072,7 @@ pub fn detect_unstarted_prompt_bearing_diff(file: &Path) -> Result<Option<String
 
 pub fn first_unstarted_prompt_bearing_change(
     file: &Path,
-) -> Result<Option<agent_doc_core::diff::PromptBearingChange>> {
+) -> Result<Option<agent_doc_diff::PromptBearingChange>> {
     // A fresh session can carry an unanswered exchange tail prompt before any
     // cycle snapshot exists. The queue path activates independently of the
     // snapshot (route queue activation re-saves the snapshot on activation), so
@@ -1090,27 +1091,24 @@ pub fn first_unstarted_prompt_bearing_change(
     };
 
     let prompt_bearing_body = |content: &str| {
-        let body = agent_doc_core::frontmatter::parse(content)
+        let body = agent_doc_frontmatter::frontmatter::parse(content)
             .map(|(_, body)| body.to_string())
             .unwrap_or_else(|_| content.to_string());
-        agent_doc_core::diff::strip_comments(&strip_queue_components_for_unstarted_prompt_guard(
-            &body,
-        ))
+        agent_doc_diff::strip_comments(&strip_queue_components_for_unstarted_prompt_guard(&body))
     };
     let norm = |s: &str| crate::git::normalize_committed_exchange_artifacts(s);
     let snap_norm = norm(&prompt_bearing_body(&baseline));
     let cur_norm = norm(&prompt_bearing_body(&current));
-    let Some(diff_text) = agent_doc_core::diff::unified_diff_from_contents(&snap_norm, &cur_norm)
-    else {
+    let Some(diff_text) = agent_doc_diff::unified_diff_from_contents(&snap_norm, &cur_norm) else {
         return Ok(None);
     };
-    let changes = agent_doc_core::diff::classify_prompt_bearing_changes(&diff_text);
+    let changes = agent_doc_diff::classify_prompt_bearing_changes(&diff_text);
     let mut skip_answered_response_run = false;
     for (idx, change) in changes.iter().enumerate() {
         match change.kind {
-            agent_doc_core::diff::PromptBearingChangeKind::RecoveryArtifact
-            | agent_doc_core::diff::PromptBearingChangeKind::BoundaryArtifact => continue,
-            agent_doc_core::diff::PromptBearingChangeKind::PromptTarget => {
+            agent_doc_diff::PromptBearingChangeKind::RecoveryArtifact
+            | agent_doc_diff::PromptBearingChangeKind::BoundaryArtifact => continue,
+            agent_doc_diff::PromptBearingChangeKind::PromptTarget => {
                 if skip_answered_response_run {
                     let preview = change
                         .text
@@ -1118,14 +1116,12 @@ pub fn first_unstarted_prompt_bearing_change(
                         .find(|line| !line.trim().is_empty())
                         .unwrap_or(change.text.as_str())
                         .trim();
-                    if !agent_doc_core::diff::line_looks_like_fresh_prompt_after_response(preview) {
+                    if !agent_doc_diff::line_looks_like_fresh_prompt_after_response(preview) {
                         continue;
                     }
                 }
-                if agent_doc_core::diff::prompt_change_is_already_answered(&change.text)
-                    || agent_doc_core::diff::prompt_change_is_answered_by_later_response(
-                        &changes, idx,
-                    )
+                if agent_doc_diff::prompt_change_is_already_answered(&change.text)
+                    || agent_doc_diff::prompt_change_is_answered_by_later_response(&changes, idx)
                     || prompt_target_is_immediately_before_existing_response(&current, &change.text)
                 {
                     skip_answered_response_run = true;
@@ -1133,7 +1129,7 @@ pub fn first_unstarted_prompt_bearing_change(
                 }
                 return Ok(Some(change.clone()));
             }
-            agent_doc_core::diff::PromptBearingChangeKind::ContentEdit => {
+            agent_doc_diff::PromptBearingChangeKind::ContentEdit => {
                 continue;
             }
         }
@@ -1174,7 +1170,7 @@ pub(crate) fn prompt_target_is_immediately_before_existing_response(
     if target.is_empty() {
         return false;
     }
-    let body = agent_doc_core::frontmatter::parse(current_doc)
+    let body = agent_doc_frontmatter::frontmatter::parse(current_doc)
         .map(|(_, body)| body.to_string())
         .unwrap_or_else(|_| current_doc.to_string());
     let Ok(components) = agent_doc_element::element::parse(&body) else {
@@ -1210,7 +1206,7 @@ pub(crate) fn prompt_target_is_immediately_before_existing_response(
 }
 
 pub(crate) fn prompt_only_exchange_tail(doc: &str) -> Option<String> {
-    let body = agent_doc_core::frontmatter::parse(doc)
+    let body = agent_doc_frontmatter::frontmatter::parse(doc)
         .map(|(_, body)| body.to_string())
         .unwrap_or_else(|_| doc.to_string());
     let components = agent_doc_element::element::parse(&body).ok()?;
@@ -1254,11 +1250,11 @@ pub(crate) fn prompt_only_exchange_tail(doc: &str) -> Option<String> {
         if trimmed.is_empty()
             || trimmed.starts_with("<!--")
             || trimmed == "(HEAD)"
-            || agent_doc_core::diff::line_looks_like_plain_response_after_prompt(trimmed)
+            || agent_doc_diff::line_looks_like_plain_response_after_prompt(trimmed)
         {
             continue;
         }
-        if agent_doc_core::diff::text_line_looks_like_prompt_target(trimmed) {
+        if agent_doc_diff::text_line_looks_like_prompt_target(trimmed) {
             if in_assistant_response && !trimmed.starts_with('❯') {
                 continue;
             }

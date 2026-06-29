@@ -597,7 +597,7 @@ pub fn reconcile_disk_projection_for_file(file: &Path, projection: &[u8]) -> Res
 
 fn settle_or_flush_editor_sync_barrier(file: &Path, reason: &str) -> bool {
     let file_str = file.display().to_string();
-    let outcome = crate::debounce::await_editor_sync_barrier(
+    let outcome = agent_doc_debounce::await_editor_sync_barrier(
         &file_str,
         EDITOR_SYNC_SETTLE_MS,
         EDITOR_SYNC_TIMEOUT_MS,
@@ -619,7 +619,7 @@ fn settle_or_flush_editor_sync_barrier(file: &Path, reason: &str) -> bool {
             outcome.typing_recent
         ),
     );
-    if outcome.kind != crate::debounce::EditorSyncBarrierKind::TimedOut {
+    if outcome.kind != agent_doc_debounce::EditorSyncBarrierKind::TimedOut {
         return true;
     }
 
@@ -692,7 +692,7 @@ fn settle_or_flush_editor_sync_barrier(file: &Path, reason: &str) -> bool {
         }
     }
 
-    let after_flush = crate::debounce::await_editor_sync_barrier(
+    let after_flush = agent_doc_debounce::await_editor_sync_barrier(
         &file_str,
         EDITOR_SYNC_SETTLE_MS,
         EDITOR_SYNC_TIMEOUT_MS,
@@ -714,7 +714,7 @@ fn settle_or_flush_editor_sync_barrier(file: &Path, reason: &str) -> bool {
             after_flush.typing_recent
         ),
     );
-    after_flush.kind != crate::debounce::EditorSyncBarrierKind::TimedOut
+    after_flush.kind != agent_doc_debounce::EditorSyncBarrierKind::TimedOut
 }
 
 #[cfg(test)]
@@ -746,7 +746,7 @@ mod tests {
             .unwrap()
             .expect("editor-attached register should return a bootstrap");
         let replica =
-            agent_doc_core::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap).unwrap();
+            agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap).unwrap();
         assert_eq!(
             replica.text(),
             on_disk,
@@ -781,7 +781,7 @@ mod tests {
         let (_dir, doc) = temp_doc("epoch-defers.md");
         let file_str = doc.display().to_string();
         let disk = std::fs::read_to_string(&doc).unwrap();
-        crate::debounce::document_changed_with_content_for_editor(
+        agent_doc_debounce::document_changed_with_content_for_editor(
             &file_str,
             &format!("{disk}\nunsaved editor text"),
             Some("jetbrains:epoch-defers"),

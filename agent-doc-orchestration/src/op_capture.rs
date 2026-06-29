@@ -1,7 +1,7 @@
 //! # Module: op_capture (`#qnodemerge4wire`)
 //!
 //! Supply side of the op-capture / evented-reflection merge (`#qnodemerge4`).
-//! The *consumer* (`agent_doc_core::crdt::merge_with_editor_ops` + `EditorOp` /
+//! The *consumer* (`agent_doc_merge::crdt::merge_with_editor_ops` + `EditorOp` /
 //! `replay_editor_ops`) already trusts the editor's *real* operations over a
 //! Myers diff-guess when those ops replay onto the merge base exactly. This
 //! module is the durable plumbing that gets those ops from the editor to the
@@ -35,7 +35,7 @@
 //! and clears the sidecar after the merge.
 
 use crate::fs_util::read_optional_text;
-use agent_doc_core::crdt::EditorOp;
+use agent_doc_merge::crdt::EditorOp;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -235,7 +235,7 @@ pub fn current_base_hash(doc: &Path) -> Result<String> {
     record_base_hash_recompute_for_tests(&cache_key);
     let baseline = read_optional_text(&snapshot_path)?.unwrap_or_default();
     let base = crate::snapshot::crdt_merge_base_state(doc, &baseline)?;
-    let base_text = agent_doc_core::crdt::CrdtDoc::decode_state(&base.state)
+    let base_text = agent_doc_merge::crdt::CrdtDoc::decode_state(&base.state)
         .map(|d| d.to_text())
         .unwrap_or_default();
     let hash = content_hash(&base_text);
@@ -373,7 +373,7 @@ mod tests {
         let snapshot = crate::snapshot::path_for(&doc).unwrap();
         let baseline = read_optional_text(&snapshot).unwrap().unwrap_or_default();
         let base = crate::snapshot::crdt_merge_base_state(&doc, &baseline).unwrap();
-        let base_text = agent_doc_core::crdt::CrdtDoc::decode_state(&base.state)
+        let base_text = agent_doc_merge::crdt::CrdtDoc::decode_state(&base.state)
             .map(|d| d.to_text())
             .unwrap_or_default();
 

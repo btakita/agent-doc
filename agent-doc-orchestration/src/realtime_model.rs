@@ -166,10 +166,10 @@ pub fn buffer_supersedes(prev: u64, next: u64) -> bool {
 // Rung 1 above is the *pure authority decision* over a `BufferState` the caller
 // is assumed to trust. Rung 2 is the durable *source* of that `BufferState`: it
 // reads the editor-buffer snapshot the plugin persists on every change
-// (`.agent-doc/live-buffer/<hash>`, [`crate::debounce::LiveBufferSnapshot`],
+// (`.agent-doc/live-buffer/<hash>`, [`agent_doc_debounce::LiveBufferSnapshot`],
 // written via the `#pcp6` full-content digest path), and only promotes it to an
 // authoritative `BufferState` when the existing staleness classifier
-// ([`crate::debounce::live_buffer_diverges_from_content`]) proves the editor
+// ([`agent_doc_debounce::live_buffer_diverges_from_content`]) proves the editor
 // holds genuine *unsaved edits ahead of disk*.
 //
 // Gating on that classifier — not the raw `dirty`/`version` digest — is what
@@ -183,14 +183,14 @@ pub fn buffer_supersedes(prev: u64, next: u64) -> bool {
 /// Map the staleness classifier's output to an authoritative [`BufferState`].
 ///
 /// Pure (no I/O): `divergence` is `Some` only when
-/// [`crate::debounce::live_buffer_diverges_from_content`] proved the editor
+/// [`agent_doc_debounce::live_buffer_diverges_from_content`] proved the editor
 /// holds unsaved edits ahead of disk. We additionally require the snapshot to
 /// carry the **full buffer content** (`#pcp6`); a len/hash-only digest proves
 /// *that* the buffer diverged but not *what* it contains, so we cannot
 /// substitute it and fall back to disk (`None`). The snapshot timestamp is the
 /// monotonic generation stamp.
 fn buffer_state_from_divergence(
-    divergence: Option<&crate::debounce::LiveBufferSnapshot>,
+    divergence: Option<&agent_doc_debounce::LiveBufferSnapshot>,
 ) -> Option<BufferState> {
     let snapshot = divergence?;
     let content = snapshot.content.clone()?;
@@ -224,7 +224,7 @@ fn indicator_path(file: &std::path::Path) -> String {
 /// waits, so it is safe off the project-control-pane hot path.
 pub fn durable_buffer_state(file: &std::path::Path, disk: &str) -> Option<BufferState> {
     let indicator = indicator_path(file);
-    let divergence = crate::debounce::live_buffer_diverges_from_content(&indicator, disk);
+    let divergence = agent_doc_debounce::live_buffer_diverges_from_content(&indicator, disk);
     buffer_state_from_divergence(divergence.as_ref())
 }
 
@@ -332,7 +332,7 @@ pub fn compute_broadcast(
             originator_echo_suppressed: true,
         });
     }
-    let base_state = agent_doc_core::crdt::CrdtDoc::from_text(base).encode_state();
+    let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state();
     let (merged, _state) = crate::merge::merge_contents_crdt(Some(&base_state), originator, peer)?;
     let originator_echo_suppressed = merged == originator;
     Ok(BroadcastMerge {
@@ -484,7 +484,7 @@ pub fn broadcast_editor_change(
     // patch file the reaper just cleared, and the merge against its divergent
     // stale buffer leaks into the finalize IPC-proof path.
     let mut reaped_dead_peers = 0usize;
-    let peers: Vec<BroadcastPeer> = crate::debounce::live_buffer_snapshots(&canonical_str)
+    let peers: Vec<BroadcastPeer> = agent_doc_debounce::live_buffer_snapshots(&canonical_str)
         .into_iter()
         .filter_map(|snapshot| {
             let editor_id = snapshot.editor_id?;
@@ -497,7 +497,7 @@ pub fn broadcast_editor_change(
             }
             reaped_dead_peers += 1;
             if let Err(err) =
-                crate::debounce::clear_live_buffer_for_editor(&canonical_str, Some(&peer.editor_id))
+                agent_doc_debounce::clear_live_buffer_for_editor(&canonical_str, Some(&peer.editor_id))
             {
                 eprintln!(
                     "[agent-doc] warning: failed to reap dead-editor live-buffer sidecar for {}: {err}",
@@ -547,8 +547,8 @@ pub fn broadcast_editor_change(
             "node_patches": delta.node_patches,
             "unmatched": "",
             "baseline": peer_baseline,
-            "baseline_hash": crate::debounce::content_hash(peer_baseline),
-            "baseline_normalized_hash": crate::debounce::content_hash(
+            "baseline_hash": agent_doc_debounce::content_hash(peer_baseline),
+            "baseline_normalized_hash": agent_doc_debounce::content_hash(
                 &crate::git::normalize_transient_agent_doc_markers(peer_baseline),
             ),
             "reposition_boundary": false,
@@ -829,14 +829,14 @@ mod tests {
 
     // ── Rung 2 (`#rtwfeed`) durable-feed bridge ──
 
-    use crate::debounce::LiveBufferSnapshot;
+    use agent_doc_debounce::LiveBufferSnapshot;
 
     fn snapshot(content: Option<&str>, generation: u128) -> LiveBufferSnapshot {
         let body = content.unwrap_or("");
         LiveBufferSnapshot {
             path: "doc.md".to_string(),
             len: body.len(),
-            hash: crate::debounce::content_hash(body),
+            hash: agent_doc_debounce::content_hash(body),
             timestamp_ms: generation,
             edit_epoch: 0,
             last_synced_epoch: 0,
@@ -893,7 +893,7 @@ mod tests {
         let disk = "## Queue\n- do [#a]\n";
         let (_dir, file, canonical) = temp_doc(disk);
         // Editor reports the same text as disk: no unsaved edit ahead → disk wins.
-        crate::debounce::record_live_buffer_digest_content(&canonical, disk).unwrap();
+        agent_doc_debounce::record_live_buffer_digest_content(&canonical, disk).unwrap();
         assert!(durable_buffer_state(&file, disk).is_none());
         // resolve_current_doc agrees, returns disk content.
         let r = resolve_current_doc(&file, disk);
@@ -909,7 +909,7 @@ mod tests {
         let disk = "## Queue\n- do [#a]\n";
         let buffer = "## Queue\n- do [#a]\n- do [#rtwatch]\n";
         let (_dir, file, canonical) = temp_doc(disk);
-        crate::debounce::record_live_buffer_digest_content(&canonical, buffer).unwrap();
+        agent_doc_debounce::record_live_buffer_digest_content(&canonical, buffer).unwrap();
         let state = durable_buffer_state(&file, disk).expect("unsaved buffer wins");
         assert_eq!(state.content, buffer);
         let r = resolve_current_doc(&file, disk);
@@ -970,13 +970,13 @@ mod tests {
         let (_dir, file, canonical) = temp_doc(disk);
         std::fs::create_dir_all(file.parent().unwrap().join(".agent-doc/patches")).unwrap();
 
-        crate::debounce::record_live_buffer_digest_content_for_editor(
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor(
             &canonical,
             &origin,
             Some("editor-A"),
         )
         .unwrap();
-        crate::debounce::record_live_buffer_digest_content_for_editor(
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor(
             &canonical,
             &peer,
             Some("editor-B"),
@@ -1003,11 +1003,11 @@ mod tests {
         assert_eq!(payload["file"], canonical);
         assert_eq!(
             payload["baseline_hash"],
-            crate::debounce::content_hash(&peer)
+            agent_doc_debounce::content_hash(&peer)
         );
         assert_eq!(
             payload["baseline_normalized_hash"],
-            crate::debounce::content_hash(&crate::git::normalize_transient_agent_doc_markers(
+            agent_doc_debounce::content_hash(&crate::git::normalize_transient_agent_doc_markers(
                 &peer
             ))
         );
@@ -1073,7 +1073,7 @@ mod tests {
         let (_dir, file, canonical) = temp_doc(disk);
         std::fs::create_dir_all(file.parent().unwrap().join(".agent-doc/patches")).unwrap();
         // A live peer exists, but the originator's IntelliJ pid is dead.
-        crate::debounce::record_live_buffer_digest_content_for_editor(
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor(
             &canonical,
             &peer,
             Some("editor-B"),
@@ -1100,14 +1100,14 @@ mod tests {
         let (_dir, file, canonical) = temp_doc(disk);
         std::fs::create_dir_all(file.parent().unwrap().join(".agent-doc/patches")).unwrap();
         let dead_id = "jetbrains-2147483646-deadpeer";
-        crate::debounce::record_live_buffer_digest_content_for_editor(
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor(
             &canonical,
             &dead_peer_buf,
             Some(dead_id),
         )
         .unwrap();
         assert!(
-            crate::debounce::live_buffer_snapshots(&canonical)
+            agent_doc_debounce::live_buffer_snapshots(&canonical)
                 .iter()
                 .any(|s| s.editor_id.as_deref() == Some(dead_id)),
             "dead peer sidecar present before broadcast"
@@ -1116,7 +1116,7 @@ mod tests {
         let deliveries = broadcast_editor_change(&file, "editor-A", &origin).unwrap();
         assert!(deliveries.is_empty(), "no delivery to a dead peer");
         assert!(
-            !crate::debounce::live_buffer_snapshots(&canonical)
+            !agent_doc_debounce::live_buffer_snapshots(&canonical)
                 .iter()
                 .any(|s| s.editor_id.as_deref() == Some(dead_id)),
             "dead peer orphan sidecar must be reaped"

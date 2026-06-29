@@ -5,7 +5,7 @@ pub(crate) fn check_no_response_active_queue_head(
     rc: &crate::graph::RunContext,
 ) -> Result<GuardResult> {
     let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
-    if mode == agent_doc_core::frontmatter::PendingCaptureGuardMode::Off {
+    if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
     }
     let Some(state) = crate::cycle_state::load(file)? else {
@@ -106,17 +106,19 @@ pub(crate) fn check_no_response_active_queue_head(
     );
 
     Ok(match mode {
-        agent_doc_core::frontmatter::PendingCaptureGuardMode::Warn => GuardResult::Warn(vec![
-            warn_line,
-            format!("[session-check] hint: {repair} (see #nochange-after-stall-breadth)"),
-        ]),
-        agent_doc_core::frontmatter::PendingCaptureGuardMode::Strict => {
+        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Warn => {
+            GuardResult::Warn(vec![
+                warn_line,
+                format!("[session-check] hint: {repair} (see #nochange-after-stall-breadth)"),
+            ])
+        }
+        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict => {
             GuardResult::Error(format!(
                 "{}\n[session-check] hint: {repair} (see #nochange-after-stall-breadth)",
                 warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
             ))
         }
-        agent_doc_core::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
+        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
     })
 }
 
@@ -143,7 +145,7 @@ pub(crate) fn check_reaped_queue_head_without_response(
     rc: &crate::graph::RunContext,
 ) -> Result<GuardResult> {
     let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
-    if mode == agent_doc_core::frontmatter::PendingCaptureGuardMode::Off {
+    if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
     }
     let Some(state) = crate::cycle_state::load(file)? else {
@@ -260,16 +262,18 @@ pub(crate) fn check_reaped_queue_head_without_response(
     );
 
     Ok(match mode {
-        agent_doc_core::frontmatter::PendingCaptureGuardMode::Warn => GuardResult::Warn(vec![
-            warn_line,
-            format!("[session-check] hint: {repair} (see #compact-reap-no-response-record)"),
-        ]),
-        agent_doc_core::frontmatter::PendingCaptureGuardMode::Strict => {
+        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Warn => {
+            GuardResult::Warn(vec![
+                warn_line,
+                format!("[session-check] hint: {repair} (see #compact-reap-no-response-record)"),
+            ])
+        }
+        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict => {
             GuardResult::Error(format!(
                 "{}\n[session-check] hint: {repair} (see #compact-reap-no-response-record)",
                 warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
             ))
         }
-        agent_doc_core::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
+        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
     })
 }

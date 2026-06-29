@@ -1,7 +1,8 @@
 use agent_doc_element::element;
 
-use agent_doc_core::{diff, frontmatter};
+use agent_doc_diff as diff;
 use agent_doc_element_backlog::backlog;
+use agent_doc_frontmatter::frontmatter;
 
 use crate::{frontmatter_io, session_accretion};
 use std::path::Path;

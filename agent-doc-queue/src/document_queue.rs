@@ -1467,12 +1467,12 @@ pub fn has_auto_attr(attrs: &std::collections::HashMap<String, String>) -> bool 
 /// over `start`/`go` if both are (erroneously) present.
 pub fn marker_control(
     attrs: &std::collections::HashMap<String, String>,
-) -> Option<agent_doc_core::frontmatter::QueueControl> {
+) -> Option<agent_doc_frontmatter::frontmatter::QueueControl> {
     if attrs.contains_key("stop") {
-        return Some(agent_doc_core::frontmatter::QueueControl::Stop);
+        return Some(agent_doc_frontmatter::frontmatter::QueueControl::Stop);
     }
     if attrs.contains_key("start") || attrs.contains_key("go") {
-        return Some(agent_doc_core::frontmatter::QueueControl::Start);
+        return Some(agent_doc_frontmatter::frontmatter::QueueControl::Start);
     }
     None
 }
@@ -4361,7 +4361,7 @@ mod tests {
         // onto `queue_active`, which feeds `resolve_activation` as
         // `persisted_active`, activating the queue with the Persisted trigger
         // (auto-loop-continuation eligible).
-        let (fm, _) = agent_doc_core::frontmatter::parse(
+        let (fm, _) = agent_doc_frontmatter::frontmatter::parse(
             "---\nagent_doc_format: template\nqueue: start\n---\n\n",
         )
         .unwrap();
@@ -4376,7 +4376,7 @@ mod tests {
 
     #[test]
     fn marker_control_detects_start_go_stop() {
-        use agent_doc_core::frontmatter::QueueControl;
+        use agent_doc_frontmatter::frontmatter::QueueControl;
         let mut attrs = std::collections::HashMap::new();
         assert_eq!(marker_control(&attrs), None);
         attrs.insert("go".to_string(), String::new());
@@ -4419,9 +4419,10 @@ mod tests {
 
     #[test]
     fn activation_canonical_queue_stop_deactivates() {
-        let (fm, _) =
-            agent_doc_core::frontmatter::parse("---\nqueue: stop\nqueue_active: true\n---\n\n")
-                .unwrap();
+        let (fm, _) = agent_doc_frontmatter::frontmatter::parse(
+            "---\nqueue: stop\nqueue_active: true\n---\n\n",
+        )
+        .unwrap();
         // Canonical `queue: stop` wins over a stale `queue_active: true`.
         assert_eq!(fm.queue_active, Some(false));
         let entries = vec![make_prompt("do #fix1")];

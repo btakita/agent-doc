@@ -305,14 +305,14 @@ pub(crate) fn status_mutation_introduces_prompt_work(
         return false;
     }
 
-    if !agent_doc_core::diff::extract_prompt_preset_requests_from_text(&added).is_empty() {
+    if !agent_doc_diff::extract_prompt_preset_requests_from_text(&added).is_empty() {
         return true;
     }
 
     added.lines().any(|line| {
         let trimmed = line.trim();
         !trimmed.is_empty()
-            && (agent_doc_core::diff::text_line_looks_like_prompt_target(trimmed)
+            && (agent_doc_diff::text_line_looks_like_prompt_target(trimmed)
                 || starts_with_prompt_preset_reference(trimmed))
     })
 }
@@ -326,7 +326,7 @@ pub(crate) fn is_safe_out_of_band_status_mutation(
 }
 
 pub(crate) fn is_empty_template_scaffold_snapshot(snapshot_doc: &str) -> bool {
-    let body = agent_doc_core::frontmatter::parse(snapshot_doc)
+    let body = agent_doc_frontmatter::frontmatter::parse(snapshot_doc)
         .map(|(_, body)| body)
         .unwrap_or(snapshot_doc);
     let Ok(components) = agent_doc_element::element::parse(body) else {
@@ -356,10 +356,10 @@ pub(crate) fn classify_safe_agent_doc_mutation(
         return None;
     }
 
-    let snap_body = agent_doc_core::frontmatter::parse(snapshot_doc)
+    let snap_body = agent_doc_frontmatter::frontmatter::parse(snapshot_doc)
         .map(|(_, body)| body)
         .unwrap_or(snapshot_doc);
-    let file_body = agent_doc_core::frontmatter::parse(file_doc)
+    let file_body = agent_doc_frontmatter::frontmatter::parse(file_doc)
         .map(|(_, body)| body)
         .unwrap_or(file_doc);
 

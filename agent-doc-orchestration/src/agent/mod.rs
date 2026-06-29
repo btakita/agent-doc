@@ -38,7 +38,7 @@ use std::time::{Duration, Instant};
 
 use self::streaming::StreamingAgent;
 use crate::config::{AgentConfig, Config};
-use agent_doc_core::frontmatter::{CodexNetworkAccess, Frontmatter};
+use agent_doc_frontmatter::frontmatter::{CodexNetworkAccess, Frontmatter};
 
 /// Response from an agent backend.
 pub struct AgentResponse {
@@ -542,7 +542,7 @@ pub fn resolve_streaming_for_file(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_doc_core::frontmatter::CodexNetworkAccess;
+    use agent_doc_frontmatter::frontmatter::CodexNetworkAccess;
     use std::fs;
     use std::process::Command;
     use std::sync::MutexGuard;

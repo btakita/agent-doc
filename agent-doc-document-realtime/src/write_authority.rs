@@ -4,7 +4,8 @@
 //! Realizes the `specs/08b-single-process-control-plane.md` document-write
 //! authority: **every** same-process visible-document `.md` disk write
 //! serializes through the session actor's single in-process ordered write queue
-//! (`#pcpc3`, [`crate::write_queue`]) instead of a bare `flock`-only
+//! (`#pcpc3`, adapted by orchestration's `write_queue`) instead of a bare
+//! `flock`-only
 //! `atomic_write`. This is the structural root-fix for the supervisor self-race
 //! / exit-75 (`#ipc-crdt-response-drift` / R6): a route-owned supervisor write
 //! and an agent finalize write could interleave between `flock` acquisitions
@@ -25,7 +26,7 @@
 //!   `.agent-doc/` sidecar/snapshot writes are never rerouted, matching the same
 //!   predicate `record_document_write_provenance` uses.
 //! - [`within_owner_scope`] / [`owner_scope_guard`] are the re-entrancy guard.
-//!   [`crate::write_queue::run_serialized`] installs the guard while a job runs
+//!   The orchestration write-queue adapter installs the guard while a job runs
 //!   on the session-actor owner thread; `atomic_write` checks it and does the
 //!   raw write when already inside the owner thread. Without this, a routed
 //!   write whose job calls `atomic_write` again would re-enter the same
@@ -62,7 +63,7 @@ pub fn within_owner_scope() -> bool {
 
 /// RAII guard that marks the current thread as inside a session-actor owner job
 /// for its lifetime, restoring the previous value on drop. Installed by
-/// [`crate::write_queue::run_serialized`] around the serialized job.
+/// the orchestration write queue around the serialized job.
 #[must_use = "the owner scope ends when the guard is dropped"]
 pub struct OwnerScopeGuard {
     previous: bool,

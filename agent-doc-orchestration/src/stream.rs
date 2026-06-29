@@ -76,7 +76,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::agent::streaming::{StreamChunk, StreamingAgent};
-use agent_doc_core::{crdt, diff, frontmatter, template};
+use agent_doc_diff as diff;
+use agent_doc_frontmatter::frontmatter;
+use agent_doc_merge::crdt;
+use agent_doc_template as template;
 
 use crate::{agent, config::Config, diff_io, git, repair, snapshot, template_io};
 
@@ -458,7 +461,7 @@ fn stream_loop(
                 target, final_text, target
             );
             let (patches, unmatched) =
-                agent_doc_core::template::parse_patches(&patch).unwrap_or_default();
+                agent_doc_template::parse_patches(&patch).unwrap_or_default();
             let mut mode_overrides = std::collections::HashMap::new();
             mode_overrides.insert(target.to_string(), "replace".to_string());
             crate::template_io::apply_patches_with_overrides_with_context(
@@ -615,7 +618,7 @@ fn resolve_streaming(
     config: Option<&crate::config::AgentConfig>,
     env: Vec<(String, Option<String>)>,
     file: &Path,
-    fm: &agent_doc_core::frontmatter::Frontmatter,
+    fm: &agent_doc_frontmatter::frontmatter::Frontmatter,
 ) -> Result<Box<dyn StreamingAgent>> {
     let Some(agent) = agent::resolve_streaming_for_file(name, config, env, file, fm)? else {
         anyhow::bail!(
@@ -1199,7 +1202,7 @@ Done — all packages pushed.";
             "<!-- patch:{} -->\n{}\n<!-- /patch:{} -->",
             target, final_text, target
         );
-        let (patches, unmatched) = agent_doc_core::template::parse_patches(&patch).unwrap();
+        let (patches, unmatched) = agent_doc_template::parse_patches(&patch).unwrap();
         let mut mode_overrides = std::collections::HashMap::new();
         mode_overrides.insert(target.to_string(), "replace".to_string());
         let file = std::path::Path::new("test.md");
@@ -1253,7 +1256,7 @@ user prompt here
             "<!-- patch:{} -->\n{}\n<!-- /patch:{} -->",
             target, final_text, target
         );
-        let (patches, unmatched) = agent_doc_core::template::parse_patches(&patch).unwrap();
+        let (patches, unmatched) = agent_doc_template::parse_patches(&patch).unwrap();
         let file = std::path::Path::new("test.md");
 
         // dedup_exchange_adjacent_lines now removes the echo duplication in append mode

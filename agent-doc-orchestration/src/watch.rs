@@ -73,7 +73,7 @@ use std::time::{Duration, Instant};
 
 use notify::{EventKind, RecursiveMode, Watcher};
 
-use agent_doc_core::frontmatter;
+use agent_doc_frontmatter::frontmatter;
 use agent_doc_markdown_ast::events::DocumentNodeEvent;
 
 use crate::{
@@ -726,7 +726,7 @@ fn run_event_loop(
             // Skip if file has an active agent-doc operation (prevents duplicate
             // responses from watch daemon competing with skill/stream writes)
             let file_str = path.to_string_lossy().to_string();
-            if crate::debounce::is_busy(&file_str) {
+            if agent_doc_debounce::is_busy(&file_str) {
                 eprintln!(
                     "[watch] skipping {} — busy (active operation in progress)",
                     path.display()

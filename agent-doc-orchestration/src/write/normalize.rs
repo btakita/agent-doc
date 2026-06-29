@@ -174,11 +174,10 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
         }
     }
 
-    let diff_text =
-        agent_doc_core::diff::unified_diff_from_contents(&snap_stripped, &baseline_stripped);
+    let diff_text = agent_doc_diff::unified_diff_from_contents(&snap_stripped, &baseline_stripped);
     let prompt_prefix_targets = diff_text
         .as_deref()
-        .map(agent_doc_core::diff::prompt_prefix_normalization_targets)
+        .map(agent_doc_diff::prompt_prefix_normalization_targets)
         .unwrap_or_default();
 
     let diff = TextDiff::from_lines(snap_stripped.as_str(), baseline_stripped.as_str());
@@ -281,7 +280,7 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
             // not user input — never stamp it with the `❯` prompt prefix even
             // though it appears as an inserted line relative to the pre-compact
             // snapshot. Origin is known, so the content-diff guess is overridden.
-            && !agent_doc_core::diff::line_is_binary_authored_compact_summary(trimmed)
+            && !agent_doc_diff::line_is_binary_authored_compact_summary(trimmed)
         {
             user_added.insert(line.to_string());
         } else if change.tag() == ChangeTag::Insert && (in_agent_block || is_re_block_replacement) {
@@ -522,8 +521,7 @@ pub fn enforce_imperative_response_contract(
     let Some(base) = baseline_owned.as_deref() else {
         return Ok(());
     };
-    let Some(diff_text) = agent_doc_core::diff::unified_diff_from_contents(base, current_content)
-    else {
+    let Some(diff_text) = agent_doc_diff::unified_diff_from_contents(base, current_content) else {
         return Ok(());
     };
     enforce_imperative_response_contract_for_diff(file, &diff_text, response)
@@ -534,13 +532,13 @@ pub fn enforce_imperative_response_contract_for_diff(
     diff_text: &str,
     response: &str,
 ) -> Result<()> {
-    if !agent_doc_core::diff::diff_contains_imperative_directive(diff_text) {
+    if !agent_doc_diff::diff_contains_imperative_directive(diff_text) {
         return Ok(());
     }
     if response_satisfies_imperative_contract(response) {
         return Ok(());
     }
-    let trigger = agent_doc_core::diff::extract_imperative_directives(diff_text)
+    let trigger = agent_doc_diff::extract_imperative_directives(diff_text)
         .into_iter()
         .next()
         .unwrap_or_else(|| "approval".to_string());
@@ -570,11 +568,10 @@ pub(crate) fn template_mode_overrides_for_current_doc(
     let Some(base) = baseline_owned.as_deref() else {
         return overrides;
     };
-    let Some(diff_text) = agent_doc_core::diff::unified_diff_from_contents(base, current_content)
-    else {
+    let Some(diff_text) = agent_doc_diff::unified_diff_from_contents(base, current_content) else {
         return overrides;
     };
-    if agent_doc_core::diff::detect_exchange_compaction_request(&diff_text) {
+    if agent_doc_diff::detect_exchange_compaction_request(&diff_text) {
         overrides.insert("exchange".to_string(), "replace".to_string());
     }
     overrides
@@ -857,11 +854,11 @@ pub(crate) fn normalization_target_matches_line(
 }
 
 pub(crate) fn starts_prompt_run_after_response(trimmed: &str, is_target: bool) -> bool {
-    agent_doc_core::diff::line_looks_like_prompt_prefix_repair_start(trimmed, is_target)
+    agent_doc_diff::line_looks_like_prompt_prefix_repair_start(trimmed, is_target)
 }
 
 pub(crate) fn starts_targeted_prompt_repair_after_response(trimmed: &str, is_target: bool) -> bool {
-    agent_doc_core::diff::line_looks_like_targeted_prompt_prefix_repair_start(trimmed, is_target)
+    agent_doc_diff::line_looks_like_targeted_prompt_prefix_repair_start(trimmed, is_target)
 }
 
 pub(crate) fn starts_targeted_or_prefixed_prompt_repair_after_response(
@@ -896,7 +893,7 @@ pub(crate) fn exchange_prompt_prefix_eligible_lines<'a>(
                 is_prefixed_exchange_response_heading_for_prefix_repair(trimmed);
             continue;
         }
-        if agent_doc_core::diff::line_looks_like_markdown_list_item(trimmed) {
+        if agent_doc_diff::line_looks_like_markdown_list_item(trimmed) {
             continue;
         }
 
@@ -1082,7 +1079,7 @@ pub fn normalize_exchange_prefixes_for_targets(doc: &str, prefix_lines: &[String
                 }
             }
             if normalized.starts_with("❯ ")
-                || agent_doc_core::diff::line_looks_like_plain_response_after_prompt(normalized)
+                || agent_doc_diff::line_looks_like_plain_response_after_prompt(normalized)
             {
                 return doc_line.to_string();
             }
@@ -1390,9 +1387,7 @@ mod verify_sidecar_normalization_tests {
 
     #[test]
     fn orchestrate_contract_rejects_non_exchange_patch() {
-        let patches = vec![agent_doc_core::template::PatchBlock::new(
-            "status", "updated",
-        )];
+        let patches = vec![agent_doc_template::PatchBlock::new("status", "updated")];
         let err = enforce_orchestrate_template_patch_contract(Some("orchestrate"), &patches, "")
             .unwrap_err();
         assert!(err.to_string().contains("patch:exchange"));
@@ -1400,7 +1395,7 @@ mod verify_sidecar_normalization_tests {
 
     #[test]
     fn orchestrate_contract_rejects_unmatched_transcript() {
-        let patches = vec![agent_doc_core::template::PatchBlock::new("exchange", "ok")];
+        let patches = vec![agent_doc_template::PatchBlock::new("exchange", "ok")];
         let err = enforce_orchestrate_template_patch_contract(
             Some("orchestrate"),
             &patches,
@@ -1412,7 +1407,7 @@ mod verify_sidecar_normalization_tests {
 
     #[test]
     fn orchestrate_contract_allows_exchange_only_patch() {
-        let patches = vec![agent_doc_core::template::PatchBlock::new("exchange", "ok")];
+        let patches = vec![agent_doc_template::PatchBlock::new("exchange", "ok")];
         enforce_orchestrate_template_patch_contract(Some("orchestrate"), &patches, "")
             .expect("exchange-only orchestrate patch should be accepted");
     }
@@ -1430,8 +1425,8 @@ mod verify_sidecar_normalization_tests {
     #[test]
     fn orchestrate_contract_allows_explicit_multi_component_patch() {
         let patches = vec![
-            agent_doc_core::template::PatchBlock::new("exchange", "response"),
-            agent_doc_core::template::PatchBlock::new("status", "updated"),
+            agent_doc_template::PatchBlock::new("exchange", "response"),
+            agent_doc_template::PatchBlock::new("status", "updated"),
         ];
         enforce_orchestrate_template_patch_contract(Some("orchestrate"), &patches, "")
             .expect("explicit multi-component patch should be accepted");
@@ -1502,8 +1497,8 @@ mod verify_sidecar_normalization_tests {
     #[test]
     fn template_response_write_proof_rejects_empty_response_shells() {
         let patches = vec![
-            agent_doc_core::template::PatchBlock::new("exchange", ""),
-            agent_doc_core::template::PatchBlock::new("frontmatter", "agent: codex"),
+            agent_doc_template::PatchBlock::new("exchange", ""),
+            agent_doc_template::PatchBlock::new("frontmatter", "agent: codex"),
         ];
         let err = super::ensure_template_response_write_proof(&patches, "").unwrap_err();
         assert!(err.to_string().contains("no real response-body write"));
@@ -1511,7 +1506,7 @@ mod verify_sidecar_normalization_tests {
 
     #[test]
     fn strict_template_response_heading_accepts_exchange_patch_heading() {
-        let patches = vec![agent_doc_core::template::PatchBlock::new(
+        let patches = vec![agent_doc_template::PatchBlock::new(
             "exchange",
             "### Re: queue head — gpt-5\n\nAnswered.\n",
         )];
@@ -1529,7 +1524,7 @@ mod verify_sidecar_normalization_tests {
 
     #[test]
     fn strict_template_response_heading_rejects_body_only_exchange_patch() {
-        let patches = vec![agent_doc_core::template::PatchBlock::new(
+        let patches = vec![agent_doc_template::PatchBlock::new(
             "exchange",
             "- changed paths\n- verification\n",
         )];
@@ -1542,7 +1537,7 @@ mod verify_sidecar_normalization_tests {
 
     #[test]
     fn strict_template_response_heading_rejects_non_exchange_patch_only() {
-        let patches = vec![agent_doc_core::template::PatchBlock::new(
+        let patches = vec![agent_doc_template::PatchBlock::new(
             "status",
             "### Re: misplaced — gpt-5\n\nWrong component.\n",
         )];
@@ -1560,7 +1555,7 @@ mod verify_sidecar_normalization_tests {
             "<!-- agent:boundary:streamed -->\n",
             "<!-- /agent:exchange -->\n",
         );
-        let patches = vec![agent_doc_core::template::PatchBlock::new(
+        let patches = vec![agent_doc_template::PatchBlock::new(
             "exchange",
             "\nImplemented and verified.\n",
         )];
@@ -1579,7 +1574,7 @@ mod verify_sidecar_normalization_tests {
             "<!-- agent:boundary:new -->\n",
             "<!-- /agent:exchange -->\n",
         );
-        let patches = vec![agent_doc_core::template::PatchBlock::new(
+        let patches = vec![agent_doc_template::PatchBlock::new(
             "exchange",
             "\nImplemented and verified.\n",
         )];

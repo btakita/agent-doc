@@ -1,0 +1,19 @@
+[package]
+name = "agent-doc-template"
+version = "0.34.65"
+edition = "2024"
+description = "Pure template-mode patch parsing, repair, and component mutation policy for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_template"
+
+[dependencies]
+agent-doc-element = { path = "../agent-doc-element", version = "0.34.65" }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"

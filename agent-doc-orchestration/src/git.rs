@@ -306,12 +306,12 @@ fn has_non_exchange_component_drift(snapshot_doc: &str, file_doc: &str) -> bool 
 fn has_non_exchange_component_drift_scoped(
     snapshot_doc: &str,
     file_doc: &str,
-    scope: Option<&agent_doc_core::turn_scope::TurnScope>,
+    scope: Option<&agent_doc_turn::turn_scope::TurnScope>,
 ) -> bool {
-    let snap_body = agent_doc_core::frontmatter::parse(snapshot_doc)
+    let snap_body = agent_doc_frontmatter::frontmatter::parse(snapshot_doc)
         .map(|(_, body)| body)
         .unwrap_or(snapshot_doc);
-    let file_body = agent_doc_core::frontmatter::parse(file_doc)
+    let file_body = agent_doc_frontmatter::frontmatter::parse(file_doc)
         .map(|(_, body)| body)
         .unwrap_or(file_doc);
 
@@ -376,10 +376,10 @@ fn non_exchange_change_is_turn_independent(
     snap_body: &str,
     file_body: &str,
     component_name: &str,
-    scope: &agent_doc_core::turn_scope::TurnScope,
+    scope: &agent_doc_turn::turn_scope::TurnScope,
 ) -> bool {
-    use agent_doc_core::op_log::OpActor;
-    use agent_doc_core::turn_scope::{Address, classify_op};
+    use agent_doc_turn::op_log::OpActor;
+    use agent_doc_turn::turn_scope::{Address, classify_op};
 
     let events: Vec<_> = agent_doc_markdown_ast::events::diff_node_events(snap_body, file_body)
         .into_iter()
@@ -434,10 +434,10 @@ fn is_safe_user_only_follow_up_after_committed_head(head_doc: &str, current_doc:
         return false;
     }
 
-    let head_body = agent_doc_core::frontmatter::parse(head_doc)
+    let head_body = agent_doc_frontmatter::frontmatter::parse(head_doc)
         .map(|(_, body)| body)
         .unwrap_or(head_doc);
-    let current_body = agent_doc_core::frontmatter::parse(current_doc)
+    let current_body = agent_doc_frontmatter::frontmatter::parse(current_doc)
         .map(|(_, body)| body)
         .unwrap_or(current_doc);
 
@@ -901,7 +901,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     if snapshot_matches_head
         && let Some(head) = head_doc.as_deref()
         && let Some(cleaned) =
-            agent_doc_core::template::deleted_conversation_tail_cleanup(head, &file_content)?
+            agent_doc_template::deleted_conversation_tail_cleanup(head, &file_content)?
     {
         eprintln!(
             "[commit] committing manual escaped conversation tail cleanup for {}",
@@ -1651,8 +1651,7 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
     // Reposition the snapshot to the same clean shape we stage into git.
     if let Ok(Some(snap_content)) = crate::snapshot::load(file) {
         let prompt_canonicalized = canonicalize_answered_prompt_prefixes(&snap_content);
-        let new_snap =
-            agent_doc_core::template::reposition_boundary_to_end_clean(&prompt_canonicalized);
+        let new_snap = agent_doc_template::reposition_boundary_to_end_clean(&prompt_canonicalized);
         if new_snap != snap_content {
             match crate::snapshot::save(file, &new_snap) {
                 Ok(()) => {
@@ -1707,7 +1706,7 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
             )
         };
         let repositioned =
-            agent_doc_core::template::reposition_boundary_to_end_preserve_head(&prefix_repaired);
+            agent_doc_template::reposition_boundary_to_end_preserve_head(&prefix_repaired);
         if repositioned != working {
             let committed_boundary_id = snapshot_after_reposition
                 .as_deref()
@@ -1883,7 +1882,7 @@ pub(crate) fn strip_guard_markers(content: &str) -> String {
 }
 
 fn document_uses_crdt(content: &str) -> bool {
-    agent_doc_core::frontmatter::parse(content)
+    agent_doc_frontmatter::frontmatter::parse(content)
         .map(|(fm, _)| fm.resolve_mode().is_crdt())
         .unwrap_or(false)
 }
@@ -1894,7 +1893,7 @@ fn refresh_live_closeout_sidecars(
     signal_editor_refresh: bool,
 ) -> Result<Option<bool>> {
     if document_uses_crdt(committed_doc) {
-        let crdt = agent_doc_core::crdt::CrdtDoc::from_text(committed_doc).encode_state();
+        let crdt = agent_doc_merge::crdt::CrdtDoc::from_text(committed_doc).encode_state();
         crate::snapshot::save_document_crdt(file, &crdt, committed_doc)?;
     }
 
@@ -2162,7 +2161,7 @@ fn prompt_classifier_post_commit_drift_kind(
     current_doc: &str,
 ) -> Option<PostCommitLocalDriftKind> {
     let prompt_bearing_body = |content: &str| {
-        agent_doc_core::frontmatter::parse(content)
+        agent_doc_frontmatter::frontmatter::parse(content)
             .map(|(_, body)| body.to_string())
             .unwrap_or_else(|_| content.to_string())
     };
@@ -2170,14 +2169,14 @@ fn prompt_classifier_post_commit_drift_kind(
         crate::git::normalize_committed_exchange_artifacts(&prompt_bearing_body(content))
     };
     let diff_text =
-        agent_doc_core::diff::unified_diff_from_contents(&norm(head_doc), &norm(current_doc))?;
-    let changes = agent_doc_core::diff::classify_prompt_bearing_changes(&diff_text);
+        agent_doc_diff::unified_diff_from_contents(&norm(head_doc), &norm(current_doc))?;
+    let changes = agent_doc_diff::classify_prompt_bearing_changes(&diff_text);
     if changes.is_empty() {
         return None;
     }
     let has_explicit_prompt_target = changes
         .iter()
-        .filter(|change| change.kind == agent_doc_core::diff::PromptBearingChangeKind::PromptTarget)
+        .filter(|change| change.kind == agent_doc_diff::PromptBearingChangeKind::PromptTarget)
         .any(|change| {
             change
                 .text
@@ -2186,10 +2185,10 @@ fn prompt_classifier_post_commit_drift_kind(
         });
     let has_content_edit = changes
         .iter()
-        .any(|change| change.kind == agent_doc_core::diff::PromptBearingChangeKind::ContentEdit);
-    let has_recovery_artifact = changes.iter().any(|change| {
-        change.kind == agent_doc_core::diff::PromptBearingChangeKind::RecoveryArtifact
-    });
+        .any(|change| change.kind == agent_doc_diff::PromptBearingChangeKind::ContentEdit);
+    let has_recovery_artifact = changes
+        .iter()
+        .any(|change| change.kind == agent_doc_diff::PromptBearingChangeKind::RecoveryArtifact);
     if has_explicit_prompt_target && !has_content_edit && !has_recovery_artifact {
         Some(PostCommitLocalDriftKind::UserFollowUp)
     } else {
@@ -2256,7 +2255,7 @@ fn classify_post_commit_local_drift(
         return Some(PostCommitLocalDriftKind::UserFollowUp);
     }
     if let Ok(Some(cleaned_head)) =
-        agent_doc_core::template::strip_conversation_tail_outside_exchange(head_doc)
+        agent_doc_template::strip_conversation_tail_outside_exchange(head_doc)
         && is_safe_user_only_follow_up_after_committed_head(&cleaned_head, current_doc)
     {
         return Some(PostCommitLocalDriftKind::UserFollowUp);
@@ -2682,7 +2681,7 @@ fn ensure_no_live_editor_buffer_ahead_of_disk(
 ) -> Result<()> {
     let file_str = file.display().to_string();
     let Some(snapshot) =
-        crate::debounce::live_buffer_diverges_from_content(&file_str, file_content)
+        agent_doc_debounce::live_buffer_diverges_from_content(&file_str, file_content)
     else {
         return Ok(());
     };
@@ -3169,15 +3168,15 @@ mod th {
     pub(crate) fn drift_gate_scope(
         content: &str,
         driver_id: &str,
-    ) -> agent_doc_core::turn_scope::TurnScope {
+    ) -> agent_doc_turn::turn_scope::TurnScope {
         let nodes = agent_doc_markdown_ast::mutations::all_item_nodes(content);
         let node = nodes
             .iter()
             .find(|node| node.component == "queue" && node.item.id == driver_id)
             .expect("driver queue node present");
         let driver =
-            agent_doc_core::turn_scope::Address::from_component_node_key("queue", &node.node_key);
-        agent_doc_core::turn_scope::TurnScope::for_driver(Some(driver))
+            agent_doc_turn::turn_scope::Address::from_component_node_key("queue", &node.node_key);
+        agent_doc_turn::turn_scope::TurnScope::for_driver(Some(driver))
     }
     pub(crate) fn init_repo(repo: &Path) {
         Command::new("git")
@@ -3692,7 +3691,7 @@ Duplicate replay should stay live.
     #[test]
     fn reposition_boundary_to_end_basic() {
         let content = "<!-- agent:exchange patch=append -->\nResponse.\n<!-- agent:boundary:abc123 -->\nUser prompt.\n<!-- /agent:exchange -->\n";
-        let result = agent_doc_core::template::reposition_boundary_to_end(content);
+        let result = agent_doc_template::reposition_boundary_to_end(content);
         // Boundary should be after user prompt, before close tag
         assert!(result.contains("User prompt.\n<!-- agent:boundary:"));
         assert!(result.contains("-->\n<!-- /agent:exchange -->"));
@@ -3702,14 +3701,14 @@ Duplicate replay should stay live.
     #[test]
     fn reposition_boundary_no_exchange() {
         let content = "# No exchange component\nJust text.\n";
-        let result = agent_doc_core::template::reposition_boundary_to_end(content);
+        let result = agent_doc_template::reposition_boundary_to_end(content);
         // Should return unchanged if no exchange
         assert_eq!(result.trim(), content.trim());
     }
     #[test]
     fn reposition_boundary_preserves_user_edits() {
         let content = "<!-- agent:exchange patch=append -->\n### Re: Answer\nAgent response.\n<!-- agent:boundary:old-id -->\nUser's new prompt here.\nMore user text.\n<!-- /agent:exchange -->\n";
-        let result = agent_doc_core::template::reposition_boundary_to_end(content);
+        let result = agent_doc_template::reposition_boundary_to_end(content);
         assert!(
             result.contains("User's new prompt here."),
             "user edit must be preserved"
@@ -3732,7 +3731,7 @@ Duplicate replay should stay live.
             <!-- agent:boundary:bbb222 -->\n\
             User prompt.\n\
             <!-- /agent:exchange -->\n";
-        let result = agent_doc_core::template::reposition_boundary_to_end(content);
+        let result = agent_doc_template::reposition_boundary_to_end(content);
         // All old boundaries should be removed
         assert!(
             !result.contains("aaa111"),
@@ -5117,7 +5116,7 @@ Duplicate replay should stay live.
         .unwrap();
 
         let editor_visible = format!("{committed}\noperator edit accepted by editor only\n");
-        crate::debounce::document_changed_with_content_for_editor(
+        agent_doc_debounce::document_changed_with_content_for_editor(
             &doc.display().to_string(),
             &editor_visible,
             Some("jetbrains:test"),
@@ -6240,7 +6239,7 @@ Duplicate replay should stay live.
             <!-- /agent:exchange -->\n";
         fs::write(&doc, transient).unwrap();
         crate::snapshot::save(&doc, committed).unwrap();
-        let stale_crdt = agent_doc_core::crdt::CrdtDoc::from_text(transient).encode_state();
+        let stale_crdt = agent_doc_merge::crdt::CrdtDoc::from_text(transient).encode_state();
         crate::snapshot::save_crdt(&doc, &stale_crdt).unwrap();
 
         let did_commit = commit(&doc).expect("HEAD-current closeout should succeed");
@@ -6264,7 +6263,7 @@ Duplicate replay should stay live.
         let crdt = crate::snapshot::load_crdt(&doc)
             .unwrap()
             .expect("CRDT state should be preserved for CRDT docs");
-        let crdt_text = agent_doc_core::crdt::CrdtDoc::decode_state(&crdt)
+        let crdt_text = agent_doc_merge::crdt::CrdtDoc::decode_state(&crdt)
             .unwrap()
             .to_text();
         assert_eq!(
@@ -6350,7 +6349,7 @@ Duplicate replay should stay live.
             <!-- /agent:exchange -->\n";
         crate::snapshot::save(&doc, committed).unwrap();
         fs::write(&doc, transient).unwrap();
-        let stale_crdt = agent_doc_core::crdt::CrdtDoc::from_text(transient).encode_state();
+        let stale_crdt = agent_doc_merge::crdt::CrdtDoc::from_text(transient).encode_state();
         crate::snapshot::save_crdt(&doc, &stale_crdt).unwrap();
 
         let did_commit = commit(&doc).expect("real closeout commit should succeed");
@@ -6374,7 +6373,7 @@ Duplicate replay should stay live.
         let crdt = crate::snapshot::load_crdt(&doc)
             .unwrap()
             .expect("CRDT state should be preserved for CRDT docs");
-        let crdt_text = agent_doc_core::crdt::CrdtDoc::decode_state(&crdt)
+        let crdt_text = agent_doc_merge::crdt::CrdtDoc::decode_state(&crdt)
             .unwrap()
             .to_text();
         assert_eq!(
@@ -6750,7 +6749,7 @@ Duplicate replay should stay live.
         );
         fs::write(&doc, drifted).unwrap();
         crate::snapshot::save(&doc, committed).unwrap();
-        let stale_crdt = agent_doc_core::crdt::CrdtDoc::from_text(drifted).encode_state();
+        let stale_crdt = agent_doc_merge::crdt::CrdtDoc::from_text(drifted).encode_state();
         crate::snapshot::save_crdt(&doc, &stale_crdt).unwrap();
 
         let did_commit = commit(&doc).expect("stale response collapse should self-heal");
@@ -6797,7 +6796,7 @@ Duplicate replay should stay live.
         let crdt = crate::snapshot::load_crdt(&doc)
             .unwrap()
             .expect("CRDT state should be refreshed for the repaired visible document");
-        let crdt_text = agent_doc_core::crdt::CrdtDoc::decode_state(&crdt)
+        let crdt_text = agent_doc_merge::crdt::CrdtDoc::decode_state(&crdt)
             .unwrap()
             .to_text();
         assert!(

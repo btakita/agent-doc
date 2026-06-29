@@ -450,9 +450,9 @@ pub fn latest_committed(file: &Path) -> Result<Option<CaptureRecord>> {
 /// drift and fail the replay baseline. Stripping it keeps replay validation
 /// invariant to the mirror, matching the diff layer.
 pub(crate) fn replay_file_hash(content: &str) -> String {
-    crate::ops_log::content_hash(&agent_doc_core::frontmatter::strip_pipeline_block_lines(
-        content,
-    ))
+    crate::ops_log::content_hash(
+        &agent_doc_frontmatter::frontmatter::strip_pipeline_block_lines(content),
+    )
 }
 
 /// Pure check (no side effects, no benign-drift refresh): returns true when the
@@ -588,9 +588,9 @@ pub(crate) fn live_drift_is_queue_only_against_snapshot(
     let Some(current_snapshot) = current_snapshot else {
         return Ok(false);
     };
-    let current_file = agent_doc_core::frontmatter::strip_pipeline_block_lines(current_file);
+    let current_file = agent_doc_frontmatter::frontmatter::strip_pipeline_block_lines(current_file);
     let current_snapshot =
-        agent_doc_core::frontmatter::strip_pipeline_block_lines(current_snapshot);
+        agent_doc_frontmatter::frontmatter::strip_pipeline_block_lines(current_snapshot);
     if current_file == current_snapshot {
         return Ok(false);
     }
@@ -851,7 +851,7 @@ fn capture_state_rank(state: CaptureState) -> u8 {
 }
 
 fn metadata_from_frontmatter(file_content: &str) -> CaptureMetadata {
-    let Ok((fm, _)) = agent_doc_core::frontmatter::parse(file_content) else {
+    let Ok((fm, _)) = agent_doc_frontmatter::frontmatter::parse(file_content) else {
         return CaptureMetadata::default();
     };
     let resolved = fm.resolve_mode();

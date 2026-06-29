@@ -285,10 +285,10 @@ pub(crate) fn pending_prompt_bearing_context_for_route(
         return Ok(None);
     };
     let marker = match change.kind {
-        agent_doc_core::diff::PromptBearingChangeKind::PromptTarget => "prompt_target",
-        agent_doc_core::diff::PromptBearingChangeKind::ContentEdit => "content_edit",
-        agent_doc_core::diff::PromptBearingChangeKind::RecoveryArtifact
-        | agent_doc_core::diff::PromptBearingChangeKind::BoundaryArtifact => return Ok(None),
+        agent_doc_diff::PromptBearingChangeKind::PromptTarget => "prompt_target",
+        agent_doc_diff::PromptBearingChangeKind::ContentEdit => "content_edit",
+        agent_doc_diff::PromptBearingChangeKind::RecoveryArtifact
+        | agent_doc_diff::PromptBearingChangeKind::BoundaryArtifact => return Ok(None),
     };
     let preview = change
         .text

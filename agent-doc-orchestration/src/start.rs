@@ -137,7 +137,7 @@ use crate::supervisor::{
     resize,
     state::{CrashPolicy, RestartAction, SupervisorState},
 };
-use agent_doc_core::frontmatter;
+use agent_doc_frontmatter::frontmatter;
 
 use crate::{config, sessions, snapshot};
 
@@ -926,7 +926,7 @@ fn route_owned_exchange_tail_has_unresolved_prompt(body: &str) -> bool {
 
     body[tail_start..]
         .lines()
-        .any(agent_doc_core::diff::text_line_looks_like_prompt_target)
+        .any(agent_doc_diff::text_line_looks_like_prompt_target)
 }
 
 fn route_owned_line_is_response_heading(line: &str) -> bool {
@@ -2757,7 +2757,7 @@ mod th {
     use super::*;
     use crate::config::Config;
     use crate::sessions::IsolatedTmux;
-    use agent_doc_core::frontmatter::Frontmatter;
+    use agent_doc_frontmatter::frontmatter::Frontmatter;
     pub(crate) struct ScopedCurrentDir {
         prev_cwd: std::path::PathBuf,
         _env_guard: crate::test_support::ProcessGlobalLockGuard,
@@ -2945,7 +2945,7 @@ mod tests {
     use crate::hooks::fire_doc_hooks;
     use crate::project_config_io as project_config;
     use crate::sessions::IsolatedTmux;
-    use agent_doc_core::frontmatter::Frontmatter;
+    use agent_doc_frontmatter::frontmatter::Frontmatter;
     use std::collections::HashMap;
     use tempfile::TempDir;
     #[cfg(unix)]

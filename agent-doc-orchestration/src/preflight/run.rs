@@ -1,7 +1,7 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
-use agent_doc_core::diff;
+use agent_doc_diff as diff;
 
 /// Options controlling a `preflight` invocation.
 #[derive(Debug, Clone, Copy, Default)]
@@ -490,12 +490,12 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                     if let (Ok(snap_content), Ok(doc_content)) = (
                         std::fs::read_to_string(&snap_abs),
                         std::fs::read_to_string(&doc_path),
-                    ) && !agent_doc_core::diff::is_stale_snapshot(&snap_content, &doc_content)
+                    ) && !agent_doc_diff::is_stale_snapshot(&snap_content, &doc_content)
                     {
                         // Not a stale inline snapshot — check content equality
                         // (covers template mode where is_stale_snapshot always returns false)
-                        let snap_stripped = agent_doc_core::diff::strip_comments(&snap_content);
-                        let doc_stripped = agent_doc_core::diff::strip_comments(&doc_content);
+                        let snap_stripped = agent_doc_diff::strip_comments(&snap_content);
+                        let doc_stripped = agent_doc_diff::strip_comments(&doc_content);
                         if snap_stripped.trim() != doc_stripped.trim() {
                             eprintln!(
                                 "[preflight] sweep: skipping {} (unresponded user content)",
@@ -588,7 +588,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                 .and_then(|t| t.elapsed().ok())
                 .unwrap_or(debounce);
 
-            let typing_active = crate::debounce::is_typing_via_file(&file_str, debounce_ms);
+            let typing_active = agent_doc_debounce::is_typing_via_file(&file_str, debounce_ms);
             tracing::trace!(
                 idle_ms = idle_for.as_millis() as u64,
                 typing_active,
@@ -930,7 +930,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                 "",
                 summary,
             );
-            Some(agent_doc_core::turn_scope::classify_cycle(&ops, scope))
+            Some(agent_doc_turn::turn_scope::classify_cycle(&ops, scope))
         }
         _ => None,
     };
@@ -951,7 +951,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                 "",
                 summary,
             );
-            Some(agent_doc_core::turn_scope::classify_cycle(&ops, scope))
+            Some(agent_doc_turn::turn_scope::classify_cycle(&ops, scope))
         }
         _ => None,
     };
@@ -1312,7 +1312,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             .find(|change| {
                 matches!(
                     change.kind,
-                    agent_doc_core::diff::PromptBearingChangeKind::PromptTarget
+                    agent_doc_diff::PromptBearingChangeKind::PromptTarget
                 )
             })
             .map(|change| change.text.clone());
@@ -3425,11 +3425,9 @@ mod tests {
             "the inline #next-steps prompt should still require backlog capture"
         );
         let diff = crate::diff_io::compute(&doc).unwrap().unwrap();
-        let prompt_targets = agent_doc_core::diff::classify_prompt_bearing_changes(&diff)
+        let prompt_targets = agent_doc_diff::classify_prompt_bearing_changes(&diff)
             .into_iter()
-            .filter(|change| {
-                change.kind == agent_doc_core::diff::PromptBearingChangeKind::PromptTarget
-            })
+            .filter(|change| change.kind == agent_doc_diff::PromptBearingChangeKind::PromptTarget)
             .map(|change| change.text)
             .collect::<Vec<_>>();
         assert!(
@@ -4025,7 +4023,7 @@ mod tests {
             "<!-- agent:backlog -->\n",
             "<!-- /agent:backlog -->\n",
         );
-        let (fm, _) = agent_doc_core::frontmatter::parse(content).unwrap();
+        let (fm, _) = agent_doc_frontmatter::frontmatter::parse(content).unwrap();
         let warning = post_exchange_comment_prompt_preset_warning(
             Path::new("session.md"),
             content,
@@ -4321,7 +4319,7 @@ mod tests {
 
         let doc_for_thread = doc.clone();
         let doc_str = doc.to_string_lossy().to_string();
-        crate::debounce::document_changed(&doc_str);
+        agent_doc_debounce::document_changed(&doc_str);
         let handle = std::thread::spawn(move || run(&doc_for_thread));
         std::thread::sleep(std::time::Duration::from_millis(500));
         let during_debounce = std::fs::read_to_string(&doc).unwrap();

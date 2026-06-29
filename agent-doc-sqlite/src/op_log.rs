@@ -4,7 +4,7 @@
 //! (`#op-scoped-drift-1`, `tasks/agent-doc/plan-operation-scoped-drift.md`).
 //!
 //! ## Spec
-//! - Persists node-keyed document operations (`agent_doc_core::op_log::DocumentOp`)
+//! - Persists node-keyed document operations (`agent_doc_turn::op_log::DocumentOp`)
 //!   tagged with actor + causal (Lamport / session-origin) clock to a derived
 //!   sqlite database at `.agent-doc/op-log.db`.
 //! - The durable store owns Lamport assignment: each appended op gets the next
@@ -29,7 +29,7 @@
 //! - lamport_is_per_document: independent documents keep independent clocks
 //! - read_ops_returns_lamport_order: rows come back ordered by Lamport tick
 
-use agent_doc_core::op_log::{CausalClock, DocumentOp, OpActor};
+use agent_doc_turn::op_log::{CausalClock, DocumentOp, OpActor};
 use anyhow::{Context, Result};
 use rusqlite::{Connection, params};
 use std::collections::HashMap;

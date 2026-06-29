@@ -11,6 +11,9 @@ name = "agent_doc_sqlite"
 
 [dependencies]
 agent-doc-core = { path = "../agent-doc-core", version = "0.34.65" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.65" }
+agent-doc-topic = { path = "../agent-doc-topic", version = "0.34.65" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.65" }
 anyhow = "1"
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }

@@ -1,9 +1,10 @@
 //! C-ABI exports for FFI consumers (editor plugins, Python bindings).
 //!
-//! Pure subset of the FFI surface: functions that depend only on
-//! `agent-doc-core` types and need no orchestration-layer state. The full
-//! editor-plugin FFI lives in `agent_doc::ffi` (main crate), which
-//! re-exports the symbols defined here via `pub use agent_doc_core::ffi::*`.
+//! Pure subset of the FFI surface: functions that depend only on focused
+//! data/merge crates and need no orchestration-layer state. The full
+//! editor-plugin FFI lives in `agent_doc::ffi` (main crate), which re-exports
+//! the symbols defined here through the `agent_doc_ffi::*` compatibility
+//! path.
 //!
 //! Wave 5 / `#k9e1` of `#adcr` — proof-of-concept relocation. Adding more
 //! pure functions to this module is tracked under follow-up sub-tasks of
@@ -23,8 +24,11 @@ use std::sync::{Mutex, OnceLock};
 
 use agent_doc_element::element;
 
-use crate::crdt_sync::ReplicaState;
-use crate::{crdt, frontmatter, syntax, template};
+use agent_doc_frontmatter::frontmatter;
+use agent_doc_merge::crdt;
+use agent_doc_merge::crdt_sync::ReplicaState;
+use agent_doc_syntax as syntax;
+use agent_doc_template as template;
 
 /// Free a string returned by an `agent_doc_*` function.
 ///

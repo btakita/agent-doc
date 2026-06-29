@@ -616,7 +616,7 @@ pub(crate) fn remove_post_exchange_duplicate_prompt_comments_with_log(
         .flatten()
         .collect::<Vec<_>>();
     let Some(cleaned) =
-        agent_doc_core::template::remove_post_exchange_duplicate_prompt_comments_preserving_docs(
+        agent_doc_template::remove_post_exchange_duplicate_prompt_comments_preserving_docs(
             content,
             &preserve_docs,
         )

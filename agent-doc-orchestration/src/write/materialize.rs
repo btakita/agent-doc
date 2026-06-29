@@ -697,18 +697,18 @@ pub(crate) fn sanitize_template_patchback_response_for_write(response: &mut Stri
         return Ok(());
     }
 
-    match agent_doc_core::replay_guard::classify_replay_payload(response) {
-        agent_doc_core::replay_guard::ReplayPayloadClassification::Replayable(payload) => {
+    match agent_doc_template::replay_guard::classify_replay_payload(response) {
+        agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(payload) => {
             let sanitized = payload.into_owned();
             if sanitized != response.trim() {
                 *response = sanitized;
             }
             Ok(())
         }
-        agent_doc_core::replay_guard::ReplayPayloadClassification::Empty => {
+        agent_doc_template::replay_guard::ReplayPayloadClassification::Empty => {
             anyhow::bail!("empty response — nothing to write")
         }
-        agent_doc_core::replay_guard::ReplayPayloadClassification::Blocked(reason) => {
+        agent_doc_template::replay_guard::ReplayPayloadClassification::Blocked(reason) => {
             anyhow::bail!(
                 "template response contains unsafe unmatched content around patch blocks: {reason}"
             )
@@ -749,7 +749,7 @@ mod pending_patch_normalization_tests {
     fn normalize_pending_patch_repairs_lone_bare_placeholder() {
         let tmp = TempDir::new().unwrap();
         let (doc, content) = doc_with_backlog(&tmp, "");
-        let patches = vec![agent_doc_core::template::PatchBlock::new(
+        let patches = vec![agent_doc_template::PatchBlock::new(
             "backlog",
             "- [ ] [#] repair placeholder\n",
         )];
@@ -771,7 +771,7 @@ mod pending_patch_normalization_tests {
     fn normalize_pending_patch_rejects_stacked_leading_id_prefixes() {
         let tmp = TempDir::new().unwrap();
         let (doc, content) = doc_with_backlog(&tmp, "");
-        let patches = vec![agent_doc_core::template::PatchBlock::new(
+        let patches = vec![agent_doc_template::PatchBlock::new(
             "backlog",
             "- [ ] [#] [#ship1] release checklist\n",
         )];
@@ -799,7 +799,7 @@ mod pending_patch_normalization_tests {
         let tmp = TempDir::new().unwrap();
         let backlog = concat!("### Active\n", "- [ ] [#yckq] [#ss01] ShipStation fix\n");
         let (doc, content) = doc_with_backlog(&tmp, backlog);
-        let patches = vec![agent_doc_core::template::PatchBlock::new(
+        let patches = vec![agent_doc_template::PatchBlock::new(
             "backlog",
             concat!(
                 "### Active\n",
@@ -827,7 +827,7 @@ mod pending_patch_normalization_tests {
             "- [ ] [#keep2] later item\n"
         );
         let (doc, content) = doc_with_backlog(&tmp, backlog);
-        let patches = vec![agent_doc_core::template::PatchBlock::new(
+        let patches = vec![agent_doc_template::PatchBlock::new(
             "backlog",
             concat!(
                 "### Active\n",
@@ -861,7 +861,7 @@ mod pending_patch_normalization_tests {
             "- [ ] [#keep2] later item\n"
         );
         let (doc, content) = doc_with_backlog(&tmp, backlog);
-        let patches = vec![agent_doc_core::template::PatchBlock::new(
+        let patches = vec![agent_doc_template::PatchBlock::new(
             "backlog",
             concat!(
                 "### Active\n",
@@ -882,7 +882,7 @@ mod pending_patch_normalization_tests {
     fn write_flags_allow_replace_bypasses_enforcement() {
         let tmp = TempDir::new().unwrap();
         let (doc, content) = doc_with_backlog(&tmp, "- [ ] [#aaaa] existing\n");
-        let patches = vec![agent_doc_core::template::PatchBlock::new(
+        let patches = vec![agent_doc_template::PatchBlock::new(
             "backlog",
             "- [ ] [#zzzz] new\n",
         )];
@@ -896,7 +896,7 @@ mod pending_patch_normalization_tests {
     fn write_flags_default_rejects_replace_pending() {
         let tmp = TempDir::new().unwrap();
         let (_doc, _content) = doc_with_backlog(&tmp, "- [ ] [#aaaa] existing\n");
-        let patches = vec![agent_doc_core::template::PatchBlock::new(
+        let patches = vec![agent_doc_template::PatchBlock::new(
             "backlog",
             "- [ ] [#zzzz] new\n",
         )];
@@ -918,7 +918,7 @@ mod pending_patch_normalization_tests {
                 "- [ ] Re-score sessions\n",
             ),
         );
-        let patches = vec![agent_doc_core::template::PatchBlock::new(
+        let patches = vec![agent_doc_template::PatchBlock::new(
             "todo",
             concat!(
                 "### Phase 1\n\n",
@@ -948,7 +948,7 @@ mod pending_patch_normalization_tests {
                 "- [ ] Original item 2\n",
             ),
         );
-        let patches = vec![agent_doc_core::template::PatchBlock::new(
+        let patches = vec![agent_doc_template::PatchBlock::new(
             "todo",
             concat!(
                 "### Phase 1\n\n",

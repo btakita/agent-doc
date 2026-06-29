@@ -66,7 +66,7 @@ use crate::{
     parallel,
     queue_dispatch::{self, QueueItemKind},
 };
-use agent_doc_core::diff;
+use agent_doc_diff as diff;
 use agent_doc_orchestration::{
     agent,
     agent::streaming::StreamChunk,
@@ -405,7 +405,7 @@ impl FreshAgentRunner for CliAgentRunner {
         model: Option<&str>,
     ) -> Result<String> {
         let content = std::fs::read_to_string(file)?;
-        let (fm, _) = agent_doc_core::frontmatter::parse(&content)?;
+        let (fm, _) = agent_doc_frontmatter::frontmatter::parse(&content)?;
         let backend = agent::resolve_for_file(agent_name, agent_config, env, file, &fm)?;
         let response = send_fresh_response(backend.as_ref(), prompt, model)?;
         Ok(response.text)
@@ -421,7 +421,7 @@ impl FreshAgentRunner for CliAgentRunner {
         model: Option<&str>,
     ) -> Result<Option<Box<dyn Iterator<Item = Result<StreamChunk>>>>> {
         let content = std::fs::read_to_string(file)?;
-        let (fm, _) = agent_doc_core::frontmatter::parse(&content)?;
+        let (fm, _) = agent_doc_frontmatter::frontmatter::parse(&content)?;
         let Some(backend) =
             agent::resolve_streaming_for_file(agent_name, agent_config, env, file, &fm)?
         else {
@@ -521,8 +521,8 @@ fn finalize_suffix_from_streamed_prefix(streamed: &str, full: &str) -> Option<St
     }
 
     if let (Ok((full_patches, full_unmatched)), Ok((streamed_patches, streamed_unmatched))) = (
-        agent_doc_core::template::parse_patches(full),
-        agent_doc_core::template::parse_patches(streamed),
+        agent_doc_template::parse_patches(full),
+        agent_doc_template::parse_patches(streamed),
     ) && full_unmatched.trim().is_empty()
         && streamed_unmatched.trim().is_empty()
         && full_patches.len() == streamed_patches.len()
@@ -606,7 +606,7 @@ fn expand_frontmatter_env(fm: &frontmatter::Frontmatter) -> Vec<(String, Option<
 }
 
 fn build_image_description_block(file: &Path, doc: &str, agent_name: &str) -> Option<String> {
-    let project_config = crate::project_config::load_project_for_doc(file);
+    let project_config = agent_doc_orchestration::project_config_io::load_project_for_doc(file);
     let vision = &project_config.vision;
     let agent_mode = vision.agent_mode(agent_name).unwrap_or("passthrough");
     if agent_mode != "describe" {
@@ -2895,8 +2895,8 @@ mod tests {
         let prompt = build_agent_prompt(
             Path::new("session.md"),
             ResolvedMode {
-                format: agent_doc_core::frontmatter::AgentDocFormat::Template,
-                write: agent_doc_core::frontmatter::AgentDocWrite::Crdt,
+                format: agent_doc_frontmatter::frontmatter::AgentDocFormat::Template,
+                write: agent_doc_frontmatter::frontmatter::AgentDocWrite::Crdt,
             },
             Some("diff"),
             doc,
@@ -2938,8 +2938,8 @@ mod tests {
         let prompt = build_agent_prompt(
             Path::new("session.md"),
             ResolvedMode {
-                format: agent_doc_core::frontmatter::AgentDocFormat::Template,
-                write: agent_doc_core::frontmatter::AgentDocWrite::Crdt,
+                format: agent_doc_frontmatter::frontmatter::AgentDocFormat::Template,
+                write: agent_doc_frontmatter::frontmatter::AgentDocWrite::Crdt,
             },
             Some(diff),
             doc,

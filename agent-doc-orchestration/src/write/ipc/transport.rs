@@ -25,11 +25,11 @@ fn live_editor_delivery_target(file: &Path) -> Option<String> {
         );
     let live_buffer_candidates = file_keys
         .iter()
-        .flat_map(|file_key| crate::debounce::live_buffer_snapshots(file_key))
+        .flat_map(|file_key| agent_doc_debounce::live_buffer_snapshots(file_key))
         .map(|snapshot| {
-            let is_live = crate::debounce::live_buffer_snapshot_editor_is_live(&snapshot);
+            let is_live = agent_doc_debounce::live_buffer_snapshot_editor_is_live(&snapshot);
             let has_operator_text_authority =
-                snapshot.has_capability(crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY);
+                snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY);
             agent_doc_document_realtime::LiveEditorDeliveryCandidate {
                 editor_id: snapshot.editor_id,
                 timestamp_ms: snapshot.timestamp_ms,
@@ -137,7 +137,8 @@ pub fn queue_file_ipc_reposition_boundary(
         payload["cycle_id"] = serde_json::Value::String(cs.cycle_id);
     }
     if let Ok(live) = std::fs::read_to_string(file) {
-        payload["baseline_hash"] = serde_json::Value::String(crate::debounce::content_hash(&live));
+        payload["baseline_hash"] =
+            serde_json::Value::String(agent_doc_debounce::content_hash(&live));
     }
     target_payload_to_live_editor(file, &mut payload, "file_reposition");
 
@@ -173,7 +174,7 @@ pub fn queue_file_ipc_reposition_boundary(
 #[allow(clippy::too_many_arguments)]
 pub fn try_ipc(
     file: &Path,
-    patches: &[agent_doc_core::template::PatchBlock],
+    patches: &[agent_doc_template::PatchBlock],
     unmatched: &str,
     frontmatter_yaml: Option<&str>,
     baseline: Option<&str>,
@@ -314,9 +315,9 @@ pub fn try_ipc(
         });
         if let Some(target_baseline) = ipc_before_content.as_deref().or(baseline) {
             socket_payload["baseline_hash"] =
-                serde_json::Value::String(crate::debounce::content_hash(target_baseline));
+                serde_json::Value::String(agent_doc_debounce::content_hash(target_baseline));
             socket_payload["baseline_normalized_hash"] =
-                serde_json::Value::String(crate::debounce::content_hash(
+                serde_json::Value::String(agent_doc_debounce::content_hash(
                     &crate::git::normalize_transient_agent_doc_markers(target_baseline),
                 ));
         }
@@ -562,7 +563,7 @@ pub fn try_ipc(
                                 repair_decision.snapshot_content.len()
                             ),
                         );
-                        let crdt_doc = agent_doc_core::crdt::CrdtDoc::from_text(
+                        let crdt_doc = agent_doc_merge::crdt::CrdtDoc::from_text(
                             &repair_decision.snapshot_content,
                         );
                         if let Err(e) = snapshot::save_document_crdt(
@@ -801,9 +802,9 @@ pub fn try_ipc(
     });
     if let Some(target_baseline) = ipc_before_content.as_deref().or(baseline) {
         ipc_payload["baseline_hash"] =
-            serde_json::Value::String(crate::debounce::content_hash(target_baseline));
+            serde_json::Value::String(agent_doc_debounce::content_hash(target_baseline));
         ipc_payload["baseline_normalized_hash"] =
-            serde_json::Value::String(crate::debounce::content_hash(
+            serde_json::Value::String(agent_doc_debounce::content_hash(
                 &crate::git::normalize_transient_agent_doc_markers(target_baseline),
             ));
     }
@@ -1707,7 +1708,7 @@ pub(crate) fn write_ipc_and_poll(
                     ),
                 );
                 let crdt_doc =
-                    agent_doc_core::crdt::CrdtDoc::from_text(&repair_decision.snapshot_content);
+                    agent_doc_merge::crdt::CrdtDoc::from_text(&repair_decision.snapshot_content);
                 if let Err(e) = snapshot::save_document_crdt(
                     doc_file,
                     &crdt_doc.encode_state(),
@@ -1758,7 +1759,7 @@ pub(crate) fn normalize_patch_content(content: &str, prefix_lines: &[String]) ->
             .trim_end()
             .strip_prefix("\u{276f} ")
             .unwrap_or(line.trim_end());
-        if agent_doc_core::diff::line_looks_like_plain_response_after_prompt(bare) {
+        if agent_doc_diff::line_looks_like_plain_response_after_prompt(bare) {
             result.push_str(line);
             result.push('\n');
             continue;
@@ -1804,7 +1805,7 @@ pub(crate) fn normalization_target_counts(
 /// cannot normalize lines that the patch is about to append.)
 pub(crate) fn build_ipc_patches_json(
     file: &Path,
-    patches: &[agent_doc_core::template::PatchBlock],
+    patches: &[agent_doc_template::PatchBlock],
     unmatched: &str,
     normalize_prefix_lines: Option<&[String]>,
     boundary_seed: Option<&str>,
@@ -1972,7 +1973,7 @@ pub(crate) fn build_ipc_node_patches_json(before: Option<&str>, after: Option<&s
                     "op": "remove",
                     "content": before_source,
                     "expected_content": before_source,
-                    "expected_content_hash": crate::debounce::content_hash(&before_source),
+                    "expected_content_hash": agent_doc_debounce::content_hash(&before_source),
                 }));
             }
         }
@@ -2020,7 +2021,7 @@ pub(crate) fn build_ipc_node_patches_json(before: Option<&str>, after: Option<&s
                 "op": op,
                 "content": after_source,
                 "expected_content": before_source,
-                "expected_content_hash": crate::debounce::content_hash(&before_source),
+                "expected_content_hash": agent_doc_debounce::content_hash(&before_source),
             }));
         }
 
@@ -2048,7 +2049,7 @@ pub(crate) fn build_ipc_node_patches_json(before: Option<&str>, after: Option<&s
                     let before_source = ipc_node_source(before, node);
                     patch["expected_content"] = Value::String(before_source.clone());
                     patch["expected_content_hash"] =
-                        Value::String(crate::debounce::content_hash(&before_source));
+                        Value::String(agent_doc_debounce::content_hash(&before_source));
                 }
                 if let Some(anchor) = after_shared[..index].last() {
                     patch["after"] = Value::String((*anchor).to_string());
@@ -2337,7 +2338,7 @@ mod submodule_patch_routing_tests {
                                         .and_then(|value| value.as_str())?;
                                     let content =
                                         item.get("content").and_then(|value| value.as_str())?;
-                                    Some(agent_doc_core::template::PatchBlock::new(name, content))
+                                    Some(agent_doc_template::PatchBlock::new(name, content))
                                 })
                                 .collect::<Vec<_>>()
                         })
@@ -2462,7 +2463,7 @@ mod submodule_patch_routing_tests {
         )
         .unwrap();
 
-        let patch = agent_doc_core::template::PatchBlock::new("exchange", "test response");
+        let patch = agent_doc_template::PatchBlock::new("exchange", "test response");
 
         // try_ipc should route to the submodule's socket listener and succeed.
         let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
@@ -2510,7 +2511,7 @@ mod submodule_patch_routing_tests {
         )
         .unwrap();
 
-        let patch = agent_doc_core::template::PatchBlock::new("exchange", "response");
+        let patch = agent_doc_template::PatchBlock::new("exchange", "response");
 
         let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
         assert!(
@@ -2575,7 +2576,7 @@ mod submodule_patch_routing_tests {
         let _listener = start_already_applied_listener(&root);
         wait_for_listener(&root);
 
-        let patch = agent_doc_core::template::PatchBlock::new(
+        let patch = agent_doc_template::PatchBlock::new(
             "exchange",
             "### Re: Please reply — gpt-5\n\nAnswered.",
         );
@@ -2691,7 +2692,7 @@ mod submodule_patch_routing_tests {
         let _listener = start_already_applied_listener(&root);
         wait_for_listener(&root);
 
-        let patch = agent_doc_core::template::PatchBlock::new(
+        let patch = agent_doc_template::PatchBlock::new(
             "exchange",
             "### Re: Please reply — gpt-5\n\nAnswered.",
         );
@@ -2852,7 +2853,7 @@ mod submodule_patch_routing_tests {
         let _listener = start_fixed_ack_content_listener(&root, duplicated_ack_content.to_string());
         wait_for_listener(&root);
 
-        let patch = agent_doc_core::template::PatchBlock::new(
+        let patch = agent_doc_template::PatchBlock::new(
             "exchange",
             "### Re: Production key — gpt-5\n\nDone.",
         );
@@ -3894,13 +3895,13 @@ mod live_editor_target_tests {
         fs::write(&doc, "saved").unwrap();
         let doc_str = doc.to_string_lossy().to_string();
 
-        crate::debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
             &doc_str,
             "saved",
             "jetbrains-test-owner",
             "jetbrains",
             "0.2.197",
-            &[crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
         )
         .unwrap();
 
@@ -3929,13 +3930,13 @@ mod live_editor_target_tests {
             "jetbrains-owner",
             std::process::id(),
         ));
-        crate::debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
             &doc_str,
             "saved plus newer non-owner buffer",
             "jetbrains-newer-nonowner",
             "jetbrains",
             "0.2.197",
-            &[crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
         )
         .unwrap();
 
@@ -4226,7 +4227,7 @@ mod late_fallback_patch_guard_tests {
         )
         .unwrap();
 
-        let patch = agent_doc_core::template::PatchBlock::new("exchange", "late response");
+        let patch = agent_doc_template::PatchBlock::new("exchange", "late response");
         let result = try_ipc(
             &doc,
             &[patch],

@@ -35,7 +35,7 @@ use anyhow::Result;
 use std::io::Write;
 use std::path::Path;
 
-use agent_doc_core::frontmatter;
+use agent_doc_frontmatter::frontmatter;
 use agent_doc_orchestration::snapshot;
 
 pub fn run(
@@ -113,7 +113,7 @@ pub fn run(
 
 fn rebuild_sidecars_from_current(file: &Path, content: &str, save_baseline: bool) -> Result<()> {
     snapshot::save(file, content)?;
-    let crdt = agent_doc_core::crdt::CrdtDoc::from_text(content).encode_state();
+    let crdt = agent_doc_merge::crdt::CrdtDoc::from_text(content).encode_state();
     snapshot::save_document_crdt(file, &crdt, content)?;
     if save_baseline {
         save_baseline_from_current(file, content)?;
@@ -163,7 +163,7 @@ mod tests {
         assert!(!updated.contains("resume: old"));
         assert_eq!(snapshot::load(&doc).unwrap().unwrap(), updated);
         let crdt_state = snapshot::load_crdt(&doc).unwrap().unwrap();
-        let crdt_text = agent_doc_core::crdt::CrdtDoc::decode_state(&crdt_state)
+        let crdt_text = agent_doc_merge::crdt::CrdtDoc::decode_state(&crdt_state)
             .unwrap()
             .to_text();
         assert_eq!(crdt_text, updated);
@@ -242,7 +242,7 @@ mod tests {
             current
         );
         let crdt_state = snapshot::load_crdt(&doc).unwrap().unwrap();
-        let crdt_text = agent_doc_core::crdt::CrdtDoc::decode_state(&crdt_state)
+        let crdt_text = agent_doc_merge::crdt::CrdtDoc::decode_state(&crdt_state)
             .unwrap()
             .to_text();
         assert_eq!(crdt_text, current);

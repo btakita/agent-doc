@@ -66,7 +66,8 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock, mpsc};
 use std::time::Instant;
 
@@ -929,9 +930,20 @@ fn live_buffer_snapshot_can_receive_delivery(
 
 fn editor_id_is_live_for_delivery(editor_id: &str) -> bool {
     match jetbrains_editor_id_pid_for_delivery(editor_id) {
-        Some(pid) => crate::hooks::pid_is_live(pid),
+        Some(pid) => pid_is_live(pid),
         None => true,
     }
+}
+
+#[cfg(unix)]
+fn pid_is_live(pid: u32) -> bool {
+    let ret = unsafe { libc::kill(pid as libc::pid_t, 0) };
+    ret == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(not(unix))]
+fn pid_is_live(_pid: u32) -> bool {
+    true
 }
 
 fn jetbrains_editor_id_pid_for_delivery(editor_id: &str) -> Option<u32> {
@@ -1034,10 +1046,54 @@ fn log_live_buffer_decision(file: &str, decision: &str, reason: &str) {
 }
 
 fn log_live_buffer_decision_with_details(file: &str, decision: &str, reason: &str, details: &str) {
-    crate::ops_log::log_op(
-        std::path::Path::new(file),
+    log_live_buffer_op(
+        Path::new(file),
         &format!("live_buffer_classify decision={decision} reason={reason} file={file}{details}"),
     );
+}
+
+fn log_live_buffer_op(file: &Path, message: &str) {
+    let _ = try_log_live_buffer_op(file, message);
+}
+
+fn try_log_live_buffer_op(file: &Path, message: &str) -> Option<()> {
+    let canonical = file.canonicalize().ok()?;
+    let project_root = find_project_root(&canonical)?;
+    let logs_dir = project_root.join(".agent-doc/logs");
+    std::fs::create_dir_all(&logs_dir).ok()?;
+    let log_path = logs_dir.join("ops.log");
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .ok()?;
+    writeln!(
+        f,
+        "[{}] {}",
+        agent_doc_log_time::format_log_timestamp(ts),
+        message
+    )
+    .ok()
+}
+
+fn find_project_root(path: &Path) -> Option<PathBuf> {
+    let mut current = if path.is_dir() {
+        path.to_path_buf()
+    } else {
+        path.parent()?.to_path_buf()
+    };
+    loop {
+        if current.join(".agent-doc").is_dir() || current.join(".git").exists() {
+            return Some(current);
+        }
+        if !current.pop() {
+            return None;
+        }
+    }
 }
 
 fn live_buffer_snapshot_dir_and_stem(file: &str) -> (PathBuf, String) {

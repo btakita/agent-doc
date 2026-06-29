@@ -42,7 +42,7 @@ use anyhow::Result;
 use std::path::Path;
 
 use crate::project_config_io as project_config;
-use agent_doc_core::frontmatter::{self, LintDialectMode};
+use agent_doc_frontmatter::frontmatter::{self, LintDialectMode};
 
 use tagpath::lint::agent_doc::{
     AgentDocOptions, LintFinding, LintSeverity, format_findings_text, lint_agent_doc,

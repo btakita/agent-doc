@@ -17,18 +17,18 @@
 use anyhow::Result;
 use std::path::Path;
 
-use agent_doc_core::frontmatter::{
+use agent_doc_frontmatter::frontmatter::{
     Frontmatter, SshResolverContext, contextualize_parse_error, ensure_session_with_ssh_resolver,
     parse, parse_with_ssh_resolver,
 };
-use agent_doc_core::project_config::{self, ProjectConfig};
+use agent_doc_frontmatter::project_config::{self, ProjectConfig};
 
 use crate::graph::RunContext;
 use crate::project_config_io;
 
 /// Parse frontmatter for a concrete document path so callers can surface
 /// actionable errors. Wraps the pure
-/// [`agent_doc_core::frontmatter::parse_with_ssh_resolver`] after resolving
+/// [`agent_doc_frontmatter::frontmatter::parse_with_ssh_resolver`] after resolving
 /// the project config + canonical relative path from the filesystem.
 pub fn parse_for_file<'a>(content: &'a str, file: &Path) -> Result<(Frontmatter, &'a str)> {
     let display = file.display().to_string();
@@ -109,7 +109,7 @@ fn resolve_ssh_context_inputs(file: &Path) -> (ProjectConfig, String) {
 ///
 /// Resolves the project config + project-relative path from the filesystem,
 /// then delegates to the pure
-/// [`agent_doc_core::project_config::is_agent_doc_document`] predicate. Used as
+/// [`agent_doc_frontmatter::project_config::is_agent_doc_document`] predicate. Used as
 /// the opt-in gate so a plain `.md` is not silently converted into a session.
 pub fn is_agent_doc_document_for_file(content: &str, file: &Path) -> bool {
     let (project, doc_relative) = resolve_ssh_context_inputs(file);

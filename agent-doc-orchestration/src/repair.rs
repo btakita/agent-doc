@@ -66,7 +66,7 @@ use serde::Serialize;
 use std::collections::HashSet;
 use std::path::Path;
 
-use agent_doc_core::frontmatter;
+use agent_doc_frontmatter::frontmatter;
 
 use crate::{snapshot, write};
 
@@ -283,7 +283,7 @@ fn extract_visible_response_patch_between(
                 if trimmed.starts_with("<!-- agent:boundary:")
                     || trimmed == "<!-- /agent:exchange -->"
                     || trimmed == "<!-- /patch:exchange -->"
-                    || agent_doc_core::diff::text_line_looks_like_prompt_target(trimmed)
+                    || agent_doc_diff::text_line_looks_like_prompt_target(trimmed)
                     || crate::session_check::is_exchange_response_heading(trimmed)
                 {
                     break;
@@ -855,24 +855,22 @@ fn repair_template_doc_if_needed(
     let mut dup_opener_input = doc_content.to_string();
     let mut duplicate_opener_changed = false;
     while let Some(merged) =
-        agent_doc_core::template::repair_duplicate_exchange_opener(&dup_opener_input)?
+        agent_doc_template::repair_duplicate_exchange_opener(&dup_opener_input)?
     {
         dup_opener_input = merged;
         duplicate_opener_changed = true;
     }
     let duplicate_scaffold_repaired =
-        agent_doc_core::template::repair_duplicate_exchange_close_scaffold(&dup_opener_input)?
+        agent_doc_template::repair_duplicate_exchange_close_scaffold(&dup_opener_input)?
             .unwrap_or_else(|| dup_opener_input.clone());
     let duplicate_scaffold_changed = duplicate_scaffold_repaired != dup_opener_input;
-    let duplicate_close_repaired = agent_doc_core::template::repair_duplicate_exchange_close_tail(
-        &duplicate_scaffold_repaired,
-    )?
-    .unwrap_or_else(|| duplicate_scaffold_repaired.clone());
+    let duplicate_close_repaired =
+        agent_doc_template::repair_duplicate_exchange_close_tail(&duplicate_scaffold_repaired)?
+            .unwrap_or_else(|| duplicate_scaffold_repaired.clone());
     let duplicate_close_changed = duplicate_close_repaired != duplicate_scaffold_repaired;
-    let tail_repaired = agent_doc_core::template::repair_conversation_tail_outside_exchange(
-        &duplicate_close_repaired,
-    )?
-    .unwrap_or_else(|| duplicate_close_repaired.clone());
+    let tail_repaired =
+        agent_doc_template::repair_conversation_tail_outside_exchange(&duplicate_close_repaired)?
+            .unwrap_or_else(|| duplicate_close_repaired.clone());
     let tail_changed = tail_repaired != duplicate_close_repaired;
     let boundary_repaired = repair_answered_stale_boundary_if_safe(file, &tail_repaired)?;
     let boundary_changed = boundary_repaired.is_some();
@@ -1049,7 +1047,7 @@ fn repair_response_body_prompt_prefixes_if_needed(
 }
 
 fn repair_duplicate_exchange_scaffold_if_needed(file: &Path, doc_content: &str) -> Result<String> {
-    let repaired = agent_doc_core::template::repair_duplicate_exchange_close_scaffold(doc_content)?
+    let repaired = agent_doc_template::repair_duplicate_exchange_close_scaffold(doc_content)?
         .unwrap_or_else(|| doc_content.to_string());
     if repaired == doc_content {
         return Ok(repaired);
@@ -1084,14 +1082,14 @@ fn repair_leaves_unanswered_prompt_diff(
     let norm_snapshot = crate::git::normalize_committed_exchange_artifacts(snapshot_content);
     let norm_repaired = crate::git::normalize_committed_exchange_artifacts(repaired);
     let Some(diff_text) =
-        agent_doc_core::diff::unified_diff_from_contents(&norm_snapshot, &norm_repaired)
+        agent_doc_diff::unified_diff_from_contents(&norm_snapshot, &norm_repaired)
     else {
         return false;
     };
-    let changes = agent_doc_core::diff::classify_prompt_bearing_changes(&diff_text);
+    let changes = agent_doc_diff::classify_prompt_bearing_changes(&diff_text);
     let mut skip_answered_response_run = false;
     for (idx, change) in changes.iter().enumerate() {
-        if change.kind != agent_doc_core::diff::PromptBearingChangeKind::PromptTarget {
+        if change.kind != agent_doc_diff::PromptBearingChangeKind::PromptTarget {
             continue;
         }
         if skip_answered_response_run {
@@ -1105,8 +1103,8 @@ fn repair_leaves_unanswered_prompt_diff(
                 continue;
             }
         }
-        if agent_doc_core::diff::prompt_change_is_already_answered(&change.text)
-            || agent_doc_core::diff::prompt_change_is_answered_by_later_response(&changes, idx)
+        if agent_doc_diff::prompt_change_is_already_answered(&change.text)
+            || agent_doc_diff::prompt_change_is_answered_by_later_response(&changes, idx)
             || repair_prompt_target_immediately_before_existing_response(repaired, &change.text)
             || known_response
                 .map(|response| prompt_change_is_known_response(&change.text, response))
@@ -1153,7 +1151,7 @@ fn repair_prompt_target_immediately_before_existing_response(
         return false;
     }
 
-    let body = agent_doc_core::frontmatter::parse(current_doc)
+    let body = agent_doc_frontmatter::frontmatter::parse(current_doc)
         .map(|(_, body)| body.to_string())
         .unwrap_or_else(|_| current_doc.to_string());
     let Ok(components) = agent_doc_element::element::parse(&body) else {
@@ -1235,13 +1233,13 @@ fn repair_answered_stale_boundary_if_safe(
     };
     let tail_after_boundary = &exchange_body[marker_idx + marker.len()..];
     if tail_after_boundary.trim().is_empty()
-        || !agent_doc_core::diff::prompt_change_is_already_answered(tail_after_boundary)
+        || !agent_doc_diff::prompt_change_is_already_answered(tail_after_boundary)
         || crate::session_check::first_unstarted_prompt_bearing_change(file)?.is_some()
     {
         return Ok(None);
     }
 
-    let repaired = agent_doc_core::template::reposition_boundary_to_end_preserve_head_with_id(
+    let repaired = agent_doc_template::reposition_boundary_to_end_preserve_head_with_id(
         doc_content,
         Some(boundary_id.as_str()),
     );
@@ -1549,7 +1547,7 @@ fn respect_manual_exchange_tail_removal_if_safe(
     }
 
     let Some(stripped_snapshot) =
-        agent_doc_core::template::strip_conversation_tail_outside_exchange(&snapshot_content)?
+        agent_doc_template::strip_conversation_tail_outside_exchange(&snapshot_content)?
     else {
         return Ok(false);
     };
@@ -1746,15 +1744,17 @@ pub(crate) fn run_with_queue_completion_ids(
         .with_context(|| format!("failed to parse document frontmatter {}", file.display()))?;
     let use_template_write = fm.resolve_mode().is_template() || response.contains("<!-- patch:");
     let response_to_write = if use_template_write {
-        match agent_doc_core::replay_guard::classify_replay_payload(&response) {
-            agent_doc_core::replay_guard::ReplayPayloadClassification::Blocked(reason) => {
+        match agent_doc_template::replay_guard::classify_replay_payload(&response) {
+            agent_doc_template::replay_guard::ReplayPayloadClassification::Blocked(reason) => {
                 fail_closed_on_blocked_template_replay(file, &response, &reason)?;
                 response.clone()
             }
-            agent_doc_core::replay_guard::ReplayPayloadClassification::Replayable(response) => {
+            agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(response) => {
                 response.into_owned()
             }
-            agent_doc_core::replay_guard::ReplayPayloadClassification::Empty => response.clone(),
+            agent_doc_template::replay_guard::ReplayPayloadClassification::Empty => {
+                response.clone()
+            }
         }
     } else {
         response.clone()

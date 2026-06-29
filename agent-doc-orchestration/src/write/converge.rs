@@ -36,7 +36,7 @@ pub fn guard_no_stale_snapshot_reset_drift(
         return Ok(false);
     };
     if let Ok(Some(cleaned)) =
-        agent_doc_core::template::deleted_conversation_tail_cleanup(snapshot_doc, current_doc)
+        agent_doc_template::deleted_conversation_tail_cleanup(snapshot_doc, current_doc)
         && cleaned == current_doc
     {
         return Ok(false);
@@ -47,7 +47,7 @@ pub fn guard_no_stale_snapshot_reset_drift(
     };
     if let Some(reason) = classify_stale_snapshot_visible_rebase(file, snapshot_doc, current_doc) {
         crate::snapshot::save(file, current_doc)?;
-        let crdt = agent_doc_core::crdt::CrdtDoc::from_text(current_doc).encode_state();
+        let crdt = agent_doc_merge::crdt::CrdtDoc::from_text(current_doc).encode_state();
         crate::snapshot::save_document_crdt(file, &crdt, current_doc)?;
         crate::ops_log::log_op(
             file,
@@ -110,9 +110,9 @@ fn classify_stale_snapshot_visible_rebase(
     }
 
     let (snapshot_frontmatter, snapshot_body) =
-        agent_doc_core::frontmatter::parse(snapshot_doc).ok()?;
+        agent_doc_frontmatter::frontmatter::parse(snapshot_doc).ok()?;
     let (current_frontmatter, current_body) =
-        agent_doc_core::frontmatter::parse(current_doc).ok()?;
+        agent_doc_frontmatter::frontmatter::parse(current_doc).ok()?;
     if !frontmatter_agent_only_equivalent(&snapshot_frontmatter, &current_frontmatter) {
         return None;
     }
@@ -209,8 +209,8 @@ fn active_capture_response_removed(file: &Path, snapshot_doc: &str, current_doc:
 }
 
 fn frontmatter_agent_only_equivalent(
-    snapshot: &agent_doc_core::frontmatter::Frontmatter,
-    current: &agent_doc_core::frontmatter::Frontmatter,
+    snapshot: &agent_doc_frontmatter::frontmatter::Frontmatter,
+    current: &agent_doc_frontmatter::frontmatter::Frontmatter,
 ) -> bool {
     normalized_frontmatter_without_agent(snapshot)
         .zip(normalized_frontmatter_without_agent(current))
@@ -218,7 +218,7 @@ fn frontmatter_agent_only_equivalent(
 }
 
 fn normalized_frontmatter_without_agent(
-    frontmatter: &agent_doc_core::frontmatter::Frontmatter,
+    frontmatter: &agent_doc_frontmatter::frontmatter::Frontmatter,
 ) -> Option<serde_yaml::Value> {
     let mut value = serde_yaml::to_value(frontmatter).ok()?;
     if let serde_yaml::Value::Mapping(map) = &mut value {
@@ -231,10 +231,10 @@ fn component_change_is_turn_independent(
     snap_body: &str,
     current_body: &str,
     component_name: &str,
-    scope: &agent_doc_core::turn_scope::TurnScope,
+    scope: &agent_doc_turn::turn_scope::TurnScope,
 ) -> bool {
-    use agent_doc_core::op_log::OpActor;
-    use agent_doc_core::turn_scope::{Address, classify_op};
+    use agent_doc_turn::op_log::OpActor;
+    use agent_doc_turn::turn_scope::{Address, classify_op};
 
     let events: Vec<_> = agent_doc_markdown_ast::events::diff_node_events(snap_body, current_body)
         .into_iter()
@@ -467,7 +467,7 @@ fn exchange_prompt_target_lines(exchange_body: &str) -> Vec<String> {
         .filter_map(|line| {
             let trimmed = line.trim();
             if trimmed.starts_with('❯')
-                || agent_doc_core::diff::text_line_looks_like_prompt_target(trimmed)
+                || agent_doc_diff::text_line_looks_like_prompt_target(trimmed)
             {
                 Some(
                     trimmed
@@ -660,7 +660,7 @@ pub fn try_auto_recover_live_prompt_drift(
         )
     })?;
     crate::snapshot::save(file, &recovery_target)?;
-    let crdt_doc = agent_doc_core::crdt::CrdtDoc::from_text(&recovery_target);
+    let crdt_doc = agent_doc_merge::crdt::CrdtDoc::from_text(&recovery_target);
     crate::snapshot::save_document_crdt(file, &crdt_doc.encode_state(), &recovery_target)?;
     log_live_prompt_drift_auto_recovered(
         file,
@@ -905,7 +905,7 @@ pub fn reconcile_postcommit_exchange_to_head(working: &str, head: &str) -> Optio
     let exchange_changes = prompt_bearing_user_changes_between(head_body, working_body);
     if exchange_changes
         .iter()
-        .any(|change| change.kind == agent_doc_core::diff::PromptBearingChangeKind::PromptTarget)
+        .any(|change| change.kind == agent_doc_diff::PromptBearingChangeKind::PromptTarget)
     {
         return None;
     }
@@ -1277,9 +1277,9 @@ fn live_editor_sidecar_present(file: &Path) -> bool {
         .unwrap_or_else(|_| file.to_path_buf())
         .to_string_lossy()
         .to_string();
-    crate::debounce::live_buffer_snapshots(&indicator_path)
+    agent_doc_debounce::live_buffer_snapshots(&indicator_path)
         .iter()
-        .any(crate::debounce::live_buffer_snapshot_editor_is_live)
+        .any(agent_doc_debounce::live_buffer_snapshot_editor_is_live)
 }
 
 fn try_detached_disk_write(
@@ -1558,10 +1558,10 @@ pub(crate) fn live_buffer_delivery_missing_operator_text_authority_after_refresh
     file: &Path,
     content: &str,
     source: &str,
-) -> Option<crate::debounce::LiveBufferSnapshot> {
+) -> Option<agent_doc_debounce::LiveBufferSnapshot> {
     let canonical_file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let indicator_path = canonical_file.to_string_lossy().to_string();
-    let missing = crate::debounce::live_buffer_delivery_missing_operator_text_authority(
+    let missing = agent_doc_debounce::live_buffer_delivery_missing_operator_text_authority(
         &indicator_path,
         content,
     )?;
@@ -1643,10 +1643,10 @@ pub(crate) fn live_buffer_delivery_missing_operator_text_authority_after_refresh
 fn wait_for_operator_text_authority_refresh(
     indicator_path: &str,
     content: &str,
-    mut latest_missing: crate::debounce::LiveBufferSnapshot,
-) -> Option<crate::debounce::LiveBufferSnapshot> {
+    mut latest_missing: agent_doc_debounce::LiveBufferSnapshot,
+) -> Option<agent_doc_debounce::LiveBufferSnapshot> {
     for _ in 0..20 {
-        match crate::debounce::live_buffer_delivery_missing_operator_text_authority(
+        match agent_doc_debounce::live_buffer_delivery_missing_operator_text_authority(
             indicator_path,
             content,
         ) {
@@ -1699,7 +1699,7 @@ pub fn try_editor_converge(
             &format!(
                 "{source}_writeback file={} transport=blocked reason=editor_capability_missing capability={} editor_id={} live_len={} live_hash={} action=editor_reload_required",
                 file.display(),
-                crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+                agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
                 editor_id,
                 snapshot.len,
                 snapshot.hash
@@ -1709,7 +1709,7 @@ pub fn try_editor_converge(
             "{source}: refused editor convergence for {} because live editor buffer {} lacks required capability {}",
             file.display(),
             editor_id,
-            crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY
+            agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY
         );
     }
     match ipc_direct_disk_degraded(&project_root, file) {
@@ -2089,8 +2089,8 @@ pub(crate) fn editor_convergence_payload(
         "node_patches": node_patches,
         "unmatched": "",
         "baseline": current_content,
-        "baseline_hash": crate::debounce::content_hash(current_content),
-        "baseline_normalized_hash": crate::debounce::content_hash(&normalized_baseline),
+        "baseline_hash": agent_doc_debounce::content_hash(current_content),
+        "baseline_normalized_hash": agent_doc_debounce::content_hash(&normalized_baseline),
         "reposition_boundary": false,
         "patch_id": patch_id,
     });
@@ -3037,15 +3037,15 @@ mod core_tests {
 
         assert_eq!(
             payload["baseline_hash"].as_str(),
-            Some(crate::debounce::content_hash(&source).as_str()),
+            Some(agent_doc_debounce::content_hash(&source).as_str()),
             "socket convergence payloads must carry the raw generation fence"
         );
         assert_eq!(
             payload["baseline_normalized_hash"].as_str(),
             Some(
-                crate::debounce::content_hash(&crate::git::normalize_transient_agent_doc_markers(
-                    &source
-                ))
+                agent_doc_debounce::content_hash(
+                    &crate::git::normalize_transient_agent_doc_markers(&source)
+                )
                 .as_str()
             ),
             "socket convergence payloads must also carry the transient-marker-normalized fence"
@@ -3146,7 +3146,7 @@ mod core_tests {
         let target = crate::test_support::queue_consume_convergence_target();
         fs::write(&doc, &source).unwrap();
         let doc_str = doc.to_string_lossy().to_string();
-        crate::debounce::record_live_buffer_digest_content_for_editor(
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor(
             &doc_str,
             &format!("{source}\noperator typed text\n"),
             Some("jetbrains-old"),
@@ -3187,7 +3187,7 @@ mod core_tests {
         let target = crate::test_support::queue_consume_convergence_target();
         fs::write(&doc, &source).unwrap();
         let doc_str = doc.to_string_lossy().to_string();
-        crate::debounce::record_live_buffer_digest_content_for_editor(
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor(
             &doc_str,
             &source,
             Some("jetbrains-old"),
@@ -3227,7 +3227,7 @@ mod core_tests {
         let source = crate::test_support::queue_consume_convergence_source();
         fs::write(&doc, &source).unwrap();
         let doc_str = doc.to_string_lossy().to_string();
-        crate::debounce::record_live_buffer_digest_content_for_editor(
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor(
             &doc_str,
             &source,
             Some("jetbrains-old"),
@@ -3245,13 +3245,13 @@ mod core_tests {
                 *captured_clone.lock().unwrap() = Some(v.clone());
                 if v.get("type").and_then(|value| value.as_str()) == Some("publish_live_buffer") {
                     let published =
-                        crate::debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+                        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
                             &doc_for_listener,
                             &source_for_listener,
                             "jetbrains-old",
                             "jetbrains",
                             "test",
-                            &[crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+                            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
                         );
                     published.ok()?;
                 }
@@ -3300,7 +3300,7 @@ mod core_tests {
         let source = crate::test_support::queue_consume_convergence_source();
         fs::write(&doc, &source).unwrap();
         let doc_str = doc.to_string_lossy().to_string();
-        crate::debounce::record_live_buffer_digest_content_for_editor(
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor(
             &doc_str,
             &source,
             Some("vscode-old"),
@@ -3323,13 +3323,13 @@ mod core_tests {
                     *captured_clone.lock().unwrap() = Some(v.clone());
                     if v.get("type").and_then(|value| value.as_str()) == Some("publish_live_buffer")
                     {
-                        crate::debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+                        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
                             &doc_for_signal,
                             &source_for_signal,
                             "vscode-old",
                             "vscode",
                             "test",
-                            &[crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+                            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
                         )
                         .unwrap();
                     }
@@ -3384,13 +3384,13 @@ mod core_tests {
         let target = crate::test_support::queue_consume_convergence_target();
         fs::write(&doc, &source).unwrap();
         let doc_str = doc.to_string_lossy().to_string();
-        crate::debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
             &doc_str,
             &format!("{source}\noperator typed text\n"),
             "jetbrains-new",
             "jetbrains",
             "0.2.197",
-            &[crate::debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
         )
         .unwrap();
 
@@ -4165,8 +4165,8 @@ mod core_tests {
         fs::write(&doc, &current).unwrap();
         crate::snapshot::save(&doc, &snapshot).unwrap();
         let active_node_key = queue_node_key_for_id(&snapshot, "active");
-        let scope = agent_doc_core::turn_scope::TurnScope::for_driver_with_exchange_tail(
-            Some(agent_doc_core::turn_scope::Address::node(
+        let scope = agent_doc_turn::turn_scope::TurnScope::for_driver_with_exchange_tail(
+            Some(agent_doc_turn::turn_scope::Address::node(
                 "queue",
                 0,
                 &active_node_key,
@@ -4215,7 +4215,7 @@ mod core_tests {
         fs::write(&doc, current).unwrap();
         crate::snapshot::save(&doc, &snapshot).unwrap();
         let scope =
-            agent_doc_core::turn_scope::TurnScope::for_driver_with_exchange_tail(None, Some(0));
+            agent_doc_turn::turn_scope::TurnScope::for_driver_with_exchange_tail(None, Some(0));
         crate::turn_scope_store::save(&doc, &scope).unwrap();
 
         let rebased =
@@ -4349,7 +4349,7 @@ mod core_tests {
 ## Exchange\n\n<!-- agent:exchange patch=append -->\n### Session Summary\n\nOperator-authored replacement without compact archive proof.\n<!-- /agent:exchange -->\n";
         crate::snapshot::save(&doc, &snapshot).unwrap();
         let scope =
-            agent_doc_core::turn_scope::TurnScope::for_driver_with_exchange_tail(None, Some(0));
+            agent_doc_turn::turn_scope::TurnScope::for_driver_with_exchange_tail(None, Some(0));
         crate::turn_scope_store::save(&doc, &scope).unwrap();
 
         let err =
@@ -4391,8 +4391,8 @@ mod core_tests {
         fs::write(&doc, &current).unwrap();
         crate::snapshot::save(&doc, &snapshot).unwrap();
         let active_node_key = queue_node_key_for_id(&snapshot, "active");
-        let scope = agent_doc_core::turn_scope::TurnScope::for_driver_with_exchange_tail(
-            Some(agent_doc_core::turn_scope::Address::node(
+        let scope = agent_doc_turn::turn_scope::TurnScope::for_driver_with_exchange_tail(
+            Some(agent_doc_turn::turn_scope::Address::node(
                 "queue",
                 0,
                 &active_node_key,
@@ -4400,8 +4400,8 @@ mod core_tests {
             Some(0),
         );
         crate::turn_scope_store::save(&doc, &scope).unwrap();
-        let (_, snapshot_body) = agent_doc_core::frontmatter::parse(&snapshot).unwrap();
-        let (_, current_body) = agent_doc_core::frontmatter::parse(&current).unwrap();
+        let (_, snapshot_body) = agent_doc_frontmatter::frontmatter::parse(&snapshot).unwrap();
+        let (_, current_body) = agent_doc_frontmatter::frontmatter::parse(&current).unwrap();
         let queue_events: Vec<_> =
             agent_doc_markdown_ast::events::diff_node_events(snapshot_body, current_body)
                 .into_iter()

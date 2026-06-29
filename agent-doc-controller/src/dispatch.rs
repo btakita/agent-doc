@@ -73,6 +73,45 @@ pub fn dispatch_should_coalesce_in_flight(
     in_flight_same_cycle && !operator_driven
 }
 
+/// Decision for the route-dispatch drain retry loop after a mid-drain `repair`
+/// plus `session_check` failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DispatchDrainRetryDecision {
+    /// A concurrent finalize in another process closed the cycle, so the drain is
+    /// satisfied and routed dispatch may proceed.
+    ConcurrentlyClosed,
+    /// The cycle advanced concurrently and attempts remain, so back off and retry.
+    Retry,
+    /// No concurrent progress was observed, or attempts are exhausted, so fail closed.
+    GiveUp,
+}
+
+/// Classify whether a mid-drain failure is a transient concurrent-finalize race.
+///
+/// `original_*` is the cycle observed when the drain started; `reloaded` is the
+/// cycle re-read after the failed check as `(cycle_id, phase, is_open)`, or
+/// `None` when no open cycle remains on disk.
+pub fn dispatch_drain_retry_decision(
+    original_cycle_id: &str,
+    original_phase: agent_doc_turn::CyclePhase,
+    reloaded: Option<(&str, agent_doc_turn::CyclePhase, bool)>,
+    attempt: u32,
+    max_attempts: u32,
+) -> DispatchDrainRetryDecision {
+    match reloaded {
+        None => DispatchDrainRetryDecision::ConcurrentlyClosed,
+        Some((_, _, false)) => DispatchDrainRetryDecision::ConcurrentlyClosed,
+        Some((cycle_id, phase, true)) => {
+            let progressed = cycle_id != original_cycle_id || phase != original_phase;
+            if progressed && attempt + 1 < max_attempts {
+                DispatchDrainRetryDecision::Retry
+            } else {
+                DispatchDrainRetryDecision::GiveUp
+            }
+        }
+    }
+}
+
 pub fn dispatch_error_is_coalesced(message: &str) -> bool {
     message.contains(DISPATCH_COALESCED_IN_FLIGHT_MARKER)
 }
@@ -196,6 +235,90 @@ mod tests {
         assert!(!dispatch_should_coalesce_in_flight(true, true));
         assert!(!dispatch_should_coalesce_in_flight(false, false));
         assert!(!dispatch_should_coalesce_in_flight(false, true));
+    }
+
+    #[test]
+    fn drain_retry_concurrent_close_when_cycle_gone() {
+        assert_eq!(
+            dispatch_drain_retry_decision(
+                "cyc-1",
+                agent_doc_turn::CyclePhase::PreflightStarted,
+                None,
+                0,
+                3
+            ),
+            DispatchDrainRetryDecision::ConcurrentlyClosed
+        );
+    }
+
+    #[test]
+    fn drain_retry_concurrent_close_when_cycle_no_longer_open() {
+        assert_eq!(
+            dispatch_drain_retry_decision(
+                "cyc-1",
+                agent_doc_turn::CyclePhase::PreflightStarted,
+                Some(("cyc-1", agent_doc_turn::CyclePhase::Committed, false)),
+                0,
+                3
+            ),
+            DispatchDrainRetryDecision::ConcurrentlyClosed
+        );
+    }
+
+    #[test]
+    fn drain_retry_retries_when_phase_advanced_and_attempts_remain() {
+        assert_eq!(
+            dispatch_drain_retry_decision(
+                "cyc-1",
+                agent_doc_turn::CyclePhase::PreflightStarted,
+                Some(("cyc-1", agent_doc_turn::CyclePhase::WriteApplied, true)),
+                0,
+                3
+            ),
+            DispatchDrainRetryDecision::Retry
+        );
+    }
+
+    #[test]
+    fn drain_retry_retries_when_cycle_id_changed_and_attempts_remain() {
+        assert_eq!(
+            dispatch_drain_retry_decision(
+                "cyc-1",
+                agent_doc_turn::CyclePhase::PreflightStarted,
+                Some(("cyc-2", agent_doc_turn::CyclePhase::PreflightStarted, true)),
+                1,
+                3
+            ),
+            DispatchDrainRetryDecision::Retry
+        );
+    }
+
+    #[test]
+    fn drain_retry_gives_up_when_no_progress_observed() {
+        assert_eq!(
+            dispatch_drain_retry_decision(
+                "cyc-1",
+                agent_doc_turn::CyclePhase::PreflightStarted,
+                Some(("cyc-1", agent_doc_turn::CyclePhase::PreflightStarted, true)),
+                0,
+                3
+            ),
+            DispatchDrainRetryDecision::GiveUp
+        );
+    }
+
+    #[test]
+    fn drain_retry_gives_up_when_attempts_exhausted_despite_progress() {
+        assert_eq!(
+            dispatch_drain_retry_decision(
+                "cyc-1",
+                agent_doc_turn::CyclePhase::PreflightStarted,
+                Some(("cyc-1", agent_doc_turn::CyclePhase::WriteApplied, true)),
+                2,
+                3
+            ),
+            DispatchDrainRetryDecision::GiveUp
+        );
     }
 
     #[test]

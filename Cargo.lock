@@ -84,6 +84,7 @@ name = "agent-doc-controller"
 version = "0.34.65"
 dependencies = [
  "agent-doc-supervisor",
+ "agent-doc-turn",
  "serde",
 ]
 

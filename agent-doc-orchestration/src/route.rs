@@ -191,6 +191,7 @@ use crate::flow::routed_reopen::{
 };
 use crate::harness::HarnessConfig;
 use crate::supervisor::ipc::IpcMethod;
+use agent_doc_controller::dispatch::{DispatchDrainRetryDecision, dispatch_drain_retry_decision};
 use agent_doc_frontmatter::frontmatter;
 use tmux_router::Tmux;
 
@@ -2334,53 +2335,6 @@ fn scrub_duplicate_prompt_comments_for_route(
     }
 }
 
-/// Decision for the #pcp3a drain retry loop after a mid-drain `repair` +
-/// `session_check` failure.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DrainRetryDecision {
-    /// A concurrent finalize in another process closed the cycle — the drain is
-    /// satisfied; routed dispatch may proceed.
-    ConcurrentlyClosed,
-    /// The cycle advanced concurrently and attempts remain — back off and retry.
-    Retry,
-    /// No concurrent progress observed, or attempts exhausted — fail closed.
-    GiveUp,
-}
-
-/// Classify whether a mid-drain `repair` + `session_check` failure is a transient
-/// concurrent-finalize race (#pcp3a). `original_*` is the cycle observed when the
-/// drain started; `reloaded` is the cycle re-read after the failed check as
-/// `(cycle_id, phase, is_open)`, or `None` when no open cycle remains on disk.
-///
-/// The route-owned supervisor can race the agent's own finalize writes on the
-/// same document: a finalize in the *other* process moves the cycle/baseline
-/// mid-drain, so `session_check` sees "captured response baseline no longer
-/// matches current document". That is transient — the finalize will close the
-/// cycle. We only retry when there is positive evidence of concurrent progress
-/// (the cycle closed, or its `cycle_id`/`phase` advanced); a genuine,
-/// non-advancing block fails closed immediately so we never paper over a real
-/// stuck cycle.
-fn classify_drain_retry(
-    original_cycle_id: &str,
-    original_phase: agent_doc_turn::CyclePhase,
-    reloaded: Option<(&str, agent_doc_turn::CyclePhase, bool)>,
-    attempt: u32,
-    max_attempts: u32,
-) -> DrainRetryDecision {
-    match reloaded {
-        None => DrainRetryDecision::ConcurrentlyClosed,
-        Some((_, _, false)) => DrainRetryDecision::ConcurrentlyClosed,
-        Some((cycle_id, phase, true)) => {
-            let progressed = cycle_id != original_cycle_id || phase != original_phase;
-            if progressed && attempt + 1 < max_attempts {
-                DrainRetryDecision::Retry
-            } else {
-                DrainRetryDecision::GiveUp
-            }
-        }
-    }
-}
-
 fn drain_open_closeout_before_routed_dispatch(file: &Path) -> Result<RouteCloseoutDrainOutcome> {
     let Some(state) = crate::cycle_state::load(file)? else {
         return Ok(RouteCloseoutDrainOutcome::NoOpenCycle);
@@ -2460,7 +2414,7 @@ fn drain_open_closeout_before_routed_dispatch(file: &Path) -> Result<RouteCloseo
 
         // Concurrent-finalize detection: re-read the cycle after the failed check.
         let reloaded = crate::cycle_state::load(file)?;
-        let decision = classify_drain_retry(
+        let decision = dispatch_drain_retry_decision(
             &state.cycle_id,
             state.phase,
             reloaded
@@ -2471,7 +2425,7 @@ fn drain_open_closeout_before_routed_dispatch(file: &Path) -> Result<RouteCloseo
         );
         last_reason = block_reason;
         match decision {
-            DrainRetryDecision::ConcurrentlyClosed => {
+            DispatchDrainRetryDecision::ConcurrentlyClosed => {
                 crate::ops_log::log_op(
                     file,
                     &format!(
@@ -2482,7 +2436,7 @@ fn drain_open_closeout_before_routed_dispatch(file: &Path) -> Result<RouteCloseo
                 );
                 return Ok(RouteCloseoutDrainOutcome::NoOpenCycle);
             }
-            DrainRetryDecision::Retry => {
+            DispatchDrainRetryDecision::Retry => {
                 crate::ops_log::log_op(
                     file,
                     &format!(
@@ -2495,7 +2449,7 @@ fn drain_open_closeout_before_routed_dispatch(file: &Path) -> Result<RouteCloseo
                 std::thread::sleep(std::time::Duration::from_millis(DRAIN_RETRY_BACKOFF_MS));
                 continue;
             }
-            DrainRetryDecision::GiveUp => break,
+            DispatchDrainRetryDecision::GiveUp => break,
         }
     }
 
@@ -5259,13 +5213,6 @@ pub(crate) fn test_degraded_actor(pane_id: &str) -> AuthoritativeActorDispatchTa
 }
 // #route-busy-vs-starting-wording: the FailClosed wait context distinguishes a
 // pane busy on an active harness turn from a genuine cold startup timeout.
-// #pcp3a: classify_drain_retry — the route-drain concurrent-finalize race
-// hardening decision. A mid-drain repair+session_check failure should retry
-// (not fail closed) when there is positive evidence a finalize in another
-// process is concurrently progressing or has just closed the cycle.
-#[cfg(test)]
-use agent_doc_turn::CyclePhase;
-
 #[cfg(test)]
 mod tests {
     #![allow(unused_imports)]
@@ -8797,86 +8744,5 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
         assert!(msg.contains("No need to rerun"), "{msg}");
         // Must NOT carry the generic busy diagnostic's rerun instruction.
         assert!(!msg.contains("rerun `Run Agent Doc`"), "{msg}");
-    }
-    #[test]
-    fn drain_retry_concurrent_close_when_cycle_gone() {
-        // The cycle is no longer on disk — a concurrent finalize closed it.
-        assert_eq!(
-            classify_drain_retry("cyc-1", CyclePhase::PreflightStarted, None, 0, 3),
-            DrainRetryDecision::ConcurrentlyClosed
-        );
-    }
-    #[test]
-    fn drain_retry_concurrent_close_when_cycle_no_longer_open() {
-        // The cycle reloaded as not-open (Committed) — a concurrent finalize closed it.
-        assert_eq!(
-            classify_drain_retry(
-                "cyc-1",
-                CyclePhase::PreflightStarted,
-                Some(("cyc-1", CyclePhase::Committed, false)),
-                0,
-                3
-            ),
-            DrainRetryDecision::ConcurrentlyClosed
-        );
-    }
-    #[test]
-    fn drain_retry_retries_when_phase_advanced_and_attempts_remain() {
-        // The cycle is still open but its phase advanced (PreflightStarted ->
-        // WriteApplied) — a finalize is actively progressing in another process.
-        assert_eq!(
-            classify_drain_retry(
-                "cyc-1",
-                CyclePhase::PreflightStarted,
-                Some(("cyc-1", CyclePhase::WriteApplied, true)),
-                0,
-                3
-            ),
-            DrainRetryDecision::Retry
-        );
-    }
-    #[test]
-    fn drain_retry_retries_when_cycle_id_changed_and_attempts_remain() {
-        // A different, newer open cycle replaced ours — concurrent progress.
-        assert_eq!(
-            classify_drain_retry(
-                "cyc-1",
-                CyclePhase::PreflightStarted,
-                Some(("cyc-2", CyclePhase::PreflightStarted, true)),
-                1,
-                3
-            ),
-            DrainRetryDecision::Retry
-        );
-    }
-    #[test]
-    fn drain_retry_gives_up_when_no_progress_observed() {
-        // Same cycle, same phase, still open — no concurrent finalize. A genuine
-        // stuck cycle must fail closed immediately rather than retry-spin.
-        assert_eq!(
-            classify_drain_retry(
-                "cyc-1",
-                CyclePhase::PreflightStarted,
-                Some(("cyc-1", CyclePhase::PreflightStarted, true)),
-                0,
-                3
-            ),
-            DrainRetryDecision::GiveUp
-        );
-    }
-    #[test]
-    fn drain_retry_gives_up_when_attempts_exhausted_despite_progress() {
-        // Concurrent progress, but this is the last attempt — fail closed instead
-        // of looping forever.
-        assert_eq!(
-            classify_drain_retry(
-                "cyc-1",
-                CyclePhase::PreflightStarted,
-                Some(("cyc-1", CyclePhase::WriteApplied, true)),
-                2,
-                3
-            ),
-            DrainRetryDecision::GiveUp
-        );
     }
 }

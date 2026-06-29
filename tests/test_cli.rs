@@ -3653,6 +3653,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         manifest_dir.join("agent-doc-orchestration/src/route/authoritative_actor.rs"),
     )
     .unwrap();
+    let route_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
     assert!(
         authoritative_actor.contains("agent_doc_controller::dispatch::dispatch_error_is_coalesced"),
         "route authorization should call the focused controller dispatch classifier directly"
@@ -3662,6 +3664,29 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             "agent_doc_controller::dispatch::stale_queue_pause_recovery_from_dispatch_error"
         ),
         "route authorization should call the focused stale-queue recovery classifier directly"
+    );
+    let controller_dispatch =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller/src/dispatch.rs")).unwrap();
+    for required_snippet in [
+        "pub enum DispatchDrainRetryDecision",
+        "pub fn dispatch_drain_retry_decision(",
+    ] {
+        assert!(
+            controller_dispatch.contains(required_snippet),
+            "agent-doc-controller should own route dispatch drain-retry policy directly: {required_snippet}"
+        );
+    }
+    for forbidden_snippet in ["enum DrainRetryDecision", "fn classify_drain_retry("] {
+        assert!(
+            !route_source.contains(forbidden_snippet),
+            "route.rs must not re-own pure dispatch drain-retry policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        route_source.contains("use agent_doc_controller::dispatch::{")
+            && route_source.contains("DispatchDrainRetryDecision")
+            && route_source.contains("dispatch_drain_retry_decision("),
+        "route.rs should call focused controller drain-retry policy directly"
     );
     let sim_world = fs::read_to_string(manifest_dir.join("src/sim_world/engine.rs")).unwrap();
     assert!(

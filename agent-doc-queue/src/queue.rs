@@ -1,8 +1,8 @@
-//! Pure executor-side queue drain and context-clear policy.
+//! Pure queue drain and context-clear policy.
 //!
-//! These decisions answer whether a turn executor is ready for the next queue
-//! trigger or context clear. They do not read documents, inspect panes, or submit
-//! commands; callers provide the observed executor/document facts.
+//! These decisions answer whether the realtime queue can dispatch its next
+//! trigger or context clear. They do not read documents, inspect panes, or
+//! submit commands; callers provide the observed executor/document facts.
 
 pub const CLEAR_COOLDOWN_RESUME_IDLE_TICKS: u32 = 4;
 
@@ -224,6 +224,14 @@ pub fn idle_queue_context_clear_in_flight_decision(
 
 pub fn drain_dispatch_dedup_skip(payload_already_pending: Option<bool>) -> bool {
     matches!(payload_already_pending, Some(true))
+}
+
+pub fn stale_drain_recycle_yield_requested(
+    would_recycle_at_boundary: bool,
+    drain_owner_active: bool,
+    turn_boundary: bool,
+) -> bool {
+    would_recycle_at_boundary && drain_owner_active && !turn_boundary
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -452,6 +460,14 @@ mod tests {
             }),
             Settled
         );
+    }
+
+    #[test]
+    fn stale_drain_recycle_yield_policy() {
+        assert!(!stale_drain_recycle_yield_requested(false, true, false));
+        assert!(!stale_drain_recycle_yield_requested(true, false, false));
+        assert!(!stale_drain_recycle_yield_requested(true, true, true));
+        assert!(stale_drain_recycle_yield_requested(true, true, false));
     }
 
     #[test]

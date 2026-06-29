@@ -1,0 +1,10 @@
+[package]
+name = "agent-doc-queue"
+version = "0.34.65"
+edition = "2024"
+description = "Pure queue scheduling and drain policy for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_queue"

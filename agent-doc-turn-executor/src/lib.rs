@@ -7,8 +7,6 @@
 
 use serde::{Deserialize, Serialize};
 
-pub mod idle_queue;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]

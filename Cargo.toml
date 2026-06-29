@@ -16,6 +16,7 @@ members = [
     "agent-doc-element-signals",
     "agent-doc-element-status",
     "agent-doc-element-unknown",
+    "agent-doc-queue",
     "agent-doc-sqlite",
     "agent-doc-document",
     "agent-doc-document-realtime",

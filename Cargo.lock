@@ -269,6 +269,7 @@ dependencies = [
  "agent-doc-log-time",
  "agent-doc-markdown-ast",
  "agent-doc-merge",
+ "agent-doc-queue",
  "agent-doc-secret-redact",
  "agent-doc-sqlite",
  "agent-doc-supervisor",
@@ -277,7 +278,6 @@ dependencies = [
  "agent-doc-tmux-commands",
  "agent-doc-tmux-io",
  "agent-doc-turn",
- "agent-doc-turn-executor",
  "agent-doc-turn-executor-tmux",
  "agent-kit",
  "alacritty_terminal",
@@ -319,6 +319,10 @@ dependencies = [
  "yrs",
  "zip",
 ]
+
+[[package]]
+name = "agent-doc-queue"
+version = "0.34.65"
 
 [[package]]
 name = "agent-doc-secret-redact"

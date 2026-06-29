@@ -93,14 +93,6 @@ pub fn supervisor_recycle_action(
     SupervisorRecycleAction::None
 }
 
-pub fn stale_drain_recycle_yield_requested(
-    would_recycle_at_boundary: bool,
-    drain_owner_active: bool,
-    turn_boundary: bool,
-) -> bool {
-    would_recycle_at_boundary && drain_owner_active && !turn_boundary
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SupervisorInstallAction {
     None,
@@ -247,14 +239,6 @@ mod tests {
             MAX_REEXEC_ESCALATIONS,
             MAX_REEXEC_ESCALATIONS
         ));
-    }
-
-    #[test]
-    fn stale_drain_recycle_yield_policy() {
-        assert!(!stale_drain_recycle_yield_requested(false, true, false));
-        assert!(!stale_drain_recycle_yield_requested(true, false, false));
-        assert!(!stale_drain_recycle_yield_requested(true, true, true));
-        assert!(stale_drain_recycle_yield_requested(true, true, false));
     }
 
     #[test]

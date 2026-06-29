@@ -13,14 +13,14 @@
 //! simulation), rather than reimplementing the policy in the test harness.
 
 #[cfg(test)]
-pub(crate) use agent_doc_turn_executor::idle_queue::idle_queue_context_reset_decision;
-pub use agent_doc_turn_executor::idle_queue::{
+pub(crate) use agent_doc_queue::queue::idle_queue_context_reset_decision;
+pub use agent_doc_queue::queue::{
     BetweenTurnCommandKind, BetweenTurnEnqueuePlan, CLEAR_COOLDOWN_RESUME_IDLE_TICKS,
     IdleQueueDrainDecision, IdleQueueDrainDecisionFacts, between_turn_enqueue_plan,
     clear_cooldown_resume_ready, drain_blocked_awaiting_clear_settle, drain_dispatch_dedup_skip,
     idle_queue_drain_decision, idle_queue_drain_decision_with_editor_typing,
 };
-pub(crate) use agent_doc_turn_executor::idle_queue::{
+pub(crate) use agent_doc_queue::queue::{
     IdleQueueContextClearInFlightDecision, IdleQueueContextClearInFlightFacts,
     IdleQueueContextResetDecision, clean_session_head_forces_context_reset,
     idle_queue_context_clear_in_flight_decision,
@@ -238,7 +238,7 @@ pub fn stale_drain_recycle_yield_requested(
     drain_owner_active: bool,
     turn_boundary: bool,
 ) -> bool {
-    agent_doc_supervisor::lifecycle::stale_drain_recycle_yield_requested(
+    agent_doc_queue::queue::stale_drain_recycle_yield_requested(
         would_recycle_at_boundary,
         drain_owner_active,
         turn_boundary,

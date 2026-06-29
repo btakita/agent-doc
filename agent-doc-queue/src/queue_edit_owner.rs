@@ -17,7 +17,7 @@
 //! out-of-band queue edit is atomic with respect to the supervisor + preflight
 //! instead of racing them.
 //!
-//! Mirrors [`crate::drain_owner`]: a per-document filesystem lease with a short,
+//! Mirrors orchestration's drain-owner lease: a per-document filesystem lease with a short,
 //! self-healing TTL. The TTL only has to cover a single read-modify-write plus
 //! clock skew, so a crashed editor hands the queue back to the supervisor fast.
 
@@ -70,7 +70,7 @@ fn now_secs() -> u64 {
 }
 
 /// Compute the queue-edit lease path for a document. Mirrors
-/// [`crate::drain_owner`]: hash the document path and land the sidecar in the
+/// Hash the document path and land the sidecar in the
 /// nearest ancestor `.agent-doc/` directory.
 fn queue_edit_owner_lease_path(file: &str) -> PathBuf {
     use std::hash::{Hash, Hasher};
@@ -170,8 +170,19 @@ pub fn foreign_queue_edit_in_flight(file: &str) -> Option<u32> {
         std::process::id(),
         now_secs(),
         queue_edit_owner_ttl(),
-        crate::hooks::pid_is_live,
+        pid_is_live,
     )
+}
+
+#[cfg(unix)]
+fn pid_is_live(pid: u32) -> bool {
+    let ret = unsafe { libc::kill(pid as libc::pid_t, 0) };
+    ret == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(not(unix))]
+fn pid_is_live(_pid: u32) -> bool {
+    true
 }
 
 /// RAII guard around a direct queue edit. Acquires (refreshes) the queue-edit

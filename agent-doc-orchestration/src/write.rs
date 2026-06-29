@@ -826,13 +826,13 @@ fn queue_component_text(doc: &str) -> String {
 }
 
 fn queue_prompt_texts(body: &str) -> Vec<String> {
-    let Ok(entries) = crate::queue::parse(body) else {
+    let Ok(entries) = agent_doc_queue::document_queue::parse(body) else {
         return Vec::new();
     };
     entries
         .into_iter()
         .filter_map(|entry| match entry {
-            crate::queue::QueueEntry::Prompt(prompt) if !prompt.multiline => {
+            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) if !prompt.multiline => {
                 let text = prompt.text.trim().to_string();
                 (!text.is_empty()).then_some(text)
             }
@@ -849,14 +849,14 @@ fn queue_prompt_texts(body: &str) -> Vec<String> {
 /// consumed item read as a dropped user edit and tripped the
 /// `#queue-user-edit-overwrite` guard on a correct closeout.
 fn queue_prompt_texts_including_consumed(body: &str) -> Vec<String> {
-    let Ok(entries) = crate::queue::parse(body) else {
+    let Ok(entries) = agent_doc_queue::document_queue::parse(body) else {
         return Vec::new();
     };
     entries
         .into_iter()
         .filter_map(|entry| match entry {
-            crate::queue::QueueEntry::Prompt(prompt)
-            | crate::queue::QueueEntry::Completed(prompt)
+            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
+            | agent_doc_queue::document_queue::QueueEntry::Completed(prompt)
                 if !prompt.multiline =>
             {
                 let text = prompt.text.trim().to_string();

@@ -75,7 +75,7 @@ pub const RECYCLE_YIELD_GUIDANCE: &str = "supervisor recycle pending — the rou
 /// Detect whether `file` currently requires queue continuation.
 ///
 /// True only when: frontmatter `queue_active: true`,
-/// [`crate::queue::resolve_activation`] is active, the head is a real prompt
+/// [`agent_doc_queue::document_queue::resolve_activation`] is active, the head is a real prompt
 /// (not a stop fence or future time gate), and the head was not edited between
 /// the committed snapshot and the file.
 ///
@@ -234,14 +234,16 @@ fn detect_in_content(file: &Path, content: &str) -> Result<Option<QueueContinuat
     // `auto` is a start trigger only — continuation is gated on `queue_active:
     // true` (checked above), so a persisted-active queue without `auto` still
     // continues (`#active-queue-persisted-no-continue`).
-    let has_auto = crate::queue::has_auto_attr(&queue_component.attrs);
+    let has_auto = agent_doc_queue::document_queue::has_auto_attr(&queue_component.attrs);
 
     let body = &content[queue_component.open_end..queue_component.close_start];
-    let entries = crate::queue::parse(body).context("queue continuation: failed to parse queue")?;
-    let activation = crate::queue::resolve_activation(&entries, has_auto, false, true);
+    let entries = agent_doc_queue::document_queue::parse(body)
+        .context("queue continuation: failed to parse queue")?;
+    let activation =
+        agent_doc_queue::document_queue::resolve_activation(&entries, has_auto, false, true);
     if !activation.active
-        || crate::queue::has_stop_fence_at_head(&activation.entries_after)
-        || crate::queue::time_gate_at_head(&activation.entries_after).is_some()
+        || agent_doc_queue::document_queue::has_stop_fence_at_head(&activation.entries_after)
+        || agent_doc_queue::document_queue::time_gate_at_head(&activation.entries_after).is_some()
     {
         return Ok(None);
     }
@@ -256,11 +258,16 @@ fn detect_in_content(file: &Path, content: &str) -> Result<Option<QueueContinuat
             .find(|component| component.name == "queue")
     {
         let snapshot_body = &snapshot_content[snapshot_queue.open_end..snapshot_queue.close_start];
-        if let Ok(snapshot_entries) = crate::queue::parse(snapshot_body) {
-            let snapshot_has_auto = crate::queue::has_auto_attr(&snapshot_queue.attrs);
-            let snapshot_activation =
-                crate::queue::resolve_activation(&snapshot_entries, snapshot_has_auto, false, true);
-            if crate::queue::detect_head_prompt_modified(
+        if let Ok(snapshot_entries) = agent_doc_queue::document_queue::parse(snapshot_body) {
+            let snapshot_has_auto =
+                agent_doc_queue::document_queue::has_auto_attr(&snapshot_queue.attrs);
+            let snapshot_activation = agent_doc_queue::document_queue::resolve_activation(
+                &snapshot_entries,
+                snapshot_has_auto,
+                false,
+                true,
+            );
+            if agent_doc_queue::document_queue::detect_head_prompt_modified(
                 &snapshot_activation.entries_after,
                 &activation.entries_after,
             ) {
@@ -534,14 +541,16 @@ pub fn deferred_head_count(file: &Path) -> usize {
         return 0;
     };
     let body = &content[queue_component.open_end..queue_component.close_start];
-    let Ok(entries) = crate::queue::parse(body) else {
+    let Ok(entries) = agent_doc_queue::document_queue::parse(body) else {
         return 0;
     };
     let deferred_ids = deferred_backlog_ids(&content);
     entries
         .iter()
         .filter_map(|entry| match entry {
-            crate::queue::QueueEntry::Prompt(prompt) => extract_head_id(&prompt.text),
+            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
+                extract_head_id(&prompt.text)
+            }
             _ => None,
         })
         .filter(|id| deferred_ids.contains(&id.to_ascii_lowercase()))
@@ -569,17 +578,18 @@ pub fn live_continuation_head(file: &Path, content: &str) -> Option<String> {
     }
     let components = agent_doc_element::element::parse(content).ok()?;
     let queue_component = components.iter().find(|c| c.name == "queue")?;
-    let has_auto = crate::queue::has_auto_attr(&queue_component.attrs);
+    let has_auto = agent_doc_queue::document_queue::has_auto_attr(&queue_component.attrs);
     let body = &content[queue_component.open_end..queue_component.close_start];
-    let entries = crate::queue::parse(body).ok()?;
-    let activation = crate::queue::resolve_activation(&entries, has_auto, false, true);
+    let entries = agent_doc_queue::document_queue::parse(body).ok()?;
+    let activation =
+        agent_doc_queue::document_queue::resolve_activation(&entries, has_auto, false, true);
     if !activation.active
-        || crate::queue::has_stop_fence_at_head(&activation.entries_after)
-        || crate::queue::time_gate_at_head(&activation.entries_after).is_some()
+        || agent_doc_queue::document_queue::has_stop_fence_at_head(&activation.entries_after)
+        || agent_doc_queue::document_queue::time_gate_at_head(&activation.entries_after).is_some()
     {
         return None;
     }
-    let head = crate::queue::first_prompt(&activation.entries_after)?;
+    let head = agent_doc_queue::document_queue::first_prompt(&activation.entries_after)?;
     Some(extract_head_id(&head.text).unwrap_or_else(|| head.text.trim().to_string()))
 }
 
@@ -591,13 +601,13 @@ pub fn live_continuation_head(file: &Path, content: &str) -> Option<String> {
 /// of truth for "is there agent-drainable work at the queue head" so the supervisor
 /// idle-watch dispatch and `session-check` continuation agree.
 fn first_drainable_head<'a>(
-    entries_after: &'a [crate::queue::QueueEntry],
+    entries_after: &'a [agent_doc_queue::document_queue::QueueEntry],
     open_backlog_ids: Option<&std::collections::HashSet<String>>,
     deferred_ids: &std::collections::HashSet<String>,
     preset_supplies_directive: bool,
-) -> Option<&'a crate::queue::QueuePrompt> {
+) -> Option<&'a agent_doc_queue::document_queue::QueuePrompt> {
     entries_after.iter().find_map(|entry| match entry {
-        crate::queue::QueueEntry::Prompt(prompt) => {
+        agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
             if head_is_drainable(
                 &prompt.text,
                 open_backlog_ids,
@@ -742,7 +752,7 @@ pub fn review_phase_routed(prior: &str, current: &str) -> bool {
 /// `[operator-verify]`).
 pub fn live_drainable_continuation_head(file: &Path, content: &str) -> Option<String> {
     let head = drainable_head_prompt_for_scope(file, content, DrainScope::Supervisor)?;
-    let stripped = crate::queue::strip_in_progress_marker(&head.text);
+    let stripped = agent_doc_queue::document_queue::strip_in_progress_marker(&head.text);
     Some(extract_head_id(&stripped).unwrap_or(stripped))
 }
 
@@ -750,7 +760,7 @@ fn drainable_head_prompt_for_scope(
     file: &Path,
     content: &str,
     scope: DrainScope,
-) -> Option<crate::queue::QueuePrompt> {
+) -> Option<agent_doc_queue::document_queue::QueuePrompt> {
     let rc = crate::graph::RunContext::new(file.to_path_buf());
     let (fm, _) = crate::frontmatter_io::parse_for_file_with_context(content, file, &rc).ok()?;
     if fm.queue_active != Some(true) {
@@ -758,13 +768,14 @@ fn drainable_head_prompt_for_scope(
     }
     let components = agent_doc_element::element::parse(content).ok()?;
     let queue_component = components.iter().find(|c| c.name == "queue")?;
-    let has_auto = crate::queue::has_auto_attr(&queue_component.attrs);
+    let has_auto = agent_doc_queue::document_queue::has_auto_attr(&queue_component.attrs);
     let body = &content[queue_component.open_end..queue_component.close_start];
-    let entries = crate::queue::parse(body).ok()?;
-    let activation = crate::queue::resolve_activation(&entries, has_auto, false, true);
+    let entries = agent_doc_queue::document_queue::parse(body).ok()?;
+    let activation =
+        agent_doc_queue::document_queue::resolve_activation(&entries, has_auto, false, true);
     if !activation.active
-        || crate::queue::has_stop_fence_at_head(&activation.entries_after)
-        || crate::queue::time_gate_at_head(&activation.entries_after).is_some()
+        || agent_doc_queue::document_queue::has_stop_fence_at_head(&activation.entries_after)
+        || agent_doc_queue::document_queue::time_gate_at_head(&activation.entries_after).is_some()
     {
         return None;
     }
@@ -810,15 +821,16 @@ pub fn drainable_head_count(file: &Path, content: &str) -> usize {
     let Some(queue_component) = components.iter().find(|c| c.name == "queue") else {
         return 0;
     };
-    let has_auto = crate::queue::has_auto_attr(&queue_component.attrs);
+    let has_auto = agent_doc_queue::document_queue::has_auto_attr(&queue_component.attrs);
     let body = &content[queue_component.open_end..queue_component.close_start];
-    let Ok(entries) = crate::queue::parse(body) else {
+    let Ok(entries) = agent_doc_queue::document_queue::parse(body) else {
         return 0;
     };
-    let activation = crate::queue::resolve_activation(&entries, has_auto, false, true);
+    let activation =
+        agent_doc_queue::document_queue::resolve_activation(&entries, has_auto, false, true);
     if !activation.active
-        || crate::queue::has_stop_fence_at_head(&activation.entries_after)
-        || crate::queue::time_gate_at_head(&activation.entries_after).is_some()
+        || agent_doc_queue::document_queue::has_stop_fence_at_head(&activation.entries_after)
+        || agent_doc_queue::document_queue::time_gate_at_head(&activation.entries_after).is_some()
     {
         return 0;
     }
@@ -829,7 +841,7 @@ pub fn drainable_head_count(file: &Path, content: &str) -> usize {
         .entries_after
         .iter()
         .filter(|entry| match entry {
-            crate::queue::QueueEntry::Prompt(prompt) => head_is_drainable(
+            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => head_is_drainable(
                 &prompt.text,
                 open_backlog.as_ref(),
                 &deferred_ids,
@@ -1150,7 +1162,7 @@ fn is_drainable_queue_head_with_context(text: &str, preset_supplies_directive: b
     }
     // A harness slash command (`/clear`, `/model sonnet`, `/code-review`) is a
     // drainable command head, submitted to the owner pane — not prose noise.
-    if crate::queue_command::is_slash_command(&normalized) {
+    if agent_doc_queue::queue_command::is_slash_command(&normalized) {
         return true;
     }
     if normalized.trim_end().ends_with('?') {
@@ -1212,7 +1224,7 @@ pub fn queue_stale_noise_lines(file: &Path) -> usize {
         return 0;
     };
     let body = &content[queue_component.open_end..queue_component.close_start];
-    let Ok(entries) = crate::queue::parse(body) else {
+    let Ok(entries) = agent_doc_queue::document_queue::parse(body) else {
         return 0;
     };
     let preset_supplies_directive = queue_component.attrs.contains_key("preset");
@@ -1224,10 +1236,12 @@ pub fn queue_stale_noise_lines(file: &Path) -> usize {
             // classifier demotes multi-line / fenced text), and a pasted-evidence
             // `Freeform` line (bare ``` console fence / prose head) is noise while
             // `---`/`~~~` separators and `re [#id]` references are not.
-            crate::queue::QueueEntry::Prompt(prompt) => {
+            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
                 !is_drainable_queue_head_with_context(&prompt.text, preset_supplies_directive)
             }
-            crate::queue::QueueEntry::Freeform(line) => crate::queue::is_noise_freeform_line(line),
+            agent_doc_queue::document_queue::QueueEntry::Freeform(line) => {
+                agent_doc_queue::document_queue::is_noise_freeform_line(line)
+            }
             _ => false,
         })
         .count()

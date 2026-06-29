@@ -775,7 +775,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             .first()
             .or_else(|| queue_state.queue_prompts.first())
     {
-        let slash_command = crate::queue_command::slash_command_text(head_prompt);
+        let slash_command = agent_doc_queue::queue_command::slash_command_text(head_prompt);
         let prompt_source = slash_command.as_deref().unwrap_or(head_prompt);
         diff_result = Some(diff::synthetic_added_lines_diff(prompt_source, "queue"));
         classification = diff_result.as_ref().map(|d| diff::classify_diff(d));
@@ -1565,14 +1565,14 @@ fn first_queue_prompt_identity(content: &str) -> Option<String> {
         .iter()
         .find(|component| component.name == "queue")?;
     let body = &content[queue.open_end..queue.close_start];
-    let entries = crate::queue::parse(body).ok()?;
-    crate::queue::prompts(&entries)
+    let entries = agent_doc_queue::document_queue::parse(body).ok()?;
+    agent_doc_queue::document_queue::prompts(&entries)
         .first()
         .map(|prompt| queue_prompt_identity(&prompt.text))
 }
 
 fn queue_prompt_identity(prompt: &str) -> String {
-    crate::queue::strip_priority_markers(prompt)
+    agent_doc_queue::document_queue::strip_priority_markers(prompt)
 }
 
 fn content_without_queue_body(content: &str) -> Option<String> {

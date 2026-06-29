@@ -521,11 +521,11 @@ fn collect_completion_candidates(file: &Path) -> Result<Vec<CompletionCandidate>
                 });
             }
         } else if comp.name == "queue" {
-            let Ok(entries) = crate::queue::parse(body) else {
+            let Ok(entries) = agent_doc_queue::document_queue::parse(body) else {
                 continue;
             };
             for (index, entry) in entries.iter().enumerate() {
-                let crate::queue::QueueEntry::Prompt(prompt) = entry else {
+                let agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) = entry else {
                     continue;
                 };
                 if queue_prompt_target_id(&prompt.text).is_some() || prompt.text.trim().is_empty() {
@@ -542,7 +542,9 @@ fn collect_completion_candidates(file: &Path) -> Result<Vec<CompletionCandidate>
                     source: "queue".to_string(),
                     source_ref: format!("{session_ref}#queue:{index}"),
                     item_id: None,
-                    text: crate::queue::strip_in_progress_marker(prompt.text.trim()),
+                    text: agent_doc_queue::document_queue::strip_in_progress_marker(
+                        prompt.text.trim(),
+                    ),
                 });
             }
         }

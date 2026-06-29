@@ -406,14 +406,14 @@ fn first_active_queue_prompt_in_content(content: &str) -> Option<String> {
     let queue = components
         .iter()
         .find(|component| component.name == "queue")?;
-    let entries = crate::queue::parse(queue.content(content)).ok()?;
-    let prompt = crate::queue::prompts(&entries)
+    let entries = agent_doc_queue::document_queue::parse(queue.content(content)).ok()?;
+    let prompt = agent_doc_queue::document_queue::prompts(&entries)
         .into_iter()
-        .map(|prompt| crate::queue::strip_in_progress_marker(&prompt.text))
+        .map(|prompt| agent_doc_queue::document_queue::strip_in_progress_marker(&prompt.text))
         .map(|prompt| prompt.trim().to_string())
         .find(|prompt| !prompt.is_empty())?;
     if is_context_clear_prompt(&prompt)
-        || crate::queue_command::slash_command_text(&prompt).is_some()
+        || agent_doc_queue::queue_command::slash_command_text(&prompt).is_some()
     {
         return None;
     }
@@ -458,7 +458,7 @@ fn agent_doc_mcp_configured_for(file: &Path) -> bool {
 }
 
 fn is_context_clear_prompt(prompt: &str) -> bool {
-    crate::queue_command::is_context_clear_command(prompt)
+    agent_doc_queue::queue_command::is_context_clear_command(prompt)
 }
 
 /// `#clearcodex`: resolve the Codex Stop-hook continuation context-reset reason
@@ -577,7 +577,7 @@ fn continuation_closeout_instruction_for_head(
     head: &str,
     context_reset_reason: Option<&str>,
 ) -> String {
-    if let Some(command) = crate::queue_command::slash_command_text(head) {
+    if let Some(command) = agent_doc_queue::queue_command::slash_command_text(head) {
         slash_command_continuation_instruction(file, &command)
     } else {
         continuation_closeout_instruction(file, context_reset_reason)

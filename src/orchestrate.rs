@@ -809,11 +809,11 @@ fn active_queue_hash(doc: &str) -> Result<Option<String>> {
         .find(|comp| comp.name == "queue")
         .ok_or_else(|| anyhow::anyhow!("document has no `agent:queue` component"))?;
     let body = queue.content(doc);
-    let entries = agent_doc_orchestration::queue::parse(body)?;
+    let entries = agent_doc_queue::document_queue::parse(body)?;
     let (fm, _) = frontmatter::parse(doc)?;
-    let activation = agent_doc_orchestration::queue::resolve_activation(
+    let activation = agent_doc_queue::document_queue::resolve_activation(
         &entries,
-        agent_doc_orchestration::queue::has_auto_attr(&queue.attrs),
+        agent_doc_queue::document_queue::has_auto_attr(&queue.attrs),
         false,
         fm.queue_active.unwrap_or(false),
     );
@@ -821,7 +821,7 @@ fn active_queue_hash(doc: &str) -> Result<Option<String>> {
         return Ok(None);
     }
     Ok(Some(agent_doc_orchestration::ops_log::content_hash(
-        &agent_doc_orchestration::queue::render(&activation.entries_after),
+        &agent_doc_queue::document_queue::render(&activation.entries_after),
     )))
 }
 

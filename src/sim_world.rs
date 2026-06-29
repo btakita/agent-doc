@@ -4228,7 +4228,7 @@ fn qflood2_drain_dedups_trigger_already_pending_in_composer() {
 /// maintenance uses, modeled without a live editor/tmux.
 #[test]
 fn brtc_reemit_storm_converges_to_one_item_per_identity_and_preserves_operator_position() {
-    use agent_doc_orchestration::queue::{self, QueueEntry, QueuePrompt};
+    use agent_doc_queue::document_queue::{self as queue, QueueEntry, QueuePrompt};
 
     fn pr(text: &str) -> QueueEntry {
         QueueEntry::Prompt(QueuePrompt {

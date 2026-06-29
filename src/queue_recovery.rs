@@ -15,7 +15,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use agent_doc_element::element;
-use agent_doc_orchestration::{queue, snapshot};
+use agent_doc_orchestration::snapshot;
+use agent_doc_queue::document_queue as queue;
 
 const QUEUE_COMPONENT: &str = "queue";
 const DONE_COMPONENT: &str = "done";

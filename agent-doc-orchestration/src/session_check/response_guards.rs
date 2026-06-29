@@ -48,7 +48,7 @@ pub(crate) fn normalized_queue_line_for_match(line: &str) -> String {
         .and_then(|s| s.strip_suffix("~~"))
         .or_else(|| trimmed.strip_prefix('~').and_then(|s| s.strip_suffix('~')))
         .unwrap_or(trimmed);
-    let unpinned = crate::queue::strip_priority_markers(unstruck);
+    let unpinned = agent_doc_queue::document_queue::strip_priority_markers(unstruck);
     normalized_prompt_for_match(&unpinned)
 }
 
@@ -308,7 +308,7 @@ pub(crate) fn check_queue_response_contamination_guard(
     };
 
     let queue_body = &content[queue.open_end..queue.close_start];
-    let Ok(entries) = crate::queue::parse(queue_body) else {
+    let Ok(entries) = agent_doc_queue::document_queue::parse(queue_body) else {
         return Ok(GuardResult::None);
     };
     let response_text = assistant_response_text(exchange.content(&content));
@@ -317,7 +317,7 @@ pub(crate) fn check_queue_response_contamination_guard(
     }
 
     let mut contaminated: Vec<String> = Vec::new();
-    for prompt in crate::queue::prompts(&entries) {
+    for prompt in agent_doc_queue::document_queue::prompts(&entries) {
         let text = prompt.text.trim();
         if text.is_empty() || is_queue_directive_prompt(text) {
             continue;

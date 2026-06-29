@@ -2267,28 +2267,41 @@ fn classify_post_commit_local_drift(
     Some(PostCommitLocalDriftKind::WorkingTreeEdits)
 }
 
-fn queue_entry_commit_signature(entry: &crate::queue::QueueEntry) -> String {
+fn queue_entry_commit_signature(entry: &agent_doc_queue::document_queue::QueueEntry) -> String {
     match entry {
-        crate::queue::QueueEntry::Prompt(prompt) => {
+        agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
             format!("prompt:{}:{}", prompt.multiline, prompt.text.trim())
         }
-        crate::queue::QueueEntry::Completed(prompt) => {
+        agent_doc_queue::document_queue::QueueEntry::Completed(prompt) => {
             format!("completed:{}:{}", prompt.multiline, prompt.text.trim())
         }
-        crate::queue::QueueEntry::Preset(preset) => format!("preset:{}", preset.trim()),
-        crate::queue::QueueEntry::Dispatch(dispatch) => format!("dispatch:{}", dispatch.trim()),
-        crate::queue::QueueEntry::StartFence(Some(at)) => format!("start:{}", at.trim()),
-        crate::queue::QueueEntry::StartFence(None) => "start:".to_string(),
-        crate::queue::QueueEntry::StopFence => "stop:".to_string(),
-        crate::queue::QueueEntry::Freeform(line) => format!("freeform:{}", line.trim()),
+        agent_doc_queue::document_queue::QueueEntry::Preset(preset) => {
+            format!("preset:{}", preset.trim())
+        }
+        agent_doc_queue::document_queue::QueueEntry::Dispatch(dispatch) => {
+            format!("dispatch:{}", dispatch.trim())
+        }
+        agent_doc_queue::document_queue::QueueEntry::StartFence(Some(at)) => {
+            format!("start:{}", at.trim())
+        }
+        agent_doc_queue::document_queue::QueueEntry::StartFence(None) => "start:".to_string(),
+        agent_doc_queue::document_queue::QueueEntry::StopFence => "stop:".to_string(),
+        agent_doc_queue::document_queue::QueueEntry::Freeform(line) => {
+            format!("freeform:{}", line.trim())
+        }
     }
 }
 
-fn queue_entry_count_map(entries: &[crate::queue::QueueEntry]) -> HashMap<String, (usize, bool)> {
+fn queue_entry_count_map(
+    entries: &[agent_doc_queue::document_queue::QueueEntry],
+) -> HashMap<String, (usize, bool)> {
     let mut counts = HashMap::new();
     for entry in entries {
         let key = queue_entry_commit_signature(entry);
-        let is_prompt = matches!(entry, crate::queue::QueueEntry::Prompt(_));
+        let is_prompt = matches!(
+            entry,
+            agent_doc_queue::document_queue::QueueEntry::Prompt(_)
+        );
         let slot = counts.entry(key).or_insert((0usize, is_prompt));
         slot.0 += 1;
         slot.1 |= is_prompt;
@@ -2326,8 +2339,9 @@ fn preserved_queue_additions_neutralized_by_replay(
     let current_queue = current_components
         .iter()
         .find(|component| component.name == "queue")?;
-    let head_entries = crate::queue::parse(head_queue.content(head_doc)).ok()?;
-    let current_entries = crate::queue::parse(current_queue.content(current_doc)).ok()?;
+    let head_entries = agent_doc_queue::document_queue::parse(head_queue.content(head_doc)).ok()?;
+    let current_entries =
+        agent_doc_queue::document_queue::parse(current_queue.content(current_doc)).ok()?;
     let head_counts = queue_entry_count_map(&head_entries);
     let current_counts = queue_entry_count_map(&current_entries);
 

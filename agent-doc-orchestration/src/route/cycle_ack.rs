@@ -298,7 +298,7 @@ pub(crate) fn pending_prompt_bearing_context_for_route(
         .trim();
     let prompt_text = queue_prompt_text_for_route_change(&change.text)
         .unwrap_or_else(|| preview.trim_start_matches('❯').trim().to_string());
-    let slash_command = crate::queue_command::slash_command_text(&prompt_text);
+    let slash_command = agent_doc_queue::queue_command::slash_command_text(&prompt_text);
     Ok(Some(PendingPromptBearingRouteContext {
         marker: format!("{marker}: {preview}"),
         prompt_text,

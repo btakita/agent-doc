@@ -878,11 +878,11 @@ fn reconcile_idle_projection_before_clear(
                     &ctx.canonical_file,
                 )?
                 .is_some();
-            match agent_doc_orchestration::queue_preemption::plan_busy_clear(
+            match agent_doc_queue::queue_preemption::plan_busy_clear(
                 queue_active,
                 deferred_clear_pending,
             ) {
-                agent_doc_orchestration::queue_preemption::BusyClearOutcome::PauseAndDefer => {
+                agent_doc_queue::queue_preemption::BusyClearOutcome::PauseAndDefer => {
                     // Pause the loop (the idle-queue watch honors this cooldown)
                     // AND record the deferred clear so the supervisor delivers it
                     // at the next idle gap and resumes (`#autoloop-command-preemption`
@@ -913,7 +913,7 @@ fn reconcile_idle_projection_before_clear(
                     );
                     return Ok(ClearPreflightOutcome::DeferredPreempt);
                 }
-                agent_doc_orchestration::queue_preemption::BusyClearOutcome::AlreadyDeferred => {
+                agent_doc_queue::queue_preemption::BusyClearOutcome::AlreadyDeferred => {
                     agent_doc_orchestration::ops_log::log_op(
                         &ctx.canonical_file,
                         &format!(
@@ -932,7 +932,7 @@ fn reconcile_idle_projection_before_clear(
                     );
                     return Ok(ClearPreflightOutcome::DeferredPreempt);
                 }
-                agent_doc_orchestration::queue_preemption::BusyClearOutcome::HardBlock => {
+                agent_doc_queue::queue_preemption::BusyClearOutcome::HardBlock => {
                     agent_doc_orchestration::ops_log::log_op(
                         &ctx.canonical_file,
                         &format!(

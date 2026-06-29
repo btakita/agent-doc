@@ -479,7 +479,7 @@ pub(crate) use decisions::{
 pub(crate) use decisions::{idle_queue_context_reset_decision, idle_queue_drain_decision};
 
 fn idle_queue_head_slash_command(active_head: &str) -> Option<String> {
-    crate::queue_command::slash_command_text(active_head)
+    agent_doc_queue::queue_command::slash_command_text(active_head)
 }
 
 fn turn_active_for_owned_pane(file: &Path, shared: &SupervisorShared) -> bool {
@@ -905,8 +905,8 @@ fn route_owned_backlog_has_live_items(body: &str) -> bool {
 }
 
 fn route_owned_queue_has_prompts(body: &str) -> bool {
-    match crate::queue::parse(body) {
-        Ok(entries) => !crate::queue::prompts(&entries).is_empty(),
+    match agent_doc_queue::document_queue::parse(body) {
+        Ok(entries) => !agent_doc_queue::document_queue::prompts(&entries).is_empty(),
         Err(_) => !body.trim().is_empty(),
     }
 }
@@ -1529,7 +1529,7 @@ fn auto_trigger_submit_queue_command(
     stop: &AtomicBool,
     command: &str,
 ) -> AutoTriggerOutcome {
-    if crate::queue_command::is_context_clear_command(command) {
+    if agent_doc_queue::queue_command::is_context_clear_command(command) {
         auto_trigger_clear_command(shared, stop, command)
     } else {
         auto_trigger_inject_command(shared, stop, command)

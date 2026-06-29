@@ -401,9 +401,9 @@ fn next_queue_head_selection(content: &str) -> Result<Option<(String, String, bo
         return Ok(None);
     };
     let body = &content[queue_component.open_end..queue_component.close_start];
-    let entries =
-        crate::queue::parse(body).context("queue consume: failed to parse next queue head")?;
-    let stop_fence_at_head = crate::queue::has_stop_fence_at_head(&entries);
+    let entries = agent_doc_queue::document_queue::parse(body)
+        .context("queue consume: failed to parse next queue head")?;
+    let stop_fence_at_head = agent_doc_queue::document_queue::has_stop_fence_at_head(&entries);
     let Some(head_text) = first_n_queue_prompt_texts(&entries, 1).into_iter().next() else {
         return Ok(None);
     };
@@ -635,9 +635,9 @@ pub(crate) fn active_queue_head_text(content: &str) -> Result<Option<String>> {
             )
         })?;
     let body = &content[comp.open_end..comp.close_start];
-    let entries =
-        crate::queue::parse(body).context("queue consume guard: failed to parse document queue")?;
-    Ok(crate::queue::first_prompt(&entries).map(|prompt| prompt.text.clone()))
+    let entries = agent_doc_queue::document_queue::parse(body)
+        .context("queue consume guard: failed to parse document queue")?;
+    Ok(agent_doc_queue::document_queue::first_prompt(&entries).map(|prompt| prompt.text.clone()))
 }
 
 /// True when a closeout flag in this cycle explicitly names the active queue
@@ -1026,7 +1026,7 @@ fn response_blockquote_text(response_body: &str) -> String {
 /// prompt path: a one-word head like `deploy` is proof only when it appears in
 /// the labeled queue-prompt echo, not just anywhere in assistant prose.
 fn response_explicit_queue_prompt_echoes_head(response_body: &str, head_text: &str) -> bool {
-    let head_clean = crate::queue::strip_priority_markers(head_text);
+    let head_clean = agent_doc_queue::document_queue::strip_priority_markers(head_text);
     let head_norm = normalize_for_answer_match(&free_text_head_match_prose(&head_clean));
     if head_norm.is_empty() {
         return false;
@@ -1082,7 +1082,7 @@ fn response_explicit_queue_prompt_echoes_head(response_body: &str, head_text: &s
 /// an answered free-text drain target without depending on agent prose formatting.
 fn head_carries_in_progress_marker(text: &str) -> bool {
     text.trim_start()
-        .starts_with(crate::queue::IN_PROGRESS_MARKER)
+        .starts_with(agent_doc_queue::document_queue::IN_PROGRESS_MARKER)
 }
 
 fn free_text_head_match_prose(head_text: &str) -> String {
@@ -1108,7 +1108,7 @@ fn free_text_head_match_prose(head_text: &str) -> String {
 pub(crate) fn free_text_head_answered_by_response(response_body: &str, head_text: &str) -> bool {
     // Strip the leading operator/agent pin (`:pushpin:` …) first — its literal
     // shortcode word would otherwise survive normalization and break the match.
-    let head_clean = crate::queue::strip_priority_markers(head_text);
+    let head_clean = agent_doc_queue::document_queue::strip_priority_markers(head_text);
     if response_explicit_queue_prompt_echoes_head(response_body, &head_clean) {
         return true;
     }
@@ -1133,7 +1133,7 @@ pub(crate) fn free_text_head_answered_by_response(response_body: &str, head_text
 /// four significant prose words can never be confidently identified in the
 /// baseline (matching the answer-match floor), so it is treated as not-present.
 fn free_text_head_present_in_baseline(baseline: &str, head_text: &str) -> bool {
-    let head_clean = crate::queue::strip_priority_markers(head_text);
+    let head_clean = agent_doc_queue::document_queue::strip_priority_markers(head_text);
     let head_norm = normalize_for_answer_match(&free_text_head_match_prose(&head_clean));
     if head_norm.split(' ').filter(|w| !w.is_empty()).count() < 4 {
         return false;
@@ -1142,7 +1142,8 @@ fn free_text_head_present_in_baseline(baseline: &str, head_text: &str) -> bool {
         return false;
     };
     nodes.iter().any(|node| {
-        let base_clean = crate::queue::strip_priority_markers(node.item.text.trim());
+        let base_clean =
+            agent_doc_queue::document_queue::strip_priority_markers(node.item.text.trim());
         let base_norm = normalize_for_answer_match(&free_text_head_match_prose(&base_clean));
         !base_norm.is_empty() && base_norm == head_norm
     })
@@ -1645,16 +1646,18 @@ fn strike_all_noise_queue_heads(content: &str) -> Result<(String, usize)> {
     //    so it lands as a run of `Freeform` lines instead; `is_noise_freeform_line`
     //    excises those while preserving `---`/`~~~` separators and `re [#id]` references.
     let mut ranges: Vec<std::ops::Range<usize>> = Vec::new();
-    for (entry, range) in crate::queue::parse_spans(body)? {
+    for (entry, range) in agent_doc_queue::document_queue::parse_spans(body)? {
         let is_noise = match &entry {
-            crate::queue::QueueEntry::Prompt(prompt) => {
+            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
                 prompt.multiline
                     && crate::queue_continuation::is_noise_queue_head(
                         &prompt.text,
                         preset_supplies_directive,
                     )
             }
-            crate::queue::QueueEntry::Freeform(line) => crate::queue::is_noise_freeform_line(line),
+            agent_doc_queue::document_queue::QueueEntry::Freeform(line) => {
+                agent_doc_queue::document_queue::is_noise_freeform_line(line)
+            }
             _ => false,
         };
         if is_noise {
@@ -2002,15 +2005,15 @@ pub(crate) fn normalize_done_id(id: &str) -> String {
 }
 
 pub(crate) fn first_n_queue_prompt_texts(
-    entries: &[crate::queue::QueueEntry],
+    entries: &[agent_doc_queue::document_queue::QueueEntry],
     count: usize,
 ) -> Vec<String> {
     entries
         .iter()
         .filter_map(|entry| match entry {
-            crate::queue::QueueEntry::Prompt(prompt) => {
-                Some(crate::queue::strip_in_progress_marker(&prompt.text))
-            }
+            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => Some(
+                agent_doc_queue::document_queue::strip_in_progress_marker(&prompt.text),
+            ),
             _ => None,
         })
         .take(count)
@@ -2018,7 +2021,7 @@ pub(crate) fn first_n_queue_prompt_texts(
 }
 
 pub(crate) fn queue_consume_count_for_done_ids(
-    entries: &[crate::queue::QueueEntry],
+    entries: &[agent_doc_queue::document_queue::QueueEntry],
     done_ids: &[String],
 ) -> usize {
     if done_ids.is_empty() {
@@ -2030,7 +2033,7 @@ pub(crate) fn queue_consume_count_for_done_ids(
         .collect::<std::collections::HashSet<_>>();
     let mut count = 0usize;
     for entry in entries {
-        let crate::queue::QueueEntry::Prompt(prompt) = entry else {
+        let agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) = entry else {
             continue;
         };
         let Some(id) = queue_prompt_done_id(&prompt.text) else {
@@ -2046,26 +2049,30 @@ pub(crate) fn queue_consume_count_for_done_ids(
 }
 
 fn queue_prompt_texts_match_for_consumption(left: &str, right: &str) -> bool {
-    crate::queue::strip_priority_markers(left) == crate::queue::strip_priority_markers(right)
+    agent_doc_queue::document_queue::strip_priority_markers(left)
+        == agent_doc_queue::document_queue::strip_priority_markers(right)
 }
 
 fn mark_first_matching_prompts_completed_by_texts(
-    entries: &[crate::queue::QueueEntry],
+    entries: &[agent_doc_queue::document_queue::QueueEntry],
     target_texts: &[String],
-) -> Option<Vec<crate::queue::QueueEntry>> {
+) -> Option<Vec<agent_doc_queue::document_queue::QueueEntry>> {
     let mut remaining_targets = target_texts.to_vec();
     let mut marked = Vec::with_capacity(target_texts.len());
     let mut result = Vec::with_capacity(entries.len());
     for entry in entries {
-        if let crate::queue::QueueEntry::Prompt(prompt) = entry
+        if let agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) = entry
             && let Some(pos) = remaining_targets
                 .iter()
                 .position(|target| queue_prompt_texts_match_for_consumption(&prompt.text, target))
         {
             let mut completed = prompt.clone();
-            completed.text = crate::queue::strip_in_progress_marker(&completed.text);
+            completed.text =
+                agent_doc_queue::document_queue::strip_in_progress_marker(&completed.text);
             marked.push(remaining_targets.remove(pos));
-            result.push(crate::queue::QueueEntry::Completed(completed));
+            result.push(agent_doc_queue::document_queue::QueueEntry::Completed(
+                completed,
+            ));
             continue;
         }
         result.push(entry.clone());
@@ -2078,9 +2085,12 @@ fn mark_first_matching_prompts_completed_by_texts(
 }
 
 pub(crate) fn mark_entries_completed_by_done_ids(
-    entries: &[crate::queue::QueueEntry],
+    entries: &[agent_doc_queue::document_queue::QueueEntry],
     done_ids: &[String],
-) -> (Vec<crate::queue::QueueEntry>, Vec<String>) {
+) -> (
+    Vec<agent_doc_queue::document_queue::QueueEntry>,
+    Vec<String>,
+) {
     if done_ids.is_empty() {
         return (entries.to_vec(), Vec::new());
     }
@@ -2092,13 +2102,14 @@ pub(crate) fn mark_entries_completed_by_done_ids(
     let entries = entries
         .iter()
         .map(|entry| match entry {
-            crate::queue::QueueEntry::Prompt(prompt)
+            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
                 if queue_prompt_done_id(&prompt.text).is_some_and(|id| done_ids.contains(&id)) =>
             {
                 let mut completed = prompt.clone();
-                completed.text = crate::queue::strip_in_progress_marker(&completed.text);
+                completed.text =
+                    agent_doc_queue::document_queue::strip_in_progress_marker(&completed.text);
                 marked_texts.push(completed.text.clone());
-                crate::queue::QueueEntry::Completed(completed)
+                agent_doc_queue::document_queue::QueueEntry::Completed(completed)
             }
             _ => entry.clone(),
         })
@@ -2135,14 +2146,14 @@ pub(crate) fn mark_completed_queue_prompts_for_done_ids(
         return Ok(0);
     };
     let body = &content[queue_component.open_end..queue_component.close_start];
-    let entries =
-        crate::queue::parse(body).context("queue done-id mark: failed to parse document queue")?;
+    let entries = agent_doc_queue::document_queue::parse(body)
+        .context("queue done-id mark: failed to parse document queue")?;
     let (marked_entries, marked_texts) = mark_entries_completed_by_done_ids(&entries, done_ids);
     if marked_texts.is_empty() {
         return Ok(0);
     }
 
-    let new_body = crate::queue::render(&marked_entries);
+    let new_body = agent_doc_queue::document_queue::render(&marked_entries);
     let new_document = queue_component.replace_content(&content, &new_body);
 
     let new_snapshot = if let Some(snapshot_content) = snapshot::load(file)? {
@@ -2156,7 +2167,7 @@ pub(crate) fn mark_completed_queue_prompts_for_done_ids(
                 )
             })?;
         let snapshot_body = &snapshot_content[snapshot_queue.open_end..snapshot_queue.close_start];
-        let snapshot_entries = crate::queue::parse(snapshot_body)
+        let snapshot_entries = agent_doc_queue::document_queue::parse(snapshot_body)
             .context("queue done-id mark: failed to parse snapshot queue")?;
         let (snapshot_marked_entries, snapshot_marked_texts) =
             mark_entries_completed_by_done_ids(&snapshot_entries, done_ids);
@@ -2167,7 +2178,7 @@ pub(crate) fn mark_completed_queue_prompts_for_done_ids(
                 marked_texts.len()
             );
         }
-        let snapshot_body = crate::queue::render(&snapshot_marked_entries);
+        let snapshot_body = agent_doc_queue::document_queue::render(&snapshot_marked_entries);
         Some(snapshot_queue.replace_content(&snapshot_content, &snapshot_body))
     } else {
         None
@@ -2264,8 +2275,8 @@ pub(crate) fn queue_prompt_node_keys_for_count(
         .find(|c| c.name == "queue")
         .ok_or_else(|| anyhow::anyhow!("queue consume: document has no agent:queue component"))?;
     let body = &content[queue_component.open_end..queue_component.close_start];
-    let entries =
-        crate::queue::parse(body).context("queue consume: failed to parse document queue")?;
+    let entries = agent_doc_queue::document_queue::parse(body)
+        .context("queue consume: failed to parse document queue")?;
     let prompt_texts = first_n_queue_prompt_texts(&entries, count);
     if prompt_texts.len() < count {
         anyhow::bail!(
@@ -2353,8 +2364,8 @@ fn strip_in_progress_marker_from_struck_queue_items(content: &str) -> String {
         return content.to_string();
     };
     let body = queue.content(content);
-    let needle_with_space = format!("~~{} ", crate::queue::IN_PROGRESS_MARKER);
-    let needle_bare = format!("~~{}", crate::queue::IN_PROGRESS_MARKER);
+    let needle_with_space = format!("~~{} ", agent_doc_queue::document_queue::IN_PROGRESS_MARKER);
+    let needle_bare = format!("~~{}", agent_doc_queue::document_queue::IN_PROGRESS_MARKER);
     let updated_body = body
         .replace(&needle_with_space, "~~")
         .replace(&needle_bare, "~~");
@@ -2373,7 +2384,7 @@ pub(crate) fn display_queue_prompt_text(text: &str) -> String {
     text.lines()
         .map(|line| {
             let line = line.trim().trim_start_matches('❯').trim();
-            crate::queue::strip_priority_markers(line)
+            agent_doc_queue::document_queue::strip_priority_markers(line)
                 .replace("[#", "#")
                 .replace(']', "")
         })
@@ -2488,7 +2499,7 @@ fn normalize_prompt_echo_presence_line(line: &str) -> String {
     text = text.trim_start_matches('❯').trim_start();
     text = strip_echo_presence_list_marker(text);
     text = strip_echo_presence_checkbox_marker(text);
-    crate::queue::strip_priority_markers(text)
+    agent_doc_queue::document_queue::strip_priority_markers(text)
         .trim()
         .to_string()
 }
@@ -2635,8 +2646,8 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
         })?;
 
     let body = &content[comp.open_end..comp.close_start];
-    let entries =
-        crate::queue::parse(body).context("queue consume: failed to parse document queue")?;
+    let entries = agent_doc_queue::document_queue::parse(body)
+        .context("queue consume: failed to parse document queue")?;
 
     let leading_done_consume_count = queue_consume_count_for_done_ids(&entries, done_ids);
     if leading_done_consume_count > 0 {
@@ -2657,15 +2668,15 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
                 .map(|node_key| IpcNodeOp::consume("queue", node_key))
                 .collect::<Vec<_>>();
 
-            let has_auto = crate::queue::has_auto_attr(&comp.attrs);
-            let remaining = crate::queue::prompts(&completed_entries).len();
+            let has_auto = agent_doc_queue::document_queue::has_auto_attr(&comp.attrs);
+            let remaining = agent_doc_queue::document_queue::prompts(&completed_entries).len();
             let drained = remaining == 0;
             let new_entries = if drained {
                 Vec::new()
             } else {
                 completed_entries
             };
-            let new_body = crate::queue::render(&new_entries);
+            let new_body = agent_doc_queue::document_queue::render(&new_entries);
             let mut current = if drained || !consumed_node_keys.ast_backed {
                 comp.replace_content(content, &new_body)
             } else {
@@ -2677,7 +2688,7 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
                     let comps = element::parse(&current)?;
                     if let Some(q) = comps.iter().find(|c| c.name == "queue") {
                         let raw = &current[q.open_start..q.open_end];
-                        let new_tag = crate::queue::strip_auto_from_tag(raw);
+                        let new_tag = agent_doc_queue::document_queue::strip_auto_from_tag(raw);
                         if new_tag != raw {
                             let mut rebuilt = String::with_capacity(current.len());
                             rebuilt.push_str(&current[..q.open_start]);
@@ -2703,9 +2714,9 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
                     )
                 })?;
             let snap_body = &snap[snap_queue.open_end..snap_queue.close_start];
-            let snap_entries = crate::queue::parse(snap_body)
+            let snap_entries = agent_doc_queue::document_queue::parse(snap_body)
                 .context("queue consume: failed to parse snapshot queue")?;
-            let snap_has_auto = crate::queue::has_auto_attr(&snap_queue.attrs);
+            let snap_has_auto = agent_doc_queue::document_queue::has_auto_attr(&snap_queue.attrs);
             let (snap_completed_entries, snapshot_consumed_texts) =
                 mark_entries_completed_by_done_ids(&snap_entries, done_ids);
             if normalized_done_id_bag(&snapshot_consumed_texts)
@@ -2719,15 +2730,18 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
             }
             let snapshot_node_keys =
                 queue_prompt_node_keys_for_done_ids(snap, done_ids, &snapshot_consumed_texts);
-            let snap_remaining = crate::queue::prompts(&snap_completed_entries).len();
+            let snap_remaining =
+                agent_doc_queue::document_queue::prompts(&snap_completed_entries).len();
             let snap_new_entries = if snap_remaining == 0 {
                 Vec::new()
             } else {
                 snap_completed_entries
             };
             if snap_new_entries != new_entries {
-                let snap_remaining_prompts = crate::queue::prompts(&snap_new_entries).len();
-                let doc_remaining_prompts = crate::queue::prompts(&new_entries).len();
+                let snap_remaining_prompts =
+                    agent_doc_queue::document_queue::prompts(&snap_new_entries).len();
+                let doc_remaining_prompts =
+                    agent_doc_queue::document_queue::prompts(&new_entries).len();
                 crate::ops_log::log_op(
                     file,
                     &format!(
@@ -2752,7 +2766,7 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
                     && let Some(sq2) = sc2.iter().find(|c| c.name == "queue")
                 {
                     let raw = &new_snap[sq2.open_start..sq2.open_end];
-                    let new_tag = crate::queue::strip_auto_from_tag(raw);
+                    let new_tag = agent_doc_queue::document_queue::strip_auto_from_tag(raw);
                     if new_tag != raw {
                         let mut rebuilt = String::with_capacity(new_snap.len());
                         rebuilt.push_str(&new_snap[..sq2.open_start]);
@@ -2819,9 +2833,9 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
             )
         })?;
     let snap_body = &snap[snap_queue.open_end..snap_queue.close_start];
-    let snap_entries =
-        crate::queue::parse(snap_body).context("queue consume: failed to parse snapshot queue")?;
-    let snap_has_auto = crate::queue::has_auto_attr(&snap_queue.attrs);
+    let snap_entries = agent_doc_queue::document_queue::parse(snap_body)
+        .context("queue consume: failed to parse snapshot queue")?;
+    let snap_has_auto = agent_doc_queue::document_queue::has_auto_attr(&snap_queue.attrs);
     let snapshot_consumed_texts = first_n_queue_prompt_texts(&snap_entries, consume_count);
     let snapshot_node_keys = queue_prompt_node_keys_for_count(snap, consume_count)?;
     if snapshot_consumed_texts.len() != consumed_texts.len() {
@@ -2840,7 +2854,7 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
     let norm = |texts: &[String]| {
         texts
             .iter()
-            .map(|t| crate::queue::strip_priority_markers(t))
+            .map(|t| agent_doc_queue::document_queue::strip_priority_markers(t))
             .collect::<Vec<_>>()
     };
     let mut consume_snapshot_head_for_live_addition = false;
@@ -2857,10 +2871,10 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
             .unwrap_or_default();
         let doc_head_is_recorded_addition = !dropped_evidence.is_empty()
             && consumed_texts.iter().all(|doc_head| {
-                let doc_norm = crate::queue::strip_priority_markers(doc_head);
+                let doc_norm = agent_doc_queue::document_queue::strip_priority_markers(doc_head);
                 dropped_evidence
                     .iter()
-                    .any(|d| crate::queue::strip_priority_markers(d) == doc_norm)
+                    .any(|d| agent_doc_queue::document_queue::strip_priority_markers(d) == doc_norm)
             });
         if doc_head_is_recorded_addition {
             consume_snapshot_head_for_live_addition = true;
@@ -2950,7 +2964,10 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
         }
         (
             queue_prompt_node_keys_for_count(content, consume_count)?,
-            crate::queue::mark_first_n_prompts_completed(&entries, consume_count),
+            agent_doc_queue::document_queue::mark_first_n_prompts_completed(
+                &entries,
+                consume_count,
+            ),
         )
     };
     let node_ops = consumed_node_keys
@@ -2960,15 +2977,15 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
         .map(|node_key| IpcNodeOp::consume("queue", node_key))
         .collect::<Vec<_>>();
 
-    let has_auto = crate::queue::has_auto_attr(&comp.attrs);
-    let remaining = crate::queue::prompts(&completed_entries).len();
+    let has_auto = agent_doc_queue::document_queue::has_auto_attr(&comp.attrs);
+    let remaining = agent_doc_queue::document_queue::prompts(&completed_entries).len();
     let drained = remaining == 0;
     let new_entries = if drained {
         Vec::new()
     } else {
         completed_entries
     };
-    let new_body = crate::queue::render(&new_entries);
+    let new_body = agent_doc_queue::document_queue::render(&new_entries);
     let mut current = if drained || !consumed_node_keys.ast_backed {
         comp.replace_content(content, &new_body)
     } else {
@@ -2980,7 +2997,7 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
             let comps = element::parse(&current)?;
             if let Some(q) = comps.iter().find(|c| c.name == "queue") {
                 let raw = &current[q.open_start..q.open_end];
-                let new_tag = crate::queue::strip_auto_from_tag(raw);
+                let new_tag = agent_doc_queue::document_queue::strip_auto_from_tag(raw);
                 if new_tag != raw {
                     let mut rebuilt = String::with_capacity(current.len());
                     rebuilt.push_str(&current[..q.open_start]);
@@ -2992,9 +3009,11 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
         }
         current = frontmatter::merge_queue_state(&current, false)?;
     }
-    let snap_completed_entries =
-        crate::queue::mark_first_n_prompts_completed(&snap_entries, consume_count);
-    let snap_remaining = crate::queue::prompts(&snap_completed_entries).len();
+    let snap_completed_entries = agent_doc_queue::document_queue::mark_first_n_prompts_completed(
+        &snap_entries,
+        consume_count,
+    );
+    let snap_remaining = agent_doc_queue::document_queue::prompts(&snap_completed_entries).len();
     let snap_new_entries = if snap_remaining == 0 {
         Vec::new()
     } else {
@@ -3014,8 +3033,9 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
         // authoritative, and the snapshot below adopts the document's `new_body`,
         // so both sides converge on the head-struck merged state. Record the
         // reconciliation for forensics rather than failing the cycle.
-        let snap_remaining_prompts = crate::queue::prompts(&snap_new_entries).len();
-        let doc_remaining_prompts = crate::queue::prompts(&new_entries).len();
+        let snap_remaining_prompts =
+            agent_doc_queue::document_queue::prompts(&snap_new_entries).len();
+        let doc_remaining_prompts = agent_doc_queue::document_queue::prompts(&new_entries).len();
         crate::ops_log::log_op(
             file,
             &format!(
@@ -3040,7 +3060,7 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
             && let Some(sq2) = sc2.iter().find(|c| c.name == "queue")
         {
             let raw = &new_snap[sq2.open_start..sq2.open_end];
-            let new_tag = crate::queue::strip_auto_from_tag(raw);
+            let new_tag = agent_doc_queue::document_queue::strip_auto_from_tag(raw);
             if new_tag != raw {
                 let mut rebuilt = String::with_capacity(new_snap.len());
                 rebuilt.push_str(&new_snap[..sq2.open_start]);
@@ -3465,7 +3485,7 @@ mod core_tests {
     }
     #[test]
     fn done_id_marking_ignores_already_completed_queue_prompt() {
-        let entries = crate::queue::parse(concat!(
+        let entries = agent_doc_queue::document_queue::parse(concat!(
             "- do [#head]\n",
             "- ~~do [#opportunistic]~~\n",
             "- do [#tail]\n",

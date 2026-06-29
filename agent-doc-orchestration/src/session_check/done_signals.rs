@@ -284,7 +284,7 @@ pub(crate) fn do_directive_target_ids_in_line(line: &str) -> Vec<String> {
     // annotations on the directive, not part of it: `:round_pushpin: [#id]`
     // targets `#id` exactly like the unpinned spelling
     // (#queue-user-edit-overwrite consumed-head accounting).
-    let unpinned = crate::queue::strip_priority_markers(normalized);
+    let unpinned = agent_doc_queue::document_queue::strip_priority_markers(normalized);
     let mut normalized = unpinned.as_str();
     // Optional-`do` Stage 2: a `re [#id]` / `re #id` reference never targets a
     // tracked id — it is inert (no execute, no reap). Skip it before any id

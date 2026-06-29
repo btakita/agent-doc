@@ -188,7 +188,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     };
     let queue_head_slash_command = queue_prompt
         .as_deref()
-        .and_then(agent_doc_orchestration::queue_command::slash_command_text);
+        .and_then(agent_doc_queue::queue_command::slash_command_text);
     let queue_diff = queue_prompt
         .as_deref()
         .map(|prompt| diff::synthetic_added_lines_diff(prompt, "queue"));
@@ -386,10 +386,10 @@ fn active_queue_prompt(content: &str) -> Option<String> {
         .iter()
         .find(|component| component.name == "queue")?;
     let body = &content[queue_component.open_end..queue_component.close_start];
-    let entries = agent_doc_orchestration::queue::parse(body).ok()?;
-    let has_auto = agent_doc_orchestration::queue::has_auto_attr(&queue_component.attrs);
+    let entries = agent_doc_queue::document_queue::parse(body).ok()?;
+    let has_auto = agent_doc_queue::document_queue::has_auto_attr(&queue_component.attrs);
     let (fm, _) = frontmatter::parse(content).ok()?;
-    let activation = agent_doc_orchestration::queue::resolve_activation(
+    let activation = agent_doc_queue::document_queue::resolve_activation(
         &entries,
         has_auto,
         false,
@@ -398,9 +398,9 @@ fn active_queue_prompt(content: &str) -> Option<String> {
     if !activation.active {
         return None;
     }
-    agent_doc_orchestration::queue::prompts(&activation.entries_after)
+    agent_doc_queue::document_queue::prompts(&activation.entries_after)
         .first()
-        .map(|prompt| agent_doc_orchestration::queue::strip_in_progress_marker(&prompt.text))
+        .map(|prompt| agent_doc_queue::document_queue::strip_in_progress_marker(&prompt.text))
 }
 
 fn queue_is_active_for_diff(content: &str, diff_text: &str) -> bool {
@@ -414,12 +414,12 @@ fn queue_is_active_for_diff(content: &str, diff_text: &str) -> bool {
         return false;
     };
     let body = &content[queue_component.open_end..queue_component.close_start];
-    let Ok(entries) = agent_doc_orchestration::queue::parse(body) else {
+    let Ok(entries) = agent_doc_queue::document_queue::parse(body) else {
         return false;
     };
-    let has_auto = agent_doc_orchestration::queue::has_auto_attr(&queue_component.attrs);
+    let has_auto = agent_doc_queue::document_queue::has_auto_attr(&queue_component.attrs);
     let (fm, _) = frontmatter::parse(content).unwrap_or_default();
-    agent_doc_orchestration::queue::resolve_activation(
+    agent_doc_queue::document_queue::resolve_activation(
         &entries,
         has_auto,
         diff::detect_queue_trigger(diff_text),

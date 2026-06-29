@@ -976,20 +976,20 @@ pub fn reconcile_postcommit_queue_strikes_to_head(working: &str, head: &str) -> 
     let head_queue = head_comps.iter().find(|c| c.name == "queue")?;
     let working_body = working_queue.content(working);
     let head_body = head_queue.content(head);
-    let working_entries = crate::queue::parse(working_body).ok()?;
-    let head_entries = crate::queue::parse(head_body).ok()?;
+    let working_entries = agent_doc_queue::document_queue::parse(working_body).ok()?;
+    let head_entries = agent_doc_queue::document_queue::parse(head_body).ok()?;
 
     let prompt_key = |text: &str| text.trim().to_string();
     let mut head_active_counts: HashMap<String, usize> = HashMap::new();
     let mut head_completed_counts: HashMap<String, usize> = HashMap::new();
     for entry in &head_entries {
         match entry {
-            crate::queue::QueueEntry::Prompt(prompt) => {
+            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
                 *head_active_counts
                     .entry(prompt_key(&prompt.text))
                     .or_insert(0) += 1;
             }
-            crate::queue::QueueEntry::Completed(prompt) => {
+            agent_doc_queue::document_queue::QueueEntry::Completed(prompt) => {
                 *head_completed_counts
                     .entry(prompt_key(&prompt.text))
                     .or_insert(0) += 1;
@@ -1003,10 +1003,10 @@ pub fn reconcile_postcommit_queue_strikes_to_head(working: &str, head: &str) -> 
 
     let mut seen_working_active: HashMap<String, usize> = HashMap::new();
     let mut restored = false;
-    let reconciled_entries: Vec<crate::queue::QueueEntry> = working_entries
+    let reconciled_entries: Vec<agent_doc_queue::document_queue::QueueEntry> = working_entries
         .into_iter()
         .map(|entry| match entry {
-            crate::queue::QueueEntry::Prompt(prompt) => {
+            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
                 let key = prompt_key(&prompt.text);
                 let seen = seen_working_active.entry(key.clone()).or_insert(0);
                 *seen += 1;
@@ -1014,9 +1014,9 @@ pub fn reconcile_postcommit_queue_strikes_to_head(working: &str, head: &str) -> 
                 let head_completed = head_completed_counts.get(&key).copied().unwrap_or(0);
                 if *seen > allowed_active && head_completed > 0 {
                     restored = true;
-                    crate::queue::QueueEntry::Completed(prompt)
+                    agent_doc_queue::document_queue::QueueEntry::Completed(prompt)
                 } else {
-                    crate::queue::QueueEntry::Prompt(prompt)
+                    agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
                 }
             }
             other => other,
@@ -1026,7 +1026,7 @@ pub fn reconcile_postcommit_queue_strikes_to_head(working: &str, head: &str) -> 
         return None;
     }
 
-    let new_body = crate::queue::render(&reconciled_entries);
+    let new_body = agent_doc_queue::document_queue::render(&reconciled_entries);
     if new_body == working_body {
         return None;
     }

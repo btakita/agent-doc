@@ -515,7 +515,7 @@ fn is_reference_directive(text: &str) -> bool {
 /// (blank, `---`, `~~~…` — an unpaired bare `---`/`~~~` the parser keeps verbatim),
 /// or an optional-`do` `re [#id]` / `re #id` reference (possibly bulleted). A ```
 /// code-fence line, a `:pushpin:`/prose head, or a raw console line is noise.
-pub(crate) fn is_noise_freeform_line(line: &str) -> bool {
+pub fn is_noise_freeform_line(line: &str) -> bool {
     let trimmed = line.trim();
     if trimmed.is_empty() || trimmed == "---" || trimmed.starts_with("~~~") {
         return false;

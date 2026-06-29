@@ -228,7 +228,7 @@ pub(crate) fn supervisor_pane_payload_pending_in_content(
     payload: &str,
     harness: &crate::harness::HarnessConfig,
 ) -> bool {
-    if crate::queue_command::is_context_clear_command(payload) {
+    if agent_doc_queue::queue_command::is_context_clear_command(payload) {
         return context_clear_command_visible_in_active_input(content, payload, harness);
     }
     crate::route::recent_lines_contain_trigger(content, payload)

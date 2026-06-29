@@ -140,8 +140,9 @@ pub(crate) fn committed_current_queue_head_ids(content: &str) -> Vec<String> {
     let Some(queue) = components.iter().find(|c| c.name == "queue") else {
         return Vec::new();
     };
-    let entries = crate::queue::parse(queue.content(content)).unwrap_or_default();
-    let Some(head) = crate::queue::first_prompt(&entries) else {
+    let entries =
+        agent_doc_queue::document_queue::parse(queue.content(content)).unwrap_or_default();
+    let Some(head) = agent_doc_queue::document_queue::first_prompt(&entries) else {
         return Vec::new();
     };
     do_directive_target_ids(std::slice::from_ref(&head.text))
@@ -459,7 +460,7 @@ pub(crate) fn check_free_text_queue_head_provenance(
 }
 
 fn normalized_free_text_queue_head_identity(text: &str) -> String {
-    crate::queue::strip_priority_markers(text)
+    agent_doc_queue::document_queue::strip_priority_markers(text)
         .trim()
         .to_ascii_lowercase()
 }
@@ -471,18 +472,20 @@ fn committed_queue_contains_active_free_text_head(content: &str, head: &str) -> 
     let Some(queue) = components.iter().find(|c| c.name == "queue") else {
         return false;
     };
-    let Ok(entries) = crate::queue::parse(queue.content(content)) else {
+    let Ok(entries) = agent_doc_queue::document_queue::parse(queue.content(content)) else {
         return false;
     };
     let target = normalized_free_text_queue_head_identity(head);
     if target.is_empty() {
         return false;
     }
-    crate::queue::prompts(&entries).into_iter().any(|prompt| {
-        let text = prompt.text.trim();
-        crate::write::queue_prompt_text_is_free_text(content, text)
-            && normalized_free_text_queue_head_identity(text) == target
-    })
+    agent_doc_queue::document_queue::prompts(&entries)
+        .into_iter()
+        .any(|prompt| {
+            let text = prompt.text.trim();
+            crate::write::queue_prompt_text_is_free_text(content, text)
+                && normalized_free_text_queue_head_identity(text) == target
+        })
 }
 
 pub(crate) fn free_text_queue_marker_has_bare_heading_residue(content: &str) -> bool {

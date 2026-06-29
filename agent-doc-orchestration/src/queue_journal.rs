@@ -42,8 +42,8 @@ use serde::{Deserialize, Serialize};
 const QUEUE_JOURNAL_DIR: &str = ".agent-doc/queue-journal";
 
 /// One journaled operator queue prompt. `text` is the canonical prompt text as
-/// parsed by [`crate::queue::parse`] (the `- ` bullet / fence markers stripped),
-/// so it round-trips through [`crate::queue::QueuePrompt`].
+/// parsed by [`agent_doc_queue::document_queue::parse`] (the `- ` bullet / fence markers stripped),
+/// so it round-trips through [`agent_doc_queue::document_queue::QueuePrompt`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QueueJournalEntry {
     /// Canonical prompt text (matches `QueuePrompt::text`).
@@ -66,7 +66,7 @@ fn journal_path(file: &Path) -> Option<PathBuf> {
 /// Parse the queue prompts (`Prompt` entries only — never `Completed`, presets,
 /// dispatches, fences, or freeform noise) from a document's `agent:queue`
 /// component. Returns an empty vec when there is no queue component.
-fn queue_prompts(content: &str) -> Vec<crate::queue::QueuePrompt> {
+fn queue_prompts(content: &str) -> Vec<agent_doc_queue::document_queue::QueuePrompt> {
     let Ok(components) = agent_doc_element::element::parse(content) else {
         return Vec::new();
     };
@@ -74,13 +74,13 @@ fn queue_prompts(content: &str) -> Vec<crate::queue::QueuePrompt> {
         return Vec::new();
     };
     let body = &content[queue.open_end..queue.close_start];
-    let Ok(entries) = crate::queue::parse(body) else {
+    let Ok(entries) = agent_doc_queue::document_queue::parse(body) else {
         return Vec::new();
     };
     entries
         .into_iter()
         .filter_map(|entry| match entry {
-            crate::queue::QueueEntry::Prompt(p) => Some(p),
+            agent_doc_queue::document_queue::QueueEntry::Prompt(p) => Some(p),
             _ => None,
         })
         .collect()
@@ -136,7 +136,7 @@ pub fn record_live_buffer(file: &Path) -> Result<()> {
     };
     // Each open editor reports its own sidecar; journal the prompts from every
     // one so a multi-editor session never drops one editor's pending add.
-    let mut prompts: Vec<crate::queue::QueuePrompt> = Vec::new();
+    let mut prompts: Vec<agent_doc_queue::document_queue::QueuePrompt> = Vec::new();
     for snapshot in crate::debounce::live_buffer_snapshots(file_str) {
         let Some(buffer) = snapshot.content.as_deref() else {
             // len/hash-only sidecar: we cannot recover the prompt text from a
@@ -155,7 +155,10 @@ pub fn record_live_buffer(file: &Path) -> Result<()> {
 /// Shared append path for [`record`] and [`record_live_buffer`]: durably append
 /// every prompt not already journaled. Best-effort (logs + degrades to a no-op on
 /// any resolution/IO failure).
-fn append_prompts(file: &Path, prompts: Vec<crate::queue::QueuePrompt>) -> Result<()> {
+fn append_prompts(
+    file: &Path,
+    prompts: Vec<agent_doc_queue::document_queue::QueuePrompt>,
+) -> Result<()> {
     if prompts.is_empty() {
         return Ok(());
     }
@@ -278,12 +281,13 @@ fn present_queue_texts(content: &str) -> std::collections::HashSet<String> {
         return texts;
     };
     let body = &content[queue.open_end..queue.close_start];
-    let Ok(entries) = crate::queue::parse(body) else {
+    let Ok(entries) = agent_doc_queue::document_queue::parse(body) else {
         return texts;
     };
     for entry in entries {
         match entry {
-            crate::queue::QueueEntry::Prompt(p) | crate::queue::QueueEntry::Completed(p) => {
+            agent_doc_queue::document_queue::QueueEntry::Prompt(p)
+            | agent_doc_queue::document_queue::QueueEntry::Completed(p) => {
                 texts.insert(p.text);
             }
             _ => {}
@@ -309,15 +313,16 @@ pub fn merge_missing_into_content(
         return Ok(None);
     };
     let body = &content[queue.open_end..queue.close_start];
-    let mut entries = crate::queue::parse(body).context("queue_journal: failed to parse queue")?;
+    let mut entries = agent_doc_queue::document_queue::parse(body)
+        .context("queue_journal: failed to parse queue")?;
     let present = present_queue_texts(content);
     let mut added = false;
     for entry in missing {
         if present.contains(&entry.text) {
             continue;
         }
-        entries.push(crate::queue::QueueEntry::Prompt(
-            crate::queue::QueuePrompt {
+        entries.push(agent_doc_queue::document_queue::QueueEntry::Prompt(
+            agent_doc_queue::document_queue::QueuePrompt {
                 text: entry.text.clone(),
                 multiline: entry.multiline,
             },
@@ -327,7 +332,7 @@ pub fn merge_missing_into_content(
     if !added {
         return Ok(None);
     }
-    let rendered = crate::queue::render(&entries);
+    let rendered = agent_doc_queue::document_queue::render(&entries);
     let mut new_content = String::with_capacity(content.len() + rendered.len());
     new_content.push_str(&content[..queue.open_end]);
     if !rendered.is_empty() && !new_content.ends_with('\n') {

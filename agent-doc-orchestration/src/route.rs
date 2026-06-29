@@ -2643,16 +2643,16 @@ fn queue_prompt_text_for_route_change(change_text: &str) -> Option<String> {
 }
 
 fn operator_prioritize_route_prompt(prompt_text: String) -> String {
-    if crate::queue_command::is_slash_command(&prompt_text) {
+    if agent_doc_queue::queue_command::is_slash_command(&prompt_text) {
         return prompt_text;
     }
-    if crate::queue::is_prioritized(&prompt_text) {
+    if agent_doc_queue::document_queue::is_prioritized(&prompt_text) {
         prompt_text
     } else {
         format!(
             "{} {}",
-            crate::queue::PRIORITIZED_MARKER,
-            crate::queue::strip_priority_markers(&prompt_text)
+            agent_doc_queue::document_queue::PRIORITIZED_MARKER,
+            agent_doc_queue::document_queue::strip_priority_markers(&prompt_text)
         )
     }
 }
@@ -2677,7 +2677,7 @@ fn enqueue_route_dispatch_prompt(
     } else {
         prompt_text
     };
-    let prompt_identity = crate::queue::strip_priority_markers(&prompt_text);
+    let prompt_identity = agent_doc_queue::document_queue::strip_priority_markers(&prompt_text);
     let _lock = acquire_route_queue_lock(file)?;
     let original = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
@@ -2694,26 +2694,36 @@ fn enqueue_route_dispatch_prompt(
         .cloned()
     {
         let body = &content[queue_component.open_end..queue_component.close_start];
-        match crate::queue::parse(body) {
+        match agent_doc_queue::document_queue::parse(body) {
             Ok(mut entries) => {
-                already_present = crate::queue::prompts(&entries).iter().any(|prompt| {
-                    crate::queue::strip_priority_markers(&prompt.text) == prompt_identity
-                });
+                already_present = agent_doc_queue::document_queue::prompts(&entries)
+                    .iter()
+                    .any(|prompt| {
+                        agent_doc_queue::document_queue::strip_priority_markers(&prompt.text)
+                            == prompt_identity
+                    });
                 if !already_present {
                     let active_prompt_count = entries
                         .iter()
-                        .filter(|entry| matches!(entry, crate::queue::QueueEntry::Prompt(_)))
+                        .filter(|entry| {
+                            matches!(
+                                entry,
+                                agent_doc_queue::document_queue::QueueEntry::Prompt(_)
+                            )
+                        })
                         .count();
                     // #jb-run-preempt-autoloop-priority: a priority dispatch must
                     // preempt, so it never supersedes a lone prompt — replacing
                     // would silently drop the pending queue item the manual run
                     // is jumping ahead of. Non-priority keeps the stale-prompt update.
                     let replace_single_auto_prompt = !priority
-                        && crate::queue::has_auto_attr(&queue_component.attrs)
+                        && agent_doc_queue::document_queue::has_auto_attr(&queue_component.attrs)
                         && active_prompt_count == 1;
                     if replace_single_auto_prompt {
                         for entry in &mut entries {
-                            if let crate::queue::QueueEntry::Prompt(prompt) = entry {
+                            if let agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) =
+                                entry
+                            {
                                 prompt.multiline = prompt_text.contains('\n');
                                 prompt.text = prompt_text.clone();
                                 superseded = true;
@@ -2721,18 +2731,22 @@ fn enqueue_route_dispatch_prompt(
                             }
                         }
                     } else {
-                        let new_prompt =
-                            crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
+                        let new_prompt = agent_doc_queue::document_queue::QueueEntry::Prompt(
+                            agent_doc_queue::document_queue::QueuePrompt {
                                 multiline: prompt_text.contains('\n'),
                                 text: prompt_text.clone(),
-                            });
+                            },
+                        );
                         if priority {
                             // Insert ahead of the first actionable prompt, preserving
                             // any leading queue directives (preset / start fence).
                             let insert_at = entries
                                 .iter()
                                 .position(|entry| {
-                                    matches!(entry, crate::queue::QueueEntry::Prompt(_))
+                                    matches!(
+                                        entry,
+                                        agent_doc_queue::document_queue::QueueEntry::Prompt(_)
+                                    )
                                 })
                                 .unwrap_or(entries.len());
                             entries.insert(insert_at, new_prompt);
@@ -2742,7 +2756,7 @@ fn enqueue_route_dispatch_prompt(
                         appended = true;
                     }
                 }
-                let rendered = crate::queue::render(&entries);
+                let rendered = agent_doc_queue::document_queue::render(&entries);
                 content = queue_component.replace_content(&content, &rendered);
             }
             Err(parse_err) => {
@@ -2761,11 +2775,13 @@ fn enqueue_route_dispatch_prompt(
                         parse_err
                     ),
                 );
-                let new_rendered = crate::queue::render(std::slice::from_ref(
-                    &crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
-                        multiline: prompt_text.contains('\n'),
-                        text: prompt_text.clone(),
-                    }),
+                let new_rendered = agent_doc_queue::document_queue::render(std::slice::from_ref(
+                    &agent_doc_queue::document_queue::QueueEntry::Prompt(
+                        agent_doc_queue::document_queue::QueuePrompt {
+                            multiline: prompt_text.contains('\n'),
+                            text: prompt_text.clone(),
+                        },
+                    ),
                 ));
                 // Dedup against the raw body so a repeated dispatch into an
                 // already-polluted queue stays idempotent.
@@ -2886,28 +2902,30 @@ fn inactive_route_queue_head_in_content(file: &Path, content: &str) -> Result<Op
     // attribute, and `stop` forces the queue inactive. Mirror preflight's
     // `has_auto` resolution so JB `Run Agent Doc` activates a `queue: stop` +
     // `<!-- agent:queue go -->` document instead of treating `go` as inert.
-    let marker_control = crate::queue::marker_control(&queue_component.attrs);
+    let marker_control = agent_doc_queue::document_queue::marker_control(&queue_component.attrs);
     if matches!(
         marker_control,
         Some(agent_doc_core::frontmatter::QueueControl::Stop)
     ) {
         return Ok(None);
     }
-    let has_auto = crate::queue::has_auto_attr(&queue_component.attrs)
+    let has_auto = agent_doc_queue::document_queue::has_auto_attr(&queue_component.attrs)
         || matches!(
             marker_control,
             Some(agent_doc_core::frontmatter::QueueControl::Start)
         );
     let body = &content[queue_component.open_end..queue_component.close_start];
-    let entries = crate::queue::parse(body)?;
-    let activation = crate::queue::resolve_activation(&entries, has_auto, false, false);
+    let entries = agent_doc_queue::document_queue::parse(body)?;
+    let activation =
+        agent_doc_queue::document_queue::resolve_activation(&entries, has_auto, false, false);
     if !activation.active
-        || crate::queue::has_stop_fence_at_head(&activation.entries_after)
-        || crate::queue::time_gate_at_head(&activation.entries_after).is_some()
+        || agent_doc_queue::document_queue::has_stop_fence_at_head(&activation.entries_after)
+        || agent_doc_queue::document_queue::time_gate_at_head(&activation.entries_after).is_some()
     {
         return Ok(None);
     }
-    let Some(head) = crate::queue::first_prompt(&activation.entries_after) else {
+    let Some(head) = agent_doc_queue::document_queue::first_prompt(&activation.entries_after)
+    else {
         return Ok(None);
     };
     let head_text = head.text.clone();
@@ -2984,12 +3002,13 @@ fn route_queue_head_backed_by_committed_snapshot(file: &Path, head_text: &str) -
         return false;
     };
     let body = &snapshot[queue_component.open_end..queue_component.close_start];
-    let entries = match crate::queue::parse(body) {
+    let entries = match agent_doc_queue::document_queue::parse(body) {
         Ok(entries) => entries,
         Err(_) => return true,
     };
     entries.iter().any(|entry| match entry {
-        crate::queue::QueueEntry::Prompt(prompt) | crate::queue::QueueEntry::Completed(prompt) => {
+        agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
+        | agent_doc_queue::document_queue::QueueEntry::Completed(prompt) => {
             prompt.text == head_text
         }
         _ => false,
@@ -3077,11 +3096,11 @@ fn strip_queue_component_auto_attr(content: &str) -> Result<String> {
     else {
         return Ok(content.to_string());
     };
-    if !crate::queue::has_auto_attr(&queue_component.attrs) {
+    if !agent_doc_queue::document_queue::has_auto_attr(&queue_component.attrs) {
         return Ok(content.to_string());
     }
     let open_tag = &content[queue_component.open_start..queue_component.open_end];
-    let new_tag = crate::queue::strip_auto_from_tag(open_tag);
+    let new_tag = agent_doc_queue::document_queue::strip_auto_from_tag(open_tag);
     let mut result = String::with_capacity(content.len());
     result.push_str(&content[..queue_component.open_start]);
     result.push_str(&new_tag);
@@ -3090,12 +3109,14 @@ fn strip_queue_component_auto_attr(content: &str) -> Result<String> {
 }
 
 fn insert_queue_component(content: &str, prompt_text: &str) -> Result<String> {
-    let body = crate::queue::render(&[crate::queue::QueueEntry::Prompt(
-        crate::queue::QueuePrompt {
-            multiline: prompt_text.contains('\n'),
-            text: prompt_text.to_string(),
-        },
-    )]);
+    let body = agent_doc_queue::document_queue::render(&[
+        agent_doc_queue::document_queue::QueueEntry::Prompt(
+            agent_doc_queue::document_queue::QueuePrompt {
+                multiline: prompt_text.contains('\n'),
+                text: prompt_text.to_string(),
+            },
+        ),
+    ]);
     let block = format!("<!-- agent:queue -->\n{}<!-- /agent:queue -->\n\n", body);
     let components = agent_doc_element::element::parse(content)?;
     let insert_at = components
@@ -5861,11 +5882,13 @@ mod tests {
 
         // The polluted free-text line is preserved as a non-actionable Freeform
         // entry (tolerant parse) rather than failing the consume/dispatch guards.
-        let parsed = crate::queue::parse("JB `Run Agent Doc` error:\n- do [#existing]\n").unwrap();
+        let parsed =
+            agent_doc_queue::document_queue::parse("JB `Run Agent Doc` error:\n- do [#existing]\n")
+                .unwrap();
         assert!(
             parsed
                 .iter()
-                .any(|e| matches!(e, crate::queue::QueueEntry::Freeform(_)))
+                .any(|e| matches!(e, agent_doc_queue::document_queue::QueueEntry::Freeform(_)))
         );
 
         let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);

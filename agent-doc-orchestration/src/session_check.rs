@@ -290,7 +290,7 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                     return Ok(());
                 }
                 if let Some(command) =
-                    crate::queue_command::slash_command_text(&continuation.head_prompt)
+                    agent_doc_queue::queue_command::slash_command_text(&continuation.head_prompt)
                 {
                     println!(
                         "queue_continuation_required=true next_queue_command={:?}",
@@ -348,9 +348,9 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                     );
                 }
                 if codex_final_gate {
-                    if let Some(command) =
-                        crate::queue_command::slash_command_text(&continuation.head_prompt)
-                    {
+                    if let Some(command) = agent_doc_queue::queue_command::slash_command_text(
+                        &continuation.head_prompt,
+                    ) {
                         eprintln!(
                             "[session-check] codex-final-gate: active `agent:queue auto` slash command required for {} — submit {} after the current turn reaches an idle prompt before sending any final answer.",
                             file.display(),

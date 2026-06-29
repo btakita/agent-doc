@@ -2044,17 +2044,17 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // below is unchanged.
                 let deferred_clear = crate::queue_continuation::read_deferred_operator_clear(&path)
                     .unwrap_or(None);
-                match crate::queue_preemption::plan_deferred_clear_step(
+                match agent_doc_queue::queue_preemption::plan_deferred_clear_step(
                     deferred_clear.is_some(),
                     prompt_visible && !turn_active,
                 ) {
-                    crate::queue_preemption::DeferredClearStep::None => {}
-                    crate::queue_preemption::DeferredClearStep::WaitForIdle => {
+                    agent_doc_queue::queue_preemption::DeferredClearStep::None => {}
+                    agent_doc_queue::queue_preemption::DeferredClearStep::WaitForIdle => {
                         // Pending clear, pane still mid-turn: do not interrupt
                         // in-flight work; wait for the next idle tick.
                         continue;
                     }
-                    crate::queue_preemption::DeferredClearStep::Deliver => {
+                    agent_doc_queue::queue_preemption::DeferredClearStep::Deliver => {
                         let clear_cmd = deferred_clear
                             .as_ref()
                             .map(|d| d.clear_command.clone())
@@ -2501,7 +2501,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // intermediate queue head. The lease is short-TTL, so this is a
                 // brief yield: the edit settles and the next tick drains normally.
                 if let Some(holder_pid) =
-                    crate::queue_edit_owner::foreign_queue_edit_in_flight(&file)
+                    agent_doc_queue::queue_edit_owner::foreign_queue_edit_in_flight(&file)
                 {
                     log_event(
                         &mut session_log,
@@ -2701,7 +2701,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     last_dispatched = Some(head.clone());
                                     if slash_command
                                         .as_deref()
-                                        .is_some_and(crate::queue_command::is_context_clear_command)
+                                        .is_some_and(agent_doc_queue::queue_command::is_context_clear_command)
                                     {
                                         record_context_clear_in_flight_marker(
                                             &path,
@@ -2776,7 +2776,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 }
                                 context_reset_in_flight = false;
                                 if last_context_reset_head.as_deref() == Some(head.as_str())
-                                    && !crate::queue_command::is_context_clear_command(
+                                    && !agent_doc_queue::queue_command::is_context_clear_command(
                                         &drain_payload,
                                     )
                                 {
@@ -2801,7 +2801,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                         command,
                                         &mut session_log,
                                     );
-                                    if crate::queue_command::is_context_clear_command(command) {
+                                    if agent_doc_queue::queue_command::is_context_clear_command(command) {
                                         last_context_reset_head = Some(head.clone());
                                         last_context_clear_at = Some(current_epoch_secs());
                                         context_reset_in_flight = true;

@@ -855,7 +855,7 @@ fn active_queue_prompt_diff(file: &Path) -> Result<Option<String>> {
     let ActiveQueuePromptState::Ready { prompt } = active_queue_prompt_state(file)? else {
         return Ok(None);
     };
-    if let Some(command) = crate::queue_command::slash_command_text(&prompt) {
+    if let Some(command) = agent_doc_queue::queue_command::slash_command_text(&prompt) {
         eprintln!(
             "[run] active queue head is slash command {command:?}; leaving it for the managed supervisor to submit after the owner pane is idle"
         );
@@ -905,15 +905,16 @@ fn active_queue_prompt_state(file: &Path) -> Result<ActiveQueuePromptState> {
         return Ok(ActiveQueuePromptState::Inactive);
     };
     let body = &content[queue_component.open_end..queue_component.close_start];
-    let entries =
-        crate::queue::parse(body).context("run queue resume: failed to parse document queue")?;
-    let has_auto = crate::queue::has_auto_attr(&queue_component.attrs);
-    let activation = crate::queue::resolve_activation(&entries, has_auto, false, true);
+    let entries = agent_doc_queue::document_queue::parse(body)
+        .context("run queue resume: failed to parse document queue")?;
+    let has_auto = agent_doc_queue::document_queue::has_auto_attr(&queue_component.attrs);
+    let activation =
+        agent_doc_queue::document_queue::resolve_activation(&entries, has_auto, false, true);
     if !activation.active {
         return Ok(ActiveQueuePromptState::Inactive);
     }
-    let document_head = crate::queue::first_prompt(&activation.entries_after)
-        .map(|prompt| crate::queue::strip_in_progress_marker(&prompt.text));
+    let document_head = agent_doc_queue::document_queue::first_prompt(&activation.entries_after)
+        .map(|prompt| agent_doc_queue::document_queue::strip_in_progress_marker(&prompt.text));
     if document_head.is_none() {
         return Ok(ActiveQueuePromptState::Empty);
     };
@@ -1559,7 +1560,9 @@ fn owned_pane_queue_handoff_diagnostic(
     detail: &str,
     continuation: &crate::queue_continuation::QueueContinuation,
 ) -> String {
-    if let Some(command) = crate::queue_command::slash_command_text(&continuation.head_prompt) {
+    if let Some(command) =
+        agent_doc_queue::queue_command::slash_command_text(&continuation.head_prompt)
+    {
         return format!(
             "owned-pane self-invocation with active auto-queue slash command: `agent-doc {}` was run inside the Codex pane that already owns this document ({}), and the ready queue head is the literal slash command {:?}. The recursive same-pane guard refuses to answer slash commands as agent-doc work. No pre-commit, snapshot, exchange, or queue mutation was made — the command stays live. Recovery: let the current turn stop; the managed owner-pane supervisor will submit {:?} at the next idle prompt and consume the queue head. Do NOT answer this queue head in the exchange, and do NOT re-run `agent-doc {}` from this same pane.",
             file.display(),

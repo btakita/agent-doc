@@ -446,7 +446,7 @@ pub struct PreflightOutput {
     pub queue_start_at: Option<String>,
     /// How the queue was activated (auto, start_fence, exchange_request, persisted).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub queue_trigger: Option<crate::queue::QueueTrigger>,
+    pub queue_trigger: Option<agent_doc_queue::document_queue::QueueTrigger>,
     /// If non-null, the queue was halted this cycle. Value is the reason:
     /// `"stop_fence"` (hit a `--- stop` breakpoint) or `"item_modified"`
     /// (user edited the next-to-consume prompt between cycles).
@@ -1110,7 +1110,7 @@ fn misplaced_component_attr_warning(file: &Path, content: &str) -> Option<Prefli
                 // `queue` is a recognized backlog/pending sync attribute
                 // (#backlog-queue-sync-attr). Surface only an unrecognized mode
                 // value as a typo; the bare token and sync/append/prepend are valid.
-                if crate::queue::BacklogQueueSyncMode::parse(value).is_none() {
+                if agent_doc_queue::document_queue::BacklogQueueSyncMode::parse(value).is_none() {
                     issues.push(format!(
                         "`queue={value}` on `agent:{}` is not a recognized sync mode (use `sync`, `append`, or `prepend`)",
                         component.name
@@ -2210,11 +2210,11 @@ fn route_queue_prompt_texts(content: &str) -> Result<Vec<String>> {
     else {
         return Ok(Vec::new());
     };
-    if !crate::queue::has_auto_attr(&queue_component.attrs) {
+    if !agent_doc_queue::document_queue::has_auto_attr(&queue_component.attrs) {
         return Ok(Vec::new());
     }
-    let entries = crate::queue::parse(queue_component.content(body))?;
-    Ok(crate::queue::prompts(&entries)
+    let entries = agent_doc_queue::document_queue::parse(queue_component.content(body))?;
+    Ok(agent_doc_queue::document_queue::prompts(&entries)
         .into_iter()
         .map(|prompt| normalize_route_queue_prompt_text(&prompt.text))
         .filter(|text| !text.is_empty())
@@ -2536,23 +2536,27 @@ fn collect_agent_review_gated_ids(content: &str) -> std::collections::HashSet<St
 /// Returns `None` when nothing changed. On match, returns the rewritten
 /// entries plus the prompts that were struck (for telemetry).
 fn strike_done_queue_head_prompts(
-    entries: &[crate::queue::QueueEntry],
+    entries: &[agent_doc_queue::document_queue::QueueEntry],
     done_ids: &std::collections::HashSet<String>,
 ) -> Option<(
-    Vec<crate::queue::QueueEntry>,
-    Vec<crate::queue::QueuePrompt>,
+    Vec<agent_doc_queue::document_queue::QueueEntry>,
+    Vec<agent_doc_queue::document_queue::QueuePrompt>,
 )> {
-    let mut rewritten: Vec<crate::queue::QueueEntry> = Vec::with_capacity(entries.len());
-    let mut struck: Vec<crate::queue::QueuePrompt> = Vec::new();
+    let mut rewritten: Vec<agent_doc_queue::document_queue::QueueEntry> =
+        Vec::with_capacity(entries.len());
+    let mut struck: Vec<agent_doc_queue::document_queue::QueuePrompt> = Vec::new();
     for entry in entries {
-        if let crate::queue::QueueEntry::Prompt(prompt) = entry
+        if let agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) = entry
             && let Some(id) = queue_prompt_done_id(&prompt.text)
             && done_ids.contains(&id)
         {
             let mut completed = prompt.clone();
-            completed.text = crate::queue::strip_in_progress_marker(&completed.text);
+            completed.text =
+                agent_doc_queue::document_queue::strip_in_progress_marker(&completed.text);
             struck.push(completed.clone());
-            rewritten.push(crate::queue::QueueEntry::Completed(completed));
+            rewritten.push(agent_doc_queue::document_queue::QueueEntry::Completed(
+                completed,
+            ));
             continue;
         }
         rewritten.push(entry.clone());
@@ -2600,11 +2604,11 @@ fn snapshot_proves_queue_was_active(file: &Path) -> bool {
         return false;
     };
     let body = &snapshot_content[queue_component.open_end..queue_component.close_start];
-    let Ok(entries) = crate::queue::parse(body) else {
+    let Ok(entries) = agent_doc_queue::document_queue::parse(body) else {
         return false;
     };
-    let has_auto = crate::queue::has_auto_attr(&queue_component.attrs);
-    crate::queue::resolve_activation(&entries, has_auto, false, false).active
+    let has_auto = agent_doc_queue::document_queue::has_auto_attr(&queue_component.attrs);
+    agent_doc_queue::document_queue::resolve_activation(&entries, has_auto, false, false).active
 }
 
 /// Archive reaped pending items to `agent:done`.
@@ -3643,15 +3647,21 @@ mod tests {
     #[test]
     fn strike_done_queue_head_prompts_marks_done_items_completed() {
         let entries = vec![
-            crate::queue::QueueEntry::Preset("#spec-test-build-install-commit-push".to_string()),
-            crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
-                text: "do [#jbrsrbusyint]".to_string(),
-                multiline: false,
-            }),
-            crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
-                text: "do [#jbrsrbusysim]".to_string(),
-                multiline: false,
-            }),
+            agent_doc_queue::document_queue::QueueEntry::Preset(
+                "#spec-test-build-install-commit-push".to_string(),
+            ),
+            agent_doc_queue::document_queue::QueueEntry::Prompt(
+                agent_doc_queue::document_queue::QueuePrompt {
+                    text: "do [#jbrsrbusyint]".to_string(),
+                    multiline: false,
+                },
+            ),
+            agent_doc_queue::document_queue::QueueEntry::Prompt(
+                agent_doc_queue::document_queue::QueuePrompt {
+                    text: "do [#jbrsrbusysim]".to_string(),
+                    multiline: false,
+                },
+            ),
         ];
         let done_ids: std::collections::HashSet<String> =
             ["jbrsrbusyint".to_string()].into_iter().collect();
@@ -3662,7 +3672,7 @@ mod tests {
         assert_eq!(struck.len(), 1);
         assert_eq!(struck[0].text, "do [#jbrsrbusyint]");
         match &rewritten[1] {
-            crate::queue::QueueEntry::Completed(prompt) => {
+            agent_doc_queue::document_queue::QueueEntry::Completed(prompt) => {
                 assert_eq!(prompt.text, "do [#jbrsrbusyint]");
             }
             other => panic!("expected Completed for head prompt, got {:?}", other),
@@ -3670,7 +3680,7 @@ mod tests {
         // The live head (`#jbrsrbusysim`) must stay intact for the normal
         // consumption path.
         match &rewritten[2] {
-            crate::queue::QueueEntry::Prompt(prompt) => {
+            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
                 assert_eq!(prompt.text, "do [#jbrsrbusysim]");
             }
             other => panic!("expected Prompt for live head, got {:?}", other),
@@ -3678,8 +3688,8 @@ mod tests {
     }
     #[test]
     fn strike_done_queue_head_prompts_returns_none_when_head_is_live() {
-        let entries = vec![crate::queue::QueueEntry::Prompt(
-            crate::queue::QueuePrompt {
+        let entries = vec![agent_doc_queue::document_queue::QueueEntry::Prompt(
+            agent_doc_queue::document_queue::QueuePrompt {
                 text: "do [#stillopen]".to_string(),
                 multiline: false,
             },
@@ -3695,14 +3705,18 @@ mod tests {
         // left as an orphaned ref (which trips the shadow-backlog guard). The
         // live head is preserved in place.
         let entries = vec![
-            crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
-                text: "do [#liveone]".to_string(),
-                multiline: false,
-            }),
-            crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
-                text: "do [#donetail]".to_string(),
-                multiline: false,
-            }),
+            agent_doc_queue::document_queue::QueueEntry::Prompt(
+                agent_doc_queue::document_queue::QueuePrompt {
+                    text: "do [#liveone]".to_string(),
+                    multiline: false,
+                },
+            ),
+            agent_doc_queue::document_queue::QueueEntry::Prompt(
+                agent_doc_queue::document_queue::QueuePrompt {
+                    text: "do [#donetail]".to_string(),
+                    multiline: false,
+                },
+            ),
         ];
         let done_ids: std::collections::HashSet<String> =
             ["donetail".to_string()].into_iter().collect();
@@ -3714,11 +3728,11 @@ mod tests {
         // Live head preserved as a Prompt; the trailing resolved ref struck.
         assert!(matches!(
             &rewritten[0],
-            crate::queue::QueueEntry::Prompt(p) if p.text == "do [#liveone]"
+            agent_doc_queue::document_queue::QueueEntry::Prompt(p) if p.text == "do [#liveone]"
         ));
         assert!(matches!(
             &rewritten[1],
-            crate::queue::QueueEntry::Completed(p) if p.text == "do [#donetail]"
+            agent_doc_queue::document_queue::QueueEntry::Completed(p) if p.text == "do [#donetail]"
         ));
     }
     #[test]
@@ -3730,18 +3744,24 @@ mod tests {
         // even behind an unrelated live head. (The earlier single-strike report
         // was against a stale binary; this locks in the multi-strike behavior.)
         let entries = vec![
-            crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
-                text: "[#8667]".to_string(),
-                multiline: false,
-            }),
-            crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
-                text: "do [#liveone]".to_string(),
-                multiline: false,
-            }),
-            crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
-                text: "do [#8667] follow-up".to_string(),
-                multiline: false,
-            }),
+            agent_doc_queue::document_queue::QueueEntry::Prompt(
+                agent_doc_queue::document_queue::QueuePrompt {
+                    text: "[#8667]".to_string(),
+                    multiline: false,
+                },
+            ),
+            agent_doc_queue::document_queue::QueueEntry::Prompt(
+                agent_doc_queue::document_queue::QueuePrompt {
+                    text: "do [#liveone]".to_string(),
+                    multiline: false,
+                },
+            ),
+            agent_doc_queue::document_queue::QueueEntry::Prompt(
+                agent_doc_queue::document_queue::QueuePrompt {
+                    text: "do [#8667] follow-up".to_string(),
+                    multiline: false,
+                },
+            ),
         ];
         let done_ids: std::collections::HashSet<String> =
             ["8667".to_string()].into_iter().collect();
@@ -3755,16 +3775,16 @@ mod tests {
         );
         assert!(matches!(
             &rewritten[0],
-            crate::queue::QueueEntry::Completed(p) if p.text == "[#8667]"
+            agent_doc_queue::document_queue::QueueEntry::Completed(p) if p.text == "[#8667]"
         ));
         // The unrelated live head between them is preserved.
         assert!(matches!(
             &rewritten[1],
-            crate::queue::QueueEntry::Prompt(p) if p.text == "do [#liveone]"
+            agent_doc_queue::document_queue::QueueEntry::Prompt(p) if p.text == "do [#liveone]"
         ));
         assert!(matches!(
             &rewritten[2],
-            crate::queue::QueueEntry::Completed(p) if p.text == "do [#8667] follow-up"
+            agent_doc_queue::document_queue::QueueEntry::Completed(p) if p.text == "do [#8667] follow-up"
         ));
     }
     #[test]
@@ -3833,14 +3853,18 @@ mod tests {
         // Queue head matches a gated `[/]` item in agent:review — auto-strike
         // must advance the queue past it just like an agent:done item.
         let entries = vec![
-            crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
-                text: "do [#gatedphase]".to_string(),
-                multiline: false,
-            }),
-            crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
-                text: "do [#stillopen]".to_string(),
-                multiline: false,
-            }),
+            agent_doc_queue::document_queue::QueueEntry::Prompt(
+                agent_doc_queue::document_queue::QueuePrompt {
+                    text: "do [#gatedphase]".to_string(),
+                    multiline: false,
+                },
+            ),
+            agent_doc_queue::document_queue::QueueEntry::Prompt(
+                agent_doc_queue::document_queue::QueuePrompt {
+                    text: "do [#stillopen]".to_string(),
+                    multiline: false,
+                },
+            ),
         ];
         let eligible_ids: std::collections::HashSet<String> =
             ["gatedphase".to_string()].into_iter().collect();
@@ -3850,7 +3874,7 @@ mod tests {
         assert_eq!(struck.len(), 1);
         assert_eq!(struck[0].text, "do [#gatedphase]");
         match &rewritten[1] {
-            crate::queue::QueueEntry::Prompt(prompt) => {
+            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
                 assert_eq!(prompt.text, "do [#stillopen]");
             }
             other => panic!("expected live head to remain Prompt, got {:?}", other),
@@ -4797,18 +4821,19 @@ mod tests {
         let components = agent_doc_element::element::parse(content).unwrap();
         let queue = components.iter().find(|c| c.name == "queue").unwrap();
         assert!(
-            !crate::queue::has_auto_attr(&queue.attrs),
+            !agent_doc_queue::document_queue::has_auto_attr(&queue.attrs),
             "queue has no auto attribute"
         );
         let backlog = components.iter().find(|c| c.name == "backlog").unwrap();
         assert!(
-            crate::queue::has_auto_attr(&backlog.attrs),
+            agent_doc_queue::document_queue::has_auto_attr(&backlog.attrs),
             "backlog carries the misplaced auto attribute"
         );
         let body = &content[queue.open_end..queue.close_start];
-        let entries = crate::queue::parse(body).unwrap();
+        let entries = agent_doc_queue::document_queue::parse(body).unwrap();
         // Activation is driven solely by the queue component's auto flag.
-        let activation = crate::queue::resolve_activation(&entries, false, false, false);
+        let activation =
+            agent_doc_queue::document_queue::resolve_activation(&entries, false, false, false);
         assert!(
             !activation.active,
             "backlog `auto` must never activate the auto-loop"

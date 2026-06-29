@@ -1064,7 +1064,7 @@ pub(crate) struct QueueState {
     pub(crate) queue_active: Option<bool>,
     pub(crate) queue_deferred: bool,
     pub(crate) queue_start_at: Option<String>,
-    pub(crate) queue_trigger: Option<crate::queue::QueueTrigger>,
+    pub(crate) queue_trigger: Option<agent_doc_queue::document_queue::QueueTrigger>,
     pub(crate) queue_halted: Option<String>,
     /// `#qpausego`: true when an accepted controller `admin queue pause` is the
     /// effective queue-control state. Surfaced for visibility and consumed by the
@@ -1135,9 +1135,12 @@ pub(crate) fn filter_expect_done_or_gate_ids(
         .collect()
 }
 
-pub(crate) fn queue_entry_do_id(entry: &crate::queue::QueueEntry) -> Option<String> {
+pub(crate) fn queue_entry_do_id(
+    entry: &agent_doc_queue::document_queue::QueueEntry,
+) -> Option<String> {
     match entry {
-        crate::queue::QueueEntry::Prompt(prompt) | crate::queue::QueueEntry::Completed(prompt) => {
+        agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
+        | agent_doc_queue::document_queue::QueueEntry::Completed(prompt) => {
             queue_prompt_done_id(&prompt.text)
         }
         _ => None,
@@ -1145,7 +1148,7 @@ pub(crate) fn queue_entry_do_id(entry: &crate::queue::QueueEntry) -> Option<Stri
 }
 
 pub(crate) struct BacklogQueueSyncRequest {
-    pub(crate) mode: crate::queue::BacklogQueueSyncMode,
+    pub(crate) mode: agent_doc_queue::document_queue::BacklogQueueSyncMode,
     pub(crate) ids: Vec<String>,
     pub(crate) enqueue_ids: Vec<String>,
     pub(crate) priority: bool,
@@ -1155,7 +1158,7 @@ pub(crate) fn collect_backlog_queue_sync(
     components: &[agent_doc_element::element::Component],
     content: &str,
 ) -> Option<BacklogQueueSyncRequest> {
-    let mut mode: Option<crate::queue::BacklogQueueSyncMode> = None;
+    let mut mode: Option<agent_doc_queue::document_queue::BacklogQueueSyncMode> = None;
     let mut ids: Vec<String> = Vec::new();
     let mut enqueue_ids: Vec<String> = Vec::new();
     let mut priority = false;
@@ -1174,7 +1177,8 @@ pub(crate) fn collect_backlog_queue_sync(
             continue;
         };
         priority |= comp.attrs.contains_key("priority");
-        let Some(comp_mode) = crate::queue::BacklogQueueSyncMode::parse(value) else {
+        let Some(comp_mode) = agent_doc_queue::document_queue::BacklogQueueSyncMode::parse(value)
+        else {
             continue;
         };
         if mode.is_none() {
@@ -1183,7 +1187,7 @@ pub(crate) fn collect_backlog_queue_sync(
         ids.extend(agent_doc_element_backlog::backlog::active_item_ids(body));
     }
     if mode.is_none() && !enqueue_ids.is_empty() {
-        mode = Some(crate::queue::BacklogQueueSyncMode::Append);
+        mode = Some(agent_doc_queue::document_queue::BacklogQueueSyncMode::Append);
     }
     ids.extend(enqueue_ids.iter().cloned());
     mode.map(|m| BacklogQueueSyncRequest {
@@ -1239,7 +1243,7 @@ pub(crate) fn collect_after_deps(
 
 fn queue_prompt_projection_rows(
     content: &str,
-    entries: &[crate::queue::QueueEntry],
+    entries: &[agent_doc_queue::document_queue::QueueEntry],
 ) -> Vec<agent_doc_document::queue_projection::QueuePromptRow> {
     let deferred_ids = crate::queue_continuation::deferred_backlog_ids(content);
     let preset_supplies_directive = agent_doc_element::element::parse(content)
@@ -1254,8 +1258,8 @@ fn queue_prompt_projection_rows(
     entries
         .iter()
         .filter_map(|entry| match entry {
-            crate::queue::QueueEntry::Prompt(prompt) => {
-                let text = crate::queue::strip_in_progress_marker(&prompt.text);
+            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
+                let text = agent_doc_queue::document_queue::strip_in_progress_marker(&prompt.text);
                 let id = queue_prompt_done_id(&text);
                 let projectable_default =
                     !crate::queue_continuation::is_noise_queue_head(
@@ -1275,7 +1279,7 @@ fn queue_prompt_projection_rows(
 
 fn active_queue_prompt_projection(
     content: &str,
-    entries: &[crate::queue::QueueEntry],
+    entries: &[agent_doc_queue::document_queue::QueueEntry],
     deps: &std::collections::HashMap<String, Vec<String>>,
     honor_in_progress_markers: bool,
 ) -> agent_doc_document::queue_projection::ActiveQueuePromptProjection {
@@ -1290,7 +1294,7 @@ fn active_queue_prompt_projection(
 fn in_progress_marker_retarget_requested(
     diff: Option<&str>,
     content: &str,
-    entries: &[crate::queue::QueueEntry],
+    entries: &[agent_doc_queue::document_queue::QueueEntry],
 ) -> bool {
     let rows = queue_prompt_projection_rows(content, entries);
     agent_doc_document::queue_projection::in_progress_marker_retarget_requested(diff, &rows)
@@ -1387,8 +1391,8 @@ fn selected_queue_head_node_key(content: &str, head_text: &str) -> Option<String
     if let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
         && let Some(node) = nodes.into_iter().find(|node| {
             !node.item.struck
-                && crate::queue::strip_priority_markers(node.item.text.trim())
-                    == crate::queue::strip_priority_markers(head_text)
+                && agent_doc_queue::document_queue::strip_priority_markers(node.item.text.trim())
+                    == agent_doc_queue::document_queue::strip_priority_markers(head_text)
         })
     {
         return Some(node.node_key);
@@ -1511,8 +1515,8 @@ fn record_deferred_queue_head_state(
     Ok(())
 }
 
-fn queue_worklist_hash(entries: &[crate::queue::QueueEntry]) -> String {
-    crate::ops_log::content_hash(&crate::queue::render(entries))
+fn queue_worklist_hash(entries: &[agent_doc_queue::document_queue::QueueEntry]) -> String {
+    crate::ops_log::content_hash(&agent_doc_queue::document_queue::render(entries))
 }
 
 fn queue_prompt_node_key(
@@ -1521,14 +1525,15 @@ fn queue_prompt_node_key(
     prompt_text: &str,
     index: usize,
 ) -> Option<String> {
-    let normalized_prompt = crate::queue::strip_in_progress_marker(prompt_text)
+    let normalized_prompt = agent_doc_queue::document_queue::strip_in_progress_marker(prompt_text)
         .trim()
         .to_string();
     for (node_index, node) in nodes.iter().enumerate() {
         if used_nodes.get(node_index).copied().unwrap_or(false) || node.item.struck {
             continue;
         }
-        let node_text = crate::queue::strip_in_progress_marker(node.item.text.trim());
+        let node_text =
+            agent_doc_queue::document_queue::strip_in_progress_marker(node.item.text.trim());
         if node_text.trim() == normalized_prompt {
             if let Some(used) = used_nodes.get_mut(node_index) {
                 *used = true;
@@ -1547,7 +1552,7 @@ fn queue_prompt_node_key(
 
 fn queue_worklist_entries(
     content: &str,
-    entries: &[crate::queue::QueueEntry],
+    entries: &[agent_doc_queue::document_queue::QueueEntry],
 ) -> Vec<crate::state_backbone::QueueWorklistEntry> {
     let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue").unwrap_or_default();
     let mut used_nodes = vec![false; nodes.len()];
@@ -1555,8 +1560,8 @@ fn queue_worklist_entries(
     entries
         .iter()
         .filter_map(|entry| match entry {
-            crate::queue::QueueEntry::Prompt(prompt) => {
-                let text = crate::queue::strip_in_progress_marker(&prompt.text);
+            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
+                let text = agent_doc_queue::document_queue::strip_in_progress_marker(&prompt.text);
                 let node_key = queue_prompt_node_key(&nodes, &mut used_nodes, &text, prompt_index);
                 prompt_index += 1;
                 Some(crate::state_backbone::QueueWorklistEntry {
@@ -1567,7 +1572,7 @@ fn queue_worklist_entries(
                     drainable: true,
                 })
             }
-            crate::queue::QueueEntry::Preset(preset) => {
+            agent_doc_queue::document_queue::QueueEntry::Preset(preset) => {
                 Some(crate::state_backbone::QueueWorklistEntry {
                     kind: crate::state_backbone::QueueWorklistEntryKind::Preset,
                     text: preset.clone(),
@@ -1576,7 +1581,7 @@ fn queue_worklist_entries(
                     drainable: false,
                 })
             }
-            crate::queue::QueueEntry::Dispatch(preset) => {
+            agent_doc_queue::document_queue::QueueEntry::Dispatch(preset) => {
                 Some(crate::state_backbone::QueueWorklistEntry {
                     kind: crate::state_backbone::QueueWorklistEntryKind::Dispatch,
                     text: preset.clone(),
@@ -1585,10 +1590,10 @@ fn queue_worklist_entries(
                     drainable: false,
                 })
             }
-            crate::queue::QueueEntry::Completed(_)
-            | crate::queue::QueueEntry::StartFence(_)
-            | crate::queue::QueueEntry::StopFence
-            | crate::queue::QueueEntry::Freeform(_) => None,
+            agent_doc_queue::document_queue::QueueEntry::Completed(_)
+            | agent_doc_queue::document_queue::QueueEntry::StartFence(_)
+            | agent_doc_queue::document_queue::QueueEntry::StopFence
+            | agent_doc_queue::document_queue::QueueEntry::Freeform(_) => None,
         })
         .collect()
 }
@@ -1596,7 +1601,7 @@ fn queue_worklist_entries(
 fn record_queue_worklist_state(
     file: &Path,
     content: &str,
-    entries: &[crate::queue::QueueEntry],
+    entries: &[agent_doc_queue::document_queue::QueueEntry],
     active: bool,
 ) -> Result<()> {
     let canonical = file.canonicalize().with_context(|| {
@@ -1643,10 +1648,11 @@ fn record_queue_worklist_state(
 
 type QueueDeleteCounts = std::collections::HashMap<String, usize>;
 
-fn queue_entry_delete_key(entry: &crate::queue::QueueEntry) -> Option<String> {
+fn queue_entry_delete_key(entry: &agent_doc_queue::document_queue::QueueEntry) -> Option<String> {
     match entry {
-        crate::queue::QueueEntry::Prompt(prompt) | crate::queue::QueueEntry::Completed(prompt) => {
-            let key = crate::queue::strip_priority_markers(&prompt.text);
+        agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
+        | agent_doc_queue::document_queue::QueueEntry::Completed(prompt) => {
+            let key = agent_doc_queue::document_queue::strip_priority_markers(&prompt.text);
             (!key.is_empty()).then_some(key)
         }
         _ => None,
@@ -1654,7 +1660,7 @@ fn queue_entry_delete_key(entry: &crate::queue::QueueEntry) -> Option<String> {
 }
 
 fn queue_delete_counts(body: &str) -> Option<QueueDeleteCounts> {
-    let entries = crate::queue::parse(body).ok()?;
+    let entries = agent_doc_queue::document_queue::parse(body).ok()?;
     let mut counts = std::collections::HashMap::new();
     for entry in &entries {
         if let Some(key) = queue_entry_delete_key(entry) {
@@ -1771,7 +1777,7 @@ pub(crate) fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<Que
     };
 
     let body = &content[comp.open_end..comp.close_start];
-    let entries = match crate::queue::parse(body) {
+    let entries = match agent_doc_queue::document_queue::parse(body) {
         Ok(entries) => entries,
         Err(err) => {
             eprintln!("[preflight] queue probe parse warning: {err}");
@@ -1779,12 +1785,12 @@ pub(crate) fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<Que
         }
     };
 
-    let marker_control = crate::queue::marker_control(&comp.attrs);
+    let marker_control = agent_doc_queue::document_queue::marker_control(&comp.attrs);
     let marker_stop = matches!(
         marker_control,
         Some(agent_doc_core::frontmatter::QueueControl::Stop)
     );
-    let has_auto = crate::queue::has_auto_attr(&comp.attrs)
+    let has_auto = agent_doc_queue::document_queue::has_auto_attr(&comp.attrs)
         || matches!(
             marker_control,
             Some(agent_doc_core::frontmatter::QueueControl::Start)
@@ -1795,16 +1801,22 @@ pub(crate) fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<Que
     let (fm, _) = frontmatter::parse(&content).unwrap_or_default();
     let persisted_active = fm.queue_active.unwrap_or(false);
 
-    let mut activation =
-        crate::queue::resolve_activation(&entries, has_auto, exchange_triggered, persisted_active);
+    let mut activation = agent_doc_queue::document_queue::resolve_activation(
+        &entries,
+        has_auto,
+        exchange_triggered,
+        persisted_active,
+    );
     if marker_stop && activation.active {
-        activation = crate::queue::QueueActivation {
+        activation = agent_doc_queue::document_queue::QueueActivation {
             entries_after: activation.entries_after,
             ..Default::default()
         };
     }
 
-    if activation.active && crate::queue::has_stop_fence_at_head(&activation.entries_after) {
+    if activation.active
+        && agent_doc_queue::document_queue::has_stop_fence_at_head(&activation.entries_after)
+    {
         return Ok(QueueState {
             queue_prompts: vec![],
             selected_queue_prompts: vec![],
@@ -1824,7 +1836,8 @@ pub(crate) fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<Que
     }
 
     if activation.active
-        && let Some(start_at) = crate::queue::time_gate_at_head(&activation.entries_after)
+        && let Some(start_at) =
+            agent_doc_queue::document_queue::time_gate_at_head(&activation.entries_after)
     {
         return Ok(QueueState {
             queue_prompts: vec![],
@@ -1845,9 +1858,9 @@ pub(crate) fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<Que
     }
 
     let queue_prompts = if activation.active {
-        crate::queue::prompts(&activation.entries_after)
+        agent_doc_queue::document_queue::prompts(&activation.entries_after)
             .iter()
-            .map(|prompt| crate::queue::strip_in_progress_marker(&prompt.text))
+            .map(|prompt| agent_doc_queue::document_queue::strip_in_progress_marker(&prompt.text))
             .collect()
     } else {
         vec![]
@@ -1856,7 +1869,7 @@ pub(crate) fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<Que
         crate::queue_continuation::document_queue_controller_pause_reason(file);
     let queue_paused = queue_pause_reason.is_some();
     let drainability_content = if activation.active {
-        let body = crate::queue::render(&activation.entries_after);
+        let body = agent_doc_queue::document_queue::render(&activation.entries_after);
         let projected = comp.replace_content(&content, &body);
         frontmatter::merge_queue_state(&projected, true).unwrap_or(projected)
     } else {
@@ -1922,7 +1935,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // a stall: the direct edit completes in well under a TTL and the next preflight
     // performs maintenance normally on the settled queue.
     if let Some(holder_pid) =
-        crate::queue_edit_owner::foreign_queue_edit_in_flight(&file.to_string_lossy())
+        agent_doc_queue::queue_edit_owner::foreign_queue_edit_in_flight(&file.to_string_lossy())
     {
         crate::ops_log::log_op(
             file,
@@ -1951,7 +1964,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     };
 
     let body = &content[comp.open_end..comp.close_start];
-    let entries = match crate::queue::parse(body) {
+    let entries = match agent_doc_queue::document_queue::parse(body) {
         Ok(e) => e,
         Err(e) => {
             eprintln!("[preflight] queue parse warning: {}", e);
@@ -1988,7 +2001,8 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     }
 
     let raw_queue_tag = &current_content[comp.open_start..comp.open_end];
-    let normalized_queue_tag = crate::queue::normalize_queue_tag_attrs(raw_queue_tag);
+    let normalized_queue_tag =
+        agent_doc_queue::document_queue::normalize_queue_tag_attrs(raw_queue_tag);
     if normalized_queue_tag != raw_queue_tag {
         let mut rebuilt = String::with_capacity(current_content.len());
         rebuilt.push_str(&current_content[..comp.open_start]);
@@ -2061,11 +2075,16 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                         let comps = agent_doc_element::element::parse(&snap).ok()?;
                         let q = comps.iter().find(|c| c.name == "queue")?;
                         let body = &snap[q.open_end..q.close_start];
-                        let snap_entries = crate::queue::parse(body).ok()?;
+                        let snap_entries = agent_doc_queue::document_queue::parse(body).ok()?;
                         Some(
                             snap_entries
                                 .iter()
-                                .filter(|e| matches!(e, crate::queue::QueueEntry::Prompt(_)))
+                                .filter(|e| {
+                                    matches!(
+                                        e,
+                                        agent_doc_queue::document_queue::QueueEntry::Prompt(_)
+                                    )
+                                })
                                 .filter_map(queue_entry_do_id)
                                 .collect(),
                         )
@@ -2075,7 +2094,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 entries.iter().filter_map(queue_entry_do_id).collect();
             let current_active_ids: std::collections::HashSet<String> = entries
                 .iter()
-                .filter(|e| matches!(e, crate::queue::QueueEntry::Prompt(_)))
+                .filter(|e| matches!(e, agent_doc_queue::document_queue::QueueEntry::Prompt(_)))
                 .filter_map(queue_entry_do_id)
                 .collect();
             let tombstones = super::queue_tombstone::reconcile(
@@ -2173,7 +2192,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         // (marked `[/]`/`[x]` per the `do #id` closeout rule) drop out and the
         // loop converges when no Open backlog item remains.
         let queue_go_mode = matches!(
-            crate::queue::marker_control(&comp.attrs),
+            agent_doc_queue::document_queue::marker_control(&comp.attrs),
             Some(agent_doc_core::frontmatter::QueueControl::Start)
         ) || frontmatter::parse(&content)
             .ok()
@@ -2214,7 +2233,9 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                  (continuous-backlog-loop; #backlog-queue-attr-populates-in-go-mode)"
             );
         }
-        if let Some(synced) = crate::queue::sync_backlog_into_queue(&entries, &backlog_ids, mode) {
+        if let Some(synced) =
+            agent_doc_queue::document_queue::sync_backlog_into_queue(&entries, &backlog_ids, mode)
+        {
             let pre_sync_ids = entries
                 .iter()
                 .filter_map(queue_entry_do_id)
@@ -2226,7 +2247,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 .filter(|id| !pre_sync_ids.contains(id))
                 .filter(|id| seen_synced_ids.insert(id.clone()))
                 .collect();
-            let new_body = crate::queue::render(&synced);
+            let new_body = agent_doc_queue::document_queue::render(&synced);
             current_content = {
                 let comps = agent_doc_element::element::parse(&current_content)?;
                 let q = comps.iter().find(|c| c.name == "queue").unwrap();
@@ -2234,7 +2255,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
             };
             let pre_sync_prompt_count = entries
                 .iter()
-                .filter(|e| matches!(e, crate::queue::QueueEntry::Prompt(_)))
+                .filter(|e| matches!(e, agent_doc_queue::document_queue::QueueEntry::Prompt(_)))
                 .count();
             eprintln!(
                 "[preflight] queue: synced backlog → queue ({:?}, {} active id(s))",
@@ -2277,11 +2298,14 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
             && let Some(snap_queue) = snap_components.iter().find(|c| c.name == "queue")
         {
             let snap_body = &snap_content[snap_queue.open_end..snap_queue.close_start];
-            if let Ok(snap_entries) = crate::queue::parse(snap_body) {
+            if let Ok(snap_entries) = agent_doc_queue::document_queue::parse(snap_body) {
                 if let Some(pinned) =
-                    crate::queue::annotate_operator_priority_reorders(&snap_entries, &entries)
+                    agent_doc_queue::document_queue::annotate_operator_priority_reorders(
+                        &snap_entries,
+                        &entries,
+                    )
                 {
-                    let new_body = crate::queue::render(&pinned);
+                    let new_body = agent_doc_queue::document_queue::render(&pinned);
                     current_content = {
                         let comps = agent_doc_element::element::parse(&current_content)?;
                         let q = comps.iter().find(|c| c.name == "queue").unwrap();
@@ -2300,11 +2324,12 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 // slot is held without injecting a `:pushpin:`.
                 let synced_set: std::collections::HashSet<String> =
                     synced_queue_ids.iter().cloned().collect();
-                operator_authored_identities = crate::queue::operator_authored_prompt_identities(
-                    &snap_entries,
-                    &entries,
-                    &synced_set,
-                );
+                operator_authored_identities =
+                    agent_doc_queue::document_queue::operator_authored_prompt_identities(
+                        &snap_entries,
+                        &entries,
+                        &synced_set,
+                    );
                 if !operator_authored_identities.is_empty() {
                     eprintln!(
                         "[preflight] queue: preserving {} manually-added prompt slot(s) by stable identity (#qauthorderpin)",
@@ -2337,7 +2362,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         // graph first (a blocker outranks a pin); fall back to the plain
         // pin+priority sort when there are no dependency edges.
         let deps = collect_after_deps(&components, &content);
-        let sorted = crate::queue::sort_prompts_by_dag_with_operator_authored(
+        let sorted = agent_doc_queue::document_queue::sort_prompts_by_dag_with_operator_authored(
             &entries,
             &rank,
             &deps,
@@ -2346,7 +2371,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         )
         .map(|s| ("auto-dag dependency order (blockers + pins)", s))
         .or_else(|| {
-            crate::queue::sort_prompts_by_priority_with_operator_authored(
+            agent_doc_queue::document_queue::sort_prompts_by_priority_with_operator_authored(
                 &entries,
                 &rank,
                 &backlog_sourced,
@@ -2355,9 +2380,11 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
             .map(|s| ("backlog priority (operator pins position-locked)", s))
         });
         if let Some((how, sorted)) = sorted {
-            let sorted = crate::queue::annotate_agent_priority_promotions(&entries, &sorted)
-                .unwrap_or(sorted);
-            let new_body = crate::queue::render(&sorted);
+            let sorted = agent_doc_queue::document_queue::annotate_agent_priority_promotions(
+                &entries, &sorted,
+            )
+            .unwrap_or(sorted);
+            let new_body = agent_doc_queue::document_queue::render(&sorted);
             current_content = {
                 let comps = agent_doc_element::element::parse(&current_content)?;
                 let q = comps.iter().find(|c| c.name == "queue").unwrap();
@@ -2376,12 +2403,12 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // not the continuation-only Persisted path), and `stop` forces the queue
     // inactive this cycle. The control token is stripped from the tag below when
     // the queue drains, mirroring `auto`.
-    let marker_control = crate::queue::marker_control(&comp.attrs);
+    let marker_control = agent_doc_queue::document_queue::marker_control(&comp.attrs);
     let marker_stop = matches!(
         marker_control,
         Some(agent_doc_core::frontmatter::QueueControl::Stop)
     );
-    let has_auto = crate::queue::has_auto_attr(&comp.attrs)
+    let has_auto = agent_doc_queue::document_queue::has_auto_attr(&comp.attrs)
         || matches!(
             marker_control,
             Some(agent_doc_core::frontmatter::QueueControl::Start)
@@ -2392,13 +2419,17 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     let (fm, _) = frontmatter::parse(&current_content).unwrap_or_default();
     let persisted_active = fm.queue_active.unwrap_or(false);
 
-    let mut activation =
-        crate::queue::resolve_activation(&entries, has_auto, exchange_triggered, persisted_active);
+    let mut activation = agent_doc_queue::document_queue::resolve_activation(
+        &entries,
+        has_auto,
+        exchange_triggered,
+        persisted_active,
+    );
     // A `stop` marker control forces the queue inactive this cycle regardless of
     // any other activation signal (#queue-state-unify), so the later
     // drain/clear path halts a running queue and strips the control token.
     if marker_stop && activation.active {
-        activation = crate::queue::QueueActivation {
+        activation = agent_doc_queue::document_queue::QueueActivation {
             entries_after: activation.entries_after,
             ..Default::default()
         };
@@ -2436,7 +2467,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         let comps = agent_doc_element::element::parse(&current_content)?;
         if let Some(q) = comps.iter().find(|c| c.name == "queue") {
             let body = &current_content[q.open_end..q.close_start];
-            activation.entries_after = crate::queue::parse(body)
+            activation.entries_after = agent_doc_queue::document_queue::parse(body)
                 .context("queue maintenance: failed to parse AST-deduped queue")?;
         }
         mutated = true;
@@ -2461,20 +2492,21 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // their regression coverage do not break). Position-lock
     // (#queue-operator-pin-position-lock) is preserved: convergence is purely
     // subtractive at each identity's earliest slot.
-    let snapshot_queue_entries: Vec<crate::queue::QueueEntry> = match snapshot::load(file) {
-        Ok(Some(snap)) => agent_doc_element::element::parse(&snap)
-            .ok()
-            .and_then(|comps| {
-                comps
-                    .iter()
-                    .find(|c| c.name == "queue")
-                    .map(|q| snap[q.open_end..q.close_start].to_string())
-            })
-            .and_then(|body| crate::queue::parse(&body).ok())
-            .unwrap_or_default(),
-        _ => Vec::new(),
-    };
-    if let Some(converged_entries) = crate::queue::converge_queue_via_lifecycle(
+    let snapshot_queue_entries: Vec<agent_doc_queue::document_queue::QueueEntry> =
+        match snapshot::load(file) {
+            Ok(Some(snap)) => agent_doc_element::element::parse(&snap)
+                .ok()
+                .and_then(|comps| {
+                    comps
+                        .iter()
+                        .find(|c| c.name == "queue")
+                        .map(|q| snap[q.open_end..q.close_start].to_string())
+                })
+                .and_then(|body| agent_doc_queue::document_queue::parse(&body).ok())
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        };
+    if let Some(converged_entries) = agent_doc_queue::document_queue::converge_queue_via_lifecycle(
         &activation.entries_after,
         &snapshot_queue_entries,
     ) {
@@ -2482,7 +2514,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
             .entries_after
             .len()
             .saturating_sub(converged_entries.len());
-        let new_body = crate::queue::render(&converged_entries);
+        let new_body = agent_doc_queue::document_queue::render(&converged_entries);
         current_content = {
             let comps = agent_doc_element::element::parse(&current_content)?;
             let q = comps
@@ -2500,7 +2532,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
 
     // Consume start fence if needed
     if activation.consumed_start_fence {
-        let new_body = crate::queue::render(&activation.entries_after);
+        let new_body = agent_doc_queue::document_queue::render(&activation.entries_after);
         current_content = {
             let comps = agent_doc_element::element::parse(&current_content)?;
             let q = comps.iter().find(|c| c.name == "queue").unwrap();
@@ -2539,7 +2571,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         && let Some((new_entries, struck)) =
             strike_done_queue_head_prompts(&entries_for_strike, &eligible_ids)
     {
-        let new_body = crate::queue::render(&new_entries);
+        let new_body = agent_doc_queue::document_queue::render(&new_entries);
         current_content = {
             let comps = agent_doc_element::element::parse(&current_content)?;
             let q = comps.iter().find(|c| c.name == "queue").unwrap();
@@ -2569,7 +2601,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         // stale `active: true` either trips the `item_modified` halt (the
         // post-strike head is `None` vs a still-live snapshot head) or leaves
         // the queue reported active with an empty prompt set. (#drained-done-queue-clear)
-        if crate::queue::prompts(&activation.entries_after).is_empty() {
+        if agent_doc_queue::document_queue::prompts(&activation.entries_after).is_empty() {
             activation.active = false;
             activation.trigger = None;
         }
@@ -2588,7 +2620,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // `answered_free_text_head_node_keys`/`item_nodes`: the live churning heads
     // are BARE, multi-line operator-pasted blocks (no `- ` bullet, embedded
     // route-error code fences), which the markdown list-item parser does not
-    // surface — only `crate::queue::parse` represents them (as a multiline
+    // surface — only `agent_doc_queue::document_queue::parse` represents them (as a multiline
     // `Prompt`). The match reuses the SAME `free_text_head_answered_by_response`
     // predicate the session-check residue guard uses, so the preflight strike set
     // and the session-check INTERRUPT set agree — anything struck here is exactly
@@ -2609,7 +2641,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         // Normalized prose of every free-text head committed in the snapshot — the
         // in-flight-edit gate. `snapshot_queue_entries` was parsed above.
         let gate_norm = |text: &str| -> String {
-            crate::queue::strip_priority_markers(text)
+            agent_doc_queue::document_queue::strip_priority_markers(text)
                 .to_lowercase()
                 .split_whitespace()
                 .collect::<Vec<_>>()
@@ -2618,16 +2650,16 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         let committed_free_text: std::collections::HashSet<String> = snapshot_queue_entries
             .iter()
             .filter_map(|e| match e {
-                crate::queue::QueueEntry::Prompt(p) => Some(gate_norm(&p.text)),
+                agent_doc_queue::document_queue::QueueEntry::Prompt(p) => Some(gate_norm(&p.text)),
                 _ => None,
             })
             .collect();
         let mut struck_count = 0usize;
-        let new_entries: Vec<crate::queue::QueueEntry> = activation
+        let new_entries: Vec<agent_doc_queue::document_queue::QueueEntry> = activation
             .entries_after
             .iter()
             .map(|entry| match entry {
-                crate::queue::QueueEntry::Prompt(p)
+                agent_doc_queue::document_queue::QueueEntry::Prompt(p)
                     if crate::write::queue_prompt_text_is_free_text(&current_content, &p.text)
                         && crate::write::free_text_head_answered_by_response(
                             &exchange_text,
@@ -2640,21 +2672,24 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                     // cosmetic `🚧` marker so it does not linger inside the
                     // strikethrough (`set_first_prompt_in_progress` re-applies it to
                     // the genuinely-active next head).
-                    let cleaned = crate::queue::strip_in_progress_marker(&p.text);
+                    let cleaned =
+                        agent_doc_queue::document_queue::strip_in_progress_marker(&p.text);
                     if cleaned == p.text {
-                        crate::queue::QueueEntry::Completed(p.clone())
+                        agent_doc_queue::document_queue::QueueEntry::Completed(p.clone())
                     } else {
-                        crate::queue::QueueEntry::Completed(crate::queue::QueuePrompt {
-                            text: cleaned,
-                            multiline: p.multiline,
-                        })
+                        agent_doc_queue::document_queue::QueueEntry::Completed(
+                            agent_doc_queue::document_queue::QueuePrompt {
+                                text: cleaned,
+                                multiline: p.multiline,
+                            },
+                        )
                     }
                 }
                 other => other.clone(),
             })
             .collect();
         if struck_count > 0 {
-            let new_body = crate::queue::render(&new_entries);
+            let new_body = agent_doc_queue::document_queue::render(&new_entries);
             current_content = {
                 let comps = agent_doc_element::element::parse(&current_content)?;
                 let q = comps.iter().find(|c| c.name == "queue").context(
@@ -2677,7 +2712,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
             // If the strike emptied the live head set, mirror the id-backed
             // done-strike drain-clear so the queue does not report active with an
             // empty prompt set (#drained-done-queue-clear).
-            if crate::queue::prompts(&activation.entries_after).is_empty() {
+            if agent_doc_queue::document_queue::prompts(&activation.entries_after).is_empty() {
                 activation.active = false;
                 activation.trigger = None;
             }
@@ -2706,7 +2741,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // prompt verbatim inside the strikethrough for auditability.
     {
         let gate_norm = |text: &str| -> String {
-            crate::queue::strip_priority_markers(text)
+            agent_doc_queue::document_queue::strip_priority_markers(text)
                 .to_lowercase()
                 .split_whitespace()
                 .collect::<Vec<_>>()
@@ -2715,7 +2750,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         let committed_free_text: std::collections::HashSet<String> = snapshot_queue_entries
             .iter()
             .filter_map(|e| match e {
-                crate::queue::QueueEntry::Prompt(p) => Some(gate_norm(&p.text)),
+                agent_doc_queue::document_queue::QueueEntry::Prompt(p) => Some(gate_norm(&p.text)),
                 _ => None,
             })
             .collect();
@@ -2740,11 +2775,11 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                     by_norm.entry(gate_norm(&m.candidate_text)).or_insert(m);
                 }
                 let mut struck: Vec<(crate::memory_cmd::QueueStrikeMatch, String)> = Vec::new();
-                let new_entries: Vec<crate::queue::QueueEntry> = activation
+                let new_entries: Vec<agent_doc_queue::document_queue::QueueEntry> = activation
                     .entries_after
                     .iter()
                     .map(|entry| match entry {
-                        crate::queue::QueueEntry::Prompt(p)
+                        agent_doc_queue::document_queue::QueueEntry::Prompt(p)
                             if crate::write::queue_prompt_text_is_free_text(
                                 &current_content,
                                 &p.text,
@@ -2774,10 +2809,10 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                                     // the strikethrough (and `set_first_prompt_in_progress`
                                     // re-applies it to the genuinely-active next head).
                                     let head_clean =
-                                        crate::queue::strip_in_progress_marker(p.text.trim_end());
+                                        agent_doc_queue::document_queue::strip_in_progress_marker(p.text.trim_end());
                                     let annotated = format!("{head_clean} — {reason}");
                                     struck.push((m.clone(), annotated.clone()));
-                                    crate::queue::QueueEntry::Completed(crate::queue::QueuePrompt {
+                                    agent_doc_queue::document_queue::QueueEntry::Completed(agent_doc_queue::document_queue::QueuePrompt {
                                         text: annotated,
                                         multiline: p.multiline,
                                     })
@@ -2789,7 +2824,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                     })
                     .collect();
                 if !struck.is_empty() {
-                    let new_body = crate::queue::render(&new_entries);
+                    let new_body = agent_doc_queue::document_queue::render(&new_entries);
                     current_content = {
                         let comps = agent_doc_element::element::parse(&current_content)?;
                         let q = comps.iter().find(|c| c.name == "queue").context(
@@ -2820,7 +2855,9 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                             struck.len(),
                         ),
                     );
-                    if crate::queue::prompts(&activation.entries_after).is_empty() {
+                    if agent_doc_queue::document_queue::prompts(&activation.entries_after)
+                        .is_empty()
+                    {
                         activation.active = false;
                         activation.trigger = None;
                     }
@@ -2838,11 +2875,12 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // Phase 3: halt detection — stop fences and item modification
     if activation.active {
         // Stop fence at head → halt the queue
-        if crate::queue::has_stop_fence_at_head(&activation.entries_after) {
+        if agent_doc_queue::document_queue::has_stop_fence_at_head(&activation.entries_after) {
             eprintln!("[preflight] queue: halt — stop fence at head");
             // Consume the stop fence
-            let after_stop: Vec<crate::queue::QueueEntry> = activation.entries_after[1..].to_vec();
-            let new_body = crate::queue::render(&after_stop);
+            let after_stop: Vec<agent_doc_queue::document_queue::QueueEntry> =
+                activation.entries_after[1..].to_vec();
+            let new_body = agent_doc_queue::document_queue::render(&after_stop);
             current_content = {
                 let comps = agent_doc_element::element::parse(&current_content)?;
                 let q = comps.iter().find(|c| c.name == "queue").unwrap();
@@ -2853,7 +2891,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 let comps = agent_doc_element::element::parse(&current_content)?;
                 if let Some(q) = comps.iter().find(|c| c.name == "queue") {
                     let raw = &current_content[q.open_start..q.open_end];
-                    let new_tag = crate::queue::strip_auto_from_tag(raw);
+                    let new_tag = agent_doc_queue::document_queue::strip_auto_from_tag(raw);
                     if new_tag != raw {
                         let mut rebuilt = String::with_capacity(current_content.len());
                         rebuilt.push_str(&current_content[..q.open_start]);
@@ -2885,7 +2923,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                         && let Some(sq2) = sc2.iter().find(|c| c.name == "queue")
                     {
                         let raw = &new_snap[sq2.open_start..sq2.open_end];
-                        let new_tag = crate::queue::strip_auto_from_tag(raw);
+                        let new_tag = agent_doc_queue::document_queue::strip_auto_from_tag(raw);
                         if new_tag != raw {
                             let mut rebuilt = String::with_capacity(new_snap.len());
                             rebuilt.push_str(&new_snap[..sq2.open_start]);
@@ -2907,8 +2945,9 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 }
             }
             record_queue_worklist_state(file, &current_content, &after_stop, false)?;
-            if let Some(head) = crate::queue::first_prompt(&after_stop) {
-                let head_text = crate::queue::strip_in_progress_marker(&head.text);
+            if let Some(head) = agent_doc_queue::document_queue::first_prompt(&after_stop) {
+                let head_text =
+                    agent_doc_queue::document_queue::strip_in_progress_marker(&head.text);
                 record_deferred_queue_head_state(file, &current_content, &head_text, "stop_fence")?;
             }
             return Ok(QueueState {
@@ -2930,11 +2969,16 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         }
 
         // Time gate at head → defer if not yet time
-        if let Some(dt) = crate::queue::time_gate_at_head(&activation.entries_after) {
+        if let Some(dt) =
+            agent_doc_queue::document_queue::time_gate_at_head(&activation.entries_after)
+        {
             eprintln!("[preflight] queue: deferred — time gate at head: {}", dt);
             record_queue_worklist_state(file, &current_content, &activation.entries_after, false)?;
-            if let Some(head) = crate::queue::first_prompt(&activation.entries_after) {
-                let head_text = crate::queue::strip_in_progress_marker(&head.text);
+            if let Some(head) =
+                agent_doc_queue::document_queue::first_prompt(&activation.entries_after)
+            {
+                let head_text =
+                    agent_doc_queue::document_queue::strip_in_progress_marker(&head.text);
                 let reason = format!("time_gate:{dt}");
                 record_deferred_queue_head_state(file, &current_content, &head_text, &reason)?;
             }
@@ -2966,7 +3010,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
             && let Some(snap_q) = snap_comps.iter().find(|c| c.name == "queue")
         {
             let snap_body = &snap_content[snap_q.open_end..snap_q.close_start];
-            if let Ok(snap_entries) = crate::queue::parse(snap_body)
+            if let Ok(snap_entries) = agent_doc_queue::document_queue::parse(snap_body)
                 && {
                     // Apply the same done/gated strike to the snapshot's
                     // entries before comparing heads. A cycle that resolved a
@@ -2984,7 +3028,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                             .map(|(entries, _)| entries)
                             .unwrap_or(snap_entries)
                     };
-                    crate::queue::detect_head_prompt_modified(
+                    agent_doc_queue::document_queue::detect_head_prompt_modified(
                         &snap_entries_struck,
                         &activation.entries_after,
                     )
@@ -3018,7 +3062,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                         let comps = agent_doc_element::element::parse(&current_content)?;
                         if let Some(q) = comps.iter().find(|c| c.name == "queue") {
                             let raw = &current_content[q.open_start..q.open_end];
-                            let new_tag = crate::queue::strip_auto_from_tag(raw);
+                            let new_tag = agent_doc_queue::document_queue::strip_auto_from_tag(raw);
                             if new_tag != raw {
                                 let mut rebuilt = String::with_capacity(current_content.len());
                                 rebuilt.push_str(&current_content[..q.open_start]);
@@ -3045,7 +3089,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                             && let Some(sq) = sc.iter().find(|c| c.name == "queue")
                         {
                             let raw = &ns[sq.open_start..sq.open_end];
-                            let new_tag = crate::queue::strip_auto_from_tag(raw);
+                            let new_tag = agent_doc_queue::document_queue::strip_auto_from_tag(raw);
                             if new_tag != raw {
                                 let mut rebuilt = String::with_capacity(ns.len());
                                 rebuilt.push_str(&ns[..sq.open_start]);
@@ -3071,8 +3115,11 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                         &activation.entries_after,
                         false,
                     )?;
-                    if let Some(head) = crate::queue::first_prompt(&activation.entries_after) {
-                        let head_text = crate::queue::strip_in_progress_marker(&head.text);
+                    if let Some(head) =
+                        agent_doc_queue::document_queue::first_prompt(&activation.entries_after)
+                    {
+                        let head_text =
+                            agent_doc_queue::document_queue::strip_in_progress_marker(&head.text);
                         record_deferred_queue_head_state(
                             file,
                             &current_content,
@@ -3103,7 +3150,8 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
 
     // Handle queue drain: if the queue has no remaining prompts, clear
     // queue_active, strip auto, and remove completed/directive residue.
-    let queue_has_prompts = !crate::queue::prompts(&activation.entries_after).is_empty();
+    let queue_has_prompts =
+        !agent_doc_queue::document_queue::prompts(&activation.entries_after).is_empty();
     let drained_residue = queue_entries_are_drained_residue(&activation.entries_after);
     let need_sync_newly_activated_queue_snapshot = activation.active && !snapshot_was_active;
     let need_set_active = activation.active && !persisted_active;
@@ -3160,8 +3208,9 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         let comps = agent_doc_element::element::parse(&current_content)?;
         let q = comps.iter().find(|c| c.name == "queue").unwrap();
         let raw_tag = &current_content[q.open_start..q.open_end];
-        let new_tag =
-            crate::queue::strip_control_from_tag(&crate::queue::strip_auto_from_tag(raw_tag));
+        let new_tag = agent_doc_queue::document_queue::strip_control_from_tag(
+            &agent_doc_queue::document_queue::strip_auto_from_tag(raw_tag),
+        );
         if new_tag != raw_tag {
             let mut rebuilt = String::with_capacity(current_content.len());
             rebuilt.push_str(&current_content[..q.open_start]);
@@ -3231,10 +3280,11 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         .iter()
         .filter_map(|text| queue_prompt_done_id(text))
         .collect::<std::collections::HashSet<_>>();
-    if let Some(marked_entries) =
-        crate::queue::set_prompts_in_progress(&activation.entries_after, &active_queue_prompt_texts)
-    {
-        let new_body = crate::queue::render(&marked_entries);
+    if let Some(marked_entries) = agent_doc_queue::document_queue::set_prompts_in_progress(
+        &activation.entries_after,
+        &active_queue_prompt_texts,
+    ) {
+        let new_body = agent_doc_queue::document_queue::render(&marked_entries);
         current_content = {
             let comps = agent_doc_element::element::parse(&current_content)?;
             let q = comps
@@ -3288,7 +3338,8 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
             && let Some(snap_q) = snap_comps.iter().find(|c| c.name == "queue")
         {
             let raw_tag = &new_snap[snap_q.open_start..snap_q.open_end];
-            let normalized_tag = crate::queue::normalize_queue_tag_attrs(raw_tag);
+            let normalized_tag =
+                agent_doc_queue::document_queue::normalize_queue_tag_attrs(raw_tag);
             if normalized_tag != raw_tag {
                 let mut rebuilt = String::with_capacity(new_snap.len());
                 rebuilt.push_str(&new_snap[..snap_q.open_start]);
@@ -3326,7 +3377,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
             let new_body = if need_clear_drained_body {
                 String::new()
             } else {
-                crate::queue::render(&activation.entries_after)
+                agent_doc_queue::document_queue::render(&activation.entries_after)
             };
             new_snap = snap_q.replace_content(&new_snap, &new_body);
 
@@ -3335,7 +3386,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 && let Some(snap_q2) = snap_comps2.iter().find(|c| c.name == "queue")
             {
                 let raw_tag = &new_snap[snap_q2.open_start..snap_q2.open_end];
-                let new_tag = crate::queue::strip_auto_from_tag(raw_tag);
+                let new_tag = agent_doc_queue::document_queue::strip_auto_from_tag(raw_tag);
                 if new_tag != raw_tag {
                     let mut rebuilt = String::with_capacity(new_snap.len());
                     rebuilt.push_str(&new_snap[..snap_q2.open_start]);
@@ -3373,9 +3424,9 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
 
     // Build output
     let queue_prompts: Vec<String> = if activation.active {
-        crate::queue::prompts(&activation.entries_after)
+        agent_doc_queue::document_queue::prompts(&activation.entries_after)
             .iter()
-            .map(|p| crate::queue::strip_in_progress_marker(&p.text))
+            .map(|p| agent_doc_queue::document_queue::strip_in_progress_marker(&p.text))
             .collect()
     } else {
         vec![]
@@ -3433,9 +3484,9 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
             record_selected_queue_head_state(file, &current_content, head_text, true)?;
         }
     } else if activation.deferred
-        && let Some(head) = crate::queue::first_prompt(&activation.entries_after)
+        && let Some(head) = agent_doc_queue::document_queue::first_prompt(&activation.entries_after)
     {
-        let head_text = crate::queue::strip_in_progress_marker(&head.text);
+        let head_text = agent_doc_queue::document_queue::strip_in_progress_marker(&head.text);
         let reason = activation
             .start_at
             .as_deref()
@@ -3554,7 +3605,7 @@ pub(crate) fn sync_same_cycle_pending_adds_into_go_queue(file: &Path) -> Result<
         return Ok(Vec::new());
     };
     let queue_body = &content[queue_component.open_end..queue_component.close_start];
-    let entries = match crate::queue::parse(queue_body) {
+    let entries = match agent_doc_queue::document_queue::parse(queue_body) {
         Ok(entries) => entries,
         Err(e) => {
             eprintln!("[write] queue: same-cycle pending-add sync skipped — parse warning: {e}");
@@ -3567,7 +3618,7 @@ pub(crate) fn sync_same_cycle_pending_adds_into_go_queue(file: &Path) -> Result<
         .queue
         .as_deref()
         .and_then(agent_doc_core::frontmatter::QueueControl::parse);
-    let marker_control = crate::queue::marker_control(&queue_component.attrs);
+    let marker_control = agent_doc_queue::document_queue::marker_control(&queue_component.attrs);
     let queue_go_mode = matches!(
         marker_control.or(queue_control),
         Some(agent_doc_core::frontmatter::QueueControl::Start)
@@ -3582,7 +3633,9 @@ pub(crate) fn sync_same_cycle_pending_adds_into_go_queue(file: &Path) -> Result<
             && comp
                 .attrs
                 .get("queue")
-                .and_then(|value| crate::queue::BacklogQueueSyncMode::parse(value))
+                .and_then(|value| {
+                    agent_doc_queue::document_queue::BacklogQueueSyncMode::parse(value)
+                })
                 .is_some()
     });
     if !backlog_has_queue_attr {
@@ -3642,10 +3695,10 @@ pub(crate) fn sync_same_cycle_pending_adds_into_go_queue(file: &Path) -> Result<
         .iter()
         .filter_map(queue_entry_do_id)
         .collect::<std::collections::HashSet<String>>();
-    let Some(synced) = crate::queue::sync_backlog_into_queue(
+    let Some(synced) = agent_doc_queue::document_queue::sync_backlog_into_queue(
         &entries,
         &backlog_ids,
-        crate::queue::BacklogQueueSyncMode::Append,
+        agent_doc_queue::document_queue::BacklogQueueSyncMode::Append,
     ) else {
         return Ok(Vec::new());
     };
@@ -3660,7 +3713,7 @@ pub(crate) fn sync_same_cycle_pending_adds_into_go_queue(file: &Path) -> Result<
         return Ok(Vec::new());
     }
 
-    let new_body = crate::queue::render(&synced);
+    let new_body = agent_doc_queue::document_queue::render(&synced);
     let current_content = {
         let comps = agent_doc_element::element::parse(&content)?;
         let q = comps.iter().find(|c| c.name == "queue").unwrap();
@@ -3758,7 +3811,7 @@ pub(crate) fn converge_live_buffer_queue_shape(
             .find(|c| c.name == "queue")
             .map(|q| {
                 (
-                    crate::queue::has_auto_attr(&q.attrs),
+                    agent_doc_queue::document_queue::has_auto_attr(&q.attrs),
                     Some(q.content(content).to_string()),
                 )
             })
@@ -3837,9 +3890,9 @@ pub(crate) fn adopt_edited_queue_head_into_snapshot(file: &Path, current_content
 
 fn selected_queue_head_unchanged_in_snapshot(
     file: &Path,
-    current_entries: &[crate::queue::QueueEntry],
+    current_entries: &[agent_doc_queue::document_queue::QueueEntry],
 ) -> bool {
-    let current_prompts = crate::queue::prompts(current_entries);
+    let current_prompts = agent_doc_queue::document_queue::prompts(current_entries);
     let Some(current_head) = current_prompts.first() else {
         return false;
     };
@@ -3856,15 +3909,15 @@ fn selected_queue_head_unchanged_in_snapshot(
         return false;
     };
     let snapshot_body = &snapshot_content[snapshot_queue.open_end..snapshot_queue.close_start];
-    let Ok(snapshot_entries) = crate::queue::parse(snapshot_body) else {
+    let Ok(snapshot_entries) = agent_doc_queue::document_queue::parse(snapshot_body) else {
         return false;
     };
-    let snapshot_prompts = crate::queue::prompts(&snapshot_entries);
+    let snapshot_prompts = agent_doc_queue::document_queue::prompts(&snapshot_entries);
     let Some(snapshot_head) = snapshot_prompts.first() else {
         return false;
     };
-    crate::queue::strip_priority_markers(&snapshot_head.text)
-        == crate::queue::strip_priority_markers(&current_head.text)
+    agent_doc_queue::document_queue::strip_priority_markers(&snapshot_head.text)
+        == agent_doc_queue::document_queue::strip_priority_markers(&current_head.text)
 }
 
 fn queue_region_differs_from_snapshot(file: &Path, current_content: &str) -> bool {
@@ -3905,7 +3958,7 @@ fn queue_region_differs_from_snapshot(file: &Path, current_content: &str) -> boo
 /// "changed" so a freshly-populated inactive queue still warns.
 pub(crate) fn inactive_queue_changed_vs_snapshot(
     file: &Path,
-    current_entries: &[crate::queue::QueueEntry],
+    current_entries: &[agent_doc_queue::document_queue::QueueEntry],
 ) -> bool {
     let Ok(Some(snapshot_content)) = snapshot::load(file) else {
         return true;
@@ -3917,20 +3970,23 @@ pub(crate) fn inactive_queue_changed_vs_snapshot(
         return true;
     };
     let snap_body = &snapshot_content[snap_queue.open_end..snap_queue.close_start];
-    let Ok(snap_entries) = crate::queue::parse(snap_body) else {
+    let Ok(snap_entries) = agent_doc_queue::document_queue::parse(snap_body) else {
         return true;
     };
-    crate::queue::render(&snap_entries) != crate::queue::render(current_entries)
+    agent_doc_queue::document_queue::render(&snap_entries)
+        != agent_doc_queue::document_queue::render(current_entries)
 }
 
-pub(crate) fn queue_entries_are_drained_residue(entries: &[crate::queue::QueueEntry]) -> bool {
+pub(crate) fn queue_entries_are_drained_residue(
+    entries: &[agent_doc_queue::document_queue::QueueEntry],
+) -> bool {
     !entries.is_empty()
         && entries.iter().all(|entry| {
             matches!(
                 entry,
-                crate::queue::QueueEntry::Completed(_)
-                    | crate::queue::QueueEntry::Preset(_)
-                    | crate::queue::QueueEntry::Dispatch(_)
+                agent_doc_queue::document_queue::QueueEntry::Completed(_)
+                    | agent_doc_queue::document_queue::QueueEntry::Preset(_)
+                    | agent_doc_queue::document_queue::QueueEntry::Dispatch(_)
             )
         })
 }
@@ -4058,7 +4114,7 @@ mod tests {
         // pid 1 (init) is always live on Unix and is never this test process →
         // a genuine foreign in-flight queue edit.
         let doc_str = doc.to_string_lossy().to_string();
-        crate::queue_edit_owner::refresh_queue_edit_owner_lease(&doc_str, 1).unwrap();
+        agent_doc_queue::queue_edit_owner::refresh_queue_edit_owner_lease(&doc_str, 1).unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 
@@ -4079,7 +4135,7 @@ mod tests {
 
         // Once the lease clears, the next pass syncs normally (the defer is a
         // yield, not a permanent skip).
-        crate::queue_edit_owner::clear_queue_edit_owner_lease(&doc_str);
+        agent_doc_queue::queue_edit_owner::clear_queue_edit_owner_lease(&doc_str);
         let resumed = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(resumed.synced_queue_ids, vec!["alpha".to_string()]);
         assert!(
@@ -4182,14 +4238,18 @@ mod tests {
         let active: Vec<&str> = entries
             .iter()
             .filter_map(|entry| match entry {
-                crate::queue::QueueEntry::Prompt(prompt) => Some(prompt.text.as_str()),
+                agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
+                    Some(prompt.text.as_str())
+                }
                 _ => None,
             })
             .collect();
         let completed: Vec<&str> = entries
             .iter()
             .filter_map(|entry| match entry {
-                crate::queue::QueueEntry::Completed(prompt) => Some(prompt.text.as_str()),
+                agent_doc_queue::document_queue::QueueEntry::Completed(prompt) => {
+                    Some(prompt.text.as_str())
+                }
                 _ => None,
             })
             .collect();
@@ -4924,7 +4984,10 @@ mod tests {
                 Some(true),
                 "marker `{token}` must activate the queue"
             );
-            assert_eq!(state.queue_trigger, Some(crate::queue::QueueTrigger::Auto));
+            assert_eq!(
+                state.queue_trigger,
+                Some(agent_doc_queue::document_queue::QueueTrigger::Auto)
+            );
             let updated = std::fs::read_to_string(&doc).unwrap();
             assert!(
                 updated.contains("queue: start"),
@@ -5869,7 +5932,8 @@ mod tests {
                             && let Some(q) = comps.iter().find(|c| c.name == "queue")
                         {
                             let raw = doc[q.open_start..q.open_end].to_string();
-                            let new_tag = crate::queue::strip_auto_from_tag(&raw);
+                            let new_tag =
+                                agent_doc_queue::document_queue::strip_auto_from_tag(&raw);
                             if new_tag != raw {
                                 let mut rebuilt = String::with_capacity(doc.len());
                                 rebuilt.push_str(&doc[..q.open_start]);
@@ -7117,7 +7181,10 @@ mod tests {
         let components = agent_doc_element::element::parse(content).unwrap();
         let request = collect_backlog_queue_sync(&components, content)
             .expect("backlog with queue attr should produce a sync request");
-        assert_eq!(request.mode, crate::queue::BacklogQueueSyncMode::Sync);
+        assert_eq!(
+            request.mode,
+            agent_doc_queue::document_queue::BacklogQueueSyncMode::Sync
+        );
         assert_eq!(request.ids, vec!["a".to_string(), "b".to_string()]);
         assert!(request.enqueue_ids.is_empty());
     }
@@ -7136,7 +7203,10 @@ mod tests {
         let components = agent_doc_element::element::parse(content).unwrap();
         let request = collect_backlog_queue_sync(&components, content)
             .expect("enqueue markers should produce an append request");
-        assert_eq!(request.mode, crate::queue::BacklogQueueSyncMode::Append);
+        assert_eq!(
+            request.mode,
+            agent_doc_queue::document_queue::BacklogQueueSyncMode::Append
+        );
         assert_eq!(request.ids, vec!["a".to_string(), "c".to_string()]);
         assert_eq!(request.enqueue_ids, vec!["a".to_string(), "c".to_string()]);
     }
@@ -7341,21 +7411,21 @@ mod tests {
             .find(|c| c.name == "queue")
             .map(|q| updated[q.open_end..q.close_start].to_string())
             .unwrap();
-        let entries = crate::queue::parse(&queue_body).unwrap();
+        let entries = agent_doc_queue::document_queue::parse(&queue_body).unwrap();
         // The answered bare multi-line head is now a `Completed` (struck) entry,
         // not an active `Prompt` — session-check's residue guard keys off active
         // heads, so this is exactly what clears the churn.
         let active: Vec<&str> = entries
             .iter()
             .filter_map(|e| match e {
-                crate::queue::QueueEntry::Prompt(p) => Some(p.text.as_str()),
+                agent_doc_queue::document_queue::QueueEntry::Prompt(p) => Some(p.text.as_str()),
                 _ => None,
             })
             .collect();
         let completed: Vec<&str> = entries
             .iter()
             .filter_map(|e| match e {
-                crate::queue::QueueEntry::Completed(p) => Some(p.text.as_str()),
+                agent_doc_queue::document_queue::QueueEntry::Completed(p) => Some(p.text.as_str()),
                 _ => None,
             })
             .collect();
@@ -7414,8 +7484,8 @@ mod tests {
             .find(|c| c.name == "queue")
             .map(|q| updated[q.open_end..q.close_start].to_string())
             .unwrap();
-        let entries = crate::queue::parse(&queue_body).unwrap();
-        let active: Vec<String> = crate::queue::prompts(&entries)
+        let entries = agent_doc_queue::document_queue::parse(&queue_body).unwrap();
+        let active: Vec<String> = agent_doc_queue::document_queue::prompts(&entries)
             .iter()
             .map(|p| p.text.clone())
             .collect();
@@ -7432,7 +7502,7 @@ mod tests {
     }
 
     /// Test helper: read the queue entries from the on-disk document.
-    fn read_queue_entries(doc: &Path) -> Vec<crate::queue::QueueEntry> {
+    fn read_queue_entries(doc: &Path) -> Vec<agent_doc_queue::document_queue::QueueEntry> {
         let updated = std::fs::read_to_string(doc).unwrap();
         let queue_body = agent_doc_element::element::parse(&updated)
             .unwrap()
@@ -7440,7 +7510,7 @@ mod tests {
             .find(|c| c.name == "queue")
             .map(|q| updated[q.open_end..q.close_start].to_string())
             .unwrap();
-        crate::queue::parse(&queue_body).unwrap()
+        agent_doc_queue::document_queue::parse(&queue_body).unwrap()
     }
 
     #[test]
@@ -7488,11 +7558,11 @@ mod tests {
         let completed: Vec<&str> = entries
             .iter()
             .filter_map(|e| match e {
-                crate::queue::QueueEntry::Completed(p) => Some(p.text.as_str()),
+                agent_doc_queue::document_queue::QueueEntry::Completed(p) => Some(p.text.as_str()),
                 _ => None,
             })
             .collect();
-        let active: Vec<String> = crate::queue::prompts(&entries)
+        let active: Vec<String> = agent_doc_queue::document_queue::prompts(&entries)
             .iter()
             .map(|p| p.text.clone())
             .collect();
@@ -7554,11 +7624,11 @@ mod tests {
         let completed: Vec<&str> = entries
             .iter()
             .filter_map(|e| match e {
-                crate::queue::QueueEntry::Completed(p) => Some(p.text.as_str()),
+                agent_doc_queue::document_queue::QueueEntry::Completed(p) => Some(p.text.as_str()),
                 _ => None,
             })
             .collect();
-        let active: Vec<String> = crate::queue::prompts(&entries)
+        let active: Vec<String> = agent_doc_queue::document_queue::prompts(&entries)
             .iter()
             .map(|p| p.text.clone())
             .collect();
@@ -7567,7 +7637,7 @@ mod tests {
             completed.iter().any(|t| {
                 t.contains("Fix JB File Cache Conflict dialogs")
                     && t.contains("auto-struck: completed by #jbcache (#qftbklgstrike)")
-                    && !t.contains(crate::queue::IN_PROGRESS_MARKER)
+                    && !t.contains(agent_doc_queue::document_queue::IN_PROGRESS_MARKER)
             }),
             "struck head must be annotated with NO 🚧 marker:\ncompleted={completed:?}"
         );
@@ -7575,23 +7645,21 @@ mod tests {
         assert!(
             !completed
                 .iter()
-                .any(|t| t.contains(crate::queue::IN_PROGRESS_MARKER)),
+                .any(|t| t.contains(agent_doc_queue::document_queue::IN_PROGRESS_MARKER)),
             "no completed entry may carry 🚧:\ncompleted={completed:?}"
         );
         // The newly-promoted active head is the in-progress head now.
         assert!(
             active
                 .iter()
-                .filter(|t| t.contains(crate::queue::IN_PROGRESS_MARKER))
+                .filter(|t| t.contains(agent_doc_queue::document_queue::IN_PROGRESS_MARKER))
                 .count()
                 == 1,
             "exactly one active head should carry 🚧 (the new in-progress head):\nactive={active:?}"
         );
         assert!(
-            active
-                .iter()
-                .any(|t| t.contains("[#stillopen]")
-                    && t.contains(crate::queue::IN_PROGRESS_MARKER)),
+            active.iter().any(|t| t.contains("[#stillopen]")
+                && t.contains(agent_doc_queue::document_queue::IN_PROGRESS_MARKER)),
             "the genuinely-active next head should be the 🚧 in-progress head:\nactive={active:?}"
         );
     }
@@ -7631,7 +7699,7 @@ mod tests {
         let completed: Vec<&str> = entries
             .iter()
             .filter_map(|e| match e {
-                crate::queue::QueueEntry::Completed(p) => Some(p.text.as_str()),
+                agent_doc_queue::document_queue::QueueEntry::Completed(p) => Some(p.text.as_str()),
                 _ => None,
             })
             .collect();
@@ -7682,7 +7750,7 @@ mod tests {
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         let entries = read_queue_entries(&doc);
-        let active: Vec<String> = crate::queue::prompts(&entries)
+        let active: Vec<String> = agent_doc_queue::document_queue::prompts(&entries)
             .iter()
             .map(|p| p.text.clone())
             .collect();
@@ -7739,7 +7807,7 @@ mod tests {
             "id-backed head must not be touched by the #qftbklgstrike free-text path:\n{updated}"
         );
         let entries = read_queue_entries(&doc);
-        let active: Vec<String> = crate::queue::prompts(&entries)
+        let active: Vec<String> = agent_doc_queue::document_queue::prompts(&entries)
             .iter()
             .map(|p| p.text.clone())
             .collect();

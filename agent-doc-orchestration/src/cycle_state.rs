@@ -248,10 +248,10 @@ pub fn active_queue_directive_heads(doc: &str) -> Vec<String> {
     let Some(queue) = components.iter().find(|c| c.name == "queue") else {
         return Vec::new();
     };
-    let Ok(entries) = crate::queue::parse(queue.content(doc)) else {
+    let Ok(entries) = agent_doc_queue::document_queue::parse(queue.content(doc)) else {
         return Vec::new();
     };
-    crate::queue::prompts(&entries)
+    agent_doc_queue::document_queue::prompts(&entries)
         .into_iter()
         .map(|prompt| prompt.text.trim().to_string())
         .filter(|text| !text.is_empty())
@@ -269,10 +269,10 @@ pub fn active_free_text_queue_heads(doc: &str) -> Vec<String> {
     let Some(queue) = components.iter().find(|c| c.name == "queue") else {
         return Vec::new();
     };
-    let Ok(entries) = crate::queue::parse(queue.content(doc)) else {
+    let Ok(entries) = agent_doc_queue::document_queue::parse(queue.content(doc)) else {
         return Vec::new();
     };
-    crate::queue::prompts(&entries)
+    agent_doc_queue::document_queue::prompts(&entries)
         .into_iter()
         .map(|prompt| prompt.text.trim().to_string())
         .filter(|text| !text.is_empty() && !is_do_directive(text))

@@ -16,10 +16,10 @@
 use anyhow::{Context, Result, bail};
 use std::path::Path;
 
-use crate::queue;
 use crate::snapshot;
 use agent_doc_element::element;
 use agent_doc_element_backlog::backlog;
+use agent_doc_queue::document_queue as queue;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ConsumeOptions {
@@ -113,7 +113,7 @@ pub fn consume_with_options(file: &Path, count: usize, options: ConsumeOptions) 
     // preflight queue maintenance and the supervisor idle-watch defer instead of
     // round-tripping a torn intermediate queue. Released on drop (incl. early
     // return / `bail!`).
-    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
+    let _queue_edit_guard = agent_doc_queue::queue_edit_owner::QueueEditGuard::acquire(file);
     let target = count.max(1);
     let mut struck: Vec<String> = Vec::new();
     let mut last_remaining = 0usize;
@@ -240,7 +240,7 @@ pub fn consume(file: &Path, count: usize) -> Result<()> {
 pub fn prune_noise(file: &Path) -> Result<()> {
     // #sqedit-race Phase 2: hold the queue-edit lease across the prune so the
     // supervisor idle-watch + preflight maintenance defer (single queue writer).
-    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
+    let _queue_edit_guard = agent_doc_queue::queue_edit_owner::QueueEditGuard::acquire(file);
     let struck = crate::write::prune_noise_queue_heads(file)?;
     if struck == 0 {
         println!(

@@ -24,6 +24,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Authoritative actor dispatch guard moved to `agent-doc-controller`.** The supervisor-health/runtime-state gate that decides whether an authoritative actor can accept routed dispatch now lives in `agent_doc_controller::dispatch`. Orchestration maps supervisor IPC facts into the controller dispatch vocabulary and keeps only degraded-pane fallback, logging, and tmux/process adapters.
 
+- **Dispatch-start proof classification moved to `agent-doc-controller`.** The routed dispatch-start proof vocabulary, accepted-only fail-closed decision, and dispatch-only proof-required default now live in `agent_doc_controller::dispatch`. Orchestration still observes tmux/hooks and formats operator diagnostics, but calls the focused controller policy directly.
+
 - **Route-owned reap policy moved to `agent-doc-supervisor`.** The route-owned supervisor completion reap policy, liveness reason vocabulary, and hidden CLI reap-policy parser now live in `agent_doc_supervisor::route_owned`. The start path keeps only document liveness/file adapters and calls the focused supervisor API directly; the CLI shell imports the focused type instead of preserving an orchestration API path.
 
 - **Stale install-artifact policy moved to `agent-doc-supervisor`.** The `#install-stale-guard` grace window and timestamp classifier now live in `agent_doc_supervisor::config` beside auto-install/stale-binary policy. Preflight still discovers artifact mtimes and formats the warning, but calls the focused supervisor API directly instead of owning the staleness rule.

@@ -1,4 +1,5 @@
-use super::types::{DispatchProof, FlowEvent, FlowName, FlowOutcome, FlowStage, RouteDecision};
+use super::types::{FlowEvent, FlowName, FlowOutcome, FlowStage, RouteDecision};
+use agent_doc_controller::dispatch::RoutedDispatchStartProof;
 use std::path::Path;
 use std::time::Duration;
 
@@ -195,66 +196,6 @@ impl DispatchOnlyReopenDelivery {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RoutedDispatchStartProof {
-    CommandAcceptedOnly,
-    DispatchStartUnproven,
-    HookPromptMatched,
-    HookStateAdvanced,
-    PaneStateChanged,
-}
-
-impl RoutedDispatchStartProof {
-    pub const fn dispatch_stage_label(self) -> &'static str {
-        match self {
-            Self::CommandAcceptedOnly => "accepted",
-            Self::DispatchStartUnproven => "accepted_without_dispatch_start_proof",
-            Self::HookPromptMatched => "consumed",
-            Self::HookStateAdvanced => "submitted",
-            Self::PaneStateChanged => "pane_state_changed",
-        }
-    }
-
-    pub const fn proof_scope_label(self) -> &'static str {
-        match self {
-            Self::CommandAcceptedOnly | Self::DispatchStartUnproven => "accepted_only",
-            Self::HookPromptMatched | Self::HookStateAdvanced | Self::PaneStateChanged => {
-                "dispatch_start"
-            }
-        }
-    }
-
-    pub const fn proof_scope_description(self) -> &'static str {
-        match self {
-            Self::CommandAcceptedOnly => {
-                "accepted-only; no harness dispatch-start proof was available"
-            }
-            Self::DispatchStartUnproven => "accepted-only; harness dispatch-start proof timed out",
-            Self::HookPromptMatched => "dispatch-start proof matched the routed prompt",
-            Self::HookStateAdvanced => "dispatch-start proof observed newer harness prompt state",
-            Self::PaneStateChanged => "dispatch-start proof observed pane state leave idle chrome",
-        }
-    }
-
-    pub const fn startup_miss_label(self) -> &'static str {
-        match self {
-            Self::CommandAcceptedOnly => "acceptance",
-            Self::DispatchStartUnproven => "accepted-without-dispatch-proof",
-            Self::HookPromptMatched => "consumption",
-            Self::HookStateAdvanced => "submission",
-            Self::PaneStateChanged => "pane-state-change",
-        }
-    }
-
-    pub const fn typed_proof(self) -> DispatchProof {
-        match self {
-            Self::CommandAcceptedOnly | Self::DispatchStartUnproven => DispatchProof::AcceptedOnly,
-            Self::HookPromptMatched => DispatchProof::Consumed,
-            Self::HookStateAdvanced | Self::PaneStateChanged => DispatchProof::DispatchStarted,
-        }
-    }
-}
-
 pub fn direct_pane_submit_outcome(
     status: DirectPaneSubmitStatus,
     dispatch_start_proof: Option<RoutedDispatchStartProof>,
@@ -264,50 +205,6 @@ pub fn direct_pane_submit_outcome(
         (DirectPaneSubmitStatus::TimedOut, Some(_)) => "acceptance_unobserved_dispatch_proven",
         (DirectPaneSubmitStatus::TimedOut, None) => "acceptance_unobserved",
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DispatchStartProofDecision {
-    Accepted,
-    FailClosedAcceptedOnly,
-}
-
-pub fn decide_dispatch_start_proof(
-    proof: RoutedDispatchStartProof,
-    dispatch_start_proof_required: bool,
-) -> DispatchStartProofDecision {
-    if proof == RoutedDispatchStartProof::DispatchStartUnproven
-        || proof == RoutedDispatchStartProof::CommandAcceptedOnly && dispatch_start_proof_required
-    {
-        DispatchStartProofDecision::FailClosedAcceptedOnly
-    } else {
-        DispatchStartProofDecision::Accepted
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DispatchStartProofFacts {
-    pub proof: RoutedDispatchStartProof,
-    pub dispatch_start_proof_required: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DispatchStartProofClassification {
-    pub decision: DispatchStartProofDecision,
-    pub typed_proof: DispatchProof,
-}
-
-pub fn classify_dispatch_start_proof(
-    facts: DispatchStartProofFacts,
-) -> DispatchStartProofClassification {
-    DispatchStartProofClassification {
-        decision: decide_dispatch_start_proof(facts.proof, facts.dispatch_start_proof_required),
-        typed_proof: facts.proof.typed_proof(),
-    }
-}
-
-pub fn dispatch_only_dispatch_start_proof_required(_harness_binary: &str) -> bool {
-    false
 }
 
 pub fn should_print_dispatch_only_unproven_progress() -> bool {
@@ -1291,39 +1188,6 @@ mod tests {
     }
 
     #[test]
-    fn accepted_only_dispatch_start_proof_fails_only_when_required() {
-        assert_eq!(
-            decide_dispatch_start_proof(RoutedDispatchStartProof::CommandAcceptedOnly, true),
-            DispatchStartProofDecision::FailClosedAcceptedOnly
-        );
-        assert_eq!(
-            decide_dispatch_start_proof(RoutedDispatchStartProof::CommandAcceptedOnly, false),
-            DispatchStartProofDecision::Accepted
-        );
-        assert_eq!(
-            decide_dispatch_start_proof(RoutedDispatchStartProof::DispatchStartUnproven, false),
-            DispatchStartProofDecision::FailClosedAcceptedOnly
-        );
-        assert_eq!(
-            decide_dispatch_start_proof(RoutedDispatchStartProof::HookPromptMatched, true),
-            DispatchStartProofDecision::Accepted
-        );
-        assert_eq!(
-            decide_dispatch_start_proof(RoutedDispatchStartProof::PaneStateChanged, true),
-            DispatchStartProofDecision::Accepted
-        );
-        let classification = classify_dispatch_start_proof(DispatchStartProofFacts {
-            proof: RoutedDispatchStartProof::HookStateAdvanced,
-            dispatch_start_proof_required: true,
-        });
-        assert_eq!(
-            classification.decision,
-            DispatchStartProofDecision::Accepted
-        );
-        assert_eq!(classification.typed_proof, DispatchProof::DispatchStarted);
-    }
-
-    #[test]
     fn direct_submit_outcome_separates_acceptance_from_dispatch_proof() {
         assert_eq!(
             direct_pane_submit_outcome(DirectPaneSubmitStatus::Accepted, None),
@@ -1360,9 +1224,6 @@ mod tests {
 
     #[test]
     fn dispatch_only_proof_policy_accepts_enter_delivery_for_all_harnesses() {
-        assert!(!dispatch_only_dispatch_start_proof_required("codex"));
-        assert!(!dispatch_only_dispatch_start_proof_required("opencode"));
-        assert!(!dispatch_only_dispatch_start_proof_required("claude"));
         assert!(should_print_dispatch_only_unproven_progress());
     }
 

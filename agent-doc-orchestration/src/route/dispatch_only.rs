@@ -462,7 +462,7 @@ pub(crate) fn dispatch_only_dispatch_start_proof_required(
     if harness.binary == "codex" && codex_dispatch_start_tracking_enabled(file) {
         return true;
     }
-    flow_dispatch_only_dispatch_start_proof_required(&harness.binary)
+    controller_dispatch_only_dispatch_start_proof_required(&harness.binary)
 }
 
 pub(crate) fn require_dispatch_only_dispatch_start_proof(

@@ -3679,6 +3679,11 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub enum DispatchRuntimeHealth",
         "pub struct AuthoritativeRuntimeFacts",
         "pub fn authoritative_actor_dispatch_guard_reason(",
+        "pub enum RoutedDispatchStartProof",
+        "pub enum DispatchStartProofDecision",
+        "pub struct DispatchStartProofFacts",
+        "pub fn classify_dispatch_start_proof(",
+        "pub fn dispatch_only_dispatch_start_proof_required(",
         "pub fn dispatch_only_busy_should_wait_for_ready(",
         "pub fn dispatch_only_should_probe_active_turn_cue(",
         "pub enum DispatchDrainRetryDecision",
@@ -3707,6 +3712,11 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub enum ActorRuntimeHealth",
         "pub struct AuthoritativeRuntimeFacts",
         "pub fn authoritative_actor_dispatch_guard_reason(",
+        "pub enum RoutedDispatchStartProof",
+        "pub enum DispatchStartProofDecision",
+        "pub struct DispatchStartProofFacts",
+        "pub fn classify_dispatch_start_proof(",
+        "pub fn dispatch_only_dispatch_start_proof_required(",
     ] {
         assert!(
             !flow_routed_reopen_source.contains(forbidden_snippet),
@@ -3717,6 +3727,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         route_source.contains("use agent_doc_controller::dispatch::{")
             && route_source.contains("DispatchRuntimeHealth")
             && route_source.contains("controller_authoritative_actor_dispatch_guard_reason(")
+            && route_source.contains("RoutedDispatchStartProof")
+            && route_source.contains("classify_dispatch_start_proof")
             && route_source.contains("DispatchActorState")
             && route_source.contains("dispatch_only_busy_should_wait_for_ready(")
             && route_source.contains("dispatch_only_should_probe_active_turn_cue(")

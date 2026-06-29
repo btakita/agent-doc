@@ -151,6 +151,100 @@ pub fn dispatch_only_should_probe_active_turn_cue(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoutedDispatchStartProof {
+    CommandAcceptedOnly,
+    DispatchStartUnproven,
+    HookPromptMatched,
+    HookStateAdvanced,
+    PaneStateChanged,
+}
+
+impl RoutedDispatchStartProof {
+    pub const fn dispatch_stage_label(self) -> &'static str {
+        match self {
+            Self::CommandAcceptedOnly => "accepted",
+            Self::DispatchStartUnproven => "accepted_without_dispatch_start_proof",
+            Self::HookPromptMatched => "consumed",
+            Self::HookStateAdvanced => "submitted",
+            Self::PaneStateChanged => "pane_state_changed",
+        }
+    }
+
+    pub const fn proof_scope_label(self) -> &'static str {
+        match self {
+            Self::CommandAcceptedOnly | Self::DispatchStartUnproven => "accepted_only",
+            Self::HookPromptMatched | Self::HookStateAdvanced | Self::PaneStateChanged => {
+                "dispatch_start"
+            }
+        }
+    }
+
+    pub const fn proof_scope_description(self) -> &'static str {
+        match self {
+            Self::CommandAcceptedOnly => {
+                "accepted-only; no harness dispatch-start proof was available"
+            }
+            Self::DispatchStartUnproven => "accepted-only; harness dispatch-start proof timed out",
+            Self::HookPromptMatched => "dispatch-start proof matched the routed prompt",
+            Self::HookStateAdvanced => "dispatch-start proof observed newer harness prompt state",
+            Self::PaneStateChanged => "dispatch-start proof observed pane state leave idle chrome",
+        }
+    }
+
+    pub const fn startup_miss_label(self) -> &'static str {
+        match self {
+            Self::CommandAcceptedOnly => "acceptance",
+            Self::DispatchStartUnproven => "accepted-without-dispatch-proof",
+            Self::HookPromptMatched => "consumption",
+            Self::HookStateAdvanced => "submission",
+            Self::PaneStateChanged => "pane-state-change",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DispatchStartProofDecision {
+    Accepted,
+    FailClosedAcceptedOnly,
+}
+
+pub fn decide_dispatch_start_proof(
+    proof: RoutedDispatchStartProof,
+    dispatch_start_proof_required: bool,
+) -> DispatchStartProofDecision {
+    if proof == RoutedDispatchStartProof::DispatchStartUnproven
+        || proof == RoutedDispatchStartProof::CommandAcceptedOnly && dispatch_start_proof_required
+    {
+        DispatchStartProofDecision::FailClosedAcceptedOnly
+    } else {
+        DispatchStartProofDecision::Accepted
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DispatchStartProofFacts {
+    pub proof: RoutedDispatchStartProof,
+    pub dispatch_start_proof_required: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DispatchStartProofClassification {
+    pub decision: DispatchStartProofDecision,
+}
+
+pub fn classify_dispatch_start_proof(
+    facts: DispatchStartProofFacts,
+) -> DispatchStartProofClassification {
+    DispatchStartProofClassification {
+        decision: decide_dispatch_start_proof(facts.proof, facts.dispatch_start_proof_required),
+    }
+}
+
+pub fn dispatch_only_dispatch_start_proof_required(_harness_binary: &str) -> bool {
+    false
+}
+
 /// Decision for the route-dispatch drain retry loop after a mid-drain `repair`
 /// plus `session_check` failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -424,6 +518,57 @@ mod tests {
             .unwrap()
             .contains("missing")
         );
+    }
+
+    #[test]
+    fn dispatch_start_proof_fails_only_when_required_or_unproven() {
+        assert_eq!(
+            decide_dispatch_start_proof(RoutedDispatchStartProof::CommandAcceptedOnly, true),
+            DispatchStartProofDecision::FailClosedAcceptedOnly
+        );
+        assert_eq!(
+            decide_dispatch_start_proof(RoutedDispatchStartProof::CommandAcceptedOnly, false),
+            DispatchStartProofDecision::Accepted
+        );
+        assert_eq!(
+            decide_dispatch_start_proof(RoutedDispatchStartProof::DispatchStartUnproven, false),
+            DispatchStartProofDecision::FailClosedAcceptedOnly
+        );
+        assert_eq!(
+            decide_dispatch_start_proof(RoutedDispatchStartProof::HookPromptMatched, true),
+            DispatchStartProofDecision::Accepted
+        );
+        assert_eq!(
+            decide_dispatch_start_proof(RoutedDispatchStartProof::PaneStateChanged, true),
+            DispatchStartProofDecision::Accepted
+        );
+        assert_eq!(
+            classify_dispatch_start_proof(DispatchStartProofFacts {
+                proof: RoutedDispatchStartProof::HookStateAdvanced,
+                dispatch_start_proof_required: true,
+            })
+            .decision,
+            DispatchStartProofDecision::Accepted
+        );
+        assert_eq!(
+            RoutedDispatchStartProof::HookStateAdvanced.dispatch_stage_label(),
+            "submitted"
+        );
+        assert_eq!(
+            RoutedDispatchStartProof::HookStateAdvanced.proof_scope_label(),
+            "dispatch_start"
+        );
+        assert_eq!(
+            RoutedDispatchStartProof::HookStateAdvanced.startup_miss_label(),
+            "submission"
+        );
+    }
+
+    #[test]
+    fn dispatch_only_start_proof_policy_accepts_enter_delivery_for_all_harnesses() {
+        assert!(!dispatch_only_dispatch_start_proof_required("codex"));
+        assert!(!dispatch_only_dispatch_start_proof_required("opencode"));
+        assert!(!dispatch_only_dispatch_start_proof_required("claude"));
     }
 
     #[test]

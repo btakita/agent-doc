@@ -1379,7 +1379,7 @@ pub unsafe extern "C" fn agent_doc_reconnect_buffer_decision(
     file_path: *const c_char,
     buffer_content: *const c_char,
 ) -> *mut c_char {
-    use agent_doc_orchestration::flow::document_mutation::{
+    use agent_doc_document_realtime::write_policy::{
         ReconnectBufferDecision, decide_reconnect_buffer,
     };
     let keep = || {

@@ -4669,7 +4669,7 @@ fn full_content_source_proof_sim_rejects_stale_editor_buffers() {
 
         assert_eq!(
             decision,
-            agent_doc_orchestration::flow::document_mutation::FullContentVisibleReplacementDecision::RejectStaleSourceBuffer,
+            agent_doc_document_realtime::write_policy::FullContentVisibleReplacementDecision::RejectStaleSourceBuffer,
             "{source:?} must reject full-content replacement when the editor buffer drifted"
         );
         assert!(
@@ -4697,7 +4697,7 @@ fn full_content_source_proof_sim_rejects_stale_editor_buffers() {
 
 #[test]
 fn reconnect_buffer_sim_rereads_stale_then_keeps_user_edits() {
-    use agent_doc_orchestration::flow::document_mutation::{
+    use agent_doc_document_realtime::write_policy::{
         ReconnectBufferDecision, decide_reconnect_buffer,
     };
     let mut world = SimWorld::new(2_044);
@@ -4756,7 +4756,7 @@ fn reconnect_buffer_sim_rereads_stale_then_keeps_user_edits() {
 
 #[test]
 fn editorless_cli_sim_uses_detached_disk_and_live_editor_fail_closed() {
-    use agent_doc_orchestration::flow::document_mutation::{
+    use agent_doc_document_realtime::write_policy::{
         EditorlessDiskFallbackDecision, decide_editorless_disk_fallback,
     };
     let mut world = SimWorld::new(2_046);
@@ -5768,11 +5768,11 @@ fn ipc_snapshot_guard_blocks_live_queue_drift_after_preflight() {
 
 #[test]
 fn closeout_recovery_transition_scenarios_cover_simworld_inputs() {
+    use agent_doc_document_realtime::write_policy::FullContentVisibleReplacementDecision;
     use agent_doc_orchestration::flow::closeout::{
         CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput, CloseoutRecoveryState,
         closeout_recovery_decision_from_state,
     };
-    use agent_doc_orchestration::flow::document_mutation::FullContentVisibleReplacementDecision;
 
     let file = Path::new("sim.md");
 

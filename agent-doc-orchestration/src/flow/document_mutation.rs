@@ -4,6 +4,9 @@ use super::types::{
 use anyhow::{Context, Result};
 use std::path::Path;
 
+use agent_doc_document_realtime::write_policy::{
+    FullContentVisibleReplacementDecision, VisibleWriteDecision,
+};
 use agent_doc_element::element;
 
 use agent_doc_template as template;
@@ -218,48 +221,15 @@ pub fn log_patchback_parse_event(file: &Path, shape: PatchbackShape, outcome: Fl
     super::proof::log_flow_event(file, patchback_parse_event(shape, outcome));
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct VisibleWriteTypingFacts {
-    pub idle_reached: bool,
-    pub timeout_ms: u64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum VisibleWriteDecision {
-    Apply,
-    DeferActiveTyping,
-}
-
-impl VisibleWriteDecision {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Apply => "apply",
-            Self::DeferActiveTyping => "defer_active_typing",
-        }
-    }
-
-    pub const fn outcome(self) -> FlowOutcome {
-        match self {
-            Self::Apply => FlowOutcome::Completed,
-            Self::DeferActiveTyping => FlowOutcome::Blocked,
-        }
-    }
-}
-
-pub fn decide_visible_write_after_typing(facts: VisibleWriteTypingFacts) -> VisibleWriteDecision {
-    let _timeout_ms = facts.timeout_ms;
-    if facts.idle_reached {
-        VisibleWriteDecision::Apply
-    } else {
-        VisibleWriteDecision::DeferActiveTyping
-    }
-}
-
 pub fn visible_write_guard_event(decision: VisibleWriteDecision, source: &str) -> FlowEvent {
+    let outcome = match decision {
+        VisibleWriteDecision::Apply => FlowOutcome::Completed,
+        VisibleWriteDecision::DeferActiveTyping => FlowOutcome::Blocked,
+    };
     FlowEvent::new(
         FlowName::DocumentMutation,
         FlowStage::PreWriteGuard,
-        decision.outcome(),
+        outcome,
     )
     .with_reason(format!(
         "visible_write_typing_{}:{source}",
@@ -315,221 +285,23 @@ pub fn log_template_structure_guard_event(
     super::proof::log_flow_event(file, template_structure_guard_event(reason, outcome));
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FullContentSourceProof {
-    pub expected_content_hash: String,
-    pub expected_content_len: usize,
-}
-
-impl FullContentSourceProof {
-    pub fn from_content(content: &str) -> Self {
-        Self {
-            expected_content_hash: crate::ops_log::content_hash(content),
-            expected_content_len: content.len(),
-        }
-    }
-
-    pub fn matches_current(&self, current_content: &str) -> bool {
-        current_content.len() == self.expected_content_len
-            && crate::ops_log::content_hash(current_content) == self.expected_content_hash
-    }
-}
-
-pub fn full_content_source_proof(before_content: Option<&str>) -> Option<FullContentSourceProof> {
-    before_content.map(FullContentSourceProof::from_content)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FullContentVisibleReplacementDecision {
-    Apply,
-    RejectStaleSourceBuffer,
-}
-
-impl FullContentVisibleReplacementDecision {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Apply => "apply",
-            Self::RejectStaleSourceBuffer => "reject_stale_source_buffer",
-        }
-    }
-
-    pub const fn outcome(self) -> FlowOutcome {
-        match self {
-            Self::Apply => FlowOutcome::Completed,
-            Self::RejectStaleSourceBuffer => FlowOutcome::Blocked,
-        }
-    }
-}
-
-pub fn decide_full_content_visible_replacement(
-    current_content: &str,
-    proof: Option<&FullContentSourceProof>,
-) -> FullContentVisibleReplacementDecision {
-    match proof {
-        Some(proof) if !proof.matches_current(current_content) => {
-            FullContentVisibleReplacementDecision::RejectStaleSourceBuffer
-        }
-        _ => FullContentVisibleReplacementDecision::Apply,
-    }
-}
-
 pub fn full_content_visible_replacement_event(
     decision: FullContentVisibleReplacementDecision,
     source: &str,
 ) -> FlowEvent {
+    let outcome = match decision {
+        FullContentVisibleReplacementDecision::Apply => FlowOutcome::Completed,
+        FullContentVisibleReplacementDecision::RejectStaleSourceBuffer => FlowOutcome::Blocked,
+    };
     FlowEvent::new(
         FlowName::DocumentMutation,
         FlowStage::PreWriteGuard,
-        decision.outcome(),
+        outcome,
     )
     .with_reason(format!(
         "full_content_source_buffer_{}:{source}",
         decision.as_str()
     ))
-}
-
-/// Decision for reconciling a JetBrains editor buffer against disk when the
-/// plugin (re)connects its IPC listener (`#yzer` / `#evmhplugin`, the plugin
-/// half of `#evmh`).
-///
-/// While the plugin is disconnected (supervisor down, plugin/cdylib reload), the
-/// binary may commit control-plane content to disk/HEAD. On reconnect the editor
-/// buffer is then stale vs HEAD. If the plugin later pushes that stale buffer
-/// back via `save_document`, it reverts the binary's committed writes — the
-/// `#postcommit-ipc-worktree-corruption` direction. The fix: on reconnect,
-/// re-read disk/HEAD into the buffer when (and only when) we can PROVE the buffer
-/// is stale committed content. The editor wins only for genuine user edits
-/// (per `#editorbufwin` P1), so an unprovable divergence keeps the buffer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReconnectBufferDecision {
-    /// Buffer already matches disk — nothing to do.
-    InSync,
-    /// Buffer equals a prior commit of the file and disk is clean HEAD — the
-    /// binary advanced disk while the plugin was disconnected. HEAD wins:
-    /// re-read disk into the buffer.
-    RereadDisk,
-    /// Buffer diverges from disk but is not a known prior commit — treat as
-    /// genuine local user edits. Editor wins: keep the buffer.
-    KeepBuffer,
-}
-
-impl ReconnectBufferDecision {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::InSync => "in_sync",
-            Self::RereadDisk => "reread_disk",
-            Self::KeepBuffer => "keep_buffer",
-        }
-    }
-}
-
-/// Decide how to reconcile an editor buffer with disk on plugin IPC reconnect.
-///
-/// - `buffer_matches_disk`: editor buffer content == on-disk content.
-/// - `disk_is_committed_head`: on-disk content == the file's blob at `HEAD`
-///   (the working tree is clean for this file — disk is authoritative committed
-///   content the binary wrote, not a half-applied write).
-/// - `buffer_matches_prior_commit`: editor buffer content == the file's blob at
-///   some recent prior commit (definitive proof the buffer is stale committed
-///   content, not unsynced user edits).
-///
-/// Re-read disk only when the buffer is PROVABLY stale (equals a prior commit)
-/// and disk is clean HEAD; otherwise keep the buffer so genuine user edits are
-/// never clobbered.
-pub fn decide_reconnect_buffer(
-    buffer_matches_disk: bool,
-    disk_is_committed_head: bool,
-    buffer_matches_prior_commit: bool,
-) -> ReconnectBufferDecision {
-    if buffer_matches_disk {
-        return ReconnectBufferDecision::InSync;
-    }
-    if disk_is_committed_head && buffer_matches_prior_commit {
-        return ReconnectBufferDecision::RereadDisk;
-    }
-    ReconnectBufferDecision::KeepBuffer
-}
-
-/// Decision for a finalize/converge write when the editor-IPC socket may be
-/// absent, connectable, or backed by a live editor endpoint (`#kcb5`).
-///
-/// After the 08b in-process-supervisor cutover the controller hosts the
-/// editor-IPC socket even when no JB plugin is attached, so a pure-CLI session
-/// can have a *connectable* socket with no editor. Under the realtime cutover, a
-/// connectable socket that fails to prove delivery is still not permission to
-/// write behind a live editor path. If no editor endpoint owns the document, the
-/// current file is the detached realtime replica and may be updated through the
-/// guarded `DetachedDisk` path.
-///
-/// Safety invariant: unproven delivery to a live editor always fails closed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EditorlessDiskFallbackDecision {
-    /// A live editor endpoint is (or may be) present and delivery is unproven —
-    /// never clobber the buffer; retry the editor/CRDT path.
-    FailClosed,
-    /// No editor endpoint owns the document and the editor path is absent or has
-    /// failed its delivery proof. The current file is the detached realtime
-    /// replica, so a guarded direct disk write is allowed.
-    DetachedDisk,
-    /// Explicit operator force — route to the controller-host disk write.
-    ForceDiskNoEditor,
-    /// A live editor endpoint is present and reachable — converge through it.
-    ConvergeViaEditor,
-}
-
-impl EditorlessDiskFallbackDecision {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::FailClosed => "fail_closed",
-            Self::DetachedDisk => "detached_disk",
-            Self::ForceDiskNoEditor => "force_disk_no_editor",
-            Self::ConvergeViaEditor => "converge_via_editor",
-        }
-    }
-}
-
-/// Decide how to handle a finalize/converge write against a (possibly editor-less)
-/// editor-IPC socket (`#kcb5`).
-///
-/// - `socket_connectable`: the editor-IPC socket accepts a connection (true even
-///   when only the controller — not a JB plugin — is behind it).
-/// - `editor_endpoint_proven`: a live JB plugin editor consumer is registered for
-///   this document (distinct from the controller merely hosting the socket).
-/// - `consecutive_no_ack`: consecutive `no_ack` / `send_failed` / `error` acks
-///   with no proven delivery this run.
-/// - `threshold`: how many consecutive failures prove "no delivery."
-/// - `force_disk_requested`: the operator passed `--force-disk`.
-///
-/// Routes to disk when no editor endpoint owns the document and the editor path
-/// is absent or has proven no delivery; explicit `--force-disk` remains a
-/// separate operator override.
-pub fn decide_editorless_disk_fallback(
-    socket_connectable: bool,
-    editor_endpoint_proven: bool,
-    consecutive_no_ack: usize,
-    threshold: usize,
-    force_disk_requested: bool,
-) -> EditorlessDiskFallbackDecision {
-    if force_disk_requested {
-        return EditorlessDiskFallbackDecision::ForceDiskNoEditor;
-    }
-    if editor_endpoint_proven {
-        // A real editor buffer is in play: protect it. Unproven delivery means
-        // retry, never a disk clobber (preserves #editorbufwin / the FCC guard).
-        return if consecutive_no_ack >= threshold && threshold > 0 {
-            EditorlessDiskFallbackDecision::FailClosed
-        } else {
-            EditorlessDiskFallbackDecision::ConvergeViaEditor
-        };
-    }
-    // No editor endpoint proven. With no socket there is no editor transport to
-    // converge through; after repeated no-ACKs a controller-hosted socket has
-    // likewise proven no delivery. In both cases the current file is the
-    // detached realtime replica.
-    if !socket_connectable || (threshold > 0 && consecutive_no_ack >= threshold) {
-        return EditorlessDiskFallbackDecision::DetachedDisk;
-    }
-    EditorlessDiskFallbackDecision::FailClosed
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -681,89 +453,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn editorless_detached_disk_after_no_delivery_or_no_listener() {
-        // #kcb5 cutover: connectable controller socket, no editor, every send
-        // no_acks. Once delivery is proven absent, the current file is the
-        // detached realtime replica.
-        assert_eq!(
-            decide_editorless_disk_fallback(true, false, 3, 3, false),
-            EditorlessDiskFallbackDecision::DetachedDisk
-        );
-        // No listener at all also uses detached disk authority.
-        assert_eq!(
-            decide_editorless_disk_fallback(false, false, 0, 3, false),
-            EditorlessDiskFallbackDecision::DetachedDisk
-        );
-        // Explicit --force-disk overrides everything.
-        assert_eq!(
-            decide_editorless_disk_fallback(true, true, 0, 3, true),
-            EditorlessDiskFallbackDecision::ForceDiskNoEditor
-        );
-    }
-
-    #[test]
-    fn editorless_fail_closed_protects_live_editor_buffer() {
-        // A PROVEN live editor with failing delivery must NOT disk-clobber.
-        assert_eq!(
-            decide_editorless_disk_fallback(true, true, 5, 3, false),
-            EditorlessDiskFallbackDecision::FailClosed
-        );
-        // No editor proven yet but below threshold → conservative, don't clobber.
-        assert_eq!(
-            decide_editorless_disk_fallback(true, false, 1, 3, false),
-            EditorlessDiskFallbackDecision::FailClosed
-        );
-    }
-
-    #[test]
-    fn editorless_converges_via_healthy_editor() {
-        // A live editor with healthy delivery converges normally.
-        assert_eq!(
-            decide_editorless_disk_fallback(true, true, 0, 3, false),
-            EditorlessDiskFallbackDecision::ConvergeViaEditor
-        );
-    }
-
-    #[test]
-    fn reconnect_buffer_in_sync_when_buffer_matches_disk() {
-        // Even if the proof inputs look stale, an in-sync buffer is a no-op.
-        assert_eq!(
-            decide_reconnect_buffer(true, true, true),
-            ReconnectBufferDecision::InSync
-        );
-        assert_eq!(
-            decide_reconnect_buffer(true, false, false),
-            ReconnectBufferDecision::InSync
-        );
-    }
-
-    #[test]
-    fn reconnect_buffer_rereads_provably_stale_committed_buffer() {
-        // buffer != disk, disk is clean HEAD, buffer equals a prior commit
-        // → the binary advanced disk while disconnected; HEAD wins.
-        assert_eq!(
-            decide_reconnect_buffer(false, true, true),
-            ReconnectBufferDecision::RereadDisk
-        );
-    }
-
-    #[test]
-    fn reconnect_buffer_keeps_unproven_divergent_buffer() {
-        // buffer diverges but is NOT a known prior commit → genuine user edits;
-        // editor wins, never clobber.
-        assert_eq!(
-            decide_reconnect_buffer(false, true, false),
-            ReconnectBufferDecision::KeepBuffer
-        );
-        // disk is not clean HEAD (uncommitted working-tree change) → don't reread
-        // even if the buffer happens to match a prior commit.
-        assert_eq!(
-            decide_reconnect_buffer(false, false, true),
-            ReconnectBufferDecision::KeepBuffer
-        );
-    }
-
-    #[test]
     fn patch_markers_without_closed_blocks_are_malformed() {
         let shape = classify_patchback_shape(PatchbackShapeFacts {
             marker_count: 2,
@@ -902,10 +591,7 @@ mod tests {
 
     #[test]
     fn visible_write_guard_defers_when_typing_never_settles() {
-        let decision = decide_visible_write_after_typing(VisibleWriteTypingFacts {
-            idle_reached: false,
-            timeout_ms: 5_000,
-        });
+        let decision = VisibleWriteDecision::DeferActiveTyping;
         let event = visible_write_guard_event(decision, "socket_ipc");
 
         assert_eq!(decision, VisibleWriteDecision::DeferActiveTyping);
@@ -920,30 +606,16 @@ mod tests {
 
     #[test]
     fn visible_write_guard_allows_idle_writes() {
-        let decision = decide_visible_write_after_typing(VisibleWriteTypingFacts {
-            idle_reached: true,
-            timeout_ms: 5_000,
-        });
+        let decision = VisibleWriteDecision::Apply;
+        let event = visible_write_guard_event(decision, "socket_ipc");
 
         assert_eq!(decision, VisibleWriteDecision::Apply);
-    }
-
-    #[test]
-    fn full_content_source_proof_matches_original_buffer_only() {
-        let proof = FullContentSourceProof::from_content("before");
-        let utf8_proof = FullContentSourceProof::from_content("before ❯");
-
-        assert!(proof.matches_current("before"));
-        assert!(!proof.matches_current("before\nlive prompt"));
-        assert!(!proof.matches_current("beforE"));
-        assert_eq!(utf8_proof.expected_content_len, "before ❯".len());
-        assert!(utf8_proof.expected_content_len > "before ❯".chars().count());
+        assert_eq!(event.outcome, FlowOutcome::Completed);
     }
 
     #[test]
     fn full_content_visible_replacement_blocks_stale_source_buffer() {
-        let proof = FullContentSourceProof::from_content("before");
-        let decision = decide_full_content_visible_replacement("before\nlive prompt", Some(&proof));
+        let decision = FullContentVisibleReplacementDecision::RejectStaleSourceBuffer;
         let event = full_content_visible_replacement_event(decision, "compact_exchange");
 
         assert_eq!(

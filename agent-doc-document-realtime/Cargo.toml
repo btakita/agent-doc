@@ -14,3 +14,4 @@ agent-doc-document = { path = "../agent-doc-document", version = "0.34.65" }
 agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.65" }
 lazily = "0.13.1"
 serde = { version = "1", features = ["derive"] }
+sha2 = "0.11"

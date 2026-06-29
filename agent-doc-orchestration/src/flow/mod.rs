@@ -33,12 +33,13 @@ mod tests {
         assert_eq!(route_event.stage, FlowStage::DispatchProof);
         assert_eq!(route_event.outcome, FlowOutcome::FailedClosed);
 
-        let typing_decision = document_mutation::decide_visible_write_after_typing(
-            document_mutation::VisibleWriteTypingFacts {
-                idle_reached: false,
-                timeout_ms: 5_000,
-            },
-        );
+        let typing_decision =
+            agent_doc_document_realtime::write_policy::decide_visible_write_after_typing(
+                agent_doc_document_realtime::write_policy::VisibleWriteTypingFacts {
+                    idle_reached: false,
+                    timeout_ms: 5_000,
+                },
+            );
         let write_event =
             document_mutation::visible_write_guard_event(typing_decision, "socket_ipc");
         assert_eq!(write_event.flow, FlowName::DocumentMutation);

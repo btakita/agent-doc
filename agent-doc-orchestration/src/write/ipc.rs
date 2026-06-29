@@ -1911,8 +1911,9 @@ pub(crate) fn normalization_repair_payload(
     expected_bad_state: &str,
     include_type: bool,
 ) -> serde_json::Value {
-    let proof =
-        crate::flow::document_mutation::FullContentSourceProof::from_content(expected_bad_state);
+    let proof = agent_doc_document_realtime::write_policy::FullContentSourceProof::from_content(
+        expected_bad_state,
+    );
     let mut payload = serde_json::json!({
         "file": canonical.to_string_lossy(),
         "patches": [],

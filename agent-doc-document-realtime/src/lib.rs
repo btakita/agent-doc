@@ -12,6 +12,7 @@ pub mod ipc_corruption;
 pub mod read_authority;
 pub mod watch_authority;
 pub mod write_authority;
+pub mod write_policy;
 
 pub use read_authority::{
     BufferState, DocAuthority, Reconciliation, buffer_supersedes, current_doc,

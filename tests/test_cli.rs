@@ -5255,6 +5255,11 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
     );
     assert!(
         manifest_dir
+            .join("agent-doc-document-realtime/src/write_policy.rs")
+            .exists()
+    );
+    assert!(
+        manifest_dir
             .join("agent-doc-document-realtime/src/watch_authority.rs")
             .exists()
     );
@@ -5279,6 +5284,62 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
             "orchestration must not re-own pure realtime read-authority policy: {forbidden_snippet}"
         );
     }
+    let realtime_write_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime/src/write_policy.rs"))
+            .unwrap();
+    for required_snippet in [
+        "pub struct VisibleWriteTypingFacts",
+        "pub enum VisibleWriteDecision",
+        "pub fn decide_visible_write_after_typing",
+        "pub struct FullContentSourceProof",
+        "pub fn decide_full_content_visible_replacement",
+        "pub enum ReconnectBufferDecision",
+        "pub fn decide_reconnect_buffer",
+        "pub enum EditorlessDiskFallbackDecision",
+        "pub fn decide_editorless_disk_fallback",
+    ] {
+        assert!(
+            realtime_write_policy.contains(required_snippet),
+            "agent-doc-document-realtime must own write/reconnect policy: {required_snippet}"
+        );
+    }
+    let orchestration_document_mutation = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/flow/document_mutation.rs"),
+    )
+    .unwrap();
+    for forbidden_snippet in [
+        "pub struct VisibleWriteTypingFacts",
+        "pub enum VisibleWriteDecision",
+        "pub fn decide_visible_write_after_typing",
+        "pub struct FullContentSourceProof",
+        "pub fn full_content_source_proof",
+        "pub fn decide_full_content_visible_replacement",
+        "pub enum ReconnectBufferDecision",
+        "pub fn decide_reconnect_buffer",
+        "pub enum EditorlessDiskFallbackDecision",
+        "pub fn decide_editorless_disk_fallback",
+        "pub use agent_doc_document_realtime",
+    ] {
+        assert!(
+            !orchestration_document_mutation.contains(forbidden_snippet),
+            "orchestration must not re-own or facade realtime write policy: {forbidden_snippet}"
+        );
+    }
+    let write_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    assert!(
+        write_source.contains(
+            "agent_doc_document_realtime::write_policy::decide_visible_write_after_typing"
+        ),
+        "orchestration write path should call the focused realtime policy directly"
+    );
+    let write_ipc_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+    assert!(
+        write_ipc_source
+            .contains("agent_doc_document_realtime::write_policy::FullContentSourceProof"),
+        "normalization repair payloads should use the focused source-proof type directly"
+    );
     for forbidden in [
         "agent-doc-core",
         "agent-doc-orchestration",

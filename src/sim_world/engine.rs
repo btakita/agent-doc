@@ -1658,27 +1658,26 @@ impl SimWorld {
     pub(crate) fn stale_full_content_visible_replacement(
         &mut self,
         source: FullContentReplacementSource,
-    ) -> agent_doc_orchestration::flow::document_mutation::FullContentVisibleReplacementDecision
-    {
-        let proof =
-            agent_doc_orchestration::flow::document_mutation::FullContentSourceProof::from_content(
-                &self.doc,
-            );
+    ) -> agent_doc_document_realtime::write_policy::FullContentVisibleReplacementDecision {
+        let proof = agent_doc_document_realtime::write_policy::FullContentSourceProof::from_content(
+            &self.doc,
+        );
         let replacement = template_doc(&format!(
             "### Re: replacement from {} — gpt-5\n\nDone.\n",
             source.as_str()
         ));
         self.append_to_exchange("❯ live prompt typed before full-content apply\n")
             .expect("template doc should keep an exchange component");
-        let decision = agent_doc_orchestration::flow::document_mutation::decide_full_content_visible_replacement(
-            &self.doc,
-            Some(&proof),
-        );
-        if decision == agent_doc_orchestration::flow::document_mutation::FullContentVisibleReplacementDecision::Apply
+        let decision =
+            agent_doc_document_realtime::write_policy::decide_full_content_visible_replacement(
+                &self.doc,
+                Some(&proof),
+            );
+        if decision == agent_doc_document_realtime::write_policy::FullContentVisibleReplacementDecision::Apply
         {
             self.doc = replacement;
         } else if decision
-            == agent_doc_orchestration::flow::document_mutation::FullContentVisibleReplacementDecision::RejectStaleSourceBuffer
+            == agent_doc_document_realtime::write_policy::FullContentVisibleReplacementDecision::RejectStaleSourceBuffer
         {
             self.coverage.stale_source_buffer_skips += 1;
         }

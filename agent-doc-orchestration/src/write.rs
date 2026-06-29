@@ -3317,16 +3317,17 @@ fn guard_visible_write_idle_with_budget(
         .to_string();
     let idle_reached =
         agent_doc_debounce::await_idle_via_file(&indicator_path, debounce_ms, timeout_ms);
-    let facts = crate::flow::document_mutation::VisibleWriteTypingFacts {
+    let facts = agent_doc_document_realtime::write_policy::VisibleWriteTypingFacts {
         idle_reached,
         timeout_ms,
     };
-    let decision = crate::flow::document_mutation::decide_visible_write_after_typing(facts);
+    let decision =
+        agent_doc_document_realtime::write_policy::decide_visible_write_after_typing(facts);
     crate::flow::proof::log_flow_event(
         file,
         crate::flow::document_mutation::visible_write_guard_event(decision, source),
     );
-    if decision == crate::flow::document_mutation::VisibleWriteDecision::Apply {
+    if decision == agent_doc_document_realtime::write_policy::VisibleWriteDecision::Apply {
         return Ok(());
     }
 

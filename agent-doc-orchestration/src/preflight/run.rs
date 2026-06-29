@@ -51,11 +51,17 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         frontmatter_io::parse_for_file_with_context(&content, file, &rc)?;
     let active_harness = rc.harness();
     let mut warnings = Vec::new();
-    if let Some(warning) =
-        harness_mismatch_warning(initial_frontmatter.agent.as_deref(), &active_harness)
-    {
+    if let Some(warning) = agent_doc_model_tier::harness_mismatch_warning(
+        initial_frontmatter.agent.as_deref(),
+        &active_harness,
+    ) {
         eprintln!("[preflight] warning: {}", warning.message);
-        warnings.push(warning);
+        warnings.push(PreflightWarning {
+            code: warning.code.to_string(),
+            message: warning.message,
+            document_agent: Some(warning.document_agent),
+            active_harness: Some(warning.active_harness),
+        });
     }
     // #fccsupwarn: read-only WARN when the live controller/supervisor hosting this
     // document is serving a STALE agent-doc binary (a newer build is installed but the
@@ -74,7 +80,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     }
 
     if initial_frontmatter.codex_network_access.is_some()
-        && canonical_harness_name(&active_harness).as_deref() != Some("codex")
+        && agent_doc_model_tier::canonical_harness_name(&active_harness).as_deref() != Some("codex")
     {
         let msg = format!(
             "{}: `codex_network_access` is Codex-specific and has no effect when the active harness is {}. \
@@ -1283,8 +1289,11 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         }),
     }
 
-    let agent_model =
-        resolve_agent_model(frontmatter_model.as_deref(), &harness, &global_config.model);
+    let agent_model = agent_doc_model_tier::resolve_agent_model(
+        frontmatter_model.as_deref(),
+        &harness,
+        &global_config.model,
+    );
     let session_accretion = crate::session_accretion::inspect(file)
         .ok()
         .filter(|report| !report.is_healthy());

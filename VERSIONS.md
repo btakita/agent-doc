@@ -16,6 +16,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Context usage policy moved to `agent-doc-model-tier`.** Harness transcript token aggregation, Claude project transcript path composition, model-context window lookup, Codex `token_count` percentage parsing, and the clear/no-clear diagnostic decision now live in `agent_doc_model_tier::context_usage`. Orchestration's `context_pct` module keeps only file-backed transcript reads and newest-transcript discovery, and the Codex hook calls the focused clear-decision API directly.
 
+- **Preflight model attribution policy moved to `agent-doc-model-tier`.** Harness alias canonicalization, frontmatter-vs-active harness mismatch warning facts, short response-header model attribution, and deferred Claude Code `opus` attribution now live in the focused model-tier crate. Preflight keeps only JSON warning adaptation and calls the model-tier API directly.
+
 - **Claim cross-session admission moved to `agent-doc-controller`.** The `CrossSessionDecision` enum, structured reject marker, stale-session/force decision, and foreign-supervisor lease guard now live in `agent_doc_controller::claim`. The `claim` orchestration module keeps only tmux/session/file side effects and calls the focused controller API directly.
 
 - **Route dispatch drain-retry policy moved to `agent-doc-controller`.** The `#pcp3a` concurrent-finalize drain retry decision now lives in `agent_doc_controller::dispatch` beside the other dispatch admission helpers. `route.rs` still performs repair/session-check/file IO, but it calls the focused controller API directly instead of owning the retry decision table.

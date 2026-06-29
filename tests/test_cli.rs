@@ -2283,6 +2283,22 @@ fn test_agent_doc_model_tier_owns_context_usage_policy() {
         package_version
     );
 
+    let model_tier_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-model-tier/src/lib.rs")).unwrap();
+    for required_snippet in [
+        "pub fn canonical_harness_name(",
+        "pub const HARNESS_MISMATCH_WARNING_CODE",
+        "pub struct HarnessMismatchWarning",
+        "pub fn harness_mismatch_warning(",
+        "pub fn short_model_name(",
+        "pub fn resolve_agent_model(",
+    ] {
+        assert!(
+            model_tier_source.contains(required_snippet),
+            "agent-doc-model-tier should own preflight model attribution and harness policy directly: {required_snippet}"
+        );
+    }
+
     let context_usage =
         fs::read_to_string(manifest_dir.join("agent-doc-model-tier/src/context_usage.rs")).unwrap();
     for required_snippet in [
@@ -2308,6 +2324,28 @@ fn test_agent_doc_model_tier_owns_context_usage_policy() {
     let orchestration_context =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/context_pct.rs"))
             .unwrap();
+    let preflight_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let preflight_run_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "fn canonical_harness_name(",
+        "fn harness_mismatch_warning(",
+        "fn short_model_name(",
+        "fn resolve_agent_model(",
+    ] {
+        assert!(
+            !preflight_source.contains(forbidden_snippet),
+            "preflight.rs must not re-own model-tier attribution or harness policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        preflight_run_source.contains("agent_doc_model_tier::harness_mismatch_warning(")
+            && preflight_run_source.contains("agent_doc_model_tier::canonical_harness_name(")
+            && preflight_run_source.contains("agent_doc_model_tier::resolve_agent_model("),
+        "preflight/run.rs should adapt preflight facts into focused model-tier policy directly"
+    );
     for forbidden_snippet in [
         "pub enum Harness",
         "pub struct UsedTokens",

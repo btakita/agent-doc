@@ -686,87 +686,6 @@ fn explicit_backlog_target_requirements(
     Ok(requirements)
 }
 
-/// Extract a human-readable short model name from a full model ID.
-///
-/// Strips well-known provider prefixes so the response header stays compact:
-/// - `claude-sonnet-4-6` → `sonnet-4-6`
-/// - `claude-opus-4` → `opus-4`
-/// - `claude-haiku-4-5` → `haiku-4-5`
-/// - Short names such as `gpt-5` / `gpt-5.4` are returned as-is.
-fn short_model_name(model_id: &str) -> &str {
-    // Strip leading "claude-" prefix if present
-    if let Some(suffix) = model_id.strip_prefix("claude-") {
-        return suffix;
-    }
-    model_id
-}
-
-/// Resolve the agent model short name for attribution in `### Re:` headers.
-///
-/// Source: frontmatter `model` field only. `ANTHROPIC_MODEL` env var is
-/// deliberately ignored — it reflects the user's shell, not the model
-/// Claude Code is actually running with (Claude Code does not export
-/// `ANTHROPIC_MODEL` to child shells). The SKILL running inside Claude
-/// Code always knows its own model identity and stamps attribution
-/// directly when `agent_model` is null.
-///
-/// Full model IDs are shortened via `short_model_name`; already-short names
-/// like `gpt-5` pass through unchanged.
-fn resolve_agent_model(
-    frontmatter_model: Option<&str>,
-    harness: &str,
-    model_config: &agent_doc_model_tier::ModelConfig,
-) -> Option<String> {
-    let m = frontmatter_model?;
-    let canonical = agent_doc_model_tier::canonical_model_name(m, harness, model_config);
-    // The Claude Code `opus` alias is deferred — agent-doc never pins a concrete
-    // opus version, so it cannot attribute a specific id. Return None so the
-    // running skill self-stamps its real model identity (always the current
-    // opus, e.g. `opus-4-8`), keeping attribution from lagging a release.
-    // Explicitly pinned ids (e.g. `claude-opus-4-8`) still stamp their short name.
-    if harness == "claude-code" && canonical.trim() == "opus" {
-        return None;
-    }
-    Some(short_model_name(&canonical).to_string())
-}
-
-fn canonical_harness_name(value: &str) -> Option<String> {
-    let normalized = value.trim().to_ascii_lowercase().replace(['_', ' '], "-");
-    match normalized.as_str() {
-        "" | "default" | "generic" => None,
-        "claude" | "claude-code" | "claudecode" | "claude-code-cli" => {
-            Some("claude-code".to_string())
-        }
-        "codex" | "codex-cli" | "openai-codex" => Some("codex".to_string()),
-        "opencode" | "open-code" | "opencode-ai" => Some("opencode".to_string()),
-        other => Some(other.to_string()),
-    }
-}
-
-fn harness_mismatch_warning(
-    document_agent: Option<&str>,
-    active_harness: &str,
-) -> Option<PreflightWarning> {
-    let declared_raw = document_agent?.trim();
-    if declared_raw.is_empty() {
-        return None;
-    }
-    let declared = canonical_harness_name(declared_raw)?;
-    let active = canonical_harness_name(active_harness)?;
-    if declared == active {
-        return None;
-    }
-    Some(PreflightWarning {
-        code: "harness_mismatch".to_string(),
-        message: format!(
-            "Document declares agent: {} but active harness is {}; responses will use the active harness attribution and closeout path.",
-            declared_raw, active
-        ),
-        document_agent: Some(declared_raw.to_string()),
-        active_harness: Some(active),
-    })
-}
-
 fn post_exchange_comment_prompt_preset_warning(
     file: &Path,
     content: &str,
@@ -4920,23 +4839,6 @@ mod tests {
         );
     }
     #[test]
-    fn harness_mismatch_warning_normalizes_aliases() {
-        assert!(
-            harness_mismatch_warning(Some("claude"), "claude-code").is_none(),
-            "claude and claude-code are the same canonical harness"
-        );
-        let warning = harness_mismatch_warning(Some("codex"), "claude-code").unwrap();
-        assert_eq!(warning.code, "harness_mismatch");
-        assert_eq!(warning.document_agent.as_deref(), Some("codex"));
-        assert_eq!(warning.active_harness.as_deref(), Some("claude-code"));
-        assert!(warning.message.contains("Document declares agent: codex"));
-    }
-    #[test]
-    fn harness_mismatch_warning_skips_unknown_active_harness() {
-        assert!(harness_mismatch_warning(Some("codex"), "default").is_none());
-        assert!(harness_mismatch_warning(None, "claude-code").is_none());
-    }
-    #[test]
     fn codex_network_access_warning_for_non_codex_harness() {
         let content = "---\nagent_doc_session: test\nagent: opencode\ncodex_network_access: enabled\n---\n\ntest\n";
         let (fm, _) = agent_doc_frontmatter::frontmatter::parse(content).unwrap();
@@ -4946,16 +4848,17 @@ mod tests {
         );
         let active = "opencode";
         assert_ne!(
-            canonical_harness_name(active).as_deref(),
+            agent_doc_model_tier::canonical_harness_name(active).as_deref(),
             Some("codex"),
             "opencode should not be canonical codex"
         );
         assert!(
-            canonical_harness_name(&active).is_some(),
+            agent_doc_model_tier::canonical_harness_name(&active).is_some(),
             "opencode is a known harness"
         );
-        let has_guard = canonical_harness_name("codex").as_deref() == Some("codex")
-            && canonical_harness_name(active).as_deref() != Some("codex")
+        let has_guard = agent_doc_model_tier::canonical_harness_name("codex").as_deref()
+            == Some("codex")
+            && agent_doc_model_tier::canonical_harness_name(active).as_deref() != Some("codex")
             && fm.codex_network_access.is_some();
         assert!(
             has_guard,
@@ -5663,62 +5566,5 @@ mod tests {
         }
         // Diff itself is allowed to contain the content
         assert!(diff_str.contains(&large_content));
-    }
-    #[test]
-    fn short_model_name_strips_claude_prefix() {
-        assert_eq!(short_model_name("claude-sonnet-4-6"), "sonnet-4-6");
-        assert_eq!(short_model_name("claude-opus-4"), "opus-4");
-        assert_eq!(short_model_name("claude-haiku-4-5"), "haiku-4-5");
-    }
-    #[test]
-    fn short_model_name_returns_as_is_without_prefix() {
-        assert_eq!(short_model_name("sonnet-4-6"), "sonnet-4-6");
-        assert_eq!(short_model_name("gpt-4o"), "gpt-4o");
-        assert_eq!(short_model_name("gpt-5"), "gpt-5");
-        assert_eq!(short_model_name("gpt-5.4"), "gpt-5.4");
-        assert_eq!(short_model_name("opus-4-6"), "opus-4-6");
-        assert_eq!(short_model_name(""), "");
-    }
-    #[test]
-    fn resolve_agent_model_uses_frontmatter_only() {
-        // ANTHROPIC_MODEL env var is deliberately ignored — only frontmatter matters.
-        let cfg = agent_doc_model_tier::ModelConfig::default();
-        let result = resolve_agent_model(Some("claude-opus-4"), "claude-code", &cfg);
-        assert_eq!(result, Some("opus-4".to_string()));
-    }
-    #[test]
-    fn resolve_agent_model_strips_claude_prefix_from_frontmatter() {
-        let cfg = agent_doc_model_tier::ModelConfig::default();
-        let result = resolve_agent_model(Some("claude-haiku-4-5"), "claude-code", &cfg);
-        assert_eq!(result, Some("haiku-4-5".to_string()));
-    }
-    #[test]
-    fn resolve_agent_model_defers_claude_code_opus_alias() {
-        // The bare `opus` alias is deferred: agent-doc pins no version, so
-        // attribution returns None and the running skill self-stamps its real
-        // model identity (always the current opus).
-        let cfg = agent_doc_model_tier::ModelConfig::default();
-        let result = resolve_agent_model(Some("opus"), "claude-code", &cfg);
-        assert_eq!(result, None);
-    }
-    #[test]
-    fn resolve_agent_model_stamps_pinned_concrete_opus() {
-        // An explicitly pinned concrete opus id still stamps its short name.
-        let cfg = agent_doc_model_tier::ModelConfig::default();
-        let result = resolve_agent_model(Some("claude-opus-4-8"), "claude-code", &cfg);
-        assert_eq!(result, Some("opus-4-8".to_string()));
-    }
-    #[test]
-    fn resolve_agent_model_preserves_short_openai_style_name() {
-        let cfg = agent_doc_model_tier::ModelConfig::default();
-        let result = resolve_agent_model(Some("gpt-5"), "codex", &cfg);
-        assert_eq!(result, Some("gpt-5".to_string()));
-    }
-    #[test]
-    fn resolve_agent_model_none_when_no_frontmatter() {
-        // No frontmatter → None, regardless of env var state.
-        let cfg = agent_doc_model_tier::ModelConfig::default();
-        let result = resolve_agent_model(None, "claude-code", &cfg);
-        assert_eq!(result, None);
     }
 }

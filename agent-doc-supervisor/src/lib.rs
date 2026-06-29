@@ -13,6 +13,7 @@ pub mod handoff;
 pub mod idle_reconcile;
 pub mod lifecycle;
 pub mod run_loop;
+pub mod selfkill;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

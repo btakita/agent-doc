@@ -95,71 +95,6 @@ pub fn clear_self_kill_request(file: &Path) {
     }
 }
 
-/// `#supkill-a` — pure: should the supervisor honor a graceful self-kill *now*? Only
-/// at a turn boundary, so a healthy live turn is never interrupted. A wedged
-/// supervisor that never reaches a turn boundary is handled by the external
-/// force-kill ([`supervisor_force_kill_decision`]) instead.
-pub fn supervisor_self_kill_action(requested: bool, turn_boundary: bool) -> bool {
-    requested && turn_boundary
-}
-
-/// `#supkill-b` — pure: should the external driver escalate to a force-kill now?
-/// When the supervisor is still alive and the graceful request is at least the grace
-/// window old. `requested_at` / `now` are unix-epoch seconds.
-pub fn supervisor_force_kill_decision(
-    requested_at: Option<u64>,
-    now: u64,
-    alive: bool,
-    grace_secs: u64,
-) -> bool {
-    if !alive {
-        return false;
-    }
-    match requested_at {
-        Some(at) => now.saturating_sub(at) >= grace_secs,
-        None => false,
-    }
-}
-
-/// `#supkill` — pure parse of a `start --route-owned <FILE>` supervisor `/proc`
-/// cmdline arg vector, returning the owned document path (possibly relative to the
-/// process cwd). `None` for any other process. Skips the value of the one
-/// value-taking flag (`--route-owned-reap-policy`) so it cannot be mistaken for the
-/// positional document.
-pub fn start_route_owned_doc_from_args(args: &[String]) -> Option<PathBuf> {
-    if !args.iter().any(|arg| arg.ends_with("agent-doc")) {
-        return None;
-    }
-    if !args.iter().any(|arg| arg == "start") || !args.iter().any(|arg| arg == "--route-owned") {
-        return None;
-    }
-    let mut seen_start = false;
-    let mut skip_next = false;
-    for arg in args {
-        if skip_next {
-            skip_next = false;
-            continue;
-        }
-        if !seen_start {
-            if arg == "start" {
-                seen_start = true;
-            }
-            continue;
-        }
-        if arg == "--route-owned-reap-policy" {
-            // Long form `--flag VALUE`; `--flag=VALUE` carries its own `=` and is
-            // already filtered by the `--` prefix check below.
-            skip_next = true;
-            continue;
-        }
-        if arg.starts_with('-') {
-            continue;
-        }
-        return Some(PathBuf::from(arg));
-    }
-    None
-}
-
 #[cfg(unix)]
 fn read_proc_args(pid: u32) -> Option<Vec<String>> {
     let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
@@ -177,7 +112,7 @@ fn read_proc_args(pid: u32) -> Option<Vec<String>> {
 #[cfg(unix)]
 fn supervisor_doc_canonical(pid: u32) -> Option<PathBuf> {
     let args = read_proc_args(pid)?;
-    let doc = start_route_owned_doc_from_args(&args)?;
+    let doc = agent_doc_supervisor::selfkill::start_route_owned_doc_from_args(&args)?;
     if doc.is_absolute() {
         doc.canonicalize().ok()
     } else {
@@ -333,10 +268,18 @@ pub fn drive_supervisor_kill(
     // Poll for the graceful self-kill (the supervisor's idle loop honors the
     // sentinel at its next turn boundary).
     let start = Instant::now();
-    while start.elapsed() < grace {
-        if !process_is_alive(pid) {
+    loop {
+        let alive = process_is_alive(pid);
+        if !alive {
             clear_self_kill_request(file);
             return Ok(SupervisorKillOutcome::Graceful(pid));
+        }
+        if agent_doc_supervisor::selfkill::supervisor_force_kill_decision(
+            start.elapsed(),
+            alive,
+            grace,
+        ) {
+            break;
         }
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -357,104 +300,6 @@ pub fn drive_supervisor_kill(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn self_kill_action_is_idle_gated() {
-        // Honored only when requested AND at a turn boundary.
-        assert!(supervisor_self_kill_action(true, true));
-        assert!(!supervisor_self_kill_action(true, false)); // mid-turn → wait
-        assert!(!supervisor_self_kill_action(false, true)); // no request
-        assert!(!supervisor_self_kill_action(false, false));
-    }
-
-    #[test]
-    fn force_kill_decision_waits_for_grace_then_escalates() {
-        let grace = 10;
-        // No request → never force-kill.
-        assert!(!supervisor_force_kill_decision(None, 100, true, grace));
-        // Requested but within the grace window → keep waiting for graceful exit.
-        assert!(!supervisor_force_kill_decision(Some(95), 100, true, grace));
-        assert!(!supervisor_force_kill_decision(Some(91), 100, true, grace));
-        // Grace elapsed AND still alive → escalate. This is the wedged-supervisor
-        // path the dead-in-prod M1 self-watchdog cannot cover.
-        assert!(supervisor_force_kill_decision(Some(90), 100, true, grace));
-        assert!(supervisor_force_kill_decision(Some(50), 100, true, grace));
-        // Grace elapsed but already dead → nothing to force.
-        assert!(!supervisor_force_kill_decision(Some(50), 100, false, grace));
-    }
-
-    #[test]
-    fn parses_start_route_owned_doc_positional() {
-        let args = vec![
-            "/home/u/.cargo/bin/agent-doc".to_string(),
-            "start".to_string(),
-            "--route-owned".to_string(),
-            "tasks/agent-doc/agent-doc-bugs2.md".to_string(),
-        ];
-        assert_eq!(
-            start_route_owned_doc_from_args(&args),
-            Some(PathBuf::from("tasks/agent-doc/agent-doc-bugs2.md"))
-        );
-    }
-
-    #[test]
-    fn parses_doc_before_route_owned_flag() {
-        // clap allows the positional anywhere relative to flags.
-        let args = vec![
-            "agent-doc".to_string(),
-            "start".to_string(),
-            "plan.md".to_string(),
-            "--route-owned".to_string(),
-        ];
-        assert_eq!(
-            start_route_owned_doc_from_args(&args),
-            Some(PathBuf::from("plan.md"))
-        );
-    }
-
-    #[test]
-    fn skips_reap_policy_flag_value() {
-        let args = vec![
-            "agent-doc".to_string(),
-            "start".to_string(),
-            "--route-owned".to_string(),
-            "--route-owned-reap-policy".to_string(),
-            "auto".to_string(),
-            "doc.md".to_string(),
-        ];
-        // `auto` is the reap-policy value, not the document.
-        assert_eq!(
-            start_route_owned_doc_from_args(&args),
-            Some(PathBuf::from("doc.md"))
-        );
-    }
-
-    #[test]
-    fn rejects_non_supervisor_cmdlines() {
-        // Not a supervisor: a controller serve.
-        let controller = vec![
-            "agent-doc".to_string(),
-            "controller".to_string(),
-            "serve".to_string(),
-            "--project-root".to_string(),
-            "/p".to_string(),
-        ];
-        assert_eq!(start_route_owned_doc_from_args(&controller), None);
-        // `start` without `--route-owned` (a foreground operator start).
-        let foreground = vec![
-            "agent-doc".to_string(),
-            "start".to_string(),
-            "doc.md".to_string(),
-        ];
-        assert_eq!(start_route_owned_doc_from_args(&foreground), None);
-        // Not agent-doc at all.
-        let other = vec![
-            "vim".to_string(),
-            "start".to_string(),
-            "--route-owned".to_string(),
-        ];
-        assert_eq!(start_route_owned_doc_from_args(&other), None);
-    }
 
     #[cfg(unix)]
     #[test]

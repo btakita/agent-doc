@@ -3526,6 +3526,12 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     );
     assert!(
         manifest_dir
+            .join("agent-doc-supervisor/src/selfkill.rs")
+            .exists(),
+        "agent-doc-supervisor must own pure supervisor self-kill policy"
+    );
+    assert!(
+        manifest_dir
             .join("agent-doc-supervisor/src/crash_policy.rs")
             .exists(),
         "agent-doc-supervisor must own child crash/restart policy"
@@ -3601,6 +3607,49 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             "{relative} must call focused supervisor/queue/process crates directly"
         );
     }
+
+    let supervisor_selfkill =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/supervisor_selfkill.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "pub fn supervisor_self_kill_action(",
+        "pub fn supervisor_force_kill_decision(",
+        "pub fn start_route_owned_doc_from_args(",
+    ] {
+        assert!(
+            !supervisor_selfkill.contains(forbidden_snippet),
+            "supervisor_selfkill must stay an effect adapter, not re-own pure self-kill policy: {forbidden_snippet}"
+        );
+    }
+    let supervisor_selfkill_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/selfkill.rs")).unwrap();
+    for required_snippet in [
+        "pub fn supervisor_self_kill_action(",
+        "pub fn supervisor_force_kill_decision(",
+        "pub fn start_route_owned_doc_from_args(",
+    ] {
+        assert!(
+            supervisor_selfkill_policy.contains(required_snippet),
+            "agent-doc-supervisor should expose pure self-kill policy directly: {required_snippet}"
+        );
+    }
+    let idle_watch =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
+            .unwrap();
+    assert!(
+        idle_watch.contains("agent_doc_supervisor::selfkill::supervisor_self_kill_action"),
+        "idle_watch should call focused supervisor self-kill policy directly"
+    );
+    assert!(
+        supervisor_selfkill
+            .contains("agent_doc_supervisor::selfkill::start_route_owned_doc_from_args"),
+        "supervisor_selfkill should call focused route-owned cmdline parsing directly"
+    );
+    assert!(
+        supervisor_selfkill
+            .contains("agent_doc_supervisor::selfkill::supervisor_force_kill_decision"),
+        "supervisor_selfkill should call focused force-kill escalation policy directly"
+    );
 
     let start_detection =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/detection.rs"))

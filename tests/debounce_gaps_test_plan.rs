@@ -15,6 +15,16 @@
 
 use std::time::Duration;
 
+fn wait_for_typing_indicator(file: &str, debounce_ms: u64) {
+    for _ in 0..50 {
+        if agent_doc_debounce::is_typing_via_file(file, debounce_ms) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("typing indicator was not written for {file}");
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // GAP 1: Mtime Granularity
 // ─────────────────────────────────────────────────────────────────────────────
@@ -83,10 +93,7 @@ fn test_mtime_granularity_100ms_rapid_edits() {
     );
 
     // Validation 2: is_typing_via_file should also return true
-    assert!(
-        agent_doc_debounce::is_typing_via_file(&doc_str, 1500),
-        "is_typing_via_file() should detect active typing despite mtime granularity"
-    );
+    wait_for_typing_indicator(&doc_str, 1500);
 
     // Validation 3: After 1500ms, should be idle
     std::thread::sleep(Duration::from_millis(1500));

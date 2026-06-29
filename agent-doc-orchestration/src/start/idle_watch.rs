@@ -1236,7 +1236,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // a recycle). A wedged supervisor that never reaches this point is
                 // force-killed externally instead (`#supkill-b`). Checked before the
                 // recycle decision so a kill request wins over a hot-reload.
-                if crate::supervisor_selfkill::supervisor_self_kill_action(
+                if agent_doc_supervisor::selfkill::supervisor_self_kill_action(
                     crate::supervisor_selfkill::self_kill_requested(&path),
                     turn_boundary,
                 ) {

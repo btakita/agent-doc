@@ -28,6 +28,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Supervisor idle-reconcile policy moved to `agent-doc-supervisor`.** The stale busy-over-idle and ready-with-queued-draft reconcile decisions now live in `agent_doc_supervisor::idle_reconcile`. `start` and idle-watch gather pane/harness facts and pass their debounce thresholds directly to the focused policy; boundary coverage prevents the orchestration decision functions from returning.
 
+- **Supervisor self-kill policy moved to `agent-doc-supervisor`.** The graceful turn-boundary action, force-kill grace escalation decision, and route-owned supervisor cmdline parser now live in `agent_doc_supervisor::selfkill`. Orchestration keeps only sentinel files, `/proc` inspection, and signal adapters, with boundary coverage preventing local self-kill policy helpers from returning.
+
 - **Manual queue-addition compatibility shim deleted.** `agent-doc-queue` now exposes only `operator_authored_prompt_identities` for the operator-added prompt identity path; the unused `annotate_manual_queue_additions` shim is removed and covered by a source guard.
 
 - **Focus pane selection moved to `agent-doc-tmux`.** The stale projection/registry vs live-owner pane decision now lives with focused tmux state policy. `focus` imports `agent_doc_tmux::decide_focus_pane` directly and remains only the file/session/tmux adapter; boundary coverage prevents the pure focus decision from returning to orchestration.

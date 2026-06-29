@@ -770,7 +770,7 @@ fn normalize_path(path: &Path) -> PathBuf {
 }
 
 fn build_projection(doc: &str) -> Result<ServeProjection> {
-    let components = crate::component::parse(doc)?;
+    let components = agent_doc_element::element::parse(doc)?;
     let names = ["exchange", "backlog", "queue", "review"];
     Ok(ServeProjection {
         components: names
@@ -782,12 +782,12 @@ fn build_projection(doc: &str) -> Result<ServeProjection> {
 
 fn projection_component(
     doc: &str,
-    components: &[crate::component::Component],
+    components: &[agent_doc_element::element::Component],
     name: &'static str,
 ) -> ServeProjectionComponent {
     let component = components.iter().find(|component| match name {
-        "backlog" => crate::component::is_backlog_component(&component.name),
-        "review" => crate::component::is_review_component(&component.name),
+        "backlog" => agent_doc_element::element::is_backlog_component(&component.name),
+        "review" => agent_doc_element::element::is_review_component(&component.name),
         _ => component.name == name,
     });
     let content = component

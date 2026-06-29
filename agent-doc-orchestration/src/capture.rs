@@ -595,8 +595,8 @@ pub(crate) fn live_drift_is_queue_only_against_snapshot(
         return Ok(false);
     }
 
-    let current_components = crate::component::parse(&current_file)?;
-    let snapshot_components = crate::component::parse(&current_snapshot)?;
+    let current_components = agent_doc_element::element::parse(&current_file)?;
+    let snapshot_components = agent_doc_element::element::parse(&current_snapshot)?;
     let mut current_queues = current_components.iter().filter(|c| c.name == "queue");
     let mut snapshot_queues = snapshot_components.iter().filter(|c| c.name == "queue");
     let Some(current_queue) = current_queues.next() else {

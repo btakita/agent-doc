@@ -947,7 +947,7 @@ fn route_owned_liveness_reason(
         return Some("post_commit_user_follow_up".to_string());
     }
 
-    let components = match crate::component::parse(&content) {
+    let components = match agent_doc_element::element::parse(&content) {
         Ok(components) => components,
         Err(err) => {
             return Some(if dirty_after_commit {
@@ -960,7 +960,7 @@ fn route_owned_liveness_reason(
 
     for component in &components {
         let body = component.content(&content);
-        if crate::component::is_backlog_component(&component.name)
+        if agent_doc_element::element::is_backlog_component(&component.name)
             && route_owned_backlog_has_live_items(body)
         {
             return Some("backlog_non_empty".to_string());

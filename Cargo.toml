@@ -60,6 +60,7 @@ path = "src/main.rs"
 
 [dependencies]
 agent-doc-core = { path = "agent-doc-core", version = "0.34.65" }
+agent-doc-element = { path = "agent-doc-element", version = "0.34.65" }
 agent-doc-markdown-ast = { path = "agent-doc-markdown-ast", version = "0.34.65" }
 agent-doc-orchestration = { path = "agent-doc-orchestration", version = "0.34.65" }
 anyhow = "1"

@@ -40,8 +40,8 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use crate::component;
 use crate::snapshot;
+use agent_doc_element::element;
 
 /// Signal the IDE plugin to refresh the file from disk.
 /// Tries socket IPC first, falls back to file-based signal.
@@ -93,7 +93,7 @@ pub fn extract_id(marker: &str) -> Option<&str> {
 #[allow(dead_code)]
 pub fn find_in_component(
     doc: &str,
-    comp: &component::Component,
+    comp: &element::Component,
     boundary_id: &str,
 ) -> Option<(usize, usize)> {
     let content_region = &doc[comp.open_end..comp.close_start];
@@ -129,9 +129,9 @@ pub fn find_in_component(
 /// Scans the component's content for any `<!-- agent:boundary:UUID -->` marker,
 /// skipping matches inside code blocks. Returns the UUID if found.
 #[allow(dead_code)]
-pub fn find_boundary_id_in_component(doc: &str, comp: &component::Component) -> Option<String> {
+pub fn find_boundary_id_in_component(doc: &str, comp: &element::Component) -> Option<String> {
     let content_region = &doc[comp.open_end..comp.close_start];
-    let code_ranges = component::find_code_ranges(doc);
+    let code_ranges = element::find_code_ranges(doc);
     let mut search_from = 0;
     while let Some(start) = content_region[search_from..].find(BOUNDARY_PREFIX) {
         let abs_start = comp.open_end + search_from + start;
@@ -169,7 +169,7 @@ pub fn insert(doc: &str, component_name: &str) -> Result<(String, String)> {
         );
     }
 
-    let components = component::parse(&cleaned)?;
+    let components = element::parse(&cleaned)?;
     let comp = components
         .iter()
         .find(|c| c.name == component_name)
@@ -274,7 +274,7 @@ mod tests {
             "<!-- agent:exchange -->\ncontent\n{}\n<!-- /agent:exchange -->",
             format_marker(id)
         );
-        let components = component::parse(&doc).unwrap();
+        let components = element::parse(&doc).unwrap();
         let comp = &components[0];
         let result = find_in_component(&doc, comp, id);
         assert!(result.is_some());

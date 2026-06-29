@@ -154,7 +154,7 @@ CRDT sidecar state is versioned. The legacy merge engine state lives at `.agent-
 - The editor buffer may diverge from all three persistent states (unsaved user edits)
 
 **Staleness risk:** If the baseline is saved before preflight (the old SKILL.md approach), it becomes stale when commit repositions the boundary marker. The binary guard in `write.rs` detects this via component-aware comparison:
-- Parses both snapshot and baseline into components (`component::parse`)
+- Parses both snapshot and baseline into elements (`agent_doc_element::element::parse`)
 - Only checks **append-mode** components (exchange, findings) — these grow monotonically
 - Skips **replace-mode** components (status, pending) — user-editable, expected to diverge
 - Falls back to prefix check for non-template (inline) documents

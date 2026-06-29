@@ -14,10 +14,10 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use agent_doc_core::component;
 use agent_doc_core::template::{
     ComponentInfo, PatchBlock, TemplateInfo, apply_patches_pure, apply_patches_with_overrides_pure,
 };
+use agent_doc_element::element;
 
 use crate::graph::RunContext;
 use crate::project_config;
@@ -101,7 +101,7 @@ pub fn template_info_with_context(file: &Path, rc: Option<&RunContext>) -> Resul
     let (fm, _body) = agent_doc_core::frontmatter::parse(&doc)?;
     let template_mode = fm.resolve_mode().is_template();
 
-    let components = component::parse(&doc)
+    let components = element::parse(&doc)
         .with_context(|| format!("failed to parse components in {}", file.display()))?;
 
     let configs = load_component_configs(file, rc);

@@ -15,7 +15,7 @@ functions whenever possible:
   classify unresolved prompt-bearing changes.
 - `template::parse_patches`, `template::apply_patches`, and boundary
   reposition helpers apply response bodies and normalize exchange boundaries.
-- `component::parse` scopes checks to live template components.
+- `agent_doc_element::element::parse` scopes checks to live template elements.
 - `pending::detect_malformed_item_lines` verifies tracked backlog/icebox lines
   that would otherwise be hidden from pending guards.
 

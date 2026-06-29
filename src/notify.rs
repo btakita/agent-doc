@@ -46,7 +46,7 @@ use anyhow::{Context, Result, bail};
 use std::path::Path;
 use std::process::Command;
 
-use crate::{component, component::is_backlog_component};
+use agent_doc_element::element::{self, is_backlog_component};
 use agent_doc_orchestration::graph::RunContext;
 use agent_doc_orchestration::{pending, pending_cmd, snapshot};
 
@@ -96,7 +96,7 @@ fn format_notification(message: &str, source: Option<&str>, affects: Option<&str
 fn ensure_pending_component(file: &Path, no_create: bool) -> Result<bool> {
     let doc = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    let components = component::parse(&doc)
+    let components = element::parse(&doc)
         .with_context(|| format!("failed to parse components in {}", file.display()))?;
 
     if components.iter().any(|c| is_backlog_component(&c.name)) {
@@ -126,7 +126,7 @@ fn ensure_pending_component(file: &Path, no_create: bool) -> Result<bool> {
 }
 
 /// Find the best position to insert a backlog component.
-fn find_pending_insert_position(doc: &str, components: &[component::Component]) -> usize {
+fn find_pending_insert_position(doc: &str, components: &[element::Component]) -> usize {
     // After the exchange close tag if one exists
     if let Some(exchange) = components.iter().find(|c| c.name == "exchange") {
         return exchange.close_end;
@@ -210,7 +210,7 @@ pub fn run(
     let doc = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
 
-    let components = component::parse(&doc)
+    let components = element::parse(&doc)
         .with_context(|| format!("failed to parse components in {}", file.display()))?;
 
     let exchange = components
@@ -279,7 +279,7 @@ pub fn run(
 /// Returns the assigned hash ID on success.
 fn add_pending_item(file: &Path, item: &str, doc_id: &str, gated: bool) -> Result<String> {
     let content = std::fs::read_to_string(file).context("failed to read document")?;
-    let components = component::parse(&content).context("failed to parse components")?;
+    let components = element::parse(&content).context("failed to parse components")?;
     let comp = components
         .into_iter()
         .find(|c| is_backlog_component(&c.name))

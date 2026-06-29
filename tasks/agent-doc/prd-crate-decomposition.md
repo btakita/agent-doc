@@ -48,7 +48,7 @@ small enough that they are adapters/facades rather than God crates.
 
 | Current module | Target crate | Notes |
 |---|---|---|
-| `component.rs` | `agent-doc-component` or `agent-doc-element` submodule | Component parsing is element/document syntax. Keep parser pure; no file IO. |
+| `component.rs` | `agent-doc-element::element` | Extracted. Element parsing is element/document syntax; keep parser pure and file-IO free. |
 | `pending.rs` | `agent-doc-element-backlog` / `agent-doc-tracked-work` | Tracked work parsing and lifecycle should be shared by backlog, review, icebox, and done. |
 | `queue_item_lifecycle.rs` | `agent-doc-element-queue` | Extracted. Core path is compatibility only. |
 | `template.rs` | `agent-doc-template` | Split pure patch parsing from any path/file helpers. |

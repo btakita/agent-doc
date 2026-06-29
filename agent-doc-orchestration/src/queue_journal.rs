@@ -67,7 +67,7 @@ fn journal_path(file: &Path) -> Option<PathBuf> {
 /// dispatches, fences, or freeform noise) from a document's `agent:queue`
 /// component. Returns an empty vec when there is no queue component.
 fn queue_prompts(content: &str) -> Vec<crate::queue::QueuePrompt> {
-    let Ok(components) = crate::component::parse(content) else {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
         return Vec::new();
     };
     let Some(queue) = components.iter().find(|c| c.name == "queue") else {
@@ -271,7 +271,7 @@ fn durable_queue_texts(file: &Path) -> std::collections::HashSet<String> {
 /// (never resurrected by replay).
 fn present_queue_texts(content: &str) -> std::collections::HashSet<String> {
     let mut texts = std::collections::HashSet::new();
-    let Ok(components) = crate::component::parse(content) else {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
         return texts;
     };
     let Some(queue) = components.iter().find(|c| c.name == "queue") else {
@@ -304,7 +304,7 @@ pub fn merge_missing_into_content(
     if missing.is_empty() {
         return Ok(None);
     }
-    let components = crate::component::parse(content)?;
+    let components = agent_doc_element::element::parse(content)?;
     let Some(queue) = components.iter().find(|c| c.name == "queue") else {
         return Ok(None);
     };

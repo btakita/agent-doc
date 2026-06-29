@@ -31,7 +31,7 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
-use crate::component;
+use agent_doc_element::element;
 use agent_doc_orchestration::{snapshot, write};
 
 pub fn run(files: &[PathBuf], all: bool, dry_run: bool) -> Result<()> {
@@ -122,15 +122,15 @@ fn migrate_content(content: &str) -> String {
 
     // Also strip any remaining patch/mode attrs from already-canonical backlog tags,
     // then split legacy gated backlog items into the canonical review component.
-    let result = component::strip_backlog_patch_attr(&result);
+    let result = element::strip_backlog_patch_attr(&result);
     migrate_legacy_gated_backlog_items(&result).unwrap_or(result)
 }
 
 fn migrate_legacy_gated_backlog_items(content: &str) -> Result<String> {
-    let components = component::parse(content).context("failed to parse components")?;
+    let components = element::parse(content).context("failed to parse components")?;
     let Some(backlog) = components
         .iter()
-        .find(|c| component::is_backlog_component(&c.name))
+        .find(|c| element::is_backlog_component(&c.name))
     else {
         return Ok(content.to_string());
     };
@@ -144,13 +144,13 @@ fn migrate_legacy_gated_backlog_items(content: &str) -> Result<String> {
     }
 
     let mut result = backlog.replace_content(content, &new_backlog);
-    let review = component::parse(&result)?
+    let review = element::parse(&result)?
         .into_iter()
-        .find(|c| component::is_review_component(&c.name));
+        .find(|c| element::is_review_component(&c.name));
     if review.is_none() {
-        let backlog = component::parse(&result)?
+        let backlog = element::parse(&result)?
             .into_iter()
-            .find(|c| component::is_backlog_component(&c.name))
+            .find(|c| element::is_backlog_component(&c.name))
             .context("backlog missing after gated-item migration")?;
         let insert = "\n## Review\n\n<!-- agent:review -->\n<!-- /agent:review -->\n";
         let mut with_review = String::with_capacity(result.len() + insert.len());
@@ -159,9 +159,9 @@ fn migrate_legacy_gated_backlog_items(content: &str) -> Result<String> {
         with_review.push_str(&result[backlog.close_end..]);
         result = with_review;
     }
-    let review = component::parse(&result)?
+    let review = element::parse(&result)?
         .into_iter()
-        .find(|c| component::is_review_component(&c.name))
+        .find(|c| element::is_review_component(&c.name))
         .context("review missing after gated-item migration")?;
     let review_body = review.content(&result);
     let new_review = agent_doc_orchestration::pending::op_append_items(review_body, &gated_items);

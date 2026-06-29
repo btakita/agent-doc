@@ -51,7 +51,7 @@ pub fn malformed_tracked_item_refs(
     completed_by_response: Option<&str>,
 ) -> Result<Vec<String>> {
     let content = std::fs::read_to_string(file)?;
-    let Ok(components) = crate::component::parse(&content) else {
+    let Ok(components) = agent_doc_element::element::parse(&content) else {
         return Ok(Vec::new());
     };
     Ok(malformed_tracked_item_refs_in(
@@ -67,7 +67,7 @@ pub fn malformed_tracked_item_refs(
 /// document.
 pub(crate) fn malformed_tracked_item_refs_in(
     content: &str,
-    components: &[crate::component::Component],
+    components: &[agent_doc_element::element::Component],
     completed_by_response: Option<&str>,
 ) -> Vec<String> {
     components

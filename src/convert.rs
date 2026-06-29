@@ -132,7 +132,7 @@ fn convert_to_template(
     target_write: AgentDocWrite,
 ) -> Result<()> {
     if resolved.is_template() {
-        let components = crate::component::parse(content).unwrap_or_default();
+        let components = agent_doc_element::element::parse(content).unwrap_or_default();
         if !components.is_empty() {
             anyhow::bail!(
                 "{} is already in template mode with components",

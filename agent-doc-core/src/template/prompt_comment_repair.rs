@@ -31,7 +31,7 @@ pub fn remove_post_exchange_duplicate_prompt_comments_preserving_docs(
     doc: &str,
     preserve_docs: &[&str],
 ) -> Option<String> {
-    let components = component::parse(doc).ok()?;
+    let components = element::parse(doc).ok()?;
     let exchange = components
         .iter()
         .find(|component| component.name == "exchange")?;
@@ -51,7 +51,7 @@ pub fn remove_post_exchange_duplicate_prompt_comments_preserving_docs(
     }
 
     let mut replacements = Vec::<(usize, usize, String)>::new();
-    for (start, end) in component::find_non_agent_html_comment_ranges(doc) {
+    for (start, end) in element::find_non_agent_html_comment_ranges(doc) {
         if start < exchange.close_end {
             continue;
         }
@@ -91,7 +91,7 @@ pub fn remove_post_exchange_duplicate_prompt_comments_preserving_docs(
 }
 
 pub(crate) fn post_exchange_comment_line_preserve_set(doc: &str) -> HashSet<String> {
-    let Ok(components) = component::parse(doc) else {
+    let Ok(components) = element::parse(doc) else {
         return HashSet::new();
     };
     let Some(exchange) = components
@@ -107,7 +107,7 @@ pub(crate) fn post_exchange_comment_line_preserve_set(doc: &str) -> HashSet<Stri
         .collect::<Vec<_>>();
 
     let mut preserved = HashSet::new();
-    for (start, end) in component::find_non_agent_html_comment_ranges(doc) {
+    for (start, end) in element::find_non_agent_html_comment_ranges(doc) {
         if start < exchange.close_end {
             continue;
         }
@@ -143,7 +143,7 @@ pub(crate) fn post_exchange_comment_line_preserve_set(doc: &str) -> HashSet<Stri
 /// (b) match a contiguous prompt block immediately before an existing response
 /// heading. A bare unprefixed post-boundary prompt is always preserved.
 pub fn remove_duplicate_answered_exchange_prompt_tail(doc: &str) -> Option<String> {
-    let components = component::parse(doc).ok()?;
+    let components = element::parse(doc).ok()?;
     let exchange = components
         .iter()
         .find(|component| component.name == "exchange")?;
@@ -284,7 +284,7 @@ pub(crate) fn normalize_duplicate_exchange_prompt_line(line: &str) -> Option<Str
 /// backlog/queue have their own mutation rules. Anything else is ambiguous
 /// enough that closeout must not silently commit or dispatch it.
 pub fn guard_no_duplicate_prompt_residue_outside_exchange(doc: &str) -> Result<()> {
-    let components = match component::parse(doc) {
+    let components = match element::parse(doc) {
         Ok(components) => components,
         Err(err)
             if err
@@ -316,7 +316,7 @@ pub fn guard_no_duplicate_prompt_residue_outside_exchange(doc: &str) -> Result<(
             .iter()
             .any(|(start, end)| pos >= *start && pos < *end)
     };
-    let ordinary_comment_ranges = component::find_non_agent_html_comment_ranges(doc);
+    let ordinary_comment_ranges = element::find_non_agent_html_comment_ranges(doc);
     let in_ordinary_comment = |pos: usize| {
         ordinary_comment_ranges
             .iter()
@@ -572,7 +572,7 @@ pub(crate) fn is_safe_duplicate_template_scaffold(segment: &str) -> bool {
     }
 
     let wrapped = format!("<!-- agent:scaffold -->\n{trimmed}\n<!-- /agent:scaffold -->\n");
-    let Ok(components) = component::parse(&wrapped) else {
+    let Ok(components) = element::parse(&wrapped) else {
         return false;
     };
     let allowed = ["scaffold", "queue", "backlog", "pending", "icebox", "done"];
@@ -583,7 +583,7 @@ pub(crate) fn is_safe_duplicate_template_scaffold(segment: &str) -> bool {
 
 pub(crate) fn duplicate_scaffold_has_only_structural_residue(segment: &str) -> bool {
     let mut residue = segment.to_string();
-    if let Ok(components) = component::parse(segment) {
+    if let Ok(components) = element::parse(segment) {
         let mut ranges: Vec<(usize, usize)> = components
             .iter()
             .filter(|component| {

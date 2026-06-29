@@ -59,8 +59,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use agent_doc_element::element;
+
 use crate::{
-    component,
     frontmatter::{self, ResolvedMode},
     parallel,
     queue_dispatch::{self, QueueItemKind},
@@ -793,7 +794,7 @@ fn extend_task_batch_from_text(batch: &mut ResolvedTaskBatch, text: &str) {
 }
 
 fn exchange_text(doc: &str) -> Result<&str> {
-    let components = component::parse(doc).context("failed to parse document components")?;
+    let components = element::parse(doc).context("failed to parse document components")?;
     let exchange = components
         .iter()
         .find(|comp| comp.name == "exchange")
@@ -802,7 +803,7 @@ fn exchange_text(doc: &str) -> Result<&str> {
 }
 
 fn active_queue_hash(doc: &str) -> Result<Option<String>> {
-    let components = component::parse(doc).context("failed to parse document components")?;
+    let components = element::parse(doc).context("failed to parse document components")?;
     let queue = components
         .iter()
         .find(|comp| comp.name == "queue")
@@ -1551,7 +1552,7 @@ fn inject_prompt(file: &Path, task: &str) -> Result<()> {
 }
 
 fn inject_prompt_into_doc(doc: &str, task: &str) -> Result<String> {
-    let components = component::parse(doc).context("failed to parse document components")?;
+    let components = element::parse(doc).context("failed to parse document components")?;
     let exchange = components
         .iter()
         .find(|comp| comp.name == "exchange")

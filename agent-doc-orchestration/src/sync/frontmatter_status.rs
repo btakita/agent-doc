@@ -20,7 +20,7 @@ pub(crate) fn sync_frontmatter_status_message(phase: &str, err: &anyhow::Error) 
 pub(crate) fn write_sync_status(file: &Path, text: &str) -> Result<bool> {
     let doc = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {} for sync status update", file.display()))?;
-    let components = component::parse(&doc)
+    let components = element::parse(&doc)
         .with_context(|| format!("failed to parse components in {}", file.display()))?;
     let Some(status) = components
         .iter()
@@ -79,7 +79,7 @@ pub(crate) fn clear_frontmatter_status(file: &Path) {
         Ok(doc) => doc,
         Err(_) => return,
     };
-    let components = match component::parse(&doc) {
+    let components = match element::parse(&doc) {
         Ok(components) => components,
         Err(_) => return,
     };

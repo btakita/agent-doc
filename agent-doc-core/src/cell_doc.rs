@@ -25,7 +25,7 @@
 //!
 //! ## Reuse of the existing parse + key scheme
 //!
-//! - Component framing is parsed with [`crate::component::parse`] (the single
+//! - Component framing is parsed with [`agent_doc_element::element::parse`] (the single
 //!   document-component parser).
 //! - Item segmentation reuses the crdt module's keyed-child splitters
 //!   ([`crate::crdt::split_list_children`] /
@@ -42,12 +42,12 @@ use lazily::{
     CellMap, CellTree, Context, DiffOp, SemTree, TextCrdt, apply_to_map, apply_to_tree, reconcile,
 };
 
-use crate::component::{self, Component};
 use crate::crdt::{
     EditorOp, PREAMBLE_KEY, is_list_component, replay_editor_ops, split_exchange_children,
     split_list_children,
 };
 use crate::queue_item_lifecycle::QueueItemLifecycle;
+use agent_doc_element::element::{self, Component};
 
 /// Environment variable that gates the live CRDT merge per-cell
 /// 3-way path ([`merge_3way`], routed from [`crate::crdt::merge_by_component`]).
@@ -243,7 +243,7 @@ impl ComponentDiff {
 /// never cross-component) exactly where the live merge would fall back to the
 /// flat path.
 pub fn project_document(doc: &str) -> Vec<ComponentOccurrence> {
-    let components = match component::parse(doc) {
+    let components = match element::parse(doc) {
         Ok(c) => c,
         Err(_) => return Vec::new(),
     };
@@ -292,7 +292,7 @@ fn project_component(doc: &str, comp: &Component, occurrence: usize) -> Componen
 // adds a parallel *span-aware* projection ([`project_document_spans`]) that, for
 // each keyed item, records its **byte span** `(start, end)` in the FULL source
 // document. A component body sits at `&doc[comp.open_end..comp.close_start]`
-// (see `component::Component::content`), and the splitters are lossless
+// (see `element::Component::content`), and the splitters are lossless
 // (`children.map(text).collect() == body`), so each item's full-doc span is
 // `comp.open_end + accumulated_child_len .. + item_len`. An absolute op offset
 // then resolves to the unique containing item — or to none (structural framing /
@@ -352,7 +352,7 @@ pub struct ItemSpan {
 ///
 /// Returns `None` on a parse error (caller falls back).
 pub fn project_document_spans(doc: &str) -> Option<Vec<ItemSpan>> {
-    let components = component::parse(doc).ok()?;
+    let components = element::parse(doc).ok()?;
     // Top-level components only (mirror `parse_doc_nodes` / `segment_into_nodes`).
     let top: Vec<&Component> = components
         .iter()
@@ -635,7 +635,7 @@ struct ComponentFraming {
 /// each top-level component, with each component projected into keyed items.
 /// `None` on a parse error (caller falls back).
 fn parse_doc_nodes(doc: &str) -> Option<Vec<DocNode>> {
-    let comps = component::parse(doc).ok()?;
+    let comps = element::parse(doc).ok()?;
     // Top-level components only (mirror `crdt::segment_into_nodes`).
     let mut top: Vec<&Component> = comps
         .iter()
@@ -1336,7 +1336,7 @@ pub fn merge_3way(base_doc: &str, ours_doc: &str, theirs_doc: &str) -> CellMerge
 /// `<<<<<<< / ======= / >>>>>>>` rails showing BOTH sides verbatim, with `ours`
 /// (the active/structural text already present in the body) named first. Its
 /// inner content begins with `cell-merge-conflict` (deliberately **not** an
-/// `agent:` / `/agent:` prefix), so [`crate::component::parse`] treats it as an
+/// `agent:` / `/agent:` prefix), so [`agent_doc_element::element::parse`] treats it as an
 /// ordinary comment and never as a component open/close marker. It is emitted as
 /// a comment specifically so it can never:
 /// - introduce a new top-level component (its inner text never starts with
@@ -1375,7 +1375,7 @@ fn conflict_marker(conflict: &CellConflict) -> String {
 /// stderr-only) rather than risk corrupting framing. Returns true when safe.
 fn marker_is_framing_safe(conflict: &CellConflict) -> bool {
     // The rails/comment scaffolding is fixed and safe; only the verbatim side
-    // text could carry framing. `component::parse` keys off `<!-- agent:` /
+    // text could carry framing. `element::parse` keys off `<!-- agent:` /
     // `<!-- /agent:` openers, so reject either side carrying one.
     let carries_framing =
         |s: &str| s.contains("<!-- agent:") || s.contains("<!-- /agent:") || s.contains("-->");
@@ -3030,7 +3030,7 @@ working on it
         );
         // The marker is an HTML comment (framing-safe), so re-parsing yields the
         // SAME single top-level queue component.
-        let parsed = component::parse(&out.merged_text).expect("merged doc parses");
+        let parsed = element::parse(&out.merged_text).expect("merged doc parses");
         let top: Vec<&str> = parsed.iter().map(|c| c.name.as_str()).collect();
         assert_eq!(top, vec!["queue"], "component sequence unchanged: {top:?}");
     }

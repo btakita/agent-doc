@@ -402,7 +402,7 @@ fn active_session_prompt_or_queue_head(file: &Path) -> Result<Option<String>> {
 }
 
 fn first_active_queue_prompt_in_content(content: &str) -> Option<String> {
-    let components = crate::component::parse(content).ok()?;
+    let components = agent_doc_element::element::parse(content).ok()?;
     let queue = components
         .iter()
         .find(|component| component.name == "queue")?;

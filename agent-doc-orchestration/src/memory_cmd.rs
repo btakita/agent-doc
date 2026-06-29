@@ -15,10 +15,10 @@ use tsift_memory::{
     default_memory_db_path, read_memory_events,
 };
 
-use crate::component;
 use crate::fs_util;
 use crate::pending::{self, PendingItem, PendingListMarker, PendingState};
 use crate::snapshot;
+use agent_doc_element::element;
 
 const TRACKED_WORK_IMPORT_SOURCE: &str = "agent-doc:tracked-work";
 const EXCHANGE_IMPORT_SOURCE: &str = "agent-doc:exchange";
@@ -485,7 +485,7 @@ fn is_active_backlog_work_event(event: &MemoryEvent) -> bool {
         && event
             .metadata
             .get("component")
-            .is_some_and(|component| component::is_backlog_component(component))
+            .is_some_and(|component| element::is_backlog_component(component))
 }
 
 fn collect_completion_candidates(file: &Path) -> Result<Vec<CompletionCandidate>> {
@@ -493,13 +493,12 @@ fn collect_completion_candidates(file: &Path) -> Result<Vec<CompletionCandidate>
         .with_context(|| format!("failed to read session document {}", file.display()))?;
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let session_ref = display_path(&canonical);
-    let components = component::parse(&content).context("failed to parse session components")?;
+    let components = element::parse(&content).context("failed to parse session components")?;
     let mut candidates = Vec::new();
 
     for comp in &components {
         let body = comp.content(&content);
-        if component::is_backlog_component(&comp.name) || component::is_review_component(&comp.name)
-        {
+        if element::is_backlog_component(&comp.name) || element::is_review_component(&comp.name) {
             let (_, items, _) = pending::parse_items(body);
             for item in items {
                 if item.state == PendingState::Done || item.text.trim().is_empty() {
@@ -589,23 +588,23 @@ fn collect_session_events(file: &Path) -> Result<SessionEvents> {
     let doc_hash = snapshot::doc_hash(&canonical)
         .unwrap_or_else(|_| snapshot::doc_hash_from_str(&canonical.to_string_lossy()));
     let session_ref = display_path(&canonical);
-    let components = component::parse(&content).context("failed to parse session components")?;
+    let components = element::parse(&content).context("failed to parse session components")?;
     let mut events = Vec::new();
     let mut component_counts = BTreeMap::new();
     let mut warnings = Vec::new();
 
     for comp in &components {
         let body = comp.content(&content);
-        if component::is_backlog_component(&comp.name)
-            || component::is_review_component(&comp.name)
-            || component::is_icebox_component(&comp.name)
+        if element::is_backlog_component(&comp.name)
+            || element::is_review_component(&comp.name)
+            || element::is_icebox_component(&comp.name)
         {
             let state_override = None;
             let new_events =
                 tracked_work_events(&session_ref, &doc_hash, &comp.name, body, state_override);
             bump_count(&mut component_counts, &comp.name, new_events.len());
             events.extend(new_events);
-        } else if component::is_backlog_done_component(&comp.name) {
+        } else if element::is_backlog_done_component(&comp.name) {
             let new_events = tracked_work_events(
                 &session_ref,
                 &doc_hash,

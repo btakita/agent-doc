@@ -45,8 +45,8 @@ pub(crate) fn conversation_tail_start_in_range(
     search_start: usize,
     search_end: usize,
 ) -> Option<usize> {
-    let code_ranges = component::find_code_ranges(doc);
-    let comment_ranges = component::find_non_agent_html_comment_ranges(doc);
+    let code_ranges = element::find_code_ranges(doc);
+    let comment_ranges = element::find_non_agent_html_comment_ranges(doc);
     let in_ignored_range = |pos: usize| {
         code_ranges
             .iter()
@@ -93,8 +93,8 @@ pub(crate) fn prompt_tail_range_in_region(
     search_start: usize,
     search_end: usize,
 ) -> Option<(usize, usize)> {
-    let code_ranges = component::find_code_ranges(doc);
-    let comment_ranges = component::find_non_agent_html_comment_ranges(doc);
+    let code_ranges = element::find_code_ranges(doc);
+    let comment_ranges = element::find_non_agent_html_comment_ranges(doc);
     let in_ignored_range = |pos: usize| {
         code_ranges
             .iter()
@@ -152,10 +152,10 @@ pub(crate) fn prompt_tail_range_in_region(
 
 pub(crate) fn escaped_prompt_range_outside_exchange(
     doc: &str,
-    components: &[component::Component],
-    exchange: &component::Component,
+    components: &[element::Component],
+    exchange: &element::Component,
 ) -> Option<(usize, usize)> {
-    let mut trailing_components: Vec<&component::Component> = components
+    let mut trailing_components: Vec<&element::Component> = components
         .iter()
         .filter(|c| c.open_start >= exchange.close_end)
         .collect();
@@ -183,14 +183,14 @@ pub(crate) fn escaped_prompt_range_outside_exchange(
 
 pub(crate) fn escaped_conversation_range_outside_exchange(
     doc: &str,
-    components: &[component::Component],
-    exchange: &component::Component,
+    components: &[element::Component],
+    exchange: &element::Component,
 ) -> Option<(usize, usize)> {
     if let Some(range) = escaped_prompt_range_outside_exchange(doc, components, exchange) {
         return Some(range);
     }
 
-    let mut trailing_components: Vec<&component::Component> = components
+    let mut trailing_components: Vec<&element::Component> = components
         .iter()
         .filter(|c| c.open_start >= exchange.close_end)
         .collect();
@@ -286,7 +286,7 @@ pub(crate) fn tail_is_safe_exchange_content(tail: &str) -> bool {
 /// guard — explicit `agent-doc repair` uses `repair_conversation_tail_outside_exchange`
 /// instead.
 pub fn guard_no_conversation_tail_outside_exchange(doc: &str) -> Result<()> {
-    let components = component::parse(doc).context("failed to parse components")?;
+    let components = element::parse(doc).context("failed to parse components")?;
     let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
         return Ok(());
     };
@@ -311,7 +311,7 @@ pub fn guard_no_conversation_tail_outside_exchange(doc: &str) -> Result<()> {
 /// below `<!-- /agent:exchange -->` and now trails the document after sibling
 /// components like pending/todo.
 pub fn repair_conversation_tail_outside_exchange(doc: &str) -> Result<Option<String>> {
-    let components = component::parse(doc).context("failed to parse components")?;
+    let components = element::parse(doc).context("failed to parse components")?;
     let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
         return Ok(None);
     };
@@ -331,7 +331,7 @@ pub fn repair_conversation_tail_outside_exchange(doc: &str) -> Result<Option<Str
 
     let prefix = &doc[..tail_start];
     let suffix = &doc[tail_end..];
-    let prefix_components = component::parse(prefix).context("failed to parse repair prefix")?;
+    let prefix_components = element::parse(prefix).context("failed to parse repair prefix")?;
     let exchange = prefix_components
         .iter()
         .find(|c| c.name == "exchange")
@@ -359,7 +359,7 @@ pub fn repair_conversation_tail_outside_exchange(doc: &str) -> Result<Option<Str
 /// Repair only prompt-target drift that escaped below `<!-- /agent:exchange -->`
 /// while leaving later markdown section separators outside the exchange block.
 pub fn repair_prompt_tail_outside_exchange(doc: &str) -> Result<Option<String>> {
-    let components = component::parse(doc).context("failed to parse components")?;
+    let components = element::parse(doc).context("failed to parse components")?;
     let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
         return Ok(None);
     };
@@ -379,7 +379,7 @@ pub fn repair_prompt_tail_outside_exchange(doc: &str) -> Result<Option<String>> 
 
     let prefix = &doc[..tail_start];
     let suffix = &doc[tail_end..];
-    let prefix_components = component::parse(prefix).context("failed to parse repair prefix")?;
+    let prefix_components = element::parse(prefix).context("failed to parse repair prefix")?;
     let exchange = prefix_components
         .iter()
         .find(|c| c.name == "exchange")
@@ -444,7 +444,7 @@ pub fn repair_duplicate_exchange_close_tail(doc: &str) -> Result<Option<String>>
     }
 
     let prefix = &doc[..first_close_end];
-    let prefix_components = component::parse(prefix).context("failed to parse repair prefix")?;
+    let prefix_components = element::parse(prefix).context("failed to parse repair prefix")?;
     let exchange = prefix_components
         .iter()
         .find(|c| c.name == "exchange")
@@ -568,7 +568,7 @@ pub(crate) fn safe_exchange_tail_from_duplicate_scaffold(segment: &str) -> Resul
     }
 
     let mut residue = segment.to_string();
-    if let Ok(components) = component::parse(segment) {
+    if let Ok(components) = element::parse(segment) {
         let mut ranges: Vec<(usize, usize)> = components
             .iter()
             .filter(|component| {
@@ -613,7 +613,7 @@ pub(crate) fn safe_exchange_tail_from_duplicate_scaffold(segment: &str) -> Resul
 pub(crate) fn append_tail_to_exchange_end(prefix: &str, tail: &str) -> Result<String> {
     let prefix_without_boundaries = remove_all_boundaries(prefix);
     let components =
-        component::parse(&prefix_without_boundaries).context("failed to parse repair prefix")?;
+        element::parse(&prefix_without_boundaries).context("failed to parse repair prefix")?;
     let exchange = components
         .iter()
         .find(|c| c.name == "exchange")
@@ -967,7 +967,7 @@ mod tests {
             "repair should drop the duplicated queue scaffold:\n{repaired}"
         );
         assert!(repaired.contains("JB `Run Agent Doc` failed on this document."));
-        assert!(component::parse(&repaired).is_ok());
+        assert!(element::parse(&repaired).is_ok());
     }
     #[test]
     fn repair_duplicate_exchange_close_scaffold_rejects_mixed_user_text() {

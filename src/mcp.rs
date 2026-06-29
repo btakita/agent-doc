@@ -653,7 +653,7 @@ fn read_document(file: &Path, component: Option<&str>) -> Result<String> {
     let Some(component) = component else {
         return Ok(content);
     };
-    let components = crate::component::parse(&content)
+    let components = agent_doc_element::element::parse(&content)
         .with_context(|| format!("failed to parse components in {}", file.display()))?;
     let component = components
         .iter()

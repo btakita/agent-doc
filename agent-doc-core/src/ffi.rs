@@ -21,8 +21,10 @@ use std::os::raw::c_char;
 use std::ptr;
 use std::sync::{Mutex, OnceLock};
 
+use agent_doc_element::element;
+
 use crate::crdt_sync::ReplicaState;
-use crate::{component, crdt, frontmatter, syntax, template};
+use crate::{crdt, frontmatter, syntax, template};
 
 /// Free a string returned by an `agent_doc_*` function.
 ///
@@ -164,7 +166,7 @@ pub unsafe extern "C" fn agent_doc_parse_components(doc: *const c_char) -> FfiCo
         }
     };
 
-    let components = match component::parse(doc_str) {
+    let components = match element::parse(doc_str) {
         Ok(c) => c,
         Err(_) => {
             return FfiComponentList {
@@ -304,7 +306,7 @@ pub unsafe extern "C" fn agent_doc_converge_queue_auto(
         Ok(s) => s,
         Err(e) => return ffi_patch_err(&format!("invalid doc UTF-8: {e}")),
     };
-    let converged = component::converge_queue_auto(doc_str, want_auto != 0)
+    let converged = element::converge_queue_auto(doc_str, want_auto != 0)
         .unwrap_or_else(|| doc_str.to_string());
     FfiPatchResult {
         text: CString::new(converged).unwrap_or_default().into_raw(),
@@ -974,7 +976,7 @@ pub unsafe extern "C" fn agent_doc_apply_patch_with_caret(
 
     // If append mode with a valid caret, use cursor-aware insertion
     if mode_str == "append" && caret_offset >= 0 {
-        let components = match component::parse(doc_str) {
+        let components = match element::parse(doc_str) {
             Ok(c) => c,
             Err(e) => return ffi_patch_err(&format!("{e}")),
         };
@@ -1046,7 +1048,7 @@ pub unsafe extern "C" fn agent_doc_apply_patch_with_boundary(
 
     // Use boundary-aware insertion for append mode
     if mode_str == "append" && !bid.is_empty() {
-        let components = match component::parse(doc_str) {
+        let components = match element::parse(doc_str) {
             Ok(c) => c,
             Err(e) => return ffi_patch_err(&format!("{e}")),
         };

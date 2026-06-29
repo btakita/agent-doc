@@ -11,6 +11,11 @@
 //! queue projection, active-head marker placement, and signals that observe
 //! queue/turn/supervisor state.
 
+pub mod element;
+pub mod id;
+
+pub use element::Component;
+
 /// Where an element descriptor comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ElementSource {

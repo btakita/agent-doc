@@ -2526,10 +2526,12 @@ impl SimWorld {
             _ => {}
         }
 
-        let components = crate::component::parse(&self.doc)?;
+        let components = agent_doc_element::element::parse(&self.doc)?;
         let malformed = components
             .iter()
-            .filter(|component| crate::component::is_tracked_work_component(&component.name))
+            .filter(|component| {
+                agent_doc_element::element::is_tracked_work_component(&component.name)
+            })
             .flat_map(|component| {
                 agent_doc_orchestration::pending::detect_malformed_item_lines(
                     component.content(&self.doc),
@@ -2630,7 +2632,7 @@ impl SimWorld {
     }
 
     pub(crate) fn assert_structural_invariants(&self) -> Result<()> {
-        let components = crate::component::parse(&self.doc)?;
+        let components = agent_doc_element::element::parse(&self.doc)?;
         let exchange = components
             .iter()
             .find(|component| component.name == "exchange")
@@ -2725,7 +2727,7 @@ impl SimWorld {
     }
 
     pub(crate) fn component_content(&self, name: &str) -> Result<&str> {
-        crate::component::parse(&self.doc)?
+        agent_doc_element::element::parse(&self.doc)?
             .into_iter()
             .find(|component| component.name == name)
             .map(|component| component.content(&self.doc))
@@ -2733,7 +2735,7 @@ impl SimWorld {
     }
 
     pub(crate) fn replace_component_content(&mut self, name: &str, content: &str) -> Result<()> {
-        let component = crate::component::parse(&self.doc)?
+        let component = agent_doc_element::element::parse(&self.doc)?
             .into_iter()
             .find(|component| component.name == name)
             .ok_or_else(|| anyhow!("missing component `{name}`"))?;
@@ -2742,7 +2744,7 @@ impl SimWorld {
     }
 
     pub(crate) fn insert_after_exchange(&mut self, content: &str) -> Result<()> {
-        let exchange = crate::component::parse(&self.doc)?
+        let exchange = agent_doc_element::element::parse(&self.doc)?
             .into_iter()
             .find(|component| component.name == "exchange")
             .ok_or_else(|| anyhow!("missing component `exchange`"))?;

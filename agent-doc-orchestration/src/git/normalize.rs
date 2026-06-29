@@ -33,7 +33,7 @@ pub fn normalize_transient_agent_doc_markers(content: &str) -> String {
 /// root cause #4: the capture-replay guard must validate the response body, not
 /// a whole-document hash that queue-component churn invalidates).
 pub(crate) fn neutralize_queue_component(content: &str) -> String {
-    let Ok(components) = crate::component::parse(content) else {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
         return content.to_string();
     };
     let Some(queue) = components.iter().find(|c| c.name == "queue") else {
@@ -245,7 +245,7 @@ pub fn normalize_committed_exchange_artifacts(content: &str) -> String {
         Err(_) => return transient,
     };
     let prefix_len = transient.len().saturating_sub(body.len());
-    let Ok(components) = crate::component::parse(body) else {
+    let Ok(components) = agent_doc_element::element::parse(body) else {
         return transient;
     };
 
@@ -314,7 +314,7 @@ pub(crate) fn normalize_component_content_for_absorb(content: &str) -> String {
 }
 
 pub(crate) fn redact_component_contents_for_absorb(body: &str) -> Option<String> {
-    let components = crate::component::parse(body).ok()?;
+    let components = agent_doc_element::element::parse(body).ok()?;
     let mut redacted = String::with_capacity(body.len());
     let mut last = 0usize;
     for comp in components {

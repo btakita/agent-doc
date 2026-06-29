@@ -1,4 +1,6 @@
-use crate::{component, diff, frontmatter, pending, session_accretion};
+use agent_doc_element::element;
+
+use crate::{diff, frontmatter, pending, session_accretion};
 use std::path::Path;
 
 const BACKLOG_HEAD_LIMIT: usize = 3;
@@ -26,7 +28,7 @@ pub fn build_document_section(
         return full_document_section(doc, &remote_host_scope);
     }
 
-    let Ok(components) = component::parse(doc) else {
+    let Ok(components) = element::parse(doc) else {
         return full_document_section(doc, &remote_host_scope);
     };
 
@@ -146,7 +148,7 @@ fn render_prompt_targets(prompt_targets: &[String]) -> String {
         .join("\n")
 }
 
-fn extract_session_summary(components: &[component::Component], doc: &str) -> Option<String> {
+fn extract_session_summary(components: &[element::Component], doc: &str) -> Option<String> {
     let exchange = components.iter().find(|comp| comp.name == "exchange")?;
     let exchange_body = exchange.content(doc);
     let lines: Vec<&str> = exchange_body.lines().collect();
@@ -165,10 +167,10 @@ fn extract_session_summary(components: &[component::Component], doc: &str) -> Op
     (!summary.is_empty()).then_some(summary)
 }
 
-fn render_backlog_head(components: &[component::Component], doc: &str) -> Option<String> {
+fn render_backlog_head(components: &[element::Component], doc: &str) -> Option<String> {
     let backlog = components
         .iter()
-        .find(|comp| component::is_backlog_component(&comp.name))?;
+        .find(|comp| element::is_backlog_component(&comp.name))?;
     let (_, items, _) = pending::parse_items(backlog.content(doc));
     let active: Vec<&pending::PendingItem> = items.iter().filter(|item| !item.is_done()).collect();
     if active.is_empty() {
@@ -197,7 +199,7 @@ fn format_pending_head(item: &pending::PendingItem) -> String {
     format!("- {} [#{}] {}", checkbox, item.id, item.text)
 }
 
-fn render_available_components(components: &[component::Component]) -> String {
+fn render_available_components(components: &[element::Component]) -> String {
     components
         .iter()
         .map(|comp| comp.name.as_str())
@@ -208,7 +210,7 @@ fn render_available_components(components: &[component::Component]) -> String {
 }
 
 fn render_recent_exchange_turns(
-    components: &[component::Component],
+    components: &[element::Component],
     doc: &str,
     prompt_targets: &[String],
 ) -> Option<String> {

@@ -1397,10 +1397,10 @@ pub fn merge_partial_backlog_prefix(current_body: &str, target_body: &str) -> Op
 }
 
 pub fn detect_shadow_open_items(doc: &str) -> Result<ShadowPendingReport> {
-    let components = crate::component::parse(doc)?;
+    let components = agent_doc_element::element::parse(doc)?;
     let Some(backlog_component) = components
         .iter()
-        .find(|component| crate::component::is_backlog_component(&component.name))
+        .find(|component| agent_doc_element::element::is_backlog_component(&component.name))
     else {
         return Ok(ShadowPendingReport::default());
     };
@@ -1415,7 +1415,7 @@ pub fn detect_shadow_open_items(doc: &str) -> Result<ShadowPendingReport> {
     let excluded_ranges: Vec<(usize, usize)> = components
         .iter()
         .filter(|component| {
-            crate::component::is_tracked_work_component(&component.name)
+            agent_doc_element::element::is_tracked_work_component(&component.name)
                 || component.name == "exchange"
                 // `agent:queue` `[#id]` / `do [#id]` heads are legitimate queue
                 // references to backlog items, NOT shadow backlog items hiding in
@@ -1430,7 +1430,7 @@ pub fn detect_shadow_open_items(doc: &str) -> Result<ShadowPendingReport> {
         })
         .map(|component| (component.open_start, component.close_end))
         .collect();
-    let code_ranges = crate::component::find_code_ranges(doc);
+    let code_ranges = agent_doc_element::element::find_code_ranges(doc);
 
     let mut report = ShadowPendingReport::default();
     let mut seen_ids = HashSet::new();
@@ -1527,10 +1527,10 @@ pub fn detect_dropped_from_history_with_extra_current_ids(
     done_ids: &HashSet<String>,
     extra_current_ids: &HashSet<String>,
 ) -> Result<DroppedBacklogReport> {
-    let baseline_components = crate::component::parse(baseline_doc)?;
+    let baseline_components = agent_doc_element::element::parse(baseline_doc)?;
     let Some(baseline_backlog) = baseline_components
         .iter()
-        .find(|c| crate::component::is_backlog_component(&c.name))
+        .find(|c| agent_doc_element::element::is_backlog_component(&c.name))
     else {
         return Ok(DroppedBacklogReport::default());
     };
@@ -1546,19 +1546,19 @@ pub fn detect_dropped_from_history_with_extra_current_ids(
         return Ok(DroppedBacklogReport::default());
     }
 
-    let current_components = crate::component::parse(current_doc)?;
+    let current_components = agent_doc_element::element::parse(current_doc)?;
 
     let mut current_ids: HashSet<String> = HashSet::new();
 
     for comp in &current_components {
-        if crate::component::is_tracked_work_component(&comp.name) {
+        if agent_doc_element::element::is_tracked_work_component(&comp.name) {
             let (_, items, _) = parse_items(comp.content(current_doc));
             for item in items {
                 if !item.id.is_empty() {
                     current_ids.insert(item.id);
                 }
             }
-        } else if crate::component::is_backlog_done_component(&comp.name) {
+        } else if agent_doc_element::element::is_backlog_done_component(&comp.name) {
             current_ids.extend(extract_pending_ids_from_text(comp.content(current_doc)));
         }
     }
@@ -1566,10 +1566,10 @@ pub fn detect_dropped_from_history_with_extra_current_ids(
 
     let excluded_ranges: Vec<(usize, usize)> = current_components
         .iter()
-        .filter(|c| crate::component::is_tracked_work_component(&c.name))
+        .filter(|c| agent_doc_element::element::is_tracked_work_component(&c.name))
         .map(|c| (c.open_start, c.close_end))
         .collect();
-    let code_ranges = crate::component::find_code_ranges(current_doc);
+    let code_ranges = agent_doc_element::element::find_code_ranges(current_doc);
 
     let mut offset = 0usize;
     for raw_line in current_doc.split_inclusive('\n') {

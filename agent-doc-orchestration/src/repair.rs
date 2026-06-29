@@ -177,7 +177,7 @@ fn has_matching_orphan_prompt_for_committed_capture(
     let body = frontmatter::parse(doc_content)
         .map(|(_, body)| body)
         .unwrap_or(doc_content);
-    let exchange = if let Ok(components) = crate::component::parse(body) {
+    let exchange = if let Ok(components) = agent_doc_element::element::parse(body) {
         components
             .iter()
             .find(|component| component.name == "exchange")
@@ -742,7 +742,7 @@ fn repair_completed_backlog_items(file: &Path) -> Result<RepairOutcome> {
             file.display()
         )
     })?;
-    let components = crate::component::parse(&content).with_context(|| {
+    let components = agent_doc_element::element::parse(&content).with_context(|| {
         format!(
             "failed to parse {} for completed backlog reap repair",
             file.display()
@@ -750,7 +750,7 @@ fn repair_completed_backlog_items(file: &Path) -> Result<RepairOutcome> {
     })?;
     let Some(backlog) = components
         .iter()
-        .find(|component| crate::component::is_backlog_component(&component.name))
+        .find(|component| agent_doc_element::element::is_backlog_component(&component.name))
     else {
         return Ok(RepairOutcome::Noop);
     };
@@ -774,15 +774,16 @@ fn repair_completed_backlog_items(file: &Path) -> Result<RepairOutcome> {
     write::atomic_write_pub(file, &repaired)?;
 
     let repaired_snapshot = if let Some(snap_content) = snapshot::load(file)? {
-        let snap_components = crate::component::parse(&snap_content).with_context(|| {
-            format!(
-                "failed to parse snapshot for completed backlog reap repair {}",
-                file.display()
-            )
-        })?;
+        let snap_components =
+            agent_doc_element::element::parse(&snap_content).with_context(|| {
+                format!(
+                    "failed to parse snapshot for completed backlog reap repair {}",
+                    file.display()
+                )
+            })?;
         let snap_backlog = snap_components
             .iter()
-            .find(|component| crate::component::is_backlog_component(&component.name))
+            .find(|component| agent_doc_element::element::is_backlog_component(&component.name))
             .with_context(|| {
                 format!(
                     "completed backlog reap repair requires the snapshot backlog component in {}",
@@ -1145,7 +1146,7 @@ fn repair_prompt_target_immediately_before_existing_response(
     let body = crate::frontmatter::parse(current_doc)
         .map(|(_, body)| body.to_string())
         .unwrap_or_else(|_| current_doc.to_string());
-    let Ok(components) = crate::component::parse(&body) else {
+    let Ok(components) = agent_doc_element::element::parse(&body) else {
         return false;
     };
     let Some(exchange) = components
@@ -1199,7 +1200,7 @@ fn repair_answered_stale_boundary_if_safe(
         return Ok(None);
     }
 
-    let components = crate::component::parse(doc_content).with_context(|| {
+    let components = agent_doc_element::element::parse(doc_content).with_context(|| {
         format!(
             "failed to parse {} for completed-turn boundary repair",
             file.display()
@@ -1504,7 +1505,7 @@ pub(crate) fn live_exchange_answers_heading(doc_content: &str, heading: &str) ->
     if target.is_empty() {
         return false;
     }
-    let Ok(components) = crate::component::parse(doc_content) else {
+    let Ok(components) = agent_doc_element::element::parse(doc_content) else {
         return false;
     };
     let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
@@ -2795,7 +2796,7 @@ mod tests {
         assert_eq!(recovered, RepairOutcome::ReplayedResponse);
 
         let result = std::fs::read_to_string(&doc).unwrap();
-        let exchange = crate::component::parse(&result)
+        let exchange = agent_doc_element::element::parse(&result)
             .unwrap()
             .into_iter()
             .find(|component| component.name == "exchange")

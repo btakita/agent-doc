@@ -22,7 +22,7 @@ pub fn unresolved_backlog_capture_targets(
             let Ok(Some(content)) = std::fs::read_to_string(&normalized_target).map(Some) else {
                 return true;
             };
-            let Ok(components) = crate::component::parse(&content) else {
+            let Ok(components) = agent_doc_element::element::parse(&content) else {
                 return true;
             };
             let component = target
@@ -30,13 +30,13 @@ pub fn unresolved_backlog_capture_targets(
                 .as_deref()
                 .and_then(|name| components.iter().find(|component| component.name == name))
                 .or_else(|| {
-                    components
-                        .iter()
-                        .find(|component| crate::component::is_backlog_component(&component.name))
+                    components.iter().find(|component| {
+                        agent_doc_element::element::is_backlog_component(&component.name)
+                    })
                 })
                 .or_else(|| {
                     components.iter().find(|component| {
-                        crate::component::is_tracked_work_component(&component.name)
+                        agent_doc_element::element::is_tracked_work_component(&component.name)
                     })
                 });
             let current_hash = component
@@ -70,18 +70,18 @@ pub(crate) fn tracked_work_ids_for_target(
     content: &str,
     preferred_component: Option<&str>,
 ) -> Result<HashSet<String>> {
-    let components = crate::component::parse(content)?;
+    let components = agent_doc_element::element::parse(content)?;
     let component = preferred_component
         .and_then(|name| components.iter().find(|component| component.name == name))
         .or_else(|| {
             components
                 .iter()
-                .find(|component| crate::component::is_backlog_component(&component.name))
+                .find(|component| agent_doc_element::element::is_backlog_component(&component.name))
         })
         .or_else(|| {
-            components
-                .iter()
-                .find(|component| crate::component::is_tracked_work_component(&component.name))
+            components.iter().find(|component| {
+                agent_doc_element::element::is_tracked_work_component(&component.name)
+            })
         });
     Ok(component
         .map(|component| tracked_work_ids_from_component_body(component.content(content)))
@@ -859,7 +859,7 @@ pub(crate) fn auto_apply_pending_done_if_enabled(
 
 pub(crate) fn auto_apply_pending_done_id(file: &Path, id: &str) -> Result<()> {
     if let Some(component) = crate::pending_cmd::open_item_component_name(file, id)?
-        && crate::component::is_backlog_component(&component)
+        && agent_doc_element::element::is_backlog_component(&component)
     {
         crate::pending_cmd::gate(file, id)?;
     }
@@ -907,13 +907,13 @@ fn closeout_pending_maintenance_required(file: &Path) -> Result<bool> {
     let Ok(content) = std::fs::read_to_string(file) else {
         return Ok(false);
     };
-    let Ok(components) = crate::component::parse(&content) else {
+    let Ok(components) = agent_doc_element::element::parse(&content) else {
         return Ok(false);
     };
 
     Ok(components
         .iter()
-        .filter(|component| crate::component::is_tracked_work_component(&component.name))
+        .filter(|component| agent_doc_element::element::is_tracked_work_component(&component.name))
         .any(|component| {
             let (_, items, _) = crate::pending::parse_items(component.content(&content));
             items.iter().any(|item| item.is_done())
@@ -1025,10 +1025,10 @@ mod precommit_pending_capture_tests {
 
     fn backlog_component_hash(path: &Path) -> String {
         let content = fs::read_to_string(path).unwrap();
-        let components = crate::component::parse(&content).unwrap();
+        let components = agent_doc_element::element::parse(&content).unwrap();
         let component = components
             .iter()
-            .find(|component| crate::component::is_backlog_component(&component.name))
+            .find(|component| agent_doc_element::element::is_backlog_component(&component.name))
             .unwrap();
         crate::ops_log::content_hash(component.content(&content))
     }

@@ -16,12 +16,12 @@ use std::cell::Cell;
 use std::collections::HashSet;
 use std::path::Path;
 
-use crate::component;
-use crate::component::{
-    is_backlog_component, is_icebox_component, is_review_component, is_tracked_work_component,
-};
 use crate::pending;
 use crate::snapshot;
+use agent_doc_element::element;
+use agent_doc_element::element::{
+    is_backlog_component, is_icebox_component, is_review_component, is_tracked_work_component,
+};
 
 thread_local! {
     static FORCE_DISK_PENDING_WRITE: Cell<bool> = const { Cell::new(false) };
@@ -118,9 +118,9 @@ impl TrackedList {
 fn find_tracked_list_component(
     file: &Path,
     list: TrackedList,
-) -> Result<(String, component::Component)> {
+) -> Result<(String, element::Component)> {
     let content = std::fs::read_to_string(file).context("failed to read document")?;
-    let components = component::parse(&content).context("failed to parse components")?;
+    let components = element::parse(&content).context("failed to parse components")?;
     let comp = components
         .into_iter()
         .find(|c| list.matches(&c.name))
@@ -128,19 +128,19 @@ fn find_tracked_list_component(
     Ok((content, comp))
 }
 
-fn find_pending_component(file: &Path) -> Result<(String, component::Component)> {
+fn find_pending_component(file: &Path) -> Result<(String, element::Component)> {
     find_tracked_list_component(file, TrackedList::Backlog)
 }
 
-fn find_review_component_in_content(content: &str) -> Result<Option<component::Component>> {
-    let components = component::parse(content).context("failed to parse components")?;
+fn find_review_component_in_content(content: &str) -> Result<Option<element::Component>> {
+    let components = element::parse(content).context("failed to parse components")?;
     Ok(components
         .into_iter()
         .find(|c| is_review_component(&c.name)))
 }
 
 fn insert_empty_review_after_backlog(content: &str) -> Result<String> {
-    let components = component::parse(content).context("failed to parse components")?;
+    let components = element::parse(content).context("failed to parse components")?;
     if components.iter().any(|c| is_review_component(&c.name)) {
         return Ok(content.to_string());
     }
@@ -156,7 +156,7 @@ fn insert_empty_review_after_backlog(content: &str) -> Result<String> {
     Ok(out)
 }
 
-fn ensure_review_component(content: &str) -> Result<(String, component::Component)> {
+fn ensure_review_component(content: &str) -> Result<(String, element::Component)> {
     let content = insert_empty_review_after_backlog(content)?;
     let comp = find_review_component_in_content(&content)?
         .context("document has no review component after insertion")?;
@@ -166,10 +166,10 @@ fn ensure_review_component(content: &str) -> Result<(String, component::Componen
 fn find_component_containing_open_id(
     file: &Path,
     id: &str,
-) -> Result<(String, component::Component)> {
+) -> Result<(String, element::Component)> {
     let id = pending::normalize_pending_id(id);
     let content = std::fs::read_to_string(file).context("failed to read document")?;
-    let components = component::parse(&content).context("failed to parse components")?;
+    let components = element::parse(&content).context("failed to parse components")?;
     let comp = components
         .into_iter()
         .find(|c| {
@@ -188,7 +188,7 @@ fn find_component_containing_open_id(
 pub fn open_item_component_name(file: &Path, id: &str) -> Result<Option<String>> {
     let id = pending::normalize_pending_id(id);
     let content = std::fs::read_to_string(file).context("failed to read document")?;
-    let components = component::parse(&content).context("failed to parse components")?;
+    let components = element::parse(&content).context("failed to parse components")?;
     for comp in components {
         if !is_tracked_work_component(&comp.name) {
             continue;
@@ -214,11 +214,11 @@ fn tracked_work_id_already_resolved(file: &Path, id: &str) -> Result<bool> {
     }
 
     let content = std::fs::read_to_string(file).context("failed to read document")?;
-    let components = component::parse(&content).context("failed to parse components")?;
+    let components = element::parse(&content).context("failed to parse components")?;
     let archive_ref = format!("[#{}]", id);
     for comp in components {
         let body = comp.content(&content);
-        if crate::component::is_backlog_done_component(&comp.name)
+        if agent_doc_element::element::is_backlog_done_component(&comp.name)
             && body
                 .lines()
                 .any(|line| line.to_ascii_lowercase().contains(&archive_ref))
@@ -511,11 +511,11 @@ fn bounded(s: &str, max: usize) -> String {
 /// without reading the whole component. Read-only.
 pub fn list_review_items(file: &Path, filter: &ReviewListFilter) -> Result<Vec<ReviewItemView>> {
     let content = std::fs::read_to_string(file)?;
-    let components = crate::component::parse(&content)?;
+    let components = agent_doc_element::element::parse(&content)?;
     let mut views: Vec<ReviewItemView> = Vec::new();
     for c in components
         .iter()
-        .filter(|c| crate::component::is_review_component(&c.name))
+        .filter(|c| agent_doc_element::element::is_review_component(&c.name))
     {
         let (_, items, _) = pending::parse_items(c.content(&content));
         for item in items
@@ -562,11 +562,11 @@ pub fn list_review_items(file: &Path, filter: &ReviewListFilter) -> Result<Vec<R
 /// backlog is skipped.
 pub fn add_ungate_tasks_for_review(file: &Path) -> Result<UngateTasksReport> {
     let content = std::fs::read_to_string(file)?;
-    let components = crate::component::parse(&content)?;
+    let components = agent_doc_element::element::parse(&content)?;
 
     let gated_review_ids: Vec<String> = components
         .iter()
-        .filter(|c| crate::component::is_review_component(&c.name))
+        .filter(|c| agent_doc_element::element::is_review_component(&c.name))
         .flat_map(|c| {
             let (_, items, _) = pending::parse_items(c.content(&content));
             items
@@ -578,7 +578,7 @@ pub fn add_ungate_tasks_for_review(file: &Path) -> Result<UngateTasksReport> {
 
     let backlog_text: String = components
         .iter()
-        .filter(|c| crate::component::is_backlog_component(&c.name))
+        .filter(|c| agent_doc_element::element::is_backlog_component(&c.name))
         .map(|c| c.content(&content).to_string())
         .collect::<Vec<_>>()
         .join("\n");
@@ -841,7 +841,7 @@ pub fn ungate(file: &Path, id: &str) -> Result<()> {
         &full_content,
         &canonicalize_component_content(file, &new_review),
     );
-    let components = component::parse(&new_doc).context("failed to parse components")?;
+    let components = element::parse(&new_doc).context("failed to parse components")?;
     let backlog_comp = components
         .into_iter()
         .find(|c| is_backlog_component(&c.name))
@@ -1175,7 +1175,7 @@ pub fn resolve_gate_scan(gate_type: &str, scope: &Path) -> Result<usize> {
                 Ok(c) => c,
                 Err(_) => continue,
             };
-            let components = match component::parse(&content) {
+            let components = match element::parse(&content) {
                 Ok(c) => c,
                 Err(_) => continue,
             };

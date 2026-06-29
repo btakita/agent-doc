@@ -27,7 +27,7 @@
 //! sessions/supervisor + neighbors moves in one migration. Orchestration is now
 //! self-contained over `agent_doc_core`; the main crate becomes a CLI shell
 //! re-exporting these modules via `pub use` shims. Core-backed lib modules
-//! (`component`/`crdt`/`frontmatter`/`project_config`/`template`) are mirrored
+//! (`element`/`crdt`/`frontmatter`/`project_config`/`template`) are mirrored
 //! here as shims so moved bodies need no `crate::` rewriting.
 //!
 //! The next boundary is to retire this crate as an authority holder. Pure
@@ -41,7 +41,6 @@
 //! split into narrower crates.
 
 // Core-backed shims (mirror the main-crate shims).
-pub mod component;
 pub mod crdt;
 pub mod frontmatter;
 pub mod project_config;

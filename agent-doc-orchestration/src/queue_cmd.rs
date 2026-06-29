@@ -16,10 +16,10 @@
 use anyhow::{Context, Result, bail};
 use std::path::Path;
 
-use crate::component;
 use crate::pending;
 use crate::queue;
 use crate::snapshot;
+use agent_doc_element::element;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ConsumeOptions {
@@ -76,7 +76,7 @@ fn format_queue_ids(ids: &[String]) -> String {
 /// the simpler `do [#` prefix check would miss a bare `[#id]` head and strike it,
 /// desyncing it from its backlog item.
 fn classify_active_head(content: &str) -> Result<HeadKind> {
-    let components = component::parse(content)?;
+    let components = element::parse(content)?;
     let Some(qc) = components.iter().find(|c| c.name == "queue") else {
         return Ok(HeadKind::None);
     };
@@ -261,7 +261,7 @@ pub fn sync(file: &Path) -> Result<()> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
 
-    let components = component::parse(&content)
+    let components = element::parse(&content)
         .with_context(|| format!("failed to parse components in {}", file.display()))?;
 
     let queue_comp = components.iter().find(|c| c.name == "queue");

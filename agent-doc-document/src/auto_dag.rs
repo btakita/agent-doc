@@ -131,7 +131,7 @@ fn summarize(item: &PendingItem) -> String {
 /// Build the classified work-graph from a document's content.
 pub fn analyze(content: &str) -> Result<AutoDag> {
     let components =
-        agent_doc_core::component::parse(content).context("auto-dag: parse components")?;
+        agent_doc_element::element::parse(content).context("auto-dag: parse components")?;
     let mut items = Vec::new();
     for comp in &components {
         if !matches!(comp.name.as_str(), "backlog" | "review" | "icebox") {

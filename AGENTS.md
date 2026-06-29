@@ -83,7 +83,7 @@ src/
   dedupe.rs         # Remove consecutive duplicate response blocks
   diff.rs           # Preview diff (dry run) + comment stripping
   clean.rs          # Squash git history
-  component.rs      # Component parser (<!-- agent:name --> markers) + name validation
+  agent-doc-element/src/element.rs # Element parser (<!-- agent:name --> markers) + name validation
   patch.rs          # Replace/append/prepend component content, config + shell hooks
   watch.rs          # Watch daemon: auto-submit on file change with debounce + loop prevention (reactive mode for stream docs)
   frontmatter.rs    # YAML frontmatter parse/write

@@ -45,11 +45,9 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::{
-    component,
-    component::{is_backlog_component, is_tracked_work_component},
-    frontmatter,
-};
+use agent_doc_element::element::{self, is_backlog_component, is_tracked_work_component};
+
+use crate::frontmatter;
 use agent_doc_orchestration::{diff, pending, security};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -381,7 +379,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
 }
 
 fn active_queue_prompt(content: &str) -> Option<String> {
-    let components = component::parse(content).ok()?;
+    let components = element::parse(content).ok()?;
     let queue_component = components
         .iter()
         .find(|component| component.name == "queue")?;
@@ -404,7 +402,7 @@ fn active_queue_prompt(content: &str) -> Option<String> {
 }
 
 fn queue_is_active_for_diff(content: &str, diff_text: &str) -> bool {
-    let Ok(components) = component::parse(content) else {
+    let Ok(components) = element::parse(content) else {
         return false;
     };
     let Some(queue_component) = components
@@ -807,7 +805,7 @@ fn pending_mutations_for_doc(
     prompt_bearing_changes: &[diff::PromptBearingChange],
 ) -> Result<Vec<PendingMutationPlan>> {
     let (fm, _) = frontmatter::parse(content).context("failed to parse frontmatter")?;
-    let components = component::parse(content).context("failed to parse document components")?;
+    let components = element::parse(content).context("failed to parse document components")?;
     let has_backlog = components
         .iter()
         .any(|component| is_backlog_component(&component.name));

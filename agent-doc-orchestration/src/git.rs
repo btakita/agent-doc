@@ -98,7 +98,7 @@ use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::component::is_backlog_component;
+use agent_doc_element::element::is_backlog_component;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommitOutcome {
@@ -315,10 +315,10 @@ fn has_non_exchange_component_drift_scoped(
         .map(|(_, body)| body)
         .unwrap_or(file_doc);
 
-    let Ok(snap_components) = crate::component::parse(snap_body) else {
+    let Ok(snap_components) = agent_doc_element::element::parse(snap_body) else {
         return false;
     };
-    let Ok(file_components) = crate::component::parse(file_body) else {
+    let Ok(file_components) = agent_doc_element::element::parse(file_body) else {
         return false;
     };
     if snap_components.is_empty() || file_components.is_empty() {
@@ -447,10 +447,10 @@ fn is_safe_user_only_follow_up_after_committed_head(head_doc: &str, current_doc:
         return false;
     }
 
-    let Ok(head_components) = crate::component::parse(head_body) else {
+    let Ok(head_components) = agent_doc_element::element::parse(head_body) else {
         return false;
     };
-    let Ok(current_components) = crate::component::parse(current_body) else {
+    let Ok(current_components) = agent_doc_element::element::parse(current_body) else {
         return false;
     };
     if head_components.len() != current_components.len() {
@@ -1481,7 +1481,7 @@ fn strip_exchange_prompt_prefixes_for_compare(content: &str) -> String {
         stripped
     }
 
-    let Ok(components) = crate::component::parse(content) else {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
         return strip_lines(content);
     };
     let mut rebuilt = String::with_capacity(content.len());
@@ -2316,8 +2316,8 @@ fn preserved_queue_additions_neutralized_by_replay(
         return None;
     }
 
-    let head_components = crate::component::parse(head_doc).ok()?;
-    let current_components = crate::component::parse(current_doc).ok()?;
+    let head_components = agent_doc_element::element::parse(head_doc).ok()?;
+    let current_components = agent_doc_element::element::parse(current_doc).ok()?;
     let head_queue = head_components
         .iter()
         .find(|component| component.name == "queue")?;
@@ -2354,8 +2354,8 @@ fn preserved_queue_additions_neutralized_by_replay(
     (added_prompts > 0).then_some(added_prompts)
 }
 
-fn exchange_component(doc: &str) -> Option<crate::component::Component> {
-    crate::component::parse(doc)
+fn exchange_component(doc: &str) -> Option<agent_doc_element::element::Component> {
+    agent_doc_element::element::parse(doc)
         .ok()?
         .into_iter()
         .find(|component| component.name == "exchange")
@@ -2862,7 +2862,7 @@ pub fn show_head(file: &Path) -> Result<Option<String>> {
 }
 
 fn redact_exchange_component_content(doc: &str) -> Option<String> {
-    let components = crate::component::parse(doc).ok()?;
+    let components = agent_doc_element::element::parse(doc).ok()?;
     let mut redacted = doc.to_string();
     for component in components.iter().rev() {
         if component.name == "exchange" {

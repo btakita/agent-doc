@@ -48,7 +48,7 @@ pub(crate) fn check_exchange_shrink_guard(
 /// Extract the byte length of the exchange component's content.
 /// Returns 0 if no exchange component is found.
 pub(crate) fn extract_exchange_content_len(doc: &str) -> usize {
-    if let Ok(components) = component::parse(doc) {
+    if let Ok(components) = element::parse(doc) {
         components
             .iter()
             .find(|c| c.name == "exchange")
@@ -60,7 +60,7 @@ pub(crate) fn extract_exchange_content_len(doc: &str) -> usize {
 }
 
 pub(crate) fn exchange_content(doc: &str) -> Option<&str> {
-    component::parse(doc)
+    element::parse(doc)
         .ok()?
         .into_iter()
         .find(|component| component.name == "exchange")
@@ -350,7 +350,7 @@ pub(crate) fn dedupe_live_prompt_prefix_variants_in_tail(
     content: &str,
     file: &Path,
 ) -> (String, bool) {
-    let Ok(components) = component::parse(content) else {
+    let Ok(components) = element::parse(content) else {
         return (content.to_string(), false);
     };
     let Some(exchange) = components
@@ -461,7 +461,7 @@ pub(crate) fn dedupe_adjacent_prompt_prefix_duplicates(
     content: &str,
     file: &Path,
 ) -> (String, bool) {
-    let Ok(components) = component::parse(content) else {
+    let Ok(components) = element::parse(content) else {
         return (content.to_string(), false);
     };
     let Some(exchange) = components
@@ -522,7 +522,7 @@ pub(crate) fn dedupe_prompt_lines_against_before(
     let Some(before_exchange) = exchange_content(before) else {
         return (after.to_string(), false);
     };
-    let Ok(components) = component::parse(after) else {
+    let Ok(components) = element::parse(after) else {
         return (after.to_string(), false);
     };
     let Some(after_exchange) = components
@@ -710,7 +710,7 @@ mod core_tests {
         assert!(repaired.contains("- do [#canonical]"));
         assert!(!repaired.contains("- do [#stale]"));
         assert_eq!(
-            crate::component::structural_corruption_reason(&repaired),
+            agent_doc_element::element::structural_corruption_reason(&repaired),
             None
         );
         let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();

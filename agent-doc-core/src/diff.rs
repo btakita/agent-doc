@@ -134,7 +134,7 @@
 use serde::{Deserialize, Serialize};
 use similar::{ChangeTag, TextDiff};
 
-use crate::component;
+use agent_doc_element::element;
 
 const IMPERATIVE_LEADING_VERBS: &[&str] = &[
     "add",
@@ -220,7 +220,7 @@ struct PromptPrefixLine {
 
 /// Strip comments from document content for diff comparison.
 ///
-/// Delegates to `component::strip_comments` — the shared implementation
+/// Delegates to `element::strip_comments` — the shared implementation
 /// available to both the binary and external crates.
 pub fn strip_comments(content: &str) -> String {
     // #22a8 (Phase 5b write-side): also drop the managed `agent_doc_pipeline:`
@@ -229,7 +229,7 @@ pub fn strip_comments(content: &str) -> String {
     // edit. Both sides of every diff pass through this, so a pipeline-only delta
     // cancels to `no_changes`. Shared with the write-side splice so the strip and
     // the write agree byte-for-byte on the block boundary.
-    crate::frontmatter::strip_pipeline_block_lines(&component::strip_comments(content))
+    crate::frontmatter::strip_pipeline_block_lines(&element::strip_comments(content))
 }
 
 /// Annotate a unified diff with content-source markers.
@@ -1249,7 +1249,7 @@ pub fn suppress_inactive_queue_additions(diff: &str, current_content: &str) -> S
 }
 
 fn queue_line_ranges(content: &str) -> Vec<(usize, usize)> {
-    let Ok(components) = component::parse(content) else {
+    let Ok(components) = element::parse(content) else {
         return Vec::new();
     };
     components

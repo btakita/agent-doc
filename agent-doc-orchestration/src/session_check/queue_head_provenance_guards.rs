@@ -121,7 +121,7 @@ pub(crate) fn check_expect_done_or_gate_guard(
 /// component. Used by `#queue-clear-unrun-items` to decide which recorded
 /// preflight heads are still queued (preserved) vs removed this cycle.
 pub(crate) fn committed_queue_head_ids(content: &str) -> Vec<String> {
-    let Ok(components) = crate::component::parse(content) else {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
         return Vec::new();
     };
     let Some(queue) = components.iter().find(|c| c.name == "queue") else {
@@ -132,7 +132,7 @@ pub(crate) fn committed_queue_head_ids(content: &str) -> Vec<String> {
 
 /// `do [#id]` target ids for the current live queue head only.
 pub(crate) fn committed_current_queue_head_ids(content: &str) -> Vec<String> {
-    let Ok(components) = crate::component::parse(content) else {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
         return Vec::new();
     };
     let Some(queue) = components.iter().find(|c| c.name == "queue") else {
@@ -341,7 +341,7 @@ pub(crate) fn check_free_text_queue_head_provenance(
         }
         return Ok(GuardResult::None);
     }
-    let Ok(components) = crate::component::parse(&content) else {
+    let Ok(components) = agent_doc_element::element::parse(&content) else {
         return Ok(GuardResult::None);
     };
     let exchange_text: String = components
@@ -459,7 +459,7 @@ fn normalized_free_text_queue_head_identity(text: &str) -> String {
 }
 
 fn committed_queue_contains_active_free_text_head(content: &str, head: &str) -> bool {
-    let Ok(components) = crate::component::parse(content) else {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
         return false;
     };
     let Some(queue) = components.iter().find(|c| c.name == "queue") else {
@@ -631,12 +631,12 @@ pub(crate) fn blocked_signal_tied_to_id(text: &str, id: &str) -> bool {
 /// fires.
 pub(crate) fn open_review_ids(file: &Path) -> Result<std::collections::HashSet<String>> {
     let content = std::fs::read_to_string(file)?;
-    let Ok(components) = crate::component::parse(&content) else {
+    let Ok(components) = agent_doc_element::element::parse(&content) else {
         return Ok(std::collections::HashSet::new());
     };
     Ok(components
         .into_iter()
-        .filter(|component| crate::component::is_review_component(&component.name))
+        .filter(|component| agent_doc_element::element::is_review_component(&component.name))
         .flat_map(|component| {
             let (_, items, _) = crate::pending::parse_items(component.content(&content));
             items

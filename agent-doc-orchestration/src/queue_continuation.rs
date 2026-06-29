@@ -224,7 +224,7 @@ fn detect_in_content(file: &Path, content: &str) -> Result<Option<QueueContinuat
     if fm.queue_active != Some(true) {
         return Ok(None);
     }
-    let components = crate::component::parse(content)?;
+    let components = agent_doc_element::element::parse(content)?;
     let Some(queue_component) = components
         .iter()
         .find(|component| component.name == "queue")
@@ -250,7 +250,7 @@ fn detect_in_content(file: &Path, content: &str) -> Result<Option<QueueContinuat
     // continuation — the operator changed the next prompt, so defer to the
     // normal preflight/halt path rather than forcing continuation.
     if let Some(snapshot_content) = crate::snapshot::load(file)?
-        && let Ok(snapshot_components) = crate::component::parse(&snapshot_content)
+        && let Ok(snapshot_components) = agent_doc_element::element::parse(&snapshot_content)
         && let Some(snapshot_queue) = snapshot_components
             .iter()
             .find(|component| component.name == "queue")
@@ -357,7 +357,7 @@ fn deferred_backlog_ids_scoped(
     scope: DrainScope,
 ) -> std::collections::HashSet<String> {
     let mut deferred = std::collections::HashSet::new();
-    let Ok(components) = crate::component::parse(content) else {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
         return deferred;
     };
     for comp in &components {
@@ -388,7 +388,7 @@ fn deferred_backlog_ids_scoped(
 /// `agent_doc_queue_context_reset` opt-in is off.
 pub fn clean_session_backlog_ids(content: &str) -> std::collections::HashSet<String> {
     let mut ids = std::collections::HashSet::new();
-    let Ok(components) = crate::component::parse(content) else {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
         return ids;
     };
     for comp in &components {
@@ -410,7 +410,7 @@ pub fn clean_session_backlog_ids(content: &str) -> std::collections::HashSet<Str
 /// context reset (`#qfocsup`).
 pub fn focused_cycle_backlog_ids(content: &str) -> std::collections::HashSet<String> {
     let mut ids = std::collections::HashSet::new();
-    let Ok(components) = crate::component::parse(content) else {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
         return ids;
     };
     for comp in &components {
@@ -480,7 +480,7 @@ pub fn head_requires_focused_cycle_in(content: &str, head: &str) -> bool {
 /// re-dispatching it, exactly as it does for `[clean-session]`.
 pub fn context_reset_backlog_ids(content: &str) -> std::collections::HashSet<String> {
     let mut ids = std::collections::HashSet::new();
-    let Ok(components) = crate::component::parse(content) else {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
         return ids;
     };
     for comp in &components {
@@ -527,7 +527,7 @@ pub fn deferred_head_count(file: &Path) -> usize {
     let Ok(content) = std::fs::read_to_string(file) else {
         return 0;
     };
-    let Ok(components) = crate::component::parse(&content) else {
+    let Ok(components) = agent_doc_element::element::parse(&content) else {
         return 0;
     };
     let Some(queue_component) = components.iter().find(|c| c.name == "queue") else {
@@ -567,7 +567,7 @@ pub fn live_continuation_head(file: &Path, content: &str) -> Option<String> {
     if fm.queue_active != Some(true) {
         return None;
     }
-    let components = crate::component::parse(content).ok()?;
+    let components = agent_doc_element::element::parse(content).ok()?;
     let queue_component = components.iter().find(|c| c.name == "queue")?;
     let has_auto = crate::queue::has_auto_attr(&queue_component.attrs);
     let body = &content[queue_component.open_end..queue_component.close_start];
@@ -669,11 +669,11 @@ fn head_is_drainable(
 /// has no `agent:backlog` component (a free-form id-head queue is not backlog-driven,
 /// so id-head drainability is not gated on backlog membership).
 fn open_backlog_ids_from_content(content: &str) -> Option<std::collections::HashSet<String>> {
-    let components = crate::component::parse(content).ok()?;
+    let components = agent_doc_element::element::parse(content).ok()?;
     let mut found_backlog = false;
     let mut ids = std::collections::HashSet::new();
     for comp in &components {
-        if !agent_doc_core::component::is_backlog_component(&comp.name) {
+        if !agent_doc_element::element::is_backlog_component(&comp.name) {
             continue;
         }
         found_backlog = true;
@@ -694,12 +694,12 @@ fn open_backlog_ids_from_content(content: &str) -> Option<std::collections::Hash
 /// open review items lets a closeout detect that a phase was routed to review
 /// this cycle (`#mphaseloop`).
 fn open_review_item_count(content: &str) -> usize {
-    let Ok(components) = crate::component::parse(content) else {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
         return 0;
     };
     components
         .iter()
-        .find(|comp| agent_doc_core::component::is_review_component(&comp.name))
+        .find(|comp| agent_doc_element::element::is_review_component(&comp.name))
         .map(|comp| {
             let body = &content[comp.open_end..comp.close_start];
             let (_, items, _) = crate::pending::parse_items(body);
@@ -756,7 +756,7 @@ fn drainable_head_prompt_for_scope(
     if fm.queue_active != Some(true) {
         return None;
     }
-    let components = crate::component::parse(content).ok()?;
+    let components = agent_doc_element::element::parse(content).ok()?;
     let queue_component = components.iter().find(|c| c.name == "queue")?;
     let has_auto = crate::queue::has_auto_attr(&queue_component.attrs);
     let body = &content[queue_component.open_end..queue_component.close_start];
@@ -804,7 +804,7 @@ pub fn drainable_head_count(file: &Path, content: &str) -> usize {
     if fm.queue_active != Some(true) {
         return 0;
     }
-    let Ok(components) = crate::component::parse(content) else {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
         return 0;
     };
     let Some(queue_component) = components.iter().find(|c| c.name == "queue") else {
@@ -1205,7 +1205,7 @@ pub fn queue_stale_noise_lines(file: &Path) -> usize {
     let Ok(content) = std::fs::read_to_string(file) else {
         return 0;
     };
-    let Ok(components) = crate::component::parse(&content) else {
+    let Ok(components) = agent_doc_element::element::parse(&content) else {
         return 0;
     };
     let Some(queue_component) = components.iter().find(|c| c.name == "queue") else {

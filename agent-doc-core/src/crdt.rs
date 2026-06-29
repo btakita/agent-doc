@@ -472,10 +472,10 @@ impl Node {
 /// with the same component-name sequence produce structurally-aligned node
 /// vectors that can be paired by index.
 fn segment_into_nodes(text: &str) -> Result<Vec<Node>> {
-    let comps = crate::component::parse(text)?;
+    let comps = agent_doc_element::element::parse(text)?;
     // Top-level components only: a component is top-level if it is not nested
     // inside any other component's span.
-    let mut top: Vec<&crate::component::Component> = comps
+    let mut top: Vec<&agent_doc_element::element::Component> = comps
         .iter()
         .filter(|c| {
             !comps.iter().any(|o| {
@@ -917,7 +917,7 @@ fn keys_unique(children: &[KeyedChild]) -> bool {
 /// where `body` is the content between the markers. `None` when the text does
 /// not parse as a component (caller falls back to flat merge).
 fn component_framing(text: &str) -> Option<(&str, &str, &str)> {
-    let comps = crate::component::parse(text).ok()?;
+    let comps = agent_doc_element::element::parse(text).ok()?;
     let comp = comps.iter().min_by_key(|c| c.open_start)?;
     Some((
         &text[..comp.open_end],

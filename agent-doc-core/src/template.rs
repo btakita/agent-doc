@@ -83,7 +83,7 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 use std::collections::HashSet;
 
-use crate::component::{self, Component, find_comment_end, is_backlog_component};
+use agent_doc_element::element::{self, Component, find_comment_end, is_backlog_component};
 
 /// A parsed patch directive from an agent response.
 #[derive(Debug, Clone)]
@@ -147,7 +147,7 @@ pub fn is_template_mode(mode: Option<&str>) -> bool {
 pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
     let bytes = response.as_bytes();
     let len = bytes.len();
-    let code_ranges = component::find_code_ranges(response);
+    let code_ranges = element::find_code_ranges(response);
     let mut patches = Vec::new();
     let mut unmatched = String::new();
     let mut pos = 0;
@@ -199,8 +199,8 @@ pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
                 .unwrap_or(rest_trim.len());
             let name = &rest_trim[..name_end];
             if is_backlog_component(name)
-                || name == component::ICEBOX_COMPONENT
-                || name == component::REVIEW_COMPONENT
+                || name == element::ICEBOX_COMPONENT
+                || name == element::REVIEW_COMPONENT
             {
                 Some(("replace", rest))
             } else {
@@ -221,7 +221,7 @@ pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
             let (name, attrs) = if let Some(space_idx) = rest.find(char::is_whitespace) {
                 let name = &rest[..space_idx];
                 let attr_text = rest[space_idx..].trim();
-                (name, component::parse_attrs(attr_text))
+                (name, element::parse_attrs(attr_text))
             } else {
                 (rest, std::collections::HashMap::new())
             };
@@ -339,11 +339,11 @@ pub use tail_repair::*;
 /// write path. Safe duplicate exchange-close scaffolds are dropped; ambiguous
 /// mixed user text remains an error so the editor can refuse the visible write.
 pub fn normalize_editor_visible_template_structure(doc: &str) -> Result<String> {
-    if let Some(reason) = crate::component::malformed_agent_comment_reason(doc) {
+    if let Some(reason) = agent_doc_element::element::malformed_agent_comment_reason(doc) {
         anyhow::bail!("template structural corruption guard failed: {reason}");
     }
 
-    let mut normalized = crate::component::strip_backlog_patch_attr(doc);
+    let mut normalized = agent_doc_element::element::strip_backlog_patch_attr(doc);
     // #queue-completed-items-escape-below-component: scrub struck queue items
     // that drifted below `<!-- /agent:queue -->` into the parking-lot comment so
     // the visible buffer never accumulates orphaned struck-queue residue.
@@ -402,7 +402,7 @@ pub fn normalize_editor_visible_template_structure(doc: &str) -> Result<String> 
 }
 
 fn guard_editor_visible_structural_corruption(doc: &str) -> Result<()> {
-    if let Some(reason) = crate::component::structural_corruption_reason(doc) {
+    if let Some(reason) = agent_doc_element::element::structural_corruption_reason(doc) {
         anyhow::bail!("template structural corruption guard failed: {reason}");
     }
     Ok(())
@@ -445,7 +445,7 @@ fn is_displaced_struck_queue_item(line: &str) -> bool {
 /// queue) and ordinary scratch comments intact. Returns the repaired document
 /// when it removed at least one displaced line.
 pub fn repair_queue_struck_items_escaped_below_marker(doc: &str) -> Option<String> {
-    let components = component::parse(doc).ok()?;
+    let components = element::parse(doc).ok()?;
     let queue = components.iter().find(|c| c.name == "queue")?;
     let scan_start = queue.close_end;
     // Never edit content inside any agent component span.
@@ -498,7 +498,7 @@ pub use prompt_comment_repair::*;
 /// the first and removes the second block entirely. Returns `None` if the document
 /// has zero or one exchange component.
 pub fn repair_duplicate_exchange_opener(doc: &str) -> Result<Option<String>> {
-    let components = match component::parse(doc) {
+    let components = match element::parse(doc) {
         Ok(c) => c,
         Err(_) => return Ok(None),
     };
@@ -545,7 +545,7 @@ pub fn repair_duplicate_exchange_opener(doc: &str) -> Result<Option<String>> {
 /// block and recovery should respect that edit instead of reapplying a stale
 /// captured response.
 pub fn strip_conversation_tail_outside_exchange(doc: &str) -> Result<Option<String>> {
-    let components = component::parse(doc).context("failed to parse components")?;
+    let components = element::parse(doc).context("failed to parse components")?;
     let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
         return Ok(None);
     };
@@ -585,7 +585,7 @@ pub fn deleted_conversation_tail_cleanup(before: &str, after: &str) -> Result<Op
         return Ok(None);
     };
 
-    let components = component::parse(before).context("failed to parse components")?;
+    let components = element::parse(before).context("failed to parse components")?;
     let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
         return Ok(None);
     };
@@ -798,11 +798,11 @@ fn looks_like_prompt_directive(line: &str) -> bool {
 }
 
 fn unresolved_tail_after_boundary(doc: &str, component_name: &str) -> Option<String> {
-    let components = component::parse(doc).ok()?;
+    let components = element::parse(doc).ok()?;
     let comp = components.iter().find(|comp| comp.name == component_name)?;
     let prefix = "<!-- agent:boundary:";
     let content_region = &doc[comp.open_end..comp.close_start];
-    let code_ranges = component::find_code_ranges(doc);
+    let code_ranges = element::find_code_ranges(doc);
     let mut search_from = 0usize;
     while let Some(start) = content_region[search_from..].find(prefix) {
         let abs_start = comp.open_end + search_from + start;
@@ -1046,7 +1046,7 @@ pub fn apply_patches_with_overrides_pure(
     // at the end of the exchange. This is deterministic — belongs in the binary,
     // not the SKILL workflow.
     let mut result = remove_all_boundaries(doc);
-    if let Ok(components) = component::parse(&result)
+    if let Ok(components) = element::parse(&result)
         && let Some(exchange) = components.iter().find(|c| c.name == "exchange")
     {
         let id = crate::id::new_boundary_id_with_summary(summary);
@@ -1061,7 +1061,7 @@ pub fn apply_patches_with_overrides_pure(
     }
 
     // Apply patches in reverse order (by position) to preserve byte offsets
-    let components = component::parse(&result).context("failed to parse components")?;
+    let components = element::parse(&result).context("failed to parse components")?;
 
     // Component configs were preloaded by the caller.
     let configs = component_configs;
@@ -1146,7 +1146,7 @@ pub fn apply_patches_with_overrides_pure(
     if !all_unmatched.is_empty() {
         // Re-parse after patches applied
         let components =
-            component::parse(&result).context("failed to re-parse components after patching")?;
+            element::parse(&result).context("failed to re-parse components after patching")?;
 
         if let Some(output_comp) = components
             .iter()
@@ -1215,7 +1215,7 @@ pub fn apply_patches_with_overrides_pure(
     // in practice; the third is a safety bound.
     {
         'stability: for _ in 0..3 {
-            let Ok(components) = component::parse(&result) else {
+            let Ok(components) = element::parse(&result) else {
                 break;
             };
             for comp in &components {
@@ -1246,7 +1246,7 @@ pub fn apply_patches_with_overrides_pure(
     // causes a snowball: once one cycle loses the boundary, every subsequent cycle
     // also loses it because the check always finds nothing.
     {
-        if let Ok(components) = component::parse(&result)
+        if let Ok(components) = element::parse(&result)
             && let Some(exchange) = components.iter().find(|c| c.name == "exchange")
             && find_boundary_in_component(&result, exchange).is_none()
         {
@@ -1329,7 +1329,7 @@ fn reposition_boundary_to_end_clean_internal(
     summary: Option<&str>,
 ) -> String {
     let mut result = strip_transient_head_markers(&remove_all_boundaries(doc));
-    if let Ok(components) = component::parse(&result)
+    if let Ok(components) = element::parse(&result)
         && let Some(exchange) = components.iter().find(|c| c.name == "exchange")
     {
         let id = boundary_id
@@ -1357,7 +1357,7 @@ pub fn reposition_boundary_to_end_preserve_head_with_id(
     boundary_id: Option<&str>,
 ) -> String {
     let mut result = remove_all_boundaries(doc);
-    if let Ok(components) = component::parse(&result)
+    if let Ok(components) = element::parse(&result)
         && let Some(exchange) = components.iter().find(|c| c.name == "exchange")
     {
         let id = boundary_id
@@ -1374,7 +1374,7 @@ pub fn reposition_boundary_to_end_preserve_head_with_id(
 /// Strip transient ` (HEAD)` suffixes from markdown headings and bold-text
 /// pseudo-headers, skipping fenced code blocks.
 fn strip_transient_head_markers(content: &str) -> String {
-    let code_ranges = component::find_code_ranges(content);
+    let code_ranges = element::find_code_ranges(content);
     let in_code = |pos: usize| code_ranges.iter().any(|&(s, e)| pos >= s && pos < e);
 
     let mut result = String::with_capacity(content.len());
@@ -1423,7 +1423,7 @@ pub fn reposition_boundary_to_end_with_baseline(
     baseline_headings: Option<&std::collections::HashSet<String>>,
 ) -> String {
     let mut result = remove_all_boundaries(doc);
-    if let Ok(components) = component::parse(&result)
+    if let Ok(components) = element::parse(&result)
         && let Some(exchange) = components.iter().find(|c| c.name == "exchange")
     {
         let id = crate::id::new_boundary_id_with_summary(summary);
@@ -1444,7 +1444,7 @@ pub fn reposition_boundary_to_end_with_baseline(
 /// Returns an empty set if the document has no `exchange` component or no
 /// matching headings. Headings inside fenced code blocks are skipped.
 pub fn exchange_baseline_headings(doc: &str) -> std::collections::HashSet<String> {
-    if let Ok(components) = component::parse(doc)
+    if let Ok(components) = element::parse(doc)
         && let Some(exchange) = components.iter().find(|c| c.name == "exchange")
     {
         return collect_re_headings(exchange.content(doc));
@@ -1453,14 +1453,14 @@ pub fn exchange_baseline_headings(doc: &str) -> std::collections::HashSet<String
 }
 
 pub fn annotate_exchange_headings_against_baseline(doc: &str, baseline_doc: &str) -> String {
-    let Ok(components) = component::parse(doc) else {
+    let Ok(components) = element::parse(doc) else {
         return doc.to_string();
     };
     let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
         return doc.to_string();
     };
 
-    let baseline_exchange = component::parse(baseline_doc)
+    let baseline_exchange = element::parse(baseline_doc)
         .ok()
         .and_then(|components| {
             components
@@ -1492,7 +1492,7 @@ pub fn annotate_exchange_headings_against_baseline(doc: &str, baseline_doc: &str
 /// Each entry is the heading line with any trailing ` (HEAD)` suffix and
 /// trailing whitespace removed. Headings inside fenced code blocks are skipped.
 fn collect_re_headings(content: &str) -> std::collections::HashSet<String> {
-    let code_ranges = component::find_code_ranges(content);
+    let code_ranges = element::find_code_ranges(content);
     let in_code = |pos: usize| code_ranges.iter().any(|&(s, e)| pos >= s && pos < e);
     let mut set = std::collections::HashSet::new();
     let mut offset = 0usize;
@@ -1547,7 +1547,7 @@ pub(crate) fn annotate_re_headings_with_head(
     content: &str,
     baseline: Option<&std::collections::HashSet<String>>,
 ) -> String {
-    let code_ranges = component::find_code_ranges(content);
+    let code_ranges = element::find_code_ranges(content);
     let in_code = |pos: usize| code_ranges.iter().any(|&(s, e)| pos >= s && pos < e);
 
     let mut lines: Vec<String> = content
@@ -1639,7 +1639,7 @@ pub(crate) fn annotate_re_headings_with_head(
 fn remove_all_boundaries(doc: &str) -> String {
     let prefix = "<!-- agent:boundary:";
     let suffix = " -->";
-    let code_ranges = component::find_code_ranges(doc);
+    let code_ranges = element::find_code_ranges(doc);
     let in_code = |pos: usize| {
         code_ranges
             .iter()
@@ -1670,7 +1670,7 @@ fn find_boundary_in_component(doc: &str, comp: &Component) -> Option<String> {
     let prefix = "<!-- agent:boundary:";
     let suffix = " -->";
     let content_region = &doc[comp.open_end..comp.close_start];
-    let code_ranges = component::find_code_ranges(doc);
+    let code_ranges = element::find_code_ranges(doc);
     let mut search_from = 0;
     while let Some(start) = content_region[search_from..].find(prefix) {
         let abs_start = comp.open_end + search_from + start;
@@ -1717,7 +1717,7 @@ fn limit_lines(content: &str, max_lines: usize) -> String {
 /// Only non-blank lines are subject to deduplication — blank lines are
 /// intentional separators and are never collapsed.
 fn dedup_exchange_adjacent_lines(doc: &str) -> String {
-    let Ok(components) = component::parse(doc) else {
+    let Ok(components) = element::parse(doc) else {
         return doc.to_string();
     };
     let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
@@ -1862,7 +1862,7 @@ mod th {
     }
     // --- Inline attribute mode resolution tests ---
     pub(crate) fn exchange_component(doc: &str) -> Component {
-        component::parse(doc)
+        element::parse(doc)
             .unwrap()
             .into_iter()
             .find(|c| c.name == "exchange")
@@ -3553,7 +3553,7 @@ Existing answer.
         let doc_path = std::path::PathBuf::from("/tmp/test.md");
         let result = apply_patches_via_path(doc, &patches, "", &doc_path).unwrap();
         // Extract just the exchange component content
-        let components = component::parse(&result).unwrap();
+        let components = element::parse(&result).unwrap();
         let exchange = components.iter().find(|c| c.name == "exchange").unwrap();
         let content = exchange.content(&result);
         // No bare `❯` on its own line immediately before the boundary marker.
@@ -3580,7 +3580,7 @@ Existing answer.
         }];
         let doc_path = std::path::PathBuf::from("/tmp/test.md");
         let result = apply_patches_via_path(doc, &patches, "", &doc_path).unwrap();
-        let components = component::parse(&result).unwrap();
+        let components = element::parse(&result).unwrap();
         let notes = components.iter().find(|c| c.name == "notes").unwrap();
         assert!(
             notes.content(&result).contains("❯"),

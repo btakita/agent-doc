@@ -668,7 +668,7 @@ fn new_agent_response_headings(base: &str, candidate: &str) -> Vec<String> {
 /// existing line-based `#fintol2` / `content_ours` carry-forward UNCHANGED:
 ///
 /// 1. The reconstructed `merged_doc` is non-empty and re-parses cleanly
-///    (`component::structural_corruption_reason` is `None`).
+///    (`element::structural_corruption_reason` is `None`).
 /// 2. The merge preserves the agent's response: it must NOT drop any agent
 ///    exchange/queue/backlog content that `content_ours` would have dropped —
 ///    both `dropped_prompt_lines_after_content_ours` and
@@ -711,7 +711,7 @@ fn try_semantic_merge_convergence(
     if sm.merged_doc.is_empty() {
         return None;
     }
-    if component::structural_corruption_reason(&sm.merged_doc).is_some() {
+    if element::structural_corruption_reason(&sm.merged_doc).is_some() {
         return None;
     }
 
@@ -760,7 +760,7 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
     // split/unterminated attribute). Refuse the adoption so the clean candidate
     // snapshot stays as the base — the corrupt buffer never reaches disk, where
     // the lint-gate could only flag it after the fact.
-    if let Some(reason) = component::structural_corruption_reason(ours) {
+    if let Some(reason) = element::structural_corruption_reason(ours) {
         crate::ops_log::log_op(
             file,
             &format!(
@@ -1066,7 +1066,7 @@ fn latest_exchange_response_block(content: &str) -> Option<String> {
 }
 
 fn exchange_content(content: &str) -> &str {
-    component::parse(content)
+    element::parse(content)
         .ok()
         .and_then(|components| {
             components
@@ -1092,7 +1092,7 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_prompt_duplication(
     };
     // #dupcontent: same fail-closed refusal on the prompt-duplication path — a
     // structurally-corrupt `content_ours` buffer must never become the snapshot.
-    if let Some(reason) = component::structural_corruption_reason(ours) {
+    if let Some(reason) = element::structural_corruption_reason(ours) {
         crate::ops_log::log_op(
             file,
             &format!(
@@ -1315,7 +1315,7 @@ pub fn materialize_response_in_current_exchange(
     if response.trim().is_empty() || response_materialized_in_content(&response, current) {
         return Some(current.to_string());
     }
-    let components = component::parse(current).ok()?;
+    let components = element::parse(current).ok()?;
     let exchange = components
         .iter()
         .find(|component| component.name == "exchange")?;
@@ -1514,7 +1514,7 @@ pub(crate) fn normalization_prefix_observation_counts(
         return (0, 0);
     }
 
-    let exchange = component::parse(content)
+    let exchange = element::parse(content)
         .ok()
         .and_then(|components| {
             components
@@ -1548,7 +1548,7 @@ pub(crate) fn normalization_prefix_observation_counts(
 }
 
 pub(crate) fn duplicate_prompt_line_count(content: &str) -> usize {
-    let exchange = component::parse(content)
+    let exchange = element::parse(content)
         .ok()
         .and_then(|components| {
             components
@@ -2380,19 +2380,19 @@ fn canonical_singleton_component_name(name: &str) -> Option<&'static str> {
         "exchange" => Some("exchange"),
         "status" => Some("status"),
         "queue" => Some("queue"),
-        component::BACKLOG_DONE_COMPONENT => Some(component::BACKLOG_DONE_COMPONENT),
-        _ if component::is_backlog_component(name) => Some(component::BACKLOG_COMPONENT),
-        _ if component::is_review_component(name) => Some(component::REVIEW_COMPONENT),
-        _ if component::is_icebox_component(name) => Some(component::ICEBOX_COMPONENT),
+        element::BACKLOG_DONE_COMPONENT => Some(element::BACKLOG_DONE_COMPONENT),
+        _ if element::is_backlog_component(name) => Some(element::BACKLOG_COMPONENT),
+        _ if element::is_review_component(name) => Some(element::REVIEW_COMPONENT),
+        _ if element::is_icebox_component(name) => Some(element::ICEBOX_COMPONENT),
         _ => None,
     }
 }
 
 fn singleton_components_by_name(
     doc: &str,
-) -> Option<HashMap<&'static str, Vec<component::Component>>> {
-    let components = component::parse(doc).ok()?;
-    let mut by_name: HashMap<&'static str, Vec<component::Component>> = HashMap::new();
+) -> Option<HashMap<&'static str, Vec<element::Component>>> {
+    let components = element::parse(doc).ok()?;
+    let mut by_name: HashMap<&'static str, Vec<element::Component>> = HashMap::new();
     for component in components {
         if let Some(canonical) = canonical_singleton_component_name(&component.name) {
             by_name.entry(canonical).or_default().push(component);
@@ -2401,7 +2401,7 @@ fn singleton_components_by_name(
     Some(by_name)
 }
 
-fn component_block<'a>(doc: &'a str, component: &component::Component) -> &'a str {
+fn component_block<'a>(doc: &'a str, component: &element::Component) -> &'a str {
     &doc[component.open_start..component.close_end]
 }
 
@@ -2417,7 +2417,7 @@ fn repair_duplicate_singleton_components(
     let Some(content_groups) = singleton_components_by_name(content) else {
         return (content.to_string(), false);
     };
-    let duplicate_groups: Vec<(&'static str, Vec<component::Component>)> = content_groups
+    let duplicate_groups: Vec<(&'static str, Vec<element::Component>)> = content_groups
         .iter()
         .filter(|(_, components)| components.len() > 1)
         .map(|(name, components)| (*name, components.clone()))
@@ -2441,7 +2441,7 @@ fn repair_duplicate_singleton_components(
             return (content.to_string(), false);
         }
         let canonical_block = component_block(before, &before_components[0]);
-        let canonical_matches: Vec<&component::Component> = components
+        let canonical_matches: Vec<&element::Component> = components
             .iter()
             .filter(|component| component_block(content, component) == canonical_block)
             .collect();
@@ -2963,7 +2963,7 @@ mod ack_content_snapshot_tests {
             "merged result must preserve the operator's added queue line; got:\n{merged}"
         );
         assert!(
-            component::structural_corruption_reason(merged).is_none(),
+            element::structural_corruption_reason(merged).is_none(),
             "merged result must re-parse cleanly"
         );
     }
@@ -3030,7 +3030,7 @@ mod ack_content_snapshot_tests {
             "fenced head body lost in merge:\n{merged}"
         );
         assert!(
-            component::structural_corruption_reason(merged).is_none(),
+            element::structural_corruption_reason(merged).is_none(),
             "merged result must re-parse cleanly"
         );
     }
@@ -3086,7 +3086,7 @@ mod ack_content_snapshot_tests {
             "merged result must preserve the operator's added queue line; got:\n{doc}"
         );
         assert!(
-            component::structural_corruption_reason(doc).is_none(),
+            element::structural_corruption_reason(doc).is_none(),
             "merged result must re-parse cleanly; got:\n{doc}"
         );
 
@@ -3156,7 +3156,7 @@ mod ack_content_snapshot_tests {
         assert!(adopted, "the conflict case must still resolve (no panic)");
         let merged = &decision.snapshot_content;
         assert!(
-            component::structural_corruption_reason(merged).is_none(),
+            element::structural_corruption_reason(merged).is_none(),
             "resolved result must re-parse cleanly"
         );
         // The agent's new exchange turn is a list item, so whichever path runs it

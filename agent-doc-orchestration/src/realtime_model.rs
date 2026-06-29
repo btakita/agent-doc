@@ -638,9 +638,9 @@ fn broadcast_convergence_patches(
     before: &str,
     after: &str,
 ) -> anyhow::Result<Vec<serde_json::Value>> {
-    let before_components = crate::component::parse(before)?;
-    let after_components = crate::component::parse(after)?;
-    let before_by_name: std::collections::HashMap<&str, &crate::component::Component> =
+    let before_components = agent_doc_element::element::parse(before)?;
+    let after_components = agent_doc_element::element::parse(after)?;
+    let before_by_name: std::collections::HashMap<&str, &agent_doc_element::element::Component> =
         before_components
             .iter()
             .map(|component| (component.name.as_str(), component))
@@ -755,7 +755,7 @@ mod tests {
             .merged;
         assert!(merged.contains("#edit-A"));
         assert!(merged.contains("#edit-B"));
-        crate::component::parse(&merged).unwrap();
+        agent_doc_element::element::parse(&merged).unwrap();
 
         let rebroadcast = compute_broadcast(base, &merged, &editor_a).unwrap();
         assert_eq!(
@@ -763,7 +763,7 @@ mod tests {
             "rebroadcasting an already-converged buffer to a stale peer must not re-merge component markers"
         );
         assert!(rebroadcast.originator_echo_suppressed);
-        crate::component::parse(&rebroadcast.merged).unwrap();
+        agent_doc_element::element::parse(&rebroadcast.merged).unwrap();
     }
 
     #[test]

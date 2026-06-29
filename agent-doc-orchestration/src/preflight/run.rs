@@ -1176,7 +1176,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         } else {
             // Read the live document once for the open-backlog set.
             let parsed = std::fs::read_to_string(file).ok().and_then(|content| {
-                crate::component::parse(&content)
+                agent_doc_element::element::parse(&content)
                     .ok()
                     .map(|components| (content, components))
             });
@@ -1185,7 +1185,9 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                 .map(|(content, components)| {
                     components
                         .iter()
-                        .filter(|component| crate::component::is_backlog_component(&component.name))
+                        .filter(|component| {
+                            agent_doc_element::element::is_backlog_component(&component.name)
+                        })
                         .flat_map(|component| {
                             let (_, items, _) =
                                 crate::pending::parse_items(component.content(content));
@@ -1504,8 +1506,8 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
 /// no-convergence case — so non-queue preflights are untouched) or when either
 /// document lacks a parseable queue component.
 fn realign_baseline_to_converged_queue(current: &str, converged: &str) -> Option<String> {
-    let cur_comps = crate::component::parse(current).ok()?;
-    let conv_comps = crate::component::parse(converged).ok()?;
+    let cur_comps = agent_doc_element::element::parse(current).ok()?;
+    let conv_comps = agent_doc_element::element::parse(converged).ok()?;
     let cur_q = cur_comps.iter().find(|c| c.name == "queue")?;
     let conv_q = conv_comps.iter().find(|c| c.name == "queue")?;
     let cur_q_text = &current[cur_q.open_start..cur_q.close_end];
@@ -1555,7 +1557,7 @@ fn queue_body_diff_is_non_selected_future_state(
 }
 
 fn first_queue_prompt_identity(content: &str) -> Option<String> {
-    let components = crate::component::parse(content).ok()?;
+    let components = agent_doc_element::element::parse(content).ok()?;
     let queue = components
         .iter()
         .find(|component| component.name == "queue")?;
@@ -1571,7 +1573,7 @@ fn queue_prompt_identity(prompt: &str) -> String {
 }
 
 fn content_without_queue_body(content: &str) -> Option<String> {
-    let components = crate::component::parse(content).ok()?;
+    let components = agent_doc_element::element::parse(content).ok()?;
     let queue = components
         .iter()
         .find(|component| component.name == "queue")?;
@@ -1582,7 +1584,7 @@ fn content_without_queue_body(content: &str) -> Option<String> {
 }
 
 fn queue_body(content: &str) -> Option<&str> {
-    let components = crate::component::parse(content).ok()?;
+    let components = agent_doc_element::element::parse(content).ok()?;
     let queue = components
         .iter()
         .find(|component| component.name == "queue")?;
@@ -1606,8 +1608,8 @@ fn realign_component_when_only_in_progress_marker_changed(
     converged: &str,
     component_name: &str,
 ) -> Option<String> {
-    let current_components = crate::component::parse(current).ok()?;
-    let converged_components = crate::component::parse(converged).ok()?;
+    let current_components = agent_doc_element::element::parse(current).ok()?;
+    let converged_components = agent_doc_element::element::parse(converged).ok()?;
     let current_component = current_components
         .iter()
         .find(|component| component.name == component_name)?;
@@ -4472,10 +4474,10 @@ mod tests {
         run(&doc).unwrap();
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
-        let backlog_after = crate::component::parse(&file_after).unwrap();
+        let backlog_after = agent_doc_element::element::parse(&file_after).unwrap();
         let backlog_after = backlog_after
             .iter()
-            .find(|component| crate::component::is_backlog_component(&component.name))
+            .find(|component| agent_doc_element::element::is_backlog_component(&component.name))
             .map(|component| component.content(&file_after))
             .unwrap();
         assert!(file_after.contains("do #statusws. spec-test-build-install-commit-push"));
@@ -4484,10 +4486,10 @@ mod tests {
         assert!(!backlog_after.contains("@@ -1 +1 @@"));
 
         let snapshot_after = crate::snapshot::load(&doc).unwrap().unwrap();
-        let snapshot_backlog = crate::component::parse(&snapshot_after).unwrap();
+        let snapshot_backlog = agent_doc_element::element::parse(&snapshot_after).unwrap();
         let snapshot_backlog = snapshot_backlog
             .iter()
-            .find(|component| crate::component::is_backlog_component(&component.name))
+            .find(|component| agent_doc_element::element::is_backlog_component(&component.name))
             .map(|component| component.content(&snapshot_after))
             .unwrap();
         assert!(!snapshot_backlog.contains("- [x] [#scopeid] completed item"));

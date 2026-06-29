@@ -1707,16 +1707,16 @@ pub fn classify_closeout_recovery_state(file: &Path) -> CloseoutRecoveryState {
 /// drift (safe to commit) from content drift (fail closed).
 fn content_component_signature(doc: &str) -> String {
     let normalized = crate::git::normalize_committed_exchange_artifacts(doc);
-    let Ok(components) = crate::component::parse(&normalized) else {
+    let Ok(components) = agent_doc_element::element::parse(&normalized) else {
         return normalized;
     };
     let mut sig = String::new();
     for c in &components {
         let is_content = c.name == "exchange"
-            || crate::component::is_backlog_component(&c.name)
-            || crate::component::is_review_component(&c.name)
-            || crate::component::is_icebox_component(&c.name)
-            || crate::component::is_backlog_done_component(&c.name);
+            || agent_doc_element::element::is_backlog_component(&c.name)
+            || agent_doc_element::element::is_review_component(&c.name)
+            || agent_doc_element::element::is_icebox_component(&c.name)
+            || agent_doc_element::element::is_backlog_done_component(&c.name);
         if is_content {
             sig.push_str(&c.name);
             sig.push('\u{0}');
@@ -1731,7 +1731,7 @@ fn head_exchange_has_escaped_markers(file: &Path) -> bool {
     let Ok(Some(head)) = crate::git::show_head(file) else {
         return false;
     };
-    let Ok(components) = crate::component::parse(&head) else {
+    let Ok(components) = agent_doc_element::element::parse(&head) else {
         return false;
     };
     let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {

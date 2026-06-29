@@ -25,9 +25,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use agent_doc_core::component::{self, Component};
 use agent_doc_core::frontmatter::{self, Frontmatter};
 use agent_doc_core::project_config::ProjectConfig;
+use agent_doc_element::element::{self, Component};
 use hex;
 use lazily::{CellHandle, Context, SlotHandle};
 use sha2::{Digest, Sha256};
@@ -202,7 +202,7 @@ impl RunContext {
             let dc = doc_content;
             move |ctx: &Context| -> Arc<Vec<Component>> {
                 let content: String = ctx.get_cell(&dc);
-                Arc::new(component::parse(&content).unwrap_or_default())
+                Arc::new(element::parse(&content).unwrap_or_default())
             }
         });
 

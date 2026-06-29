@@ -210,8 +210,8 @@ pub(crate) fn check_gated_phase_split_guard(
     let components = rc.components();
     let mut flagged: Vec<String> = Vec::new();
     for component in components.iter() {
-        let trackable = crate::component::is_backlog_component(&component.name)
-            || crate::component::is_review_component(&component.name);
+        let trackable = agent_doc_element::element::is_backlog_component(&component.name)
+            || agent_doc_element::element::is_review_component(&component.name);
         if !trackable {
             continue;
         }
@@ -433,12 +433,12 @@ pub(crate) fn queue_audit_has_none_complete_claim(lower: &str) -> bool {
 
 pub(crate) fn single_open_review_item_id(file: &Path) -> Result<Option<String>> {
     let content = std::fs::read_to_string(file)?;
-    let Ok(components) = crate::component::parse(&content) else {
+    let Ok(components) = agent_doc_element::element::parse(&content) else {
         return Ok(None);
     };
     let ids = components
         .into_iter()
-        .filter(|component| crate::component::is_review_component(&component.name))
+        .filter(|component| agent_doc_element::element::is_review_component(&component.name))
         .flat_map(|component| {
             let (_, items, _) = crate::pending::parse_items(component.content(&content));
             items
@@ -584,7 +584,7 @@ pub(crate) fn exchange_has_new_appended_content(snapshot: &str, current: &str) -
 
 pub(crate) fn extract_normalized_exchange_body(doc: &str) -> Option<String> {
     let (_, body) = crate::frontmatter::parse(doc).ok()?;
-    let components = crate::component::parse(body).ok()?;
+    let components = agent_doc_element::element::parse(body).ok()?;
     for component in &components {
         if component.name == "exchange" {
             return Some(component.content(body).to_string());
@@ -634,7 +634,7 @@ pub(crate) fn mask_exchange_component_content(doc: &str) -> Option<String> {
 }
 
 pub(crate) fn mask_components_by_name(doc: &str, names: &[&str]) -> Option<String> {
-    let components = crate::component::parse(doc).ok()?;
+    let components = agent_doc_element::element::parse(doc).ok()?;
     let mut masked = doc.to_string();
     let mut saw_target = false;
     for component in components.iter().rev() {
@@ -929,7 +929,7 @@ pub fn unresolved_exchange_prompt(file: &Path) -> Result<Option<String>> {
 }
 
 pub(crate) fn unresolved_exchange_prompt_in_content(content: &str) -> Option<String> {
-    let components = crate::component::parse(content).ok()?;
+    let components = agent_doc_element::element::parse(content).ok()?;
     let exchange = components.iter().find(|c| c.name == "exchange")?;
     let body = exchange.content(content);
     let lines: Vec<&str> = body.lines().collect();
@@ -1004,7 +1004,7 @@ pub(crate) fn exchange_tail_has_response_heading(file: &Path) -> bool {
     let Ok(content) = std::fs::read_to_string(file) else {
         return false;
     };
-    let Ok(components) = crate::component::parse(&content) else {
+    let Ok(components) = agent_doc_element::element::parse(&content) else {
         return false;
     };
     let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
@@ -1130,7 +1130,7 @@ pub fn first_unstarted_prompt_bearing_change(
 }
 
 pub(crate) fn strip_queue_components_for_unstarted_prompt_guard(body: &str) -> String {
-    let Ok(components) = crate::component::parse(body) else {
+    let Ok(components) = agent_doc_element::element::parse(body) else {
         return body.to_string();
     };
     let mut result = body.to_string();
@@ -1165,7 +1165,7 @@ pub(crate) fn prompt_target_is_immediately_before_existing_response(
     let body = crate::frontmatter::parse(current_doc)
         .map(|(_, body)| body.to_string())
         .unwrap_or_else(|_| current_doc.to_string());
-    let Ok(components) = crate::component::parse(&body) else {
+    let Ok(components) = agent_doc_element::element::parse(&body) else {
         return false;
     };
     let Some(exchange) = components
@@ -1201,7 +1201,7 @@ pub(crate) fn prompt_only_exchange_tail(doc: &str) -> Option<String> {
     let body = crate::frontmatter::parse(doc)
         .map(|(_, body)| body.to_string())
         .unwrap_or_else(|_| doc.to_string());
-    let components = crate::component::parse(&body).ok()?;
+    let components = agent_doc_element::element::parse(&body).ok()?;
     let exchange = components
         .iter()
         .find(|component| component.name == "exchange")?;

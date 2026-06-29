@@ -14,7 +14,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::component;
+use agent_doc_element::element;
 use agent_doc_orchestration::{queue, snapshot};
 
 const QUEUE_COMPONENT: &str = "queue";
@@ -406,7 +406,7 @@ fn queue_heads_from_doc(doc: &str, include_completed: bool) -> Vec<String> {
 }
 
 fn queue_component_text(doc: &str) -> Option<String> {
-    let components = component::parse(doc).ok()?;
+    let components = element::parse(doc).ok()?;
     let queue = components
         .iter()
         .find(|component| component.name == QUEUE_COMPONENT)?;
@@ -435,7 +435,7 @@ fn current_coverage_text(file: &Path, current_doc: &str) -> String {
 }
 
 fn done_archive_paths(file: &Path, doc: &str) -> Vec<PathBuf> {
-    let Ok(components) = component::parse(doc) else {
+    let Ok(components) = element::parse(doc) else {
         return Vec::new();
     };
     let base = file.parent().unwrap_or(Path::new("."));

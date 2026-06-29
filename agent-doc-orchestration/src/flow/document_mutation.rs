@@ -4,7 +4,9 @@ use super::types::{
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use crate::{component, template};
+use agent_doc_element::element;
+
+use crate::template;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PatchbackShapeFacts {
@@ -50,7 +52,7 @@ pub fn classify_patchback_shape(facts: PatchbackShapeFacts) -> PatchbackShape {
 /// is treated as "no clean component blocks" — that shape is handled by the
 /// existing malformed/plain paths rather than this raw-template guard.
 pub fn raw_component_block_count(response: &str) -> usize {
-    component::parse(response)
+    element::parse(response)
         .map(|components| components.len())
         .unwrap_or(0)
 }
@@ -75,7 +77,7 @@ impl TemplatePatchbackPlan {
 }
 
 pub fn patchback_marker_count_outside_code(response: &str) -> usize {
-    let code_ranges = component::find_code_ranges(response);
+    let code_ranges = element::find_code_ranges(response);
     let markers = [
         "<!-- patch:",
         "<!-- /patch:",

@@ -91,7 +91,6 @@ mod upgrade;
 mod worktree;
 
 // Re-export library modules so binary-internal modules can use `crate::` paths
-pub(crate) use agent_doc::component;
 pub(crate) use agent_doc::crdt;
 pub(crate) use agent_doc::frontmatter;
 pub(crate) use agent_doc::template;

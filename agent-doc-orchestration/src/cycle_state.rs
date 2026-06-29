@@ -242,7 +242,7 @@ pub struct CycleState {
 /// Freeform / non-prompt entries are skipped; id semantics are applied later by
 /// the guard via `do_directive_target_ids`.
 pub fn active_queue_directive_heads(doc: &str) -> Vec<String> {
-    let Ok(components) = crate::component::parse(doc) else {
+    let Ok(components) = agent_doc_element::element::parse(doc) else {
         return Vec::new();
     };
     let Some(queue) = components.iter().find(|c| c.name == "queue") else {
@@ -263,7 +263,7 @@ pub fn active_queue_directive_heads(doc: &str) -> Vec<String> {
 /// `active_queue_heads` so `session-check` can require committed-response /
 /// consume / deferral proof for free-text queue heads that have no backlog id.
 pub fn active_free_text_queue_heads(doc: &str) -> Vec<String> {
-    let Ok(components) = crate::component::parse(doc) else {
+    let Ok(components) = agent_doc_element::element::parse(doc) else {
         return Vec::new();
     };
     let Some(queue) = components.iter().find(|c| c.name == "queue") else {

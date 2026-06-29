@@ -119,9 +119,9 @@ use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use crate::{
-    agent, component, config::Config, diff, frontmatter, git, merge, snapshot, template, write,
-};
+use agent_doc_element::element;
+
+use crate::{agent, config::Config, diff, frontmatter, git, merge, snapshot, template, write};
 
 const AGENT_DOC_RUN_HEARTBEAT_SECS_ENV: &str = "AGENT_DOC_RUN_HEARTBEAT_SECS";
 const DEFAULT_RUN_HEARTBEAT_SECS: u64 = 30;
@@ -893,7 +893,7 @@ fn active_queue_prompt_state(file: &Path) -> Result<ActiveQueuePromptState> {
         return Ok(ActiveQueuePromptState::Inactive);
     }
 
-    let components = component::parse(&content)?;
+    let components = element::parse(&content)?;
     let Some(queue_component) = components
         .iter()
         .find(|component| component.name == "queue")

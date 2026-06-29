@@ -39,7 +39,9 @@ use std::io::Read;
 use std::path::Path;
 use std::process::Command;
 
-use crate::{PatchMode, component, project_config};
+use agent_doc_element::element;
+
+use crate::{PatchMode, project_config};
 use agent_doc_orchestration::graph::RunContext;
 use agent_doc_orchestration::snapshot;
 
@@ -91,7 +93,7 @@ pub fn run(
     let doc = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
 
-    let components = component::parse(&doc)
+    let components = element::parse(&doc)
         .with_context(|| format!("failed to parse components in {}", file.display()))?;
 
     let comp = components

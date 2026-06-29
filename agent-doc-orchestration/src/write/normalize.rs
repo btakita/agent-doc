@@ -15,8 +15,8 @@ use super::*;
 /// These are passed to the IPC plugin so it can apply the same normalization
 /// to the live editor document.
 pub fn extract_normalization_targets(before: &str, after: &str) -> Vec<String> {
-    let before_comps = component::parse(before).unwrap_or_default();
-    let after_comps = component::parse(after).unwrap_or_default();
+    let before_comps = element::parse(before).unwrap_or_default();
+    let after_comps = element::parse(after).unwrap_or_default();
 
     let before_exc = before_comps
         .iter()
@@ -76,11 +76,11 @@ pub fn extract_normalization_targets(before: &str, after: &str) -> Vec<String> {
 /// Both disk and IPC write paths call this after computing `content_ours` so the
 /// snapshot and merged document consistently show `❯ ` on user input.
 pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapshot: &str) -> String {
-    let Ok(content_comps) = component::parse(content) else {
+    let Ok(content_comps) = element::parse(content) else {
         return content.to_string();
     };
-    let baseline_comps = component::parse(baseline).unwrap_or_default();
-    let snap_comps = component::parse(snapshot).unwrap_or_default();
+    let baseline_comps = element::parse(baseline).unwrap_or_default();
+    let snap_comps = element::parse(snapshot).unwrap_or_default();
 
     let Some(exchange) = content_comps.iter().find(|c| c.name == "exchange") else {
         return content.to_string();
@@ -334,7 +334,7 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
 }
 
 pub(crate) fn preserve_head_exchange_prompt_prefix_state(content: &str, head: &str) -> String {
-    let Ok(head_components) = component::parse(head) else {
+    let Ok(head_components) = element::parse(head) else {
         return content.to_string();
     };
     let Some(head_exchange) = head_components.iter().find(|c| c.name == "exchange") else {
@@ -368,7 +368,7 @@ pub(crate) fn preserve_head_exchange_prompt_prefix_state(content: &str, head: &s
         return content.to_string();
     }
 
-    let Ok(content_components) = component::parse(content) else {
+    let Ok(content_components) = element::parse(content) else {
         return content.to_string();
     };
     let Some(exchange) = content_components.iter().find(|c| c.name == "exchange") else {
@@ -786,7 +786,7 @@ pub fn verify_sidecar_normalization(sidecar: &str, normalize_prefix_lines: &[Str
         return true;
     }
 
-    let sidecar_exchange = component::parse(sidecar)
+    let sidecar_exchange = element::parse(sidecar)
         .ok()
         .and_then(|components| {
             components
@@ -925,8 +925,8 @@ pub(crate) fn exchange_prompt_prefix_eligible_lines<'a>(
 /// Compare the committed/snapshot document against the working tree and return
 /// exchange user-region lines that should regain a missing `❯ ` prefix.
 pub fn extract_post_commit_normalization_targets(committed: &str, working: &str) -> Vec<String> {
-    let committed_comps = component::parse(committed).unwrap_or_default();
-    let working_comps = component::parse(working).unwrap_or_default();
+    let committed_comps = element::parse(committed).unwrap_or_default();
+    let working_comps = element::parse(working).unwrap_or_default();
 
     let committed_exc = committed_comps
         .iter()

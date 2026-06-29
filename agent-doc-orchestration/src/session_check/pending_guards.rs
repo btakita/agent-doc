@@ -398,7 +398,7 @@ pub fn response_text_for_guards(response: &str) -> String {
         .iter()
         .filter(|patch| {
             !is_backlog_component(&patch.name)
-                && !crate::component::is_review_component(&patch.name)
+                && !agent_doc_element::element::is_review_component(&patch.name)
         })
         .map(|patch| patch.content.trim().to_string())
         .filter(|text| !text.is_empty())

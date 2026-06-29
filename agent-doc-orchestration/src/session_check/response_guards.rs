@@ -15,7 +15,7 @@ pub(crate) fn exchange_contains_prompt_line(doc: &str, prompt: &str) -> bool {
     if needle.is_empty() {
         return true;
     }
-    let Ok(components) = crate::component::parse(doc) else {
+    let Ok(components) = agent_doc_element::element::parse(doc) else {
         return false;
     };
     let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
@@ -57,7 +57,7 @@ pub(crate) fn queue_contains_prompt_line(doc: &str, prompt: &str) -> bool {
     if needle.is_empty() {
         return true;
     }
-    let Ok(components) = crate::component::parse(doc) else {
+    let Ok(components) = agent_doc_element::element::parse(doc) else {
         return false;
     };
     let Some(queue) = components.iter().find(|c| c.name == "queue") else {
@@ -82,7 +82,7 @@ pub(crate) fn queue_contains_prompt_line(doc: &str, prompt: &str) -> bool {
 /// the strike wrapper before id extraction lets the guard self-clear instead.
 pub(crate) fn queue_ids_including_struck(doc: &str) -> std::collections::HashSet<String> {
     let mut ids = std::collections::HashSet::new();
-    let Ok(components) = crate::component::parse(doc) else {
+    let Ok(components) = agent_doc_element::element::parse(doc) else {
         return ids;
     };
     let Some(queue) = components.iter().find(|c| c.name == "queue") else {
@@ -541,7 +541,7 @@ pub(crate) fn closeout_recovery_hint(file: &Path) -> String {
 /// returns false.
 pub(crate) fn committed_exchange_has_response_body(file: &Path) -> Result<bool> {
     let content = std::fs::read_to_string(file)?;
-    let components = crate::component::parse(&content)?;
+    let components = agent_doc_element::element::parse(&content)?;
     let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
         return Ok(false);
     };

@@ -393,7 +393,7 @@ fn record_next_queue_head_selected_state(
 }
 
 fn next_queue_head_selection(content: &str) -> Result<Option<(String, String, bool)>> {
-    let components = component::parse(content)?;
+    let components = element::parse(content)?;
     let Some(queue_component) = components
         .iter()
         .find(|component| component.name == "queue")
@@ -621,7 +621,7 @@ pub(crate) fn active_queue_head_text(content: &str) -> Result<Option<String>> {
     if fm.queue_active != Some(true) {
         return Ok(None);
     }
-    let components = component::parse(content)?;
+    let components = element::parse(content)?;
     let comp = components
         .iter()
         .find(|component| component.name == "queue")
@@ -885,7 +885,7 @@ pub(crate) fn head_id_is_registered_preset(content: &str, head_id: &str) -> bool
 /// registered prompt-preset id (e.g. `#spec-...`), which is not a tracked item and
 /// still completes on a `### Re: #id` heading match (#zwn5).
 pub(crate) fn head_id_names_tracked_directive_item(content: &str, head_id: &str) -> bool {
-    let Ok(comps) = crate::component::parse(content) else {
+    let Ok(comps) = agent_doc_element::element::parse(content) else {
         return false;
     };
     comps
@@ -1468,7 +1468,7 @@ pub fn strike_answered_free_text_queue_heads(
 /// (`do [#id]`) and genuinely drainable free-text/prose heads are excluded, so
 /// pruning never desyncs tracked or runnable work.
 fn noise_queue_head_node_keys(content: &str) -> Result<Vec<String>> {
-    let preset_supplies_directive = component::parse(content)
+    let preset_supplies_directive = element::parse(content)
         .ok()
         .and_then(|comps| {
             comps
@@ -1510,12 +1510,8 @@ fn noise_queue_head_node_keys(content: &str) -> Result<Vec<String>> {
 /// nothing is pruned — mirroring `head_is_drainable`'s `open_backlog_ids` gate so
 /// the prune set and the drainable set agree on what an "orphan" is.
 fn orphan_id_queue_head_node_keys(content: &str) -> Result<Vec<String>> {
-    let has_backlog = component::parse(content)
-        .map(|comps| {
-            comps
-                .iter()
-                .any(|c| component::is_backlog_component(&c.name))
-        })
+    let has_backlog = element::parse(content)
+        .map(|comps| comps.iter().any(|c| element::is_backlog_component(&c.name)))
         .unwrap_or(false);
     if !has_backlog {
         return Ok(Vec::new());
@@ -1627,7 +1623,7 @@ pub fn prune_noise_queue_heads(file: &Path) -> Result<usize> {
 /// struck by durable node key (`item_nodes`). Multiline removal runs first so the
 /// node-key pass sees stable post-excision offsets. (#qnoise-multiline-strike)
 fn strike_all_noise_queue_heads(content: &str) -> Result<(String, usize)> {
-    let comps = component::parse(content)?;
+    let comps = element::parse(content)?;
     let Some(queue) = comps.iter().find(|c| c.name == "queue") else {
         return Ok((content.to_string(), 0));
     };
@@ -1867,12 +1863,12 @@ fn id_backed_head_node_keys(content: &str, target_id: &str) -> Result<Vec<String
 /// live work that should drain through the normal `--done` lifecycle rather than
 /// the orphan escape hatch.
 fn head_id_names_open_backlog_item(content: &str, target_id: &str) -> bool {
-    let Ok(comps) = crate::component::parse(content) else {
+    let Ok(comps) = agent_doc_element::element::parse(content) else {
         return false;
     };
     comps
         .iter()
-        .filter(|c| crate::component::is_backlog_component(&c.name))
+        .filter(|c| agent_doc_element::element::is_backlog_component(&c.name))
         .any(|comp| {
             let (_, items, _) = crate::pending::parse_items(comp.content(content));
             items.iter().any(|item| {
@@ -2123,7 +2119,7 @@ pub(crate) fn mark_completed_queue_prompts_for_done_ids(
     let _lock = acquire_doc_lock(file)?;
     let content =
         std::fs::read_to_string(file).context("queue done-id mark: failed to read document")?;
-    let components = component::parse(&content)?;
+    let components = element::parse(&content)?;
     let Some(queue_component) = components
         .iter()
         .find(|component| component.name == "queue")
@@ -2142,7 +2138,7 @@ pub(crate) fn mark_completed_queue_prompts_for_done_ids(
     let new_document = queue_component.replace_content(&content, &new_body);
 
     let new_snapshot = if let Some(snapshot_content) = snapshot::load(file)? {
-        let snapshot_components = component::parse(&snapshot_content)?;
+        let snapshot_components = element::parse(&snapshot_content)?;
         let snapshot_queue = snapshot_components
             .iter()
             .find(|component| component.name == "queue")
@@ -2254,7 +2250,7 @@ pub(crate) fn queue_prompt_node_keys_for_count(
         });
     }
 
-    let components = component::parse(content)?;
+    let components = element::parse(content)?;
     let queue_component = components
         .iter()
         .find(|c| c.name == "queue")
@@ -2339,7 +2335,7 @@ pub(crate) fn consume_queue_nodes_by_key(content: &str, node_keys: &[String]) ->
 }
 
 fn strip_in_progress_marker_from_struck_queue_items(content: &str) -> String {
-    let Ok(components) = component::parse(content) else {
+    let Ok(components) = element::parse(content) else {
         return content.to_string();
     };
     let Some(queue) = components
@@ -2538,7 +2534,7 @@ pub(crate) fn embed_consumed_prompt_in_response(
     if consumed_texts.iter().all(|t| t.trim().is_empty()) {
         return content.to_string();
     }
-    let Ok(components) = component::parse(content) else {
+    let Ok(components) = element::parse(content) else {
         return content.to_string();
     };
     let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
@@ -2572,7 +2568,7 @@ pub(crate) fn embed_consumed_prompt_in_response(
         return content.to_string();
     }
 
-    let code_ranges = component::find_code_ranges(content);
+    let code_ranges = element::find_code_ranges(content);
     let Some(heading_rel) = locate_response_heading_offset(
         region,
         exchange.open_end,
@@ -2620,7 +2616,7 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
         return Ok(None);
     }
 
-    let components = component::parse(content)?;
+    let components = element::parse(content)?;
     let comp = components
         .iter()
         .find(|c| c.name == "queue")
@@ -2670,7 +2666,7 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
 
             if drained {
                 if has_auto {
-                    let comps = component::parse(&current)?;
+                    let comps = element::parse(&current)?;
                     if let Some(q) = comps.iter().find(|c| c.name == "queue") {
                         let raw = &current[q.open_start..q.open_end];
                         let new_tag = crate::queue::strip_auto_from_tag(raw);
@@ -2689,7 +2685,7 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
             let snap = snapshot_content.ok_or_else(|| {
                 anyhow::anyhow!("queue consume: queue_active is true but snapshot is missing")
             })?;
-            let snap_comps = component::parse(snap)?;
+            let snap_comps = element::parse(snap)?;
             let snap_queue = snap_comps
                 .iter()
                 .find(|c| c.name == "queue")
@@ -2744,7 +2740,7 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
                 };
             if drained {
                 if snap_has_auto
-                    && let Ok(sc2) = component::parse(&new_snap)
+                    && let Ok(sc2) = element::parse(&new_snap)
                     && let Some(sq2) = sc2.iter().find(|c| c.name == "queue")
                 {
                     let raw = &new_snap[sq2.open_start..sq2.open_end];
@@ -2805,7 +2801,7 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
     let snap = snapshot_content.ok_or_else(|| {
         anyhow::anyhow!("queue consume: queue_active is true but snapshot is missing")
     })?;
-    let snap_comps = component::parse(snap)?;
+    let snap_comps = element::parse(snap)?;
     let snap_queue = snap_comps
         .iter()
         .find(|c| c.name == "queue")
@@ -2973,7 +2969,7 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
 
     if drained {
         if has_auto {
-            let comps = component::parse(&current)?;
+            let comps = element::parse(&current)?;
             if let Some(q) = comps.iter().find(|c| c.name == "queue") {
                 let raw = &current[q.open_start..q.open_end];
                 let new_tag = crate::queue::strip_auto_from_tag(raw);
@@ -3032,7 +3028,7 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
         };
     if drained {
         if snap_has_auto
-            && let Ok(sc2) = component::parse(&new_snap)
+            && let Ok(sc2) = element::parse(&new_snap)
             && let Some(sq2) = sc2.iter().find(|c| c.name == "queue")
         {
             let raw = &new_snap[sq2.open_start..sq2.open_end];

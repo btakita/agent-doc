@@ -59,7 +59,7 @@ fn run_pending_maintenance_with_options(
         Ok(c) => c,
         Err(_) => return Ok(PendingMaintenanceReport::default()),
     };
-    let components = match crate::component::parse(&content) {
+    let components = match agent_doc_element::element::parse(&content) {
         Ok(cs) => cs,
         Err(_) => return Ok(PendingMaintenanceReport::default()),
     };
@@ -98,7 +98,7 @@ fn run_pending_maintenance_with_options(
     let already_done_ids = collect_agent_done_ids_with_root(&content, project_root.as_deref());
 
     for surface in &tracked_surfaces {
-        let components = crate::component::parse(&current_content)
+        let components = agent_doc_element::element::parse(&current_content)
             .with_context(|| format!("failed to parse components while maintaining {}", surface))?;
         let comp = components
             .into_iter()
@@ -270,7 +270,7 @@ fn run_pending_maintenance_with_options(
         // (#pending-gate-snapshot-desync). --done already reaches this via reap,
         // which sets `mutated`; this also covers the no-reap mutations.
         if let Some(ref mut snap_content) = snapshot_content {
-            let snap_comps = crate::component::parse(snap_content).ok();
+            let snap_comps = agent_doc_element::element::parse(snap_content).ok();
             let snap_comp = snap_comps
                 .and_then(|cs| {
                     cs.into_iter()
@@ -410,7 +410,7 @@ fn run_pending_maintenance_with_options(
     let current_body = tracked_body_for_reorder(&current_content);
     let reordered = match snapshot_at_start {
         Some(snap) => {
-            let snap_comp = crate::component::parse(&snap)
+            let snap_comp = agent_doc_element::element::parse(&snap)
                 .ok()
                 .and_then(|comps| comps.into_iter().find(|c| is_backlog_component(&c.name)));
             if let (Some(sc), Some(current_body)) = (snap_comp, current_body) {
@@ -519,7 +519,7 @@ pub(crate) struct OpsProofCompletion {
 /// brand-new same-cycle adds (absent from the cycle-start snapshot) so ops-proof
 /// auto-completion never reaps an item on the cycle it first appears.
 pub(crate) fn surface_pending_ids(content: &str, surface: &str) -> HashSet<String> {
-    crate::component::parse(content)
+    agent_doc_element::element::parse(content)
         .ok()
         .and_then(|comps| {
             comps
@@ -718,21 +718,26 @@ pub(crate) fn contains_ascii_word(haystack: &str, needle: &str) -> bool {
 }
 
 pub(crate) fn tracked_body_for_reorder(content: &str) -> Option<&str> {
-    crate::component::parse(content).ok().and_then(|comps| {
-        comps
-            .into_iter()
-            .find(|component| is_backlog_component(&component.name))
-            .map(|component| component.content(content))
-    })
+    agent_doc_element::element::parse(content)
+        .ok()
+        .and_then(|comps| {
+            comps
+                .into_iter()
+                .find(|component| is_backlog_component(&component.name))
+                .map(|component| component.content(content))
+        })
 }
 
 pub(crate) fn review_counts(content: &str) -> (usize, usize) {
-    let Some(body) = crate::component::parse(content).ok().and_then(|comps| {
-        comps
-            .into_iter()
-            .find(|component| is_review_component(&component.name))
-            .map(|component| component.content(content).to_string())
-    }) else {
+    let Some(body) = agent_doc_element::element::parse(content)
+        .ok()
+        .and_then(|comps| {
+            comps
+                .into_iter()
+                .find(|component| is_review_component(&component.name))
+                .map(|component| component.content(content).to_string())
+        })
+    else {
         return (0, 0);
     };
     let (_, items, _) = crate::pending::parse_items(&body);
@@ -773,7 +778,7 @@ fn run_gate_verify_with_options(
         Ok(c) => c,
         Err(_) => return Ok(Vec::new()),
     };
-    let components = match crate::component::parse(&content) {
+    let components = match agent_doc_element::element::parse(&content) {
         Ok(cs) => cs,
         Err(_) => return Ok(Vec::new()),
     };
@@ -881,7 +886,7 @@ fn run_gate_verify_with_options(
         )?;
         // Keep the snapshot in lockstep so the upcoming commit stages the flip.
         if let Some(snap) = snapshot::load(file)?
-            && let Ok(snap_comps) = crate::component::parse(&snap)
+            && let Ok(snap_comps) = agent_doc_element::element::parse(&snap)
             && let Some(snap_review) = snap_comps.iter().find(|c| is_review_component(&c.name))
         {
             let snap_new = snap_review.replace_content(&snap, &new_body);
@@ -898,7 +903,7 @@ fn run_gate_verify_with_options(
 }
 
 pub(crate) fn ensure_no_completed_tracked_items(content: &str, surface: &str) -> Result<()> {
-    let components = crate::component::parse(content).with_context(|| {
+    let components = agent_doc_element::element::parse(content).with_context(|| {
         format!("failed to parse {surface} components during pending reap check")
     })?;
     let completed: Vec<crate::pending::PendingItem> = components
@@ -1097,7 +1102,7 @@ pub(crate) struct BacklogQueueSyncRequest {
 }
 
 pub(crate) fn collect_backlog_queue_sync(
-    components: &[crate::component::Component],
+    components: &[agent_doc_element::element::Component],
     content: &str,
 ) -> Option<BacklogQueueSyncRequest> {
     let mut mode: Option<crate::queue::BacklogQueueSyncMode> = None;
@@ -1141,7 +1146,7 @@ pub(crate) fn collect_backlog_queue_sync(
 /// items (`#backlog-priority-attribute`) for ordering a synced `agent:queue`.
 /// First-seen rank wins on duplicate ids across components.
 pub(crate) fn collect_backlog_priority_ranks(
-    components: &[crate::component::Component],
+    components: &[agent_doc_element::element::Component],
     content: &str,
 ) -> std::collections::HashMap<String, u8> {
     let mut rank = std::collections::HashMap::new();
@@ -1162,7 +1167,7 @@ pub(crate) fn collect_backlog_priority_ranks(
 /// First-seen deps win on duplicate ids across components; items with no
 /// dependency tokens are omitted.
 pub(crate) fn collect_after_deps(
-    components: &[crate::component::Component],
+    components: &[agent_doc_element::element::Component],
     content: &str,
 ) -> std::collections::HashMap<String, Vec<String>> {
     let mut deps = std::collections::HashMap::new();
@@ -1185,7 +1190,7 @@ fn queue_prompt_projection_rows(
     entries: &[crate::queue::QueueEntry],
 ) -> Vec<agent_doc_document::queue_projection::QueuePromptRow> {
     let deferred_ids = crate::queue_continuation::deferred_backlog_ids(content);
-    let preset_supplies_directive = crate::component::parse(content)
+    let preset_supplies_directive = agent_doc_element::element::parse(content)
         .ok()
         .and_then(|components| {
             components
@@ -1290,7 +1295,7 @@ pub(crate) fn partition_drainable_backlog_ids(
 /// are not agent-drainable in the current session type. First-seen context wins
 /// on duplicate ids across components.
 pub(crate) fn collect_backlog_execution_contexts(
-    components: &[crate::component::Component],
+    components: &[agent_doc_element::element::Component],
     content: &str,
 ) -> std::collections::HashMap<String, crate::pending::ExecutionContext> {
     let mut ctxs = std::collections::HashMap::new();
@@ -1638,8 +1643,8 @@ fn adopt_live_buffer_queue_deletions(file: &Path, disk_content: &mut String) -> 
     let Some(live_content) = snapshot.content.as_deref() else {
         return Ok(false);
     };
-    let disk_components = crate::component::parse(disk_content)?;
-    let live_components = crate::component::parse(live_content)?;
+    let disk_components = agent_doc_element::element::parse(disk_content)?;
+    let live_components = agent_doc_element::element::parse(live_content)?;
     let Some(disk_queue) = disk_components
         .iter()
         .find(|component| component.name == "queue")
@@ -1701,7 +1706,7 @@ pub(crate) fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<Que
         Ok(content) => content,
         Err(_) => return Ok(QueueState::default()),
     };
-    let components = match crate::component::parse(&content) {
+    let components = match agent_doc_element::element::parse(&content) {
         Ok(components) => components,
         Err(_) => return Ok(QueueState::default()),
     };
@@ -1882,7 +1887,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     };
     let adopted_live_queue_delete =
         adopt_live_buffer_queue_deletions(file, &mut content).unwrap_or(false);
-    let components = match crate::component::parse(&content) {
+    let components = match agent_doc_element::element::parse(&content) {
         Ok(cs) => cs,
         Err(_) => return Ok(QueueState::default()),
     };
@@ -1999,7 +2004,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                     .ok()
                     .flatten()
                     .and_then(|snap| {
-                        let comps = crate::component::parse(&snap).ok()?;
+                        let comps = agent_doc_element::element::parse(&snap).ok()?;
                         let q = comps.iter().find(|c| c.name == "queue")?;
                         let body = &snap[q.open_end..q.close_start];
                         let snap_entries = crate::queue::parse(body).ok()?;
@@ -2169,7 +2174,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 .collect();
             let new_body = crate::queue::render(&synced);
             current_content = {
-                let comps = crate::component::parse(&current_content)?;
+                let comps = agent_doc_element::element::parse(&current_content)?;
                 let q = comps.iter().find(|c| c.name == "queue").unwrap();
                 q.replace_content(&current_content, &new_body)
             };
@@ -2214,7 +2219,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         let mut operator_authored_identities: std::collections::HashSet<String> =
             std::collections::HashSet::new();
         if let Ok(Some(snap_content)) = snapshot::load(file)
-            && let Ok(snap_components) = crate::component::parse(&snap_content)
+            && let Ok(snap_components) = agent_doc_element::element::parse(&snap_content)
             && let Some(snap_queue) = snap_components.iter().find(|c| c.name == "queue")
         {
             let snap_body = &snap_content[snap_queue.open_end..snap_queue.close_start];
@@ -2224,7 +2229,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 {
                     let new_body = crate::queue::render(&pinned);
                     current_content = {
-                        let comps = crate::component::parse(&current_content)?;
+                        let comps = agent_doc_element::element::parse(&current_content)?;
                         let q = comps.iter().find(|c| c.name == "queue").unwrap();
                         q.replace_content(&current_content, &new_body)
                     };
@@ -2296,7 +2301,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 .unwrap_or(sorted);
             let new_body = crate::queue::render(&sorted);
             current_content = {
-                let comps = crate::component::parse(&current_content)?;
+                let comps = agent_doc_element::element::parse(&current_content)?;
                 let q = comps.iter().find(|c| c.name == "queue").unwrap();
                 q.replace_content(&current_content, &new_body)
             };
@@ -2368,7 +2373,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
 
     if let Some((deduped_content, dropped)) = dedup_queue_nodes_by_key(&current_content)? {
         current_content = deduped_content;
-        let comps = crate::component::parse(&current_content)?;
+        let comps = agent_doc_element::element::parse(&current_content)?;
         if let Some(q) = comps.iter().find(|c| c.name == "queue") {
             let body = &current_content[q.open_end..q.close_start];
             activation.entries_after = crate::queue::parse(body)
@@ -2397,7 +2402,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // (#queue-operator-pin-position-lock) is preserved: convergence is purely
     // subtractive at each identity's earliest slot.
     let snapshot_queue_entries: Vec<crate::queue::QueueEntry> = match snapshot::load(file) {
-        Ok(Some(snap)) => crate::component::parse(&snap)
+        Ok(Some(snap)) => agent_doc_element::element::parse(&snap)
             .ok()
             .and_then(|comps| {
                 comps
@@ -2419,7 +2424,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
             .saturating_sub(converged_entries.len());
         let new_body = crate::queue::render(&converged_entries);
         current_content = {
-            let comps = crate::component::parse(&current_content)?;
+            let comps = agent_doc_element::element::parse(&current_content)?;
             let q = comps
                 .iter()
                 .find(|c| c.name == "queue")
@@ -2437,7 +2442,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     if activation.consumed_start_fence {
         let new_body = crate::queue::render(&activation.entries_after);
         current_content = {
-            let comps = crate::component::parse(&current_content)?;
+            let comps = agent_doc_element::element::parse(&current_content)?;
             let q = comps.iter().find(|c| c.name == "queue").unwrap();
             q.replace_content(&current_content, &new_body)
         };
@@ -2476,7 +2481,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     {
         let new_body = crate::queue::render(&new_entries);
         current_content = {
-            let comps = crate::component::parse(&current_content)?;
+            let comps = agent_doc_element::element::parse(&current_content)?;
             let q = comps.iter().find(|c| c.name == "queue").unwrap();
             q.replace_content(&current_content, &new_body)
         };
@@ -2531,7 +2536,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // the strike to heads already present in the committed queue (mirroring
     // session-check's `committed_queue_contains_active_free_text_head`), so an
     // in-flight operator edit the convergence just added is never struck.
-    let exchange_text = crate::component::parse(&current_content)
+    let exchange_text = agent_doc_element::element::parse(&current_content)
         .ok()
         .and_then(|comps| {
             comps
@@ -2591,7 +2596,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         if struck_count > 0 {
             let new_body = crate::queue::render(&new_entries);
             current_content = {
-                let comps = crate::component::parse(&current_content)?;
+                let comps = agent_doc_element::element::parse(&current_content)?;
                 let q = comps.iter().find(|c| c.name == "queue").context(
                     "queue maintenance: queue component vanished before free-text residue strike",
                 )?;
@@ -2726,7 +2731,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 if !struck.is_empty() {
                     let new_body = crate::queue::render(&new_entries);
                     current_content = {
-                        let comps = crate::component::parse(&current_content)?;
+                        let comps = agent_doc_element::element::parse(&current_content)?;
                         let q = comps.iter().find(|c| c.name == "queue").context(
                             "queue maintenance: queue component vanished before backlog/done strike",
                         )?;
@@ -2779,13 +2784,13 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
             let after_stop: Vec<crate::queue::QueueEntry> = activation.entries_after[1..].to_vec();
             let new_body = crate::queue::render(&after_stop);
             current_content = {
-                let comps = crate::component::parse(&current_content)?;
+                let comps = agent_doc_element::element::parse(&current_content)?;
                 let q = comps.iter().find(|c| c.name == "queue").unwrap();
                 q.replace_content(&current_content, &new_body)
             };
             // Strip auto and clear queue_active
             if has_auto {
-                let comps = crate::component::parse(&current_content)?;
+                let comps = agent_doc_element::element::parse(&current_content)?;
                 if let Some(q) = comps.iter().find(|c| c.name == "queue") {
                     let raw = &current_content[q.open_start..q.open_end];
                     let new_tag = crate::queue::strip_auto_from_tag(raw);
@@ -2811,12 +2816,12 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
             )?;
             if let Ok(Some(snap)) = snapshot::load(file) {
                 let mut new_snap = snap.clone();
-                if let Ok(sc) = crate::component::parse(&new_snap)
+                if let Ok(sc) = agent_doc_element::element::parse(&new_snap)
                     && let Some(sq) = sc.iter().find(|c| c.name == "queue")
                 {
                     new_snap = sq.replace_content(&new_snap, &new_body);
                     if has_auto
-                        && let Ok(sc2) = crate::component::parse(&new_snap)
+                        && let Ok(sc2) = agent_doc_element::element::parse(&new_snap)
                         && let Some(sq2) = sc2.iter().find(|c| c.name == "queue")
                     {
                         let raw = &new_snap[sq2.open_start..sq2.open_end];
@@ -2897,7 +2902,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         // in-flight queue item edit.
         if snapshot_was_active
             && let Ok(Some(snap_content)) = snapshot::load(file)
-            && let Ok(snap_comps) = crate::component::parse(&snap_content)
+            && let Ok(snap_comps) = agent_doc_element::element::parse(&snap_content)
             && let Some(snap_q) = snap_comps.iter().find(|c| c.name == "queue")
         {
             let snap_body = &snap_content[snap_q.open_end..snap_q.close_start];
@@ -2950,7 +2955,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                     );
                     // Strip auto and clear queue_active
                     if has_auto {
-                        let comps = crate::component::parse(&current_content)?;
+                        let comps = agent_doc_element::element::parse(&current_content)?;
                         if let Some(q) = comps.iter().find(|c| c.name == "queue") {
                             let raw = &current_content[q.open_start..q.open_end];
                             let new_tag = crate::queue::strip_auto_from_tag(raw);
@@ -2976,7 +2981,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                     if let Ok(Some(snap2)) = snapshot::load(file) {
                         let mut ns = snap2.clone();
                         if has_auto
-                            && let Ok(sc) = crate::component::parse(&ns)
+                            && let Ok(sc) = agent_doc_element::element::parse(&ns)
                             && let Some(sq) = sc.iter().find(|c| c.name == "queue")
                         {
                             let raw = &ns[sq.open_start..sq.open_end];
@@ -3050,7 +3055,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         (need_strip_auto || need_clear_non_auto_residue) && !activation.deferred;
 
     if need_clear_drained_body {
-        let comps = crate::component::parse(&current_content)?;
+        let comps = agent_doc_element::element::parse(&current_content)?;
         let q = comps.iter().find(|c| c.name == "queue").unwrap();
         if !q.content(&current_content).trim().is_empty() {
             current_content = q.replace_content(&current_content, "");
@@ -3092,7 +3097,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // The token is the ephemeral activation gesture; once consumed it must not
     // re-trigger on the next cycle.
     if need_strip_auto || marker_stop {
-        let comps = crate::component::parse(&current_content)?;
+        let comps = agent_doc_element::element::parse(&current_content)?;
         let q = comps.iter().find(|c| c.name == "queue").unwrap();
         let raw_tag = &current_content[q.open_start..q.open_end];
         let new_tag =
@@ -3125,7 +3130,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
 
     let mut in_progress_markers_changed = false;
     let active_queue_projection = if activation.active {
-        let current_components = crate::component::parse(&current_content)?;
+        let current_components = agent_doc_element::element::parse(&current_content)?;
         active_queue_prompt_projection(
             &current_content,
             &activation.entries_after,
@@ -3171,7 +3176,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     {
         let new_body = crate::queue::render(&marked_entries);
         current_content = {
-            let comps = crate::component::parse(&current_content)?;
+            let comps = agent_doc_element::element::parse(&current_content)?;
             let q = comps
                 .iter()
                 .find(|c| c.name == "queue")
@@ -3219,7 +3224,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         }
 
         if queue_tag_attrs_normalized
-            && let Ok(snap_comps) = crate::component::parse(&new_snap)
+            && let Ok(snap_comps) = agent_doc_element::element::parse(&new_snap)
             && let Some(snap_q) = snap_comps.iter().find(|c| c.name == "queue")
         {
             let raw_tag = &new_snap[snap_q.open_start..snap_q.open_end];
@@ -3235,11 +3240,11 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
 
         if (need_sync_newly_activated_queue_snapshot
             || need_sync_active_queue_future_state_snapshot)
-            && let Ok(current_comps) = crate::component::parse(&current_content)
+            && let Ok(current_comps) = agent_doc_element::element::parse(&current_content)
             && let Some(current_q) = current_comps
                 .iter()
                 .find(|component| component.name == "queue")
-            && let Ok(snap_comps) = crate::component::parse(&new_snap)
+            && let Ok(snap_comps) = agent_doc_element::element::parse(&new_snap)
             && let Some(snap_q) = snap_comps
                 .iter()
                 .find(|component| component.name == "queue")
@@ -3255,7 +3260,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         // Apply queue body change to snapshot
         if !need_sync_newly_activated_queue_snapshot
             && (activation.consumed_start_fence || need_strip_auto || need_clear_drained_body)
-            && let Ok(snap_comps) = crate::component::parse(&new_snap)
+            && let Ok(snap_comps) = agent_doc_element::element::parse(&new_snap)
             && let Some(snap_q) = snap_comps.iter().find(|c| c.name == "queue")
         {
             let new_body = if need_clear_drained_body {
@@ -3266,7 +3271,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
             new_snap = snap_q.replace_content(&new_snap, &new_body);
 
             if need_strip_auto
-                && let Ok(snap_comps2) = crate::component::parse(&new_snap)
+                && let Ok(snap_comps2) = agent_doc_element::element::parse(&new_snap)
                 && let Some(snap_q2) = snap_comps2.iter().find(|c| c.name == "queue")
             {
                 let raw_tag = &new_snap[snap_q2.open_start..snap_q2.open_end];
@@ -3411,7 +3416,7 @@ fn set_in_progress_work_item_markers(
 ) -> Result<(String, bool)> {
     let mut updated = content.to_string();
     let mut changed = false;
-    let components = crate::component::parse(&updated)?;
+    let components = agent_doc_element::element::parse(&updated)?;
     for component in components
         .iter()
         .filter(|component| {
@@ -3433,7 +3438,7 @@ fn set_in_progress_work_item_markers(
 }
 
 fn sync_in_progress_marker_regions(snapshot_content: &str, current_content: &str) -> String {
-    let Ok(current_components) = crate::component::parse(current_content) else {
+    let Ok(current_components) = agent_doc_element::element::parse(current_content) else {
         return snapshot_content.to_string();
     };
     let mut updated = snapshot_content.to_string();
@@ -3445,7 +3450,7 @@ fn sync_in_progress_marker_regions(snapshot_content: &str, current_content: &str
             continue;
         };
         let current_body = current_component.content(current_content);
-        let Ok(snapshot_components) = crate::component::parse(&updated) else {
+        let Ok(snapshot_components) = agent_doc_element::element::parse(&updated) else {
             return updated;
         };
         let Some(snapshot_component) = snapshot_components
@@ -3479,7 +3484,7 @@ pub(crate) fn sync_same_cycle_pending_adds_into_go_queue(file: &Path) -> Result<
         Ok(c) => c,
         Err(_) => return Ok(Vec::new()),
     };
-    let components = match crate::component::parse(&content) {
+    let components = match agent_doc_element::element::parse(&content) {
         Ok(cs) => cs,
         Err(_) => return Ok(Vec::new()),
     };
@@ -3595,7 +3600,7 @@ pub(crate) fn sync_same_cycle_pending_adds_into_go_queue(file: &Path) -> Result<
 
     let new_body = crate::queue::render(&synced);
     let current_content = {
-        let comps = crate::component::parse(&content)?;
+        let comps = agent_doc_element::element::parse(&content)?;
         let q = comps.iter().find(|c| c.name == "queue").unwrap();
         q.replace_content(&content, &new_body)
     };
@@ -3685,7 +3690,7 @@ pub(crate) fn converge_live_buffer_queue_shape(
     if !crate::ipc_socket::is_listener_active(root) {
         return;
     }
-    let (want_auto, queue_body) = match crate::component::parse(content) {
+    let (want_auto, queue_body) = match agent_doc_element::element::parse(content) {
         Ok(comps) => comps
             .iter()
             .find(|c| c.name == "queue")
@@ -3744,13 +3749,13 @@ pub(crate) fn adopt_edited_queue_head_into_snapshot(file: &Path, current_content
             return;
         }
     };
-    let Ok(cur_comps) = crate::component::parse(current_content) else {
+    let Ok(cur_comps) = agent_doc_element::element::parse(current_content) else {
         return;
     };
     let Some(cur_q) = cur_comps.iter().find(|c| c.name == "queue") else {
         return;
     };
-    let Ok(snap_comps) = crate::component::parse(&snap_now) else {
+    let Ok(snap_comps) = agent_doc_element::element::parse(&snap_now) else {
         return;
     };
     let Some(snap_q) = snap_comps.iter().find(|c| c.name == "queue") else {
@@ -3779,7 +3784,7 @@ fn selected_queue_head_unchanged_in_snapshot(
     let Ok(Some(snapshot_content)) = snapshot::load(file) else {
         return false;
     };
-    let Ok(snapshot_components) = crate::component::parse(&snapshot_content) else {
+    let Ok(snapshot_components) = agent_doc_element::element::parse(&snapshot_content) else {
         return false;
     };
     let Some(snapshot_queue) = snapshot_components
@@ -3804,7 +3809,7 @@ fn queue_region_differs_from_snapshot(file: &Path, current_content: &str) -> boo
     let Ok(Some(snapshot_content)) = snapshot::load(file) else {
         return false;
     };
-    let Ok(current_components) = crate::component::parse(current_content) else {
+    let Ok(current_components) = agent_doc_element::element::parse(current_content) else {
         return false;
     };
     let Some(current_queue) = current_components
@@ -3813,7 +3818,7 @@ fn queue_region_differs_from_snapshot(file: &Path, current_content: &str) -> boo
     else {
         return false;
     };
-    let Ok(snapshot_components) = crate::component::parse(&snapshot_content) else {
+    let Ok(snapshot_components) = agent_doc_element::element::parse(&snapshot_content) else {
         return false;
     };
     let Some(snapshot_queue) = snapshot_components
@@ -3843,7 +3848,7 @@ pub(crate) fn inactive_queue_changed_vs_snapshot(
     let Ok(Some(snapshot_content)) = snapshot::load(file) else {
         return true;
     };
-    let Ok(components) = crate::component::parse(&snapshot_content) else {
+    let Ok(components) = agent_doc_element::element::parse(&snapshot_content) else {
         return true;
     };
     let Some(snap_queue) = components.iter().find(|c| c.name == "queue") else {
@@ -5792,13 +5797,13 @@ mod tests {
                             .and_then(|p| p.get(0))
                             .and_then(|p| p.get("content"))
                             .and_then(|c| c.as_str())
-                            && let Ok(comps) = crate::component::parse(&doc)
+                            && let Ok(comps) = agent_doc_element::element::parse(&doc)
                             && let Some(q) = comps.iter().find(|c| c.name == "queue")
                         {
                             doc = q.replace_content(&doc, body);
                         }
                         if v["queue_auto"] == serde_json::json!(false)
-                            && let Ok(comps) = crate::component::parse(&doc)
+                            && let Ok(comps) = agent_doc_element::element::parse(&doc)
                             && let Some(q) = comps.iter().find(|c| c.name == "queue")
                         {
                             let raw = doc[q.open_start..q.open_end].to_string();
@@ -5886,7 +5891,7 @@ mod tests {
             assert_eq!(
                 conv["patches"][0]["content"],
                 serde_json::json!(
-                    crate::component::parse(&updated)
+                    agent_doc_element::element::parse(&updated)
                         .unwrap()
                         .iter()
                         .find(|c| c.name == "queue")
@@ -6246,7 +6251,7 @@ mod tests {
         assert_eq!(report.pending_gated_count, 0);
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
-        let file_backlog_after = crate::component::parse(&file_after)
+        let file_backlog_after = agent_doc_element::element::parse(&file_after)
             .unwrap()
             .into_iter()
             .find(|c| c.name == "backlog")
@@ -6260,7 +6265,7 @@ mod tests {
         assert!(file_after.contains("[#reap1] Reap me"));
 
         let snapshot_after = snapshot::load(&doc).unwrap().unwrap();
-        let snapshot_backlog_after = crate::component::parse(&snapshot_after)
+        let snapshot_backlog_after = agent_doc_element::element::parse(&snapshot_after)
             .unwrap()
             .into_iter()
             .find(|c| c.name == "backlog")
@@ -6302,14 +6307,14 @@ mod tests {
         assert_eq!(report.review_gated_count, 1);
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
-        let backlog_after = crate::component::parse(&file_after)
+        let backlog_after = agent_doc_element::element::parse(&file_after)
             .unwrap()
             .into_iter()
             .find(|c| is_backlog_component(&c.name))
             .unwrap()
             .content(&file_after)
             .to_string();
-        let review_after = crate::component::parse(&file_after)
+        let review_after = agent_doc_element::element::parse(&file_after)
             .unwrap()
             .into_iter()
             .find(|c| is_review_component(&c.name))
@@ -6393,7 +6398,7 @@ mod tests {
         run_pending_maintenance_force_disk(&doc).unwrap();
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
-        let backlog_after = crate::component::parse(&file_after)
+        let backlog_after = agent_doc_element::element::parse(&file_after)
             .unwrap()
             .into_iter()
             .find(|c| is_backlog_component(&c.name))
@@ -6469,7 +6474,7 @@ mod tests {
         run_pending_maintenance_force_disk(&doc).unwrap();
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
-        let backlog_after = crate::component::parse(&file_after)
+        let backlog_after = agent_doc_element::element::parse(&file_after)
             .unwrap()
             .into_iter()
             .find(|c| is_backlog_component(&c.name))
@@ -6516,7 +6521,7 @@ mod tests {
         assert_eq!(report.review_gated_count, 1);
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
-        let file_components = crate::component::parse(&file_after).unwrap();
+        let file_components = agent_doc_element::element::parse(&file_after).unwrap();
         let file_backlog = file_components
             .iter()
             .find(|c| c.name == "backlog")
@@ -6537,7 +6542,7 @@ mod tests {
         assert_eq!(file_after.matches("[#done2]").count(), 1);
 
         let snapshot_after = snapshot::load(&doc).unwrap().unwrap();
-        let snapshot_components = crate::component::parse(&snapshot_after).unwrap();
+        let snapshot_components = agent_doc_element::element::parse(&snapshot_after).unwrap();
         let snapshot_backlog = snapshot_components
             .iter()
             .find(|c| c.name == "backlog")
@@ -6588,7 +6593,7 @@ mod tests {
         assert_eq!(report.review_gated_count, 1);
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
-        let file_components = crate::component::parse(&file_after).unwrap();
+        let file_components = agent_doc_element::element::parse(&file_after).unwrap();
         let file_backlog = file_components
             .iter()
             .find(|c| c.name == "backlog")
@@ -6683,7 +6688,7 @@ mod tests {
         assert_eq!(report.pending_gated_count, 0);
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
-        let file_icebox_after = crate::component::parse(&file_after)
+        let file_icebox_after = agent_doc_element::element::parse(&file_after)
             .unwrap()
             .into_iter()
             .find(|c| c.name == "icebox")
@@ -6696,7 +6701,7 @@ mod tests {
         assert!(file_after.contains("[#ice01] Reap me from icebox"));
 
         let snapshot_after = snapshot::load(&doc).unwrap().unwrap();
-        let snapshot_icebox_after = crate::component::parse(&snapshot_after)
+        let snapshot_icebox_after = agent_doc_element::element::parse(&snapshot_after)
             .unwrap()
             .into_iter()
             .find(|c| c.name == "icebox")
@@ -6748,7 +6753,7 @@ mod tests {
         run_pending_maintenance_force_disk(&doc).unwrap();
 
         let snapshot_after = snapshot::load(&doc).unwrap().unwrap();
-        let comps = crate::component::parse(&snapshot_after).unwrap();
+        let comps = agent_doc_element::element::parse(&snapshot_after).unwrap();
         let snap_backlog = comps
             .iter()
             .find(|c| c.name == "backlog")
@@ -7029,7 +7034,7 @@ mod tests {
             "- [ ] [#b] two\n",
             "<!-- /agent:backlog -->\n",
         );
-        let components = crate::component::parse(content).unwrap();
+        let components = agent_doc_element::element::parse(content).unwrap();
         let request = collect_backlog_queue_sync(&components, content)
             .expect("backlog with queue attr should produce a sync request");
         assert_eq!(request.mode, crate::queue::BacklogQueueSyncMode::Sync);
@@ -7048,7 +7053,7 @@ mod tests {
             "- [ ] [#c] **enqueue** marked\n",
             "<!-- /agent:backlog -->\n",
         );
-        let components = crate::component::parse(content).unwrap();
+        let components = agent_doc_element::element::parse(content).unwrap();
         let request = collect_backlog_queue_sync(&components, content)
             .expect("enqueue markers should produce an append request");
         assert_eq!(request.mode, crate::queue::BacklogQueueSyncMode::Append);
@@ -7094,7 +7099,7 @@ mod tests {
             "- [ ] [#a] one\n",
             "<!-- /agent:backlog -->\n",
         );
-        let components = crate::component::parse(content).unwrap();
+        let components = agent_doc_element::element::parse(content).unwrap();
         assert!(collect_backlog_queue_sync(&components, content).is_none());
     }
     #[test]
@@ -7200,7 +7205,7 @@ mod tests {
             "- [ ] [#c] plain drainable\n",
             "<!-- /agent:backlog -->\n",
         );
-        let components = crate::component::parse(content).unwrap();
+        let components = agent_doc_element::element::parse(content).unwrap();
         let ctxs = collect_backlog_execution_contexts(&components, content);
         assert!(ctxs.get("a").unwrap().clean_session_required);
         assert!(ctxs.get("b").unwrap().operator_verify_required);
@@ -7249,7 +7254,7 @@ mod tests {
         let _ = run_queue_maintenance(&doc, None).unwrap();
 
         let updated = std::fs::read_to_string(&doc).unwrap();
-        let queue_body = crate::component::parse(&updated)
+        let queue_body = agent_doc_element::element::parse(&updated)
             .unwrap()
             .iter()
             .find(|c| c.name == "queue")
@@ -7322,7 +7327,7 @@ mod tests {
         let _ = run_queue_maintenance(&doc, None).unwrap();
 
         let updated = std::fs::read_to_string(&doc).unwrap();
-        let queue_body = crate::component::parse(&updated)
+        let queue_body = agent_doc_element::element::parse(&updated)
             .unwrap()
             .iter()
             .find(|c| c.name == "queue")
@@ -7348,7 +7353,7 @@ mod tests {
     /// Test helper: read the queue entries from the on-disk document.
     fn read_queue_entries(doc: &Path) -> Vec<crate::queue::QueueEntry> {
         let updated = std::fs::read_to_string(doc).unwrap();
-        let queue_body = crate::component::parse(&updated)
+        let queue_body = agent_doc_element::element::parse(&updated)
             .unwrap()
             .iter()
             .find(|c| c.name == "queue")

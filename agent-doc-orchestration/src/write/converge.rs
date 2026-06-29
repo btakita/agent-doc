@@ -115,8 +115,8 @@ fn classify_stale_snapshot_visible_rebase(
         return None;
     }
 
-    let snap_components = crate::component::parse(snapshot_body).ok()?;
-    let current_components = crate::component::parse(current_body).ok()?;
+    let snap_components = agent_doc_element::element::parse(snapshot_body).ok()?;
+    let current_components = agent_doc_element::element::parse(current_body).ok()?;
     if snap_components.is_empty() || snap_components.len() != current_components.len() {
         return None;
     }
@@ -411,7 +411,7 @@ fn live_prompt_drift_recovery_target(snapshot: &str, file_content: &str) -> Opti
     }
 
     let response_block = latest_missing_snapshot_response_block(snapshot, file_content)?;
-    let components = component::parse(file_content).ok()?;
+    let components = element::parse(file_content).ok()?;
     let exchange = components
         .iter()
         .find(|component| component.name == AGENT_RESPONSE_COMPONENT)?;
@@ -425,7 +425,7 @@ fn live_prompt_drift_recovery_target(snapshot: &str, file_content: &str) -> Opti
 
 fn exchange_has_disk_only_prompt_target(snapshot: &str, file_content: &str) -> bool {
     let (Ok(snapshot_components), Ok(file_components)) =
-        (component::parse(snapshot), component::parse(file_content))
+        (element::parse(snapshot), element::parse(file_content))
     else {
         return true;
     };
@@ -482,7 +482,7 @@ fn exchange_prompt_target_lines(exchange_body: &str) -> Vec<String> {
 
 fn latest_missing_snapshot_response_block(snapshot: &str, file_content: &str) -> Option<String> {
     let (Ok(snapshot_components), Ok(file_components)) =
-        (component::parse(snapshot), component::parse(file_content))
+        (element::parse(snapshot), element::parse(file_content))
     else {
         return None;
     };
@@ -773,10 +773,10 @@ const AGENT_RESPONSE_COMPONENT: &str = "exchange";
 /// comparison — only the unkept components' bodies are cleared. Returns `None` if
 /// the document does not parse. Spans are cleared from the end backwards so
 /// earlier byte offsets stay valid. Component-name-agnostic by construction: it
-/// keys off the AST `component::parse` structure, so arbitrary / plugin-defined
+/// keys off the AST `element::parse` structure, so arbitrary / plugin-defined
 /// components are handled without enumeration.
 fn blank_components_except(doc: &str, keep: &[&str]) -> Option<String> {
-    let comps = crate::component::parse(doc).ok()?;
+    let comps = agent_doc_element::element::parse(doc).ok()?;
     let mut spans: Vec<(usize, usize)> = comps
         .iter()
         .filter(|c| !keep.contains(&c.name.as_str()))
@@ -860,8 +860,8 @@ fn convergence_recovered_editor_wins_outside_response(recovered: &str, snapshot:
 ///   archive bullet, scratch comment, prose) means real carry-forward, so preserve,
 /// - no working-only line is a user `PromptTarget` (defence in depth).
 pub fn reconcile_postcommit_exchange_to_head(working: &str, head: &str) -> Option<String> {
-    let working_comps = crate::component::parse(working).ok()?;
-    let head_comps = crate::component::parse(head).ok()?;
+    let working_comps = agent_doc_element::element::parse(working).ok()?;
+    let head_comps = agent_doc_element::element::parse(head).ok()?;
     let head_exchange = head_comps
         .iter()
         .find(|c| c.name == AGENT_RESPONSE_COMPONENT)?;
@@ -932,8 +932,8 @@ pub fn reconcile_postcommit_exchange_to_head(working: &str, head: &str) -> Optio
 /// component, so an unparseable flush is never silently trusted.
 pub fn editor_buffer_preserved_head_exchange(flushed: &str, head: &str) -> bool {
     let (Ok(flushed_comps), Ok(head_comps)) = (
-        crate::component::parse(flushed),
-        crate::component::parse(head),
+        agent_doc_element::element::parse(flushed),
+        agent_doc_element::element::parse(head),
     ) else {
         return false;
     };
@@ -967,8 +967,8 @@ pub fn editor_buffer_preserved_head_exchange(flushed: &str, head: &str) -> bool 
 /// HEAD-completed + working-active is repaired, while HEAD-active +
 /// working-completed remains editor-owned (`#qpcwcmerge`).
 pub fn reconcile_postcommit_queue_strikes_to_head(working: &str, head: &str) -> Option<String> {
-    let working_comps = crate::component::parse(working).ok()?;
-    let head_comps = crate::component::parse(head).ok()?;
+    let working_comps = agent_doc_element::element::parse(working).ok()?;
+    let head_comps = agent_doc_element::element::parse(head).ok()?;
     let working_queue = working_comps.iter().find(|c| c.name == "queue")?;
     let head_queue = head_comps.iter().find(|c| c.name == "queue")?;
     let working_body = working_queue.content(working);
@@ -1313,7 +1313,7 @@ fn try_detached_disk_write(
 }
 
 fn blank_components_named(doc: &str, names: &[&str]) -> Option<String> {
-    let comps = crate::component::parse(doc).ok()?;
+    let comps = agent_doc_element::element::parse(doc).ok()?;
     let mut spans: Vec<(usize, usize)> = comps
         .iter()
         .filter(|c| names.contains(&c.name.as_str()))
@@ -1386,8 +1386,8 @@ fn classify_ack_mismatch_recovery(target: &str, recovered: &str) -> Option<AckMi
     }
 
     let (Ok(target_comps), Ok(recovered_comps)) = (
-        crate::component::parse(target),
-        crate::component::parse(recovered),
+        agent_doc_element::element::parse(target),
+        agent_doc_element::element::parse(recovered),
     ) else {
         return None;
     };
@@ -2162,11 +2162,11 @@ pub(crate) fn live_prompt_drift_convergence_patches(
     file_content: &str,
     target: &str,
 ) -> Result<Vec<serde_json::Value>> {
-    let current_components = component::parse(file_content)
+    let current_components = element::parse(file_content)
         .with_context(|| "failed to parse current document for editor convergence")?;
-    let target_components = component::parse(target)
+    let target_components = element::parse(target)
         .with_context(|| "failed to parse target document for editor convergence")?;
-    let current_by_name: HashMap<&str, &component::Component> = current_components
+    let current_by_name: HashMap<&str, &element::Component> = current_components
         .iter()
         .map(|component| (component.name.as_str(), component))
         .collect();

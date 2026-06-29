@@ -1,4 +1,4 @@
-//! # Module: component
+//! # Module: element
 //!
 //! ## Spec
 //! - Defines `Component`, the parsed representation of a bounded document region delimited by

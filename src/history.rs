@@ -35,7 +35,7 @@ use anyhow::{Context, Result, bail};
 use std::path::Path;
 use std::process::Command;
 
-use crate::component;
+use agent_doc_element::element;
 use agent_doc_orchestration::snapshot;
 
 const EXCHANGE_COMPONENT: &str = "exchange";
@@ -50,7 +50,7 @@ struct HistoryEntry {
 /// Extract the exchange component content from a document string.
 /// Returns None if no exchange component is found.
 fn extract_exchange(doc: &str) -> Option<String> {
-    let components = component::parse(doc).ok()?;
+    let components = element::parse(doc).ok()?;
     let exchange = components.iter().find(|c| c.name == EXCHANGE_COMPONENT)?;
     Some(exchange.content(doc).to_string())
 }
@@ -225,7 +225,7 @@ pub fn restore(file: &Path, commit: &str) -> Result<()> {
 
     // Parse current document to find exchange component
     let components =
-        component::parse(&current_content).with_context(|| "failed to parse current document")?;
+        element::parse(&current_content).with_context(|| "failed to parse current document")?;
 
     let exchange = components
         .iter()

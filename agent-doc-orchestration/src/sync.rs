@@ -194,7 +194,9 @@ use std::time::{Duration, Instant};
 use tempfile::NamedTempFile;
 
 use crate::sessions::{PaneMoveOp, Tmux};
-use crate::{component, frontmatter, resync, route, sessions, snapshot};
+use agent_doc_element::element;
+
+use crate::{frontmatter, resync, route, sessions, snapshot};
 
 use tmux_router::FileResolution;
 

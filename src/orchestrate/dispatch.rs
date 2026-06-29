@@ -284,7 +284,7 @@ pub(crate) struct StreamStepResult {
 }
 
 pub(crate) fn exchange_stream_seed(doc: &str) -> Result<Option<ExchangeStreamSeed>> {
-    let components = component::parse(doc).context("failed to parse document components")?;
+    let components = element::parse(doc).context("failed to parse document components")?;
     let Some(exchange) = components.iter().find(|comp| comp.name == "exchange") else {
         return Ok(None);
     };

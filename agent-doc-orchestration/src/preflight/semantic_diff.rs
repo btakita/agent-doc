@@ -337,7 +337,7 @@ pub(crate) fn semantic_component_snapshots(
     side: &str,
     source: &str,
 ) -> BTreeMap<(String, usize), SemanticComponentSnapshot> {
-    let components = match crate::component::parse(source) {
+    let components = match agent_doc_element::element::parse(source) {
         Ok(components) => components,
         Err(err) => {
             eprintln!("[preflight] semantic_diff: component parse skipped: {err}");

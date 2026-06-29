@@ -218,12 +218,12 @@ pub(crate) fn detect_reintroduced_reaped_pending_ids(
         return Ok(Vec::new());
     }
 
-    let components = crate::component::parse(doc)?;
+    let components = agent_doc_element::element::parse(doc)?;
     let mut seen = HashSet::new();
     let mut reintroduced = Vec::new();
     for component in components
         .iter()
-        .filter(|component| crate::component::is_tracked_work_component(&component.name))
+        .filter(|component| agent_doc_element::element::is_tracked_work_component(&component.name))
     {
         let (_, items, _) = crate::pending::parse_items(component.content(doc));
         for item in items {
@@ -327,7 +327,7 @@ pub(crate) fn is_empty_template_scaffold_snapshot(snapshot_doc: &str) -> bool {
     let body = crate::frontmatter::parse(snapshot_doc)
         .map(|(_, body)| body)
         .unwrap_or(snapshot_doc);
-    let Ok(components) = crate::component::parse(body) else {
+    let Ok(components) = agent_doc_element::element::parse(body) else {
         return false;
     };
 
@@ -367,8 +367,8 @@ pub(crate) fn classify_safe_agent_doc_mutation(
         return None;
     }
 
-    let snap_components = crate::component::parse(snap_body).ok()?;
-    let file_components = crate::component::parse(file_body).ok()?;
+    let snap_components = agent_doc_element::element::parse(snap_body).ok()?;
+    let file_components = agent_doc_element::element::parse(file_body).ok()?;
     if snap_components.len() != file_components.len() {
         return None;
     }

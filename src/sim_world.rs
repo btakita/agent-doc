@@ -6537,7 +6537,7 @@ impl SimEditor {
                 .get("content")
                 .and_then(|value| value.as_str())
                 .unwrap_or_default();
-            let component = agent_doc_core::component::parse(&next)?
+            let component = agent_doc_element::element::parse(&next)?
                 .into_iter()
                 .find(|component| component.name == component_name)
                 .ok_or_else(|| anyhow!("component {component_name} not found in editor buffer"))?;
@@ -6549,7 +6549,7 @@ impl SimEditor {
                 other => bail!("unsupported targeted component patch op {other}"),
             };
             next = component.replace_content(&next, &replacement);
-            agent_doc_core::component::parse(&next).map_err(|err| {
+            agent_doc_element::element::parse(&next).map_err(|err| {
                 anyhow!("targeted patch made component {component_name} invalid: {err}\n{next}")
             })?;
         }

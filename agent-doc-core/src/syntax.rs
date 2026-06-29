@@ -30,7 +30,7 @@ pub struct VisualToken {
 }
 
 pub fn collect_visual_tokens(doc: &str) -> Vec<VisualToken> {
-    let code_ranges = crate::component::find_code_ranges(doc);
+    let code_ranges = agent_doc_element::element::find_code_ranges(doc);
     let mut tokens = Vec::new();
 
     collect_comment_tokens(doc, &code_ranges, &mut tokens);

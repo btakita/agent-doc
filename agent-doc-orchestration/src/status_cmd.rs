@@ -5,8 +5,8 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use crate::component;
-use crate::component::{is_backlog_component, is_tracked_work_component};
+use agent_doc_element::element;
+use agent_doc_element::element::{is_backlog_component, is_tracked_work_component};
 
 /// `#staleshow` — stable sentinel line inserted into the `<!-- agent:status -->`
 /// component whenever the live route-owned supervisor/controller serving the
@@ -19,9 +19,9 @@ use crate::component::{is_backlog_component, is_tracked_work_component};
 /// drifts from what the binary writes.
 pub const STALE_SUPERVISOR_STATUS_MARKER: &str = "🔴 (restart/recycle your supervisor)";
 
-fn find_status_component(file: &Path) -> Result<(String, component::Component)> {
+fn find_status_component(file: &Path) -> Result<(String, element::Component)> {
     let content = std::fs::read_to_string(file).context("failed to read document")?;
-    let components = component::parse(&content).context("failed to parse components")?;
+    let components = element::parse(&content).context("failed to parse components")?;
     let comp = components
         .into_iter()
         .find(|c| c.name == "status")
@@ -62,7 +62,7 @@ pub fn set_with_options(file: &Path, text: &str, force_disk: bool) -> Result<()>
 }
 
 fn first_live_backlog_id(content: &str) -> Result<Option<String>> {
-    let components = component::parse(content).context("failed to parse components")?;
+    let components = element::parse(content).context("failed to parse components")?;
     for comp in components {
         if !is_backlog_component(&comp.name) {
             continue;
@@ -119,7 +119,7 @@ fn replace_top_backlog_sentence(line: &str, live_id: Option<&str>) -> String {
 /// This is intentionally narrow: free-form status text is user-editable, so we
 /// only touch the generated top-backlog sentence when it names a stale id.
 pub fn reconcile_top_backlog_status_content(content: &str) -> Result<Option<String>> {
-    let components = component::parse(content).context("failed to parse components")?;
+    let components = element::parse(content).context("failed to parse components")?;
     let Some(status) = components.iter().find(|c| c.name == "status") else {
         return Ok(None);
     };
@@ -210,7 +210,7 @@ pub fn reconcile_stale_supervisor_status_content(
     content: &str,
     is_stale: bool,
 ) -> Result<Option<String>> {
-    let components = component::parse(content).context("failed to parse components")?;
+    let components = element::parse(content).context("failed to parse components")?;
     let Some(status) = components.iter().find(|c| c.name == "status") else {
         return Ok(None);
     };

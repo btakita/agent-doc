@@ -2678,7 +2678,7 @@ fn enqueue_route_dispatch_prompt(
     let original = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let mut content = frontmatter::merge_queue_state(&original, true)?;
-    let components = crate::component::parse(&content)?;
+    let components = agent_doc_element::element::parse(&content)?;
     let mut component_created = false;
     let mut already_present = false;
     let mut appended = false;
@@ -2869,7 +2869,7 @@ fn inactive_route_queue_head_in_content(file: &Path, content: &str) -> Result<Op
     if fm.queue_active == Some(true) {
         return Ok(None);
     }
-    let components = crate::component::parse(content)?;
+    let components = agent_doc_element::element::parse(content)?;
     let Some(queue_component) = components
         .iter()
         .find(|component| component.name == "queue")
@@ -2969,7 +2969,7 @@ fn route_queue_head_backed_by_committed_snapshot(file: &Path, head_text: &str) -
             return true;
         }
     };
-    let components = match crate::component::parse(&snapshot) {
+    let components = match agent_doc_element::element::parse(&snapshot) {
         Ok(components) => components,
         Err(_) => return true,
     };
@@ -3066,7 +3066,7 @@ fn acquire_route_queue_lock(file: &Path) -> Result<File> {
 }
 
 fn strip_queue_component_auto_attr(content: &str) -> Result<String> {
-    let components = crate::component::parse(content)?;
+    let components = agent_doc_element::element::parse(content)?;
     let Some(queue_component) = components
         .iter()
         .find(|component| component.name == "queue")
@@ -3093,10 +3093,10 @@ fn insert_queue_component(content: &str, prompt_text: &str) -> Result<String> {
         },
     )]);
     let block = format!("<!-- agent:queue -->\n{}<!-- /agent:queue -->\n\n", body);
-    let components = crate::component::parse(content)?;
+    let components = agent_doc_element::element::parse(content)?;
     let insert_at = components
         .iter()
-        .find(|component| crate::component::is_tracked_work_component(&component.name))
+        .find(|component| agent_doc_element::element::is_tracked_work_component(&component.name))
         .map(|component| component.open_start)
         .or_else(|| {
             components
@@ -7102,7 +7102,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let _ = super::drain_open_closeout_before_routed_dispatch(&doc);
 
         let after = std::fs::read_to_string(&doc).unwrap();
-        let review = crate::component::parse(&after)
+        let review = agent_doc_element::element::parse(&after)
             .unwrap()
             .into_iter()
             .find(|c| c.name == "review")

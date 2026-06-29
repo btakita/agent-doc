@@ -505,7 +505,7 @@ pub fn run(
             .with_context(|| format!("failed to read {}", file.display()))?;
         let (fm, _) = frontmatter::parse(&content)?;
         let resolved = fm.resolve_mode();
-        let has_components = crate::component::parse(&content)
+        let has_components = agent_doc_element::element::parse(&content)
             .map(|comps| {
                 comps
                     .iter()
@@ -694,7 +694,7 @@ fn validate_file_claim(file: &Path) {
 /// Strip user content from the exchange component, leaving just the markers.
 /// This creates a snapshot baseline that treats existing user text as a diff.
 pub fn strip_exchange_content(content: &str) -> String {
-    if let Ok(components) = crate::component::parse(content)
+    if let Ok(components) = agent_doc_element::element::parse(content)
         && let Some(exchange) = components.iter().find(|c| c.name == "exchange")
     {
         return exchange.replace_content(content, "\n");

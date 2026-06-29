@@ -24,6 +24,7 @@ name = "agent-doc"
 version = "0.34.65"
 dependencies = [
  "agent-doc-core",
+ "agent-doc-element",
  "agent-doc-element-queue",
  "agent-doc-markdown-ast",
  "agent-doc-orchestration",
@@ -72,7 +73,7 @@ dependencies = [
 name = "agent-doc-core"
 version = "0.34.65"
 dependencies = [
- "agent-doc-element-boundary",
+ "agent-doc-element",
  "agent-doc-element-queue",
  "agent-doc-model-tier",
  "anyhow",
@@ -96,6 +97,7 @@ name = "agent-doc-document"
 version = "0.34.65"
 dependencies = [
  "agent-doc-core",
+ "agent-doc-element",
  "agent-doc-element-registry",
  "anyhow",
  "serde",
@@ -114,6 +116,11 @@ dependencies = [
 [[package]]
 name = "agent-doc-element"
 version = "0.34.65"
+dependencies = [
+ "anyhow",
+ "pulldown-cmark",
+ "uuid",
+]
 
 [[package]]
 name = "agent-doc-element-backlog"
@@ -127,7 +134,6 @@ name = "agent-doc-element-boundary"
 version = "0.34.65"
 dependencies = [
  "agent-doc-element",
- "uuid",
 ]
 
 [[package]]
@@ -241,6 +247,7 @@ dependencies = [
  "agent-doc-core",
  "agent-doc-document",
  "agent-doc-document-realtime",
+ "agent-doc-element",
  "agent-doc-element-queue",
  "agent-doc-markdown-ast",
  "agent-doc-merge",

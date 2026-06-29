@@ -1056,7 +1056,7 @@ pub(crate) fn content_declares_template_frontmatter(content: &str) -> bool {
 }
 
 pub(crate) fn content_has_agent_components(content: &str) -> bool {
-    component::parse(content)
+    element::parse(content)
         .ok()
         .is_some_and(|components| !components.is_empty())
 }
@@ -1860,7 +1860,7 @@ pub(crate) fn build_ipc_patches_json(
     let effective_unmatched = unmatched.trim().to_string();
     if ipc_patches.is_empty() && !effective_unmatched.is_empty() {
         // Dedup guard: parse components once, check before synthesizing.
-        let parsed_comps = crate::component::parse(&current_doc).unwrap_or_default();
+        let parsed_comps = agent_doc_element::element::parse(&current_doc).unwrap_or_default();
         for target in &["exchange", "output"] {
             // Skip synthesis if the content already exists in the target component.
             // This makes the write idempotent even when called twice with the same content.

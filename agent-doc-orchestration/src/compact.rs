@@ -75,7 +75,9 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
 
-use crate::{archive_index, component, frontmatter, snapshot};
+use agent_doc_element::element;
+
+use crate::{archive_index, frontmatter, snapshot};
 use agent_doc_core::topic::parse_topic_sections_with_tail;
 
 /// A parsed exchange pair (User prompt + Assistant response).
@@ -282,7 +284,7 @@ fn discard_archived_captures(file: &Path, archived_text: &str) {
 /// the rebuilt `agent:exchange` so the compact commit fails closed before it
 /// reaches disk/HEAD instead of persisting a corrupt exchange structure.
 pub fn malformed_compact_summary_lines(compacted: &str) -> Vec<String> {
-    let Ok(components) = component::parse(compacted) else {
+    let Ok(components) = element::parse(compacted) else {
         return Vec::new();
     };
     let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
@@ -335,7 +337,7 @@ fn validate_compacted_exchange(file: &Path, compacted: &str) -> Result<()> {
 /// sibling of #compactqattr, which only dropped attributes).
 fn non_exchange_list_item_counts(content: &str) -> BTreeMap<String, usize> {
     let mut counts = BTreeMap::new();
-    let Ok(components) = component::parse(content) else {
+    let Ok(components) = element::parse(content) else {
         return counts;
     };
     for comp in &components {
@@ -403,7 +405,7 @@ fn assert_non_exchange_items_preserved(
 /// for every non-exchange component, keyed by component name.
 fn non_exchange_opening_markers(content: &str) -> BTreeMap<String, String> {
     let mut markers = BTreeMap::new();
-    let Ok(components) = component::parse(content) else {
+    let Ok(components) = element::parse(content) else {
         return markers;
     };
     for comp in &components {
@@ -563,7 +565,7 @@ fn run_component_compact_with_options(
     is_crdt: bool,
     force_disk: bool,
 ) -> Result<()> {
-    let components = component::parse(content)?;
+    let components = element::parse(content)?;
     let comp = components
         .iter()
         .find(|c| c.name == target)
@@ -662,7 +664,7 @@ fn run_component_compact_partial(
     is_crdt: bool,
     force_disk: bool,
 ) -> Result<()> {
-    let components = component::parse(content)?;
+    let components = element::parse(content)?;
     let comp = components
         .iter()
         .find(|c| c.name == target)
@@ -852,7 +854,7 @@ fn build_exchange_compact_summary(content: &str, archive_path: &Path) -> String 
         archive_path.display()
     ));
 
-    let Ok(components) = component::parse(content) else {
+    let Ok(components) = element::parse(content) else {
         return summary;
     };
 
@@ -1391,8 +1393,8 @@ fn is_leap_year(y: i64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::component::is_backlog_component;
     use agent_doc_core::topic::parse_topic_sections;
+    use agent_doc_element::element::is_backlog_component;
 
     const COMPACTDROPITEM_DOC: &str = concat!(
         "---\nagent_doc_session: drop-test\nagent_doc_format: template\n---\n\n",
@@ -1664,7 +1666,7 @@ mod tests {
         run_component_compact_partial(&file, doc, "exchange", 1, None, false, true).unwrap();
 
         let result = std::fs::read_to_string(&file).unwrap();
-        let exchange = crate::component::parse(&result)
+        let exchange = agent_doc_element::element::parse(&result)
             .unwrap()
             .into_iter()
             .find(|component| component.name == "exchange")
@@ -1711,7 +1713,7 @@ mod tests {
         run_component_compact_force_disk(&file, &doc, "exchange", None, false).unwrap();
 
         let result = std::fs::read_to_string(&file).unwrap();
-        let exchange = crate::component::parse(&result)
+        let exchange = agent_doc_element::element::parse(&result)
             .unwrap()
             .into_iter()
             .find(|component| component.name == "exchange")
@@ -1777,7 +1779,7 @@ mod tests {
         snapshot::save(&file, doc).unwrap();
 
         // Capture pending content before compact
-        let components_before = component::parse(doc).unwrap();
+        let components_before = element::parse(doc).unwrap();
         let pending_before = components_before
             .iter()
             .find(|c| is_backlog_component(&c.name))
@@ -1797,7 +1799,7 @@ mod tests {
 
         // Read the result and verify non-target components are byte-identical
         let result = std::fs::read_to_string(&file).unwrap();
-        let components_after = component::parse(&result).unwrap();
+        let components_after = element::parse(&result).unwrap();
         let pending_after = components_after
             .iter()
             .find(|c| is_backlog_component(&c.name))
@@ -1862,7 +1864,7 @@ mod tests {
         .unwrap();
 
         let result = std::fs::read_to_string(&file).unwrap();
-        let exchange_after = crate::component::parse(&result)
+        let exchange_after = agent_doc_element::element::parse(&result)
             .unwrap()
             .into_iter()
             .find(|component| component.name == "exchange")
@@ -2462,7 +2464,7 @@ mod tests {
         run_component_compact_force_disk(&file, doc, "exchange", None, false).unwrap();
 
         let result = std::fs::read_to_string(&file).unwrap();
-        let components = component::parse(&result).unwrap();
+        let components = element::parse(&result).unwrap();
         let exchange = components
             .iter()
             .find(|c| c.name == "exchange")
@@ -2536,7 +2538,7 @@ mod tests {
         run_component_compact_force_disk(&file, doc, "exchange", None, false).unwrap();
 
         let result = std::fs::read_to_string(&file).unwrap();
-        let exchange = component::parse(&result)
+        let exchange = element::parse(&result)
             .unwrap()
             .into_iter()
             .find(|c| c.name == "exchange")
@@ -2633,7 +2635,7 @@ mod tests {
         snapshot::save_document_crdt(&file, &initial_crdt, doc).unwrap();
 
         // Capture pending before compact
-        let components_before = component::parse(doc).unwrap();
+        let components_before = element::parse(doc).unwrap();
         let pending_before = components_before
             .iter()
             .find(|c| is_backlog_component(&c.name))
@@ -2646,7 +2648,7 @@ mod tests {
 
         // Read result and verify pending survives
         let result = std::fs::read_to_string(&file).unwrap();
-        let components_after = component::parse(&result).unwrap();
+        let components_after = element::parse(&result).unwrap();
         let pending_after = components_after
             .iter()
             .find(|c| is_backlog_component(&c.name))
@@ -2690,7 +2692,7 @@ mod tests {
         snapshot::save(&file, doc).unwrap();
 
         // Capture status with ❯ before compact
-        let components_before = component::parse(doc).unwrap();
+        let components_before = element::parse(doc).unwrap();
         let status_before = components_before
             .iter()
             .find(|c| c.name == "status")
@@ -2702,7 +2704,7 @@ mod tests {
 
         // Verify ❯ marker preserved in non-target component
         let result = std::fs::read_to_string(&file).unwrap();
-        let components_after = component::parse(&result).unwrap();
+        let components_after = element::parse(&result).unwrap();
         let status_after = components_after
             .iter()
             .find(|c| c.name == "status")
@@ -3164,7 +3166,7 @@ mod tests {
                 for patch in payload.get("patches")?.as_array()? {
                     let name = patch.get("component")?.as_str()?;
                     let replacement = patch.get("content")?.as_str()?;
-                    let components = component::parse(&content).ok()?;
+                    let components = element::parse(&content).ok()?;
                     let target = components.iter().find(|component| component.name == name)?;
                     content = target.replace_content(&content, replacement);
                 }

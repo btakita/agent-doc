@@ -229,14 +229,13 @@ use serde_json::Value;
 use similar::{ChangeTag, TextDiff};
 
 use crate::snapshot::find_project_root;
-use crate::{
-    component, component::is_backlog_component, frontmatter, merge, repair, sessions, snapshot,
-    template,
-};
+use agent_doc_element::element::{self, is_backlog_component};
+
 use crate::{
     flow::document_mutation::{TemplateStructureGuardReason, log_template_structure_guard_event},
     flow::types::FlowOutcome,
 };
+use crate::{frontmatter, merge, repair, sessions, snapshot, template};
 
 thread_local! {
     static RESPONSE_STDIN_OVERRIDE: RefCell<Option<String>> = const { RefCell::new(None) };
@@ -446,11 +445,11 @@ fn non_exchange_drift_carries_directive(base: &str, current: &str) -> bool {
 }
 
 fn outside_component_content_changed(left: &str, right: &str, component_name: &str) -> bool {
-    let left_component = match component::parse(left) {
+    let left_component = match element::parse(left) {
         Ok(components) => components.into_iter().find(|c| c.name == component_name),
         Err(_) => return left != right,
     };
-    let right_component = match component::parse(right) {
+    let right_component = match element::parse(right) {
         Ok(components) => components.into_iter().find(|c| c.name == component_name),
         Err(_) => return left != right,
     };
@@ -767,7 +766,7 @@ pub fn response_target_disjoint_from_user_edit(
 /// queue / backlog / scratch-comment drift is legitimately preserved in the
 /// working tree for the next cycle and is not a data-loss case.
 fn exchange_component_text(doc: &str) -> String {
-    let Ok(components) = crate::component::parse(doc) else {
+    let Ok(components) = agent_doc_element::element::parse(doc) else {
         return String::new();
     };
     components
@@ -811,7 +810,7 @@ fn dropped_prompt_lines_after_content_ours(
 }
 
 fn queue_component_text(doc: &str) -> String {
-    let Ok(components) = crate::component::parse(doc) else {
+    let Ok(components) = agent_doc_element::element::parse(doc) else {
         return String::new();
     };
     components
@@ -1056,9 +1055,9 @@ fn prompt_targets_added_to_backlog(
     base: &str,
     current: &str,
 ) -> Result<Vec<(String, Vec<String>)>> {
-    let base_components = component::parse(base).context("failed to parse baseline components")?;
+    let base_components = element::parse(base).context("failed to parse baseline components")?;
     let current_components =
-        component::parse(current).context("failed to parse current components")?;
+        element::parse(current).context("failed to parse current components")?;
     let mut targets = Vec::new();
 
     for current_component in current_components
@@ -1103,7 +1102,7 @@ fn cleanup_resolved_backlog_prompts_after_response(
     let mut result = final_content.to_string();
     let mut removed_total = 0usize;
     for (component_name, component_targets) in targets {
-        let components = component::parse(&result)
+        let components = element::parse(&result)
             .with_context(|| format!("failed to parse final components in {}", file.display()))?;
         let Some(component) = components
             .iter()
@@ -1523,7 +1522,7 @@ fn ensure_pending_add_target(target: &Path) -> Result<()> {
             target.display()
         )
     })?;
-    let components = crate::component::parse(&content).with_context(|| {
+    let components = agent_doc_element::element::parse(&content).with_context(|| {
         format!(
             "failed to parse --backlog-add-to target {}",
             target.display()
@@ -1531,7 +1530,7 @@ fn ensure_pending_add_target(target: &Path) -> Result<()> {
     })?;
     if !components
         .iter()
-        .any(|component| crate::component::is_backlog_component(&component.name))
+        .any(|component| agent_doc_element::element::is_backlog_component(&component.name))
     {
         anyhow::bail!(
             "--backlog-add-to target {} has no agent:backlog/agent:pending component",
@@ -1614,7 +1613,7 @@ fn enforce_review_done_guard(file: &Path, id: &str) -> Result<()> {
     let Some(component_name) = crate::pending_cmd::open_item_component_name(file, id)? else {
         return Ok(());
     };
-    if crate::component::is_review_component(&component_name) {
+    if agent_doc_element::element::is_review_component(&component_name) {
         return Ok(());
     }
 
@@ -2518,7 +2517,7 @@ fn latest_response_block_missing_from_current(head: &str, current: &str) -> Opti
     if current_norm.lines().any(|line| line.trim() == heading) {
         return None;
     }
-    let head_components = crate::component::parse(head).ok()?;
+    let head_components = agent_doc_element::element::parse(head).ok()?;
     let head_exchange = head_components
         .iter()
         .find(|component| component.name == "exchange")?;
@@ -2552,7 +2551,7 @@ fn splice_response_block_into_current_exchange(
     current: &str,
     response_block: &str,
 ) -> Option<String> {
-    let components = crate::component::parse(current).ok()?;
+    let components = agent_doc_element::element::parse(current).ok()?;
     let exchange = components
         .iter()
         .find(|component| component.name == "exchange")?;
@@ -2659,10 +2658,9 @@ pub fn enforce_no_replace_pending(patches: &[template::PatchBlock], allow: bool)
     if allow_canonical || allow_legacy {
         return Ok(());
     }
-    if patches
-        .iter()
-        .any(|p| is_backlog_component(&p.name) || crate::component::is_review_component(&p.name))
-    {
+    if patches.iter().any(|p| {
+        is_backlog_component(&p.name) || agent_doc_element::element::is_review_component(&p.name)
+    }) {
         anyhow::bail!(
             "ERR: replace:pending/review block forbidden — use --pending-add/done/edit/clear/reorder or --review-add/edit. \
              See specs/pending-system.md."
@@ -2697,7 +2695,7 @@ fn count_markdown_checklist_items(body: &str) -> usize {
 }
 
 fn todo_component_checklist_count(current_content: &str) -> Result<Option<usize>> {
-    let components = component::parse(current_content)
+    let components = element::parse(current_content)
         .context("failed to parse components for todo patch validation")?;
     Ok(components
         .iter()
@@ -2774,10 +2772,10 @@ pub(crate) fn ipc_direct_disk_degraded_for_file(project_root: &Path, file: &Path
 /// Searches for `<!-- agent:boundary:UUID -->` inside the component's content,
 /// skipping matches inside fenced code blocks and inline code spans.
 pub fn find_boundary_id(doc: &str, component_name: &str) -> Option<String> {
-    let components = component::parse(doc).ok()?;
+    let components = element::parse(doc).ok()?;
     let comp = components.iter().find(|c| c.name == component_name)?;
     let content = &doc[comp.open_end..comp.close_start];
-    let code_ranges = component::find_code_ranges(doc);
+    let code_ranges = element::find_code_ranges(doc);
 
     // Scan for boundary marker in component content, skipping code blocks
     let prefix = "<!-- agent:boundary:";
@@ -2830,7 +2828,7 @@ fn enforce_orchestrate_template_patch_contract(
 /// moves the entire pending block (open tag through close tag) to after
 /// exchange's close tag.
 pub fn lift_pending_from_exchange(content: &str) -> Option<String> {
-    let components = match crate::component::parse(content) {
+    let components = match agent_doc_element::element::parse(content) {
         Ok(c) => c,
         Err(_) => return None,
     };
@@ -3127,7 +3125,7 @@ pub fn normalize_template_structure_or_fail_preserving(
         result
     };
     let (normalized, _) = repair_duplicate_prompt_artifacts(
-        &crate::component::strip_backlog_patch_attr(&deduped_openers),
+        &agent_doc_element::element::strip_backlog_patch_attr(&deduped_openers),
         file,
         DuplicatePromptRepairOptions::new("structure").preserving(preserve_doc),
     )?;
@@ -3223,7 +3221,7 @@ pub fn is_stale_baseline(baseline: &str, snapshot: &str) -> bool {
 
     // Try structural comparison via components
     if let (Ok(snap_components), Ok(base_components)) =
-        (component::parse(snapshot), component::parse(baseline))
+        (element::parse(snapshot), element::parse(baseline))
         && !snap_components.is_empty()
     {
         // Only check append-mode components — these grow monotonically and must
@@ -3780,7 +3778,7 @@ pub fn sanitize_component_tags(content: &str) -> String {
         let inner = &content[pos + 4..close - 3];
         let trimmed = inner.trim();
 
-        if component::is_agent_marker(trimmed) {
+        if element::is_agent_marker(trimmed) {
             // Escape the entire comment: <!-- ... --> -> &lt;!-- ... --&gt;
             let original = &content[pos..close];
             result.push_str(&original.replace('<', "&lt;").replace('>', "&gt;"));
@@ -3996,9 +3994,9 @@ fn contains_contiguous_hunk(haystack: &[String], needle: &[String]) -> bool {
 /// line-overlap count so short responses do not adopt current content from a
 /// coincidental shared body line.
 fn response_already_in_current(base: &str, content_ours: &str, content_current: &str) -> bool {
-    let base_comps = crate::component::parse(base).unwrap_or_default();
-    let ours_comps = crate::component::parse(content_ours).unwrap_or_default();
-    let current_comps = crate::component::parse(content_current).unwrap_or_default();
+    let base_comps = agent_doc_element::element::parse(base).unwrap_or_default();
+    let ours_comps = agent_doc_element::element::parse(content_ours).unwrap_or_default();
+    let current_comps = agent_doc_element::element::parse(content_current).unwrap_or_default();
 
     let base_exc = base_comps.iter().find(|c| c.name == "exchange");
     let ours_exc = ours_comps.iter().find(|c| c.name == "exchange");
@@ -4085,7 +4083,7 @@ fn adopt_current_response_without_duplication(
 /// `Some(repaired)` when any prefix was stripped, `None` when the document is
 /// clean. See `tasks/agent-doc/plan-crdt-merge-prompt-prefix-leaks-into-response-body.md`.
 pub fn strip_prompt_prefix_from_response_body_first_lines(content: &str) -> Option<String> {
-    let components = component::parse(content).ok()?;
+    let components = element::parse(content).ok()?;
     let exchange = components.iter().find(|c| c.name == "exchange")?;
     let exchange_body = exchange.content(content);
 
@@ -4352,7 +4350,7 @@ fn response_precedes_prompt_in_exchange(
     response: Option<&str>,
     prompt_must_exist_in: Option<&str>,
 ) -> bool {
-    let Ok(components) = component::parse(doc) else {
+    let Ok(components) = element::parse(doc) else {
         return false;
     };
     let Some(exchange) = components
@@ -4382,7 +4380,7 @@ pub fn repair_response_precedes_prompt_in_exchange(
     file: &Path,
     prompt_must_exist_in: Option<&str>,
 ) -> Result<Option<String>> {
-    let components = component::parse(doc).with_context(|| {
+    let components = element::parse(doc).with_context(|| {
         format!(
             "failed to parse {} for response/prompt order repair",
             file.display()
@@ -4494,7 +4492,7 @@ fn exchange_contains_normalized_line_sequence(doc: &str, needle: &[String]) -> b
     if needle.is_empty() {
         return false;
     }
-    let Ok(components) = component::parse(doc) else {
+    let Ok(components) = element::parse(doc) else {
         return false;
     };
     let Some(exchange) = components
@@ -4526,7 +4524,7 @@ fn exchange_contains_normalized_line_sequence(doc: &str, needle: &[String]) -> b
 ///   warning and returns `target` unchanged (can't locate insertion point
 ///   without knowing document structure).
 fn splice_pending_component(target: &str, source: &str) -> String {
-    let source_comps = match component::parse(source) {
+    let source_comps = match element::parse(source) {
         Ok(c) => c,
         Err(e) => {
             eprintln!(
@@ -4543,7 +4541,7 @@ fn splice_pending_component(target: &str, source: &str) -> String {
     };
     let source_content = &source[src_comp.open_end..src_comp.close_start];
 
-    let target_comps = match component::parse(target) {
+    let target_comps = match element::parse(target) {
         Ok(c) => c,
         Err(e) => {
             eprintln!(
@@ -5356,10 +5354,10 @@ mod tests {
             .expect("force-disk closeout pending maintenance should write directly");
 
         let result = fs::read_to_string(&doc).unwrap();
-        let backlog_after = crate::component::parse(&result)
+        let backlog_after = agent_doc_element::element::parse(&result)
             .unwrap()
             .into_iter()
-            .find(|component| crate::component::is_backlog_component(&component.name))
+            .find(|component| agent_doc_element::element::is_backlog_component(&component.name))
             .unwrap()
             .content(&result)
             .to_string();

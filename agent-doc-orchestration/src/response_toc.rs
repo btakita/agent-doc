@@ -323,7 +323,7 @@ fn live_entries(
 }
 
 fn live_sections(doc: &str) -> Result<Vec<LiveSection>> {
-    let components = crate::component::parse(doc)
+    let components = agent_doc_element::element::parse(doc)
         .with_context(|| "failed to parse document components for response TOC")?;
     let exchange = components
         .iter()

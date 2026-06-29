@@ -29,7 +29,7 @@ pub(crate) fn template_response_write_proof(
             .iter()
             .filter(|patch| patch.name != "frontmatter")
             .filter(|patch| !is_backlog_component(&patch.name))
-            .filter(|patch| !crate::component::is_review_component(&patch.name))
+            .filter(|patch| !agent_doc_element::element::is_review_component(&patch.name))
             .filter(|patch| !patch.content.trim().is_empty())
             .map(|patch| patch.name.clone())
             .collect(),
@@ -112,7 +112,7 @@ fn live_exchange_tail_proves_streamed_response_heading(
         return false;
     }
 
-    let Ok(components) = crate::component::parse(current_content) else {
+    let Ok(components) = agent_doc_element::element::parse(current_content) else {
         return false;
     };
     let Some(exchange) = components
@@ -219,7 +219,7 @@ pub(crate) fn response_materialization_probe(
             .iter()
             .filter(|patch| patch.name != "frontmatter")
             .filter(|patch| !is_backlog_component(&patch.name))
-            .filter(|patch| !crate::component::is_review_component(&patch.name))
+            .filter(|patch| !agent_doc_element::element::is_review_component(&patch.name))
             .cloned()
             .collect();
     }
@@ -390,7 +390,7 @@ pub(crate) fn strip_partial_response_materialization_from_exchange(
         return None;
     }
 
-    let components = component::parse(content).ok()?;
+    let components = element::parse(content).ok()?;
     let exchange = components
         .iter()
         .find(|component| component.name == "exchange")?;
@@ -546,7 +546,7 @@ pub fn normalize_backlog_patch_response(
         );
     }
 
-    let components = component::parse(current_content)
+    let components = element::parse(current_content)
         .with_context(|| format!("failed to parse components in {}", file.display()))?;
     let backlog_component = components
         .iter()

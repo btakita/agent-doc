@@ -2,7 +2,7 @@ use super::*;
 
 pub(crate) fn open_tracked_work_ids(file: &Path) -> Result<Vec<String>> {
     let content = std::fs::read_to_string(file)?;
-    let Ok(components) = crate::component::parse(&content) else {
+    let Ok(components) = agent_doc_element::element::parse(&content) else {
         return Ok(Vec::new());
     };
     Ok(components
@@ -354,7 +354,7 @@ pub(crate) fn leads_with_bare_id_token(lower: &str) -> bool {
 /// lifecycle outcome.
 pub(crate) fn open_backlog_ids(file: &Path) -> Result<Vec<String>> {
     let content = std::fs::read_to_string(file)?;
-    let Ok(components) = crate::component::parse(&content) else {
+    let Ok(components) = agent_doc_element::element::parse(&content) else {
         return Ok(Vec::new());
     };
     Ok(components

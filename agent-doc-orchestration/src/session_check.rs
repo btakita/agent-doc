@@ -69,7 +69,7 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use crate::component::{is_backlog_component, is_tracked_work_component};
+use agent_doc_element::element::{is_backlog_component, is_tracked_work_component};
 
 mod response_guards;
 pub(crate) use response_guards::*;
@@ -1450,10 +1450,10 @@ mod tests {
     }
     fn backlog_component_hash(path: &Path) -> String {
         let content = fs::read_to_string(path).unwrap();
-        let components = crate::component::parse(&content).unwrap();
+        let components = agent_doc_element::element::parse(&content).unwrap();
         let component = components
             .iter()
-            .find(|component| crate::component::is_backlog_component(&component.name))
+            .find(|component| agent_doc_element::element::is_backlog_component(&component.name))
             .unwrap();
         crate::ops_log::content_hash(component.content(&content))
     }

@@ -35,11 +35,9 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::{
-    component,
-    component::{is_backlog_component, is_icebox_component},
-    frontmatter,
-};
+use agent_doc_element::element::{self, is_backlog_component, is_icebox_component};
+
+use crate::frontmatter;
 use agent_doc_orchestration::{security, snapshot, write};
 
 /// Check pane ownership for the target file. Returns Ok if no conflict or if
@@ -162,9 +160,9 @@ fn merge_list_component(
     target_content: &str,
 ) -> Result<Option<(String, String)>> {
     let source_components =
-        component::parse(source_content).context("failed to parse components in source")?;
+        element::parse(source_content).context("failed to parse components in source")?;
     let target_components =
-        component::parse(target_content).context("failed to parse components in target")?;
+        element::parse(target_content).context("failed to parse components in target")?;
 
     let Some(source_component) = source_components
         .iter()
@@ -221,7 +219,7 @@ pub fn run(source: &Path, target: &Path, component_name: Option<&str>) -> Result
 
     // Find the exchange component in source
     let components =
-        component::parse(&source_content).context("failed to parse components in source")?;
+        element::parse(&source_content).context("failed to parse components in source")?;
 
     let exchange = components.iter().find(|c| c.name == comp_name);
     let Some(exchange) = exchange else {
@@ -254,7 +252,7 @@ pub fn run(source: &Path, target: &Path, component_name: Option<&str>) -> Result
     let annotated_content = format!("{}{}", annotation, extracted.trim_start());
 
     let target_components =
-        component::parse(&target_content).context("failed to parse components in target")?;
+        element::parse(&target_content).context("failed to parse components in target")?;
 
     let target_exchange = target_components.iter().find(|c| c.name == comp_name);
     let new_target = if let Some(tc) = target_exchange {
@@ -412,7 +410,7 @@ pub fn transfer(
         .with_context(|| format!("failed to read {}", target.display()))?;
 
     let components =
-        component::parse(&source_content).context("failed to parse components in source")?;
+        element::parse(&source_content).context("failed to parse components in source")?;
 
     let comp = components
         .iter()
@@ -444,7 +442,7 @@ pub fn transfer(
     let annotated_content = format!("{}{}", annotation, content.trim_start());
 
     let target_components =
-        component::parse(&target_content).context("failed to parse components in target")?;
+        element::parse(&target_content).context("failed to parse components in target")?;
 
     let target_comp = target_components
         .iter()
@@ -526,9 +524,9 @@ fn transfer_pending_items(
         .with_context(|| format!("failed to read {}", target.display()))?;
 
     let source_comps =
-        component::parse(&source_content).context("failed to parse components in source")?;
+        element::parse(&source_content).context("failed to parse components in source")?;
     let target_comps =
-        component::parse(&target_content).context("failed to parse components in target")?;
+        element::parse(&target_content).context("failed to parse components in target")?;
 
     let source_pending = source_comps
         .iter()
@@ -672,7 +670,7 @@ fn transfer_referral(source: &Path, target: &Path, component_name: &str) -> Resu
         .with_context(|| format!("failed to read {}", target.display()))?;
 
     let target_comps =
-        component::parse(&target_content).context("failed to parse components in target")?;
+        element::parse(&target_content).context("failed to parse components in target")?;
 
     // Compute relative path from target's directory to source
     let source_rel = make_relative(source, target);

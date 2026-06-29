@@ -8,7 +8,6 @@
 //! `agent-doc-merge`, or a purpose-built pure crate.
 
 pub mod cell_doc;
-pub mod component;
 pub mod crdt;
 pub mod crdt_sync;
 pub mod diff;
@@ -28,8 +27,8 @@ pub mod template;
 pub mod topic;
 pub mod turn_scope;
 
+pub use agent_doc_element::element::Component;
 pub use agent_doc_model_tier as model_tier;
-pub use component::Component;
 pub use crdt::CrdtDoc;
 pub use diff::{
     DiffClassification, DiffType, OrchestrationRequest, OrchestrationRequestMode,

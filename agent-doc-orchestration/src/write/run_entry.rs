@@ -559,7 +559,7 @@ pub fn run_stream(
     if patches.is_empty() && !unmatched.trim().is_empty() {
         let current = std::fs::read_to_string(file)
             .with_context(|| format!("failed to read {}", file.display()))?;
-        let comps = crate::component::parse(&current).unwrap_or_default();
+        let comps = agent_doc_element::element::parse(&current).unwrap_or_default();
         if comps.is_empty() {
             eprintln!(
                 "[write] WARNING: {} bytes of content but file has no template components — \

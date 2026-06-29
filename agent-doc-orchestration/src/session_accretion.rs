@@ -536,7 +536,7 @@ fn inspect_at_with_context(
 }
 
 fn exchange_metrics(content: &str) -> (usize, usize) {
-    let exchange = crate::component::parse(content)
+    let exchange = agent_doc_element::element::parse(content)
         .ok()
         .and_then(|components| {
             components

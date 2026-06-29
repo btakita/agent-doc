@@ -11,7 +11,7 @@ pub fn run(file: &Path, component: Option<&str>) -> Result<()> {
             print!("{}", content);
         }
         Some(name) => {
-            let components = crate::component::parse(&content)
+            let components = agent_doc_element::element::parse(&content)
                 .with_context(|| format!("failed to parse components in {}", file.display()))?;
             let comp = components
                 .iter()

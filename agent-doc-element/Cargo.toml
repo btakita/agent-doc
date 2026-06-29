@@ -10,3 +10,6 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_element"
 
 [dependencies]
+anyhow = "1"
+pulldown-cmark = "0.13"
+uuid = { version = "1", features = ["v4"] }

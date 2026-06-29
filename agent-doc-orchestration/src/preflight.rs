@@ -106,8 +106,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::component::{is_backlog_component, is_review_component, is_tracked_work_component};
 use crate::{config, diff, frontmatter, git, repair, resync, sessions, snapshot, sync};
+use agent_doc_element::element::{
+    is_backlog_component, is_review_component, is_tracked_work_component,
+};
 
 /// A change detected in a related document since the last cycle.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -608,8 +610,8 @@ fn remove_post_exchange_duplicate_prompt_comments_for_preflight(
 fn tracked_work_component_fingerprint(
     content: &str,
 ) -> Result<(Option<String>, Option<String>, Vec<String>)> {
-    let components =
-        crate::component::parse(content).context("failed to parse document components")?;
+    let components = agent_doc_element::element::parse(content)
+        .context("failed to parse document components")?;
     let component = components
         .iter()
         .find(|component| is_backlog_component(&component.name))
@@ -831,13 +833,13 @@ pub fn document_active_identities(
             }
         }
     }
-    if let Ok(components) = crate::component::parse(content) {
+    if let Ok(components) = agent_doc_element::element::parse(content) {
         for component in &components {
-            let label = if crate::component::is_backlog_component(&component.name) {
+            let label = if agent_doc_element::element::is_backlog_component(&component.name) {
                 "agent:backlog"
-            } else if crate::component::is_review_component(&component.name) {
+            } else if agent_doc_element::element::is_review_component(&component.name) {
                 "agent:review"
-            } else if crate::component::is_icebox_component(&component.name) {
+            } else if agent_doc_element::element::is_icebox_component(&component.name) {
                 "agent:icebox"
             } else {
                 continue;
@@ -1087,7 +1089,7 @@ const KNOWN_COMPONENT_ATTRS: &[&str] = &[
 /// triggers from `<!-- agent:queue auto -->` — this warning just makes the
 /// silent misfire visible.
 fn misplaced_component_attr_warning(file: &Path, content: &str) -> Option<PreflightWarning> {
-    let components = crate::component::parse(content).ok()?;
+    let components = agent_doc_element::element::parse(content).ok()?;
     let mut issues: Vec<String> = Vec::new();
     for component in &components {
         for (key, value) in &component.attrs {
@@ -1147,7 +1149,7 @@ fn misplaced_component_attr_warning(file: &Path, content: &str) -> Option<Prefli
 }
 
 fn post_exchange_ordinary_html_comments(content: &str) -> Vec<String> {
-    let Ok(components) = crate::component::parse(content) else {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
         return Vec::new();
     };
     let Some(exchange_close_end) = components
@@ -1169,7 +1171,7 @@ fn post_exchange_ordinary_html_comments(content: &str) -> Vec<String> {
         };
         let absolute_open = tail_start + open;
         let inner = after_open[..close].trim();
-        if !crate::component::is_agent_marker(inner)
+        if !agent_doc_element::element::is_agent_marker(inner)
             && !components.iter().any(|component| {
                 absolute_open >= component.open_start && absolute_open < component.close_end
             })
@@ -1775,8 +1777,8 @@ fn append_ipc_dogfood_note_to_content(content: &str, diagnostic: &str) -> Result
     if content.contains(diagnostic) {
         return Ok(None);
     }
-    let components =
-        crate::component::parse(content).context("failed to parse document components")?;
+    let components = agent_doc_element::element::parse(content)
+        .context("failed to parse document components")?;
     let Some(exchange) = components
         .iter()
         .find(|component| component.name == "exchange")
@@ -2194,7 +2196,7 @@ fn route_queue_prompt_texts(content: &str) -> Result<Vec<String>> {
     if fm.queue_active != Some(true) {
         return Ok(Vec::new());
     }
-    let components = crate::component::parse(body)?;
+    let components = agent_doc_element::element::parse(body)?;
     let Some(queue_component) = components
         .iter()
         .find(|component| component.name == "queue")
@@ -2227,7 +2229,7 @@ fn strip_route_queue_state_for_boundary_compare(content: &str) -> String {
     if content.ends_with('\n') {
         result.push('\n');
     }
-    if let Ok(components) = crate::component::parse(&result) {
+    if let Ok(components) = agent_doc_element::element::parse(&result) {
         for component in components.iter().rev() {
             if component.name == "queue" {
                 result.replace_range(component.open_start..component.close_end, "");
@@ -2440,11 +2442,11 @@ fn collect_agent_done_ids_with_root(
     project_root: Option<&Path>,
 ) -> std::collections::HashSet<String> {
     let mut ids = std::collections::HashSet::new();
-    let Ok(components) = crate::component::parse(content) else {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
         return ids;
     };
     for comp in &components {
-        if !crate::component::is_backlog_done_component(&comp.name) {
+        if !agent_doc_element::element::is_backlog_done_component(&comp.name) {
             continue;
         }
         // #donemirrorreap: collect only each done item's OWN leading id, not every
@@ -2477,11 +2479,11 @@ fn collect_agent_done_ids_with_root(
 /// Plan: tasks/agent-doc/plan-queue-auto-advance-past-pending-gate.md
 fn collect_agent_review_gated_ids(content: &str) -> std::collections::HashSet<String> {
     let mut ids = std::collections::HashSet::new();
-    let Ok(components) = crate::component::parse(content) else {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
         return ids;
     };
     for comp in &components {
-        if !crate::component::is_review_component(&comp.name) {
+        if !agent_doc_element::element::is_review_component(&comp.name) {
             continue;
         }
         for line in comp.content(content).lines() {
@@ -2577,7 +2579,7 @@ fn snapshot_proves_queue_was_active(file: &Path) -> bool {
     if fm.queue_active.unwrap_or(false) {
         return true;
     }
-    let Ok(components) = crate::component::parse(&snapshot_content) else {
+    let Ok(components) = agent_doc_element::element::parse(&snapshot_content) else {
         return false;
     };
     let Some(queue_component) = components
@@ -2617,18 +2619,18 @@ pub fn archive_pending_done(
         return Ok(None);
     }
     let mut content_with_archive = content.to_string();
-    let components = crate::component::parse(&content_with_archive)?;
+    let components = agent_doc_element::element::parse(&content_with_archive)?;
     if !components
         .iter()
-        .any(|c| crate::component::is_backlog_done_component(&c.name))
+        .any(|c| agent_doc_element::element::is_backlog_done_component(&c.name))
     {
         content_with_archive = insert_pending_done_component(&content_with_archive)
             .context("failed to insert agent:done component")?;
     }
-    let components = crate::component::parse(&content_with_archive)?;
+    let components = agent_doc_element::element::parse(&content_with_archive)?;
     let archive = components
         .into_iter()
-        .find(|c| crate::component::is_backlog_done_component(&c.name))
+        .find(|c| agent_doc_element::element::is_backlog_done_component(&c.name))
         .context("document is missing agent:done component")?;
     let existing_body = &content_with_archive[archive.open_end..archive.close_start];
 
@@ -2672,10 +2674,10 @@ pub fn archive_pending_done(
 }
 
 fn insert_pending_done_component(content: &str) -> Option<String> {
-    let components = crate::component::parse(content).ok()?;
+    let components = agent_doc_element::element::parse(content).ok()?;
     let anchor = components
         .iter()
-        .filter(|c| crate::component::is_tracked_work_component(&c.name))
+        .filter(|c| agent_doc_element::element::is_tracked_work_component(&c.name))
         .max_by_key(|c| c.close_end)?;
     let insert_at = anchor.close_end;
     let mut result = String::with_capacity(content.len() + 96);
@@ -2693,10 +2695,10 @@ fn insert_pending_done_component(content: &str) -> Option<String> {
 
 pub fn external_done_archive_ids(file: &Path, content: &str) -> Result<HashSet<String>> {
     let mut ids = HashSet::new();
-    let components = crate::component::parse(content)?;
+    let components = agent_doc_element::element::parse(content)?;
     for archive in components
         .iter()
-        .filter(|c| crate::component::is_backlog_done_component(&c.name))
+        .filter(|c| agent_doc_element::element::is_backlog_done_component(&c.name))
     {
         let Some(archive_path) = archive.attrs.get("archive") else {
             continue;
@@ -4776,7 +4778,7 @@ mod tests {
             "- [ ] [#x1] keep this\n",
             "<!-- /agent:backlog -->\n",
         );
-        let components = crate::component::parse(content).unwrap();
+        let components = agent_doc_element::element::parse(content).unwrap();
         let queue = components.iter().find(|c| c.name == "queue").unwrap();
         assert!(
             !crate::queue::has_auto_attr(&queue.attrs),

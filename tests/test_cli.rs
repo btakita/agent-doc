@@ -3668,25 +3668,36 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     let controller_dispatch =
         fs::read_to_string(manifest_dir.join("agent-doc-controller/src/dispatch.rs")).unwrap();
     for required_snippet in [
+        "pub enum DispatchActorState",
+        "pub fn dispatch_only_busy_should_wait_for_ready(",
+        "pub fn dispatch_only_should_probe_active_turn_cue(",
         "pub enum DispatchDrainRetryDecision",
         "pub fn dispatch_drain_retry_decision(",
     ] {
         assert!(
             controller_dispatch.contains(required_snippet),
-            "agent-doc-controller should own route dispatch drain-retry policy directly: {required_snippet}"
+            "agent-doc-controller should own route dispatch policy directly: {required_snippet}"
         );
     }
-    for forbidden_snippet in ["enum DrainRetryDecision", "fn classify_drain_retry("] {
+    for forbidden_snippet in [
+        "fn busy_dispatch_only_should_wait_for_ready(",
+        "fn dispatch_only_should_probe_active_turn_cue(",
+        "enum DrainRetryDecision",
+        "fn classify_drain_retry(",
+    ] {
         assert!(
             !route_source.contains(forbidden_snippet),
-            "route.rs must not re-own pure dispatch drain-retry policy: {forbidden_snippet}"
+            "route.rs must not re-own pure controller dispatch policy: {forbidden_snippet}"
         );
     }
     assert!(
         route_source.contains("use agent_doc_controller::dispatch::{")
+            && route_source.contains("DispatchActorState")
+            && route_source.contains("dispatch_only_busy_should_wait_for_ready(")
+            && route_source.contains("dispatch_only_should_probe_active_turn_cue(")
             && route_source.contains("DispatchDrainRetryDecision")
             && route_source.contains("dispatch_drain_retry_decision("),
-        "route.rs should call focused controller drain-retry policy directly"
+        "route.rs should call focused controller dispatch policy directly"
     );
     let sim_world = fs::read_to_string(manifest_dir.join("src/sim_world/engine.rs")).unwrap();
     assert!(

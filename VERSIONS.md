@@ -20,6 +20,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **Route dispatch drain-retry policy moved to `agent-doc-controller`.** The `#pcp3a` concurrent-finalize drain retry decision now lives in `agent_doc_controller::dispatch` beside the other dispatch admission helpers. `route.rs` still performs repair/session-check/file IO, but it calls the focused controller API directly instead of owning the retry decision table.
 
+- **Dispatch-only busy/probe policy moved to `agent-doc-controller`.** The decision for when a dispatch-only route should wait for a busy actor to become ready, and when it should probe the live pane for active-turn wording before direct submit, now lives in `agent_doc_controller::dispatch`. `route.rs` maps persisted actor state into the controller dispatch vocabulary and keeps only tmux capture, logging, queue fallback, and refusal formatting.
+
 - **Route-owned reap policy moved to `agent-doc-supervisor`.** The route-owned supervisor completion reap policy, liveness reason vocabulary, and hidden CLI reap-policy parser now live in `agent_doc_supervisor::route_owned`. The start path keeps only document liveness/file adapters and calls the focused supervisor API directly; the CLI shell imports the focused type instead of preserving an orchestration API path.
 
 - **Stale install-artifact policy moved to `agent-doc-supervisor`.** The `#install-stale-guard` grace window and timestamp classifier now live in `agent_doc_supervisor::config` beside auto-install/stale-binary policy. Preflight still discovers artifact mtimes and formats the warning, but calls the focused supervisor API directly instead of owning the staleness rule.

@@ -73,6 +73,43 @@ pub fn dispatch_should_coalesce_in_flight(
     in_flight_same_cycle && !operator_driven
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DispatchActorState {
+    Ready,
+    Busy,
+    Other,
+}
+
+pub fn dispatch_only_busy_should_wait_for_ready(
+    dispatch_only: bool,
+    actor_state: DispatchActorState,
+    has_queue_fallback: bool,
+    pane_active_turn_busy: bool,
+) -> bool {
+    dispatch_only
+        && actor_state == DispatchActorState::Busy
+        && !has_queue_fallback
+        && !pane_active_turn_busy
+}
+
+pub fn dispatch_only_should_probe_active_turn_cue(
+    dispatch_only: bool,
+    actor_state: DispatchActorState,
+    prompt_context_present: bool,
+    has_existing_inactive_queue_fallback: bool,
+) -> bool {
+    if !dispatch_only {
+        return false;
+    }
+    match actor_state {
+        DispatchActorState::Ready => true,
+        DispatchActorState::Busy => {
+            !prompt_context_present && !has_existing_inactive_queue_fallback
+        }
+        DispatchActorState::Other => false,
+    }
+}
+
 /// Decision for the route-dispatch drain retry loop after a mid-drain `repair`
 /// plus `session_check` failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -235,6 +272,90 @@ mod tests {
         assert!(!dispatch_should_coalesce_in_flight(true, true));
         assert!(!dispatch_should_coalesce_in_flight(false, false));
         assert!(!dispatch_should_coalesce_in_flight(false, true));
+    }
+
+    #[test]
+    fn dispatch_only_busy_wait_skips_when_queue_fallback_exists() {
+        assert!(!dispatch_only_busy_should_wait_for_ready(
+            true,
+            DispatchActorState::Busy,
+            true,
+            false
+        ));
+        assert!(dispatch_only_busy_should_wait_for_ready(
+            true,
+            DispatchActorState::Busy,
+            false,
+            false
+        ));
+        assert!(!dispatch_only_busy_should_wait_for_ready(
+            false,
+            DispatchActorState::Busy,
+            false,
+            false
+        ));
+        assert!(!dispatch_only_busy_should_wait_for_ready(
+            true,
+            DispatchActorState::Ready,
+            false,
+            false
+        ));
+    }
+
+    #[test]
+    fn dispatch_only_busy_wait_skips_on_proven_active_turn() {
+        assert!(!dispatch_only_busy_should_wait_for_ready(
+            true,
+            DispatchActorState::Busy,
+            false,
+            true
+        ));
+    }
+
+    #[test]
+    fn dispatch_only_active_turn_probe_covers_ready_and_busy_no_fallback() {
+        assert!(dispatch_only_should_probe_active_turn_cue(
+            true,
+            DispatchActorState::Ready,
+            false,
+            false
+        ));
+        assert!(dispatch_only_should_probe_active_turn_cue(
+            true,
+            DispatchActorState::Ready,
+            true,
+            true
+        ));
+        assert!(dispatch_only_should_probe_active_turn_cue(
+            true,
+            DispatchActorState::Busy,
+            false,
+            false
+        ));
+        assert!(!dispatch_only_should_probe_active_turn_cue(
+            true,
+            DispatchActorState::Busy,
+            true,
+            false
+        ));
+        assert!(!dispatch_only_should_probe_active_turn_cue(
+            true,
+            DispatchActorState::Busy,
+            false,
+            true
+        ));
+        assert!(!dispatch_only_should_probe_active_turn_cue(
+            false,
+            DispatchActorState::Ready,
+            false,
+            false
+        ));
+        assert!(!dispatch_only_should_probe_active_turn_cue(
+            true,
+            DispatchActorState::Other,
+            false,
+            false
+        ));
     }
 
     #[test]

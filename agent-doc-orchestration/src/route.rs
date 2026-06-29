@@ -191,7 +191,10 @@ use crate::flow::routed_reopen::{
 };
 use crate::harness::HarnessConfig;
 use crate::supervisor::ipc::IpcMethod;
-use agent_doc_controller::dispatch::{DispatchDrainRetryDecision, dispatch_drain_retry_decision};
+use agent_doc_controller::dispatch::{
+    DispatchActorState, DispatchDrainRetryDecision, dispatch_drain_retry_decision,
+    dispatch_only_busy_should_wait_for_ready, dispatch_only_should_probe_active_turn_cue,
+};
 use agent_doc_frontmatter::frontmatter;
 use tmux_router::Tmux;
 
@@ -3339,41 +3342,13 @@ pub(crate) use authoritative_actor::*;
 /// watch to drain; a stale-busy-but-actually-ready projection is still repaired
 /// by the later direct-pane-evidence check (`#snrun`). Only wait when there is
 /// no queue fallback (where route would otherwise have to bail).
-fn busy_dispatch_only_should_wait_for_ready(
-    dispatch_only: bool,
+fn controller_dispatch_actor_state(
     actor_state: agent_doc_sqlite::state_store::ActorState,
-    has_queue_fallback: bool,
-    pane_active_turn_busy: bool,
-) -> bool {
-    dispatch_only
-        && actor_state == agent_doc_sqlite::state_store::ActorState::Busy
-        && !has_queue_fallback
-        // #jb-run-agent-doc-busy-active-turn-stall: when the live pane proves a
-        // genuine active turn (working spinner / `esc to interrupt`), the actor
-        // will not return to a dispatch-ready prompt inside the busy ready-wait
-        // budget — a multi-minute turn just produces a silent 60s stall before
-        // the inevitable "session still running" refusal. Skip the wait so the
-        // refusal (and the IDE's session-still-running notification) fires
-        // immediately. A Busy projection WITHOUT a live active-turn cue
-        // (transient/stale) still waits, so a turn about to finish is picked up.
-        && !pane_active_turn_busy
-}
-
-fn dispatch_only_should_probe_active_turn_cue(
-    dispatch_only: bool,
-    actor_state: agent_doc_sqlite::state_store::ActorState,
-    prompt_context_present: bool,
-    has_existing_inactive_queue_fallback: bool,
-) -> bool {
-    if !dispatch_only {
-        return false;
-    }
+) -> DispatchActorState {
     match actor_state {
-        agent_doc_sqlite::state_store::ActorState::Ready => true,
-        agent_doc_sqlite::state_store::ActorState::Busy => {
-            !prompt_context_present && !has_existing_inactive_queue_fallback
-        }
-        _ => false,
+        agent_doc_sqlite::state_store::ActorState::Ready => DispatchActorState::Ready,
+        agent_doc_sqlite::state_store::ActorState::Busy => DispatchActorState::Busy,
+        _ => DispatchActorState::Other,
     }
 }
 
@@ -3771,7 +3746,7 @@ fn route_via_authoritative_actor(
     // turn just because the durable actor record lagged behind the pane.
     let active_turn_busy_cue: Option<String> = if dispatch_only_should_probe_active_turn_cue(
         dispatch_only,
-        actor_state,
+        controller_dispatch_actor_state(actor_state),
         prompt_context.is_some(),
         has_existing_inactive_queue_fallback,
     ) {
@@ -3827,9 +3802,9 @@ fn route_via_authoritative_actor(
         );
     }
     let mut waited_and_timed_out = false;
-    if busy_dispatch_only_should_wait_for_ready(
+    if dispatch_only_busy_should_wait_for_ready(
         dispatch_only,
-        actor_state,
+        controller_dispatch_actor_state(actor_state),
         prompt_context.is_some() || has_existing_inactive_queue_fallback,
         active_turn_busy_cue.is_some(),
     ) {
@@ -4064,7 +4039,7 @@ fn route_via_authoritative_actor(
     }
 
     // Eager busy-cue check for dispatch-only queue fallback: when
-    // `busy_dispatch_only_should_wait_for_ready` skipped the wait because
+    // `dispatch_only_busy_should_wait_for_ready` skipped the wait because
     // a queue fallback existed (prompt_context or inactive queue head), the
     // timeout-idle recovery above never ran. The actor may be projected Busy
     // while the live pane is actually idle. Check the pane eagerly and promote
@@ -6879,68 +6854,6 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         assert!(
             !codex_dispatch_start_tracking_enabled(&doc),
             "route should not require hook-backed submission proof when a nearer `.codex` path shadows the workspace install"
-        );
-    }
-    #[test]
-    fn busy_dispatch_only_skips_ready_wait_when_queue_fallback_exists() {
-        use agent_doc_sqlite::state_store::ActorState;
-        // Busy + dispatch-only + a queue prompt available → do NOT wait (queue now).
-        assert!(
-            !busy_dispatch_only_should_wait_for_ready(true, ActorState::Busy, true, false),
-            "a busy active turn with a queue fallback must skip the start-oriented ready wait"
-        );
-        // Busy + dispatch-only + no queue fallback + no live active-turn cue → still
-        // wait (the actor may be a transient/stale busy projection about to clear).
-        assert!(
-            busy_dispatch_only_should_wait_for_ready(true, ActorState::Busy, false, false),
-            "without a queue fallback the bounded ready wait is still the only recourse before bailing"
-        );
-        // Not dispatch-only, or not busy → the busy-wait guard does not apply.
-        assert!(!busy_dispatch_only_should_wait_for_ready(
-            false,
-            ActorState::Busy,
-            false,
-            false
-        ));
-        assert!(!busy_dispatch_only_should_wait_for_ready(
-            true,
-            ActorState::Ready,
-            false,
-            false
-        ));
-    }
-    #[test]
-    fn dispatch_only_probes_active_turn_cue_for_stale_ready_actor() {
-        use agent_doc_sqlite::state_store::ActorState;
-        assert!(
-            dispatch_only_should_probe_active_turn_cue(true, ActorState::Ready, false, false),
-            "ready actor records still need a live pane active-turn probe before direct dispatch"
-        );
-        assert!(
-            dispatch_only_should_probe_active_turn_cue(true, ActorState::Ready, true, true),
-            "prompt-bearing routes must also block stale-ready active turns before injection"
-        );
-        assert!(
-            dispatch_only_should_probe_active_turn_cue(true, ActorState::Busy, false, false),
-            "existing busy no-fallback path still probes for active-turn wording"
-        );
-        assert!(
-            !dispatch_only_should_probe_active_turn_cue(true, ActorState::Busy, true, false),
-            "busy prompt-bearing routes queue without the slow active-turn probe"
-        );
-        assert!(
-            !dispatch_only_should_probe_active_turn_cue(false, ActorState::Ready, false, false),
-            "managed reopen path keeps its existing supervisor queue behavior"
-        );
-    }
-    #[test]
-    fn busy_dispatch_only_skips_ready_wait_on_proven_active_turn() {
-        use agent_doc_sqlite::state_store::ActorState;
-        // Busy + dispatch-only + no queue fallback + a live active-turn cue → skip
-        // the wait (immediate refusal), instead of stalling for the full budget.
-        assert!(
-            !busy_dispatch_only_should_wait_for_ready(true, ActorState::Busy, false, true),
-            "a proven active turn must skip the busy ready-wait and refuse immediately"
         );
     }
     #[test]

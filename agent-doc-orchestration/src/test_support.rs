@@ -80,8 +80,8 @@ impl Drop for ScopedCurrentDir {
 }
 
 #[cfg(test)]
-pub(crate) fn patch_with_heading(heading: &str) -> crate::template::PatchBlock {
-    crate::template::PatchBlock::new("exchange", format!("{heading}\n\nbody line one\n"))
+pub(crate) fn patch_with_heading(heading: &str) -> agent_doc_core::template::PatchBlock {
+    agent_doc_core::template::PatchBlock::new("exchange", format!("{heading}\n\nbody line one\n"))
 }
 
 #[cfg(test)]

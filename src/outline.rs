@@ -47,7 +47,7 @@ pub fn run(file: &Path, json: bool) -> Result<()> {
     }
 
     let content = std::fs::read_to_string(file)?;
-    let (_fm, body) = crate::frontmatter::parse(&content)?;
+    let (_fm, body) = agent_doc_core::frontmatter::parse(&content)?;
 
     let sections = parse_sections(body);
 

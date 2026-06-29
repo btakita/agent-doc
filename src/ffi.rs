@@ -774,7 +774,7 @@ pub unsafe extern "C" fn agent_doc_is_session_document(file_path: *const c_char)
         Ok(c) => c,
         Err(_) => return 0,
     };
-    agent_doc_orchestration::frontmatter::is_agent_doc_document_for_file(
+    agent_doc_orchestration::frontmatter_io::is_agent_doc_document_for_file(
         &content,
         std::path::Path::new(path),
     ) as i32
@@ -1526,7 +1526,7 @@ pub unsafe extern "C" fn agent_doc_record_editor_op(
                 );
                 return 0;
             };
-            agent_doc_orchestration::crdt::EditorOp::Insert {
+            agent_doc_core::crdt::EditorOp::Insert {
                 offset,
                 text: text.to_string(),
             }
@@ -1538,7 +1538,7 @@ pub unsafe extern "C" fn agent_doc_record_editor_op(
                 );
                 return 0;
             };
-            agent_doc_orchestration::crdt::EditorOp::Delete { offset, len }
+            agent_doc_core::crdt::EditorOp::Delete { offset, len }
         }
         other => {
             eprintln!(
@@ -1549,12 +1549,12 @@ pub unsafe extern "C" fn agent_doc_record_editor_op(
     };
 
     let op_log_summary = match &op {
-        agent_doc_orchestration::crdt::EditorOp::Insert { text, .. } => format!(
+        agent_doc_core::crdt::EditorOp::Insert { text, .. } => format!(
             "insert_bytes={} insert_non_ascii={}",
             text.len(),
             !text.is_ascii()
         ),
-        agent_doc_orchestration::crdt::EditorOp::Delete { len, .. } => {
+        agent_doc_core::crdt::EditorOp::Delete { len, .. } => {
             format!("delete_len={len}")
         }
     };
@@ -2666,14 +2666,14 @@ mod tests {
         assert_eq!(ops.len(), 2);
         assert_eq!(
             ops[0],
-            agent_doc_orchestration::crdt::EditorOp::Insert {
+            agent_doc_core::crdt::EditorOp::Insert {
                 offset: 5,
                 text: "!".into()
             }
         );
         assert_eq!(
             ops[1],
-            agent_doc_orchestration::crdt::EditorOp::Delete { offset: 0, len: 3 }
+            agent_doc_core::crdt::EditorOp::Delete { offset: 0, len: 3 }
         );
 
         // Unknown kind and negative offset fail closed (return 0, record nothing).
@@ -2754,8 +2754,8 @@ mod tests {
         assert_eq!(
             ops,
             vec![
-                agent_doc_orchestration::crdt::EditorOp::Delete { offset: 6, len: 6 },
-                agent_doc_orchestration::crdt::EditorOp::Insert {
+                agent_doc_core::crdt::EditorOp::Delete { offset: 6, len: 6 },
+                agent_doc_core::crdt::EditorOp::Insert {
                     offset: 6,
                     text: "世界".into()
                 },

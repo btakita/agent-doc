@@ -75,9 +75,11 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
 
+use agent_doc_core::frontmatter;
 use agent_doc_element::element;
+use agent_doc_sqlite::archive_index;
 
-use crate::{archive_index, frontmatter, snapshot};
+use crate::snapshot;
 use agent_doc_core::topic::parse_topic_sections_with_tail;
 
 /// A parsed exchange pair (User prompt + Assistant response).
@@ -523,7 +525,7 @@ fn apply_compacted_document(
     snapshot::save(file, snapshot_content)?;
 
     if refresh_crdt {
-        let new_crdt = crate::crdt::CrdtDoc::from_text(compacted).encode_state();
+        let new_crdt = agent_doc_core::crdt::CrdtDoc::from_text(compacted).encode_state();
         snapshot::save_document_crdt(file, &new_crdt, compacted)?;
         eprintln!("[compact] CRDT state refreshed from post-compact content");
     }
@@ -613,8 +615,9 @@ fn run_component_compact_with_options(
     }
 
     let compacted = comp.replace_content(content, &visible_content);
-    let mut compacted = crate::template::repair_conversation_tail_outside_exchange(&compacted)?
-        .unwrap_or(compacted);
+    let mut compacted =
+        agent_doc_core::template::repair_conversation_tail_outside_exchange(&compacted)?
+            .unwrap_or(compacted);
     if let Some(reconciled) = crate::status_cmd::reconcile_top_backlog_status_content(&compacted)? {
         compacted = reconciled;
     }
@@ -622,7 +625,7 @@ fn run_component_compact_with_options(
         compacted.clone()
     } else {
         let snapshot_content = comp.replace_content(content, &summary);
-        crate::template::repair_conversation_tail_outside_exchange(&snapshot_content)?
+        agent_doc_core::template::repair_conversation_tail_outside_exchange(&snapshot_content)?
             .unwrap_or(snapshot_content)
     };
     if let Some(reconciled) =
@@ -747,8 +750,9 @@ fn run_component_compact_partial(
     }
 
     let compacted = comp.replace_content(content, &new_content);
-    let mut compacted = crate::template::repair_conversation_tail_outside_exchange(&compacted)?
-        .unwrap_or(compacted);
+    let mut compacted =
+        agent_doc_core::template::repair_conversation_tail_outside_exchange(&compacted)?
+            .unwrap_or(compacted);
     if let Some(reconciled) = crate::status_cmd::reconcile_top_backlog_status_content(&compacted)? {
         compacted = reconciled;
     }
@@ -756,7 +760,7 @@ fn run_component_compact_partial(
         compacted.clone()
     } else {
         let snapshot_content = comp.replace_content(content, &base_new_content);
-        crate::template::repair_conversation_tail_outside_exchange(&snapshot_content)?
+        agent_doc_core::template::repair_conversation_tail_outside_exchange(&snapshot_content)?
             .unwrap_or(snapshot_content)
     };
     if let Some(reconciled) =
@@ -2245,7 +2249,7 @@ mod tests {
         snapshot::save(&file, &doc).unwrap();
         // Seed both the legacy and overlay CRDT sidecars from the large document,
         // mirroring a live CRDT session before compaction.
-        let legacy = crate::crdt::CrdtDoc::from_text(&doc).encode_state();
+        let legacy = agent_doc_core::crdt::CrdtDoc::from_text(&doc).encode_state();
         snapshot::save_document_crdt(&file, &legacy, &doc).unwrap();
 
         // Full compact (keep=None) in CRDT mode.
@@ -2631,7 +2635,7 @@ mod tests {
         snapshot::save(&file, doc).unwrap();
 
         // Create and save initial CRDT state
-        let initial_crdt = crate::crdt::CrdtDoc::from_text(doc).encode_state();
+        let initial_crdt = agent_doc_core::crdt::CrdtDoc::from_text(doc).encode_state();
         snapshot::save_document_crdt(&file, &initial_crdt, doc).unwrap();
 
         // Capture pending before compact
@@ -2766,7 +2770,7 @@ mod tests {
             .join("crdt")
             .join(format!("{}.yrs", snapshot::doc_hash(&file).unwrap()));
         if let Ok(bytes) = std::fs::read(&crdt_path) {
-            let round_tripped = crate::crdt::CrdtDoc::decode_state(&bytes)
+            let round_tripped = agent_doc_core::crdt::CrdtDoc::decode_state(&bytes)
                 .unwrap()
                 .to_text();
             assert!(

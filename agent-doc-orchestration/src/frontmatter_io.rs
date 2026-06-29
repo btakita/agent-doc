@@ -4,9 +4,9 @@
 //! `&Path` or `std::fs` in core"). Wave 5 / `#0c4e` of `#adcr`.
 //!
 //! Re-exported from [`crate::frontmatter`] so existing call sites that
-//! use `frontmatter::parse_for_file(content, &Path)`,
-//! `frontmatter::ensure_session_for_file(content, &Path)`, and
-//! `frontmatter::read_session_id(&Path)` continue resolving unchanged.
+//! use `frontmatter_io::parse_for_file(content, &Path)`,
+//! `frontmatter_io::ensure_session_for_file(content, &Path)`, and
+//! `frontmatter_io::read_session_id(&Path)` continue resolving unchanged.
 //!
 //! Phase 3 / `#lr-config-3`: adds `*_with_context` variants that accept
 //! a [`crate::graph::RunContext`] to reuse cached project config + SSH
@@ -21,9 +21,10 @@ use agent_doc_core::frontmatter::{
     Frontmatter, SshResolverContext, contextualize_parse_error, ensure_session_with_ssh_resolver,
     parse, parse_with_ssh_resolver,
 };
+use agent_doc_core::project_config::{self, ProjectConfig};
 
 use crate::graph::RunContext;
-use crate::project_config;
+use crate::project_config_io;
 
 /// Parse frontmatter for a concrete document path so callers can surface
 /// actionable errors. Wraps the pure
@@ -89,10 +90,10 @@ pub fn read_session_id(file: &Path) -> Option<String> {
 /// Resolve the project config + canonical project-relative path for a
 /// document. Both inputs are used to build the [`SshResolverContext`] the
 /// pure parsers consume.
-fn resolve_ssh_context_inputs(file: &Path) -> (project_config::ProjectConfig, String) {
+fn resolve_ssh_context_inputs(file: &Path) -> (ProjectConfig, String) {
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-    let project = project_config::load_project_for_doc(&canonical);
-    let doc_relative = project_config::project_root_for_doc(&canonical)
+    let project = project_config_io::load_project_for_doc(&canonical);
+    let doc_relative = project_config_io::project_root_for_doc(&canonical)
         .map(|root| {
             canonical
                 .strip_prefix(&root)

@@ -1259,12 +1259,12 @@ pub(crate) fn resolve_supervisor_auto_recycle(
 pub(crate) fn supervisor_auto_recycle_enabled(doc: &std::path::Path) -> bool {
     let env = std::env::var(SUPERVISOR_AUTO_RECYCLE_ENV).ok();
     let frontmatter = std::fs::read_to_string(doc).ok().and_then(|content| {
-        crate::frontmatter::parse(&content)
+        agent_doc_core::frontmatter::parse(&content)
             .ok()
             .and_then(|(fm, _)| fm.supervisor_auto_recycle)
     });
     let project =
-        crate::project_config::load_project_for_doc(doc).agent_doc_supervisor_auto_recycle;
+        crate::project_config_io::load_project_for_doc(doc).agent_doc_supervisor_auto_recycle;
     resolve_supervisor_auto_recycle(env.as_deref(), frontmatter, project)
 }
 
@@ -1286,11 +1286,12 @@ pub(crate) fn resolve_agent_change_restart(
 pub(crate) fn agent_change_restart_enabled(doc: &std::path::Path) -> bool {
     let env = std::env::var(AGENT_CHANGE_RESTART_ENV).ok();
     let frontmatter = std::fs::read_to_string(doc).ok().and_then(|content| {
-        crate::frontmatter::parse(&content)
+        agent_doc_core::frontmatter::parse(&content)
             .ok()
             .and_then(|(fm, _)| fm.agent_change_restart)
     });
-    let project = crate::project_config::load_project_for_doc(doc).agent_doc_agent_change_restart;
+    let project =
+        crate::project_config_io::load_project_for_doc(doc).agent_doc_agent_change_restart;
     resolve_agent_change_restart(env.as_deref(), frontmatter, project)
 }
 
@@ -1335,12 +1336,12 @@ pub(crate) fn resolve_supervisor_auto_install(
 pub(crate) fn supervisor_auto_install_enabled(doc: &std::path::Path) -> bool {
     let env = std::env::var(SUPERVISOR_AUTO_INSTALL_ENV).ok();
     let frontmatter = std::fs::read_to_string(doc).ok().and_then(|content| {
-        crate::frontmatter::parse(&content)
+        agent_doc_core::frontmatter::parse(&content)
             .ok()
             .and_then(|(fm, _)| fm.supervisor_auto_install)
     });
     let project =
-        crate::project_config::load_project_for_doc(doc).agent_doc_supervisor_auto_install;
+        crate::project_config_io::load_project_for_doc(doc).agent_doc_supervisor_auto_install;
     resolve_supervisor_auto_install(env.as_deref(), frontmatter, project)
 }
 

@@ -172,7 +172,7 @@ impl SimWorld {
                 }
             }
             SimCommand::RepairBoundary => {
-                self.doc = crate::template::reposition_boundary_to_end_clean_with_id(
+                self.doc = agent_doc_core::template::reposition_boundary_to_end_clean_with_id(
                     &self.doc,
                     Some("sim-boundary"),
                 );
@@ -1625,19 +1625,19 @@ impl SimWorld {
     ) -> Result<String> {
         let mut cleaned = content.to_string();
         if let Some(tail_cleaned) =
-            crate::template::remove_duplicate_answered_exchange_prompt_tail(&cleaned)
+            agent_doc_core::template::remove_duplicate_answered_exchange_prompt_tail(&cleaned)
         {
             cleaned = tail_cleaned;
         }
         if let Some(comment_cleaned) =
-            crate::template::remove_post_exchange_duplicate_prompt_comments_preserving_docs(
+            agent_doc_core::template::remove_post_exchange_duplicate_prompt_comments_preserving_docs(
                 &cleaned,
                 preserve_docs,
             )
         {
             cleaned = comment_cleaned;
         }
-        crate::template::guard_no_duplicate_prompt_residue_outside_exchange(&cleaned)?;
+        agent_doc_core::template::guard_no_duplicate_prompt_residue_outside_exchange(&cleaned)?;
         Ok(cleaned)
     }
 
@@ -1891,19 +1891,18 @@ impl SimWorld {
             );
         }
         let Some(diff_text) =
-            agent_doc_orchestration::diff::unified_diff_from_contents(&self.snapshot, &self.doc)
+            agent_doc_core::diff::unified_diff_from_contents(&self.snapshot, &self.doc)
         else {
             return Ok(());
         };
-        let has_follow_up =
-            agent_doc_orchestration::diff::classify_prompt_bearing_changes(&diff_text)
-                .into_iter()
-                .any(|change| {
-                    matches!(
-                        change.kind,
-                        agent_doc_orchestration::diff::PromptBearingChangeKind::PromptTarget
-                    )
-                });
+        let has_follow_up = agent_doc_core::diff::classify_prompt_bearing_changes(&diff_text)
+            .into_iter()
+            .any(|change| {
+                matches!(
+                    change.kind,
+                    agent_doc_core::diff::PromptBearingChangeKind::PromptTarget
+                )
+            });
         if has_follow_up {
             self.coverage.post_commit_follow_up_handoffs += 1;
         }
@@ -2028,7 +2027,7 @@ impl SimWorld {
         let draft_preview = harness
             .last_prompt_candidate(pane_content)
             .map(|candidate| agent_doc_orchestration::prompt::strip_ansi(&candidate))
-            .map(|preview| agent_doc_orchestration::secret_redact::redact(preview.trim()))
+            .map(|preview| agent_doc_secret_redact::redact(preview.trim()))
             .filter(|preview| !preview.is_empty())
             .unwrap_or_else(|| "<none>".to_string());
 
@@ -2405,7 +2404,7 @@ impl SimWorld {
         if response.is_empty() {
             return Ok(());
         }
-        let (patches, unmatched) = crate::template::parse_patches(&response)?;
+        let (patches, unmatched) = agent_doc_core::template::parse_patches(&response)?;
         let next_doc =
             crate::template::apply_patches(&self.doc, &patches, &unmatched, Path::new("sim.md"))?;
         if patches.is_empty() && self.take_fault(FaultPoint::FallbackPatchWrite) {
@@ -2451,8 +2450,10 @@ impl SimWorld {
                 self.trace
             );
         }
-        self.doc =
-            crate::template::reposition_boundary_to_end_clean_with_id(&self.doc, Some("committed"));
+        self.doc = agent_doc_core::template::reposition_boundary_to_end_clean_with_id(
+            &self.doc,
+            Some("committed"),
+        );
         if self.take_fault(FaultPoint::PostCommitBoundaryReposition) {
             self.phase = CyclePhase::Interrupted(FaultPoint::PostCommitBoundaryReposition);
             bail!(
@@ -2548,19 +2549,18 @@ impl SimWorld {
         }
 
         if let Some(diff_text) =
-            agent_doc_orchestration::diff::unified_diff_from_contents(&self.snapshot, &self.doc)
+            agent_doc_core::diff::unified_diff_from_contents(&self.snapshot, &self.doc)
         {
-            let prompt_targets =
-                agent_doc_orchestration::diff::classify_prompt_bearing_changes(&diff_text)
-                    .into_iter()
-                    .filter(|change| {
-                        matches!(
-                            change.kind,
-                            agent_doc_orchestration::diff::PromptBearingChangeKind::PromptTarget
-                        )
-                    })
-                    .map(|change| change.text)
-                    .collect::<Vec<_>>();
+            let prompt_targets = agent_doc_core::diff::classify_prompt_bearing_changes(&diff_text)
+                .into_iter()
+                .filter(|change| {
+                    matches!(
+                        change.kind,
+                        agent_doc_core::diff::PromptBearingChangeKind::PromptTarget
+                    )
+                })
+                .map(|change| change.text)
+                .collect::<Vec<_>>();
             if !prompt_targets.is_empty() {
                 bail!(
                     "unresolved prompt_target(s) after closeout: {}; seed={} trace={:?}",
@@ -2699,8 +2699,10 @@ impl SimWorld {
             // committed-boundary reposition scenario does not apply.
             return Ok(false);
         }
-        self.doc =
-            crate::template::reposition_boundary_to_end_clean_with_id(&self.doc, Some("committed"));
+        self.doc = agent_doc_core::template::reposition_boundary_to_end_clean_with_id(
+            &self.doc,
+            Some("committed"),
+        );
         if normalize_committed_worktree(&self.doc) != head {
             bail!(
                 "post-commit working tree drifted from HEAD (#postcommit-ipc-worktree-corruption); seed={} trace={:?}",

@@ -72,7 +72,7 @@ pub fn fire_doc_event(file: &Path, event: &str) {
         Ok(c) => c,
         Err(_) => return,
     };
-    let (fm, _) = match crate::frontmatter::parse(&content) {
+    let (fm, _) = match agent_doc_core::frontmatter::parse(&content) {
         Ok(r) => r,
         Err(_) => return,
     };

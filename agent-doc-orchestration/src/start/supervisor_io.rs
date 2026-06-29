@@ -679,10 +679,10 @@ mod tests {
     #![allow(unused_imports)]
     use super::*;
     use crate::config::Config;
-    use crate::frontmatter::Frontmatter;
     use crate::hooks::fire_doc_hooks;
-    use crate::project_config;
+    use crate::project_config_io as project_config;
     use crate::sessions::IsolatedTmux;
+    use agent_doc_core::frontmatter::Frontmatter;
     use std::collections::HashMap;
     use tempfile::TempDir;
     // --- `#crdtauth5` end-to-end fan-out over the NEW IPC path -------------------

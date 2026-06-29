@@ -6,7 +6,7 @@ pub(crate) fn parse_frontmatter_for_sync<'a>(
     phase: &str,
 ) -> Result<(frontmatter::Frontmatter, &'a str)> {
     let rc = crate::graph::RunContext::new(file.to_path_buf());
-    frontmatter::parse_for_file_with_context(content, file, &rc)
+    frontmatter_io::parse_for_file_with_context(content, file, &rc)
         .map_err(|err| anyhow::anyhow!("sync {} frontmatter: {}", phase, err))
 }
 

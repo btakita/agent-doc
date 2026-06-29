@@ -41,7 +41,7 @@
 //! - `mark_committed_closes_cycle`
 //! - `mark_write_applied_creates_synthetic_cycle_when_missing`
 
-use crate::cycle_state_machine::{CycleEvent, CyclePhaseMachine};
+use agent_doc_turn::{CycleEvent, CyclePhaseMachine};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -352,8 +352,8 @@ impl CycleState {
     /// editor plugin can see where the cycle is without parsing the sidecar JSON.
     /// Cycle-state stays authoritative; the document `agent_doc_pipeline:` block
     /// is only a fallback hint when no live cycle-state exists.
-    pub fn to_pipeline(&self) -> crate::frontmatter::AgentDocPipeline {
-        crate::frontmatter::AgentDocPipeline {
+    pub fn to_pipeline(&self) -> agent_doc_core::frontmatter::AgentDocPipeline {
+        agent_doc_core::frontmatter::AgentDocPipeline {
             run_id: Some(self.cycle_id.clone()),
             step: Some(cycle_phase_label(self.phase).to_string()),
             turn_id: self.turn_id.clone(),
@@ -1194,7 +1194,8 @@ pub fn mark_committed(
 pub(crate) fn mirror_pipeline_frontmatter(file: &Path, state: &CycleState) {
     if let Err(e) = (|| -> Result<()> {
         let content = std::fs::read_to_string(file)?;
-        let updated = crate::frontmatter::splice_pipeline_block(&content, &state.to_pipeline())?;
+        let updated =
+            agent_doc_core::frontmatter::splice_pipeline_block(&content, &state.to_pipeline())?;
         if updated != content {
             // `#fcc0`: converge the frontmatter mirror through the editor IPC when a
             // live JB listener is active so the post-response mirror write never
@@ -1221,7 +1222,8 @@ fn clear_pipeline_frontmatter(file: &Path) {
         if !content.contains("agent_doc_pipeline:") {
             return Ok(());
         }
-        let updated = crate::frontmatter::splice_pipeline_block(&content, &Default::default())?;
+        let updated =
+            agent_doc_core::frontmatter::splice_pipeline_block(&content, &Default::default())?;
         if updated != content {
             // `#fcc0`: converge the frontmatter clear through the editor IPC when a
             // live JB listener is active (no `File Cache Conflict`); plain disk
@@ -1272,7 +1274,7 @@ fn append_phase_event_to_session_log(file: &Path, state: &CycleState) {
     let Ok(content) = std::fs::read_to_string(file) else {
         return;
     };
-    let Ok((fm, _)) = crate::frontmatter::parse(&content) else {
+    let Ok((fm, _)) = agent_doc_core::frontmatter::parse(&content) else {
         return;
     };
     let Some(session_id) = fm

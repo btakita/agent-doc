@@ -2764,7 +2764,7 @@ fn build_context(file: &Path) -> Result<SessionContext> {
         .with_context(|| format!("failed to read {}", canonical_file.display()))?;
     let session_id = crate::frontmatter::read_session_id(&canonical_file)
         .or_else(|| {
-            crate::frontmatter::parse(&content)
+            agent_doc_core::frontmatter::parse(&content)
                 .ok()
                 .and_then(|(fm, _)| fm.session)
         })

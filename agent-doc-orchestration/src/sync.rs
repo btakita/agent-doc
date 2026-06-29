@@ -196,7 +196,9 @@ use tempfile::NamedTempFile;
 use crate::sessions::{PaneMoveOp, Tmux};
 use agent_doc_element::element;
 
-use crate::{frontmatter, resync, route, sessions, snapshot};
+use agent_doc_core::frontmatter;
+
+use crate::{frontmatter_io, resync, route, sessions, snapshot};
 
 use tmux_router::FileResolution;
 
@@ -1373,7 +1375,7 @@ fn sync_doctor_repair_candidate(col_args: &[String], focus: Option<&str>) -> Opt
     sync_candidate_files(col_args, focus)
         .into_iter()
         .find_map(|path| {
-            if !path.exists() || frontmatter::read_session_id(&path).is_none() {
+            if !path.exists() || frontmatter_io::read_session_id(&path).is_none() {
                 return None;
             }
             Some(path.canonicalize().unwrap_or(path))
@@ -1549,7 +1551,7 @@ fn effective_sync_columns(
 
 pub fn configured_session_for_root(tmux: &Tmux, root: &Path) -> Option<String> {
     let config_path = root.join(".agent-doc").join("config.toml");
-    let configured = crate::project_config::load_project_from(&config_path).tmux_session;
+    let configured = crate::project_config_io::load_project_from(&config_path).tmux_session;
     match configured {
         Some(session) if tmux.session_alive(&session) => Some(session),
         Some(session) => {
@@ -6700,7 +6702,7 @@ mod tests {
 
         // Read it back — tmux_session should be None
         let content = std::fs::read_to_string(&doc).unwrap();
-        let (fm, _) = crate::frontmatter::parse(&content).unwrap();
+        let (fm, _) = agent_doc_core::frontmatter::parse(&content).unwrap();
         assert!(
             fm.tmux_session.is_none(),
             "tmux_session should not be set initially"
@@ -6715,7 +6717,7 @@ mod tests {
     .unwrap();
 
         let content2 = std::fs::read_to_string(&doc2).unwrap();
-        let (fm2, _) = crate::frontmatter::parse(&content2).unwrap();
+        let (fm2, _) = agent_doc_core::frontmatter::parse(&content2).unwrap();
         // Frontmatter still parses it (for backward compat reading), but resolve_file
         // must NOT propagate it to FileResolution
         assert_eq!(
@@ -6738,7 +6740,7 @@ mod tests {
         .unwrap();
 
         let content = std::fs::read_to_string(&doc).unwrap();
-        let (fm, _) = crate::frontmatter::parse(&content).unwrap();
+        let (fm, _) = agent_doc_core::frontmatter::parse(&content).unwrap();
 
         // Simulate what resolve_file does — tmux_session must be None
         let resolution = match fm.session {
@@ -6770,7 +6772,7 @@ mod tests {
         std::fs::write(&doc, "# Just a regular file\n\nNo frontmatter at all.\n").unwrap();
 
         let content = std::fs::read_to_string(&doc).unwrap();
-        let (fm, _) = crate::frontmatter::parse(&content).unwrap();
+        let (fm, _) = agent_doc_core::frontmatter::parse(&content).unwrap();
         assert!(fm.session.is_none(), "file should have no session UUID");
 
         // Simulate resolve_file: no session → Unmanaged
@@ -6800,7 +6802,7 @@ mod tests {
         .unwrap();
 
         let content = std::fs::read_to_string(&doc).unwrap();
-        let (fm, _) = crate::frontmatter::parse(&content).unwrap();
+        let (fm, _) = agent_doc_core::frontmatter::parse(&content).unwrap();
         assert_eq!(fm.session, Some("orphan-uuid-123".to_string()));
 
         // Load registry directly from the temp path (avoid CWD dependency)
@@ -6856,7 +6858,7 @@ mod tests {
         .unwrap();
 
         let content = std::fs::read_to_string(&doc).unwrap();
-        let (fm, _) = crate::frontmatter::parse(&content).unwrap();
+        let (fm, _) = agent_doc_core::frontmatter::parse(&content).unwrap();
         assert_eq!(fm.session, Some("claimed-uuid-456".to_string()));
 
         // Load registry directly from the temp path (avoid CWD dependency)
@@ -6960,7 +6962,7 @@ mod tests {
 
         // Verify scaffolded content has frontmatter
         let content = std::fs::read_to_string(&doc).unwrap();
-        let (fm, _) = crate::frontmatter::parse(&content).unwrap();
+        let (fm, _) = agent_doc_core::frontmatter::parse(&content).unwrap();
         assert!(
             fm.session.is_some(),
             "should have session UUID after scaffold"
@@ -7003,7 +7005,7 @@ mod tests {
         std::fs::write(&doc, &scaffold).unwrap();
 
         let content = std::fs::read_to_string(&doc).unwrap();
-        let (fm, _) = crate::frontmatter::parse(&content).unwrap();
+        let (fm, _) = agent_doc_core::frontmatter::parse(&content).unwrap();
 
         // Verify frontmatter
         assert!(fm.session.is_some(), "must have session UUID");

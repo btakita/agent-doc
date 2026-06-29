@@ -2,7 +2,7 @@
 name = "agent-doc-element-boundary"
 version = "0.34.65"
 edition = "2024"
-description = "Boundary marker element descriptor for agent-doc"
+description = "Boundary marker element model and descriptor for agent-doc"
 license = "MIT"
 repository = "https://github.com/btakita/agent-doc"
 
@@ -11,3 +11,7 @@ name = "agent_doc_element_boundary"
 
 [dependencies]
 agent-doc-element = { path = "../agent-doc-element", version = "0.34.65" }
+anyhow = "1"
+
+[dev-dependencies]
+tempfile = "3"

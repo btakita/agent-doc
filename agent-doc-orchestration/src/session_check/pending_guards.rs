@@ -6,7 +6,7 @@ pub(crate) fn check_pending_capture_guard(
 ) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): resolve guard mode from the cached frontmatter slot.
     let mode = resolve_pending_capture_guard_mode_with_context(file, rc)?;
-    if mode == crate::frontmatter::PendingCaptureGuardMode::Off {
+    if mode == agent_doc_core::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
     }
 
@@ -97,7 +97,7 @@ pub(crate) fn check_pending_capture_guard(
         ));
     }
 
-    let signal = crate::heuristics::detect_uncaptured_recommendations(&response_text);
+    let signal = agent_doc_core::heuristics::detect_uncaptured_recommendations(&response_text);
     let skip = match signal.estimated_count {
         0 => true,
         1 => signal.confidence < 0.7,
@@ -116,26 +116,28 @@ pub(crate) fn check_pending_capture_guard(
             .to_string();
 
     Ok(match mode {
-        crate::frontmatter::PendingCaptureGuardMode::Warn => {
+        agent_doc_core::frontmatter::PendingCaptureGuardMode::Warn => {
             GuardResult::Warn(vec![warn_line, hint_line])
         }
-        crate::frontmatter::PendingCaptureGuardMode::Strict => GuardResult::Error(format!(
-            "{}\n[session-check] hint: re-run with --pending-add flags or set pending_capture_guard = \"warn\" to downgrade",
-            warn_line.replacen("[session-check] warn:", "[session-check] error:", 1)
-        )),
-        crate::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
+        agent_doc_core::frontmatter::PendingCaptureGuardMode::Strict => {
+            GuardResult::Error(format!(
+                "{}\n[session-check] hint: re-run with --pending-add flags or set pending_capture_guard = \"warn\" to downgrade",
+                warn_line.replacen("[session-check] warn:", "[session-check] error:", 1)
+            ))
+        }
+        agent_doc_core::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
     })
 }
 
 pub fn resolve_pending_capture_guard_mode(
     file: &Path,
-) -> Result<crate::frontmatter::PendingCaptureGuardMode> {
+) -> Result<agent_doc_core::frontmatter::PendingCaptureGuardMode> {
     let content = std::fs::read_to_string(file)?;
-    let (fm, _) = crate::frontmatter::parse(&content)?;
+    let (fm, _) = agent_doc_core::frontmatter::parse(&content)?;
     if let Some(mode) = fm.pending_capture_guard {
         return Ok(mode);
     }
-    Ok(crate::project_config::load_project_for_doc(file)
+    Ok(crate::project_config_io::load_project_for_doc(file)
         .guards
         .pending_capture
         .unwrap_or_default())
@@ -144,7 +146,7 @@ pub fn resolve_pending_capture_guard_mode(
 pub fn resolve_pending_capture_guard_mode_with_context(
     _file: &Path,
     rc: &crate::graph::RunContext,
-) -> Result<crate::frontmatter::PendingCaptureGuardMode> {
+) -> Result<agent_doc_core::frontmatter::PendingCaptureGuardMode> {
     // Phase 6 (#lr-content-6): read frontmatter from the cached `FrontmatterSlot`
     // instead of re-reading + re-parsing the document. The slot already parsed
     // `DocContentCell` (set once per inspect cycle); these guard-mode fields are
@@ -162,13 +164,13 @@ pub fn resolve_pending_capture_guard_mode_with_context(
 
 pub fn resolve_pending_done_guard_mode(
     file: &Path,
-) -> Result<crate::frontmatter::PendingCaptureGuardMode> {
+) -> Result<agent_doc_core::frontmatter::PendingCaptureGuardMode> {
     let content = std::fs::read_to_string(file)?;
-    let (fm, _) = crate::frontmatter::parse(&content)?;
+    let (fm, _) = agent_doc_core::frontmatter::parse(&content)?;
     if let Some(mode) = fm.pending_done_guard {
         return Ok(mode);
     }
-    if let Some(mode) = crate::project_config::load_project_for_doc(file)
+    if let Some(mode) = crate::project_config_io::load_project_for_doc(file)
         .guards
         .pending_done
     {
@@ -179,15 +181,15 @@ pub fn resolve_pending_done_guard_mode(
         .as_deref()
         .is_some_and(|session| !session.trim().is_empty())
     {
-        return Ok(crate::frontmatter::PendingCaptureGuardMode::Strict);
+        return Ok(agent_doc_core::frontmatter::PendingCaptureGuardMode::Strict);
     }
-    Ok(crate::frontmatter::PendingCaptureGuardMode::Warn)
+    Ok(agent_doc_core::frontmatter::PendingCaptureGuardMode::Warn)
 }
 
 pub fn resolve_pending_done_guard_mode_with_context(
     _file: &Path,
     rc: &crate::graph::RunContext,
-) -> Result<crate::frontmatter::PendingCaptureGuardMode> {
+) -> Result<agent_doc_core::frontmatter::PendingCaptureGuardMode> {
     // Phase 6 (#lr-content-6): frontmatter from the cached slot, project config
     // from the cached `ProjectConfigSlot`.
     let fm = rc.frontmatter();
@@ -202,32 +204,32 @@ pub fn resolve_pending_done_guard_mode_with_context(
         .as_deref()
         .is_some_and(|session| !session.trim().is_empty())
     {
-        return Ok(crate::frontmatter::PendingCaptureGuardMode::Strict);
+        return Ok(agent_doc_core::frontmatter::PendingCaptureGuardMode::Strict);
     }
-    Ok(crate::frontmatter::PendingCaptureGuardMode::Warn)
+    Ok(agent_doc_core::frontmatter::PendingCaptureGuardMode::Warn)
 }
 
 pub fn resolve_review_done_guard_mode(
     file: &Path,
-) -> Result<crate::frontmatter::PendingCaptureGuardMode> {
+) -> Result<agent_doc_core::frontmatter::PendingCaptureGuardMode> {
     let content = std::fs::read_to_string(file)?;
-    let (fm, _) = crate::frontmatter::parse(&content)?;
+    let (fm, _) = agent_doc_core::frontmatter::parse(&content)?;
     if let Some(mode) = fm.review_done_guard {
         return Ok(mode);
     }
-    if let Some(mode) = crate::project_config::load_project_for_doc(file)
+    if let Some(mode) = crate::project_config_io::load_project_for_doc(file)
         .guards
         .review_done
     {
         return Ok(mode);
     }
-    Ok(crate::frontmatter::PendingCaptureGuardMode::Off)
+    Ok(agent_doc_core::frontmatter::PendingCaptureGuardMode::Off)
 }
 
 pub fn resolve_review_done_guard_mode_with_context(
     _file: &Path,
     rc: &crate::graph::RunContext,
-) -> Result<crate::frontmatter::PendingCaptureGuardMode> {
+) -> Result<agent_doc_core::frontmatter::PendingCaptureGuardMode> {
     // Phase 6 (#lr-content-6): cached frontmatter + project config slots.
     let fm = rc.frontmatter();
     if let Some(mode) = fm.review_done_guard {
@@ -236,16 +238,16 @@ pub fn resolve_review_done_guard_mode_with_context(
     if let Some(mode) = rc.project_config().guards.review_done {
         return Ok(mode);
     }
-    Ok(crate::frontmatter::PendingCaptureGuardMode::Off)
+    Ok(agent_doc_core::frontmatter::PendingCaptureGuardMode::Off)
 }
 
 pub fn resolve_auto_done(file: &Path) -> Result<bool> {
     let content = std::fs::read_to_string(file)?;
-    let (fm, _) = crate::frontmatter::parse(&content)?;
+    let (fm, _) = agent_doc_core::frontmatter::parse(&content)?;
     if let Some(enabled) = fm.auto_done {
         return Ok(enabled);
     }
-    Ok(crate::project_config::load_project_for_doc(file)
+    Ok(crate::project_config_io::load_project_for_doc(file)
         .guards
         .auto_done
         .unwrap_or(false))
@@ -266,7 +268,7 @@ pub(crate) fn check_pending_done_guard(
 ) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): resolve guard mode from the cached frontmatter slot.
     let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
-    if mode == crate::frontmatter::PendingCaptureGuardMode::Off {
+    if mode == agent_doc_core::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
     }
 
@@ -325,19 +327,21 @@ pub(crate) fn check_pending_done_guard(
     );
 
     Ok(match mode {
-        crate::frontmatter::PendingCaptureGuardMode::Warn => GuardResult::Warn(vec![
+        agent_doc_core::frontmatter::PendingCaptureGuardMode::Warn => GuardResult::Warn(vec![
             warn_line,
             format!(
                 "[session-check] hint: repair with `{}` or add `pending_done_guard: off` for this document when the item should stay open",
                 repair
             ),
         ]),
-        crate::frontmatter::PendingCaptureGuardMode::Strict => GuardResult::Error(format!(
-            "{}\n[session-check] hint: repair with `{}` or set pending_done_guard = \"warn\" to downgrade",
-            warn_line.replacen("[session-check] warn:", "[session-check] error:", 1),
-            repair
-        )),
-        crate::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
+        agent_doc_core::frontmatter::PendingCaptureGuardMode::Strict => {
+            GuardResult::Error(format!(
+                "{}\n[session-check] hint: repair with `{}` or set pending_done_guard = \"warn\" to downgrade",
+                warn_line.replacen("[session-check] warn:", "[session-check] error:", 1),
+                repair
+            ))
+        }
+        agent_doc_core::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
     })
 }
 
@@ -376,7 +380,7 @@ pub fn detect_missing_pending_done_ids(
 }
 
 pub fn response_text_for_guards(response: &str) -> String {
-    let Ok((patches, unmatched)) = crate::template::parse_patches(response) else {
+    let Ok((patches, unmatched)) = agent_doc_core::template::parse_patches(response) else {
         return response.to_string();
     };
 

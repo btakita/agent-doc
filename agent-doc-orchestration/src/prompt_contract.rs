@@ -161,7 +161,7 @@ pub fn required_explicit_backlog_item_count(
     prompt_targets: &[String],
     added_diff_lines: &[String],
     prompt_presets: &IndexMap<String, String>,
-    prompt_bearing_changes: &[crate::diff::PromptBearingChange],
+    prompt_bearing_changes: &[agent_doc_core::diff::PromptBearingChange],
 ) -> usize {
     if !effective_prompt_references_preset(
         prompt_targets,
@@ -179,7 +179,7 @@ pub fn required_plan_reference_count(
     prompt_targets: &[String],
     added_diff_lines: &[String],
     prompt_presets: &IndexMap<String, String>,
-    prompt_bearing_changes: &[crate::diff::PromptBearingChange],
+    prompt_bearing_changes: &[agent_doc_core::diff::PromptBearingChange],
 ) -> usize {
     if !effective_prompt_references_preset(
         prompt_targets,
@@ -200,7 +200,7 @@ pub fn ordered_issue_units_for_agent_doc_bug(
     prompt_targets: &[String],
     added_diff_lines: &[String],
     prompt_presets: &IndexMap<String, String>,
-    prompt_bearing_changes: &[crate::diff::PromptBearingChange],
+    prompt_bearing_changes: &[agent_doc_core::diff::PromptBearingChange],
 ) -> Vec<String> {
     if !effective_prompt_references_preset(
         prompt_targets,
@@ -213,7 +213,7 @@ pub fn ordered_issue_units_for_agent_doc_bug(
 
     let content_edit_units = ordered_issue_units_from_changes(
         prompt_bearing_changes,
-        crate::diff::PromptBearingChangeKind::ContentEdit,
+        agent_doc_core::diff::PromptBearingChangeKind::ContentEdit,
     );
     if !content_edit_units.is_empty() {
         return content_edit_units;
@@ -221,7 +221,7 @@ pub fn ordered_issue_units_for_agent_doc_bug(
 
     let prompt_target_units = ordered_issue_units_from_changes(
         prompt_bearing_changes,
-        crate::diff::PromptBearingChangeKind::PromptTarget,
+        agent_doc_core::diff::PromptBearingChangeKind::PromptTarget,
     );
     if !prompt_target_units.is_empty() {
         return prompt_target_units;
@@ -401,9 +401,9 @@ fn referenced_presets_in_text(
             continue;
         }
 
-        for preset in crate::diff::extract_prompt_preset_requests_from_text(line) {
+        for preset in agent_doc_core::diff::extract_prompt_preset_requests_from_text(line) {
             if let Some(preset) =
-                crate::frontmatter::resolve_prompt_preset_key(prompt_presets, &preset)
+                agent_doc_core::frontmatter::resolve_prompt_preset_key(prompt_presets, &preset)
                 && !referenced.iter().any(|existing| existing == &preset)
             {
                 referenced.push(preset);
@@ -521,8 +521,8 @@ fn explicit_backlog_target_in_text(current_file: &Path, text: &str) -> Result<Op
 }
 
 fn ordered_issue_units_from_changes(
-    prompt_bearing_changes: &[crate::diff::PromptBearingChange],
-    kind: crate::diff::PromptBearingChangeKind,
+    prompt_bearing_changes: &[agent_doc_core::diff::PromptBearingChange],
+    kind: agent_doc_core::diff::PromptBearingChangeKind,
 ) -> Vec<String> {
     prompt_bearing_changes
         .iter()
@@ -601,10 +601,12 @@ fn count_issue_units_in_text(text: &str) -> usize {
     issue_units_in_text(text).len()
 }
 
-fn required_issue_unit_count(prompt_bearing_changes: &[crate::diff::PromptBearingChange]) -> usize {
+fn required_issue_unit_count(
+    prompt_bearing_changes: &[agent_doc_core::diff::PromptBearingChange],
+) -> usize {
     let content_edit_count = prompt_bearing_changes
         .iter()
-        .filter(|change| change.kind == crate::diff::PromptBearingChangeKind::ContentEdit)
+        .filter(|change| change.kind == agent_doc_core::diff::PromptBearingChangeKind::ContentEdit)
         .map(|change| count_issue_units_in_text(&change.text))
         .sum::<usize>();
     if content_edit_count > 0 {
@@ -613,7 +615,7 @@ fn required_issue_unit_count(prompt_bearing_changes: &[crate::diff::PromptBearin
 
     let prompt_target_count = prompt_bearing_changes
         .iter()
-        .filter(|change| change.kind == crate::diff::PromptBearingChangeKind::PromptTarget)
+        .filter(|change| change.kind == agent_doc_core::diff::PromptBearingChangeKind::PromptTarget)
         .map(|change| count_issue_units_in_text(&change.text))
         .sum::<usize>();
     if prompt_target_count > 0 {
@@ -982,12 +984,12 @@ mod tests {
                 .to_string(),
         )]);
         let changes = vec![
-            crate::diff::PromptBearingChange {
-                kind: crate::diff::PromptBearingChangeKind::PromptTarget,
+            agent_doc_core::diff::PromptBearingChange {
+                kind: agent_doc_core::diff::PromptBearingChangeKind::PromptTarget,
                 text: "Please report this agent-doc missing feature. #agent-doc-bug".to_string(),
             },
-            crate::diff::PromptBearingChange {
-                kind: crate::diff::PromptBearingChangeKind::ContentEdit,
+            agent_doc_core::diff::PromptBearingChange {
+                kind: agent_doc_core::diff::PromptBearingChangeKind::ContentEdit,
                 text: "1. First missing transfer\n2. Second missing transfer\n3. Third missing transfer"
                     .to_string(),
             },
@@ -1010,8 +1012,8 @@ mod tests {
             "Please create a plan for agent-doc to fix this issue. Add to the backlog of tasks/bugs.md"
                 .to_string(),
         )]);
-        let changes = vec![crate::diff::PromptBearingChange {
-            kind: crate::diff::PromptBearingChangeKind::PromptTarget,
+        let changes = vec![agent_doc_core::diff::PromptBearingChange {
+            kind: agent_doc_core::diff::PromptBearingChangeKind::PromptTarget,
             text: "Please report this agent-doc missing feature. #agent-doc-bug".to_string(),
         }];
 
@@ -1033,12 +1035,12 @@ mod tests {
                 .to_string(),
         )]);
         let changes = vec![
-            crate::diff::PromptBearingChange {
-                kind: crate::diff::PromptBearingChangeKind::PromptTarget,
+            agent_doc_core::diff::PromptBearingChange {
+                kind: agent_doc_core::diff::PromptBearingChangeKind::PromptTarget,
                 text: "Please report this agent-doc missing feature. #agent-doc-bug".to_string(),
             },
-            crate::diff::PromptBearingChange {
-                kind: crate::diff::PromptBearingChangeKind::ContentEdit,
+            agent_doc_core::diff::PromptBearingChange {
+                kind: agent_doc_core::diff::PromptBearingChangeKind::ContentEdit,
                 text: "1. First missing transfer\n2. Second missing transfer\n3. Third missing transfer"
                     .to_string(),
             },
@@ -1068,8 +1070,8 @@ mod tests {
         ];
         let changes = prompt_targets
             .iter()
-            .map(|text| crate::diff::PromptBearingChange {
-                kind: crate::diff::PromptBearingChangeKind::PromptTarget,
+            .map(|text| agent_doc_core::diff::PromptBearingChange {
+                kind: agent_doc_core::diff::PromptBearingChangeKind::PromptTarget,
                 text: text.clone(),
             })
             .collect::<Vec<_>>();
@@ -1094,8 +1096,8 @@ mod tests {
                 .to_string(),
         )]);
         let prompt_targets = vec!["#agent-doc-bug\n1. First issue\n2. Second issue".to_string()];
-        let changes = vec![crate::diff::PromptBearingChange {
-            kind: crate::diff::PromptBearingChangeKind::PromptTarget,
+        let changes = vec![agent_doc_core::diff::PromptBearingChange {
+            kind: agent_doc_core::diff::PromptBearingChangeKind::PromptTarget,
             text: prompt_targets[0].clone(),
         }];
 

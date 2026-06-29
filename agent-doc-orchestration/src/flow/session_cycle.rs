@@ -37,10 +37,12 @@ pub struct FinalizePendingMutation<'a> {
     pub target_files: &'a [String],
 }
 
-pub fn prompt_targets_from_changes(changes: &[crate::diff::PromptBearingChange]) -> Vec<String> {
+pub fn prompt_targets_from_changes(
+    changes: &[agent_doc_core::diff::PromptBearingChange],
+) -> Vec<String> {
     changes
         .iter()
-        .filter(|change| change.kind == crate::diff::PromptBearingChangeKind::PromptTarget)
+        .filter(|change| change.kind == agent_doc_core::diff::PromptBearingChangeKind::PromptTarget)
         .map(|change| change.text.clone())
         .collect()
 }
@@ -70,7 +72,7 @@ pub fn classify_execution_scope(
 
 pub fn finalize_command(
     file: &Path,
-    mode: crate::frontmatter::ResolvedMode,
+    mode: agent_doc_core::frontmatter::ResolvedMode,
     pending_mutations: &[FinalizePendingMutation<'_>],
 ) -> String {
     let mut finalize = format!(
@@ -118,9 +120,9 @@ pub fn session_cycle_event(
 mod tests {
     use super::*;
 
-    fn prompt_change(text: &str) -> crate::diff::PromptBearingChange {
-        crate::diff::PromptBearingChange {
-            kind: crate::diff::PromptBearingChangeKind::PromptTarget,
+    fn prompt_change(text: &str) -> agent_doc_core::diff::PromptBearingChange {
+        agent_doc_core::diff::PromptBearingChange {
+            kind: agent_doc_core::diff::PromptBearingChangeKind::PromptTarget,
             text: text.to_string(),
         }
     }
@@ -168,9 +170,9 @@ mod tests {
                 target_files: &targets,
             },
         ];
-        let mode = crate::frontmatter::ResolvedMode {
-            format: crate::frontmatter::AgentDocFormat::Template,
-            write: crate::frontmatter::AgentDocWrite::Crdt,
+        let mode = agent_doc_core::frontmatter::ResolvedMode {
+            format: agent_doc_core::frontmatter::AgentDocFormat::Template,
+            write: agent_doc_core::frontmatter::AgentDocWrite::Crdt,
         };
 
         let command = finalize_command(Path::new("tasks/doc.md"), mode, &pending);

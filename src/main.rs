@@ -8,7 +8,7 @@
 //! - On startup, calls `upgrade::warn_if_outdated()` for all subcommands except `Upgrade`.
 //! - Loads global config via `agent_doc_orchestration::config::load()` before dispatching; config is threaded into
 //!   subcommands that accept an agent backend (`Run`, `Stream`, `Watch`, `Init`).
-//! - Each subcommand delegates immediately to its own module (`agent_doc_orchestration::run::run`, `agent_doc_orchestration::diff::run`, etc.);
+//! - Each subcommand delegates immediately to its own module (`agent_doc_orchestration::run::run`, `agent_doc_orchestration::diff_io::run`, etc.);
 //!   `main` contains no business logic beyond argument destructuring and dispatch.
 //! - `Route` no longer runs a follow-up sync; editor/plugin sync remains the
 //!   authoritative layout path.
@@ -91,7 +91,6 @@ mod upgrade;
 mod worktree;
 
 // Re-export library modules so binary-internal modules can use `crate::` paths
-pub(crate) use agent_doc::crdt;
 pub(crate) use agent_doc::frontmatter;
 pub(crate) use agent_doc::template;
 
@@ -2417,7 +2416,7 @@ fn main() -> anyhow::Result<()> {
                 let to_ref = to.as_deref().unwrap_or("HEAD");
                 history::git_diff(&file, &from_ref, to_ref)
             } else {
-                agent_doc_orchestration::diff::run(&file, wait)
+                agent_doc_orchestration::diff_io::run(&file, wait)
             }
         }
         Commands::Reset {
@@ -3000,7 +2999,7 @@ fn main() -> anyhow::Result<()> {
             json,
         } => agent_doc_orchestration::response_toc::run_fetch(&file, &locator, before, after, json),
         Commands::ArchiveIndex { file, rebuild } => {
-            agent_doc_orchestration::archive_index::run_index(&file, rebuild)
+            agent_doc_sqlite::archive_index::run_index(&file, rebuild)
         }
         Commands::ArchiveSearch {
             file,
@@ -3010,7 +3009,7 @@ fn main() -> anyhow::Result<()> {
             limit,
             json,
             rebuild,
-        } => agent_doc_orchestration::archive_index::run_search(
+        } => agent_doc_sqlite::archive_index::run_search(
             &file,
             query.as_deref(),
             backlog_id.as_deref(),
@@ -3195,7 +3194,7 @@ fn main() -> anyhow::Result<()> {
             no_create_pending,
         ),
         Commands::Boundary { file, component } => {
-            agent_doc_orchestration::boundary::run(&file, component.as_deref())
+            agent_doc_element_boundary::boundary::run(&file, component.as_deref())
         }
         Commands::Terminal { file, session } => terminal::run(&file, session.as_deref()),
         Commands::Autoclaim => autoclaim::run(),

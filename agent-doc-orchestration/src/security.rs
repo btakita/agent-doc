@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::path::{Component, Path, PathBuf};
 
-use crate::frontmatter::{CollaborationMode, Frontmatter};
+use agent_doc_core::frontmatter::{CollaborationMode, Frontmatter};
 
 pub fn enforce_cross_document_review(
     action: &str,

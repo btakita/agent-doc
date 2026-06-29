@@ -1,6 +1,7 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use crate::frontmatter_io;
 
 /// Read the ack-content sidecar file written by the plugin after apply.
 /// Keyed by `patch_id` (same UUID the binary embedded in the patch payload).
@@ -34,7 +35,7 @@ pub(crate) fn read_ack_content_sidecar(
 /// boilerplate. Returns the trimmed heading lines (without the trailing
 /// newline) in order of appearance.
 pub(crate) fn extract_response_headings_from_patches(
-    patches: &[crate::template::PatchBlock],
+    patches: &[agent_doc_core::template::PatchBlock],
 ) -> Vec<String> {
     let mut out = Vec::new();
     for patch in patches {
@@ -65,7 +66,7 @@ pub(crate) fn extract_response_headings_from_patches(
 /// the mid-turn race.
 pub(crate) fn patch_response_headings_already_in_head(
     file: &Path,
-    patches: &[crate::template::PatchBlock],
+    patches: &[agent_doc_core::template::PatchBlock],
 ) -> bool {
     let headings = extract_response_headings_from_patches(patches);
     if headings.is_empty() {
@@ -94,7 +95,7 @@ pub(crate) fn cleanup_legacy_ipc_degraded(project_root: &Path) {
 pub(crate) const IPC_DEWEDGE_TIMEOUT_THRESHOLD: u64 = 2;
 
 pub(crate) fn ipc_dewedge_session_id(file: &Path) -> String {
-    frontmatter::read_session_id(file).unwrap_or_else(|| "-".to_string())
+    frontmatter_io::read_session_id(file).unwrap_or_else(|| "-".to_string())
 }
 
 pub(crate) fn ipc_dewedge_marker_path(project_root: &Path, file: &Path) -> Result<PathBuf> {
@@ -370,7 +371,7 @@ pub(crate) fn content_ours_merged_with_disk_edits(
                 "[write] WARNING: failed to load overlay CRDT merge base, falling back to baseline text: {}",
                 e
             );
-            crate::crdt::CrdtDoc::from_text(base).encode_state()
+            agent_doc_core::crdt::CrdtDoc::from_text(base).encode_state()
         }
     };
     match merge::merge_contents_crdt_with_ops(
@@ -1242,18 +1243,21 @@ pub(crate) fn log_ipcfullprompt_corruption_if_any(
     // Scaffold duplication is a self-check on the candidate (the full-tail
     // duplication shape — two `<!-- /agent:exchange -->` markers — captured live in
     // brandon-cinquegrana.md), so it runs even when no baseline is available.
-    let mut findings = crate::ipc_corruption::detect_duplicated_scaffold(candidate);
+    let mut findings =
+        agent_doc_document_realtime::ipc_corruption::detect_duplicated_scaffold(candidate);
     // Response-block delete/duplicate needs the prior committed baseline.
     if let Some(base) = baseline {
-        findings.extend(crate::ipc_corruption::detect_response_block_corruption(
-            base, candidate,
-        ));
+        findings.extend(
+            agent_doc_document_realtime::ipc_corruption::detect_response_block_corruption(
+                base, candidate,
+            ),
+        );
     }
     if findings.is_empty() {
         return;
     }
     let base = baseline.unwrap_or("");
-    let summary = crate::ipc_corruption::summarize_findings(&findings);
+    let summary = agent_doc_document_realtime::ipc_corruption::summarize_findings(&findings);
     crate::ops_log::log_op(
         file,
         &format!(
@@ -1484,7 +1488,7 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
 
     repair_ipc_decision_visible_state(file, &repair_decision, Some(patch_id))?;
     snapshot::save(file, &repair_decision.snapshot_content)?;
-    let crdt_doc = crate::crdt::CrdtDoc::from_text(&repair_decision.snapshot_content);
+    let crdt_doc = agent_doc_core::crdt::CrdtDoc::from_text(&repair_decision.snapshot_content);
     snapshot::save_document_crdt(
         file,
         &crdt_doc.encode_state(),
@@ -3313,7 +3317,7 @@ mod ack_content_snapshot_tests {
         let original = "---\nsession: test\n---\n\n<!-- agent:exchange -->\ndo #jbpfx2\n<!-- agent:boundary:test-bnd-001 -->\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, original).unwrap();
 
-        let patch = crate::template::PatchBlock::new("exchange", "agent response");
+        let patch = agent_doc_core::template::PatchBlock::new("exchange", "agent response");
 
         // content_ours has the ❯ prefix, but it is only an agent-owned candidate.
         let content_ours = "---\nsession: test\n---\n\n<!-- agent:exchange -->\n❯ do #jbpfx2\nagent response\n<!-- /agent:exchange -->\n";
@@ -3451,7 +3455,7 @@ do #bppfxstrip. spec-test-build-install-commit-push
 ";
         std::fs::write(&doc, original).unwrap();
 
-        let patch = crate::template::PatchBlock::new("exchange", "agent response");
+        let patch = agent_doc_core::template::PatchBlock::new("exchange", "agent response");
         let content_ours = "\
 ---
 session: test
@@ -3558,7 +3562,7 @@ do [#normfallback]
 ";
         std::fs::write(&doc, original).unwrap();
 
-        let patch = crate::template::PatchBlock::new(
+        let patch = agent_doc_core::template::PatchBlock::new(
             "exchange",
             "### Re: #normfallback — gpt-5\n\nCovered.",
         );
@@ -4321,7 +4325,7 @@ do #splpend
 ";
         std::fs::write(&doc, on_disk_with_pending).unwrap();
 
-        let patch = crate::template::PatchBlock::new("exchange", "agent response");
+        let patch = agent_doc_core::template::PatchBlock::new("exchange", "agent response");
         let content_ours = "\
 ---
 session: test
@@ -4427,7 +4431,7 @@ The tmux focus should be snappy.
 ";
         std::fs::write(&doc, original).unwrap();
 
-        let patch = crate::template::PatchBlock::new("exchange", "agent response");
+        let patch = agent_doc_core::template::PatchBlock::new("exchange", "agent response");
         let content_ours = "\
 ---
 session: test
@@ -5065,7 +5069,7 @@ mod core_tests {
             crate::test_support::patch_with_heading("### Re: first topic — opus-4-7"),
             crate::test_support::patch_with_heading("### Re: second topic — opus-4-7"),
             // Patch with no Re: heading should be skipped.
-            crate::template::PatchBlock::new("status", "Just a status update.\n"),
+            agent_doc_core::template::PatchBlock::new("status", "Just a status update.\n"),
         ];
         let headings = extract_response_headings_from_patches(&patches);
         assert_eq!(
@@ -5078,7 +5082,7 @@ mod core_tests {
     }
     #[test]
     fn extract_response_headings_picks_first_re_per_patch() {
-        let patch = crate::template::PatchBlock::new(
+        let patch = agent_doc_core::template::PatchBlock::new(
             "exchange",
             "### Re: outer — opus-4-7\n\nbody mentioning ### Re: inner — opus-4-7 elsewhere\n",
         );
@@ -5319,7 +5323,7 @@ mod core_tests {
         record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p1"), "socket_ipc").unwrap();
         record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p2"), "socket_ipc").unwrap();
 
-        let patch = crate::template::PatchBlock::new("exchange", "new content");
+        let patch = agent_doc_core::template::PatchBlock::new("exchange", "new content");
         let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
 
         assert!(
@@ -5397,7 +5401,7 @@ mod core_tests {
             }
         });
 
-        let patch = crate::template::PatchBlock::new("exchange", "new content");
+        let patch = agent_doc_core::template::PatchBlock::new("exchange", "new content");
         let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
         assert!(
             result.success,

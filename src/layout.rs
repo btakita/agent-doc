@@ -61,7 +61,7 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use crate::frontmatter;
+use agent_doc_core::frontmatter;
 use agent_doc_orchestration::sessions;
 use agent_doc_orchestration::sessions::{PaneMoveOp, Tmux};
 

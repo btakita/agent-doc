@@ -97,7 +97,9 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::sessions::{self, PaneMoveOp, Tmux};
-use crate::{config, frontmatter};
+use agent_doc_core::frontmatter;
+
+use crate::{config, frontmatter_io};
 
 /// Valid process names for agent-doc panes.
 const AGENT_PROCESSES: &[&str] = &["agent-doc", "claude", "codex", "node"];
@@ -457,7 +459,7 @@ fn recover_target_document_pane_in(
     target: &Path,
     base_dir: &Path,
 ) -> Result<TargetDocumentFixOutcome> {
-    let Some(session_id) = frontmatter::read_session_id(target) else {
+    let Some(session_id) = frontmatter_io::read_session_id(target) else {
         return Ok(TargetDocumentFixOutcome::default());
     };
 
@@ -884,7 +886,7 @@ fn registered_pane_still_owns_file(tmux: &Tmux, key: &str, file: &str, pane: &st
         return false;
     }
     let file_path = std::path::Path::new(file);
-    let session_id = frontmatter::read_session_id(file_path).unwrap_or_else(|| key.to_string());
+    let session_id = frontmatter_io::read_session_id(file_path).unwrap_or_else(|| key.to_string());
     crate::sync::find_live_owner_pane(tmux, file_path, &session_id).as_deref() == Some(pane)
 }
 
@@ -1079,7 +1081,7 @@ fn refresh_target_no_live_owner_registry_entry(
         entry.file = registry_file_for_target(scope.target, scope.base_dir);
     }
     if entry.session_id.is_empty()
-        && let Some(session_id) = frontmatter::read_session_id(scope.target)
+        && let Some(session_id) = frontmatter_io::read_session_id(scope.target)
     {
         entry.session_id = session_id;
     }
@@ -1628,7 +1630,7 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
 /// `#stash-session-ttl-prune`: query live tmux state, build candidates, and
 /// either log report-only or kill idle stash panes that exceed the configured TTL.
 fn apply_stash_ttl_prune(tmux: &Tmux) {
-    let config = crate::project_config::load_project();
+    let config = crate::project_config_io::load_project();
     let ttl_secs = config.stash_session_ttl_secs;
     if ttl_secs == 0 {
         return;

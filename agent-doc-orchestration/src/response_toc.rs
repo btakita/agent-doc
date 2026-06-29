@@ -215,7 +215,7 @@ fn archive_entries(
     query: Option<&str>,
     limit: usize,
 ) -> Result<Vec<TocEntry>> {
-    let turns = crate::archive_index::list_recent_turns(file, query, backlog_id, limit)?;
+    let turns = agent_doc_sqlite::archive_index::list_recent_turns(file, query, backlog_id, limit)?;
     Ok(turns
         .into_iter()
         .map(|turn| TocEntry {
@@ -270,8 +270,13 @@ fn fetch_sections(
     let turn_ordinal: i64 = ordinal_text
         .parse()
         .with_context(|| format!("invalid archive turn '{}'", ordinal_text))?;
-    let turns =
-        crate::archive_index::fetch_turn_window(file, archive_path, turn_ordinal, before, after)?;
+    let turns = agent_doc_sqlite::archive_index::fetch_turn_window(
+        file,
+        archive_path,
+        turn_ordinal,
+        before,
+        after,
+    )?;
     Ok(turns
         .into_iter()
         .map(|turn| FetchSection {

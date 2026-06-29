@@ -192,7 +192,9 @@ use crate::flow::routed_reopen::{
 use crate::harness::HarnessConfig;
 use crate::sessions::Tmux;
 use crate::supervisor::ipc::IpcMethod;
-use crate::{frontmatter, prompt, resync, sessions, snapshot, sync};
+use agent_doc_core::frontmatter;
+
+use crate::{frontmatter_io, prompt, resync, sessions, snapshot, sync};
 use std::cell::Cell;
 
 thread_local! {
@@ -575,7 +577,7 @@ fn preserve_route_pane_snapshot(
     phase: &str,
     content: &str,
 ) -> RoutePaneSnapshot {
-    let redacted = crate::secret_redact::redact(content);
+    let redacted = agent_doc_secret_redact::redact(content);
     let hash = crate::ops_log::content_hash(&redacted);
     let short_hash = &hash[..hash.len().min(12)];
     let snapshot = RoutePaneSnapshot {
@@ -763,15 +765,16 @@ fn file_route_dispatch_bug_report(facts: RouteDispatchBugReportFacts<'_>) {
                     facts.harness.binary,
                     facts.phase,
                     facts.issue,
-                    crate::secret_redact::redact(&err.to_string())
+                    agent_doc_secret_redact::redact(&err.to_string())
                         .replace(char::is_whitespace, "_")
                 ),
             );
             return;
         }
     };
-    let target_file = match crate::project_config::agent_doc_bug_target_document_for_doc(facts.file)
-    {
+    let target_file = match crate::project_config_io::agent_doc_bug_target_document_for_doc(
+        facts.file,
+    ) {
         Ok(Some(target)) => target,
         Ok(None) => facts.file.to_path_buf(),
         Err(err) => {
@@ -784,7 +787,7 @@ fn file_route_dispatch_bug_report(facts: RouteDispatchBugReportFacts<'_>) {
                     facts.harness.binary,
                     facts.phase,
                     facts.issue,
-                    crate::secret_redact::redact(&err.to_string())
+                    agent_doc_secret_redact::redact(&err.to_string())
                         .replace(char::is_whitespace, "_")
                 ),
             );
@@ -827,7 +830,7 @@ fn file_route_dispatch_bug_report(facts: RouteDispatchBugReportFacts<'_>) {
                     facts.harness.binary,
                     facts.phase,
                     facts.issue,
-                    crate::secret_redact::redact(&err.to_string())
+                    agent_doc_secret_redact::redact(&err.to_string())
                         .replace(char::is_whitespace, "_")
                 ),
             );
@@ -1564,7 +1567,7 @@ fn managed_capability_proof_status(
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let rc = crate::graph::RunContext::new(file.to_path_buf());
-    let fm = frontmatter::parse_for_file_with_context(&content, file, &rc).map(|(fm, _)| fm)?;
+    let fm = frontmatter_io::parse_for_file_with_context(&content, file, &rc).map(|(fm, _)| fm)?;
     #[cfg(test)]
     let global_config = crate::config::Config::default();
     #[cfg(not(test))]
@@ -2154,8 +2157,9 @@ pub fn run_with_tmux_with_options(
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     // Opt-in gate: a plain `.md` must not be auto-converted into a session.
-    frontmatter::require_agent_doc_document(&content, file)?;
-    let (mut updated_content, session_id) = frontmatter::ensure_session_for_file(&content, file)?;
+    frontmatter_io::require_agent_doc_document(&content, file)?;
+    let (mut updated_content, session_id) =
+        frontmatter_io::ensure_session_for_file(&content, file)?;
     if updated_content != content {
         route_write_document(file, &updated_content, &content, "route_session_id")
             .with_context(|| format!("failed to write {}", file.display()))?;
@@ -2211,7 +2215,7 @@ pub fn run_with_tmux_with_options(
 
     let rc = crate::graph::RunContext::new(file.to_path_buf());
     let fm =
-        frontmatter::parse_for_file_with_context(&updated_content, file, &rc).map(|(f, _)| f)?;
+        frontmatter_io::parse_for_file_with_context(&updated_content, file, &rc).map(|(f, _)| f)?;
     let global_config = rc.global_config();
     let mut harness = HarnessConfig::from_context(&fm, &global_config);
     if plain_trigger {
@@ -2302,13 +2306,13 @@ fn scrub_duplicate_prompt_comments_for_route(
     let mut removed_answered_tail = false;
     let mut removed_comment = false;
     if let Some(tail_cleaned) =
-        crate::template::remove_duplicate_answered_exchange_prompt_tail(&cleaned_content)
+        agent_doc_core::template::remove_duplicate_answered_exchange_prompt_tail(&cleaned_content)
     {
         cleaned_content = tail_cleaned;
         removed_answered_tail = true;
     }
     if let Some(tail_cleaned) =
-        crate::template::remove_post_exchange_duplicate_prompt_comments_preserving_docs(
+        agent_doc_core::template::remove_post_exchange_duplicate_prompt_comments_preserving_docs(
             &cleaned_content,
             preserve_docs,
         )
@@ -2316,7 +2320,7 @@ fn scrub_duplicate_prompt_comments_for_route(
         cleaned_content = tail_cleaned;
         removed_comment = true;
     }
-    crate::template::guard_no_duplicate_prompt_residue_outside_exchange(&cleaned_content)
+    agent_doc_core::template::guard_no_duplicate_prompt_residue_outside_exchange(&cleaned_content)
         .context("route duplicate prompt residue guard failed")?;
     if removed_answered_tail || removed_comment {
         Ok(Some(RouteDuplicatePromptCleanup {
@@ -2428,7 +2432,7 @@ fn drain_open_closeout_before_routed_dispatch(file: &Path) -> Result<RouteCloseo
                 &format!(
                     "route_dispatch_drain_pending_maintenance_warning file={} error={}",
                     file.display(),
-                    crate::secret_redact::redact(&e.to_string())
+                    agent_doc_secret_redact::redact(&e.to_string())
                 ),
             );
         }
@@ -2500,7 +2504,7 @@ fn drain_open_closeout_before_routed_dispatch(file: &Path) -> Result<RouteCloseo
             "route_dispatch_drain_closeout_blocked file={} cycle_id={} blocker={}",
             file.display(),
             state.cycle_id,
-            crate::secret_redact::redact(&last_reason)
+            agent_doc_secret_redact::redact(&last_reason)
         ),
     );
     Ok(RouteCloseoutDrainOutcome::Blocked(last_reason))
@@ -2865,7 +2869,7 @@ fn inactive_route_queue_head(file: &Path) -> Result<Option<String>> {
 
 fn inactive_route_queue_head_in_content(file: &Path, content: &str) -> Result<Option<String>> {
     let rc = crate::graph::RunContext::new(file.to_path_buf());
-    let (fm, _) = frontmatter::parse_for_file_with_context(content, file, &rc)?;
+    let (fm, _) = frontmatter_io::parse_for_file_with_context(content, file, &rc)?;
     if fm.queue_active == Some(true) {
         return Ok(None);
     }
@@ -2925,7 +2929,7 @@ fn inactive_route_queue_head_in_content(file: &Path, content: &str) -> Result<Op
             &format!(
                 "route_dispatch_uncommitted_head file={} decision=defer reason=head_not_in_committed_snapshot head={:?}",
                 file.display(),
-                crate::secret_redact::redact(&head_text)
+                agent_doc_secret_redact::redact(&head_text)
             ),
         );
         return Ok(None);
@@ -3710,8 +3714,8 @@ fn route_via_authoritative_actor(
                         &format!(
                             "route_dispatch_drain_closeout_wait_existing_queue file={} head={} blocker={}",
                             file.display(),
-                            crate::secret_redact::redact(&head),
-                            crate::secret_redact::redact(&blocker)
+                            agent_doc_secret_redact::redact(&head),
+                            agent_doc_secret_redact::redact(&blocker)
                         ),
                     );
                     eprintln!(

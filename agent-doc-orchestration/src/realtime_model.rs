@@ -332,7 +332,7 @@ pub fn compute_broadcast(
             originator_echo_suppressed: true,
         });
     }
-    let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
+    let base_state = agent_doc_core::crdt::CrdtDoc::from_text(base).encode_state();
     let (merged, _state) = crate::merge::merge_contents_crdt(Some(&base_state), originator, peer)?;
     let originator_echo_suppressed = merged == originator;
     Ok(BroadcastMerge {

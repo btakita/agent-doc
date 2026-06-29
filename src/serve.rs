@@ -726,7 +726,7 @@ fn is_agent_doc_file(path: &Path) -> Result<bool> {
     }
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read {}", path.display()))?;
-    let (frontmatter, _) = match crate::frontmatter::parse(&content) {
+    let (frontmatter, _) = match agent_doc_core::frontmatter::parse(&content) {
         Ok(parsed) => parsed,
         Err(_) => return Ok(false),
     };
@@ -740,7 +740,7 @@ fn is_agent_doc_file(path: &Path) -> Result<bool> {
 fn read_agent_doc_session_id(path: &Path) -> Result<Option<String>> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read {}", path.display()))?;
-    let (frontmatter, _) = crate::frontmatter::parse(&content)?;
+    let (frontmatter, _) = agent_doc_core::frontmatter::parse(&content)?;
     Ok(frontmatter.session)
 }
 

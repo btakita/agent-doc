@@ -33,7 +33,7 @@
 //!   (stripping script/style/nav/footer/noscript/svg), caches in
 //!   `.agent-doc/links_cache/<sha256(url)>.txt`, and reports changes by
 //!   comparing against the cached content.
-//! - Step 4 — diff: calls `diff::compute(file)` to compare the current
+//! - Step 4 — diff: calls `diff_io::compute(file)` to compare the current
 //!   document against the last snapshot; `no_changes=true` when they match.
 //! - Also emits a bounded `session_accretion` advisory when local exchange/log
 //!   heuristics detect churn-heavy growth or restart-heavy reopen patterns.
@@ -106,7 +106,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::{config, diff, frontmatter, git, repair, resync, sessions, snapshot, sync};
+use agent_doc_core::frontmatter;
+
+use crate::{config, diff_io, frontmatter_io, git, repair, resync, sessions, snapshot, sync};
 use agent_doc_element::element::{
     is_backlog_component, is_review_component, is_tracked_work_component,
 };
@@ -214,7 +216,7 @@ pub struct SemanticNodeEvent {
 /// Bounded preview of a prompt-bearing semantic change.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SemanticPromptChange {
-    pub kind: crate::diff::PromptBearingChangeKind,
+    pub kind: agent_doc_core::diff::PromptBearingChangeKind,
     pub text_preview: String,
 }
 
@@ -303,7 +305,7 @@ pub struct PreflightOutput {
     /// When present, the skill should dispatch `agent-doc orchestrate <FILE>
     /// --mode <mode> --from-exchange` before attempting any manual response.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub orchestration_request: Option<crate::diff::OrchestrationRequest>,
+    pub orchestration_request: Option<agent_doc_core::diff::OrchestrationRequest>,
     /// Prompt preset references requested from the changed exchange content.
     ///
     /// Values are preset names such as `#1` or `release-check`, in request order
@@ -394,7 +396,7 @@ pub struct PreflightOutput {
     /// the agent must incorporate, and `recovery_artifact` / `boundary_artifact`
     /// items indicate document-state cleanup rather than ordinary conversation.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub prompt_bearing_changes: Vec<crate::diff::PromptBearingChange>,
+    pub prompt_bearing_changes: Vec<agent_doc_core::diff::PromptBearingChange>,
     /// `prompt_bearing_changes` with managed-component state edits filtered
     /// out (queue activity toggle, queue items, backlog/review/done items,
     /// `queue_active:` frontmatter toggle), AND with edits the affectedness
@@ -406,7 +408,7 @@ pub struct PreflightOutput {
     /// user prompt (which edits the in-scope `exchange` tail and classifies as
     /// turn-affecting) preempts. Plan: `#ccloopguard`, `#queue-no-stop-unrelated-edit`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub user_intent_prompt_changes: Vec<crate::diff::PromptBearingChange>,
+    pub user_intent_prompt_changes: Vec<agent_doc_core::diff::PromptBearingChange>,
     /// Legacy compatibility field: inline user edits inside prior agent responses.
     /// Derived from `prompt_bearing_changes` by keeping only `prompt_target` and
     /// `content_edit` items.
@@ -502,7 +504,7 @@ pub struct PreflightOutput {
     /// frontmatter block as a fallback hint (cycle-state wins on conflict). Null
     /// when neither is present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pipeline: Option<crate::frontmatter::AgentDocPipeline>,
+    pub pipeline: Option<agent_doc_core::frontmatter::AgentDocPipeline>,
     /// `#semmerge-ack-turn` (semantic_merge Phase 4): node-keyed acks carried from
     /// the prior cycle's convergence semantic merge. Non-empty when the operator
     /// deleted an agent-edited node, overrode the same node, or revived an
@@ -528,7 +530,8 @@ fn relocate_out_of_exchange_prompt_before_diff(
         return Ok(None);
     }
 
-    let Some(mut repaired) = crate::template::repair_prompt_tail_outside_exchange(doc_content)?
+    let Some(mut repaired) =
+        agent_doc_core::template::repair_prompt_tail_outside_exchange(doc_content)?
     else {
         return Ok(None);
     };
@@ -547,9 +550,11 @@ fn relocate_out_of_exchange_prompt_before_diff(
 }
 
 fn remove_duplicate_answered_exchange_prompt_tail_for_preflight(file: &Path) -> Result<bool> {
-    let Some(cleaned_doc) = crate::template::remove_duplicate_answered_exchange_prompt_tail(
-        &std::fs::read_to_string(file)?,
-    ) else {
+    let Some(cleaned_doc) =
+        agent_doc_core::template::remove_duplicate_answered_exchange_prompt_tail(
+            &std::fs::read_to_string(file)?,
+        )
+    else {
         return Ok(false);
     };
 
@@ -584,7 +589,7 @@ fn remove_post_exchange_duplicate_prompt_comments_for_preflight(
         preserve_docs.push(snapshot_doc);
     }
     let Some(cleaned_doc) =
-        crate::template::remove_post_exchange_duplicate_prompt_comments_preserving_docs(
+        agent_doc_core::template::remove_post_exchange_duplicate_prompt_comments_preserving_docs(
             &current,
             &preserve_docs,
         )
@@ -656,7 +661,7 @@ fn explicit_backlog_target_requirements(
             None
         };
         let target_frontmatter = if let Some(content) = target_existing.as_ref() {
-            Some(frontmatter::parse_for_file(content, target)?.0)
+            Some(frontmatter_io::parse_for_file(content, target)?.0)
         } else {
             None
         };
@@ -822,7 +827,7 @@ pub fn document_active_identities(
 ) -> std::collections::BTreeMap<String, Vec<String>> {
     let mut sources: std::collections::BTreeMap<String, Vec<String>> =
         std::collections::BTreeMap::new();
-    if let Ok((fm, _)) = crate::frontmatter::parse(content) {
+    if let Ok((fm, _)) = agent_doc_core::frontmatter::parse(content) {
         for key in fm.prompt_presets.keys() {
             let norm = key.trim().trim_start_matches('#').to_string();
             if !norm.is_empty() {
@@ -2166,17 +2171,18 @@ fn detect_route_queue_snapshot_commit_boundary_recoverable(
 
     let head_norm = strip_route_queue_state_for_boundary_compare(&head);
     let snapshot_norm = strip_route_queue_state_for_boundary_compare(&snapshot);
-    let Some(diff_text) = crate::diff::unified_diff_from_contents(&head_norm, &snapshot_norm)
+    let Some(diff_text) =
+        agent_doc_core::diff::unified_diff_from_contents(&head_norm, &snapshot_norm)
     else {
         return Ok(true);
     };
-    let changes = crate::diff::classify_prompt_bearing_changes(&diff_text)
+    let changes = agent_doc_core::diff::classify_prompt_bearing_changes(&diff_text)
         .into_iter()
         .filter(|change| {
             !matches!(
                 change.kind,
-                crate::diff::PromptBearingChangeKind::RecoveryArtifact
-                    | crate::diff::PromptBearingChangeKind::BoundaryArtifact
+                agent_doc_core::diff::PromptBearingChangeKind::RecoveryArtifact
+                    | agent_doc_core::diff::PromptBearingChangeKind::BoundaryArtifact
             )
         })
         .collect::<Vec<_>>();
@@ -2185,7 +2191,7 @@ fn detect_route_queue_snapshot_commit_boundary_recoverable(
     }
 
     Ok(changes.iter().all(|change| {
-        change.kind == crate::diff::PromptBearingChangeKind::PromptTarget
+        change.kind == agent_doc_core::diff::PromptBearingChangeKind::PromptTarget
             && snapshot_prompts
                 .iter()
                 .any(|prompt| prompt == &normalize_route_queue_prompt_text(&change.text))
@@ -2193,7 +2199,7 @@ fn detect_route_queue_snapshot_commit_boundary_recoverable(
 }
 
 fn route_queue_prompt_texts(content: &str) -> Result<Vec<String>> {
-    let (fm, body) = crate::frontmatter::parse(content)?;
+    let (fm, body) = agent_doc_core::frontmatter::parse(content)?;
     if fm.queue_active != Some(true) {
         return Ok(Vec::new());
     }
@@ -3365,9 +3371,9 @@ mod th {
         std::fs::create_dir_all(&logs).unwrap();
         std::fs::write(logs.join("ops.log"), body).unwrap();
     }
-    pub(crate) fn user_prompt_change(text: &str) -> crate::diff::PromptBearingChange {
-        crate::diff::PromptBearingChange {
-            kind: crate::diff::PromptBearingChangeKind::PromptTarget,
+    pub(crate) fn user_prompt_change(text: &str) -> agent_doc_core::diff::PromptBearingChange {
+        agent_doc_core::diff::PromptBearingChange {
+            kind: agent_doc_core::diff::PromptBearingChangeKind::PromptTarget,
             text: text.to_string(),
         }
     }
@@ -3912,7 +3918,7 @@ mod tests {
         .unwrap();
 
         // diff::compute should detect changes → no_changes = false.
-        let diff_result = diff::compute(&doc).unwrap();
+        let diff_result = diff_io::compute(&doc).unwrap();
         assert!(diff_result.is_some(), "diff should detect new content");
     }
     #[test]
@@ -4047,25 +4053,26 @@ mod tests {
 
             // Mirrors `first_unstarted_prompt_bearing_change`: classify the diff
             // the prompt-bearing guard would see.
-            let diff_text = crate::diff::unified_diff_from_contents(before, &updated)
+            let diff_text = agent_doc_core::diff::unified_diff_from_contents(before, &updated)
                 .expect("expected a non-empty diff after appending the note");
-            let changes = crate::diff::classify_prompt_bearing_changes(&diff_text);
+            let changes = agent_doc_core::diff::classify_prompt_bearing_changes(&diff_text);
             assert!(
-                !changes
-                    .iter()
-                    .any(|c| matches!(c.kind, crate::diff::PromptBearingChangeKind::PromptTarget)),
+                !changes.iter().any(|c| matches!(
+                    c.kind,
+                    agent_doc_core::diff::PromptBearingChangeKind::PromptTarget
+                )),
                 "dogfood note must not classify as a PromptTarget for {diagnostic}: {changes:?}"
             );
             assert!(
                 changes.iter().any(|c| matches!(
                     c.kind,
-                    crate::diff::PromptBearingChangeKind::RecoveryArtifact
+                    agent_doc_core::diff::PromptBearingChangeKind::RecoveryArtifact
                 )),
                 "dogfood note must classify as a RecoveryArtifact for {diagnostic}: {changes:?}"
             );
             // No `❯` prompt-prefix normalization may be derived from the note.
             assert!(
-                crate::diff::prompt_prefix_normalization_targets(&diff_text).is_empty(),
+                agent_doc_core::diff::prompt_prefix_normalization_targets(&diff_text).is_empty(),
                 "dogfood note must not trigger prompt-prefix normalization for {diagnostic}"
             );
             // The exchange tail is not left as a prompt-only tail.
@@ -4567,7 +4574,7 @@ mod tests {
             "<!-- agent:backlog -->\n",
             "<!-- /agent:backlog -->\n",
         );
-        let (fm, _) = crate::frontmatter::parse(content).unwrap();
+        let (fm, _) = agent_doc_core::frontmatter::parse(content).unwrap();
         let warning = post_exchange_comment_prompt_preset_warning(
             Path::new("session.md"),
             content,
@@ -4603,7 +4610,7 @@ mod tests {
             "<!-- archived #spec-test-build-install-commit-push -->\n",
             "<!-- /agent:done -->\n",
         );
-        let (fm, _) = crate::frontmatter::parse(content).unwrap();
+        let (fm, _) = agent_doc_core::frontmatter::parse(content).unwrap();
 
         assert!(
             post_exchange_comment_prompt_preset_warning(
@@ -4823,7 +4830,7 @@ mod tests {
             "/clear\n",
             "-->\n",
         );
-        let (fm, _) = crate::frontmatter::parse(content).unwrap();
+        let (fm, _) = agent_doc_core::frontmatter::parse(content).unwrap();
         let warning = post_exchange_comment_prompt_preset_warning(
             Path::new("session.md"),
             content,
@@ -4948,8 +4955,8 @@ mod tests {
     fn preflight_output_includes_orchestration_request() {
         let output = PreflightOutput {
             no_changes: false,
-            orchestration_request: Some(crate::diff::OrchestrationRequest {
-                mode: crate::diff::OrchestrationRequestMode::Sequential,
+            orchestration_request: Some(agent_doc_core::diff::OrchestrationRequest {
+                mode: agent_doc_core::diff::OrchestrationRequestMode::Sequential,
                 trigger_text: "Synchronous orcestra.".to_string(),
                 task_count: 5,
             }),
@@ -5024,7 +5031,7 @@ mod tests {
     #[test]
     fn codex_network_access_warning_for_non_codex_harness() {
         let content = "---\nagent_doc_session: test\nagent: opencode\ncodex_network_access: enabled\n---\n\ntest\n";
-        let (fm, _) = crate::frontmatter::parse(content).unwrap();
+        let (fm, _) = agent_doc_core::frontmatter::parse(content).unwrap();
         assert!(
             fm.codex_network_access.is_some(),
             "frontmatter should have codex_network_access"
@@ -5579,12 +5586,12 @@ mod tests {
     fn preflight_output_includes_prompt_bearing_changes() {
         let output = PreflightOutput {
             prompt_bearing_changes: vec![
-                crate::diff::PromptBearingChange {
-                    kind: crate::diff::PromptBearingChangeKind::PromptTarget,
+                agent_doc_core::diff::PromptBearingChange {
+                    kind: agent_doc_core::diff::PromptBearingChangeKind::PromptTarget,
                     text: "❯ Why was this missed?".to_string(),
                 },
-                crate::diff::PromptBearingChange {
-                    kind: crate::diff::PromptBearingChangeKind::ContentEdit,
+                agent_doc_core::diff::PromptBearingChange {
+                    kind: agent_doc_core::diff::PromptBearingChangeKind::ContentEdit,
                     text: "This line should say 503, not 401.".to_string(),
                 },
             ],
@@ -5648,7 +5655,7 @@ mod tests {
     fn preflight_output_slash_commands_from_diff() {
         // /clear is a built-in command — goes to builtin_commands, not slash_commands
         let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+/clear\n";
-        let parsed_cmds = crate::diff::parse_slash_commands_classified(diff);
+        let parsed_cmds = agent_doc_core::diff::parse_slash_commands_classified(diff);
         let output = PreflightOutput {
             layout_issues: vec![],
             recovered: false,

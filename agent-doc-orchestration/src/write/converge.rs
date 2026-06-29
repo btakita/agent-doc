@@ -36,7 +36,7 @@ pub fn guard_no_stale_snapshot_reset_drift(
         return Ok(false);
     };
     if let Ok(Some(cleaned)) =
-        crate::template::deleted_conversation_tail_cleanup(snapshot_doc, current_doc)
+        agent_doc_core::template::deleted_conversation_tail_cleanup(snapshot_doc, current_doc)
         && cleaned == current_doc
     {
         return Ok(false);
@@ -47,7 +47,7 @@ pub fn guard_no_stale_snapshot_reset_drift(
     };
     if let Some(reason) = classify_stale_snapshot_visible_rebase(file, snapshot_doc, current_doc) {
         crate::snapshot::save(file, current_doc)?;
-        let crdt = crate::crdt::CrdtDoc::from_text(current_doc).encode_state();
+        let crdt = agent_doc_core::crdt::CrdtDoc::from_text(current_doc).encode_state();
         crate::snapshot::save_document_crdt(file, &crdt, current_doc)?;
         crate::ops_log::log_op(
             file,
@@ -109,8 +109,10 @@ fn classify_stale_snapshot_visible_rebase(
         return None;
     }
 
-    let (snapshot_frontmatter, snapshot_body) = crate::frontmatter::parse(snapshot_doc).ok()?;
-    let (current_frontmatter, current_body) = crate::frontmatter::parse(current_doc).ok()?;
+    let (snapshot_frontmatter, snapshot_body) =
+        agent_doc_core::frontmatter::parse(snapshot_doc).ok()?;
+    let (current_frontmatter, current_body) =
+        agent_doc_core::frontmatter::parse(current_doc).ok()?;
     if !frontmatter_agent_only_equivalent(&snapshot_frontmatter, &current_frontmatter) {
         return None;
     }
@@ -207,8 +209,8 @@ fn active_capture_response_removed(file: &Path, snapshot_doc: &str, current_doc:
 }
 
 fn frontmatter_agent_only_equivalent(
-    snapshot: &crate::frontmatter::Frontmatter,
-    current: &crate::frontmatter::Frontmatter,
+    snapshot: &agent_doc_core::frontmatter::Frontmatter,
+    current: &agent_doc_core::frontmatter::Frontmatter,
 ) -> bool {
     normalized_frontmatter_without_agent(snapshot)
         .zip(normalized_frontmatter_without_agent(current))
@@ -216,7 +218,7 @@ fn frontmatter_agent_only_equivalent(
 }
 
 fn normalized_frontmatter_without_agent(
-    frontmatter: &crate::frontmatter::Frontmatter,
+    frontmatter: &agent_doc_core::frontmatter::Frontmatter,
 ) -> Option<serde_yaml::Value> {
     let mut value = serde_yaml::to_value(frontmatter).ok()?;
     if let serde_yaml::Value::Mapping(map) = &mut value {
@@ -464,7 +466,8 @@ fn exchange_prompt_target_lines(exchange_body: &str) -> Vec<String> {
         .lines()
         .filter_map(|line| {
             let trimmed = line.trim();
-            if trimmed.starts_with('❯') || crate::diff::text_line_looks_like_prompt_target(trimmed)
+            if trimmed.starts_with('❯')
+                || agent_doc_core::diff::text_line_looks_like_prompt_target(trimmed)
             {
                 Some(
                     trimmed
@@ -657,7 +660,7 @@ pub fn try_auto_recover_live_prompt_drift(
         )
     })?;
     crate::snapshot::save(file, &recovery_target)?;
-    let crdt_doc = crate::crdt::CrdtDoc::from_text(&recovery_target);
+    let crdt_doc = agent_doc_core::crdt::CrdtDoc::from_text(&recovery_target);
     crate::snapshot::save_document_crdt(file, &crdt_doc.encode_state(), &recovery_target)?;
     log_live_prompt_drift_auto_recovered(
         file,
@@ -902,7 +905,7 @@ pub fn reconcile_postcommit_exchange_to_head(working: &str, head: &str) -> Optio
     let exchange_changes = prompt_bearing_user_changes_between(head_body, working_body);
     if exchange_changes
         .iter()
-        .any(|change| change.kind == crate::diff::PromptBearingChangeKind::PromptTarget)
+        .any(|change| change.kind == agent_doc_core::diff::PromptBearingChangeKind::PromptTarget)
     {
         return None;
     }
@@ -4397,8 +4400,8 @@ mod core_tests {
             Some(0),
         );
         crate::turn_scope_store::save(&doc, &scope).unwrap();
-        let (_, snapshot_body) = crate::frontmatter::parse(&snapshot).unwrap();
-        let (_, current_body) = crate::frontmatter::parse(&current).unwrap();
+        let (_, snapshot_body) = agent_doc_core::frontmatter::parse(&snapshot).unwrap();
+        let (_, current_body) = agent_doc_core::frontmatter::parse(&current).unwrap();
         let queue_events: Vec<_> =
             agent_doc_markdown_ast::events::diff_node_events(snapshot_body, current_body)
                 .into_iter()

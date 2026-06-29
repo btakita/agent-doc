@@ -11,7 +11,7 @@ use lazily::{ThreadSafeContext, ThreadSafeStateMachine};
 use serde::{Deserialize, Serialize};
 
 use crate::cycle_state::CyclePhase;
-use crate::cycle_state_machine::{CycleEvent, CyclePhaseMachine};
+use agent_doc_turn::{CycleEvent, CyclePhaseMachine};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -45,7 +45,7 @@ fn editor_buffer_converged_to_head(file: &std::path::Path) -> bool {
         == crate::git::normalize_for_replay_hash(&working)
 }
 
-/// `#fbwire` Phase 2 — gather the four [`crate::convergence_gate::ConvergenceFacts`]
+/// `#fbwire` Phase 2 — gather the four [`agent_doc_document_realtime::convergence_gate::ConvergenceFacts`]
 /// the inter-item dispatch boundary needs from live runtime state. `deferring_since`
 /// is the instant the gate FIRST deferred for the current pending dispatch (reset to
 /// `None` on every `Dispatch`), so `elapsed_ms` measures only the
@@ -56,7 +56,7 @@ fn gather_convergence_facts(
     shared: &SupervisorShared,
     deferring_since: Option<std::time::Instant>,
     timeout_ms: u64,
-) -> crate::convergence_gate::ConvergenceFacts {
+) -> agent_doc_document_realtime::convergence_gate::ConvergenceFacts {
     let committed = match crate::cycle_state::load(file) {
         Ok(Some(state)) => matches!(state.phase, crate::cycle_state::CyclePhase::Committed),
         _ => true,
@@ -64,7 +64,7 @@ fn gather_convergence_facts(
     let elapsed_ms = deferring_since
         .map(|since| since.elapsed().as_millis() as u64)
         .unwrap_or(0);
-    crate::convergence_gate::ConvergenceFacts {
+    agent_doc_document_realtime::convergence_gate::ConvergenceFacts {
         committed,
         editor_converged: editor_buffer_converged_to_head(file),
         inflight: crate::ipc_socket::inflight_connection_handlers(),
@@ -96,7 +96,7 @@ fn editor_typing_active_for_idle_queue(file: &std::path::Path) -> bool {
 /// closed.
 fn record_convergence_gate_blocked(
     file: &std::path::Path,
-    facts: &crate::convergence_gate::ConvergenceFacts,
+    facts: &agent_doc_document_realtime::convergence_gate::ConvergenceFacts,
     unmet: &[&'static str],
 ) {
     let state = crate::cycle_state::load(file).ok().flatten();
@@ -775,7 +775,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // surfaced so `agent:` edits are observable + operator-verifiable.
                 if agent_change_restart_enabled
                     && let Ok(content) = std::fs::read_to_string(&path)
-                    && let Ok((fm, _)) = crate::frontmatter::parse(&content)
+                    && let Ok((fm, _)) = agent_doc_core::frontmatter::parse(&content)
                 {
                     let global = crate::config::load().unwrap_or_default();
                     let resolved = crate::harness::HarnessConfig::from_context(&fm, &global);
@@ -2568,8 +2568,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 convergence_gate_deferring_since,
                                 CONVERGENCE_GATE_TIMEOUT_MS,
                             );
-                            match crate::convergence_gate::convergence_gate_decision(&facts) {
-                                crate::convergence_gate::ConvergenceGateDecision::Dispatch => {
+                            match agent_doc_document_realtime::convergence_gate::convergence_gate_decision(&facts) {
+                                agent_doc_document_realtime::convergence_gate::ConvergenceGateDecision::Dispatch => {
                                     // `#j9ja` / `#optverify`: distinctive SUCCESS marker so the
                                     // `#fbwireverify` slow-ACK live test auto-verifies. Emit it
                                     // ONLY when the gate had been deferring (the meaningful
@@ -2592,7 +2592,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     convergence_gate_blocked_reported = false;
                                     // fall through to the existing dispatch path below
                                 }
-                                crate::convergence_gate::ConvergenceGateDecision::Defer {
+                                agent_doc_document_realtime::convergence_gate::ConvergenceGateDecision::Defer {
                                     unmet,
                                 } => {
                                     if convergence_gate_deferring_since.is_none() {
@@ -2625,7 +2625,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     );
                                     continue;
                                 }
-                                crate::convergence_gate::ConvergenceGateDecision::Blocked {
+                                agent_doc_document_realtime::convergence_gate::ConvergenceGateDecision::Blocked {
                                     unmet,
                                 } => {
                                     if convergence_gate_deferring_since.is_none() {
@@ -3325,7 +3325,7 @@ mod tests {
 
     // ----- `#fbwire` / `#fullboundary` Phase 2: convergence-gated boundary -----
 
-    use crate::convergence_gate::{
+    use agent_doc_document_realtime::convergence_gate::{
         ConvergenceFacts, ConvergenceGateDecision, convergence_gate_decision,
     };
 
@@ -3407,7 +3407,9 @@ mod tests {
         for d in &decisions[..3] {
             match d {
                 ConvergenceGateDecision::Defer { unmet } => {
-                    assert!(unmet.contains(&crate::convergence_gate::proof::INFLIGHT_DRAINED));
+                    assert!(unmet.contains(
+                        &agent_doc_document_realtime::convergence_gate::proof::INFLIGHT_DRAINED
+                    ));
                 }
                 other => panic!("inflight>0 must Defer, not dispatch: {other:?}"),
             }
@@ -3436,8 +3438,12 @@ mod tests {
         };
         match convergence_gate_decision(&wedged) {
             ConvergenceGateDecision::Blocked { unmet } => {
-                assert!(unmet.contains(&crate::convergence_gate::proof::EDITOR_CONVERGED));
-                assert!(unmet.contains(&crate::convergence_gate::proof::INFLIGHT_DRAINED));
+                assert!(unmet.contains(
+                    &agent_doc_document_realtime::convergence_gate::proof::EDITOR_CONVERGED
+                ));
+                assert!(unmet.contains(
+                    &agent_doc_document_realtime::convergence_gate::proof::INFLIGHT_DRAINED
+                ));
             }
             other => panic!("wedged editor past timeout must block dispatch: {other:?}"),
         }
@@ -3461,8 +3467,8 @@ mod tests {
             timeout_ms: CONVERGENCE_GATE_TIMEOUT_MS,
         };
         let unmet = vec![
-            crate::convergence_gate::proof::EDITOR_CONVERGED,
-            crate::convergence_gate::proof::INFLIGHT_DRAINED,
+            agent_doc_document_realtime::convergence_gate::proof::EDITOR_CONVERGED,
+            agent_doc_document_realtime::convergence_gate::proof::INFLIGHT_DRAINED,
         ];
         record_convergence_gate_blocked(&doc, &facts, &unmet);
 

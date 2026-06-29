@@ -76,7 +76,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::agent::streaming::{StreamChunk, StreamingAgent};
-use crate::{agent, config::Config, crdt, diff, frontmatter, git, repair, snapshot, template};
+use agent_doc_core::{crdt, diff, frontmatter, template};
+
+use crate::{agent, config::Config, diff_io, git, repair, snapshot, template_io};
 
 /// Run the stream command: stream agent output to document in real-time.
 ///
@@ -132,7 +134,7 @@ pub fn run(
     );
 
     // Compute diff
-    let the_diff = match diff::compute(file)? {
+    let the_diff = match diff_io::compute(file)? {
         Some(d) => {
             eprintln!("[stream] diff computed ({} bytes)", d.len());
             d
@@ -337,7 +339,7 @@ fn stream_loop(
                         eprintln!(
                             "[stream] {} error: {}",
                             label,
-                            crate::secret_redact::redact(&e.to_string())
+                            agent_doc_secret_redact::redact(&e.to_string())
                         );
                     }
                 }
@@ -353,7 +355,7 @@ fn stream_loop(
                         Err(e) => {
                             eprintln!(
                                 "[stream] thinking flush error: {}",
-                                crate::secret_redact::redact(&e.to_string())
+                                agent_doc_secret_redact::redact(&e.to_string())
                             );
                         }
                     }
@@ -455,10 +457,11 @@ fn stream_loop(
                 "<!-- patch:{} -->\n{}\n<!-- /patch:{} -->",
                 target, final_text, target
             );
-            let (patches, unmatched) = crate::template::parse_patches(&patch).unwrap_or_default();
+            let (patches, unmatched) =
+                agent_doc_core::template::parse_patches(&patch).unwrap_or_default();
             let mut mode_overrides = std::collections::HashMap::new();
             mode_overrides.insert(target.to_string(), "replace".to_string());
-            crate::template::apply_patches_with_overrides_with_context(
+            crate::template_io::apply_patches_with_overrides_with_context(
                 baseline,
                 &patches,
                 &unmatched,
@@ -548,7 +551,7 @@ pub fn flush_to_document(file: &Path, text: &str, target: &str, _baseline: &str)
         .with_context(|| format!("failed to read {}", file.display()))?;
 
     // Apply patches with replace override for stream target
-    let content_patched = template::apply_patches_with_overrides_with_context(
+    let content_patched = template_io::apply_patches_with_overrides_with_context(
         &content_current,
         &patches,
         &unmatched,
@@ -612,7 +615,7 @@ fn resolve_streaming(
     config: Option<&crate::config::AgentConfig>,
     env: Vec<(String, Option<String>)>,
     file: &Path,
-    fm: &crate::frontmatter::Frontmatter,
+    fm: &agent_doc_core::frontmatter::Frontmatter,
 ) -> Result<Box<dyn StreamingAgent>> {
     let Some(agent) = agent::resolve_streaming_for_file(name, config, env, file, fm)? else {
         anyhow::bail!(
@@ -1196,11 +1199,11 @@ Done — all packages pushed.";
             "<!-- patch:{} -->\n{}\n<!-- /patch:{} -->",
             target, final_text, target
         );
-        let (patches, unmatched) = crate::template::parse_patches(&patch).unwrap();
+        let (patches, unmatched) = agent_doc_core::template::parse_patches(&patch).unwrap();
         let mut mode_overrides = std::collections::HashMap::new();
         mode_overrides.insert(target.to_string(), "replace".to_string());
         let file = std::path::Path::new("test.md");
-        let content_ours = crate::template::apply_patches_with_overrides(
+        let content_ours = crate::template_io::apply_patches_with_overrides(
             baseline,
             &patches,
             &unmatched,
@@ -1250,12 +1253,12 @@ user prompt here
             "<!-- patch:{} -->\n{}\n<!-- /patch:{} -->",
             target, final_text, target
         );
-        let (patches, unmatched) = crate::template::parse_patches(&patch).unwrap();
+        let (patches, unmatched) = agent_doc_core::template::parse_patches(&patch).unwrap();
         let file = std::path::Path::new("test.md");
 
         // dedup_exchange_adjacent_lines now removes the echo duplication in append mode
         let content_no_override =
-            crate::template::apply_patches(baseline, &patches, &unmatched, file).unwrap();
+            crate::template_io::apply_patches(baseline, &patches, &unmatched, file).unwrap();
 
         // "user prompt here" should appear exactly once — dedup prevents echo duplication
         assert_eq!(

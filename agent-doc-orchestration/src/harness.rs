@@ -18,7 +18,7 @@
 //! - `trigger_command` substitutes the file path into the template.
 
 use crate::config::Config;
-use crate::frontmatter::Frontmatter;
+use agent_doc_core::frontmatter::Frontmatter;
 use anyhow::{Result, bail};
 
 /// How the supervisor builds args on restart after a crash.

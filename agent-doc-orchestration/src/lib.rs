@@ -40,21 +40,6 @@
 //! for harness, git, editor, and remaining command ports while those ports are
 //! split into narrower crates.
 
-// Core-backed shims (mirror the main-crate shims).
-pub mod crdt;
-pub mod frontmatter;
-pub mod project_config;
-pub mod template;
-
-pub use agent_doc_document as document;
-pub use agent_doc_document_realtime as document_realtime;
-pub use agent_doc_tmux as tmux;
-pub use agent_doc_tmux_commands as tmux_commands;
-pub use agent_doc_tmux_io as tmux_io;
-pub use agent_doc_turn as turn;
-pub use agent_doc_turn_executor as turn_executor;
-pub use agent_doc_turn_executor_tmux as turn_executor_tmux;
-
 // Foundation utilities (increments 1–5).
 pub mod config;
 pub mod env;
@@ -63,7 +48,6 @@ pub mod input_diag;
 pub mod ipc_socket;
 pub mod ops_log;
 pub mod project_config_io;
-pub mod secret_redact;
 
 // I/O wrappers for the core-backed shims.
 pub mod frontmatter_io;
@@ -73,15 +57,11 @@ pub mod template_io;
 pub mod security;
 
 // The orchestration cluster + sessions/supervisor + neighbors (increment 6).
-pub mod agent;
-/// Re-export of the archive index, now owned by `agent-doc-sqlite`, so existing
-/// `crate::archive_index::*` and `agent_doc_orchestration::archive_index::*`
-/// call sites keep working after the SQLite-layer extraction.
-pub use agent_doc_sqlite::archive_index;
 pub mod admin;
 pub mod admit;
+pub mod agent;
+pub mod auto_dag;
 pub mod autofix;
-pub mod boundary;
 pub mod callback;
 pub mod capture;
 pub mod checkpoint;
@@ -90,14 +70,14 @@ pub mod codex_hook;
 pub mod compact;
 pub mod context_clear_in_flight;
 pub mod context_pct;
-pub mod convergence_gate;
 pub mod convergence_playback;
+pub mod crdt_authority;
+pub mod crdt_relay;
+pub mod crdt_relay_host;
 pub mod cycle_state;
-pub mod cycle_state_machine;
 pub mod dashboard;
 pub mod debounce;
 pub mod dedupe;
-pub mod diff;
 pub mod diff_io;
 pub mod doctor;
 pub mod document_watcher;
@@ -112,20 +92,12 @@ pub mod git_sibling;
 pub mod graph;
 pub mod harness;
 pub mod harness_prompt;
-pub mod plugin_owner;
-pub mod turn_status;
-// Relocated to `agent-doc-core` (#bz6s follow-up #adoc-pure-to-core — pure,
-// zero-dep). Re-exported so `crate::heuristics::*` call sites resolve unchanged.
-pub use agent_doc_core::heuristics;
 pub mod hooks;
-// Relocated to `agent-doc-document-realtime` (#ipcfullprompt-recur2 — pure
-// realtime-document forensic detector). Re-exported so
-// `crate::ipc_corruption::*` call sites resolve.
-pub use agent_doc_document_realtime::ipc_corruption;
-pub mod auto_dag;
 pub mod lint_gate;
 pub mod memory_cmd;
+pub mod merge_control_state_machine;
 pub mod pending_cmd;
+pub mod plugin_owner;
 pub mod preflight;
 pub mod project_controller;
 pub mod prompt;
@@ -144,12 +116,6 @@ pub mod recguard_wedge;
 pub mod recycle_inflight;
 pub mod recycle_yield;
 pub mod repair;
-// Relocated to `agent-doc-core` (#adoc-pure-to-core — only uses core::template).
-pub use agent_doc_core::replay_guard;
-pub mod crdt_authority;
-pub mod crdt_relay;
-pub mod crdt_relay_host;
-pub mod merge_control_state_machine;
 pub mod response_toc;
 pub mod resync;
 pub mod route;
@@ -170,10 +136,7 @@ pub mod supervisor;
 pub mod supervisor_selfkill;
 pub mod sync;
 pub mod turn_scope_store;
-/// Unified bounded wait-machinery state machine (`#waitmachine`): one global
-/// 10s hang ceiling, a pure `tick` transition, and a single typed reinstall-pause
-/// exemption. See `wait_machine.rs`.
-pub mod wait_machine;
+pub mod turn_status;
 pub mod watch;
 pub mod watch_authority;
 pub mod write;

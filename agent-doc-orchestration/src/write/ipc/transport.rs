@@ -173,7 +173,7 @@ pub fn queue_file_ipc_reposition_boundary(
 #[allow(clippy::too_many_arguments)]
 pub fn try_ipc(
     file: &Path,
-    patches: &[crate::template::PatchBlock],
+    patches: &[agent_doc_core::template::PatchBlock],
     unmatched: &str,
     frontmatter_yaml: Option<&str>,
     baseline: Option<&str>,
@@ -562,8 +562,9 @@ pub fn try_ipc(
                                 repair_decision.snapshot_content.len()
                             ),
                         );
-                        let crdt_doc =
-                            crate::crdt::CrdtDoc::from_text(&repair_decision.snapshot_content);
+                        let crdt_doc = agent_doc_core::crdt::CrdtDoc::from_text(
+                            &repair_decision.snapshot_content,
+                        );
                         if let Err(e) = snapshot::save_document_crdt(
                             file,
                             &crdt_doc.encode_state(),
@@ -902,7 +903,7 @@ pub fn try_ipc(
             .iter()
             .any(|patch| patch.content.contains("### Re:"))
         && let Ok(current) = std::fs::read_to_string(file)
-        && let Ok(after_apply) = crate::template::apply_patches(&current, patches, "", file)
+        && let Ok(after_apply) = crate::template_io::apply_patches(&current, patches, "", file)
         && strip_boundary_for_dedup(&after_apply) == strip_boundary_for_dedup(&current)
     {
         eprintln!(
@@ -1705,7 +1706,8 @@ pub(crate) fn write_ipc_and_poll(
                         repair_decision.snapshot_content.len()
                     ),
                 );
-                let crdt_doc = crate::crdt::CrdtDoc::from_text(&repair_decision.snapshot_content);
+                let crdt_doc =
+                    agent_doc_core::crdt::CrdtDoc::from_text(&repair_decision.snapshot_content);
                 if let Err(e) = snapshot::save_document_crdt(
                     doc_file,
                     &crdt_doc.encode_state(),
@@ -1756,7 +1758,7 @@ pub(crate) fn normalize_patch_content(content: &str, prefix_lines: &[String]) ->
             .trim_end()
             .strip_prefix("\u{276f} ")
             .unwrap_or(line.trim_end());
-        if crate::diff::line_looks_like_plain_response_after_prompt(bare) {
+        if agent_doc_core::diff::line_looks_like_plain_response_after_prompt(bare) {
             result.push_str(line);
             result.push('\n');
             continue;
@@ -1802,7 +1804,7 @@ pub(crate) fn normalization_target_counts(
 /// cannot normalize lines that the patch is about to append.)
 pub(crate) fn build_ipc_patches_json(
     file: &Path,
-    patches: &[crate::template::PatchBlock],
+    patches: &[agent_doc_core::template::PatchBlock],
     unmatched: &str,
     normalize_prefix_lines: Option<&[String]>,
     boundary_seed: Option<&str>,
@@ -2335,7 +2337,7 @@ mod submodule_patch_routing_tests {
                                         .and_then(|value| value.as_str())?;
                                     let content =
                                         item.get("content").and_then(|value| value.as_str())?;
-                                    Some(crate::template::PatchBlock::new(name, content))
+                                    Some(agent_doc_core::template::PatchBlock::new(name, content))
                                 })
                                 .collect::<Vec<_>>()
                         })
@@ -2344,8 +2346,9 @@ mod submodule_patch_routing_tests {
                         .get("unmatched")
                         .and_then(|value| value.as_str())
                         .unwrap_or("");
-                    let after = crate::template::apply_patches(&before, &patches, unmatched, file)
-                        .unwrap_or(before);
+                    let after =
+                        crate::template_io::apply_patches(&before, &patches, unmatched, file)
+                            .unwrap_or(before);
                     let _ = std::fs::write(file, &after);
                     after
                 } else {
@@ -2459,7 +2462,7 @@ mod submodule_patch_routing_tests {
         )
         .unwrap();
 
-        let patch = crate::template::PatchBlock::new("exchange", "test response");
+        let patch = agent_doc_core::template::PatchBlock::new("exchange", "test response");
 
         // try_ipc should route to the submodule's socket listener and succeed.
         let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
@@ -2507,7 +2510,7 @@ mod submodule_patch_routing_tests {
         )
         .unwrap();
 
-        let patch = crate::template::PatchBlock::new("exchange", "response");
+        let patch = agent_doc_core::template::PatchBlock::new("exchange", "response");
 
         let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
         assert!(
@@ -2572,7 +2575,7 @@ mod submodule_patch_routing_tests {
         let _listener = start_already_applied_listener(&root);
         wait_for_listener(&root);
 
-        let patch = crate::template::PatchBlock::new(
+        let patch = agent_doc_core::template::PatchBlock::new(
             "exchange",
             "### Re: Please reply — gpt-5\n\nAnswered.",
         );
@@ -2688,7 +2691,7 @@ mod submodule_patch_routing_tests {
         let _listener = start_already_applied_listener(&root);
         wait_for_listener(&root);
 
-        let patch = crate::template::PatchBlock::new(
+        let patch = agent_doc_core::template::PatchBlock::new(
             "exchange",
             "### Re: Please reply — gpt-5\n\nAnswered.",
         );
@@ -2849,8 +2852,10 @@ mod submodule_patch_routing_tests {
         let _listener = start_fixed_ack_content_listener(&root, duplicated_ack_content.to_string());
         wait_for_listener(&root);
 
-        let patch =
-            crate::template::PatchBlock::new("exchange", "### Re: Production key — gpt-5\n\nDone.");
+        let patch = agent_doc_core::template::PatchBlock::new(
+            "exchange",
+            "### Re: Production key — gpt-5\n\nDone.",
+        );
         let err = try_ipc(
             &doc,
             &[patch],
@@ -4221,7 +4226,7 @@ mod late_fallback_patch_guard_tests {
         )
         .unwrap();
 
-        let patch = crate::template::PatchBlock::new("exchange", "late response");
+        let patch = agent_doc_core::template::PatchBlock::new("exchange", "late response");
         let result = try_ipc(
             &doc,
             &[patch],

@@ -461,10 +461,7 @@ fn scan_text_files_source(
                     path: file.clone(),
                     line: Some(idx + 1),
                     kind: "text".to_string(),
-                    text: Some(truncate_text(
-                        &agent_doc_orchestration::secret_redact::redact(line),
-                        700,
-                    )),
+                    text: Some(truncate_text(&agent_doc_secret_redact::redact(line), 700)),
                     json: None,
                 });
             }
@@ -575,7 +572,7 @@ fn matches_terms(text: &str, terms: &[String]) -> bool {
 }
 
 fn json_summary(contents: &str) -> serde_json::Value {
-    let redacted = agent_doc_orchestration::secret_redact::redact(contents);
+    let redacted = agent_doc_secret_redact::redact(contents);
     match serde_json::from_str::<serde_json::Value>(&redacted) {
         Ok(value) => summarize_json_value(&value),
         Err(_) => serde_json::json!({

@@ -18,7 +18,7 @@ pub(crate) struct SemanticComponentSnapshot {
 pub(crate) fn semantic_diff_summary(
     previous: &str,
     current: &str,
-    prompt_bearing_changes: &[crate::diff::PromptBearingChange],
+    prompt_bearing_changes: &[agent_doc_core::diff::PromptBearingChange],
 ) -> Option<SemanticDiffSummary> {
     let mut changed_components = BTreeSet::new();
     let mut component_changes = semantic_component_changes(previous, current);
@@ -170,10 +170,10 @@ pub(crate) fn op_log_timestamp() -> u64 {
 /// did not run (`op_affectedness` is `None`, e.g. a semantic-diff parse skip),
 /// this stays conservative and falls back to the managed-state filter only.
 pub(crate) fn compute_user_intent_prompt_changes(
-    prompt_bearing_changes: &[crate::diff::PromptBearingChange],
+    prompt_bearing_changes: &[agent_doc_core::diff::PromptBearingChange],
     diff_from_queue_head_only: bool,
     op_affectedness: Option<&agent_doc_core::turn_scope::CycleAffectedness>,
-) -> Vec<crate::diff::PromptBearingChange> {
+) -> Vec<agent_doc_core::diff::PromptBearingChange> {
     if diff_from_queue_head_only {
         // Synthetic auto-queue continuation only — no user intent this cycle.
         return Vec::new();
@@ -187,7 +187,7 @@ pub(crate) fn compute_user_intent_prompt_changes(
     }
     prompt_bearing_changes
         .iter()
-        .filter(|change| !crate::diff::change_is_managed_state_only(change))
+        .filter(|change| !agent_doc_core::diff::change_is_managed_state_only(change))
         .cloned()
         .collect()
 }
@@ -494,8 +494,8 @@ pub(crate) fn push_unique_strings(target: &mut Vec<String>, extras: Vec<String>)
 }
 
 pub(crate) fn push_unique_prompt_bearing_changes(
-    target: &mut Vec<crate::diff::PromptBearingChange>,
-    extras: Vec<crate::diff::PromptBearingChange>,
+    target: &mut Vec<agent_doc_core::diff::PromptBearingChange>,
+    extras: Vec<agent_doc_core::diff::PromptBearingChange>,
 ) {
     for value in extras {
         if !target.iter().any(|existing| existing == &value) {
@@ -536,8 +536,8 @@ mod tests {
             "- [ ] [#task] new wording\n",
             "<!-- /agent:backlog -->\n"
         );
-        let prompt_changes = vec![crate::diff::PromptBearingChange {
-            kind: crate::diff::PromptBearingChangeKind::PromptTarget,
+        let prompt_changes = vec![agent_doc_core::diff::PromptBearingChange {
+            kind: agent_doc_core::diff::PromptBearingChangeKind::PromptTarget,
             text: "do [#beta]".to_string(),
         }];
 
@@ -574,7 +574,7 @@ mod tests {
         }));
         assert_eq!(
             summary.prompt_changes[0].kind,
-            crate::diff::PromptBearingChangeKind::PromptTarget
+            agent_doc_core::diff::PromptBearingChangeKind::PromptTarget
         );
         assert_eq!(summary.prompt_changes[0].text_preview, "do [#beta]");
     }
@@ -734,8 +734,8 @@ mod tests {
     fn user_intent_filters_managed_state_when_turn_affected() {
         // Even when the turn is affected, managed-component bookkeeping (a backlog
         // item line) stays filtered — it is not a real prompt.
-        let changes = vec![crate::diff::PromptBearingChange {
-            kind: crate::diff::PromptBearingChangeKind::ContentEdit,
+        let changes = vec![agent_doc_core::diff::PromptBearingChange {
+            kind: agent_doc_core::diff::PromptBearingChangeKind::ContentEdit,
             text: "- [ ] [#newitem] track a follow-up".to_string(),
         }];
         let out = compute_user_intent_prompt_changes(&changes, false, Some(&affectedness(true)));

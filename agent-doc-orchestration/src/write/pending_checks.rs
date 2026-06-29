@@ -369,11 +369,11 @@ pub(crate) fn precommit_pending_capture_check(file: &Path) -> Result<()> {
     }
 
     let mode = crate::session_check::resolve_pending_capture_guard_mode(file)?;
-    if mode != crate::frontmatter::PendingCaptureGuardMode::Strict {
+    if mode != agent_doc_core::frontmatter::PendingCaptureGuardMode::Strict {
         return Ok(());
     }
 
-    let signal = crate::heuristics::detect_uncaptured_recommendations(&response_text);
+    let signal = agent_doc_core::heuristics::detect_uncaptured_recommendations(&response_text);
     let skip = match signal.estimated_count {
         0 => true,
         1 => signal.confidence < 0.7,
@@ -573,11 +573,11 @@ pub(crate) fn prewrite_pending_capture_check(
     }
 
     let mode = crate::session_check::resolve_pending_capture_guard_mode(file)?;
-    if mode != crate::frontmatter::PendingCaptureGuardMode::Strict {
+    if mode != agent_doc_core::frontmatter::PendingCaptureGuardMode::Strict {
         return Ok(());
     }
 
-    let signal = crate::heuristics::detect_uncaptured_recommendations(&response_text);
+    let signal = agent_doc_core::heuristics::detect_uncaptured_recommendations(&response_text);
     let skip = match signal.estimated_count {
         0 => true,
         1 => signal.confidence < 0.7,
@@ -618,7 +618,7 @@ pub(crate) fn precommit_pending_done_check_with_options(
     options: PendingDoneCheckOptions,
 ) -> Result<()> {
     let mode = crate::session_check::resolve_pending_done_guard_mode(file)?;
-    if mode != crate::frontmatter::PendingCaptureGuardMode::Strict {
+    if mode != agent_doc_core::frontmatter::PendingCaptureGuardMode::Strict {
         return Ok(());
     }
 
@@ -718,7 +718,7 @@ pub(crate) fn prewrite_pending_done_check(
     }
 
     let mode = crate::session_check::resolve_pending_done_guard_mode(file)?;
-    if mode != crate::frontmatter::PendingCaptureGuardMode::Strict {
+    if mode != agent_doc_core::frontmatter::PendingCaptureGuardMode::Strict {
         return Ok(());
     }
 

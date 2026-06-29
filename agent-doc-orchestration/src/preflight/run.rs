@@ -1,6 +1,7 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use agent_doc_core::diff;
 
 /// Options controlling a `preflight` invocation.
 #[derive(Debug, Clone, Copy, Default)]
@@ -45,7 +46,8 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // With no editor attached (the common/CI case) this returns disk unchanged.
     let content = crate::realtime_model::resolve_current_doc(file, &disk).content;
     let rc = crate::graph::RunContext::new(file.to_path_buf());
-    let (initial_frontmatter, _) = frontmatter::parse_for_file_with_context(&content, file, &rc)?;
+    let (initial_frontmatter, _) =
+        frontmatter_io::parse_for_file_with_context(&content, file, &rc)?;
     let active_harness = rc.harness();
     let mut warnings = Vec::new();
     if let Some(warning) =
@@ -488,12 +490,12 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                     if let (Ok(snap_content), Ok(doc_content)) = (
                         std::fs::read_to_string(&snap_abs),
                         std::fs::read_to_string(&doc_path),
-                    ) && !crate::diff::is_stale_snapshot(&snap_content, &doc_content)
+                    ) && !agent_doc_core::diff::is_stale_snapshot(&snap_content, &doc_content)
                     {
                         // Not a stale inline snapshot — check content equality
                         // (covers template mode where is_stale_snapshot always returns false)
-                        let snap_stripped = crate::diff::strip_comments(&snap_content);
-                        let doc_stripped = crate::diff::strip_comments(&doc_content);
+                        let snap_stripped = agent_doc_core::diff::strip_comments(&snap_content);
+                        let doc_stripped = agent_doc_core::diff::strip_comments(&doc_content);
                         if snap_stripped.trim() != doc_stripped.trim() {
                             eprintln!(
                                 "[preflight] sweep: skipping {} (unresponded user content)",
@@ -644,7 +646,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
 
     // Step 4: Compute diff between snapshot and current document.
     eprintln!("[preflight] step 4: diff");
-    let diff_result_with_current = diff::compute_with_current(file)?;
+    let diff_result_with_current = diff_io::compute_with_current(file)?;
     // Save the response baseline from the exact stable document projection used
     // for the diff. This keeps the merge baseline, visible file, and prompt
     // contract in one transaction even if an editor replay lands during the
@@ -1310,7 +1312,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             .find(|change| {
                 matches!(
                     change.kind,
-                    crate::diff::PromptBearingChangeKind::PromptTarget
+                    agent_doc_core::diff::PromptBearingChangeKind::PromptTarget
                 )
             })
             .map(|change| change.text.clone());
@@ -1322,7 +1324,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                     !affectedness.turn_affected && !affectedness.classified.is_empty()
                 }));
         let current = std::fs::read_to_string(file).unwrap_or_default();
-        match frontmatter::parse_for_file_with_context(&current, file, &rc) {
+        match frontmatter_io::parse_for_file_with_context(&current, file, &rc) {
             Ok((owner_fm, _)) => match owner_fm.session.as_deref() {
                 Some(session_id) => {
                     let agent_name = owner_fm.agent.as_deref().unwrap_or("claude");
@@ -3422,10 +3424,12 @@ mod tests {
             state.requires_backlog_capture,
             "the inline #next-steps prompt should still require backlog capture"
         );
-        let diff = crate::diff::compute(&doc).unwrap().unwrap();
-        let prompt_targets = crate::diff::classify_prompt_bearing_changes(&diff)
+        let diff = crate::diff_io::compute(&doc).unwrap().unwrap();
+        let prompt_targets = agent_doc_core::diff::classify_prompt_bearing_changes(&diff)
             .into_iter()
-            .filter(|change| change.kind == crate::diff::PromptBearingChangeKind::PromptTarget)
+            .filter(|change| {
+                change.kind == agent_doc_core::diff::PromptBearingChangeKind::PromptTarget
+            })
             .map(|change| change.text)
             .collect::<Vec<_>>();
         assert!(
@@ -4021,7 +4025,7 @@ mod tests {
             "<!-- agent:backlog -->\n",
             "<!-- /agent:backlog -->\n",
         );
-        let (fm, _) = crate::frontmatter::parse(content).unwrap();
+        let (fm, _) = agent_doc_core::frontmatter::parse(content).unwrap();
         let warning = post_exchange_comment_prompt_preset_warning(
             Path::new("session.md"),
             content,

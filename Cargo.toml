@@ -63,8 +63,11 @@ path = "src/main.rs"
 agent-doc-core = { path = "agent-doc-core", version = "0.34.65" }
 agent-doc-element = { path = "agent-doc-element", version = "0.34.65" }
 agent-doc-element-backlog = { path = "agent-doc-element-backlog", version = "0.34.65" }
+agent-doc-element-boundary = { path = "agent-doc-element-boundary", version = "0.34.65" }
 agent-doc-markdown-ast = { path = "agent-doc-markdown-ast", version = "0.34.65" }
 agent-doc-orchestration = { path = "agent-doc-orchestration", version = "0.34.65" }
+agent-doc-secret-redact = { path = "agent-doc-secret-redact", version = "0.34.65" }
+agent-doc-sqlite = { path = "agent-doc-sqlite", version = "0.34.65" }
 anyhow = "1"
 base64 = "0.22"
 clap = { version = "4", features = ["derive"] }

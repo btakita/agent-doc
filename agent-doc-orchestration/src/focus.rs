@@ -65,7 +65,9 @@ use anyhow::{Context, Result};
 use std::path::Path;
 
 use crate::sessions::Tmux;
-use crate::{frontmatter, sessions};
+use agent_doc_core::frontmatter;
+
+use crate::sessions;
 
 /// Outcome of reconciling the pane `focus` was about to select against the
 /// document's provably-live owner pane.

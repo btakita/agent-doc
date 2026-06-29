@@ -13,11 +13,11 @@ const AUTO_START_DISPATCH_READY_REVERIFY_TIMEOUT: Duration = Duration::from_secs
 /// Fresh-route agent dispatch-ready wait budget (`#waitmachine2`). Historically
 /// 30s; routed through the unified wait-machinery ceiling so the operator's
 /// "never hang > 10s" bound is enforced in one place: the 30s request is clamped
-/// to [`crate::wait_machine::GLOBAL_HANG_CEILING`] (10s). The underlying
+/// to [`agent_doc_turn::wait_machine::GLOBAL_HANG_CEILING`] (10s). The underlying
 /// `wait_for_agent_ready` poll loop keeps its existing fast-fail-on-dead-pane and
 /// blocker-streak semantics; only the ceiling changes.
 const FRESH_ROUTE_AGENT_READY_TIMEOUT: Duration =
-    crate::wait_machine::clamp_to_ceiling(Duration::from_secs(30));
+    agent_doc_turn::wait_machine::clamp_to_ceiling(Duration::from_secs(30));
 
 /// Auto-start a new agent session in tmux using the default session name.
 /// Public so `sync.rs` can call it for unresolved files.

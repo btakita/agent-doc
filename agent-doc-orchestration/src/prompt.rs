@@ -40,7 +40,9 @@ use serde::Serialize;
 use std::path::Path;
 
 use crate::sessions::{SessionRegistry, Tmux};
-use crate::{frontmatter, sessions};
+use agent_doc_core::frontmatter;
+
+use crate::sessions;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PromptNavigationAxis {

@@ -595,7 +595,7 @@ pub fn try_migrate_renamed(doc: &Path) -> Result<bool> {
         Ok(c) => c,
         Err(_) => return Ok(false),
     };
-    let (fm, _) = match crate::frontmatter::parse(&content) {
+    let (fm, _) = match agent_doc_core::frontmatter::parse(&content) {
         Ok(parsed) => parsed,
         Err(_) => return Ok(false),
     };
@@ -634,7 +634,7 @@ pub fn try_migrate_renamed(doc: &Path) -> Result<bool> {
         }
         // Read and parse frontmatter
         if let Ok(snap_content) = std::fs::read_to_string(&path)
-            && let Ok((snap_fm, _)) = crate::frontmatter::parse(&snap_content)
+            && let Ok((snap_fm, _)) = agent_doc_core::frontmatter::parse(&snap_content)
             && snap_fm.session.as_deref() == Some(&session_uuid)
         {
             old_hash = Some(stem);
@@ -783,7 +783,7 @@ pub fn ensure_session_uuid(doc: &Path) -> Result<bool> {
         Ok(c) => c,
         Err(_) => return Ok(false),
     };
-    let (fm, _) = match crate::frontmatter::parse(&content) {
+    let (fm, _) = match agent_doc_core::frontmatter::parse(&content) {
         Ok(parsed) => parsed,
         Err(_) => return Ok(false),
     };
@@ -794,7 +794,7 @@ pub fn ensure_session_uuid(doc: &Path) -> Result<bool> {
         "[init] assigning session UUID to {} (has format but no session)",
         doc.display()
     );
-    let (updated, session_id) = crate::frontmatter::ensure_session(&content)?;
+    let (updated, session_id) = agent_doc_core::frontmatter::ensure_session(&content)?;
     if updated != content {
         std::fs::write(doc, &updated)?;
         eprintln!("[init] assigned session UUID: {}", session_id);
@@ -876,7 +876,7 @@ fn save_unlocked(doc: &Path, content: &str) -> Result<()> {
     // Redact known secret shapes (API keys, AWS access keys, etc.) before
     // persistence so `.agent-doc/snapshots/<hash>.md` never carries plaintext
     // tokens. `passage open …` invocations are exempt — see secret_redact.
-    let redacted = crate::secret_redact::redact(content);
+    let redacted = agent_doc_secret_redact::redact(content);
     let parent = snap.parent().unwrap_or(Path::new("."));
     let mut tmp = tempfile::NamedTempFile::new_in(parent)
         .with_context(|| format!("failed to create temp file in {}", parent.display()))?;
@@ -912,7 +912,7 @@ pub fn save_pre_response(doc: &Path, content: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let redacted = crate::secret_redact::redact(content);
+    let redacted = agent_doc_secret_redact::redact(content);
     let parent = path.parent().unwrap_or(Path::new("."));
     let mut tmp = tempfile::NamedTempFile::new_in(parent)
         .with_context(|| format!("failed to create temp file in {}", parent.display()))?;
@@ -1058,7 +1058,7 @@ pub fn save_multinode_crdt(doc: &Path, state: &[u8]) -> Result<()> {
 pub fn multinode_crdt_state(
     doc: &Path,
     fallback_markdown: &str,
-) -> Result<crate::crdt::MultiNodeState> {
+) -> Result<agent_doc_core::crdt::MultiNodeState> {
     let _lock = acquire_crdt_lock(doc)?;
     let nodes_path = multinode_crdt_path_for(doc)?;
     if let Some(bytes) = crate::fs_util::read_optional_bytes(&nodes_path).with_context(|| {
@@ -1067,7 +1067,7 @@ pub fn multinode_crdt_state(
             nodes_path.display()
         )
     })? {
-        return Ok(crate::crdt::MultiNodeState::decode_or_migrate(
+        return Ok(agent_doc_core::crdt::MultiNodeState::decode_or_migrate(
             &bytes,
             fallback_markdown,
         ));
@@ -1077,12 +1077,12 @@ pub fn multinode_crdt_state(
     if let Some(bytes) = crate::fs_util::read_optional_bytes(&legacy_path)
         .with_context(|| format!("failed to read CRDT state {}", legacy_path.display()))?
     {
-        return Ok(crate::crdt::MultiNodeState::decode_or_migrate(
+        return Ok(agent_doc_core::crdt::MultiNodeState::decode_or_migrate(
             &bytes,
             fallback_markdown,
         ));
     }
-    crate::crdt::MultiNodeState::from_text(fallback_markdown)
+    agent_doc_core::crdt::MultiNodeState::from_text(fallback_markdown)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1326,7 +1326,7 @@ pub fn crdt_merge_base_state(doc: &Path, fallback_markdown: &str) -> Result<Crdt
     );
 
     Ok(CrdtMergeBase {
-        state: crate::crdt::CrdtDoc::from_text(&markdown).encode_state(),
+        state: agent_doc_core::crdt::CrdtDoc::from_text(&markdown).encode_state(),
         source,
     })
 }
@@ -1346,7 +1346,7 @@ pub fn save_document_crdt(doc: &Path, legacy_state: &[u8], markdown: &str) -> Re
     // (compaction routes through here, so post-compact content yields fresh
     // per-node states). A parse failure must not fail the load-bearing save —
     // log and skip the per-node sidecar.
-    match crate::crdt::MultiNodeState::from_text(markdown) {
+    match agent_doc_core::crdt::MultiNodeState::from_text(markdown) {
         Ok(multinode) => save_multinode_crdt(doc, &multinode.encode())?,
         Err(e) => eprintln!(
             "[crdt] save_document_crdt: failed to build per-node state ({e}); skipping nodes sidecar"
@@ -1684,13 +1684,13 @@ mod tests {
             "- do [#first]\n",
             "<!-- /agent:queue -->\n"
         );
-        let legacy = crate::crdt::CrdtDoc::from_text(markdown).encode_state();
+        let legacy = agent_doc_core::crdt::CrdtDoc::from_text(markdown).encode_state();
 
         save_document_crdt(&doc, &legacy, markdown).unwrap();
 
         let loaded_legacy = load_crdt(&doc).unwrap().unwrap();
         assert_eq!(
-            crate::crdt::CrdtDoc::decode_state(&loaded_legacy)
+            agent_doc_core::crdt::CrdtDoc::decode_state(&loaded_legacy)
                 .unwrap()
                 .to_text(),
             markdown
@@ -1712,14 +1712,15 @@ mod tests {
             "- do [#overlay-base]\n",
             "<!-- /agent:queue -->\n"
         );
-        let stale_legacy = crate::crdt::CrdtDoc::from_text("stale legacy text").encode_state();
+        let stale_legacy =
+            agent_doc_core::crdt::CrdtDoc::from_text("stale legacy text").encode_state();
         save_document_crdt(&doc, &stale_legacy, markdown).unwrap();
 
         let base = crdt_merge_base_state(&doc, markdown).unwrap();
 
         assert_eq!(base.source, CrdtMergeBaseSource::Overlay);
         assert_eq!(
-            crate::crdt::CrdtDoc::decode_state(&base.state)
+            agent_doc_core::crdt::CrdtDoc::decode_state(&base.state)
                 .unwrap()
                 .to_text(),
             markdown
@@ -1757,7 +1758,7 @@ mod tests {
             CrdtMergeBaseSource::FallbackOverlayProjectionMismatch
         );
         assert_eq!(
-            crate::crdt::CrdtDoc::decode_state(&base.state)
+            agent_doc_core::crdt::CrdtDoc::decode_state(&base.state)
                 .unwrap()
                 .to_text(),
             baseline
@@ -1766,7 +1767,7 @@ mod tests {
         let rebuilt = crdt_merge_base_state(&doc, baseline).unwrap();
         assert_eq!(rebuilt.source, CrdtMergeBaseSource::Overlay);
         assert_eq!(
-            crate::crdt::CrdtDoc::decode_state(&rebuilt.state)
+            agent_doc_core::crdt::CrdtDoc::decode_state(&rebuilt.state)
                 .unwrap()
                 .to_text(),
             baseline
@@ -1879,14 +1880,15 @@ First answer here. Already committed to HEAD.
         );
 
         // Persist the overlay sidecar from the baseline (what a prior cycle saves).
-        let stale_legacy = crate::crdt::CrdtDoc::from_text("stale legacy text").encode_state();
+        let stale_legacy =
+            agent_doc_core::crdt::CrdtDoc::from_text("stale legacy text").encode_state();
         save_document_crdt(&doc, &stale_legacy, &base_markdown).unwrap();
 
         // The overlay merge base must project to exactly the baseline text — the
         // order-stability guarantee — whether it uses the overlay or falls back.
         let base = crdt_merge_base_state(&doc, &base_markdown).unwrap();
         assert_eq!(
-            crate::crdt::CrdtDoc::decode_state(&base.state)
+            agent_doc_core::crdt::CrdtDoc::decode_state(&base.state)
                 .unwrap()
                 .to_text(),
             base_markdown,
@@ -1911,7 +1913,7 @@ Second answer line three.
             "{header}{exchange_committed}<!-- agent:boundary:base-id -->\n{queue_open}- do [#foreign-task]\n{queue_close}"
         );
 
-        let merged = crate::crdt::merge(Some(&base.state), &ours, &theirs).unwrap();
+        let merged = agent_doc_core::crdt::merge(Some(&base.state), &ours, &theirs).unwrap();
 
         assert!(
             merged.contains("### Re: second question — opus-4-8"),
@@ -1969,7 +1971,8 @@ First answer here. Already committed to HEAD.
             "{header}{exchange_committed}<!-- agent:boundary:base-id -->\n{queue_open}{queue_close}"
         );
 
-        let stale_legacy = crate::crdt::CrdtDoc::from_text("stale legacy text").encode_state();
+        let stale_legacy =
+            agent_doc_core::crdt::CrdtDoc::from_text("stale legacy text").encode_state();
         save_document_crdt(&doc, &stale_legacy, &base_markdown).unwrap();
 
         let base = crdt_merge_base_state(&doc, &base_markdown).unwrap();
@@ -1993,7 +1996,7 @@ Steps to take:
             "{header}{exchange_committed}<!-- agent:boundary:base-id -->\n{queue_open}- do [#foreign-task]\n{queue_close}"
         );
 
-        let merged = crate::crdt::merge(Some(&base.state), &ours, &theirs).unwrap();
+        let merged = agent_doc_core::crdt::merge(Some(&base.state), &ours, &theirs).unwrap();
 
         let s1 = merged
             .find("1. First step.")
@@ -2068,7 +2071,7 @@ Steps to take:
 
         // The agent response (ours) is built from the OLD baseline (no `X`).
         // theirs == the live editor buffer carrying the keystroke.
-        let merged = crate::crdt::merge(Some(&base.state), &baseline, &live).unwrap();
+        let merged = agent_doc_core::crdt::merge(Some(&base.state), &baseline, &live).unwrap();
         assert!(
             merged.contains("model: opusX"),
             "single live keystroke dropped (source={}):\n{merged}",
@@ -2101,7 +2104,7 @@ Steps to take:
             base.source.as_str()
         );
 
-        let merged = crate::crdt::merge(Some(&base.state), &baseline, live).unwrap();
+        let merged = agent_doc_core::crdt::merge(Some(&base.state), &baseline, live).unwrap();
         assert!(
             merged.contains("model: opus"),
             "live frontmatter `model: opus` dropped (source={}):\n{merged}",
@@ -2130,7 +2133,7 @@ Steps to take:
 
         let base = crdt_merge_base_state(&doc, &baseline).unwrap();
         assert_eq!(
-            crate::crdt::CrdtDoc::decode_state(&base.state)
+            agent_doc_core::crdt::CrdtDoc::decode_state(&base.state)
                 .unwrap()
                 .to_text(),
             baseline,
@@ -2156,7 +2159,7 @@ Steps to take:
         let base = crdt_merge_base_state(&doc, &baseline).unwrap();
         // ours: agent appended a different line in the same region.
         let ours = format!("{FM_HEADER}## Notes\n\nshared line\nagent added this\n");
-        let merged = crate::crdt::merge(Some(&base.state), &ours, &live).unwrap();
+        let merged = agent_doc_core::crdt::merge(Some(&base.state), &ours, &live).unwrap();
         assert!(
             merged.contains("user added this"),
             "user's concurrent edit dropped:\n{merged}"
@@ -2182,7 +2185,7 @@ Steps to take:
         save_overlay_md(&doc, &live);
 
         let base = crdt_merge_base_state(&doc, &baseline).unwrap();
-        let merged = crate::crdt::merge(Some(&base.state), &baseline, &live).unwrap();
+        let merged = agent_doc_core::crdt::merge(Some(&base.state), &baseline, &live).unwrap();
         assert!(
             merged.ends_with('A'),
             "first keystroke on a fresh doc dropped (source={}):\n{merged:?}",
@@ -2201,7 +2204,7 @@ Steps to take:
         save_overlay_md(&doc, &live);
 
         let base = crdt_merge_base_state(&doc, &baseline).unwrap();
-        let merged = crate::crdt::merge(Some(&base.state), &baseline, &live).unwrap();
+        let merged = agent_doc_core::crdt::merge(Some(&base.state), &baseline, &live).unwrap();
         assert!(
             merged.contains("prefix abcdef"),
             "burst content not fully preserved (source={}):\n{merged}",
@@ -2222,7 +2225,7 @@ Steps to take:
         let base = crdt_merge_base_state(&doc, &baseline).unwrap();
         assert_eq!(base.source, CrdtMergeBaseSource::FallbackOverlayDecodeError);
         assert_eq!(
-            crate::crdt::CrdtDoc::decode_state(&base.state)
+            agent_doc_core::crdt::CrdtDoc::decode_state(&base.state)
                 .unwrap()
                 .to_text(),
             baseline
@@ -2252,7 +2255,7 @@ Steps to take:
         // ours: agent appended a `### Re:` response to the exchange.
         let ours =
             format!("{header}{committed}\n### Re: a question — opus-4-8\n\nThe answer.\n{close}");
-        let merged = crate::crdt::merge(Some(&base.state), &ours, &live).unwrap();
+        let merged = agent_doc_core::crdt::merge(Some(&base.state), &ours, &live).unwrap();
         assert!(
             merged.contains("model: opus"),
             "frontmatter keystroke dropped during exchange convergence (source={}):\n{merged}",
@@ -2302,7 +2305,7 @@ Steps to take:
     fn save_document_crdt_writes_per_node_sidecar() {
         let (_dir, doc) = setup();
         let markdown = template_doc("Prompt.\n\n### Re: q\n\nBody.", "- do [#a1]");
-        let legacy = crate::crdt::CrdtDoc::from_text(&markdown).encode_state();
+        let legacy = agent_doc_core::crdt::CrdtDoc::from_text(&markdown).encode_state();
         save_document_crdt(&doc, &legacy, &markdown).unwrap();
 
         // The per-node sidecar exists and round-trips through decode → text.
@@ -2310,7 +2313,7 @@ Steps to take:
         let bytes = load_multinode_crdt(&doc)
             .unwrap()
             .expect("nodes sidecar present");
-        let state = crate::crdt::MultiNodeState::decode(&bytes).unwrap();
+        let state = agent_doc_core::crdt::MultiNodeState::decode(&bytes).unwrap();
         assert_eq!(state.to_text().unwrap(), markdown);
     }
 
@@ -2319,7 +2322,7 @@ Steps to take:
         let (_dir, doc) = setup();
         let markdown = template_doc("Q.", "- do [#a1]");
         // Only the legacy whole-doc blob exists (older binary).
-        let legacy = crate::crdt::CrdtDoc::from_text(&markdown).encode_state();
+        let legacy = agent_doc_core::crdt::CrdtDoc::from_text(&markdown).encode_state();
         save_crdt(&doc, &legacy).unwrap();
         assert!(!multinode_crdt_path_for(&doc).unwrap().exists());
 
@@ -2335,7 +2338,7 @@ Steps to take:
     fn multinode_crdt_state_prefers_sidecar_over_legacy() {
         let (_dir, doc) = setup();
         let markdown = template_doc("Q.", "- do [#a1]\n- do [#b2]");
-        let legacy = crate::crdt::CrdtDoc::from_text(&markdown).encode_state();
+        let legacy = agent_doc_core::crdt::CrdtDoc::from_text(&markdown).encode_state();
         save_document_crdt(&doc, &legacy, &markdown).unwrap();
         // Round-trips from the per-node sidecar.
         let state = multinode_crdt_state(&doc, "fallback").unwrap();
@@ -2360,12 +2363,12 @@ Steps to take:
             "Q.\n\n### Re: q\n\nA long answer body to be compacted away.",
             "- do [#a1]",
         );
-        let before_legacy = crate::crdt::CrdtDoc::from_text(&before).encode_state();
+        let before_legacy = agent_doc_core::crdt::CrdtDoc::from_text(&before).encode_state();
         save_document_crdt(&doc, &before_legacy, &before).unwrap();
         let before_len = load_multinode_crdt(&doc).unwrap().unwrap().len();
 
         let after = template_doc("Q.\n\n_[compacted]_", "- do [#a1]");
-        let after_legacy = crate::crdt::CrdtDoc::from_text(&after).encode_state();
+        let after_legacy = agent_doc_core::crdt::CrdtDoc::from_text(&after).encode_state();
         save_document_crdt(&doc, &after_legacy, &after).unwrap();
 
         let state = multinode_crdt_state(&doc, "").unwrap();
@@ -2386,7 +2389,7 @@ Steps to take:
     fn delete_crdt_removes_per_node_sidecar() {
         let (_dir, doc) = setup();
         let markdown = template_doc("Q.", "- do [#a1]");
-        let legacy = crate::crdt::CrdtDoc::from_text(&markdown).encode_state();
+        let legacy = agent_doc_core::crdt::CrdtDoc::from_text(&markdown).encode_state();
         save_document_crdt(&doc, &legacy, &markdown).unwrap();
         assert!(load_multinode_crdt(&doc).unwrap().is_some());
         delete_crdt(&doc).unwrap();

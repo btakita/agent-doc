@@ -229,7 +229,7 @@ pub fn capture_response(file: &Path, response: &str) -> Result<CaptureRecord> {
     // sidecar JSON. The `response_sha256` keeps the original-bytes hash so
     // cycle-state correlation (which references the live in-memory response)
     // stays intact — only the persisted body changes.
-    let redacted_response = crate::secret_redact::redact(response);
+    let redacted_response = agent_doc_secret_redact::redact(response);
 
     let record = CaptureRecord {
         capture_id: capture_id.clone(),
@@ -288,7 +288,7 @@ fn checkpoint_partial_response_for_cycle(
         .as_ref()
         .map_or_else(now_secs, |record| record.captured_at);
 
-    let redacted_response = crate::secret_redact::redact(response);
+    let redacted_response = agent_doc_secret_redact::redact(response);
     let record = PartialCaptureRecord {
         checkpoint_id,
         cycle_id: cycle_id.to_string(),
@@ -851,7 +851,7 @@ fn capture_state_rank(state: CaptureState) -> u8 {
 }
 
 fn metadata_from_frontmatter(file_content: &str) -> CaptureMetadata {
-    let Ok((fm, _)) = crate::frontmatter::parse(file_content) else {
+    let Ok((fm, _)) = agent_doc_core::frontmatter::parse(file_content) else {
         return CaptureMetadata::default();
     };
     let resolved = fm.resolve_mode();

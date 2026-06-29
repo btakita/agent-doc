@@ -1586,7 +1586,7 @@ fn apply_metadata_drift_recovery(
 /// next stable post-commit point).
 fn rebuild_sidecars_from_content(file: &Path, content: &str) -> Result<()> {
     crate::snapshot::save(file, content)?;
-    let crdt = crate::crdt::CrdtDoc::from_text(content).encode_state();
+    let crdt = agent_doc_core::crdt::CrdtDoc::from_text(content).encode_state();
     crate::snapshot::save_document_crdt(file, &crdt, content)?;
     Ok(())
 }

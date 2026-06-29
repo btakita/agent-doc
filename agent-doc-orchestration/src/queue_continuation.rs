@@ -220,7 +220,7 @@ pub fn continuation_guidance(pause_reason: Option<&str>) -> String {
 
 fn detect_in_content(file: &Path, content: &str) -> Result<Option<QueueContinuation>> {
     let rc = crate::graph::RunContext::new(file.to_path_buf());
-    let (fm, _) = crate::frontmatter::parse_for_file_with_context(content, file, &rc)?;
+    let (fm, _) = crate::frontmatter_io::parse_for_file_with_context(content, file, &rc)?;
     if fm.queue_active != Some(true) {
         return Ok(None);
     }
@@ -563,7 +563,7 @@ pub fn deferred_head_count(file: &Path) -> usize {
 /// as response/content drift, never as metadata-only drift.
 pub fn live_continuation_head(file: &Path, content: &str) -> Option<String> {
     let rc = crate::graph::RunContext::new(file.to_path_buf());
-    let (fm, _) = crate::frontmatter::parse_for_file_with_context(content, file, &rc).ok()?;
+    let (fm, _) = crate::frontmatter_io::parse_for_file_with_context(content, file, &rc).ok()?;
     if fm.queue_active != Some(true) {
         return None;
     }
@@ -752,7 +752,7 @@ fn drainable_head_prompt_for_scope(
     scope: DrainScope,
 ) -> Option<crate::queue::QueuePrompt> {
     let rc = crate::graph::RunContext::new(file.to_path_buf());
-    let (fm, _) = crate::frontmatter::parse_for_file_with_context(content, file, &rc).ok()?;
+    let (fm, _) = crate::frontmatter_io::parse_for_file_with_context(content, file, &rc).ok()?;
     if fm.queue_active != Some(true) {
         return None;
     }
@@ -798,7 +798,7 @@ fn drainable_head_prompt_for_scope(
 /// drainability the supervisor idle-watch already enforces (#qchurn).
 pub fn drainable_head_count(file: &Path, content: &str) -> usize {
     let rc = crate::graph::RunContext::new(file.to_path_buf());
-    let Ok((fm, _)) = crate::frontmatter::parse_for_file_with_context(content, file, &rc) else {
+    let Ok((fm, _)) = crate::frontmatter_io::parse_for_file_with_context(content, file, &rc) else {
         return 0;
     };
     if fm.queue_active != Some(true) {

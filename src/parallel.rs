@@ -26,7 +26,7 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use crate::frontmatter;
+use agent_doc_core::frontmatter;
 use agent_doc_orchestration::sessions::Tmux;
 use agent_doc_orchestration::snapshot;
 

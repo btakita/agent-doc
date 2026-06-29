@@ -1,6 +1,7 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use crate::{frontmatter_io, template_io};
 
 /// Run the write command: append assistant response to document.
 ///
@@ -259,7 +260,7 @@ pub fn run_template(
     let snapshot_doc = snapshot::load(file).ok().flatten();
 
     // Apply patches to baseline
-    let content_ours = template::apply_patches_with_overrides_with_context(
+    let content_ours = template_io::apply_patches_with_overrides_with_context(
         base,
         &patches,
         &unmatched,
@@ -601,7 +602,7 @@ pub fn run_stream(
             let base = base_cow.as_ref();
             let ipc_baseline = baseline.map(|_| base);
             let t_apply = std::time::Instant::now();
-            let mut content_ours = template::apply_patches_with_overrides_with_context(
+            let mut content_ours = template_io::apply_patches_with_overrides_with_context(
                 base,
                 &patches,
                 &unmatched,
@@ -649,7 +650,7 @@ pub fn run_stream(
                     ),
                 );
                 // Re-apply patches to the current file content instead of the stale baseline
-                content_ours = template::apply_patches_with_overrides_with_context(
+                content_ours = template_io::apply_patches_with_overrides_with_context(
                     &content_at_start,
                     &patches,
                     &unmatched,
@@ -736,7 +737,7 @@ pub fn run_stream(
                     ),
                 );
                 // Fire post_write hook for cross-session coordination
-                let session_id = frontmatter::read_session_id(file).unwrap_or_default();
+                let session_id = frontmatter_io::read_session_id(file).unwrap_or_default();
                 crate::hooks::fire_post_write(file, &session_id, patches.len());
                 crate::hooks::fire_doc_event(file, "post_write");
                 drop(doc_lock);
@@ -806,7 +807,7 @@ pub fn run_stream(
     // inline attr (patch=append on tag) > config.toml ([components] section) > built-in default.
     // The skill sends delta content for append-mode components.
     let t_apply2 = std::time::Instant::now();
-    let mut content_ours = template::apply_patches_with_overrides_with_context(
+    let mut content_ours = template_io::apply_patches_with_overrides_with_context(
         base,
         &patches,
         &unmatched,
@@ -825,7 +826,7 @@ pub fn run_stream(
 
     // Apply frontmatter patch if present (fixes #16 — disk write path was missing this)
     if let Some(fm_patch) = patches.iter().find(|p| p.name == "frontmatter") {
-        content_ours = crate::frontmatter::merge_fields(&content_ours, &fm_patch.content)
+        content_ours = agent_doc_core::frontmatter::merge_fields(&content_ours, &fm_patch.content)
             .context("failed to merge frontmatter patch")?;
     }
 
@@ -864,11 +865,11 @@ pub fn run_stream(
             eprintln!(
                 "[write] response already present in current file; adopting normalized current content"
             );
-            let doc = crate::crdt::CrdtDoc::from_text(&repaired_current);
+            let doc = agent_doc_core::crdt::CrdtDoc::from_text(&repaired_current);
             (repaired_current, doc.encode_state())
         } else if content_current == base {
             // No edits — build CRDT state from result
-            let doc = crate::crdt::CrdtDoc::from_text(&content_ours);
+            let doc = agent_doc_core::crdt::CrdtDoc::from_text(&content_ours);
             (content_ours.clone(), doc.encode_state())
         } else {
             eprintln!("[write] File was modified during response generation. CRDT merging...");
@@ -894,7 +895,7 @@ pub fn run_stream(
                         e
                     );
                     let spliced = splice_pending_component(&content_ours, content_current);
-                    let doc = crate::crdt::CrdtDoc::from_text(&spliced);
+                    let doc = agent_doc_core::crdt::CrdtDoc::from_text(&spliced);
                     (spliced, doc.encode_state())
                 }
             }
@@ -920,7 +921,7 @@ pub fn run_stream(
                 file,
                 Some(content_current),
             )?;
-            crdt_state = crate::crdt::CrdtDoc::from_text(&final_content).encode_state();
+            crdt_state = agent_doc_core::crdt::CrdtDoc::from_text(&final_content).encode_state();
         }
         Ok((final_content, crdt_state, cleaned_applied))
     };
@@ -989,7 +990,8 @@ pub fn run_stream(
         final_content = plan.new_document.clone();
         snapshot_content = plan.new_snapshot.clone();
     }
-    let snapshot_crdt_state = crate::crdt::CrdtDoc::from_text(&snapshot_content).encode_state();
+    let snapshot_crdt_state =
+        agent_doc_core::crdt::CrdtDoc::from_text(&snapshot_content).encode_state();
 
     // Save snapshot BEFORE document write (#wcf5): external watchers (IDE
     // file-change listeners, git hooks) trigger on the document rename and may
@@ -1219,7 +1221,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     })?;
     let base = base_cow.as_ref();
     let ipc_baseline = baseline.map(|_| base);
-    let content_ours = template::apply_patches_with_overrides_with_context(
+    let content_ours = template_io::apply_patches_with_overrides_with_context(
         base,
         &patches,
         &unmatched,
@@ -1321,7 +1323,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
                 &patches,
                 &unmatched,
             );
-            let crdt_doc = crate::crdt::CrdtDoc::from_text(&content);
+            let crdt_doc = agent_doc_core::crdt::CrdtDoc::from_text(&content);
             snapshot::save_document_crdt(file, &crdt_doc.encode_state(), &content)?;
             drop(doc_lock);
             repair::clear_pending(file)?;
@@ -1441,7 +1443,7 @@ fn merge_recovery_content(
 fn save_recovery_snapshot(file: &Path, content: &str, use_crdt: bool) -> Result<()> {
     snapshot::save(file, content)?;
     if use_crdt {
-        let doc = crate::crdt::CrdtDoc::from_text(content);
+        let doc = agent_doc_core::crdt::CrdtDoc::from_text(content);
         snapshot::save_document_crdt(file, &doc.encode_state(), content)?;
     }
     Ok(())
@@ -1534,7 +1536,7 @@ pub fn apply_template_from_string_with_options(
 
     let mode_overrides = template_mode_overrides_for_current_doc(file, None, &content);
     let snapshot_doc = snapshot::load(file).ok().flatten();
-    let content_ours = template::apply_patches_with_overrides_with_context(
+    let content_ours = template_io::apply_patches_with_overrides_with_context(
         &content,
         &patches,
         &unmatched,
@@ -1860,7 +1862,7 @@ mod tests {
             "<!-- agent:exchange patch=append -->\nPrior response.\n<!-- /agent:exchange -->\n";
         fs::write(&doc, doc_content).unwrap();
 
-        let patches = vec![crate::template::PatchBlock::new(
+        let patches = vec![agent_doc_core::template::PatchBlock::new(
             "exchange",
             "### Re: fix\n\nNew response body.",
         )];

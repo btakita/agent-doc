@@ -83,7 +83,7 @@ fn dispatch_only_starting_pane_ready_via_authoritative_actor(
                     file.display(),
                     dispatch_pane,
                     harness.binary,
-                    crate::secret_redact::redact(&err.to_string())
+                    agent_doc_secret_redact::redact(&err.to_string())
                 ),
             );
             return false;

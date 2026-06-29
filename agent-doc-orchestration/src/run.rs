@@ -121,7 +121,11 @@ use std::time::{Duration, Instant};
 
 use agent_doc_element::element;
 
-use crate::{agent, config::Config, diff, frontmatter, git, merge, snapshot, template, write};
+use agent_doc_core::{diff, frontmatter, template};
+
+use crate::{
+    agent, config::Config, diff_io, frontmatter_io, git, merge, snapshot, template_io, write,
+};
 
 const AGENT_DOC_RUN_HEARTBEAT_SECS_ENV: &str = "AGENT_DOC_RUN_HEARTBEAT_SECS";
 const DEFAULT_RUN_HEARTBEAT_SECS: u64 = 30;
@@ -498,16 +502,16 @@ fn run_once(
     // Ensure the document has a session UUID (for tmux routing)
     let raw_content = std::fs::read_to_string(file)?;
     // Opt-in gate: a plain `.md` must not be auto-converted into a session.
-    frontmatter::require_agent_doc_document(&raw_content, file)?;
+    frontmatter_io::require_agent_doc_document(&raw_content, file)?;
     let (mut content_original, session_id) =
-        frontmatter::ensure_session_for_file(&raw_content, file)?;
+        frontmatter_io::ensure_session_for_file(&raw_content, file)?;
     if content_original != raw_content {
         std::fs::write(file, &content_original)?;
     }
     if !dry_run {
         let early_rc = crate::graph::RunContext::new(file.to_path_buf());
         let (early_fm, _) =
-            frontmatter::parse_for_file_with_context(&content_original, file, &early_rc)?;
+            frontmatter_io::parse_for_file_with_context(&content_original, file, &early_rc)?;
         let early_agent_name = agent_name
             .or(early_fm.agent.as_deref())
             .or(config.default_agent.as_deref())
@@ -536,7 +540,7 @@ fn run_once(
         owned_rc = crate::graph::RunContext::new(file.to_path_buf());
         &owned_rc
     };
-    let (fm, _body) = frontmatter::parse_for_file_with_context(&content_original, file, rc)?;
+    let (fm, _body) = frontmatter_io::parse_for_file_with_context(&content_original, file, rc)?;
     let mut prompt_fm = fm.clone();
     if force_fresh_agent_session && prompt_fm.resume.is_some() {
         eprintln!(
@@ -727,7 +731,7 @@ fn run_once(
     // This lets the editor show agent additions as diff gutters
     if !no_git {
         let did_commit = git::commit(file)?;
-        if !did_commit && !queue_synthetic_diff && diff::compute(file)?.is_none() {
+        if !did_commit && !queue_synthetic_diff && diff_io::compute(file)?.is_none() {
             anyhow::bail!(
                 "no child-agent dispatch: the pre-commit repair closed {} as already committed and no new assistant response body was supplied. If you need to recover a missed response patchback, pipe the response through `agent-doc write --commit {}`.",
                 file.display(),
@@ -834,7 +838,7 @@ fn run_once(
 }
 
 fn compute_run_diff(file: &Path) -> Result<Option<(String, bool)>> {
-    if let Some(d) = diff::compute(file)? {
+    if let Some(d) = diff_io::compute(file)? {
         eprintln!("[run] diff computed ({} bytes)", d.len());
         return Ok(Some((d, false)));
     }
@@ -888,7 +892,7 @@ fn active_queue_prompt_state(file: &Path) -> Result<ActiveQueuePromptState> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let rc = crate::graph::RunContext::new(file.to_path_buf());
-    let (fm, _) = frontmatter::parse_for_file_with_context(&content, file, &rc)?;
+    let (fm, _) = frontmatter_io::parse_for_file_with_context(&content, file, &rc)?;
     if fm.queue_active != Some(true) {
         return Ok(ActiveQueuePromptState::Inactive);
     }
@@ -1866,7 +1870,7 @@ fn apply_template_response(
     snapshot::save_pre_response(file, baseline)?;
 
     let content_ours =
-        template::apply_patches_with_context(baseline, &patches, &unmatched, file, Some(&rc))
+        template_io::apply_patches_with_context(baseline, &patches, &unmatched, file, Some(&rc))
             .context("failed to apply template patches")?;
     let snapshot_doc = snapshot::load(file).ok().flatten();
     let content_ours = normalize_direct_run_template_content(
@@ -1879,7 +1883,7 @@ fn apply_template_response(
     let content_current = std::fs::read_to_string(file)?;
     let (final_content, crdt_state) = if content_current == baseline {
         let state = if use_crdt {
-            Some(crate::crdt::CrdtDoc::from_text(&content_ours).encode_state())
+            Some(agent_doc_core::crdt::CrdtDoc::from_text(&content_ours).encode_state())
         } else {
             None
         };
@@ -3151,7 +3155,7 @@ old status\n\
         std::fs::write(&doc, baseline).unwrap();
         snapshot::save(&doc, snapshot).unwrap();
 
-        let diff_text = crate::diff::unified_diff_from_contents(snapshot, baseline)
+        let diff_text = agent_doc_core::diff::unified_diff_from_contents(snapshot, baseline)
             .expect("snapshot and baseline differ");
         let normalized = normalize_direct_run_prompt_prefixes(&doc, baseline, &diff_text)
             .expect("direct-run baseline prompt normalization should succeed");

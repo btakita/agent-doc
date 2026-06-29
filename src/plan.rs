@@ -49,7 +49,8 @@ use agent_doc_element::element::{self, is_backlog_component, is_tracked_work_com
 use agent_doc_element_backlog::backlog;
 
 use crate::frontmatter;
-use agent_doc_orchestration::{diff, security};
+use agent_doc_core::diff;
+use agent_doc_orchestration::{diff_io, security};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -174,7 +175,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     let (fm, _body) = frontmatter::parse_for_file(&content, file)
         .with_context(|| format!("failed to parse frontmatter in {}", file.display()))?;
 
-    let doc_diff = diff::compute(file)?;
+    let doc_diff = diff_io::compute(file)?;
     let harness_diff = if doc_diff.is_none() {
         agent_doc_orchestration::harness_prompt::synthetic_diff_for_file(file)?
     } else {
@@ -862,7 +863,7 @@ fn pending_mutations_for_doc(
         if target_paths.is_empty()
             && !issue_units.is_empty()
             && let Some(target) =
-                agent_doc_orchestration::project_config::agent_doc_bug_target_document_for_doc(
+                agent_doc_orchestration::project_config_io::agent_doc_bug_target_document_for_doc(
                     file,
                 )?
         {

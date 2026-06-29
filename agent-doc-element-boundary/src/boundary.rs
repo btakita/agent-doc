@@ -17,7 +17,7 @@
 //!   triggers a VFS refresh before the next IPC patch write.
 //!
 //! ## Agentic Contracts
-//! - `new_id() -> String` — delegates to `agent_doc_core::id::new_boundary_id()`; guaranteed unique UUID.
+//! - `new_id() -> String` — delegates to `new_boundary_id()`; guaranteed unique UUID.
 //! - `format_marker(id) -> String` — produces `<!-- agent:boundary:ID -->`.
 //! - `extract_id(marker) -> Option<&str>` — inverse of `format_marker`; returns trimmed ID.
 //! - `insert(doc, component_name) -> Result<(String, String)>` — returns `(uuid, updated_doc)`;
@@ -38,26 +38,35 @@
 //! - no_component: `insert` with unknown component name → `Err` containing component name
 
 use anyhow::{Context, Result};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use crate::snapshot;
 use agent_doc_element::element;
 
 /// Signal the IDE plugin to refresh the file from disk.
-/// Tries socket IPC first, falls back to file-based signal.
+/// Uses the file-based signal because the boundary element crate does not own
+/// orchestration socket IPC.
 fn signal_editor_refresh(file: &Path) {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    if let Some(root) = snapshot::find_project_root(&canonical) {
-        // Try socket IPC first
-        if crate::ipc_socket::is_listener_active(&root)
-            && crate::ipc_socket::send_vcs_refresh(&root).unwrap_or(false)
-        {
-            return;
-        }
-        // Fall back to file-based signal
+    if let Some(root) = find_project_root(&canonical) {
         let signal = root.join(".agent-doc/patches/vcs-refresh.signal");
         if signal.parent().is_some_and(|p| p.exists()) {
             let _ = std::fs::write(&signal, "boundary-refresh");
+        }
+    }
+}
+
+fn find_project_root(file: &Path) -> Option<PathBuf> {
+    let mut dir = if file.is_dir() {
+        file.to_path_buf()
+    } else {
+        file.parent()?.to_path_buf()
+    };
+    loop {
+        if dir.join(".agent-doc").is_dir() {
+            return Some(dir);
+        }
+        if !dir.pop() {
+            return None;
         }
     }
 }
@@ -68,7 +77,7 @@ pub const BOUNDARY_SUFFIX: &str = " -->";
 
 /// Generate a new boundary ID (delegates to lib).
 pub fn new_id() -> String {
-    agent_doc_core::id::new_boundary_id()
+    crate::new_boundary_id()
 }
 
 /// Format a boundary marker comment.
@@ -336,12 +345,11 @@ mod tests {
     }
 
     #[test]
-    fn run_does_not_advance_snapshot_with_marker_only_churn() {
+    fn run_writes_marker_without_rewriting_non_boundary_content() {
         let dir = tempfile::TempDir::new().unwrap();
         let file = dir.path().join("doc.md");
         let original = "<!-- agent:exchange -->\ncontent\n<!-- /agent:exchange -->\n";
         std::fs::write(&file, original).unwrap();
-        snapshot::save(&file, original).unwrap();
 
         run(&file, Some("exchange")).unwrap();
 
@@ -350,10 +358,16 @@ mod tests {
             current.contains(BOUNDARY_PREFIX),
             "boundary command should still prepare the working document"
         );
+        let marker_line = current
+            .lines()
+            .find(|line| line.contains(BOUNDARY_PREFIX))
+            .expect("boundary marker line");
+        let without_marker = current
+            .replace(marker_line, "")
+            .replace("\n\n<!-- /agent:exchange -->", "\n<!-- /agent:exchange -->");
         assert_eq!(
-            snapshot::load(&file).unwrap().unwrap(),
-            original,
-            "marker-only boundary setup must not become the committed snapshot basis"
+            without_marker, original,
+            "marker-only boundary setup must not rewrite non-boundary content"
         );
     }
 }

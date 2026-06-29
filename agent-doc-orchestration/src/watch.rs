@@ -73,12 +73,12 @@ use std::time::{Duration, Instant};
 
 use notify::{EventKind, RecursiveMode, Watcher};
 
+use agent_doc_core::frontmatter;
 use agent_doc_markdown_ast::events::DocumentNodeEvent;
 
 use crate::{
     config::Config,
     document_watcher::{RawWatchEvent, WatchDelivery},
-    frontmatter,
     graph::ActorContext,
     sessions, stream,
 };

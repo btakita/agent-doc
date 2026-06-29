@@ -6,7 +6,7 @@ use std::path::Path;
 
 use agent_doc_element::element;
 
-use crate::template;
+use agent_doc_core::template;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PatchbackShapeFacts {

@@ -17,9 +17,9 @@ pub fn normalize_transient_agent_doc_markers(content: &str) -> String {
     // as a direct response patchback / closeout drift. Stripping it here keeps
     // every doc-vs-snapshot/HEAD comparison routed through this normalizer
     // invariant to the pipeline mirror.
-    crate::frontmatter::strip_pipeline_block_lines(&strip_guard_markers(&strip_head_markers(
-        &strip_boundary_markers(content),
-    )))
+    agent_doc_core::frontmatter::strip_pipeline_block_lines(&strip_guard_markers(
+        &strip_head_markers(&strip_boundary_markers(content)),
+    ))
 }
 
 /// Replace the `agent:queue` component (opening-tag attributes + body) with a
@@ -105,7 +105,7 @@ pub(crate) fn prefix_prompt_line(line: &str) -> Option<String> {
     let trimmed = line.trim_start();
     if trimmed.is_empty()
         || trimmed.starts_with('❯')
-        || crate::diff::line_looks_like_markdown_list_item(trimmed)
+        || agent_doc_core::diff::line_looks_like_markdown_list_item(trimmed)
     {
         return None;
     }
@@ -119,7 +119,7 @@ pub(crate) fn answered_prompt_prelude_start(lines: &[&str]) -> Option<usize> {
         if trimmed.is_empty() {
             continue;
         }
-        if crate::diff::line_looks_like_prompt_prefix_repair_start(trimmed, false) {
+        if agent_doc_core::diff::line_looks_like_prompt_prefix_repair_start(trimmed, false) {
             return Some(idx);
         }
     }
@@ -240,7 +240,7 @@ pub(crate) fn canonicalize_answered_prompt_prefixes(exchange_content: &str) -> S
 
 pub fn normalize_committed_exchange_artifacts(content: &str) -> String {
     let transient = normalize_transient_agent_doc_markers(content);
-    let body = match crate::frontmatter::parse(&transient) {
+    let body = match agent_doc_core::frontmatter::parse(&transient) {
         Ok((_, body)) => body,
         Err(_) => return transient,
     };

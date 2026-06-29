@@ -137,7 +137,9 @@ use crate::supervisor::{
     resize,
     state::{CrashPolicy, RestartAction, SupervisorState},
 };
-use crate::{config, frontmatter, sessions, snapshot};
+use agent_doc_core::frontmatter;
+
+use crate::{config, sessions, snapshot};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum RouteOwnedReapPolicy {
@@ -250,7 +252,7 @@ const AUTO_TRIGGER_POLL_INTERVAL: Duration = Duration::from_millis(500);
 /// Bounds how long the auto-trigger thread waits for a freshly (re)launched
 /// harness child to finish starting up and show a dispatch-ready prompt before it
 /// gives up on re-injecting `agent-doc <FILE>`. It is deliberately NOT clamped to
-/// [`crate::wait_machine::GLOBAL_HANG_CEILING`] (10s): that ceiling bounds waits
+/// [`agent_doc_turn::wait_machine::GLOBAL_HANG_CEILING`] (10s): that ceiling bounds waits
 /// on peers expected to respond near-instantly (an IPC ack, an already-running
 /// shell prompt), but waiting on a cold-(re)starting harness *process* is a
 /// legitimately slow startup wait. A `claude --continue` resuming a large session
@@ -258,7 +260,7 @@ const AUTO_TRIGGER_POLL_INTERVAL: Duration = Duration::from_millis(500);
 /// prompt, so clamping to 10s made every continue-mode `restart-supervisor` time
 /// out before the prompt appeared: the re-dispatch never fired and the relaunched
 /// operator came up unclaimed, leaving the controller parked at `operator_ready`
-/// (`#contrestartdispatch`). Like the bounded [`crate::wait_machine::REINSTALL_BUDGET`]
+/// (`#contrestartdispatch`). Like the bounded [`agent_doc_turn::wait_machine::REINSTALL_BUDGET`]
 /// exemption, this stays bounded — a child that never becomes dispatch-ready
 /// still fails closed at this budget and records a `startup_miss`, never hanging
 /// forever. The auto-trigger runs on its own `AutoTriggerMonitor`, not the
@@ -924,7 +926,7 @@ fn route_owned_exchange_tail_has_unresolved_prompt(body: &str) -> bool {
 
     body[tail_start..]
         .lines()
-        .any(crate::diff::text_line_looks_like_prompt_target)
+        .any(agent_doc_core::diff::text_line_looks_like_prompt_target)
 }
 
 fn route_owned_line_is_response_heading(line: &str) -> bool {
@@ -2754,8 +2756,8 @@ fn rebind_project_tmux_session_if_expected_dead(
 mod th {
     use super::*;
     use crate::config::Config;
-    use crate::frontmatter::Frontmatter;
     use crate::sessions::IsolatedTmux;
+    use agent_doc_core::frontmatter::Frontmatter;
     pub(crate) struct ScopedCurrentDir {
         prev_cwd: std::path::PathBuf,
         _env_guard: crate::test_support::ProcessGlobalLockGuard,
@@ -2940,10 +2942,10 @@ mod tests {
     #![allow(unused_imports)]
     use super::*;
     use crate::config::Config;
-    use crate::frontmatter::Frontmatter;
     use crate::hooks::fire_doc_hooks;
-    use crate::project_config;
+    use crate::project_config_io as project_config;
     use crate::sessions::IsolatedTmux;
+    use agent_doc_core::frontmatter::Frontmatter;
     use std::collections::HashMap;
     use tempfile::TempDir;
     #[cfg(unix)]
@@ -4062,7 +4064,7 @@ Done.
         // that it is generous enough for harness startup yet still bounded (fails
         // closed, never an unbounded hang).
         assert!(
-            AUTO_TRIGGER_TIMEOUT > crate::wait_machine::GLOBAL_HANG_CEILING,
+            AUTO_TRIGGER_TIMEOUT > agent_doc_turn::wait_machine::GLOBAL_HANG_CEILING,
             "auto-trigger startup budget {:?} must exceed the 10s responsiveness ceiling so a \
              continue-restart harness resume can reach its prompt before the re-dispatch is abandoned",
             AUTO_TRIGGER_TIMEOUT

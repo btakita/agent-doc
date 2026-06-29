@@ -26,9 +26,12 @@ dependencies = [
  "agent-doc-core",
  "agent-doc-element",
  "agent-doc-element-backlog",
+ "agent-doc-element-boundary",
  "agent-doc-element-queue",
  "agent-doc-markdown-ast",
  "agent-doc-orchestration",
+ "agent-doc-secret-redact",
+ "agent-doc-sqlite",
  "agent-kit",
  "anyhow",
  "assert_cmd",
@@ -140,6 +143,8 @@ name = "agent-doc-element-boundary"
 version = "0.34.65"
 dependencies = [
  "agent-doc-element",
+ "anyhow",
+ "tempfile",
 ]
 
 [[package]]
@@ -259,6 +264,7 @@ dependencies = [
  "agent-doc-document-realtime",
  "agent-doc-element",
  "agent-doc-element-backlog",
+ "agent-doc-element-boundary",
  "agent-doc-element-queue",
  "agent-doc-log-time",
  "agent-doc-markdown-ast",

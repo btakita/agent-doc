@@ -1,6 +1,7 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use crate::frontmatter_io;
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
 
@@ -191,8 +192,8 @@ pub fn run_with_reap_policy(
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     // Opt-in gate: a plain `.md` must not be auto-converted into a session.
-    frontmatter::require_agent_doc_document(&content, file)?;
-    let (updated_content, session_id) = frontmatter::ensure_session_for_file(&content, file)?;
+    frontmatter_io::require_agent_doc_document(&content, file)?;
+    let (updated_content, session_id) = frontmatter_io::ensure_session_for_file(&content, file)?;
     let generated_session_uuid = updated_content != content;
     if updated_content != content {
         std::fs::write(file, &updated_content)
@@ -250,7 +251,7 @@ pub fn run_with_reap_policy(
     };
 
     let rc = crate::graph::RunContext::new(file.to_path_buf());
-    let (fm, _body) = frontmatter::parse_for_file_with_context(&updated_content, file, &rc)?;
+    let (fm, _body) = frontmatter_io::parse_for_file_with_context(&updated_content, file, &rc)?;
     let global_config = config::load().unwrap_or_default();
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
     let project_root = snapshot::find_project_root(&canonical).unwrap_or_else(|| {
@@ -1850,10 +1851,10 @@ mod tests {
     #![allow(unused_imports)]
     use super::*;
     use crate::config::Config;
-    use crate::frontmatter::Frontmatter;
     use crate::hooks::fire_doc_hooks;
-    use crate::project_config;
+    use crate::project_config_io as project_config;
     use crate::sessions::IsolatedTmux;
+    use agent_doc_core::frontmatter::Frontmatter;
     use std::collections::HashMap;
     use tempfile::TempDir;
 

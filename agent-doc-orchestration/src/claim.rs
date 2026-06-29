@@ -101,7 +101,9 @@ use anyhow::{Context, Result};
 use std::io::Write;
 use std::path::Path;
 
-use crate::{frontmatter, project_config, resync, route, sessions};
+use agent_doc_core::{frontmatter, project_config};
+
+use crate::{project_config_io, resync, route, sessions};
 
 /// Outcome of the cross-session claim gate. Pure function output, separated
 /// from side effects so it can be unit-tested without a live tmux server.
@@ -528,7 +530,7 @@ pub fn run(
 
         // Merge default components into .agent-doc/config.toml if template format
         if resolved.format == frontmatter::AgentDocFormat::Template {
-            let mut proj_cfg = project_config::load_project();
+            let mut proj_cfg = project_config_io::load_project();
 
             // Add default components if not already present
             proj_cfg
@@ -553,7 +555,7 @@ pub fn run(
                     ..Default::default()
                 });
 
-            if let Err(e) = project_config::save_project(&proj_cfg) {
+            if let Err(e) = project_config_io::save_project(&proj_cfg) {
                 eprintln!("warning: failed to save config with components: {}", e);
             } else {
                 eprintln!("merged default components into .agent-doc/config.toml");

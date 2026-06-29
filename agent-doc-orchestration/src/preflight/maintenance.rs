@@ -9,12 +9,12 @@ use super::*;
 /// document mirror behind). Returns `None` when neither is present.
 pub(crate) fn resolve_pipeline_state(
     file: &Path,
-) -> Result<Option<crate::frontmatter::AgentDocPipeline>> {
+) -> Result<Option<agent_doc_core::frontmatter::AgentDocPipeline>> {
     if let Some(state) = crate::cycle_state::load(file)? {
         return Ok(Some(state.to_pipeline()));
     }
     let current = std::fs::read_to_string(file).unwrap_or_default();
-    Ok(match crate::frontmatter::parse(&current) {
+    Ok(match agent_doc_core::frontmatter::parse(&current) {
         Ok((fm, _)) if !fm.pipeline.is_empty() => Some(fm.pipeline),
         _ => None,
     })
@@ -1789,7 +1789,9 @@ pub(crate) fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<Que
             marker_control,
             Some(agent_doc_core::frontmatter::QueueControl::Start)
         );
-    let exchange_triggered = diff.map(crate::diff::detect_queue_trigger).unwrap_or(false);
+    let exchange_triggered = diff
+        .map(agent_doc_core::diff::detect_queue_trigger)
+        .unwrap_or(false);
     let (fm, _) = frontmatter::parse(&content).unwrap_or_default();
     let persisted_active = fm.queue_active.unwrap_or(false);
 
@@ -2384,7 +2386,9 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
             marker_control,
             Some(agent_doc_core::frontmatter::QueueControl::Start)
         );
-    let exchange_triggered = diff.map(crate::diff::detect_queue_trigger).unwrap_or(false);
+    let exchange_triggered = diff
+        .map(agent_doc_core::diff::detect_queue_trigger)
+        .unwrap_or(false);
     let (fm, _) = frontmatter::parse(&current_content).unwrap_or_default();
     let persisted_active = fm.queue_active.unwrap_or(false);
 
@@ -2411,7 +2415,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // accumulate as orphaned residue. Drop any such displaced struck-queue line
     // (outside every agent component span) before the rest of queue maintenance.
     if let Some(repaired) =
-        crate::template::repair_queue_struck_items_escaped_below_marker(&current_content)
+        agent_doc_core::template::repair_queue_struck_items_escaped_below_marker(&current_content)
     {
         current_content = repaired;
         mutated = true;

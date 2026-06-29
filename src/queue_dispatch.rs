@@ -33,7 +33,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
-use crate::frontmatter;
+use agent_doc_core::frontmatter;
 use agent_doc_orchestration::sessions;
 use agent_doc_orchestration::snapshot;
 use agent_doc_orchestration::supervisor::ipc as supervisor_ipc;

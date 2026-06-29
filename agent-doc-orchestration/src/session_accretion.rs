@@ -141,7 +141,7 @@ fn recent_exchange_compaction_timestamp_at(file: &Path, now: u64) -> Result<Opti
 /// drain does not churn the session or hit `/clear` rejected mid-turn.
 pub fn queue_context_reset_opted_in(file: &Path) -> bool {
     if let Ok(content) = std::fs::read_to_string(file)
-        && let Ok((fm, _)) = crate::frontmatter::parse(&content)
+        && let Ok((fm, _)) = agent_doc_core::frontmatter::parse(&content)
         && let Some(flag) = fm.queue_context_reset
     {
         return flag;
@@ -166,7 +166,7 @@ pub const DEFAULT_CLEAR_THRESHOLD: u8 = 50;
 /// context usage against it and fail safe when no reliable percentage is known.
 pub fn clear_threshold_for_doc(file: &Path) -> u8 {
     if let Ok(content) = std::fs::read_to_string(file)
-        && let Ok((fm, _)) = crate::frontmatter::parse(&content)
+        && let Ok((fm, _)) = agent_doc_core::frontmatter::parse(&content)
         && let Some(threshold) = fm.clear_threshold
     {
         return threshold.min(100);
@@ -285,7 +285,7 @@ fn inspect_at(file: &Path, content: &str, now: u64) -> Result<SessionAccretionRe
     let startup_miss_active = crate::startup_miss::load(file)?.is_some();
     let rc = crate::graph::RunContext::new(file.to_path_buf());
     let parsed_frontmatter =
-        crate::frontmatter::parse_for_file_with_context(content, file, &rc).ok();
+        crate::frontmatter_io::parse_for_file_with_context(content, file, &rc).ok();
     let session_id = parsed_frontmatter
         .as_ref()
         .and_then(|(fm, _)| fm.session.as_ref().map(|s| s.trim().to_string()))
@@ -415,7 +415,7 @@ fn inspect_at_with_context(
     let (recent_committed_cycles, recent_noop_closeouts) = recent_cycle_metrics(file, now)?;
     let startup_miss_active = crate::startup_miss::load(file)?.is_some();
     let parsed_frontmatter =
-        crate::frontmatter::parse_for_file_with_context(content, file, rc).ok();
+        crate::frontmatter_io::parse_for_file_with_context(content, file, rc).ok();
     let session_id = parsed_frontmatter
         .as_ref()
         .and_then(|(fm, _)| fm.session.as_ref().map(|s| s.trim().to_string()))

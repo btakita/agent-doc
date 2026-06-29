@@ -122,7 +122,7 @@ pub fn normalize_harness_name(raw: &str) -> String {
 }
 
 fn document_harness_from_content(content: &str) -> Option<String> {
-    crate::frontmatter::parse(content)
+    agent_doc_core::frontmatter::parse(content)
         .ok()
         .and_then(|(fm, _)| fm.agent)
         .map(|value| normalize_harness_name(&value))
@@ -171,7 +171,7 @@ fn legacy_generation_for_document(file: &Path, session_id_hint: Option<&str>) ->
     };
     let Some(session_id) = session_id_hint
         .map(ToOwned::to_owned)
-        .or_else(|| crate::frontmatter::read_session_id(&canonical))
+        .or_else(|| crate::frontmatter_io::read_session_id(&canonical))
     else {
         return Ok(0);
     };

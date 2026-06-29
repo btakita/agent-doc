@@ -1974,7 +1974,7 @@ mod tests {
         );
         assert_eq!(
             resolve_pending_done_guard_mode_with_context(missing, &rc).unwrap(),
-            crate::frontmatter::PendingCaptureGuardMode::Strict,
+            agent_doc_core::frontmatter::PendingCaptureGuardMode::Strict,
         );
 
         let rc_off = crate::graph::RunContext::new(missing.to_path_buf());
@@ -1983,7 +1983,7 @@ mod tests {
         );
         assert_eq!(
             resolve_pending_done_guard_mode_with_context(missing, &rc_off).unwrap(),
-            crate::frontmatter::PendingCaptureGuardMode::Off,
+            agent_doc_core::frontmatter::PendingCaptureGuardMode::Off,
         );
     }
     /// Phase 6 (#lr-content-6): the shared `ComponentsSlot` parses the same
@@ -2183,11 +2183,11 @@ Body\n\
         fs::write(&doc, current).unwrap();
         crate::snapshot::save(&doc, snapshot).unwrap();
 
-        assert!(crate::diff::text_line_looks_like_prompt_target(
+        assert!(agent_doc_core::diff::text_line_looks_like_prompt_target(
             "Can we run specific rubrics for fine tuning?"
         ));
         assert!(
-            crate::diff::prompt_change_is_already_answered(
+            agent_doc_core::diff::prompt_change_is_already_answered(
                 "Can we run specific rubrics for fine tuning?\n### Re: specific rubrics — gpt-5\n\nYes.\n"
             ),
             "fixture block should be recognized as already answered"
@@ -2227,7 +2227,7 @@ Body\n\
         fs::write(&doc, current).unwrap();
         crate::snapshot::save(&doc, snapshot).unwrap();
 
-        assert!(crate::diff::prompt_change_is_already_answered(
+        assert!(agent_doc_core::diff::prompt_change_is_already_answered(
             "I renamed the repo to ClaudeScore/buildparty-investor-demo. Please update references\nI updated the repo-local references to the renamed GitHub repo.\n"
         ));
 
@@ -2259,10 +2259,10 @@ Body\n\
         fs::write(&doc, current).unwrap();
         crate::snapshot::save(&doc, snapshot).unwrap();
 
-        let changes = crate::diff::classify_prompt_bearing_changes(
-            &crate::diff::unified_diff_from_contents(
-                &crate::frontmatter::parse(snapshot).unwrap().1,
-                &crate::frontmatter::parse(&fs::read_to_string(&doc).unwrap())
+        let changes = agent_doc_core::diff::classify_prompt_bearing_changes(
+            &agent_doc_core::diff::unified_diff_from_contents(
+                &agent_doc_core::frontmatter::parse(snapshot).unwrap().1,
+                &agent_doc_core::frontmatter::parse(&fs::read_to_string(&doc).unwrap())
                     .unwrap()
                     .1,
             )
@@ -2271,7 +2271,7 @@ Body\n\
         assert_eq!(changes.len(), 1, "expected one content edit: {changes:?}");
         assert_eq!(
             changes[0].kind,
-            crate::diff::PromptBearingChangeKind::ContentEdit
+            agent_doc_core::diff::PromptBearingChangeKind::ContentEdit
         );
 
         let change = first_unstarted_prompt_bearing_change(&doc).unwrap();
@@ -2344,7 +2344,7 @@ Body\n\
             .expect("plain exchange-tail prompt should remain actionable");
         assert_eq!(
             change.kind,
-            crate::diff::PromptBearingChangeKind::PromptTarget
+            agent_doc_core::diff::PromptBearingChangeKind::PromptTarget
         );
         assert_eq!(
             change.text,

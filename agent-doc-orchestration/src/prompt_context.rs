@@ -1,8 +1,9 @@
 use agent_doc_element::element;
 
+use agent_doc_core::{diff, frontmatter};
 use agent_doc_element_backlog::backlog;
 
-use crate::{diff, frontmatter, session_accretion};
+use crate::{frontmatter_io, session_accretion};
 use std::path::Path;
 
 const BACKLOG_HEAD_LIMIT: usize = 3;
@@ -94,7 +95,7 @@ fn full_document_section(doc: &str, remote_host_scope: &str) -> String {
 
 fn render_remote_host_scope(file: &Path, doc: &str) -> String {
     let rc = crate::graph::RunContext::new(file.to_path_buf());
-    let declared_targets = frontmatter::parse_for_file_with_context(doc, file, &rc)
+    let declared_targets = frontmatter_io::parse_for_file_with_context(doc, file, &rc)
         .or_else(|_| frontmatter::parse(doc))
         .ok()
         .map(|(fm, _)| fm.required_ssh_targets)

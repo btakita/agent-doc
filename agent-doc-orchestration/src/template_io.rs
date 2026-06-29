@@ -4,8 +4,8 @@
 //! `&Path` or `std::fs` in core"). Wave 5 / `#ckv3` of `#adcr`.
 //!
 //! Re-exported from [`crate::template`] so existing call sites that use
-//! `template::apply_patches(file, …)` / `template::apply_patches_with_overrides(file, …)`
-//! / `template::template_info(file)` continue to resolve unchanged.
+//! `template_io::apply_patches(file, …)` / `template_io::apply_patches_with_overrides(file, …)`
+//! / `template_io::template_info(file)` continue to resolve unchanged.
 
 #![allow(dead_code)]
 
@@ -14,16 +14,17 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
+use agent_doc_core::project_config::{ComponentConfig, ProjectConfig};
 use agent_doc_core::template::{
     ComponentInfo, PatchBlock, TemplateInfo, apply_patches_pure, apply_patches_with_overrides_pure,
 };
 use agent_doc_element::element;
 
 use crate::graph::RunContext;
-use crate::project_config;
+use crate::project_config_io;
 
 /// File-based wrapper for the pure
-/// [`agent_doc_core::template::apply_patches`]. Loads component/max_lines
+/// [`agent_doc_core::template_io::apply_patches`]. Loads component/max_lines
 /// configs from the document's `.agent-doc/config.toml`, derives the
 /// boundary summary from the file stem, and delegates.
 pub fn apply_patches(
@@ -56,7 +57,7 @@ pub fn apply_patches_with_context(
 }
 
 /// File-based wrapper for
-/// [`agent_doc_core::template::apply_patches_with_overrides`].
+/// [`agent_doc_core::template_io::apply_patches_with_overrides`].
 pub fn apply_patches_with_overrides(
     doc: &str,
     patches: &[PatchBlock],
@@ -138,9 +139,7 @@ fn load_component_configs(file: &Path, rc: Option<&RunContext>) -> HashMap<Strin
     proj_cfg
         .components
         .iter()
-        .map(|(name, cfg): (&String, &project_config::ComponentConfig)| {
-            (name.clone(), cfg.patch.clone())
-        })
+        .map(|(name, cfg): (&String, &ComponentConfig)| (name.clone(), cfg.patch.clone()))
         .collect()
 }
 
@@ -151,17 +150,12 @@ fn load_max_lines_configs(file: &Path, rc: Option<&RunContext>) -> HashMap<Strin
         .components
         .iter()
         .filter(|(_, cfg)| cfg.max_lines > 0)
-        .map(|(name, cfg): (&String, &project_config::ComponentConfig)| {
-            (name.clone(), cfg.max_lines)
-        })
+        .map(|(name, cfg): (&String, &ComponentConfig)| (name.clone(), cfg.max_lines))
         .collect()
 }
 
 /// Resolve project config by walking up from a document path to find `.agent-doc/config.toml`.
-fn load_project_from_doc(
-    file: &Path,
-    rc: Option<&RunContext>,
-) -> Arc<project_config::ProjectConfig> {
+fn load_project_from_doc(file: &Path, rc: Option<&RunContext>) -> Arc<ProjectConfig> {
     if let Some(rc) = rc {
         return rc.project_config();
     }
@@ -170,14 +164,14 @@ fn load_project_from_doc(
     loop {
         let candidate = current.join(".agent-doc").join("config.toml");
         if candidate.exists() {
-            return Arc::new(project_config::load_project_from(&candidate));
+            return Arc::new(project_config_io::load_project_from(&candidate));
         }
         match current.parent() {
             Some(p) if p != current => current = p,
             _ => break,
         }
     }
-    Arc::new(project_config::load_project())
+    Arc::new(project_config_io::load_project())
 }
 
 /// Default mode for a component by name.

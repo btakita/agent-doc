@@ -77,7 +77,7 @@ pub(crate) fn child_output_prompt_visible(
     let Some(line) = harness.last_prompt_candidate(output) else {
         return false;
     };
-    let stripped = crate::prompt::strip_ansi(&line);
+    let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(&line);
     harness.matches_prompt(stripped.trim())
 }
 
@@ -231,7 +231,7 @@ pub(crate) fn context_clear_command_visible_in_active_input(
         .lines()
         .rev()
         .take(8)
-        .map(crate::prompt::strip_ansi)
+        .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
         .collect();
     let lines: Vec<&String> = recent_lines.iter().rev().collect();
     for start in 0..lines.len() {
@@ -319,7 +319,7 @@ pub(crate) fn supervisor_pane_payload_already_pending(
 pub(crate) fn opencode_permission_prompt_active(shared: &SupervisorShared) -> bool {
     // Primary: parse terminal screen for the structured permission dialog
     let output = child_output_for_detection(shared);
-    let prompt = crate::prompt::parse_prompt(&output);
+    let prompt = agent_doc_turn_executor_tmux::prompt::parse_prompt(&output);
     if prompt.active
         && prompt.options.as_ref().is_some_and(|options| {
             options.iter().any(|option| option.label == "Allow once")

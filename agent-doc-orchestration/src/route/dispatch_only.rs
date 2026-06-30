@@ -884,7 +884,7 @@ pub(crate) fn dispatch_only_blocker_reason(
         return None;
     }
 
-    let normalized = crate::prompt::strip_ansi(content).to_ascii_lowercase();
+    let normalized = agent_doc_turn_executor_tmux::prompt::strip_ansi(content).to_ascii_lowercase();
     if normalized.contains("reverse-i-search") {
         Some("interactive shell reverse-i-search".to_string())
     } else if normalized.contains("i-search")

@@ -54,6 +54,7 @@ dependencies = [
  "agent-doc-tmux-commands",
  "agent-doc-turn",
  "agent-doc-turn-executor",
+ "agent-doc-turn-executor-tmux",
  "agent-doc-work-graph",
  "agent-doc-workflow",
  "agent-kit",
@@ -656,6 +657,7 @@ version = "0.34.65"
 dependencies = [
  "agent-doc-tmux",
  "agent-doc-turn-executor",
+ "serde",
 ]
 
 [[package]]

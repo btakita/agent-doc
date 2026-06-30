@@ -2027,7 +2027,7 @@ impl SimWorld {
         };
         let draft_preview = harness
             .last_prompt_candidate(pane_content)
-            .map(|candidate| agent_doc_orchestration::prompt::strip_ansi(&candidate))
+            .map(|candidate| agent_doc_turn_executor_tmux::prompt::strip_ansi(&candidate))
             .map(|preview| agent_doc_secret_redact::redact(preview.trim()))
             .filter(|preview| !preview.is_empty())
             .unwrap_or_else(|| "<none>".to_string());

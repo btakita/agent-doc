@@ -841,7 +841,7 @@ pub(crate) fn wait_for_agent_ready_outcome(
                     .lines()
                     .rev()
                     .find(|l| !l.trim().is_empty())
-                    .map(prompt::strip_ansi)
+                    .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
                     .unwrap_or_default();
                 eprintln!(
                     "[route] Still waiting for {} ({:.0}s)... last line: {}",

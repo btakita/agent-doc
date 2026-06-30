@@ -221,7 +221,7 @@ use agent_doc_frontmatter::frontmatter;
 use agent_doc_turn::closeout_recovery::{CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput};
 use tmux_router::Tmux;
 
-use crate::{frontmatter_io, prompt, resync, sessions, snapshot, sync};
+use crate::{frontmatter_io, resync, sessions, snapshot, sync};
 use std::cell::Cell;
 
 thread_local! {
@@ -1012,7 +1012,7 @@ fn opencode_pane_state_changed_from_idle(
     harness.has_busy_cue(current_content)
         || current_content
             .lines()
-            .map(crate::prompt::strip_ansi)
+            .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
             .any(|line| {
                 let trimmed = line.trim();
                 !trimmed.is_empty()

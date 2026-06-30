@@ -7467,6 +7467,94 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
 }
 
 #[test]
+fn test_agent_doc_turn_executor_tmux_owns_prompt_parser_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let tmux_executor_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn-executor-tmux/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&tmux_executor_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+
+    let prompt_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn-executor-tmux/src/prompt.rs"))
+            .unwrap();
+    for required in [
+        "pub struct PromptInfo",
+        "pub struct PromptOption",
+        "pub fn parse_prompt(",
+        "pub fn strip_ansi(",
+        "pub fn navigation_axis_for_prompt(",
+        "pub fn navigation_keys_for_prompt(",
+        "pub fn opencode_option_requires_confirmation(",
+    ] {
+        assert!(
+            prompt_source.contains(required),
+            "agent-doc-turn-executor-tmux must own pure prompt parser policy: {required}"
+        );
+    }
+
+    let orchestration_prompt_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/prompt.rs")).unwrap();
+    for forbidden in [
+        "pub struct PromptInfo",
+        "pub struct PromptOption",
+        "pub fn parse_prompt(",
+        "pub fn strip_ansi(",
+        "fn parse_claude_prompt(",
+        "fn parse_opencode_prompt(",
+        "fn parse_option_line(",
+        "fn opencode_selected_option_from_ansi(",
+    ] {
+        assert!(
+            !orchestration_prompt_source.contains(forbidden),
+            "orchestration prompt command must stay an effect adapter, not re-own parser policy: {forbidden}"
+        );
+    }
+    assert!(
+        orchestration_prompt_source.contains("use agent_doc_turn_executor_tmux::prompt::{"),
+        "orchestration prompt adapter should call the focused prompt parser directly"
+    );
+
+    let harness_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/harness.rs")).unwrap();
+    let start_detection_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/detection.rs"))
+            .unwrap();
+    let session_actor_source =
+        fs::read_to_string(manifest_dir.join("src/session_actor_cmd.rs")).unwrap();
+    let sim_world_engine_source =
+        fs::read_to_string(manifest_dir.join("src/sim_world/engine.rs")).unwrap();
+    for source in [
+        &harness_source,
+        &start_detection_source,
+        &session_actor_source,
+        &sim_world_engine_source,
+    ] {
+        assert!(
+            !source.contains("agent_doc_orchestration::prompt::strip_ansi")
+                && !source.contains("crate::prompt::strip_ansi")
+                && !source.contains("agent_doc_orchestration::prompt::parse_prompt")
+                && !source.contains("crate::prompt::parse_prompt"),
+            "callers should import prompt parser policy from agent-doc-turn-executor-tmux directly"
+        );
+    }
+
+    for forbidden in [
+        "agent-doc-orchestration",
+        "anyhow",
+        "tmux-router",
+        "agent-doc-frontmatter",
+        "interprocess",
+        "notify",
+        "rusqlite",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-turn-executor-tmux prompt parser must stay free of orchestration/session/tmux effects"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_tmux_commands_owns_submit_profile_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let tmux_commands_manifest =

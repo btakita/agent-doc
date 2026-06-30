@@ -198,7 +198,7 @@ impl HarnessConfig {
     /// Check if a line (potentially with ANSI codes) matches a prompt pattern.
     /// Used by route.rs for pane prompt detection.
     pub fn is_prompt_line(&self, line: &str) -> bool {
-        let stripped = crate::prompt::strip_ansi(line);
+        let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(line);
         let trimmed = stripped.trim();
         self.prompt_patterns
             .iter()
@@ -212,7 +212,7 @@ impl HarnessConfig {
     /// safely inject into. Prompt lines with drafted user text are not idle for
     /// dispatch even if they still begin with the harness prompt glyph.
     pub fn is_dispatch_ready_prompt_line(&self, line: &str) -> bool {
-        let stripped = crate::prompt::strip_ansi(line);
+        let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(line);
         let trimmed = stripped.trim();
         match self.binary.as_str() {
             "claude" => {
@@ -230,7 +230,7 @@ impl HarnessConfig {
     /// Return true when the line is harness UI chrome that should not be treated as
     /// prompt-bearing user/agent output.
     pub fn is_ignorable_output_line(&self, line: &str) -> bool {
-        let stripped = crate::prompt::strip_ansi(line);
+        let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(line);
         let trimmed = stripped.trim();
         if trimmed.is_empty() {
             return true;
@@ -253,7 +253,7 @@ impl HarnessConfig {
     }
 
     pub fn is_idle_status_line(&self, line: &str) -> bool {
-        let stripped = crate::prompt::strip_ansi(line);
+        let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(line);
         let trimmed = stripped.trim();
         match self.binary.as_str() {
             "codex" => is_context_usage_status_line(trimmed),
@@ -278,7 +278,10 @@ impl HarnessConfig {
         }
 
         let mut saw_status = false;
-        for line in output.lines().map(crate::prompt::strip_ansi) {
+        for line in output
+            .lines()
+            .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
+        {
             let trimmed = line.trim();
             if trimmed.is_empty() {
                 continue;
@@ -313,7 +316,7 @@ impl HarnessConfig {
             .lines()
             .rev()
             .take(bottom_n)
-            .map(crate::prompt::strip_ansi)
+            .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
             .map(|line| line.trim().to_string())
             .filter(|line| !line.is_empty())
             .collect();
@@ -366,7 +369,7 @@ impl HarnessConfig {
             .lines()
             .rev()
             .take(bottom_n)
-            .map(crate::prompt::strip_ansi)
+            .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
             .map(|line| line.trim().to_string())
             .filter(|line| !line.is_empty())
             .collect();
@@ -415,7 +418,7 @@ impl HarnessConfig {
             .lines()
             .rev()
             .take(8)
-            .map(crate::prompt::strip_ansi)
+            .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
             .map(|line| line.trim().to_string())
             .filter(|line| !line.is_empty())
             .find(|line| {
@@ -434,7 +437,7 @@ impl HarnessConfig {
     /// Return a short reason when recent pane output shows that route should
     /// not inject a new trigger yet.
     pub fn dispatch_blocker_reason(&self, output: &str) -> Option<String> {
-        if crate::prompt::parse_prompt(output).active {
+        if agent_doc_turn_executor_tmux::prompt::parse_prompt(output).active {
             return Some("active permission prompt".to_string());
         }
 
@@ -457,7 +460,7 @@ impl HarnessConfig {
                 .lines()
                 .rev()
                 .take(12)
-                .map(crate::prompt::strip_ansi)
+                .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
                 .map(|line| line.trim().to_ascii_lowercase())
                 .collect::<Vec<_>>();
             if opencode_active_turn_busy(&recent) {
@@ -485,7 +488,7 @@ impl HarnessConfig {
                 .lines()
                 .rev()
                 .take(8)
-                .map(crate::prompt::strip_ansi)
+                .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
                 .map(|line| line.trim().to_ascii_lowercase())
                 .collect::<Vec<_>>();
             if claude_active_turn_busy(&recent) {
@@ -510,7 +513,7 @@ impl HarnessConfig {
             .lines()
             .rev()
             .take(8)
-            .map(crate::prompt::strip_ansi)
+            .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
             .map(|line| line.trim().to_ascii_lowercase())
             .collect::<Vec<_>>();
 
@@ -566,7 +569,7 @@ impl HarnessConfig {
         }
 
         let candidate = self.last_prompt_candidate(output)?;
-        let trimmed = crate::prompt::strip_ansi(&candidate);
+        let trimmed = agent_doc_turn_executor_tmux::prompt::strip_ansi(&candidate);
         let trimmed = trimmed.trim();
         if !matches!(trimmed.chars().next(), Some('>' | '›' | '❯')) {
             return None;
@@ -614,7 +617,7 @@ impl HarnessConfig {
         output
             .lines()
             .rev()
-            .map(crate::prompt::strip_ansi)
+            .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
             .map(|line| line.trim().to_string())
             .find(|line| !self.is_ignorable_output_line(line))
     }
@@ -632,7 +635,7 @@ impl HarnessConfig {
 }
 
 fn is_opencode_help_screen(output: &str) -> bool {
-    let stripped = crate::prompt::strip_ansi(output);
+    let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(output);
     let subcommand_lines = stripped
         .lines()
         .filter(|line| {
@@ -943,7 +946,7 @@ fn codex_idle_placeholder_candidate(output: &str) -> Option<String> {
         .lines()
         .rev()
         .take(8)
-        .map(crate::prompt::strip_ansi)
+        .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
         .collect::<Vec<_>>();
     if recent.is_empty() {
         return None;
@@ -970,7 +973,7 @@ fn codex_idle_placeholder_candidate(output: &str) -> Option<String> {
 
 fn codex_prompt_candidate_is_dim_placeholder(output: &str, candidate: &str) -> bool {
     let Some(raw_line) = output.lines().rev().find(|line| {
-        let stripped = crate::prompt::strip_ansi(line);
+        let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(line);
         stripped.trim() == candidate
     }) else {
         return false;

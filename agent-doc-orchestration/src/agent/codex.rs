@@ -660,7 +660,7 @@ fn classify_child_network_probe_failure(detail: &str, harness: &str) -> String {
 }
 
 fn looks_like_opencode_usage_output(output: &str) -> bool {
-    let lower = crate::prompt::strip_ansi(output).to_ascii_lowercase();
+    let lower = agent_doc_turn_executor_tmux::prompt::strip_ansi(output).to_ascii_lowercase();
     (lower.contains("opencode run [message..]")
         && (lower.contains("positionals:") || lower.contains("options:")))
         || lower.contains("unknown argument")

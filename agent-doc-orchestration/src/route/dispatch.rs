@@ -28,7 +28,7 @@ pub(crate) struct DirectPaneAcceptance {
 
 fn protected_prompt_draft_preview(harness: &HarnessConfig, content: &str) -> Option<String> {
     let candidate = harness.last_prompt_candidate(content)?;
-    let stripped = crate::prompt::strip_ansi(&candidate);
+    let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(&candidate);
     let redacted = agent_doc_secret_redact::redact(stripped.trim());
     let preview = redacted.trim();
     if preview.is_empty() {
@@ -236,7 +236,7 @@ pub(crate) fn direct_pane_existing_draft_visible(
     let recent_lines: Vec<String> = content
         .lines()
         .rev()
-        .map(crate::prompt::strip_ansi)
+        .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
         .filter(|line| !line.trim().is_empty())
         .take(16)
         .collect();

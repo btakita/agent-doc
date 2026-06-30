@@ -2174,7 +2174,7 @@ fn clear_command_visible_in_active_input(
         .lines()
         .rev()
         .take(8)
-        .map(agent_doc_orchestration::prompt::strip_ansi)
+        .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
         .collect();
     let lines: Vec<&String> = recent_lines.iter().rev().collect();
     for start in 0..lines.len() {
@@ -3413,7 +3413,7 @@ fn live_pane_bottom_status_is_idle(
     let Some(last_line) = captured
         .lines()
         .rev()
-        .map(agent_doc_orchestration::prompt::strip_ansi)
+        .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
         .map(|line| line.trim().to_string())
         .find(|line| !line.is_empty())
     else {
@@ -3423,7 +3423,7 @@ fn live_pane_bottom_status_is_idle(
         return false;
     }
     if let Some(candidate) = harness.last_prompt_candidate(captured) {
-        let stripped = agent_doc_orchestration::prompt::strip_ansi(&candidate);
+        let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(&candidate);
         let trimmed = stripped.trim();
         if matches!(trimmed.chars().next(), Some('>' | '›' | '❯'))
             && !harness.is_dispatch_ready_prompt_line(trimmed)
@@ -3438,7 +3438,7 @@ fn last_meaningful_pane_line(captured: &str) -> Option<String> {
     captured
         .lines()
         .rev()
-        .map(agent_doc_orchestration::prompt::strip_ansi)
+        .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
         .map(|line| line.trim().to_string())
         .find(|line| !line.is_empty())
         .map(|line| line.chars().take(160).collect())

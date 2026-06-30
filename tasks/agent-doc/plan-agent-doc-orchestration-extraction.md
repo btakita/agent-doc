@@ -363,6 +363,14 @@ should be deleted during extraction.
   and diagnostics while importing the focused queue convergence helpers
   directly; the old local helper cluster and pure test were deleted from
   orchestration instead of kept as facades.
+- `agent-doc-queue::queue_projection` now owns queue-entry projection and
+  worklist policy used by preflight: extracting done ids from prompt/completed
+  entries, building active prompt projection rows with noise/deferred filters,
+  detecting in-progress retarget requests, deriving selected queue-head node
+  keys, hashing rendered queue worklists, and projecting prompt/preset/dispatch
+  worklist facts. Preflight keeps only file/project-root lookup, state-event
+  mapping, ops-log emission, and active/inactive decision placement while
+  calling the focused queue helpers directly.
 - `agent-doc-queue` now owns effective queue-continuation output policy:
   applying recycle-yield suppression, recycle guidance, required-continuation
   guidance, and queue-pause preamble selection after orchestration supplies

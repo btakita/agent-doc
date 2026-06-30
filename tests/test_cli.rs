@@ -6807,10 +6807,12 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
     for required_snippet in [
         "pub enum CodexResumeRestartArgsError",
         "pub fn codex_resume_restart_args(",
+        "pub fn looks_like_codex_transport_403_429(",
+        "pub fn codex_transport_403_429_diagnostic(",
     ] {
         assert!(
             executor_codex_launch.contains(required_snippet),
-            "agent-doc-turn-executor should own Codex resume launch policy directly: {required_snippet}"
+            "agent-doc-turn-executor should own Codex launch/transport policy directly: {required_snippet}"
         );
     }
     for required_snippet in [
@@ -6909,6 +6911,22 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
     );
     let codex = fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/agent/codex.rs"))
         .unwrap();
+    for forbidden_snippet in [
+        "fn looks_like_codex_transport_403_429(",
+        "fn format_transport_403_429_diagnostic(",
+        "fn codex_transport_403_429_diagnostic(",
+    ] {
+        assert!(
+            !codex.contains(forbidden_snippet),
+            "agent::codex must not re-own Codex launch/transport policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        codex.contains("use agent_doc_turn_executor::codex_launch::{")
+            && codex.contains("looks_like_codex_transport_403_429")
+            && codex.contains("codex_transport_403_429_diagnostic"),
+        "agent::codex should call focused Codex launch/transport policy directly"
+    );
     assert!(
         codex.contains(
             "agent_doc_turn_executor::capability_proof::DEFAULT_MANAGED_PROOF_PROBE_TIMEOUT"

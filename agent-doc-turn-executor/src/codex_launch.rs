@@ -137,6 +137,37 @@ pub fn codex_resume_restart_args(
     Ok(args)
 }
 
+pub fn looks_like_codex_transport_403_429(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    let ws_403 = lower.contains("403")
+        && (lower.contains("websocket") || lower.contains("handshake") || lower.contains("wss://"));
+    let https_429 = lower.contains("429")
+        && (lower.contains("too many requests") || lower.contains("rate limit"));
+    ws_403 || https_429
+}
+
+pub fn codex_transport_403_429_diagnostic(stderr: &str) -> String {
+    let lower = stderr.to_ascii_lowercase();
+    let is_ws_403 = lower.contains("403")
+        && (lower.contains("websocket") || lower.contains("handshake") || lower.contains("wss://"));
+    let is_https_429 = lower.contains("429")
+        && (lower.contains("too many requests") || lower.contains("rate limit"));
+    let primary = if is_ws_403 && is_https_429 {
+        "Codex transport rejection: 403 Forbidden on WebSocket handshake, then 429 Too Many Requests on HTTPS fallback"
+    } else if is_ws_403 {
+        "Codex transport rejection: 403 Forbidden on WebSocket handshake"
+    } else {
+        "Codex transport rejection: 429 Too Many Requests on HTTPS fallback"
+    };
+    format!(
+        "{primary}. Possible causes: per-session rate limit, Cloudflare edge block, \
+         or session-specific token/auth state. Suggestions: (1) wait a few minutes and \
+         retry, (2) restart the codex session, or (3) check Codex service status. \
+         Original error: {}",
+        stderr.trim()
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -241,5 +272,39 @@ mod tests {
             }
         );
         assert!(err.to_string().contains("provided without a value"));
+    }
+
+    #[test]
+    fn looks_like_codex_transport_403_429_detects_ws_403() {
+        assert!(looks_like_codex_transport_403_429(
+            "WebSocket handshake failed: 403"
+        ));
+        assert!(looks_like_codex_transport_403_429(
+            "wss://example.com returned 403 Forbidden"
+        ));
+    }
+
+    #[test]
+    fn looks_like_codex_transport_403_429_detects_https_429() {
+        assert!(looks_like_codex_transport_403_429("429 Too Many Requests"));
+        assert!(looks_like_codex_transport_403_429(
+            "rate limit exceeded 429"
+        ));
+    }
+
+    #[test]
+    fn looks_like_codex_transport_403_429_rejects_unrelated() {
+        assert!(!looks_like_codex_transport_403_429("sandbox violation"));
+        assert!(!looks_like_codex_transport_403_429("permission denied"));
+    }
+
+    #[test]
+    fn codex_transport_403_429_diagnostic_names_both_rejections() {
+        let msg = codex_transport_403_429_diagnostic(
+            "403 on wss://example.com then 429 Too Many Requests",
+        );
+        assert!(msg.contains("403 Forbidden on WebSocket"));
+        assert!(msg.contains("429 Too Many Requests"));
+        assert!(msg.contains("restart the codex session"));
     }
 }

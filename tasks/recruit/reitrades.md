@@ -295,14 +295,7 @@ At **$125/hr**, that means:
 - Full listed scope: **$65k-$100k**
 
 For Artur, I would not lead with the full upper bound unless asked for every item. I would say: “I can phase this so you are not committing to the whole list upfront. The first production tranche is probably 260-380 hours; the full V1.2 list is more like 520-800 hours once we include migrations, QA, OM/document extraction, and production safety.”
-- Full listed scope: **$65k-$100k**
-- First scoped tranche: **$32.5k-$47.5k**
-- Product review, credentials/access, design approval, and production deploy windows are not fully captured in these coding-hour estimates.
-- “100% accurate” AI-generated data should be scoped as **source-backed extraction + validation + confidence + admin review**, not a pure AI promise.
-- External integrations, production migrations, PDF/OM output, and AI extraction accuracy compress least: agents help produce code, but validation dominates.
-- Rust/Postgres permission/data-model work compresses moderately: about **15-30% faster**, because review and migrations still matter.
-- Admin table/UI work compresses well with agents: about **25-40% faster** if existing patterns are clean.
-<!-- agent:boundary:8d66063f -->
+<!-- agent:boundary:37e648c6 -->
 <!-- /agent:exchange -->
 
 ## Queue

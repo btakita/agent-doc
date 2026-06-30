@@ -392,6 +392,14 @@ should be deleted during extraction.
   Orchestration keeps document locks, file/snapshot IO, IPC node ops,
   response-echo embedding, synthetic-head tracked-item authorization, ops
   logging, and editor convergence.
+- `agent-doc-queue` now also owns the preflight resolved-id queue strike
+  rewrite by direct reuse of `mark_entries_completed_by_done_ids`, including
+  non-head resolved references and review-gated ids supplied by the caller.
+  `agent-doc-element-review` owns gated review id extraction from
+  `agent:review`. Preflight keeps document parsing context, done/archive id
+  gathering, queue activation state, snapshot comparison, and diagnostics while
+  importing both focused helpers directly; the old orchestration helper names
+  were deleted instead of retained as shims.
 - `agent-doc-queue` now owns queue prompt drift/drop accounting used by
   `write` and IPC adoption guards: queue component extraction, active prompt
   text extraction, consumed/struck prompt coverage, baseline-vs-live deletion

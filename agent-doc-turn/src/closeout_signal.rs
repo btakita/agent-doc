@@ -399,6 +399,74 @@ pub fn blocked_closeout_followup_decision(
     }
 }
 
+pub const GATED_PHASE_SPLIT_GUARD_SUPPRESS_MARKER: &str = "<!-- no-gated-phase-split-guard -->";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GatedPhaseSplitItemEvidence {
+    pub id: String,
+    pub done: bool,
+    pub body: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GatedPhaseSplitEvidence<'a> {
+    pub cycle_open: bool,
+    pub capture_committed: bool,
+    pub response_body: &'a str,
+    pub directed_ids: &'a [String],
+    pub pending_kept_open_ids: &'a [String],
+    pub tracked_items: &'a [GatedPhaseSplitItemEvidence],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GatedPhaseSplitDecision {
+    Pass,
+    Warn { flagged_ids: Vec<String> },
+}
+
+pub fn gated_phase_split_decision(
+    evidence: GatedPhaseSplitEvidence<'_>,
+) -> GatedPhaseSplitDecision {
+    if evidence.directed_ids.is_empty() || evidence.cycle_open || !evidence.capture_committed {
+        return GatedPhaseSplitDecision::Pass;
+    }
+    if evidence
+        .response_body
+        .contains(GATED_PHASE_SPLIT_GUARD_SUPPRESS_MARKER)
+    {
+        return GatedPhaseSplitDecision::Pass;
+    }
+
+    let kept_open = normalized_id_set(evidence.pending_kept_open_ids.iter().map(String::as_str));
+    if kept_open.is_empty() {
+        return GatedPhaseSplitDecision::Pass;
+    }
+    let directed = normalized_id_set(evidence.directed_ids.iter().map(String::as_str));
+
+    let mut flagged_ids = Vec::new();
+    for item in evidence.tracked_items {
+        if item.done {
+            continue;
+        }
+        let id = agent_doc_element_backlog::backlog::normalize_pending_id(&item.id);
+        if id.is_empty() || !kept_open.contains(&id) || !directed.contains(&id) {
+            continue;
+        }
+        if body_enumerates_multiple_gated_phases(&item.body)
+            && !body_already_split_into_child_ids(&item.body, &id)
+            && !flagged_ids.iter().any(|existing| existing == &id)
+        {
+            flagged_ids.push(id);
+        }
+    }
+
+    if flagged_ids.is_empty() {
+        GatedPhaseSplitDecision::Pass
+    } else {
+        GatedPhaseSplitDecision::Warn { flagged_ids }
+    }
+}
+
 fn normalized_id_set<'a>(
     ids: impl IntoIterator<Item = &'a str>,
 ) -> std::collections::HashSet<String> {
@@ -1006,6 +1074,106 @@ mod tests {
         let body = "Remaining gated phases tracked as children: phase (2b) -> #childb, phase (3) -> #childc. Plan: tasks/x.md";
         assert!(body_enumerates_multiple_gated_phases(body));
         assert!(body_already_split_into_child_ids(body, "parentfix"));
+    }
+
+    #[test]
+    fn gated_phase_split_decision_warns_for_unsplit_kept_open_directed_item() {
+        let response = "### Re: do #parentfix\n\nKept #parentfix open for the remaining phases.";
+        let directed_ids = vec!["parentfix".to_string(), "#parentfix".to_string()];
+        let pending_kept_open_ids = vec!["parentfix".to_string()];
+        let tracked_items = vec![
+            GatedPhaseSplitItemEvidence {
+                id: "parentfix".to_string(),
+                done: false,
+                body: "Remaining gated phases: phase (2b) live-verify the pane, phase (3) ship the rollout.".to_string(),
+            },
+            GatedPhaseSplitItemEvidence {
+                id: "parentfix".to_string(),
+                done: false,
+                body: "Remaining gated phases: phase (2b) live-verify the pane, phase (3) ship the rollout.".to_string(),
+            },
+            GatedPhaseSplitItemEvidence {
+                id: "donechild".to_string(),
+                done: true,
+                body: "Remaining gated phases: phase (2b) live-verify, phase (3) ship.".to_string(),
+            },
+        ];
+
+        assert_eq!(
+            gated_phase_split_decision(GatedPhaseSplitEvidence {
+                cycle_open: false,
+                capture_committed: true,
+                response_body: response,
+                directed_ids: &directed_ids,
+                pending_kept_open_ids: &pending_kept_open_ids,
+                tracked_items: &tracked_items,
+            }),
+            GatedPhaseSplitDecision::Warn {
+                flagged_ids: vec!["parentfix".to_string()]
+            }
+        );
+    }
+
+    #[test]
+    fn gated_phase_split_decision_passes_without_required_state_or_unsplit_body() {
+        let response = "### Re: do #parentfix\n\nKept #parentfix open for the remaining phases.";
+        let suppressed = format!("{response}\n{GATED_PHASE_SPLIT_GUARD_SUPPRESS_MARKER}");
+        let directed_ids = vec!["parentfix".to_string()];
+        let pending_kept_open_ids = vec!["parentfix".to_string()];
+        let tracked_items = vec![GatedPhaseSplitItemEvidence {
+            id: "parentfix".to_string(),
+            done: false,
+            body: "Remaining gated phases: phase (2b) live-verify the pane, phase (3) ship the rollout.".to_string(),
+        }];
+        let split_items = vec![GatedPhaseSplitItemEvidence {
+            id: "parentfix".to_string(),
+            done: false,
+            body: "Remaining gated phases tracked as children: phase (2b) -> #childb, phase (3) -> #childc.".to_string(),
+        }];
+        let base = GatedPhaseSplitEvidence {
+            cycle_open: false,
+            capture_committed: true,
+            response_body: response,
+            directed_ids: &directed_ids,
+            pending_kept_open_ids: &pending_kept_open_ids,
+            tracked_items: &tracked_items,
+        };
+
+        assert_eq!(
+            gated_phase_split_decision(GatedPhaseSplitEvidence {
+                cycle_open: true,
+                ..base
+            }),
+            GatedPhaseSplitDecision::Pass
+        );
+        assert_eq!(
+            gated_phase_split_decision(GatedPhaseSplitEvidence {
+                capture_committed: false,
+                ..base
+            }),
+            GatedPhaseSplitDecision::Pass
+        );
+        assert_eq!(
+            gated_phase_split_decision(GatedPhaseSplitEvidence {
+                response_body: &suppressed,
+                ..base
+            }),
+            GatedPhaseSplitDecision::Pass
+        );
+        assert_eq!(
+            gated_phase_split_decision(GatedPhaseSplitEvidence {
+                pending_kept_open_ids: &[],
+                ..base
+            }),
+            GatedPhaseSplitDecision::Pass
+        );
+        assert_eq!(
+            gated_phase_split_decision(GatedPhaseSplitEvidence {
+                tracked_items: &split_items,
+                ..base
+            }),
+            GatedPhaseSplitDecision::Pass
+        );
     }
 
     #[test]

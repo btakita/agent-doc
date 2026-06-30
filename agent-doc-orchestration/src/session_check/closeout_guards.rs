@@ -118,48 +118,17 @@ pub(crate) fn check_gated_phase_split_guard(
     let Some(state) = crate::cycle_state::load(file)? else {
         return Ok(GuardResult::None);
     };
-    if state.expect_done_or_gate_ids.is_empty() || state.is_open() {
-        return Ok(GuardResult::None);
-    }
     let Some(capture_id) = state.capture_id.as_deref() else {
         return Ok(GuardResult::None);
     };
     let Some(capture) = crate::capture::load_by_id(file, capture_id)? else {
         return Ok(GuardResult::None);
     };
-    if capture.state != crate::capture::CaptureState::Committed {
-        return Ok(GuardResult::None);
-    }
-    if capture
-        .response_body
-        .contains("<!-- no-gated-phase-split-guard -->")
-    {
-        return Ok(GuardResult::None);
-    }
-
-    // Items kept open this cycle (`--backlog-edit` / `--review-edit` /
-    // `--backlog-gate` all feed `pending_kept_open_ids`) that were also the
-    // directed targets — the parent items at risk of burying gated phases.
-    let kept_open: std::collections::HashSet<String> = state
-        .pending_kept_open_ids
-        .iter()
-        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
-        .filter(|id| !id.is_empty())
-        .collect();
-    if kept_open.is_empty() {
-        return Ok(GuardResult::None);
-    }
-    let directed: std::collections::HashSet<String> = state
-        .expect_done_or_gate_ids
-        .iter()
-        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
-        .filter(|id| !id.is_empty())
-        .collect();
 
     // Phase 6 (#lr-content-6): cached content + parsed components.
     let content = rc.doc_content();
     let components = rc.components();
-    let mut flagged: Vec<String> = Vec::new();
+    let mut tracked_items = Vec::new();
     for component in components.iter() {
         let trackable = agent_doc_element::element::is_backlog_component(&component.name)
             || agent_doc_element::element::is_review_component(&component.name);
@@ -169,25 +138,35 @@ pub(crate) fn check_gated_phase_split_guard(
         let (_, items, _) =
             agent_doc_element_backlog::backlog::parse_items(component.content(&content));
         for item in items {
-            if item.is_done() {
-                continue;
-            }
-            let id = agent_doc_element_backlog::backlog::normalize_pending_id(&item.id);
-            if id.is_empty() || !kept_open.contains(&id) || !directed.contains(&id) {
-                continue;
-            }
+            let done = item.is_done();
             let body = format!("{} {}", item.text, item.continuation);
-            if agent_doc_turn::closeout_signal::body_enumerates_multiple_gated_phases(&body)
-                && !agent_doc_turn::closeout_signal::body_already_split_into_child_ids(&body, &id)
-                && !flagged.iter().any(|existing| existing == &id)
-            {
-                flagged.push(id);
-            }
+            tracked_items.push(
+                agent_doc_turn::closeout_signal::GatedPhaseSplitItemEvidence {
+                    id: item.id,
+                    done,
+                    body,
+                },
+            );
         }
     }
-    if flagged.is_empty() {
-        return Ok(GuardResult::None);
-    }
+
+    let flagged = match agent_doc_turn::closeout_signal::gated_phase_split_decision(
+        agent_doc_turn::closeout_signal::GatedPhaseSplitEvidence {
+            cycle_open: state.is_open(),
+            capture_committed: capture.state == crate::capture::CaptureState::Committed,
+            response_body: &capture.response_body,
+            directed_ids: &state.expect_done_or_gate_ids,
+            pending_kept_open_ids: &state.pending_kept_open_ids,
+            tracked_items: &tracked_items,
+        },
+    ) {
+        agent_doc_turn::closeout_signal::GatedPhaseSplitDecision::Pass => {
+            return Ok(GuardResult::None);
+        }
+        agent_doc_turn::closeout_signal::GatedPhaseSplitDecision::Warn { flagged_ids } => {
+            flagged_ids
+        }
+    };
 
     let ids = flagged
         .iter()
@@ -213,9 +192,10 @@ pub(crate) fn check_gated_phase_split_guard(
             "[session-check] warn: kept-open tracked item {ids} enumerates multiple gated/remaining phases in its body but does not break them out into discrete child backlog IDs — the deferred phases are not independently trackable or queueable"
         ),
         format!(
-            "[session-check] hint: split each gated phase into its own child id (e.g. `agent-doc write {} {} --pending-only --commit`), keeping the parent as context, or add `<!-- no-gated-phase-split-guard -->` if the phases are intentionally one unit",
+            "[session-check] hint: split each gated phase into its own child id (e.g. `agent-doc write {} {} --pending-only --commit`), keeping the parent as context, or add `{}` if the phases are intentionally one unit",
             file.display(),
-            add_after_hint
+            add_after_hint,
+            agent_doc_turn::closeout_signal::GATED_PHASE_SPLIT_GUARD_SUPPRESS_MARKER
         ),
     ]))
 }

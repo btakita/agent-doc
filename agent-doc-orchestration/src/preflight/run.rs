@@ -2,6 +2,7 @@
 
 use super::*;
 use agent_doc_diff as diff;
+use agent_doc_diff::semantic::semantic_diff_summary;
 use agent_doc_queue::queue_convergence::{
     queue_body_diff_is_non_selected_future_state, realign_baseline_to_converged_queue,
 };

@@ -148,6 +148,8 @@ use similar::{ChangeTag, TextDiff};
 
 use agent_doc_element::element;
 
+pub mod semantic;
+
 const IMPERATIVE_LEADING_VERBS: &[&str] = &[
     "add",
     "audit",

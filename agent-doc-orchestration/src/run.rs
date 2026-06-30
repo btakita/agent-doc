@@ -1404,7 +1404,7 @@ fn owner_pane_queue_edit_should_defer_until_closeout(
     let Some(previous) = snapshot::load(file).ok().flatten() else {
         return false;
     };
-    let Some(summary) = crate::preflight::semantic_diff_summary(
+    let Some(summary) = agent_doc_diff::semantic::semantic_diff_summary(
         &previous,
         current_content,
         &prompt_bearing_changes,

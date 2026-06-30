@@ -134,6 +134,7 @@ dependencies = [
  "agent-doc-element",
  "agent-doc-element-backlog",
  "agent-doc-frontmatter",
+ "agent-doc-markdown-ast",
  "serde",
  "serde_json",
  "similar",

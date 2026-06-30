@@ -102,7 +102,7 @@
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -140,87 +140,6 @@ pub struct PreflightWarning {
     /// Optional active harness detected from the current process environment.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_harness: Option<String>,
-}
-
-/// AST-backed semantic summary for the current preflight diff.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
-pub struct SemanticDiffSummary {
-    /// Schema version for additive changes to this JSON object.
-    pub schema_version: u8,
-    /// Components touched by this diff, in stable sorted order.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub changed_components: Vec<String>,
-    /// Component-level additions/removals/changes with bounded navigation spans.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub component_changes: Vec<SemanticComponentChange>,
-    /// Node-keyed item events from the markdown AST overlay.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub node_events: Vec<SemanticNodeEvent>,
-    /// Prompt-bearing change previews, preserving encounter order.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub prompt_changes: Vec<SemanticPromptChange>,
-}
-
-/// Component-level semantic operation.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum SemanticComponentOp {
-    Added,
-    Removed,
-    Changed,
-}
-
-/// A changed agent component plus before/after navigation handles.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SemanticComponentChange {
-    pub component: String,
-    pub occurrence: usize,
-    pub op: SemanticComponentOp,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub before: Option<SemanticNavTarget>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub after: Option<SemanticNavTarget>,
-}
-
-/// Bounded source navigation target for an agent component.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SemanticNavTarget {
-    pub handle: String,
-    pub component: String,
-    pub occurrence: usize,
-    pub start_line: usize,
-    pub end_line: usize,
-    pub start_byte: usize,
-    pub end_byte: usize,
-}
-
-/// A node-keyed item event suitable for preflight JSON.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SemanticNodeEvent {
-    pub component: String,
-    pub node_key: String,
-    pub op: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub item_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub before_index: Option<usize>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub after_index: Option<usize>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub previous_node_key: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub next_node_key: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub before_preview: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub after_preview: Option<String>,
-}
-
-/// Bounded preview of a prompt-bearing semantic change.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SemanticPromptChange {
-    pub kind: agent_doc_diff::PromptBearingChangeKind,
-    pub text_preview: String,
 }
 
 /// Per-item opportunistic gated-review verification result (`#optverify`).
@@ -281,7 +200,7 @@ pub struct PreflightOutput {
     pub annotated_diff: Option<String>,
     /// Structured semantic navigation for the same diff.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub semantic_diff: Option<SemanticDiffSummary>,
+    pub semantic_diff: Option<agent_doc_diff::semantic::SemanticDiffSummary>,
     /// Operation manifest for the current turn (`#op-scoped-drift-2`): the
     /// driver node plus the read/write addresses the turn touches. Derived from
     /// `prompt_targets` at turn start; the substrate the phase-3 affectedness
@@ -523,7 +442,7 @@ pub struct PreflightOutput {
 mod semantic_diff;
 pub(crate) use semantic_diff::{
     build_ops_from_semantic_diff, is_zero_usize, persist_op_log,
-    push_unique_prompt_bearing_changes, push_unique_strings, semantic_diff_summary,
+    push_unique_prompt_bearing_changes, push_unique_strings,
 };
 
 fn relocate_out_of_exchange_prompt_before_diff(
@@ -4751,10 +4670,10 @@ mod tests {
     #[test]
     fn preflight_output_includes_semantic_diff_when_set() {
         let output = PreflightOutput {
-            semantic_diff: Some(SemanticDiffSummary {
+            semantic_diff: Some(agent_doc_diff::semantic::SemanticDiffSummary {
                 schema_version: 1,
                 changed_components: vec!["queue".to_string()],
-                node_events: vec![SemanticNodeEvent {
+                node_events: vec![agent_doc_diff::semantic::SemanticNodeEvent {
                     component: "queue".to_string(),
                     node_key: "queue:0:task:0".to_string(),
                     op: "insert".to_string(),

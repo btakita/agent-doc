@@ -6369,6 +6369,98 @@ fn test_agent_doc_diff_owns_post_exchange_comment_policy() {
 }
 
 #[test]
+fn test_agent_doc_diff_owns_semantic_diff_summary_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let diff_source = fs::read_to_string(manifest_dir.join("agent-doc-diff/src/lib.rs")).unwrap();
+    assert!(
+        diff_source.contains("pub mod semantic;"),
+        "agent-doc-diff should expose semantic diff policy from a focused module"
+    );
+
+    let semantic_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-diff/src/semantic.rs")).unwrap();
+    for required in [
+        "pub struct SemanticDiffSummary",
+        "pub enum SemanticComponentOp",
+        "pub struct SemanticComponentChange",
+        "pub struct SemanticNavTarget",
+        "pub struct SemanticNodeEvent",
+        "pub struct SemanticPromptChange",
+        "pub fn semantic_diff_summary(",
+        "pub fn semantic_component_changes(",
+        "pub fn semantic_frontmatter_change(",
+        "pub fn frontmatter_span(",
+        "pub fn semantic_nav_target(",
+        "pub fn semantic_line_at(",
+        "pub fn semantic_node_event_kind(",
+        "pub fn semantic_preview(",
+    ] {
+        assert!(
+            semantic_source.contains(required),
+            "agent-doc-diff must own semantic diff summary policy: {required}"
+        );
+    }
+
+    let diff_manifest = fs::read_to_string(manifest_dir.join("agent-doc-diff/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&diff_manifest).unwrap();
+    let dependencies = parsed
+        .get("dependencies")
+        .and_then(toml::Value::as_table)
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        dependencies.contains_key("agent-doc-markdown-ast"),
+        "agent-doc-diff should own semantic AST projection via a focused dependency"
+    );
+
+    let preflight_mod =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let preflight_semantic_diff = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/preflight/semantic_diff.rs"),
+    )
+    .unwrap();
+    for forbidden in [
+        "pub struct SemanticDiffSummary",
+        "pub enum SemanticComponentOp",
+        "pub struct SemanticComponentChange",
+        "pub struct SemanticNavTarget",
+        "pub struct SemanticNodeEvent",
+        "pub struct SemanticPromptChange",
+        "pub(crate) fn semantic_diff_summary(",
+        "pub(crate) fn semantic_component_changes(",
+        "pub(crate) fn semantic_frontmatter_change(",
+        "pub(crate) fn frontmatter_span(",
+        "pub(crate) fn semantic_nav_target(",
+        "pub(crate) fn semantic_line_at(",
+        "pub(crate) fn semantic_node_event_kind(",
+        "pub(crate) fn semantic_preview(",
+    ] {
+        assert!(
+            !preflight_mod.contains(forbidden) && !preflight_semantic_diff.contains(forbidden),
+            "orchestration preflight must not re-own semantic diff summary policy: {forbidden}"
+        );
+    }
+    assert!(
+        !preflight_mod.contains("semantic_diff_summary,"),
+        "orchestration preflight must not re-export semantic_diff_summary as a facade"
+    );
+
+    let preflight_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
+    assert!(
+        preflight_run.contains("use agent_doc_diff::semantic::semantic_diff_summary;"),
+        "preflight run should call the focused semantic diff builder directly"
+    );
+    let orchestration_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/run.rs")).unwrap();
+    assert!(
+        orchestration_run.contains("agent_doc_diff::semantic::semantic_diff_summary("),
+        "orchestration run should call the focused semantic diff builder directly"
+    );
+}
+
+#[test]
 fn test_project_config_io_tmux_helpers_have_no_config_facade() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();

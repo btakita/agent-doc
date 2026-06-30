@@ -2160,42 +2160,6 @@ pub(crate) fn ipc_direct_disk_degraded_for_file(project_root: &Path, file: &Path
     ipc::ipc_direct_disk_degraded(project_root, file)
 }
 
-/// Helper: extract boundary_id for a named component from the document.
-///
-/// Searches for `<!-- agent:boundary:UUID -->` inside the component's content,
-/// skipping matches inside fenced code blocks and inline code spans.
-pub fn find_boundary_id(doc: &str, component_name: &str) -> Option<String> {
-    let components = element::parse(doc).ok()?;
-    let comp = components.iter().find(|c| c.name == component_name)?;
-    let content = &doc[comp.open_end..comp.close_start];
-    let code_ranges = element::find_code_ranges(doc);
-
-    // Scan for boundary marker in component content, skipping code blocks
-    let prefix = "<!-- agent:boundary:";
-    let suffix = " -->";
-    let mut search_from = 0;
-    while let Some(start) = content[search_from..].find(prefix) {
-        let abs_start = comp.open_end + search_from + start;
-        // Skip if inside a code block
-        if code_ranges
-            .iter()
-            .any(|&(cs, ce)| abs_start >= cs && abs_start < ce)
-        {
-            search_from += start + prefix.len();
-            continue;
-        }
-        let id_start = search_from + start + prefix.len();
-        if let Some(end) = content[id_start..].find(suffix) {
-            let id = &content[id_start..id_start + end];
-            if !id.is_empty() {
-                return Some(id.to_string());
-            }
-        }
-        break;
-    }
-    None
-}
-
 mod normalize;
 pub use normalize::*;
 
@@ -5675,23 +5639,6 @@ scratch
             json_str.contains("\u{2014}"),
             "JSON should contain raw UTF-8 em dash"
         );
-    }
-    #[test]
-    fn find_boundary_id_skips_code_blocks() {
-        // Boundary-looking text inside a fenced code block must not be returned
-        let content = "<!-- agent:exchange -->\n```\n<!-- agent:boundary:fake-id -->\n```\n<!-- /agent:exchange -->\n";
-        let result = find_boundary_id(content, "exchange");
-        assert!(
-            result.is_none(),
-            "boundary inside code block must not be found, got: {:?}",
-            result
-        );
-    }
-    #[test]
-    fn find_boundary_id_finds_real_marker() {
-        let content = "<!-- agent:exchange -->\nSome text.\n<!-- agent:boundary:real-uuid-5678 -->\nMore text.\n<!-- /agent:exchange -->\n";
-        let result = find_boundary_id(content, "exchange");
-        assert_eq!(result, Some("real-uuid-5678".to_string()));
     }
     #[test]
     fn build_ipc_node_patches_json_tracks_strike_and_insert_by_node_key() {

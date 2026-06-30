@@ -35,6 +35,8 @@
 //! - stale_cleanup: document with two orphaned markers → `insert` removes both, leaves exactly one
 //! - remove_all: two boundary lines in doc → both stripped, other lines preserved verbatim
 //! - find_in_component: marker present → `Some((line_start, line_end))` within component bounds
+//! - find_boundary_id: named component contains marker → `Some(id)`; ignores marker-looking text
+//!   inside code ranges
 //! - no_component: `insert` with unknown component name → `Err` containing component name
 
 use anyhow::{Context, Result};
@@ -137,7 +139,6 @@ pub fn find_in_component(
 ///
 /// Scans the component's content for any `<!-- agent:boundary:UUID -->` marker,
 /// skipping matches inside code blocks. Returns the UUID if found.
-#[allow(dead_code)]
 pub fn find_boundary_id_in_component(doc: &str, comp: &element::Component) -> Option<String> {
     let content_region = &doc[comp.open_end..comp.close_start];
     let code_ranges = element::find_code_ranges(doc);
@@ -159,6 +160,18 @@ pub fn find_boundary_id_in_component(doc: &str, comp: &element::Component) -> Op
         break;
     }
     None
+}
+
+/// Find any boundary ID within a named component.
+///
+/// Scans the named component's content for any `<!-- agent:boundary:UUID -->`
+/// marker, skipping matches inside code ranges. Returns the UUID if found.
+pub fn find_boundary_id(doc: &str, component_name: &str) -> Option<String> {
+    let components = element::parse(doc).ok()?;
+    let comp = components
+        .iter()
+        .find(|component| component.name == component_name)?;
+    find_boundary_id_in_component(doc, comp)
 }
 
 /// Insert a boundary marker at the end of an append-mode component's content.
@@ -287,6 +300,24 @@ mod tests {
         let comp = &components[0];
         let result = find_in_component(&doc, comp, id);
         assert!(result.is_some());
+    }
+
+    #[test]
+    fn find_boundary_id_skips_code_blocks() {
+        let content = "<!-- agent:exchange -->\n```\n<!-- agent:boundary:fake-id -->\n```\n<!-- /agent:exchange -->\n";
+        let result = find_boundary_id(content, "exchange");
+        assert!(
+            result.is_none(),
+            "boundary inside code block must not be found, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn find_boundary_id_finds_real_marker() {
+        let content = "<!-- agent:exchange -->\nSome text.\n<!-- agent:boundary:real-uuid-5678 -->\nMore text.\n<!-- /agent:exchange -->\n";
+        let result = find_boundary_id(content, "exchange");
+        assert_eq!(result, Some("real-uuid-5678".to_string()));
     }
 
     #[test]

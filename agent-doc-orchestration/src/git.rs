@@ -1675,9 +1675,9 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
         let repositioned =
             agent_doc_template::reposition_boundary_to_end_preserve_head(&prefix_repaired);
         if repositioned != working {
-            let committed_boundary_id = snapshot_after_reposition
-                .as_deref()
-                .and_then(|snapshot| crate::write::find_boundary_id(snapshot, "exchange"));
+            let committed_boundary_id = snapshot_after_reposition.as_deref().and_then(|snapshot| {
+                agent_doc_element_boundary::boundary::find_boundary_id(snapshot, "exchange")
+            });
             let file_ipc = crate::write::queue_file_ipc_reposition_boundary(
                 file,
                 committed_boundary_id.as_deref(),

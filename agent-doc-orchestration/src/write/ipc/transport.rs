@@ -5,6 +5,7 @@ use agent_doc_document_realtime::write_policy::{
     WholeBufferAuthority, WholeBufferAuthorityFacts, WholeBufferDelivery,
     WholeBufferDeliveryAction, decide_whole_buffer_delivery,
 };
+use agent_doc_element_boundary::boundary::find_boundary_id;
 use agent_doc_element_exchange::{
     extract_post_commit_normalization_targets, normalization_target_counts,
 };

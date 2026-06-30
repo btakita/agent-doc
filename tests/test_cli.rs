@@ -3334,10 +3334,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     }
     let write_adapter =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
-    let realtime_write_policy = fs::read_to_string(
-        manifest_dir.join("agent-doc-document-realtime/src/write_policy.rs"),
-    )
-    .unwrap();
+    let realtime_write_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime/src/write_policy.rs"))
+            .unwrap();
     for forbidden in [
         "pub(crate) fn line_is_carry_forward_signal",
         "fn carry_forward_signal_candidate",
@@ -11564,6 +11563,36 @@ fn test_agent_doc_document_owns_active_identity_projection_policy() {
         !backlog_cmd.contains("crate::preflight::identity_collision_for_new_id"),
         "backlog_cmd must not route active identity policy through preflight"
     );
+}
+
+#[test]
+fn test_agent_doc_element_boundary_owns_boundary_id_lookup() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let boundary =
+        fs::read_to_string(manifest_dir.join("agent-doc-element-boundary/src/boundary.rs"))
+            .unwrap();
+    assert!(
+        boundary.contains("pub fn find_boundary_id("),
+        "agent-doc-element-boundary must own document-level boundary id lookup"
+    );
+
+    for relative_path in [
+        "agent-doc-orchestration/src/write.rs",
+        "agent-doc-orchestration/src/write/ipc/transport.rs",
+        "agent-doc-orchestration/src/git.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
+        for forbidden_snippet in [
+            "pub fn find_boundary_id(",
+            "fn find_boundary_id(",
+            "crate::write::find_boundary_id",
+        ] {
+            assert!(
+                !source.contains(forbidden_snippet),
+                "{relative_path} must not re-own or facade boundary id lookup: {forbidden_snippet}"
+            );
+        }
+    }
 }
 
 #[test]

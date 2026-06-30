@@ -108,6 +108,9 @@
 //! - `build_prompt_resume_lists_required_response_targets`: resumed prompt with
 //!   two user request blocks → prompt includes the ordered turn-completeness section
 
+#[cfg(test)]
+use agent_doc_session_accretion::SessionAccretionLevel;
+use agent_doc_session_accretion::SessionAccretionReport;
 use anyhow::{Context, Result};
 use fs2::FileExt;
 use std::fs::OpenOptions;
@@ -1720,7 +1723,7 @@ fn build_prompt(
     fm: &frontmatter::Frontmatter,
     the_diff: &str,
     content: &str,
-    session_accretion: Option<&crate::session_accretion::SessionAccretionReport>,
+    session_accretion: Option<&SessionAccretionReport>,
 ) -> String {
     let stable_prefix = build_prompt_stable_prefix(run_mode);
     let volatile_suffix =
@@ -1772,7 +1775,7 @@ fn build_prompt_volatile_suffix(
     fm: &frontmatter::Frontmatter,
     the_diff: &str,
     content: &str,
-    session_accretion: Option<&crate::session_accretion::SessionAccretionReport>,
+    session_accretion: Option<&SessionAccretionReport>,
 ) -> String {
     let prompt_bearing_changes = diff::format_prompt_bearing_changes(the_diff)
         .map(|section| format!("\n\n{}\n", section))
@@ -2641,8 +2644,8 @@ mod tests {
             "- [ ] [#pcache-boundary] Prompt-cache boundary work\n",
             "<!-- /agent:backlog -->\n",
         );
-        let report = crate::session_accretion::SessionAccretionReport {
-            level: crate::session_accretion::SessionAccretionLevel::Warn,
+        let report = SessionAccretionReport {
+            level: SessionAccretionLevel::Warn,
             reasons: vec!["document hit 4 no-op closeouts in the last 30 minutes".to_string()],
             ..Default::default()
         };
@@ -2703,8 +2706,8 @@ old status\n\
             "- do [#pcache-boundary-contract]\n",
             "<!-- /agent:queue -->\n",
         );
-        let report = crate::session_accretion::SessionAccretionReport {
-            level: crate::session_accretion::SessionAccretionLevel::Warn,
+        let report = SessionAccretionReport {
+            level: SessionAccretionLevel::Warn,
             reasons: vec!["document closed 7 cycles in the last 30 minutes".to_string()],
             recent_noop_closeouts: 5,
             ..Default::default()
@@ -2760,8 +2763,8 @@ old status\n\
             resume: Some("sess-123".to_string()),
             ..Default::default()
         };
-        let report = crate::session_accretion::SessionAccretionReport {
-            level: crate::session_accretion::SessionAccretionLevel::Warn,
+        let report = SessionAccretionReport {
+            level: SessionAccretionLevel::Warn,
             reasons: vec!["document closed 3 no-op cycles in the last hour".to_string()],
             recent_noop_closeouts: 3,
             ..Default::default()
@@ -2968,8 +2971,8 @@ old status\n\
             "- [ ] [#ctxpack] Add bounded context pack\n",
             "<!-- /agent:backlog -->\n",
         );
-        let report = crate::session_accretion::SessionAccretionReport {
-            level: crate::session_accretion::SessionAccretionLevel::Warn,
+        let report = SessionAccretionReport {
+            level: SessionAccretionLevel::Warn,
             reasons: vec!["document hit 2 no-op closeouts in the last 30 minutes".to_string()],
             ..Default::default()
         };

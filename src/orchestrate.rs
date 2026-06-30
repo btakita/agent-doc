@@ -51,6 +51,9 @@
 //! - `sequential_orchestration_uses_streaming_backend_for_crdt_docs`
 //! - `dag_orchestration_runs_topological_order`
 
+#[cfg(test)]
+use agent_doc_session_accretion::SessionAccretionLevel;
+use agent_doc_session_accretion::SessionAccretionReport;
 use anyhow::{Context, Result};
 use clap::ValueEnum;
 use std::collections::HashSet;
@@ -656,7 +659,7 @@ fn build_agent_prompt(
     mode: ResolvedMode,
     diff_text: Option<&str>,
     doc: &str,
-    session_accretion: Option<&agent_doc_orchestration::session_accretion::SessionAccretionReport>,
+    session_accretion: Option<&SessionAccretionReport>,
 ) -> String {
     let diff_text = diff_text.unwrap_or_default();
     let prompt_bearing = diff::format_prompt_bearing_changes(diff_text)
@@ -2928,8 +2931,8 @@ mod tests {
             "- [ ] [#ctxpack] Add bounded context pack\n",
             "<!-- /agent:backlog -->\n",
         );
-        let report = agent_doc_orchestration::session_accretion::SessionAccretionReport {
-            level: agent_doc_orchestration::session_accretion::SessionAccretionLevel::Warn,
+        let report = SessionAccretionReport {
+            level: SessionAccretionLevel::Warn,
             reasons: vec!["document hit 2 no-op closeouts in the last 30 minutes".to_string()],
             ..Default::default()
         };

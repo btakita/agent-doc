@@ -5,7 +5,7 @@ use crate::frontmatter_io;
 use agent_doc_controller::status::LaunchMode;
 use agent_doc_supervisor::{
     agent_change::harness_change_forces_fresh_spawn,
-    lifecycle::{BootResumeAction, boot_resume_action},
+    lifecycle::{BootResumeAction, boot_resume_action, start_session_retryable_during_recycle},
     run_loop::{PostChildExitAction, child_launch_plan, post_child_exit_action},
 };
 use agent_doc_supervisor_process::{
@@ -559,7 +559,7 @@ pub fn run_with_reap_policy(
                 Err(err) => {
                     let recycle_pending =
                         crate::recycle_inflight::recycle_inflight_pending(&file_path_str);
-                    if !crate::recycle_inflight::start_session_retryable_during_recycle(
+                    if !start_session_retryable_during_recycle(
                         recycle_pending,
                         attempts_used,
                         MAX_START_SESSION_RECYCLE_RETRIES,

@@ -65,6 +65,25 @@ pub fn boot_resume_action(
     BootResumeAction::RedispatchInterruptedTurn
 }
 
+/// A `start_session` failure during supervisor recycle is a transient controller
+/// teardown race while retry budget remains.
+pub fn start_session_retryable_during_recycle(
+    recycle_pending: bool,
+    attempts_used: usize,
+    max_attempts: usize,
+) -> bool {
+    recycle_pending && attempts_used < max_attempts
+}
+
+/// After the trigger has already been injected, an in-flight recycle means the
+/// submit may have been dropped across `execve`; wait before the single resubmit.
+pub fn recycle_interrupted_resubmit_should_wait(
+    trigger_already_injected: bool,
+    recycle_pending: bool,
+) -> bool {
+    trigger_already_injected && recycle_pending
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn supervisor_recycle_action(
     stale: bool,
@@ -264,6 +283,21 @@ mod tests {
             RedispatchInterruptedTurn
         );
         assert_eq!(boot_resume_action(true, true, false, true), None);
+    }
+
+    #[test]
+    fn start_session_retry_only_while_recycling_and_budget_remains() {
+        assert!(start_session_retryable_during_recycle(true, 0, 2));
+        assert!(start_session_retryable_during_recycle(true, 1, 2));
+        assert!(!start_session_retryable_during_recycle(true, 2, 2));
+        assert!(!start_session_retryable_during_recycle(false, 0, 2));
+    }
+
+    #[test]
+    fn recycle_interrupted_resubmit_waits_only_when_injected_and_recycling() {
+        assert!(recycle_interrupted_resubmit_should_wait(true, true));
+        assert!(!recycle_interrupted_resubmit_should_wait(false, true));
+        assert!(!recycle_interrupted_resubmit_should_wait(true, false));
     }
 
     #[test]

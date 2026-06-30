@@ -107,6 +107,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use agent_doc_frontmatter::frontmatter;
+#[cfg(test)]
+use agent_doc_session_accretion::SessionAccretionLevel;
+use agent_doc_session_accretion::SessionAccretionReport;
 
 use crate::{config, diff_io, frontmatter_io, git, repair, resync, sessions, snapshot, sync};
 use agent_doc_element::element::{
@@ -495,7 +498,7 @@ pub struct PreflightOutput {
     /// Bounded session-growth / churn advisory derived from local exchange and
     /// per-document cycle/session logs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session_accretion: Option<crate::session_accretion::SessionAccretionReport>,
+    pub session_accretion: Option<SessionAccretionReport>,
     /// Live finalize-pipeline state (`#fmrunid-wire`): `run_id` / `step` /
     /// `turn_id` / `queue_task_id` for the current cycle. Resume-detection
     /// observability so any invocation or editor plugin can see where a crashed
@@ -5320,8 +5323,8 @@ mod tests {
     #[test]
     fn preflight_output_includes_session_accretion_when_present() {
         let output = PreflightOutput {
-            session_accretion: Some(crate::session_accretion::SessionAccretionReport {
-                level: crate::session_accretion::SessionAccretionLevel::Warn,
+            session_accretion: Some(SessionAccretionReport {
+                level: SessionAccretionLevel::Warn,
                 exchange_lines: 220,
                 response_sections: 9,
                 recent_committed_cycles: 7,

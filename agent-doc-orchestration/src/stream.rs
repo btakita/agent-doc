@@ -79,6 +79,9 @@ use crate::agent::streaming::StreamingAgent;
 use agent_doc_diff as diff;
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_merge::crdt;
+#[cfg(test)]
+use agent_doc_session_accretion::SessionAccretionLevel;
+use agent_doc_session_accretion::SessionAccretionReport;
 use agent_doc_template as template;
 use agent_doc_turn_executor::agent_stream::StreamChunk;
 
@@ -578,7 +581,7 @@ fn build_prompt(
     fm: &frontmatter::Frontmatter,
     the_diff: &str,
     content: &str,
-    session_accretion: Option<&crate::session_accretion::SessionAccretionReport>,
+    session_accretion: Option<&SessionAccretionReport>,
 ) -> String {
     let prompt_bearing_changes = diff::format_prompt_bearing_changes(the_diff)
         .map(|section| format!("\n\n{}\n", section))
@@ -1015,8 +1018,8 @@ mod tests {
             "- [ ] [#ctxpack] Add bounded context pack\n",
             "<!-- /agent:backlog -->\n",
         );
-        let report = crate::session_accretion::SessionAccretionReport {
-            level: crate::session_accretion::SessionAccretionLevel::Warn,
+        let report = SessionAccretionReport {
+            level: SessionAccretionLevel::Warn,
             reasons: vec!["document hit 2 no-op closeouts in the last 30 minutes".to_string()],
             ..Default::default()
         };

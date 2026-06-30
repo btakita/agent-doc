@@ -6,6 +6,7 @@ use agent_doc_controller::dispatch::{
     compact_trigger_text, line_contains_trigger, recent_lines_contain_trigger,
     shares_trigger_prefix, strip_leading_prompt_prefix,
 };
+use agent_doc_supervisor::lifecycle::recycle_interrupted_resubmit_should_wait;
 use agent_doc_tmux::pane_current_command_is_bare_shell;
 
 /// Outcome of one direct-pane submit-acceptance poll window.
@@ -798,7 +799,7 @@ pub(crate) fn send_command_unchecked(
     // never burning the budget on input the recycle silently drops (which would
     // re-type the trigger N times: the #rdypoll restack symptom).
     if acceptance.status != CommandDispatchStatus::Accepted
-        && crate::recycle_inflight::recycle_interrupted_resubmit_should_wait(
+        && recycle_interrupted_resubmit_should_wait(
             true,
             crate::recycle_inflight::recycle_inflight_pending(file_path),
         )

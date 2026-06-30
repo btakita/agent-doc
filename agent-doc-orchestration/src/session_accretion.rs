@@ -28,68 +28,23 @@
 //! - `inspect_warns_on_large_exchange`
 //! - `inspect_warns_on_repeated_noop_closeouts`
 //! - `inspect_blocks_on_restart_heavy_churn_with_active_startup_miss`
+use agent_doc_session_accretion::{
+    DEFAULT_CLEAR_THRESHOLD, POST_COMPACTION_NOOP_GRACE_SECS, RECENT_WINDOW_SECS,
+    SessionAccretionInput, SessionAccretionReport, evaluate_session_accretion, exchange_metrics,
+    level_label,
+};
+#[cfg(test)]
+use agent_doc_session_accretion::{
+    SessionAccretionLevel, compaction_guidance, restart_or_drain_guidance,
+};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-
-const RECENT_WINDOW_SECS: u64 = 30 * 60;
-const WARN_EXCHANGE_LINES: usize = 160;
-// Block thresholds are intentionally high so session-accretion never reaches
-// `block` during a normal multi-cycle queue drain (operator directive: the
-// queue must not stall by default). `warn` still surfaces a heads-up; only
-// genuine crash indicators (restart churn + startup-miss) block by default.
-const BLOCK_EXCHANGE_LINES: usize = 800;
-const WARN_RESPONSE_SECTIONS: usize = 8;
-const BLOCK_RESPONSE_SECTIONS: usize = 40;
-const WARN_RECENT_COMMITTED_CYCLES: usize = 6;
-const BLOCK_RECENT_COMMITTED_CYCLES: usize = 60;
-const WARN_RECENT_NOOP_CLOSEOUTS: usize = 2;
-const BLOCK_RECENT_NOOP_CLOSEOUTS: usize = 20;
-const WARN_RESTART_EVENTS: usize = 2;
-const BLOCK_RESTART_EVENTS: usize = 3;
-const RECENT_SESSION_LOSS_WARN: usize = 2;
-const POST_COMPACTION_NOOP_GRACE_SECS: u64 = RECENT_WINDOW_SECS;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct RecentExchangeCompaction {
     file: String,
     timestamp: u64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum SessionAccretionLevel {
-    #[default]
-    Healthy,
-    Warn,
-    Block,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct SessionAccretionReport {
-    pub level: SessionAccretionLevel,
-    pub exchange_lines: usize,
-    pub response_sections: usize,
-    pub recent_committed_cycles: usize,
-    pub recent_noop_closeouts: usize,
-    pub recent_restart_count: usize,
-    pub recent_session_loss_count: usize,
-    pub startup_miss_active: bool,
-    /// Resolved editor `/clear` opt-in threshold (context-usage %, 0–100) for
-    /// this document (`#clear-opt-in-threshold`). The editor compares its live
-    /// context-usage percentage against this value to decide a pre-emptive clear.
-    #[serde(default)]
-    pub clear_threshold: u8,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub reasons: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub guidance: Vec<String>,
-}
-
-impl SessionAccretionReport {
-    pub fn is_healthy(&self) -> bool {
-        self.level == SessionAccretionLevel::Healthy
-    }
 }
 
 pub fn inspect(file: &Path) -> Result<SessionAccretionReport> {
@@ -150,10 +105,6 @@ pub fn queue_context_reset_opted_in(file: &Path) -> bool {
         .agent_doc_queue_context_reset
         .unwrap_or(false)
 }
-
-/// Built-in default for the editor `/clear` opt-in threshold when neither the
-/// document frontmatter nor the project config sets one.
-pub const DEFAULT_CLEAR_THRESHOLD: u8 = 50;
 
 /// Resolve the context-usage percentage (0–100) at or above which an opted-in
 /// editor should pre-emptively run `/clear` (`#clear-opt-in-threshold`).
@@ -226,183 +177,9 @@ pub fn queue_context_reset_reason_if_opted_in(
     queue_context_reset_reason(file, last_context_clear_at)
 }
 
-/// Compaction guidance line for an over-accreted exchange.
-///
-/// Queue-aware (`#no-compact-prompt-during-queue-drain`): while an `agent:queue`
-/// is actively draining, the agent must NOT stall the queue to ask the user about
-/// compacting — a self-driving queue is meant to run unattended, so a compaction
-/// question blocks the very work the user queued. On an active queue, compaction
-/// happens only via an explicit `agent_doc_auto_compact` opt-in; otherwise the
-/// agent keeps draining and notes the size in one line. Off the queue (idle /
-/// user-driven turn), the agent asks before compacting as before.
-/// `#drain-no-defer` — restart/accretion guidance is queue-aware. While a queue is
-/// actively draining, do NOT tell the agent to stop and restart "from the current
-/// committed boundary" — that stalls the drain and is exactly the "defer to a fresh
-/// cycle" anti-pattern. The supervisor recycles onto a fresh binary and `/clear`s
-/// agent context between items at idle boundaries, so accretion/restart churn resets
-/// without the agent stopping. Off the queue (idle / user-driven turn) the normal
-/// clean-restart guidance applies.
-fn restart_or_drain_guidance(queue_active: bool) -> String {
-    if queue_active {
-        "Queue is actively draining — do NOT stop to restart or defer the remaining items: \
-         keep finalizing and looping. The supervisor recycles onto a fresh binary and \
-         /clears agent context between items at idle boundaries (#drain-no-defer), so \
-         accretion/restart churn resets without stalling the drain."
-            .to_string()
-    } else {
-        "Restart cleanly from the current committed boundary before continuing.".to_string()
-    }
-}
-
-fn compaction_guidance(file: &Path, auto_compact_opt_in: bool, queue_active: bool) -> String {
-    if auto_compact_opt_in {
-        format!(
-            "Run `agent-doc compact {} --commit` before another large turn.",
-            file.display()
-        )
-    } else if queue_active {
-        "Exchange is large, but an `agent:queue` is active — do NOT stall the queue to ask about compacting. Compact only with an explicit `agent_doc_auto_compact` opt-in (frontmatter or `.agent-doc/config.toml`); otherwise keep draining and note the size in one line of the response."
-            .to_string()
-    } else {
-        format!(
-            "Exchange is large; ask the user before compacting. Auto-compact requires an explicit `agent_doc_auto_compact` opt-in in frontmatter or `.agent-doc/config.toml` (currently off). If the user approves, run `agent-doc compact {} --commit`.",
-            file.display()
-        )
-    }
-}
-
-fn level_label(level: SessionAccretionLevel) -> &'static str {
-    match level {
-        SessionAccretionLevel::Healthy => "healthy",
-        SessionAccretionLevel::Warn => "warn",
-        SessionAccretionLevel::Block => "block",
-    }
-}
-
 fn inspect_at(file: &Path, content: &str, now: u64) -> Result<SessionAccretionReport> {
-    let (exchange_lines, response_sections) = exchange_metrics(content);
-    let (recent_committed_cycles, recent_noop_closeouts) = recent_cycle_metrics(file, now)?;
-    let startup_miss_active = crate::startup_miss::load(file)?.is_some();
     let rc = crate::graph::RunContext::new(file.to_path_buf());
-    let parsed_frontmatter =
-        crate::frontmatter_io::parse_for_file_with_context(content, file, &rc).ok();
-    let session_id = parsed_frontmatter
-        .as_ref()
-        .and_then(|(fm, _)| fm.session.as_ref().map(|s| s.trim().to_string()))
-        .filter(|s| !s.is_empty());
-    let auto_compact_opt_in = parsed_frontmatter
-        .as_ref()
-        .map(|(fm, _)| fm.auto_compact.is_some())
-        .unwrap_or(false)
-        || rc.project_config().agent_doc_auto_compact.is_some();
-    let queue_active = parsed_frontmatter
-        .as_ref()
-        .map(|(fm, _)| fm.queue_active == Some(true))
-        .unwrap_or(false);
-    let recent_restart_count = session_id
-        .as_deref()
-        .map(|session_id| recent_restart_metrics(file, session_id, now))
-        .transpose()?
-        .unwrap_or(0);
-    let recent_session_loss_count = session_id
-        .as_deref()
-        .and_then(|session_id| {
-            crate::startup_miss::recent_session_loss_window(file, session_id)
-                .ok()
-                .flatten()
-                .map(|window| window.count)
-        })
-        .unwrap_or(0);
-
-    let mut reasons = Vec::new();
-    if exchange_lines >= WARN_EXCHANGE_LINES || response_sections >= WARN_RESPONSE_SECTIONS {
-        reasons.push(format!(
-            "exchange has grown to {} lines across {} response sections",
-            exchange_lines, response_sections
-        ));
-    }
-    if recent_committed_cycles >= WARN_RECENT_COMMITTED_CYCLES {
-        reasons.push(format!(
-            "document closed {} cycles in the last {} minutes ({} no-op closeouts)",
-            recent_committed_cycles,
-            RECENT_WINDOW_SECS / 60,
-            recent_noop_closeouts
-        ));
-    } else if recent_noop_closeouts >= WARN_RECENT_NOOP_CLOSEOUTS {
-        reasons.push(format!(
-            "document hit {} no-op closeouts in the last {} minutes",
-            recent_noop_closeouts,
-            RECENT_WINDOW_SECS / 60
-        ));
-    }
-    if recent_restart_count >= WARN_RESTART_EVENTS {
-        reasons.push(format!(
-            "session log recorded {} restart-heavy events in the last {} minutes",
-            recent_restart_count,
-            RECENT_WINDOW_SECS / 60
-        ));
-    }
-    if startup_miss_active {
-        reasons.push("an unresolved startup-miss marker is still active".to_string());
-    }
-    if recent_session_loss_count >= RECENT_SESSION_LOSS_WARN {
-        reasons.push(format!(
-            "session lost {} pane(s) recently enough to trip the restart-loss window",
-            recent_session_loss_count
-        ));
-    }
-
-    let block_for_exchange =
-        exchange_lines >= BLOCK_EXCHANGE_LINES || response_sections >= BLOCK_RESPONSE_SECTIONS;
-    let block_for_closeout_churn = recent_committed_cycles >= BLOCK_RECENT_COMMITTED_CYCLES
-        && recent_noop_closeouts >= BLOCK_RECENT_NOOP_CLOSEOUTS;
-    let block_for_restart_churn = recent_restart_count >= BLOCK_RESTART_EVENTS
-        && (startup_miss_active || recent_session_loss_count >= RECENT_SESSION_LOSS_WARN);
-    let warn = !reasons.is_empty();
-    let level = if block_for_exchange || block_for_closeout_churn || block_for_restart_churn {
-        SessionAccretionLevel::Block
-    } else if warn {
-        SessionAccretionLevel::Warn
-    } else {
-        SessionAccretionLevel::Healthy
-    };
-
-    let mut guidance = Vec::new();
-    if !matches!(level, SessionAccretionLevel::Healthy) {
-        if exchange_lines >= WARN_EXCHANGE_LINES
-            || response_sections >= WARN_RESPONSE_SECTIONS
-            || recent_committed_cycles >= WARN_RECENT_COMMITTED_CYCLES
-            || recent_noop_closeouts >= WARN_RECENT_NOOP_CLOSEOUTS
-        {
-            guidance.push(compaction_guidance(file, auto_compact_opt_in, queue_active));
-        }
-        if recent_restart_count >= WARN_RESTART_EVENTS
-            || startup_miss_active
-            || recent_session_loss_count >= RECENT_SESSION_LOSS_WARN
-        {
-            guidance.push(restart_or_drain_guidance(queue_active));
-        }
-        if guidance.is_empty() {
-            guidance.push(
-                "Inspect the per-document churn signals before launching another large turn."
-                    .to_string(),
-            );
-        }
-    }
-
-    Ok(SessionAccretionReport {
-        level,
-        exchange_lines,
-        response_sections,
-        recent_committed_cycles,
-        recent_noop_closeouts,
-        recent_restart_count,
-        recent_session_loss_count,
-        startup_miss_active,
-        clear_threshold: clear_threshold_for_doc(file),
-        reasons,
-        guidance,
-    })
+    inspect_at_with_context(file, content, now, &rc)
 }
 
 fn inspect_at_with_context(
@@ -411,6 +188,17 @@ fn inspect_at_with_context(
     now: u64,
     rc: &crate::graph::RunContext,
 ) -> Result<SessionAccretionReport> {
+    Ok(evaluate_session_accretion(session_accretion_input(
+        file, content, now, rc,
+    )?))
+}
+
+fn session_accretion_input(
+    file: &Path,
+    content: &str,
+    now: u64,
+    rc: &crate::graph::RunContext,
+) -> Result<SessionAccretionInput> {
     let (exchange_lines, response_sections) = exchange_metrics(content);
     let (recent_committed_cycles, recent_noop_closeouts) = recent_cycle_metrics(file, now)?;
     let startup_miss_active = crate::startup_miss::load(file)?.is_some();
@@ -444,84 +232,8 @@ fn inspect_at_with_context(
         })
         .unwrap_or(0);
 
-    let mut reasons = Vec::new();
-    if exchange_lines >= WARN_EXCHANGE_LINES || response_sections >= WARN_RESPONSE_SECTIONS {
-        reasons.push(format!(
-            "exchange has grown to {} lines across {} response sections",
-            exchange_lines, response_sections
-        ));
-    }
-    if recent_committed_cycles >= WARN_RECENT_COMMITTED_CYCLES {
-        reasons.push(format!(
-            "document closed {} cycles in the last {} minutes ({} no-op closeouts)",
-            recent_committed_cycles,
-            RECENT_WINDOW_SECS / 60,
-            recent_noop_closeouts
-        ));
-    } else if recent_noop_closeouts >= WARN_RECENT_NOOP_CLOSEOUTS {
-        reasons.push(format!(
-            "document hit {} no-op closeouts in the last {} minutes",
-            recent_noop_closeouts,
-            RECENT_WINDOW_SECS / 60
-        ));
-    }
-    if recent_restart_count >= WARN_RESTART_EVENTS {
-        reasons.push(format!(
-            "session log recorded {} restart-heavy events in the last {} minutes",
-            recent_restart_count,
-            RECENT_WINDOW_SECS / 60
-        ));
-    }
-    if startup_miss_active {
-        reasons.push("an unresolved startup-miss marker is still active".to_string());
-    }
-    if recent_session_loss_count >= RECENT_SESSION_LOSS_WARN {
-        reasons.push(format!(
-            "session lost {} pane(s) recently enough to trip the restart-loss window",
-            recent_session_loss_count
-        ));
-    }
-
-    let block_for_exchange =
-        exchange_lines >= BLOCK_EXCHANGE_LINES || response_sections >= BLOCK_RESPONSE_SECTIONS;
-    let block_for_closeout_churn = recent_committed_cycles >= BLOCK_RECENT_COMMITTED_CYCLES
-        && recent_noop_closeouts >= BLOCK_RECENT_NOOP_CLOSEOUTS;
-    let block_for_restart_churn = recent_restart_count >= BLOCK_RESTART_EVENTS
-        && (startup_miss_active || recent_session_loss_count >= RECENT_SESSION_LOSS_WARN);
-    let warn = !reasons.is_empty();
-    let level = if block_for_exchange || block_for_closeout_churn || block_for_restart_churn {
-        SessionAccretionLevel::Block
-    } else if warn {
-        SessionAccretionLevel::Warn
-    } else {
-        SessionAccretionLevel::Healthy
-    };
-
-    let mut guidance = Vec::new();
-    if !matches!(level, SessionAccretionLevel::Healthy) {
-        if exchange_lines >= WARN_EXCHANGE_LINES
-            || response_sections >= WARN_RESPONSE_SECTIONS
-            || recent_committed_cycles >= WARN_RECENT_COMMITTED_CYCLES
-            || recent_noop_closeouts >= WARN_RECENT_NOOP_CLOSEOUTS
-        {
-            guidance.push(compaction_guidance(file, auto_compact_opt_in, queue_active));
-        }
-        if recent_restart_count >= WARN_RESTART_EVENTS
-            || startup_miss_active
-            || recent_session_loss_count >= RECENT_SESSION_LOSS_WARN
-        {
-            guidance.push(restart_or_drain_guidance(queue_active));
-        }
-        if guidance.is_empty() {
-            guidance.push(
-                "Inspect the per-document churn signals before launching another large turn."
-                    .to_string(),
-            );
-        }
-    }
-
-    Ok(SessionAccretionReport {
-        level,
+    Ok(SessionAccretionInput {
+        document: file.display().to_string(),
         exchange_lines,
         response_sections,
         recent_committed_cycles,
@@ -530,30 +242,9 @@ fn inspect_at_with_context(
         recent_session_loss_count,
         startup_miss_active,
         clear_threshold: clear_threshold_for_doc(file),
-        reasons,
-        guidance,
+        auto_compact_opt_in,
+        queue_active,
     })
-}
-
-fn exchange_metrics(content: &str) -> (usize, usize) {
-    let exchange = agent_doc_element::element::parse(content)
-        .ok()
-        .and_then(|components| {
-            components
-                .into_iter()
-                .find(|component| component.name == "exchange")
-                .map(|component| component.content(content).to_string())
-        })
-        .unwrap_or_else(|| content.to_string());
-    let exchange_lines = exchange.lines().count();
-    let response_sections = exchange
-        .lines()
-        .filter(|line| {
-            let trimmed = line.trim_start();
-            trimmed.starts_with("### Re:") || trimmed.starts_with("## Assistant")
-        })
-        .count();
-    (exchange_lines, response_sections)
 }
 
 fn recent_cycle_metrics(file: &Path, now: u64) -> Result<(usize, usize)> {
@@ -1011,13 +702,13 @@ mod tests {
     #[test]
     fn compaction_guidance_precedence_opt_in_beats_queue_active() {
         // An explicit auto-compact opt-in still wins over the queue-active branch.
-        let g = compaction_guidance(Path::new("/tmp/doc.md"), true, true);
+        let g = compaction_guidance("/tmp/doc.md", true, true);
         assert!(g.starts_with("Run `agent-doc compact"), "got {g}");
         // Queue active, no opt-in → don't-stall guidance.
-        let g = compaction_guidance(Path::new("/tmp/doc.md"), false, true);
+        let g = compaction_guidance("/tmp/doc.md", false, true);
         assert!(g.contains("do NOT stall the queue"), "got {g}");
         // Idle (no queue), no opt-in → ask the user.
-        let g = compaction_guidance(Path::new("/tmp/doc.md"), false, false);
+        let g = compaction_guidance("/tmp/doc.md", false, false);
         assert!(g.contains("ask the user before compacting"), "got {g}");
     }
 

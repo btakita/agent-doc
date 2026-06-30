@@ -2,9 +2,12 @@ use agent_doc_element::element;
 
 use agent_doc_element_backlog::backlog;
 use agent_doc_frontmatter::frontmatter;
+#[cfg(test)]
+use agent_doc_session_accretion::SessionAccretionLevel;
+use agent_doc_session_accretion::{SessionAccretionReport, level_label};
 use agent_doc_workflow::session_cycle::prompt_targets_from_diff;
 
-use crate::{frontmatter_io, session_accretion};
+use crate::frontmatter_io;
 use std::path::Path;
 
 const BACKLOG_HEAD_LIMIT: usize = 3;
@@ -21,7 +24,7 @@ pub fn build_document_section(
     file: &Path,
     diff_text: &str,
     doc: &str,
-    report: Option<&session_accretion::SessionAccretionReport>,
+    report: Option<&SessionAccretionReport>,
 ) -> String {
     let prompt_targets = prompt_targets_from_diff(diff_text);
     let remote_host_scope = render_remote_host_scope(file, doc);
@@ -67,9 +70,9 @@ pub fn build_document_section(
          <available_components>\n{}\n\
          </available_components>\n\
          </response_context>\n\n",
-        level_name(report.level),
+        level_label(report.level),
         remote_host_scope,
-        level_name(report.level),
+        level_label(report.level),
         render_prompt_targets(&prompt_targets),
         session_summary.trim_end(),
         backlog_head.trim_end(),
@@ -355,21 +358,13 @@ fn find_context_section_for_prompt_line(
         .last()
 }
 
-fn level_name(level: session_accretion::SessionAccretionLevel) -> &'static str {
-    match level {
-        session_accretion::SessionAccretionLevel::Healthy => "healthy",
-        session_accretion::SessionAccretionLevel::Warn => "warn",
-        session_accretion::SessionAccretionLevel::Block => "block",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn warn_report() -> session_accretion::SessionAccretionReport {
-        session_accretion::SessionAccretionReport {
-            level: session_accretion::SessionAccretionLevel::Warn,
+    fn warn_report() -> SessionAccretionReport {
+        SessionAccretionReport {
+            level: SessionAccretionLevel::Warn,
             reasons: vec!["document hit 2 no-op closeouts in the last 30 minutes".to_string()],
             ..Default::default()
         }
@@ -381,7 +376,7 @@ mod tests {
             Path::new("session.md"),
             "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n+❯ Hello\n",
             "doc body",
-            Some(&session_accretion::SessionAccretionReport::default()),
+            Some(&SessionAccretionReport::default()),
         );
         assert!(section.contains("The full document is now:"));
         assert!(section.contains("<document>\ndoc body\n</document>"));
@@ -440,7 +435,7 @@ mod tests {
             Path::new("session.md"),
             "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n+❯ Hello\n",
             doc,
-            Some(&session_accretion::SessionAccretionReport::default()),
+            Some(&SessionAccretionReport::default()),
         );
 
         assert!(

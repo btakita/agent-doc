@@ -183,34 +183,6 @@ pub fn wait_for_recycle_settle(file: &str, timeout: Duration, poll: Duration) ->
     true
 }
 
-/// R2 (`#jbdisprecycle`): a `start_session` that fails *while the project
-/// supervisor is mid-`execve` recycle* raced the hot-reload (the controller is
-/// tearing down / restarting its session actors) — it is a transient race, not a
-/// terminal error. Retry (after the recycle settles) while attempts remain and
-/// the supervisor was actually recycling; otherwise surface the error as before.
-/// Pure so the retry policy is unit-testable without a live controller.
-pub fn start_session_retryable_during_recycle(
-    recycle_pending: bool,
-    attempts_used: usize,
-    max_attempts: usize,
-) -> bool {
-    recycle_pending && attempts_used < max_attempts
-}
-
-/// R3 (`#jbdisprecycle`): once the routed trigger has already been typed into the
-/// composer (`dispatch_inject attempt>=1`) but the submit has not been accepted,
-/// a recycle in flight means the submit keystroke was dropped across the
-/// `execve` boundary. The recovery is to wait for the recycle to settle and then
-/// land the submit exactly ONCE — never another full trigger re-type, which would
-/// log `dispatch_inject attempt=2` (the `#rdypoll` restack symptom). Returns true
-/// when the caller must wait-for-settle before its single resubmit.
-pub fn recycle_interrupted_resubmit_should_wait(
-    trigger_already_injected: bool,
-    recycle_pending: bool,
-) -> bool {
-    trigger_already_injected && recycle_pending
-}
-
 /// Best-effort clear of the recycle-in-flight marker. The fresh post-recycle
 /// supervisor drops it when its watch loop initializes; the TTL is the backstop.
 pub fn clear_recycle_inflight(file: &str) {
@@ -302,27 +274,6 @@ mod tests {
             !settled,
             "an unsettling recycle must return false at the timeout, not hang"
         );
-    }
-
-    #[test]
-    fn start_session_retry_only_while_recycling_and_budget_remains() {
-        // Retry only when the supervisor is actually recycling AND attempts remain.
-        assert!(start_session_retryable_during_recycle(true, 0, 2));
-        assert!(start_session_retryable_during_recycle(true, 1, 2));
-        // Budget exhausted → surface the error (terminal).
-        assert!(!start_session_retryable_during_recycle(true, 2, 2));
-        // Not recycling → a real start_session failure is terminal, never retried.
-        assert!(!start_session_retryable_during_recycle(false, 0, 2));
-    }
-
-    #[test]
-    fn recycle_interrupted_resubmit_waits_only_when_injected_and_recycling() {
-        // Trigger typed + recycle in flight → wait for settle, then submit once.
-        assert!(recycle_interrupted_resubmit_should_wait(true, true));
-        // Recycle in flight but nothing injected yet → R1 pre-inject gate owns it.
-        assert!(!recycle_interrupted_resubmit_should_wait(false, true));
-        // Injected but no recycle → normal budgeted resubmit, no extra wait.
-        assert!(!recycle_interrupted_resubmit_should_wait(true, false));
     }
 
     #[test]

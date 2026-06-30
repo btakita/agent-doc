@@ -3652,6 +3652,119 @@ fn test_agent_doc_log_time_has_no_ops_log_facade() {
 }
 
 #[test]
+fn test_agent_doc_session_accretion_owns_pure_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-session-accretion")),
+        "agent-doc-session-accretion must stay a first-class workspace crate"
+    );
+
+    let focused_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-accretion/src/lib.rs")).unwrap();
+    for required_snippet in [
+        "pub enum SessionAccretionLevel",
+        "pub struct SessionAccretionReport",
+        "pub struct SessionAccretionInput",
+        "pub fn evaluate_session_accretion(",
+        "pub fn level_label(",
+        "pub fn restart_or_drain_guidance(",
+        "pub fn compaction_guidance(",
+        "pub fn exchange_metrics(",
+    ] {
+        assert!(
+            focused_source.contains(required_snippet),
+            "agent-doc-session-accretion must own pure session-accretion policy: {required_snippet}"
+        );
+    }
+
+    let orchestration_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_accretion.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "pub enum SessionAccretionLevel",
+        "pub struct SessionAccretionReport",
+        "pub struct SessionAccretionInput",
+        "pub fn evaluate_session_accretion(",
+        "fn evaluate_session_accretion(",
+        "pub fn exchange_metrics(",
+        "fn exchange_metrics(",
+        "pub fn level_label(",
+        "fn level_label(",
+        "pub use agent_doc_session_accretion",
+        "type SessionAccretion",
+    ] {
+        assert!(
+            !orchestration_source.contains(forbidden_snippet),
+            "orchestration must not re-own or facade pure session-accretion policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        orchestration_source.contains("evaluate_session_accretion(session_accretion_input(")
+            && orchestration_source.contains("SessionAccretionInput {"),
+        "orchestration session_accretion should gather IO facts then call focused policy directly"
+    );
+
+    for relative in [
+        "src/orchestrate.rs",
+        "agent-doc-orchestration/src/preflight.rs",
+        "agent-doc-orchestration/src/prompt_context.rs",
+        "agent-doc-orchestration/src/run.rs",
+        "agent-doc-orchestration/src/stream.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("agent_doc_session_accretion::"),
+            "{relative} should import session-accretion types from the focused crate"
+        );
+        assert!(
+            !source.contains("agent_doc_orchestration::session_accretion::SessionAccretion")
+                && !source.contains("crate::session_accretion::SessionAccretion"),
+            "{relative} must not route session-accretion types through orchestration"
+        );
+    }
+
+    let root_dependencies = workspace["dependencies"].as_table().unwrap();
+    assert!(
+        root_dependencies.contains_key("agent-doc-session-accretion"),
+        "the CLI shell must depend on the focused session-accretion crate directly"
+    );
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
+    assert!(
+        orchestration_dependencies.contains_key("agent-doc-session-accretion"),
+        "orchestration must depend on the focused session-accretion crate directly"
+    );
+
+    let focused_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-accretion/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&focused_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    assert!(dependencies.contains_key("agent-doc-element"));
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-session-accretion must stay free of orchestration, git, editor IPC, sqlite, or tmux-router effects"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_lease_is_freshness_boundary() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
@@ -5973,6 +6086,15 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         supervisor_lifecycle_policy.contains("pub fn write_wedged_from_ipc_failures("),
         "agent-doc-supervisor lifecycle policy should own the write_wedged evidence classifier"
     );
+    for required_snippet in [
+        "pub fn start_session_retryable_during_recycle(",
+        "pub fn recycle_interrupted_resubmit_should_wait(",
+    ] {
+        assert!(
+            supervisor_lifecycle_policy.contains(required_snippet),
+            "agent-doc-supervisor lifecycle policy should own recycle-in-flight routing decisions: {required_snippet}"
+        );
+    }
     let write_converge =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/converge.rs"))
             .unwrap();
@@ -5985,6 +6107,36 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     assert!(
         write_ipc.contains("agent_doc_supervisor::lifecycle::write_wedged_from_ipc_failures"),
         "write::ipc should call focused supervisor write-wedge classification directly"
+    );
+    let recycle_inflight =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/recycle_inflight.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "pub fn start_session_retryable_during_recycle(",
+        "fn start_session_retryable_during_recycle(",
+        "pub fn recycle_interrupted_resubmit_should_wait(",
+        "fn recycle_interrupted_resubmit_should_wait(",
+        "pub use agent_doc_supervisor::lifecycle",
+    ] {
+        assert!(
+            !recycle_inflight.contains(forbidden_snippet),
+            "recycle_inflight must stay a marker IO adapter, not re-own or facade supervisor recycle policy: {forbidden_snippet}"
+        );
+    }
+    let start_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/run.rs")).unwrap();
+    assert!(
+        start_run.contains("agent_doc_supervisor::")
+            && start_run.contains("start_session_retryable_during_recycle"),
+        "start/run should call focused supervisor start-session recycle retry policy directly"
+    );
+    let route_dispatch =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch.rs"))
+            .unwrap();
+    assert!(
+        route_dispatch.contains("agent_doc_supervisor::")
+            && route_dispatch.contains("recycle_interrupted_resubmit_should_wait"),
+        "route dispatch should call focused supervisor recycle-resubmit policy directly"
     );
     let idle_watch =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))

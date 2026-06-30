@@ -43,6 +43,30 @@ pub fn route_prompt_text_for_change(change_text: &str) -> Option<String> {
     if text.is_empty() { None } else { Some(text) }
 }
 
+pub fn active_auto_route_queue_prompt_texts(content: &str) -> Result<Vec<String>> {
+    let (frontmatter, body) = agent_doc_frontmatter::frontmatter::parse(content)?;
+    if frontmatter.queue_active != Some(true) {
+        return Ok(Vec::new());
+    }
+
+    let components = agent_doc_element::element::parse(body)?;
+    let Some(queue_component) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return Ok(Vec::new());
+    };
+    if !has_auto_attr(&queue_component.attrs) {
+        return Ok(Vec::new());
+    }
+
+    let entries = parse(queue_component.content(body))?;
+    Ok(document_queue::prompts(&entries)
+        .into_iter()
+        .filter_map(|prompt| route_prompt_text_for_change(&prompt.text))
+        .collect())
+}
+
 pub fn operator_prioritize_route_prompt(prompt_text: String) -> String {
     if crate::queue_command::is_slash_command(&prompt_text) {
         return prompt_text;
@@ -311,6 +335,59 @@ mod tests {
         assert_eq!(
             route_prompt_text_for_change("  \n<!-- agent:boundary:head -->"),
             None
+        );
+    }
+
+    #[test]
+    fn active_auto_route_queue_prompt_texts_extracts_normalized_prompts() {
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- ❯ do [#alpha]\n",
+            "<!-- /agent:queue -->\n"
+        );
+
+        assert_eq!(
+            active_auto_route_queue_prompt_texts(content).unwrap(),
+            vec!["do [#alpha]"]
+        );
+    }
+
+    #[test]
+    fn active_auto_route_queue_prompt_texts_requires_active_auto_queue() {
+        let inactive = concat!(
+            "---\nqueue_active: false\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#alpha]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        let manual = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#alpha]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        let missing = "---\nqueue_active: true\n---\n\nNo queue.\n";
+
+        assert!(
+            active_auto_route_queue_prompt_texts(inactive)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            active_auto_route_queue_prompt_texts(manual)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            active_auto_route_queue_prompt_texts(missing)
+                .unwrap()
+                .is_empty()
         );
     }
 

@@ -1801,8 +1801,10 @@ fn detect_route_queue_snapshot_commit_boundary_recoverable(
         return Ok(false);
     }
 
-    let snapshot_prompts = route_queue_prompt_texts(&snapshot)?;
-    let head_prompts = route_queue_prompt_texts(&head)?;
+    let snapshot_prompts =
+        agent_doc_queue::route_dispatch::active_auto_route_queue_prompt_texts(&snapshot)?;
+    let head_prompts =
+        agent_doc_queue::route_dispatch::active_auto_route_queue_prompt_texts(&head)?;
     // Recover only genuine active-auto-queue commit-boundary churn: either the
     // snapshot still carries the queued dispatch (enqueue case) or HEAD carried
     // an active auto-queue that the snapshot has since drained to inactive
@@ -1836,33 +1838,9 @@ fn detect_route_queue_snapshot_commit_boundary_recoverable(
 
     Ok(changes.iter().all(|change| {
         change.kind == agent_doc_diff::PromptBearingChangeKind::PromptTarget
-            && snapshot_prompts
-                .iter()
-                .any(|prompt| prompt == &normalize_route_queue_prompt_text(&change.text))
+            && agent_doc_queue::route_dispatch::route_prompt_text_for_change(&change.text)
+                .is_some_and(|text| snapshot_prompts.iter().any(|prompt| prompt == &text))
     }))
-}
-
-fn route_queue_prompt_texts(content: &str) -> Result<Vec<String>> {
-    let (fm, body) = agent_doc_frontmatter::frontmatter::parse(content)?;
-    if fm.queue_active != Some(true) {
-        return Ok(Vec::new());
-    }
-    let components = agent_doc_element::element::parse(body)?;
-    let Some(queue_component) = components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
-        return Ok(Vec::new());
-    };
-    if !agent_doc_queue::document_queue::has_auto_attr(&queue_component.attrs) {
-        return Ok(Vec::new());
-    }
-    let entries = agent_doc_queue::document_queue::parse(queue_component.content(body))?;
-    Ok(agent_doc_queue::document_queue::prompts(&entries)
-        .into_iter()
-        .map(|prompt| normalize_route_queue_prompt_text(&prompt.text))
-        .filter(|text| !text.is_empty())
-        .collect())
 }
 
 fn strip_route_queue_state_for_boundary_compare(content: &str) -> String {
@@ -1888,23 +1866,6 @@ fn strip_route_queue_state_for_boundary_compare(content: &str) -> String {
         }
     }
     crate::git::normalize_transient_agent_doc_markers(&result)
-}
-
-fn normalize_route_queue_prompt_text(text: &str) -> String {
-    text.lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with("<!-- agent:boundary:"))
-        .map(|line| {
-            line.strip_prefix('❯')
-                .or_else(|| line.strip_prefix('>'))
-                .map(str::trim)
-                .unwrap_or(line)
-        })
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n")
-        .trim()
-        .to_string()
 }
 
 pub(crate) fn preflight_debounce_ms(file: &Path) -> u64 {

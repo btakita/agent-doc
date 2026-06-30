@@ -11325,6 +11325,7 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-queue/src/route_dispatch.rs")).unwrap();
     for required_snippet in [
         "pub fn route_prompt_text_for_change(",
+        "pub fn active_auto_route_queue_prompt_texts(",
         "pub fn operator_prioritize_route_prompt(",
         "pub fn prepare_route_dispatch_queue_update(",
         "pub fn activate_existing_route_queue_content(",
@@ -11344,6 +11345,8 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
     let route_cycle_ack =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/cycle_ack.rs"))
             .unwrap();
+    let preflight_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
     for forbidden_snippet in [
         "fn queue_prompt_text_for_route_change(",
         "fn operator_prioritize_route_prompt(",
@@ -11361,6 +11364,15 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
             "route must stay an effect adapter and not re-own route-dispatch queue policy: {forbidden_snippet}"
         );
     }
+    for forbidden_snippet in [
+        "fn route_queue_prompt_texts(",
+        "fn normalize_route_queue_prompt_text(",
+    ] {
+        assert!(
+            !preflight_source.contains(forbidden_snippet),
+            "preflight must stay an effect adapter and not re-own route queue prompt policy: {forbidden_snippet}"
+        );
+    }
     assert!(
         route_source
             .contains("agent_doc_queue::route_dispatch::prepare_route_dispatch_queue_update")
@@ -11368,8 +11380,10 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
             && route_source
                 .contains("agent_doc_queue::route_dispatch::activate_existing_route_queue_content")
             && route_cycle_ack
-                .contains("agent_doc_queue::route_dispatch::route_prompt_text_for_change"),
-        "route should call route-dispatch queue policy through agent-doc-queue directly"
+                .contains("agent_doc_queue::route_dispatch::route_prompt_text_for_change")
+            && preflight_source
+                .contains("agent_doc_queue::route_dispatch::active_auto_route_queue_prompt_texts"),
+        "route/preflight should call route-dispatch queue policy through agent-doc-queue directly"
     );
 }
 

@@ -2952,6 +2952,43 @@ mod submodule_patch_routing_tests {
     }
 
     #[test]
+    fn already_applied_empty_response_probe_falls_back() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        for subdir in ["snapshots", "crdt", "logs", "state/cycles"] {
+            fs::create_dir_all(root.join(".agent-doc").join(subdir)).unwrap();
+        }
+        let doc = root.join("session.md");
+        let content_ours = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, content_ours).unwrap();
+        crate::snapshot::save(&doc, content_ours).unwrap();
+
+        let outcome = persist_already_applied_socket_content_ours_snapshot(
+            &doc,
+            "already-applied-empty-response-probe",
+            None,
+            Some(content_ours),
+            Some(content_ours),
+            None,
+            "",
+        )
+        .unwrap();
+
+        assert_eq!(outcome, AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("already_applied_empty_response_probe")
+                && log.contains("ipc_proof_insufficient")
+                && !log.contains("ipc_socket_already_applied_snapshot"),
+            "empty response probe should fail proof and fall back:\n{log}"
+        );
+    }
+
+    #[test]
     fn socket_ack_content_prompt_duplication_fails_closed_without_editor_repair() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().canonicalize().unwrap();

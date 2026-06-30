@@ -213,10 +213,14 @@ focused crate under the old path.
 - `agent-doc-queue` now owns one-shot backlog/icebox/pending queue-sync request
   collection and sync-report policy for `agent-doc queue sync`; `queue_cmd`
   keeps only file IO, rendering, snapshot persistence, and CLI output.
-- Next queue candidate from the fan-out scouts: move queue-head closeout and
-  provenance decision policy from `session_check` into `agent-doc-queue`, while
-  keeping guard-mode formatting, cycle-state loading, and ops logging in
-  orchestration.
+- `agent-doc-queue` now owns id-backed queue-head closeout/removal decisions and
+  free-text queue-head identity/presence/residue projection used by
+  `session_check`; orchestration keeps guard-mode formatting, cycle-state
+  loading, response-materialization checks owned by `agent-doc-turn`, and ops
+  logging.
+- Next queue candidate from the fan-out scouts: finish any remaining
+  `session_check` queue provenance decisions that can move without adding an
+  `agent-doc-turn` dependency to `agent-doc-queue`.
 
 ### Earlier closure finding
 

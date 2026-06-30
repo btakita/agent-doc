@@ -248,6 +248,10 @@ focused crate under the old path.
   breakout recognition, and warn/pass decisions for kept-open tracked items.
   Orchestration keeps cycle/capture loading, cached component parsing,
   tracked-item evidence projection, ops-log emission, and warning rendering.
+- `agent-doc-turn` now owns queue-audit partial-completion advisory policy:
+  committed-cycle gating, suppress-marker handling, response-text extraction,
+  none-complete collapse detection, and warn/pass decisions. Orchestration keeps
+  cycle/capture loading, ops-log emission, and warning rendering.
 
 ### Earlier closure finding
 

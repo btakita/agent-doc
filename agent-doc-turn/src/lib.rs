@@ -14,6 +14,7 @@ pub mod exchange_tail;
 pub mod heuristics;
 pub mod no_change;
 pub mod op_log;
+pub mod owner_pane_recursion;
 pub mod response_text;
 pub mod turn_scope;
 pub mod wait_machine;

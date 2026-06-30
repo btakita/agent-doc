@@ -136,6 +136,10 @@ use agent_doc_template as template;
 use agent_doc_turn::no_change::{
     NoChangeCycleStateInput, NoChangeVerdict, classify_no_change_cycle_state,
 };
+use agent_doc_turn::owner_pane_recursion::{
+    OwnerPaneQueueHead, prompt_miss_message, queue_handoff_message, queue_wedge_halt_message,
+    recursive_direct_invocation_message, recursive_start_invocation_message,
+};
 
 use crate::{agent, diff_io, frontmatter_io, git, merge, snapshot, template_io, write};
 
@@ -583,7 +587,8 @@ fn run_once(
     if let Some(detail) = owned_pane_self_invocation_detail(file, &session_id, agent_name)
         && let Some(unresolved) = crate::session_check::unresolved_exchange_prompt(file)?
     {
-        let diagnostic = owned_pane_prompt_miss_diagnostic(file, &detail, &unresolved);
+        let document = file.display().to_string();
+        let diagnostic = prompt_miss_message(&document, &detail, &unresolved);
         crate::ops_log::log_op(
             file,
             &format!(
@@ -652,10 +657,26 @@ fn run_once(
             );
             anyhow::bail!(
                 "{}",
-                owned_pane_queue_wedge_halt_diagnostic(file, &detail, &continuation, wedge_count)
+                queue_wedge_halt_message(
+                    &file.display().to_string(),
+                    &detail,
+                    OwnerPaneQueueHead {
+                        prompt: &continuation.head_prompt,
+                        id: continuation.head_id.as_deref(),
+                    },
+                    wedge_count
+                )
             );
         }
-        let diagnostic = owned_pane_queue_handoff_diagnostic(file, &detail, &continuation);
+        let document = file.display().to_string();
+        let diagnostic = queue_handoff_message(
+            &document,
+            &detail,
+            OwnerPaneQueueHead {
+                prompt: &continuation.head_prompt,
+                id: continuation.head_id.as_deref(),
+            },
+        );
         crate::ops_log::log_op(
             file,
             &format!(
@@ -1429,13 +1450,9 @@ fn recursive_codex_direct_invocation_diagnostic(
     agent_name: &str,
 ) -> Option<String> {
     let detail = owned_pane_self_invocation_detail(file, session_id, agent_name)?;
-    Some(format!(
-        "recursive direct invocation would deadlock: `agent-doc {}` is running inside the Codex pane that already owns this document ({}). The empty preflight cycle has been abandoned (terminal — `session-check` accepts it, no manual `agent-doc cancel` needed). If the pane is now idle but the document still reports busy, reconcile it without killing the pane via `agent-doc session status {}` (or `agent-doc session clear {}`) — idle pane evidence repairs a stale busy actor back to ready; otherwise retry from outside the managed pane or restart the owner with `agent-doc start {}`.",
-        file.display(),
-        detail,
-        file.display(),
-        file.display(),
-        file.display()
+    Some(recursive_direct_invocation_message(
+        &file.display().to_string(),
+        &detail,
     ))
 }
 
@@ -1452,136 +1469,10 @@ pub fn recursive_codex_start_invocation_diagnostic(
     agent_name: &str,
 ) -> Option<String> {
     let detail = owned_pane_self_invocation_detail(file, session_id, agent_name)?;
-    Some(format_recursive_start_diagnostic(file, &detail))
-}
-
-/// Pure message builder for [`recursive_codex_start_invocation_diagnostic`], kept
-/// separate so the operator-facing wording is unit-testable without live tmux,
-/// registry, or harness-env state.
-fn format_recursive_start_diagnostic(file: &Path, detail: &str) -> String {
-    format!(
-        "recursive self-owned-pane start would deadlock: `agent-doc start {}` was run inside the Codex pane that already owns this document ({}). Spawning a replacement owner here would loop re-injecting `agent-doc {}` into this same pane. Recover from a DIFFERENT pane: first reconcile a possibly stale-busy actor without killing the pane via `agent-doc session status {}`, then if the pane really is wedged run `agent-doc session interrupt-clear {}` to interrupt the owner and clear the session; if that cannot settle, run `agent-doc session interrupt-clear {} --force` to kill the owner pane/supervisor and clear the registry in one command. Do NOT re-run `agent-doc start {}` from this pane — it only re-trips this guard.",
-        file.display(),
-        detail,
-        file.display(),
-        file.display(),
-        file.display(),
-        file.display(),
-        file.display()
-    )
-}
-
-/// `#codex-owned-pane-prompt-miss`: structured fail-closed diagnostic for the
-/// case where the owner pane re-invokes `agent-doc <FILE>` while an unresolved
-/// exchange prompt is still pending. Names the prompt and the in-pane recovery
-/// path, and explicitly tells the operator not to retry the same direct command
-/// from the same pane (which would only re-trigger the guard).
-fn owned_pane_prompt_miss_diagnostic(file: &Path, detail: &str, unresolved: &str) -> String {
-    let excerpt: String = unresolved
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .unwrap_or(unresolved)
-        .trim()
-        .chars()
-        .take(200)
-        .collect();
-    format!(
-        "owned-pane self-invocation with unresolved exchange prompt: `agent-doc {}` was run inside the Codex pane that already owns this document ({}), but a user prompt is still unanswered: \"{}\". The recursive same-pane guard refuses to dispatch a nested child here, so this request would be a no-op for that prompt. No pre-commit, snapshot, or queue mutation was made — the prompt stays executable. Recovery: answer the prompt in THIS owner pane's current turn, then persist with `agent-doc finalize {}` (or `agent-doc write --commit {}`). Do NOT re-run `agent-doc {}` from this same pane; that only re-triggers this guard.",
-        file.display(),
-        detail,
-        excerpt,
-        file.display(),
-        file.display(),
-        file.display()
-    )
-}
-
-/// `#codex-owned-pane-auto-queue-stuck`: structured fail-closed diagnostic for
-/// the owner pane re-invoking `agent-doc <FILE>` while a ready active auto-queue
-/// head remains. Names the head (and id when known) plus the in-pane recovery
-/// path, and tells the operator to run the head in THIS owner turn instead of
-/// re-running the same direct command — which would only baseline queue/boundary
-/// drift and re-trigger the recursive guard.
-fn owned_pane_queue_handoff_diagnostic(
-    file: &Path,
-    detail: &str,
-    continuation: &agent_doc_queue::queue_continuation::QueueContinuation,
-) -> String {
-    if let Some(command) =
-        agent_doc_queue::queue_command::slash_command_text(&continuation.head_prompt)
-    {
-        return format!(
-            "owned-pane self-invocation with active auto-queue slash command: `agent-doc {}` was run inside the Codex pane that already owns this document ({}), and the ready queue head is the literal slash command {:?}. The recursive same-pane guard refuses to answer slash commands as agent-doc work. No pre-commit, snapshot, exchange, or queue mutation was made — the command stays live. Recovery: let the current turn stop; the managed owner-pane supervisor will submit {:?} at the next idle prompt and consume the queue head. Do NOT answer this queue head in the exchange, and do NOT re-run `agent-doc {}` from this same pane.",
-            file.display(),
-            detail,
-            command,
-            command,
-            file.display()
-        );
-    }
-    let head_excerpt: String = continuation
-        .head_prompt
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .unwrap_or(&continuation.head_prompt)
-        .trim()
-        .chars()
-        .take(200)
-        .collect();
-    let id_note = continuation
-        .head_id
-        .as_deref()
-        .map(|id| format!(" (id #{id})"))
-        .unwrap_or_default();
-    format!(
-        "owned-pane self-invocation with active auto-queue head: `agent-doc {}` was run inside the Codex pane that already owns this document ({}), and a ready queue head is still live: \"{}\"{}. The recursive same-pane guard refuses to dispatch a nested child here, so this request would baseline queue/boundary drift and leave the head unprocessed. No pre-commit, snapshot, or queue mutation was made — the head stays live. Recovery: run the queue head in THIS owner pane's current turn, then persist with `agent-doc finalize {}` (or `agent-doc write --commit {}`) so the head is consumed and the next queue prompt is exposed. Do NOT re-run `agent-doc {}` from this same pane; that only re-triggers the recursive guard.",
-        file.display(),
-        detail,
-        head_excerpt,
-        id_note,
-        file.display(),
-        file.display(),
-        file.display()
-    )
-}
-
-/// `#recguard-wedge-escape`: escalated diagnostic when the SAME auto-queue head
-/// has tripped the owner-pane self-invocation guard `WEDGE_THRESHOLD` times in a
-/// row — a proven self-driving dead-loop. The runaway auto-queue has already been
-/// halted (`queue: stop`) by the caller so it stops re-firing; this names the
-/// wedge and the one recovery action that actually advances the head (it cannot
-/// be dispatched from the owner pane that re-entered itself).
-fn owned_pane_queue_wedge_halt_diagnostic(
-    file: &Path,
-    detail: &str,
-    continuation: &agent_doc_queue::queue_continuation::QueueContinuation,
-    count: u32,
-) -> String {
-    let head_excerpt: String = continuation
-        .head_prompt
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .unwrap_or(&continuation.head_prompt)
-        .trim()
-        .chars()
-        .take(200)
-        .collect();
-    let id_note = continuation
-        .head_id
-        .as_deref()
-        .map(|id| format!(" (id #{id})"))
-        .unwrap_or_default();
-    format!(
-        "owned-pane self-invocation WEDGE: `agent-doc {}` has re-entered the Codex pane that already owns this document ({}) {} times in a row for the same live queue head \"{}\"{} without it advancing — a self-driving `agent:queue auto` dead-loop. The auto-queue has been HALTED (`queue: stop`) so it stops re-firing. The head was NOT lost (it stays live) and no snapshot/queue drift was committed. Recovery: either (a) answer this head in the current owner turn and persist with `agent-doc finalize {}`, then re-enable with `queue: go`; or (b) re-establish a clean owner with `agent-doc start {}` and trigger the queue from OUTSIDE this pane. Do NOT re-run `agent-doc {}` from this same pane — that is exactly the re-entry that wedged the loop.",
-        file.display(),
-        detail,
-        count,
-        head_excerpt,
-        id_note,
-        file.display(),
-        file.display(),
-        file.display()
-    )
+    Some(recursive_start_invocation_message(
+        &file.display().to_string(),
+        &detail,
+    ))
 }
 
 fn run_dispatch_timeout_diagnostic(file: &Path, agent_name: &str) -> String {
@@ -2062,53 +1953,6 @@ mod tests {
     }
 
     #[test]
-    fn owned_pane_queue_handoff_diagnostic_names_head_and_recovery() {
-        // #codex-owned-pane-auto-queue-stuck: the fail-closed handoff diagnostic
-        // must name the live head + id, the in-owner-turn recovery path, and warn
-        // against re-running the same direct command.
-        let continuation = agent_doc_queue::queue_continuation::QueueContinuation {
-            head_prompt: "do [#codex-owned-pane-auto-queue-stuck]".to_string(),
-            head_id: Some("codex-owned-pane-auto-queue-stuck".to_string()),
-            reason: "active `agent:queue auto` still has a ready head prompt".to_string(),
-        };
-        let msg = owned_pane_queue_handoff_diagnostic(
-            Path::new("tasks/x.md"),
-            "current_pane=%9 session_id=sess actor_generation=3 actor_state=alive-busy actor_pane=%9",
-            &continuation,
-        );
-        assert!(msg.contains("active auto-queue head"));
-        assert!(msg.contains("do [#codex-owned-pane-auto-queue-stuck]"));
-        assert!(msg.contains("(id #codex-owned-pane-auto-queue-stuck)"));
-        assert!(msg.contains("THIS owner pane"));
-        assert!(msg.contains("agent-doc finalize tasks/x.md"));
-        assert!(msg.contains("Do NOT re-run"));
-        assert!(msg.contains("No pre-commit, snapshot, or queue mutation was made"));
-    }
-
-    #[test]
-    fn owned_pane_queue_handoff_diagnostic_uses_supervisor_for_slash_command() {
-        let continuation = agent_doc_queue::queue_continuation::QueueContinuation {
-            head_prompt: "  /clear  ".to_string(),
-            head_id: None,
-            reason: "active `agent:queue auto` still has a ready head prompt".to_string(),
-        };
-        let msg = owned_pane_queue_handoff_diagnostic(
-            Path::new("tasks/x.md"),
-            "current_pane=%9 session_id=sess actor_generation=3 actor_state=alive-busy actor_pane=%9",
-            &continuation,
-        );
-        assert!(msg.contains("slash command"));
-        assert!(msg.contains("\"/clear\""));
-        assert!(msg.contains("managed owner-pane supervisor will submit"));
-        assert!(msg.contains("No pre-commit, snapshot, exchange, or queue mutation was made"));
-        assert!(msg.contains("Do NOT answer this queue head in the exchange"));
-        assert!(
-            !msg.contains("agent-doc finalize"),
-            "slash-command handoff must not instruct an assistant closeout: {msg}"
-        );
-    }
-
-    #[test]
     fn active_queue_prompt_diff_ignores_slash_command_head() {
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
@@ -2365,62 +2209,6 @@ mod tests {
                 next_prompt: Some("do [#typedhead]".to_string())
             }
         );
-    }
-
-    #[test]
-    fn owned_pane_queue_wedge_halt_diagnostic_names_halt_and_both_recoveries() {
-        // #recguard-wedge-escape-live-verify (deterministic core): when the
-        // owner-pane self-invocation guard trips WEDGE_THRESHOLD times in a row,
-        // the escalated diagnostic must (a) state the auto-queue was HALTED
-        // (queue: stop), (b) state the head stays live / no drift committed,
-        // (c) name BOTH recovery actions (answer+finalize+queue:go, or
-        // agent-doc start from OUTSIDE the pane), and (d) warn against re-running
-        // the same direct command. The end-to-end verification on a real wedged
-        // Codex pane stays a recommended live-verify (#recguard-wedge-escape-live-verify).
-        let continuation = agent_doc_queue::queue_continuation::QueueContinuation {
-            head_prompt: "do [#recguard-wedge-escape]".to_string(),
-            head_id: Some("recguard-wedge-escape".to_string()),
-            reason: "active `agent:queue auto` still has a ready head prompt".to_string(),
-        };
-        let msg = owned_pane_queue_wedge_halt_diagnostic(
-            Path::new("tasks/x.md"),
-            "current_pane=%9 session_id=sess actor_generation=3 actor_state=alive-busy actor_pane=%9",
-            &continuation,
-            crate::recguard_wedge::WEDGE_THRESHOLD,
-        );
-        assert!(msg.contains("WEDGE"));
-        assert!(msg.contains("HALTED (`queue: stop`)"));
-        assert!(msg.contains("do [#recguard-wedge-escape]"));
-        assert!(msg.contains("(id #recguard-wedge-escape)"));
-        assert!(msg.contains("stays live"));
-        assert!(msg.contains("agent-doc finalize tasks/x.md"));
-        assert!(msg.contains("queue: go"));
-        assert!(msg.contains("agent-doc start tasks/x.md"));
-        assert!(msg.contains("OUTSIDE this pane"));
-        assert!(msg.contains("Do NOT re-run"));
-    }
-
-    #[test]
-    fn recursive_start_diagnostic_refuses_and_names_out_of_pane_recovery() {
-        // #recursion-guard-wedge-escape (part 1): `agent-doc start <FILE>` inside
-        // the Codex pane that already owns the doc must fail closed with a message
-        // that (a) names the deadlock as a recursive self-owned-pane start, (b)
-        // explains it would loop re-injecting `agent-doc <FILE>`, (c) points at an
-        // out-of-pane recovery (session status reconcile, then interrupt-clear,
-        // escalating to interrupt-clear --force), and (d) warns against re-running
-        // `agent-doc start` from this pane.
-        let msg = format_recursive_start_diagnostic(
-            Path::new("tasks/x.md"),
-            "current_pane=%9 session_id=sess actor_generation=3 actor_state=alive-busy actor_pane=%9",
-        );
-        assert!(msg.contains("recursive self-owned-pane start would deadlock"));
-        assert!(msg.contains("agent-doc start tasks/x.md"));
-        assert!(msg.contains("loop re-injecting `agent-doc tasks/x.md`"));
-        assert!(msg.contains("DIFFERENT pane"));
-        assert!(msg.contains("agent-doc session status tasks/x.md"));
-        assert!(msg.contains("agent-doc session interrupt-clear tasks/x.md"));
-        assert!(msg.contains("agent-doc session interrupt-clear tasks/x.md --force"));
-        assert!(msg.contains("Do NOT re-run"));
     }
 
     #[test]

@@ -3773,6 +3773,77 @@ fn test_agent_doc_turn_owns_no_change_cycle_policy() {
 }
 
 #[test]
+fn test_agent_doc_turn_owns_owner_pane_recursion_diagnostics() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    assert!(
+        manifest_dir
+            .join("agent-doc-turn/src/owner_pane_recursion.rs")
+            .exists(),
+        "owner-pane self-invocation diagnostic policy should live in the focused turn crate"
+    );
+
+    let turn_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn/src/owner_pane_recursion.rs"))
+            .unwrap();
+    for required in [
+        "pub struct OwnerPaneQueueHead",
+        "pub fn recursive_direct_invocation_message",
+        "pub fn recursive_start_invocation_message",
+        "pub fn prompt_miss_message",
+        "pub fn queue_handoff_message",
+        "pub fn queue_wedge_halt_message",
+    ] {
+        assert!(
+            turn_source.contains(required),
+            "agent-doc-turn must own owner-pane recursion diagnostic policy: {required}"
+        );
+    }
+
+    let turn_lib = fs::read_to_string(manifest_dir.join("agent-doc-turn/src/lib.rs")).unwrap();
+    assert!(
+        turn_lib.contains("pub mod owner_pane_recursion;"),
+        "agent-doc-turn should expose owner-pane recursion diagnostics through the owning module"
+    );
+    assert!(
+        !turn_lib.contains("pub use owner_pane_recursion"),
+        "agent-doc-turn should not add an owner_pane_recursion root facade"
+    );
+
+    let run_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/run.rs")).unwrap();
+    for forbidden in [
+        "fn format_recursive_start_diagnostic",
+        "fn owned_pane_prompt_miss_diagnostic",
+        "fn owned_pane_queue_handoff_diagnostic",
+        "fn owned_pane_queue_wedge_halt_diagnostic",
+        "recursive self-owned-pane start would deadlock:",
+        "owned-pane self-invocation with unresolved exchange prompt:",
+        "owned-pane self-invocation with active auto-queue head:",
+        "owned-pane self-invocation WEDGE:",
+        "managed owner-pane supervisor will submit",
+    ] {
+        assert!(
+            !run_source.contains(forbidden),
+            "orchestration run must not re-own or facade owner-pane recursion diagnostics: {forbidden}"
+        );
+    }
+    for required in [
+        "use agent_doc_turn::owner_pane_recursion::{",
+        "OwnerPaneQueueHead",
+        "prompt_miss_message",
+        "queue_handoff_message",
+        "queue_wedge_halt_message",
+        "recursive_direct_invocation_message",
+        "recursive_start_invocation_message",
+    ] {
+        assert!(
+            run_source.contains(required),
+            "orchestration run should call focused owner-pane recursion diagnostics directly: {required}"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_turn_owns_pending_capture_heuristics() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let heuristics =

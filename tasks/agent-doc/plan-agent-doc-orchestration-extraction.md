@@ -101,7 +101,7 @@ that owns the domain:
 - Auto-DAG/work graph policy -> `agent-doc-work-graph`
 - create a new focused crate only when no current crate owns the domain
 
-### No-shim policy
+### Shim policy: no Rust API shims
 
 - Do **not** preserve old `agent_doc_orchestration::*` or root-crate paths as
   facade APIs for extracted policy.
@@ -115,6 +115,24 @@ that owns the domain:
   it.
 - Tests should move with the behavior. Adapter tests remain only for real side
   effects.
+
+Allowed exception: exported editor/plugin FFI symbols are an ABI boundary, not a
+Rust API. The cdylib may keep `extern "C"` wrappers that preserve those symbols,
+but Rust call sites still move to focused crates directly.
+
+### Modified execution plan
+
+1. Treat `agent-doc-orchestration` as a shrinking effect adapter, not the final
+   product boundary.
+2. Extract pure policy/data seams into the owning domain crate first; create a
+   new focused crate only when no current crate owns that domain.
+3. Use fan-out extractors for disjoint seams. Each extractor owns a narrow write
+   set and can move multiple related seams only when they share the same
+   destination and tests.
+4. Keep docs, cross-crate boundary tests, final no-shim scans, `make check`,
+   commit, push, and one CI check in the main integration pass.
+5. Prefer direct dependency inversion over shared catch-all utilities. A shared
+   IO/base crate is tactical only when it unblocks a domain extraction.
 
 ### Earlier closure finding
 
@@ -147,10 +165,15 @@ finish shrinking the transitional orchestration crate.
 - **Option B — domain-specific detangling (recommended).** Continue extracting
   each policy seam into the focused crate that owns the domain, creating a new
   focused crate only when no destination exists. This is cleaner long term
-  because the tangled orchestration graph is not made cleaner by hiding it in one
-  crate; it becomes cleaner when domain decisions stop depending on tmux/git/IPC
-  adapters and when direct focused imports make ownership explicit. The no-shim
-  policy is what keeps this from becoming another facade layer.
+  precisely because `agent-doc-orchestration` is heavily tangled: the tangle is
+  mostly effect coordination, process/session ownership, git/tmux/IPC adapters,
+  and historical cross-calls. Domain policy becomes maintainable when it is no
+  longer embedded in that knot. Moving queue policy to `agent-doc-queue`,
+  realtime/write vocabulary to `agent-doc-document-realtime`, tmux decisions to
+  `agent-doc-tmux-*`, and workflow/graph decisions to their domain crates turns
+  implicit social ownership into Rust-enforced dependency boundaries. The
+  no-shim policy is what keeps this from becoming another facade layer: call
+  sites must name the owning domain crate, so ownership stays visible.
 - **Option C — shared base layer.** Create a lower `agent-doc-base` /
   `agent-doc-io` style crate for shared file/path/log utilities. This can be
   useful tactically for IO helpers, but by itself it does not detangle domain

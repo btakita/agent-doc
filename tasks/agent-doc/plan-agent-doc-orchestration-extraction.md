@@ -230,6 +230,13 @@ focused crate under the old path.
   non-invocation prompt bodies, and rendering the synthetic harness diff.
   Orchestration keeps only the env/Codex-hook prompt-source adapter and imports
   the focused parser directly.
+- `agent-doc-prompt-context` now owns document-section prompt context selection:
+  deciding when session-accretion warnings with prompt targets should use the
+  bounded response-context pack, parsing components for that pack, and falling
+  back to the full document when the focused preconditions are absent.
+  Orchestration keeps only diff prompt-target extraction, required-SSH
+  frontmatter scope rendering, and live response-TOC lookup before calling the
+  focused renderer directly.
 - `agent-doc-supervisor` now owns supervisor child launch-argument precedence:
   resolving frontmatter/config `agent_args` plus harness-specific Claude/Codex/
   OpenCode aliases and the Claude env fallback from a focused fact struct.
@@ -366,6 +373,14 @@ focused crate under the old path.
   surfacing while importing the focused `codex_launch` filter directly; the old
   local report/filter helpers and pure tests were deleted instead of retained as
   facades.
+- `agent-doc-turn-executor` now owns Codex network launch policy: resolving
+  frontmatter/config network-access precedence, applying child env mutations,
+  deriving effective network status from launch args and explicit parent-env
+  facts, and formatting mismatch diagnostics. Start/orchestrate/Codex backend
+  code keeps only env fact projection, config/frontmatter fact extraction, and
+  child-process launch effects while importing the focused `codex_launch`
+  helpers directly; the old `agent_doc_orchestration::agent::*` network policy
+  path was deleted instead of retained as a facade.
 - `agent-doc-tmux` now owns sync column-memory layout policy and safe-passive
   focus-only expansion policy: restoring remembered sibling panes, preserving
   duplicate-column layout state, returning restoration/expansion events for

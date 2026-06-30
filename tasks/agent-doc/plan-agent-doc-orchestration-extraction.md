@@ -1,18 +1,34 @@
 # Plan: `agent-doc-orchestration` crate extraction (`#ysv9` / `#adoc-orchestration-crate`)
 
-Scoping document produced by `do [#ysv9]`. This is the **next big extraction** after `#adcr` (which produced `agent-doc-core`, published as v0.1.0). It splits the orchestration layer out of the main crate, leaving a thin CLI shell and completing a clean 3-layer architecture:
+Scoping document produced by `do [#ysv9]`. This began as the **next big
+extraction** after `#adcr` (which produced the now-deleted `agent-doc-core`).
+The original plan was to move a tangled route/git/sessions/supervisor cluster
+behind one `agent-doc-orchestration` crate, leaving a thin CLI shell:
 
 ```
-agent-doc (CLI)  →  agent-doc-orchestration  →  agent-doc-core
+agent-doc (CLI)  →  agent-doc-orchestration  →  focused domain crates
   entrypoint +        route/git/sessions/         pure data layer
-  command dispatch    ipc/supervisor/sync/...     (published 0.1.0)
+  command dispatch    ipc/supervisor/sync/...     and effect adapters
 ```
+
+That migration succeeded as a transitional step, but the current goal is
+stricter: **`agent-doc-core` stays deleted and `agent-doc-orchestration` is
+detangled into domain-specific focused crates.** The focused crates are the
+greenfield Rust API. There are no external consumers to preserve, so we do not
+keep compatibility shims or facade APIs for old paths.
 
 ## Motivation
 
-- `agent-doc-core` already cold-builds in **9.87s / 74 crates**; the main crate is **129s / 266 crates**. The gap is almost entirely the orchestration dependency tree: `tokio`, `hyper`/`reqwest`/`rustls`/`ureq`, `interprocess`, `notify`, `rusqlite` (bundled SQLite), `git2`-style git, `zstd`, `tmux-router`.
+- Historically, `agent-doc-core` cold-built in **9.87s / 74 crates** while the
+  main crate was **129s / 266 crates**. `agent-doc-core` is now deleted, but the
+  same evidence still identifies the orchestration dependency tree as the build
+  and coupling hot spot: `tokio`, `hyper`/`reqwest`/`rustls`/`ureq`,
+  `interprocess`, `notify`, `rusqlite` (bundled SQLite), git, `zstd`,
+  `tmux-router`.
 - The orchestration cluster is **~44,500 LOC (~29% of the 154K main crate)**. Extracting it lets the CLI shell + command dispatch stay near core's build profile, and gives a clean dependency-injected boundary for testing.
-- Acceptance criterion #1 of `#adcr` is satisfied; this extraction is the follow-on the baseline justified.
+- The current extraction work is the follow-on: keep core deleted and move
+  orchestration-owned policy into focused domain crates instead of recreating a
+  broad "core" API.
 
 ## Module inventory (the cluster)
 
@@ -52,7 +68,7 @@ start         → cycle_state, sessions, supervisor, sync
 - **Mutual pair:** `capture ↔ repair`.
 - **Top orchestrators:** `route`, `sync`, `start` depend on nearly everything.
 
-## Extraction strategy — move as ONE crate
+## Historical extraction strategy — move as ONE crate
 
 Unlike `#adcr` (which split a *layer* with a clean dependency direction), the orchestration cluster has internal cycles (`git↔cycle_state`, `capture↔repair`, `route↔sync`). **Moving these into separate crates is infeasible without breaking the cycles.** Instead, move the **entire cluster into one new workspace member `agent-doc-orchestration`** — internal mutual deps become intra-crate and are a non-issue. The real engineering is the **boundary** between orchestration and the CLI shell.
 
@@ -67,11 +83,43 @@ Unlike `#adcr` (which split a *layer* with a clean dependency direction), the or
 - The 10 cluster modules above + their orchestration-adjacent neighbors (confirm the exact set in Wave 1 by following the import graph from `route`/`sync`/`start`).
 - Heavy deps move with them: `tokio`, `reqwest`/`ureq`/`hyper`/`rustls`, `interprocess`, `notify`, `rusqlite`, git, `zstd`, `tmux-router`.
 
-## REVISION after Wave 0+1a (dependency closure findings)
+## Current revision — no-shim domain extraction
 
-Wave 0 (scaffold) + Wave 1a (`ipc_socket`) landed cleanly. But analyzing the
-`sessions`/`supervisor` closure for Wave 1b **invalidated the bottom-up "move
-leaves first" sequencing** below:
+Wave 0 (scaffold) + Wave 1a (`ipc_socket`) landed cleanly, and the later
+big-bang move created the current `agent-doc-orchestration` transitional crate.
+The old bottom-up "move leaves first" sequence is no longer the plan. Current
+work extracts **behavior seams** out of orchestration into the focused crate
+that owns the domain:
+
+- document/realtime authority -> `agent-doc-document-realtime`
+- turn lifecycle / closeout / operation-log vocabulary -> `agent-doc-turn`
+- controller/route/CAS decisions -> `agent-doc-controller`
+- supervisor lifecycle policy -> `agent-doc-supervisor`
+- tmux command/diagnostic policy -> `agent-doc-tmux-*`
+- queue syntax/scheduling/journal policy -> `agent-doc-queue`
+- workflow cross-cutting decisions -> `agent-doc-workflow`
+- Auto-DAG/work graph policy -> `agent-doc-work-graph`
+- create a new focused crate only when no current crate owns the domain
+
+### No-shim policy
+
+- Do **not** preserve old `agent_doc_orchestration::*` or root-crate paths as
+  facade APIs for extracted policy.
+- Delete compatibility shims when extracting a seam. Internal callers must
+  import the focused crate directly.
+- Orchestration may keep only effectful adapters: file IO, git/tmux/process IPC,
+  SQLite/socket ownership, ops-log emission, CLI formatting, and glue that
+  supplies facts to focused policy.
+- Static boundary tests should guard every extraction by asserting the focused
+  crate owns the policy vocabulary and orchestration does not re-own or re-export
+  it.
+- Tests should move with the behavior. Adapter tests remain only for real side
+  effects.
+
+### Earlier closure finding
+
+Analyzing the `sessions`/`supervisor` closure for the old Wave 1b invalidated
+the original bottom-up module move:
 
 - `sessions`/`supervisor` are leaves only by *intra-cluster* deps. Their full
   `crate::` closure pulls in `input_diag`, `env`, `harness`, `project_controller`,
@@ -86,54 +134,75 @@ leaves first" sequencing** below:
   They cannot move to pure `core` (they do `std::fs`), and orchestration cannot
   depend back on `agent-doc` (circular).
 
-### Consequence — revised strategy (operator decision needed)
+### Options
 
-A clean bottom-up extraction is not available. The realistic options:
+The current decision is not "one crate or no extraction"; the options are how to
+finish shrinking the transitional orchestration crate.
 
-- **Option A — one large orchestration crate.** Move the entire entangled graph
-  (cluster + shared I/O utils `snapshot`/`config`/`fs_util`/`ops_log`/
-  `secret_redact` + `sessions`/`supervisor`/`session_actor`/`project_controller`/
-  `startup_miss`/`input_diag`/`env`/`harness`/`prompt`) into
-  `agent-doc-orchestration` in essentially one migration, leaving `agent-doc`
-  as `main.rs` + only the command modules that touch none of it. Largest single
-  move; most modules reach orchestration via `pub use` shims.
-- **Option B — 4th "base" layer.** A new `agent-doc-base` crate below
-  orchestration for the shared I/O utilities. **Blocked by `snapshot → git`:**
-  `snapshot` would have to drop its `git` dependency (invert it — pass a
-  commit/hash interface in) before it can sit below the orchestration layer.
-  Adds a layer and a refactor of `snapshot`'s git coupling.
-- **Option C — defer.** `ipc_socket` (Wave 1a) already proved the crate +
-  cross-crate shim + cdylib mechanism. Leave the rest until there is a concrete
-  build-time payoff that justifies the large migration; the editor slim-link
-  target is already served by `agent-doc-core` for the pure surface.
+- **Option A — keep one large orchestration adapter.** Stop extracting after the
+  CLI shell split and treat `agent-doc-orchestration` as the broad adapter for
+  route/git/sessions/supervisor/write/realtime concerns. This minimizes churn,
+  but preserves the God-crate shape and keeps ownership boundaries social rather
+  than enforced by Rust crate dependencies.
+- **Option B — domain-specific detangling (recommended).** Continue extracting
+  each policy seam into the focused crate that owns the domain, creating a new
+  focused crate only when no destination exists. This is cleaner long term
+  because the tangled orchestration graph is not made cleaner by hiding it in one
+  crate; it becomes cleaner when domain decisions stop depending on tmux/git/IPC
+  adapters and when direct focused imports make ownership explicit. The no-shim
+  policy is what keeps this from becoming another facade layer.
+- **Option C — shared base layer.** Create a lower `agent-doc-base` /
+  `agent-doc-io` style crate for shared file/path/log utilities. This can be
+  useful tactically for IO helpers, but by itself it does not detangle domain
+  policy. It also remains blocked wherever utilities depend upward into
+  orchestration behavior, such as the historical `snapshot -> git` coupling,
+  unless those dependencies are inverted first.
+- **Option D — defer.** Keep extracting only opportunistically when a local
+  feature or bugfix touches a seam. This reduces immediate risk, but leaves the
+  objective incomplete and lets orchestration continue to accumulate policy.
 
-**Recommendation:** Option A is the only one that delivers the CLI-shell build
-win without a `snapshot`/`git` refactor, but it is a multi-cycle, large-diff
-migration that should be scheduled deliberately (not auto-queued). Option B is
-cleaner long-term but front-loads a `snapshot` decoupling. Option C is the
-low-effort hold.
+**Recommendation:** Option B is the target. Option A already served as the
+transitional migration that got code out of the CLI shell; keeping it as the
+final state would simply rename the God crate. Option C can support Option B
+when a truly shared IO primitive is blocking extraction, but it should not
+replace domain-specific crates. Option D is only a scheduling choice, not a
+completion strategy.
 
-The bottom-up wave sequencing below is **superseded** by this finding; it is
-retained only as the original reasoning.
+The bottom-up wave sequencing below is **superseded** by this finding and by
+the no-shim policy; it is retained only as the original reasoning.
 
 ## Migration waves (compilable increments)
 
-Because the cluster moves as one crate, "waves" are about migrating in **shim-preserving, always-green increments** (each ends with `make check` + `nm -D` FFI verification), not separate crates:
+Because the original cluster moved as one crate, these historical "waves" were
+about migrating in shim-preserving, always-green increments. That shim strategy
+is obsolete for current focused-crate extraction. New work should instead use
+small, direct-import extractions with boundary tests and no compatibility
+facades.
 
 - **Wave 0 — scaffold.** Create `agent-doc-orchestration` workspace member depending on `agent-doc-core`. Empty lib + `COMPILE_BASELINE.md`.
-- **Wave 1 — leaves.** Move `sessions`, `ipc_socket`, `supervisor/`. Leave `pub use agent_doc_orchestration::...` shims in main so the ~100 command modules compile unchanged. (Same shim pattern proven in `#adcr` waves 1–4.)
+- **Wave 1 — leaves.** Move `sessions`, `ipc_socket`, `supervisor/`. This was
+  originally planned with `pub use` shims in main so the ~100 command modules
+  compiled unchanged. Current work must delete such shims as seams are extracted
+  and update callers to focused crates directly.
 - **Wave 2 — state/capture core.** Move `cycle_state`, `capture`, `repair` (invert or co-locate the 1 `cycle_state→git` back-edge — likely trivial once `git` moves in Wave 3).
 - **Wave 3 — git.** Move `git` (depends on capture/cycle_state/ipc_socket — now all in orchestration).
 - **Wave 4 — orchestrators.** Move `route`, `sync`, `start` + neighbors (`terminal`, `layout`, `focus`, `resync`, `hooks`, `project_controller`, `startup_miss`, `gc`, `autoclaim`, `codex_hook`).
 - **Wave 5 — prune CLI deps.** Remove now-unused heavy deps from `agent-doc/Cargo.toml`; measure the CLI-shell cold build; update `COMPILE_BASELINE.md`.
 
-Each wave keeps shims in main so `main.rs` dispatch resolves unchanged until a final cleanup pass rewrites call sites to `agent_doc_orchestration::`.
+Do not repeat the "keep shims until final cleanup" approach for current work.
+Every extracted seam should end with callers on the focused crate path.
 
 ## FFI handling
 
 11 orchestration FFI functions remain in `src/ffi.rs` (`agent_doc_document_changed*`, `agent_doc_sync_*`, `agent_doc_is_tracked`, `agent_doc_set_status`/`get_status`, `agent_doc_*_ipc_listener_*`, `await_idle`/`is_idle`/`is_typing_via_file`, `write_ack_content`, `commit`, `resolve_project_path`).
 
-**Decision: keep ONE cdylib in the `agent-doc` CLI crate.** Editor plugins link a single `libagent_doc.{so,dylib}`. The orchestration FFI bodies move to `agent_doc_orchestration::ffi`, and main re-exports them with `pub use agent_doc_orchestration::ffi::*` + the proven `force_link_*_ffi_symbols` reference pattern (validated across `#k9e1`/`#epv5`/`#vb8h`/`#e130` — all 15 core FFI symbols verified in the export table). No plugin changes; no second cdylib.
+**Decision: keep ONE cdylib in the `agent-doc` CLI crate.** Editor plugins link
+a single `libagent_doc.{so,dylib}`. FFI symbols are an ABI boundary, not a Rust
+API facade: the binary may keep `extern "C"` wrapper functions and force-link
+references so the exported symbol table remains stable, but Rust callers should
+not get compatibility re-export paths for extracted policy. FFI-adjacent
+extractions must preserve the exported symbols and route their implementation to
+focused crates directly.
 
 ## Risks
 
@@ -146,12 +215,32 @@ Each wave keeps shims in main so `main.rs` dispatch resolves unchanged until a f
 
 ## Acceptance criteria
 
-1. `agent-doc-orchestration` compiles standalone and depends on `agent-doc-core`.
-2. The `agent-doc` CLI shell builds **without** `tokio`/`hyper`/`reqwest`/`rustls`/`interprocess`/`notify`/`rusqlite`/`git2`/`zstd` as direct deps (they reach it only transitively through orchestration, or not at all for pure-CLI commands).
-3. CLI-shell cold build measured and recorded in `COMPILE_BASELINE.md` (target: materially below the 129s full build).
-4. `cargo test` green across all three crates; `make check` green (modulo the pre-existing live-tmux environmental test).
-5. `nm -D libagent_doc.so` still exports the full FFI surface (core + orchestration).
+1. `agent-doc-core` remains absent from the workspace and dependencies.
+2. `agent-doc-orchestration` compiles as a transitional adapter crate but does
+   not own newly extracted domain policy.
+3. For each extracted seam, callers import the focused crate directly; no
+   `pub use` facade or compatibility module keeps the old path alive.
+4. Static boundary tests prove the focused crate owns the vocabulary/decision
+   table and orchestration does not re-own it.
+5. `agent-doc` and `agent-doc-orchestration` keep only CLI/effect adapters for
+   git/tmux/process/editor/socket/SQLite/file IO.
+6. `make check` remains green after each extraction. If FFI-adjacent code moves,
+   `nm -D libagent_doc.so` still exports the full editor ABI surface.
 
 ## Decomposition into implementation sub-tasks
 
-The actual extraction is tracked as `#adoc-orch-*` sub-tasks (filed on backlog, referencing this plan), one per wave: `#adoc-orch-scaffold`, `#adoc-orch-leaves`, `#adoc-orch-state`, `#adoc-orch-git`, `#adoc-orch-orchestrators`, `#adoc-orch-prune`. Each is an independent green-to-green cycle with its own `make check` + `nm -D` gate, mirroring the `#adcr` wave cadence.
+The old wave backlog (`#adoc-orch-scaffold`, `#adoc-orch-leaves`,
+`#adoc-orch-state`, `#adoc-orch-git`, `#adoc-orch-orchestrators`,
+`#adoc-orch-prune`) describes the historical one-crate move. New work should be
+filed by domain seam instead, for example:
+
+- queue journal policy -> `agent-doc-queue`
+- session accretion policy -> a focused `agent-doc-session-accretion` crate if
+  no existing crate owns it
+- document actor/write queue vocabulary -> `agent-doc-document-realtime` or a
+  focused document-actor crate if the runtime boundary is extracted
+- remaining tmux command/input policy -> `agent-doc-tmux-*`
+- remaining controller/route decisions -> `agent-doc-controller`
+
+Each seam is an independent green-to-green cycle with focused unit tests,
+static no-facade boundary tests, and `make check`.

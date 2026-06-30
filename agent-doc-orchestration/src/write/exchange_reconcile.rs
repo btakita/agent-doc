@@ -1,12 +1,13 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+#[cfg(test)]
+use agent_doc_element_exchange::normalized_prompt_counts;
 use agent_doc_element_exchange::{
-    exchange_content, exchange_content_len, is_code_fence_delimiter,
-    is_exchange_response_heading_for_prefix_repair,
-    is_prefixed_exchange_response_heading_for_prefix_repair, normalization_target_matches_line,
-    normalized_prompt_counts, normalized_prompt_text, split_line_segment,
-    starts_targeted_or_prefixed_prompt_repair_after_response,
+    PromptLineInfo, exchange_content, exchange_content_len, exchange_has_live_user_edit,
+    exchange_prompt_reconciliation_infos, is_code_fence_delimiter,
+    last_exchange_boundary_tail_start, normalized_prompt_text, probable_live_prompt_prefix_variant,
+    prompt_reconciliation_counts, split_line_segment,
 };
 
 /// Guard against accidental exchange content truncation.
@@ -50,46 +51,6 @@ pub(crate) fn check_exchange_shrink_guard(
     }
 
     Ok(())
-}
-
-pub(crate) fn response_aware_user_prompt_counts(exchange: &str) -> HashMap<String, usize> {
-    let mut counts = HashMap::new();
-    for info in exchange_prompt_reconciliation_infos(exchange, None) {
-        if let Some(text) = info.normalized {
-            *counts.entry(text).or_default() += 1;
-        }
-    }
-    counts
-}
-
-pub(crate) fn user_prompt_count_growth(reference: &str, candidate: &str) -> usize {
-    let (Some(reference_exchange), Some(candidate_exchange)) =
-        (exchange_content(reference), exchange_content(candidate))
-    else {
-        return 0;
-    };
-    let reference_counts = response_aware_user_prompt_counts(reference_exchange);
-    let candidate_counts = response_aware_user_prompt_counts(candidate_exchange);
-    candidate_counts
-        .iter()
-        .map(|(line, candidate_count)| {
-            let reference_count = reference_counts.get(line).copied().unwrap_or(0);
-            candidate_count.saturating_sub(reference_count)
-        })
-        .sum()
-}
-
-pub(crate) fn exchange_has_live_user_edit(baseline: Option<&str>, before: &str) -> bool {
-    let Some(base) = baseline else {
-        return false;
-    };
-    let Some(base_exchange) = exchange_content(base) else {
-        return false;
-    };
-    let Some(before_exchange) = exchange_content(before) else {
-        return false;
-    };
-    strip_boundary_for_dedup(base_exchange) != strip_boundary_for_dedup(before_exchange)
 }
 
 pub(crate) fn file_ipc_consumed_without_live_exchange_ack(
@@ -144,138 +105,6 @@ pub(crate) fn file_ipc_consumed_without_live_exchange_ack(
         "retry_without_disk_write",
         &format!("before_hash={} after_hash={}", before_hash, after_hash),
     );
-    true
-}
-
-pub(crate) fn exchange_prompt_prefix_count(exchange: &str) -> usize {
-    exchange
-        .lines()
-        .filter(|line| line.trim_start().starts_with("❯ "))
-        .count()
-}
-
-pub(crate) fn exchange_prompt_text_duplicated(before: &str, after: &str) -> bool {
-    let Some(before_exchange) = exchange_content(before) else {
-        return false;
-    };
-    let Some(after_exchange) = exchange_content(after) else {
-        return false;
-    };
-    let before_counts = normalized_prompt_counts(before_exchange);
-    let after_counts = normalized_prompt_counts(after_exchange);
-    after_counts.iter().any(|(line, after_count)| {
-        let before_count = before_counts.get(line).copied().unwrap_or(0);
-        before_count > 0 && *after_count > before_count
-    })
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct PromptLineInfo {
-    segment: String,
-    normalized: Option<String>,
-    prefixed: bool,
-    remove: bool,
-}
-
-pub(crate) fn exchange_prompt_reconciliation_infos(
-    exchange: &str,
-    target_counts: Option<&HashMap<String, usize>>,
-) -> Vec<PromptLineInfo> {
-    let boundary_prefix = "<!-- agent:boundary:";
-    let mut in_response_block = false;
-    let mut response_heading_was_prefixed = false;
-    let mut in_code_fence = false;
-    let mut infos = Vec::new();
-
-    for segment in exchange.split_inclusive('\n') {
-        let (line, _) = split_line_segment(segment);
-        let trimmed = line.trim();
-        let is_fence = is_code_fence_delimiter(trimmed);
-        let was_in_code_fence = in_code_fence;
-        let mut eligible = !(was_in_code_fence || is_fence);
-        if eligible {
-            if trimmed.starts_with(boundary_prefix) {
-                in_response_block = false;
-                response_heading_was_prefixed = false;
-                eligible = false;
-            } else if is_exchange_response_heading_for_prefix_repair(trimmed) {
-                in_response_block = true;
-                response_heading_was_prefixed =
-                    is_prefixed_exchange_response_heading_for_prefix_repair(trimmed);
-                eligible = false;
-            } else if in_response_block {
-                let is_target = target_counts
-                    .is_some_and(|counts| normalization_target_matches_line(line, counts));
-                if starts_targeted_or_prefixed_prompt_repair_after_response(
-                    trimmed,
-                    is_target && !response_heading_was_prefixed,
-                ) {
-                    in_response_block = false;
-                    response_heading_was_prefixed = false;
-                } else {
-                    eligible = false;
-                }
-            }
-        }
-
-        let normalized = if eligible {
-            normalized_prompt_text(line)
-        } else {
-            None
-        };
-        infos.push(PromptLineInfo {
-            segment: segment.to_string(),
-            normalized,
-            prefixed: trimmed.starts_with("❯ "),
-            remove: false,
-        });
-        if is_fence {
-            in_code_fence = !in_code_fence;
-        }
-    }
-
-    infos
-}
-
-pub(crate) fn prompt_reconciliation_counts(exchange: &str) -> HashMap<String, usize> {
-    let mut counts = HashMap::new();
-    for info in exchange_prompt_reconciliation_infos(exchange, None) {
-        if let Some(text) = info.normalized {
-            *counts.entry(text).or_default() += 1;
-        }
-    }
-    counts
-}
-
-pub(crate) fn last_exchange_boundary_tail_start(exchange: &str) -> Option<usize> {
-    let boundary_prefix = "<!-- agent:boundary:";
-    let mut offset = 0usize;
-    let mut tail_start = None;
-    for segment in exchange.split_inclusive('\n') {
-        let (line, _) = split_line_segment(segment);
-        if line.trim().starts_with(boundary_prefix) {
-            tail_start = Some(offset + segment.len());
-        }
-        offset += segment.len();
-    }
-    tail_start
-}
-
-pub(crate) fn probable_live_prompt_prefix_variant(shorter: &str, longer: &str) -> bool {
-    let shorter = shorter.trim();
-    let longer = longer.trim();
-    if shorter.len() < 16 || longer.len() <= shorter.len() + 2 {
-        return false;
-    }
-    if !longer.starts_with(shorter) || !longer.is_char_boundary(shorter.len()) {
-        return false;
-    }
-    if matches!(
-        shorter.chars().last(),
-        Some('.' | '!' | '?' | ':' | ';' | ')' | ']')
-    ) {
-        return false;
-    }
     true
 }
 

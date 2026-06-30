@@ -78,6 +78,77 @@ pub fn normalized_prompt_counts(exchange: &str) -> HashMap<String, usize> {
     counts
 }
 
+pub fn response_aware_user_prompt_counts(exchange: &str) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    for info in exchange_prompt_reconciliation_infos(exchange, None) {
+        if let Some(text) = info.normalized {
+            *counts.entry(text).or_default() += 1;
+        }
+    }
+    counts
+}
+
+pub fn user_prompt_count_growth(reference: &str, candidate: &str) -> usize {
+    let (Some(reference_exchange), Some(candidate_exchange)) =
+        (exchange_content(reference), exchange_content(candidate))
+    else {
+        return 0;
+    };
+    let reference_counts = response_aware_user_prompt_counts(reference_exchange);
+    let candidate_counts = response_aware_user_prompt_counts(candidate_exchange);
+    candidate_counts
+        .iter()
+        .map(|(line, candidate_count)| {
+            let reference_count = reference_counts.get(line).copied().unwrap_or(0);
+            candidate_count.saturating_sub(reference_count)
+        })
+        .sum()
+}
+
+pub fn exchange_has_live_user_edit(baseline: Option<&str>, before: &str) -> bool {
+    let Some(base) = baseline else {
+        return false;
+    };
+    let Some(base_exchange) = exchange_content(base) else {
+        return false;
+    };
+    let Some(before_exchange) = exchange_content(before) else {
+        return false;
+    };
+    strip_exchange_boundary_markers_for_dedup(base_exchange)
+        != strip_exchange_boundary_markers_for_dedup(before_exchange)
+}
+
+fn strip_exchange_boundary_markers_for_dedup(content: &str) -> String {
+    content
+        .lines()
+        .filter(|line| !line.trim().starts_with("<!-- agent:boundary:"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub fn exchange_prompt_prefix_count(exchange: &str) -> usize {
+    exchange
+        .lines()
+        .filter(|line| line.trim_start().starts_with("❯ "))
+        .count()
+}
+
+pub fn exchange_prompt_text_duplicated(before: &str, after: &str) -> bool {
+    let Some(before_exchange) = exchange_content(before) else {
+        return false;
+    };
+    let Some(after_exchange) = exchange_content(after) else {
+        return false;
+    };
+    let before_counts = normalized_prompt_counts(before_exchange);
+    let after_counts = normalized_prompt_counts(after_exchange);
+    after_counts.iter().any(|(line, after_count)| {
+        let before_count = before_counts.get(line).copied().unwrap_or(0);
+        before_count > 0 && *after_count > before_count
+    })
+}
+
 pub fn split_line_segment(segment: &str) -> (&str, &str) {
     segment
         .strip_suffix('\n')
@@ -214,6 +285,116 @@ pub fn exchange_prompt_prefix_eligible_lines<'a>(
     }
 
     eligible
+}
+
+#[derive(Clone, Debug)]
+pub struct PromptLineInfo {
+    pub segment: String,
+    pub normalized: Option<String>,
+    pub prefixed: bool,
+    pub remove: bool,
+}
+
+pub fn exchange_prompt_reconciliation_infos(
+    exchange: &str,
+    target_counts: Option<&HashMap<String, usize>>,
+) -> Vec<PromptLineInfo> {
+    let boundary_prefix = "<!-- agent:boundary:";
+    let mut in_response_block = false;
+    let mut response_heading_was_prefixed = false;
+    let mut in_code_fence = false;
+    let mut infos = Vec::new();
+
+    for segment in exchange.split_inclusive('\n') {
+        let (line, _) = split_line_segment(segment);
+        let trimmed = line.trim();
+        let is_fence = is_code_fence_delimiter(trimmed);
+        let was_in_code_fence = in_code_fence;
+        let mut eligible = !(was_in_code_fence || is_fence);
+        if eligible {
+            if trimmed.starts_with(boundary_prefix) {
+                in_response_block = false;
+                response_heading_was_prefixed = false;
+                eligible = false;
+            } else if is_exchange_response_heading_for_prefix_repair(trimmed) {
+                in_response_block = true;
+                response_heading_was_prefixed =
+                    is_prefixed_exchange_response_heading_for_prefix_repair(trimmed);
+                eligible = false;
+            } else if in_response_block {
+                let is_target = target_counts
+                    .is_some_and(|counts| normalization_target_matches_line(line, counts));
+                if starts_targeted_or_prefixed_prompt_repair_after_response(
+                    trimmed,
+                    is_target && !response_heading_was_prefixed,
+                ) {
+                    in_response_block = false;
+                    response_heading_was_prefixed = false;
+                } else {
+                    eligible = false;
+                }
+            }
+        }
+
+        let normalized = if eligible {
+            normalized_prompt_text(line)
+        } else {
+            None
+        };
+        infos.push(PromptLineInfo {
+            segment: segment.to_string(),
+            normalized,
+            prefixed: trimmed.starts_with("❯ "),
+            remove: false,
+        });
+        if is_fence {
+            in_code_fence = !in_code_fence;
+        }
+    }
+
+    infos
+}
+
+pub fn prompt_reconciliation_counts(exchange: &str) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    for info in exchange_prompt_reconciliation_infos(exchange, None) {
+        if let Some(text) = info.normalized {
+            *counts.entry(text).or_default() += 1;
+        }
+    }
+    counts
+}
+
+pub fn last_exchange_boundary_tail_start(exchange: &str) -> Option<usize> {
+    let boundary_prefix = "<!-- agent:boundary:";
+    let mut offset = 0usize;
+    let mut tail_start = None;
+    for segment in exchange.split_inclusive('\n') {
+        let (line, _) = split_line_segment(segment);
+        if line.trim().starts_with(boundary_prefix) {
+            tail_start = Some(offset + segment.len());
+        }
+        offset += segment.len();
+    }
+    tail_start
+}
+
+pub fn probable_live_prompt_prefix_variant(shorter: &str, longer: &str) -> bool {
+    let shorter = shorter.trim();
+    let longer = longer.trim();
+    if shorter.len() < 16 || longer.len() <= shorter.len() + 2 {
+        return false;
+    }
+    if !longer.starts_with(shorter) || !longer.is_char_boundary(shorter.len()) {
+        return false;
+    }
+    if matches!(
+        shorter.chars().last(),
+        Some('.' | '!' | '?' | ':' | ';' | ')' | ']')
+    ) {
+        return false;
+    }
+    true
 }
 
 /// Compare the committed/snapshot document against the working tree and return
@@ -421,6 +602,94 @@ mod tests {
     }
 
     #[test]
+    fn response_aware_counts_skip_response_blocks_and_fences() {
+        let exchange = concat!(
+            "❯ ship it\n",
+            "### Re: ship it\n",
+            "assistant text\n",
+            "❯ do next\n",
+            "```\n",
+            "not a prompt\n",
+            "```\n",
+        );
+
+        let counts = response_aware_user_prompt_counts(exchange);
+
+        assert_eq!(counts.get("ship it").copied(), Some(1));
+        assert_eq!(counts.get("do next").copied(), Some(1));
+        assert!(!counts.contains_key("assistant text"));
+        assert!(!counts.contains_key("not a prompt"));
+    }
+
+    #[test]
+    fn prompt_growth_counts_new_response_aware_prompt_instances() {
+        let reference = "\
+<!-- agent:exchange -->
+❯ ship it
+<!-- /agent:exchange -->
+";
+        let candidate = "\
+<!-- agent:exchange -->
+❯ ship it
+ship it
+### Re: ship it
+assistant text
+<!-- /agent:exchange -->
+";
+
+        assert_eq!(user_prompt_count_growth(reference, candidate), 1);
+    }
+
+    #[test]
+    fn exchange_live_user_edit_ignores_boundary_id_churn() {
+        let baseline = "\
+<!-- agent:exchange -->
+same prompt
+<!-- agent:boundary:old -->
+<!-- /agent:exchange -->
+";
+        let boundary_only = "\
+<!-- agent:exchange -->
+same prompt
+<!-- agent:boundary:new -->
+<!-- /agent:exchange -->
+";
+        let edited = "\
+<!-- agent:exchange -->
+same prompt
+new prompt
+<!-- agent:boundary:new -->
+<!-- /agent:exchange -->
+";
+
+        assert!(!exchange_has_live_user_edit(Some(baseline), boundary_only));
+        assert!(exchange_has_live_user_edit(Some(baseline), edited));
+    }
+
+    #[test]
+    fn prompt_duplication_and_prefix_counts_are_response_aware() {
+        let before = "\
+<!-- agent:exchange -->
+❯ ship it
+<!-- /agent:exchange -->
+";
+        let after = "\
+<!-- agent:exchange -->
+❯ ship it
+ship it
+### Re: ship it
+ship it
+<!-- /agent:exchange -->
+";
+
+        assert!(exchange_prompt_text_duplicated(before, after));
+        assert_eq!(
+            exchange_prompt_prefix_count(exchange_content(after).unwrap()),
+            1
+        );
+    }
+
+    #[test]
     fn code_fence_delimiter_detects_common_fences() {
         assert!(is_code_fence_delimiter("```"));
         assert!(is_code_fence_delimiter("~~~rust"));
@@ -459,6 +728,52 @@ mod tests {
         assert!(eligible.contains(&"do #next"));
         assert!(!eligible.contains(&"- verified"));
         assert!(!eligible.contains(&"after boundary"));
+    }
+
+    #[test]
+    fn prompt_reconciliation_infos_tracks_removable_prompt_lines() {
+        let exchange = concat!(
+            "❯ do #item\n",
+            "do #item\n",
+            "### Re: item\n",
+            "assistant text\n",
+        );
+
+        let infos = exchange_prompt_reconciliation_infos(exchange, None);
+
+        assert_eq!(infos.len(), 4);
+        assert_eq!(infos[0].normalized.as_deref(), Some("do #item"));
+        assert!(infos[0].prefixed);
+        assert_eq!(infos[1].normalized.as_deref(), Some("do #item"));
+        assert!(!infos[1].prefixed);
+        assert!(infos[2].normalized.is_none());
+        assert!(infos[3].normalized.is_none());
+        assert_eq!(
+            prompt_reconciliation_counts(exchange).get("do #item"),
+            Some(&2)
+        );
+    }
+
+    #[test]
+    fn tail_start_and_live_prefix_variant_policy_are_stable() {
+        let exchange = "old\n<!-- agent:boundary:x -->\ntail\n";
+
+        assert_eq!(
+            last_exchange_boundary_tail_start(exchange),
+            Some("old\n<!-- agent:boundary:x -->\n".len())
+        );
+        assert!(probable_live_prompt_prefix_variant(
+            "agent-doc on corky running opencode, the key log shows re",
+            "agent-doc on corky running opencode, the key log shows received"
+        ));
+        assert!(!probable_live_prompt_prefix_variant(
+            "short",
+            "short extended"
+        ));
+        assert!(!probable_live_prompt_prefix_variant(
+            "complete sentence.",
+            "complete sentence. more"
+        ));
     }
 
     #[test]

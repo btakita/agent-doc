@@ -19,6 +19,7 @@ use std::path::Path;
 use crate::snapshot;
 use agent_doc_element::element;
 use agent_doc_element_backlog::backlog;
+use agent_doc_queue::backlog_sync;
 use agent_doc_queue::document_queue as queue;
 use agent_doc_queue::queue_response::queue_head_is_free_text_prompt;
 
@@ -40,35 +41,6 @@ enum HeadKind {
     /// names a tracked backlog/review/icebox directive and must be reaped via its
     /// id, never struck blind.
     IdBacked,
-}
-
-fn queue_prompt_reference_id(text: &str) -> Option<String> {
-    let marker = text.find('#')?;
-    let id: String = text[marker + 1..]
-        .chars()
-        .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
-        .collect();
-    if id.is_empty() {
-        None
-    } else {
-        Some(id.to_ascii_lowercase())
-    }
-}
-
-fn queue_entry_reference_id(entry: &queue::QueueEntry) -> Option<String> {
-    match entry {
-        queue::QueueEntry::Prompt(prompt) | queue::QueueEntry::Completed(prompt) => {
-            queue_prompt_reference_id(&prompt.text)
-        }
-        _ => None,
-    }
-}
-
-fn format_queue_ids(ids: &[String]) -> String {
-    ids.iter()
-        .map(|id| format!("#{id}"))
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 /// Classify the active queue head using the canonical free-text detector
@@ -273,38 +245,17 @@ pub fn sync(file: &Path) -> Result<()> {
         );
     };
 
-    let mut mode: Option<queue::BacklogQueueSyncMode> = None;
-    let mut ids: Vec<String> = Vec::new();
-    let mut enqueue_ids: Vec<String> = Vec::new();
-    for comp in &components {
-        if !matches!(comp.name.as_str(), "backlog" | "icebox" | "pending") {
-            continue;
-        }
-        let body = &content[comp.open_end..comp.close_start];
-        enqueue_ids.extend(backlog::active_enqueue_item_ids(body));
-        let Some(value) = comp.attrs.get("queue") else {
-            continue;
-        };
-        let Some(comp_mode) = queue::BacklogQueueSyncMode::parse(value) else {
-            continue;
-        };
-        if mode.is_none() {
-            mode = Some(comp_mode);
-        }
-        ids.extend(backlog::active_item_ids(body));
-    }
-    if mode.is_none() && !enqueue_ids.is_empty() {
-        mode = Some(queue::BacklogQueueSyncMode::Append);
-    }
-    ids.extend(enqueue_ids);
-
-    let Some(effective_mode) = mode else {
+    let Some(sync_request) =
+        backlog_sync::collect_one_shot_backlog_queue_sync(&components, &content)
+    else {
         bail!(
             "{}: no agent:backlog/agent:icebox/agent:pending component carries a `queue` attribute or enqueue marker. \
              Add `<!-- agent:backlog queue -->` (or `queue=sync`, `queue=prepend`) or mark an item with `:inbox_tray:` / `/enqueue`.",
             file.display()
         );
     };
+    let effective_mode = sync_request.mode;
+    let ids = sync_request.ids;
 
     if ids.is_empty() {
         bail!(
@@ -316,17 +267,6 @@ pub fn sync(file: &Path) -> Result<()> {
     let body = &content[qc.open_end..qc.close_start];
     let entries = queue::parse(body)
         .with_context(|| format!("failed to parse queue body in {}", file.display()))?;
-    let existing_ids: std::collections::HashSet<String> = entries
-        .iter()
-        .filter_map(queue_entry_reference_id)
-        .collect();
-    let mut seen_existing = std::collections::HashSet::new();
-    let already_present: Vec<String> = ids
-        .iter()
-        .map(|id| id.trim().to_ascii_lowercase())
-        .filter(|id| existing_ids.contains(id))
-        .filter(|id| seen_existing.insert(id.clone()))
-        .collect();
 
     let Some(synced) = queue::sync_backlog_into_queue(&entries, &ids, effective_mode) else {
         println!(
@@ -344,36 +284,26 @@ pub fn sync(file: &Path) -> Result<()> {
     std::fs::write(file, &new_content)
         .with_context(|| format!("failed to write {}", file.display()))?;
 
-    let prompt_count = synced
-        .iter()
-        .filter(|e| matches!(e, queue::QueueEntry::Prompt(_)))
-        .count();
-    let mut seen_new = std::collections::HashSet::new();
-    let newly_materialized: Vec<String> = synced
-        .iter()
-        .filter_map(queue_entry_reference_id)
-        .filter(|id| !existing_ids.contains(id))
-        .filter(|id| seen_new.insert(id.clone()))
-        .collect();
+    let report = backlog_sync::backlog_queue_sync_report(&entries, &ids, &synced);
     println!(
         "{}: synced {} backlog id(s) → {} queue prompt(s) ({:?} mode)",
         file.display(),
         ids.len(),
-        prompt_count,
+        report.prompt_count,
         effective_mode
     );
-    if !already_present.is_empty() {
+    if !report.already_present.is_empty() {
         println!(
             "{}: skipped already represented backlog id(s): {} (reason: already_in_queue)",
             file.display(),
-            format_queue_ids(&already_present)
+            backlog_sync::format_queue_ids(&report.already_present)
         );
     }
-    if !newly_materialized.is_empty() {
+    if !report.newly_materialized.is_empty() {
         println!(
             "{}: materialized backlog id(s): {}",
             file.display(),
-            format_queue_ids(&newly_materialized)
+            backlog_sync::format_queue_ids(&report.newly_materialized)
         );
     }
 

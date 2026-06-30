@@ -557,14 +557,11 @@ fn entry_do_id(entry: &QueueEntry) -> Option<String> {
     }
 }
 
-/// All backlog `#id`s referenced on a single queue entry's text. A manually
-/// authored multi-id line (`[#a] [#b] [#c]`) references several ids; the
-/// backlog→queue mirror must treat **every** one of them as already-present so
-/// `sync_backlog_into_queue` does not re-add the trailing ids as duplicate
-/// `do [#id]` lines (#provauth2 — operator-authored multi-id lines must not be
-/// duplicated by the auto-add path). `do_prompt_id` (singular) only sees the
-/// first `#id`, which is the dedup gap that proliferated duplicates.
-fn do_prompt_ids(text: &str) -> Vec<String> {
+/// All tracked-work `#id`s referenced on a single queue prompt's text. A
+/// manually authored multi-id line (`[#a] [#b] [#c]`) references several ids;
+/// backlog→queue sync and sync reporting must treat every one of them as
+/// already-present so trailing ids are not duplicated (#provauth2).
+pub fn queue_prompt_reference_ids(text: &str) -> Vec<String> {
     let mut ids = Vec::new();
     let mut rest = text;
     while let Some(marker) = rest.find('#') {
@@ -581,11 +578,11 @@ fn do_prompt_ids(text: &str) -> Vec<String> {
     ids
 }
 
-/// Every backlog `#id` referenced on a queue entry (multi-id aware). See
-/// [`do_prompt_ids`] (#provauth2).
-fn entry_do_ids(entry: &QueueEntry) -> Vec<String> {
+/// Every tracked-work `#id` referenced on a queue entry (multi-id aware). See
+/// [`queue_prompt_reference_ids`] (#provauth2).
+pub fn queue_entry_reference_ids(entry: &QueueEntry) -> Vec<String> {
     match entry {
-        QueueEntry::Prompt(p) | QueueEntry::Completed(p) => do_prompt_ids(&p.text),
+        QueueEntry::Prompt(p) | QueueEntry::Completed(p) => queue_prompt_reference_ids(&p.text),
         _ => Vec::new(),
     }
 }
@@ -620,7 +617,7 @@ pub fn sync_backlog_into_queue(
     // marks a, b AND c as present so the mirror never re-adds the trailing ids
     // as duplicate `do [#id]` lines.
     let existing_ids: std::collections::HashSet<String> =
-        entries.iter().flat_map(entry_do_ids).collect();
+        entries.iter().flat_map(queue_entry_reference_ids).collect();
 
     let new_entries: Vec<QueueEntry> = match mode {
         BacklogQueueSyncMode::Sync => {
@@ -633,7 +630,7 @@ pub fn sync_backlog_into_queue(
             let mut rebuilt = Vec::with_capacity(entries.len().max(mirror.len()));
             let mut inserted_mirror = false;
             for entry in entries {
-                if entry_do_ids(entry).is_empty() {
+                if queue_entry_reference_ids(entry).is_empty() {
                     rebuilt.push(entry.clone());
                 } else if !inserted_mirror {
                     rebuilt.extend(mirror.iter().cloned());

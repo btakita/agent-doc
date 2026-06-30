@@ -7188,6 +7188,11 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
     for required in [
         "pub struct BacklogQueueSyncRequest",
         "pub fn collect_backlog_queue_sync",
+        "pub struct OneShotBacklogQueueSyncRequest",
+        "pub fn collect_one_shot_backlog_queue_sync",
+        "pub struct BacklogQueueSyncReport",
+        "pub fn backlog_queue_sync_report",
+        "pub fn format_queue_ids",
         "pub fn collect_backlog_priority_ranks",
         "pub fn collect_after_deps",
     ] {
@@ -7219,6 +7224,27 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
                 .contains("agent_doc_queue::backlog_sync::collect_backlog_priority_ranks")
             && preflight_maintenance.contains("agent_doc_queue::backlog_sync::collect_after_deps"),
         "preflight maintenance should call backlog queue sync policy from agent-doc-queue directly"
+    );
+
+    let queue_cmd =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/queue_cmd.rs")).unwrap();
+    for forbidden_snippet in [
+        "fn queue_prompt_reference_id",
+        "fn queue_entry_reference_id",
+        "fn format_queue_ids",
+        "fn collect_one_shot_backlog_queue_sync",
+        "fn backlog_queue_sync_report",
+    ] {
+        assert!(
+            !queue_cmd.contains(forbidden_snippet),
+            "queue_cmd.rs must not re-own one-shot backlog queue sync policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        queue_cmd.contains("agent_doc_queue::backlog_sync")
+            && queue_cmd.contains("collect_one_shot_backlog_queue_sync")
+            && queue_cmd.contains("backlog_queue_sync_report"),
+        "queue_cmd.rs should call one-shot queue sync policy through agent-doc-queue directly"
     );
 }
 

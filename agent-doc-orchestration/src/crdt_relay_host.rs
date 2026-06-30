@@ -654,12 +654,12 @@ fn settle_or_flush_editor_sync_barrier(file: &Path, reason: &str) -> bool {
 
     let patch_id = uuid::Uuid::new_v4().to_string();
     let path_str = canonical.to_string_lossy().to_string();
-    match crate::ipc_socket::send_save_document(&project_root, &path_str, &patch_id) {
+    match crate::ipc_socket::send_publish_live_buffer(&project_root, &path_str) {
         Ok(true) => {
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "editor_sync_barrier_flush_requested file={} reason={} patch_id={}",
+                    "editor_sync_barrier_live_buffer_publish_requested file={} reason={} patch_id={}",
                     file.display(),
                     reason,
                     patch_id
@@ -670,7 +670,7 @@ fn settle_or_flush_editor_sync_barrier(file: &Path, reason: &str) -> bool {
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "editor_sync_barrier_flush_not_acked file={} reason={} patch_id={}",
+                    "editor_sync_barrier_live_buffer_publish_not_acked file={} reason={} patch_id={}",
                     file.display(),
                     reason,
                     patch_id
@@ -682,7 +682,7 @@ fn settle_or_flush_editor_sync_barrier(file: &Path, reason: &str) -> bool {
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "editor_sync_barrier_flush_error file={} reason={} patch_id={} error={}",
+                    "editor_sync_barrier_live_buffer_publish_error file={} reason={} patch_id={} error={}",
                     file.display(),
                     reason,
                     patch_id,
@@ -723,6 +723,9 @@ mod tests {
     use super::*;
     use crate::crdt_relay::mint_client_id;
     use std::io::Write;
+    use std::sync::{Arc, Mutex};
+    use std::thread;
+    use std::time::Duration;
 
     /// A throwaway tracked document under a temp project root so `doc_hash` and the
     /// per-document keying resolve against a real path.
@@ -797,6 +800,81 @@ mod tests {
             start.elapsed() >= std::time::Duration::from_millis(100),
             "multi-replica commit barrier must defer briefly before failing closed on an in-flight editor epoch"
         );
+    }
+
+    #[test]
+    fn editor_sync_barrier_timeout_requests_live_buffer_publish_not_save_document() {
+        let (dir, doc) = temp_doc("publish-buffer.md");
+        let canonical = doc.canonicalize().unwrap();
+        let file_str = canonical.to_string_lossy().to_string();
+        let disk = std::fs::read_to_string(&canonical).unwrap();
+        let visible = format!("{disk}\nvisible editor buffer\n");
+
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+            &file_str,
+            &visible,
+            "jetbrains:publish-test",
+            "jetbrains",
+            "test",
+            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+        )
+        .unwrap();
+        assert!(
+            agent_doc_debounce::editor_sync_statuses(&file_str)[0].in_flight,
+            "unsynced editor-visible content should trip the barrier before publish"
+        );
+
+        let captured = Arc::new(Mutex::new(None::<serde_json::Value>));
+        let captured_for_listener = captured.clone();
+        let root = dir.path().to_path_buf();
+        let root_for_listener = root.clone();
+        let file_for_listener = file_str.clone();
+        let visible_for_listener = visible.clone();
+        let server = thread::spawn(move || {
+            crate::ipc_socket::start_listener(&root_for_listener, move |msg| {
+                let parsed: serde_json::Value = serde_json::from_str(msg).ok()?;
+                *captured_for_listener.lock().unwrap() = Some(parsed.clone());
+                if parsed.get("type").and_then(|value| value.as_str())
+                    == Some("publish_live_buffer")
+                {
+                    agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
+                        &file_for_listener,
+                        &visible_for_listener,
+                        "jetbrains:publish-test",
+                        "jetbrains",
+                        "test",
+                        &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+                    )
+                    .ok()?;
+                    Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+                } else {
+                    Some(serde_json::json!({"type": "ack", "status": "error"}).to_string())
+                }
+            })
+            .ok();
+        });
+
+        thread::sleep(Duration::from_millis(100));
+
+        assert!(
+            settle_or_flush_editor_sync_barrier(&canonical, "test_publish_live_buffer"),
+            "barrier timeout recovery should request a live-buffer publish and observe the synced proof"
+        );
+
+        let msg = captured
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("listener saw a recovery request");
+        assert_eq!(msg["type"], "publish_live_buffer");
+        assert_eq!(msg["file"], file_str);
+        assert!(
+            msg.get("patch_id").is_none(),
+            "live-buffer publish is read-only and must not use save_document patch ids: {msg}"
+        );
+
+        let _ = std::fs::remove_file(crate::ipc_socket::socket_path(&root));
+        drop(server);
     }
 
     #[test]

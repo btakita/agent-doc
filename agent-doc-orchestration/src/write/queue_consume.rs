@@ -3,9 +3,10 @@
 use super::*;
 use agent_doc_queue::{
     queue_consume::{
-        first_n_queue_prompt_texts, mark_entries_completed_by_done_ids,
-        mark_first_matching_prompts_completed_by_texts, normalized_done_id_bag,
-        queue_consume_count_for_done_ids, queue_prompt_texts_match_for_consumption,
+        annotate_newly_struck_free_text_heads, first_n_queue_prompt_texts,
+        mark_entries_completed_by_done_ids, mark_first_matching_prompts_completed_by_texts,
+        normalized_done_id_bag, queue_consume_count_for_done_ids,
+        queue_prompt_texts_match_for_consumption,
     },
     queue_directive::topic_resolves_to_exact_id,
     queue_heads::{
@@ -843,143 +844,6 @@ pub(crate) fn answered_free_text_head_node_keys(
         keys.push(node.node_key);
     }
     Ok(keys)
-}
-
-/// The deterministic, visible explanation appended to a struck free-text queue
-/// head (`#qstrikenote`). It is fixed text (no agent input) and lives *outside*
-/// the `~~…~~` wrapper so the original head text stays struck and readable while
-/// the operator can see *why* their line was struck — this cycle's response
-/// answered it. The separator is shared with the AST overlay so a line carrying
-/// the note is still recognized as a struck node.
-pub(crate) const STRUCK_FREE_TEXT_NOTE: &str = "answered this cycle (#ftstrike)";
-
-/// Given a single queue line (with or without its `- ` bullet), append the
-/// deterministic `#qstrikenote` auto-struck explanation when the line is a struck
-/// free-text head that is not already annotated. Pure and idempotent:
-///
-/// - `- ~~foo~~` → `- ~~foo~~ — auto-struck: answered this cycle (#ftstrike)`
-/// - a line already carrying the annotation → returned unchanged (no double note)
-/// - a non-struck line (no `~~…~~` wrapper) → returned unchanged
-///
-/// Trailing whitespace/newline on the input line is preserved on the output.
-pub(crate) fn annotate_struck_free_text_line(line: &str) -> String {
-    // Preserve any trailing newline so callers can splice the result back in place.
-    let (core, newline) = match line.strip_suffix('\n') {
-        Some(rest) => (rest, "\n"),
-        None => (line, ""),
-    };
-    let trimmed_end = core.trim_end();
-    let trailing_ws = &core[trimmed_end.len()..];
-    // Already annotated → idempotent no-op.
-    if trimmed_end.contains(agent_doc_markdown_ast::overlay::STRUCK_ANNOTATION_SEPARATOR) {
-        return line.to_string();
-    }
-    // Only annotate a bare strike wrapper `…~~text~~`. A line whose content does not
-    // end in the closing `~~` is either not struck or already carries a note.
-    if !trimmed_end.ends_with("~~") {
-        return line.to_string();
-    }
-    // Require an opening `~~` somewhere in the content (after the bullet) and a
-    // non-empty inner body, so we never annotate a stray `~~` artifact.
-    let content = strip_list_bullet_prefix(trimmed_end);
-    let Some(inner) = content
-        .strip_prefix("~~")
-        .and_then(|rest| rest.strip_suffix("~~"))
-    else {
-        return line.to_string();
-    };
-    if inner.trim().is_empty() {
-        return line.to_string();
-    }
-    format!(
-        "{trimmed_end}{}{STRUCK_FREE_TEXT_NOTE}{trailing_ws}{newline}",
-        agent_doc_markdown_ast::overlay::STRUCK_ANNOTATION_SEPARATOR
-    )
-}
-
-/// Strip a leading markdown list bullet (`- `, `* `, `+ `, or `N. `) from a line's
-/// content so [`annotate_struck_free_text_line`] can inspect the item body.
-fn strip_list_bullet_prefix(line: &str) -> &str {
-    let t = line.trim_start();
-    for marker in ["- ", "* ", "+ "] {
-        if let Some(rest) = t.strip_prefix(marker) {
-            return rest.trim_start();
-        }
-    }
-    // Ordered-list `N. ` bullet.
-    if let Some(dot) = t.find(". ")
-        && t[..dot].chars().all(|c| c.is_ascii_digit())
-        && !t[..dot].is_empty()
-    {
-        return t[dot + 2..].trim_start();
-    }
-    t
-}
-
-/// Apply the `#qstrikenote` auto-struck annotation to every free-text queue head
-/// that became struck between `before` and `after`. Walks the `agent:queue`
-/// component of `after`, and for each item that is now struck, free-text, and not
-/// yet annotated *and* whose matching item in `before` was NOT struck, appends the
-/// deterministic explanation note via [`annotate_struck_free_text_line`].
-///
-/// Zero-drift surface (`#qstrikenote` design constraint): the note is written only
-/// into the `agent:queue` component — the same component the strike already
-/// mutates and which is editor-authoritative — never into `agent:exchange`, so the
-/// on-disk exchange continues to equal `content_ours` (the `#qpcwcmerge`/`#pcwc`
-/// invariant). Idempotent: re-running over an already-annotated document is a
-/// no-op because annotated lines no longer end in a bare `~~` and carry the marker.
-pub(crate) fn annotate_newly_struck_free_text_heads(before: &str, after: &str) -> Result<String> {
-    let struck_before: std::collections::HashSet<String> =
-        agent_doc_markdown_ast::mutations::item_nodes(before, "queue")
-            .map(|nodes| {
-                nodes
-                    .into_iter()
-                    .filter(|n| n.item.struck)
-                    .map(|n| n.node_key)
-                    .collect()
-            })
-            .unwrap_or_default();
-
-    let nodes = match agent_doc_markdown_ast::mutations::item_nodes(after, "queue") {
-        Ok(nodes) => nodes,
-        // A queue that no longer parses (rare) is left untouched rather than risk
-        // a corrupting edit.
-        Err(_) => return Ok(after.to_string()),
-    };
-
-    // Collect byte ranges to annotate, then splice from the back so earlier offsets
-    // stay valid.
-    let mut edits: Vec<(usize, usize)> = Vec::new();
-    for node in &nodes {
-        if !node.item.struck {
-            continue;
-        }
-        let text = node.item.text.trim();
-        if text.is_empty() || !queue_prompt_text_is_free_text(after, text) {
-            continue;
-        }
-        // Only annotate heads newly struck this pass — a head already struck in
-        // `before` was annotated on an earlier cycle (idempotency across cycles).
-        if struck_before.contains(&node.node_key) {
-            continue;
-        }
-        let line = &after[node.item.start_byte..node.item.end_byte];
-        if line.contains(agent_doc_markdown_ast::overlay::STRUCK_ANNOTATION_SEPARATOR) {
-            continue;
-        }
-        edits.push((node.item.start_byte, node.item.end_byte));
-    }
-
-    if edits.is_empty() {
-        return Ok(after.to_string());
-    }
-    edits.sort_by_key(|(start, _)| *start);
-    let mut out = after.to_string();
-    for (start, end) in edits.into_iter().rev() {
-        let annotated = annotate_struck_free_text_line(&out[start..end]);
-        out.replace_range(start..end, &annotated);
-    }
-    Ok(out)
 }
 
 /// Strike every free-text queue head that the committed `response_body` answers,
@@ -3656,51 +3520,6 @@ mod core_tests {
             !after_again.contains("auto-struck")
                 || !after_again.contains("<!-- agent:exchange -->"),
             "this fixture has no exchange; note must never target exchange:\n{after_again}"
-        );
-    }
-
-    #[test]
-    fn annotate_struck_free_text_line_is_idempotent_and_targeted() {
-        // Bare struck line gets the note appended outside the wrapper.
-        assert_eq!(
-            annotate_struck_free_text_line("- ~~foo~~"),
-            "- ~~foo~~ — auto-struck: answered this cycle (#ftstrike)"
-        );
-        // Re-annotating the result is a no-op.
-        let once = annotate_struck_free_text_line("- ~~foo~~");
-        assert_eq!(annotate_struck_free_text_line(&once), once);
-        // A non-struck line is untouched.
-        assert_eq!(annotate_struck_free_text_line("- foo"), "- foo");
-        // A bullet-less struck line still annotates.
-        assert_eq!(
-            annotate_struck_free_text_line("~~bar baz~~"),
-            "~~bar baz~~ — auto-struck: answered this cycle (#ftstrike)"
-        );
-        // A trailing newline is preserved.
-        assert_eq!(
-            annotate_struck_free_text_line("- ~~foo~~\n"),
-            "- ~~foo~~ — auto-struck: answered this cycle (#ftstrike)\n"
-        );
-        // An empty wrapper is left alone.
-        assert_eq!(annotate_struck_free_text_line("- ~~~~"), "- ~~~~");
-    }
-
-    #[test]
-    fn annotated_struck_line_still_parses_as_struck_node() {
-        // The overlay must still recognize an annotated struck head as struck so the
-        // strike pass skips it across cycles (#qstrikenote idempotency).
-        let content = concat!(
-            "<!-- agent:queue -->\n",
-            "- ~~answered free-text head~~ — auto-struck: answered this cycle (#ftstrike)\n",
-            "<!-- /agent:queue -->\n",
-        );
-        let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue").unwrap();
-        assert_eq!(nodes.len(), 1);
-        assert!(nodes[0].item.struck, "annotated head must parse as struck");
-        assert_eq!(
-            nodes[0].item.text.trim(),
-            "answered free-text head",
-            "the inner text must exclude both the wrapper and the note"
         );
     }
 

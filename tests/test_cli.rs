@@ -2995,6 +2995,10 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
         "pub fn mark_first_matching_prompts_completed_by_texts",
         "pub fn mark_entries_completed_by_done_ids",
         "pub fn normalized_done_id_bag",
+        "pub const STRUCK_FREE_TEXT_NOTE",
+        "pub fn annotate_struck_free_text_line",
+        "fn strip_list_bullet_prefix",
+        "pub fn annotate_newly_struck_free_text_heads",
     ] {
         assert!(
             queue_consume_policy.contains(required),
@@ -3012,6 +3016,10 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
         "fn mark_first_matching_prompts_completed_by_texts",
         "pub(crate) fn mark_entries_completed_by_done_ids",
         "pub(crate) fn normalized_done_id_bag",
+        "pub(crate) const STRUCK_FREE_TEXT_NOTE",
+        "pub(crate) fn annotate_struck_free_text_line",
+        "fn strip_list_bullet_prefix",
+        "pub(crate) fn annotate_newly_struck_free_text_heads",
     ] {
         assert!(
             !orchestration_queue_consume.contains(forbidden),
@@ -3019,7 +3027,8 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
         );
     }
     assert!(
-        orchestration_queue_consume.contains("queue_consume::{"),
+        orchestration_queue_consume.contains("queue_consume::{")
+            && orchestration_queue_consume.contains("annotate_newly_struck_free_text_heads"),
         "write/queue_consume.rs should call queue consumption entry policy through agent-doc-queue directly"
     );
 }

@@ -252,6 +252,13 @@ focused crate under the old path.
   committed-cycle gating, suppress-marker handling, response-text extraction,
   none-complete collapse detection, and warn/pass decisions. Orchestration keeps
   cycle/capture loading, ops-log emission, and warning rendering.
+- `agent-doc-turn` now owns tracked-work completion missing-`--done` policy:
+  pending-done suppression, response-text extraction, recorded-done and kept-open
+  filtering, response-heading completion detection, and missing-id decisions.
+  `agent-doc-element-backlog` owns document-content open tracked-work and open
+  backlog id parsing. Orchestration keeps file IO, cycle/capture loading,
+  malformed-item checks, auto-done mutation, guard-mode formatting, and warning
+  rendering.
 
 ### Earlier closure finding
 

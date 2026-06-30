@@ -459,8 +459,11 @@ should be deleted during extraction.
   prompt-line normalization and counting, line-segment splitting,
   markdown-heading filtering, code-fence delimiter detection, response-heading
   classification, normalization target counting/matching, exchange user-region
-  scanning, post-commit missing-prefix target extraction, and targeted exchange
-  prefix repair. It also owns pure exchange prompt-reconciliation policy:
+  scanning, write-cycle normalization target extraction, pure
+  snapshot-vs-baseline user prompt prefix normalization, committed HEAD
+  prefix-state preservation, sidecar prefix verification, post-commit
+  missing-prefix target extraction, and targeted exchange prefix repair. It also
+  owns pure exchange prompt-reconciliation policy:
   response-aware prompt counts, prompt-growth detection, live exchange edit
   detection, prefix counts, duplicate prompt text detection, reconciliation line
   records, boundary-tail lookup, live prompt prefix-variant classification, and
@@ -472,7 +475,8 @@ should be deleted during extraction.
   regeneration. `write`, `write/exchange_reconcile`, `write/normalize`, git
   closeout, repair, and IPC paths keep component replacement,
   duplicate-repair orchestration, shrink-guard, file, git, ops-log, snapshot,
-  and delivery adapters while importing the focused exchange helpers directly.
+  normalization safety threshold/logging, and delivery adapters while importing
+  the focused exchange helpers directly.
 - `agent-doc-element-backlog` already owned open backlog id extraction; preflight
   now calls `open_backlog_ids_in_content` directly for `do #id` closeout
   evidence instead of re-parsing backlog components locally. It also owns pure

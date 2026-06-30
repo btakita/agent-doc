@@ -8373,6 +8373,17 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
             && protocol_source.contains("pub fn classify_ack("),
         "agent-doc-ipc-protocol must own plugin IPC ack classification"
     );
+    for required in [
+        "pub fn early_ack_tagged_message(",
+        "pub fn message_requests_early_ack(",
+        "pub fn early_ack_line(",
+        "pub fn early_ack_ops_marker(",
+    ] {
+        assert!(
+            protocol_source.contains(required),
+            "agent-doc-ipc-protocol must own early-ack protocol policy: {required}"
+        );
+    }
 
     let orchestration_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
@@ -8386,14 +8397,24 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
     let ipc_socket_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/ipc_socket.rs")).unwrap();
     assert!(
-        ipc_socket_source
-            .contains("use agent_doc_ipc_protocol::{AckClassification, classify_ack};"),
+        ipc_socket_source.contains("use agent_doc_ipc_protocol::{")
+            && ipc_socket_source.contains("AckClassification")
+            && ipc_socket_source.contains("classify_ack")
+            && ipc_socket_source.contains("early_ack_tagged_message")
+            && ipc_socket_source.contains("message_requests_early_ack"),
         "ipc_socket.rs should import the focused IPC protocol API directly"
     );
-    for forbidden in ["pub enum AckClassification", "pub fn classify_ack("] {
+    for forbidden in [
+        "pub enum AckClassification",
+        "pub fn classify_ack(",
+        "fn early_ack_tagged_message(",
+        "pub fn message_requests_early_ack(",
+        "pub fn early_ack_line(",
+        "pub fn early_ack_ops_marker(",
+    ] {
         assert!(
             !ipc_socket_source.contains(forbidden),
-            "ipc_socket.rs must not keep the old ack classification API after extraction: {forbidden}"
+            "ipc_socket.rs must not keep old IPC protocol policy after extraction: {forbidden}"
         );
     }
 

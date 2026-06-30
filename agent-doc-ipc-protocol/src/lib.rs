@@ -48,9 +48,56 @@ pub fn classify_ack(ack: &str) -> AckClassification {
     }
 }
 
+/// Tag a `patch` message with the `early_ack` opt-in when enabled.
+///
+/// Non-patch traffic is returned unchanged so queue convergence, VCS refreshes,
+/// and read-only live-buffer proof requests never accidentally request a
+/// two-phase patch ack.
+pub fn early_ack_tagged_message(message: &serde_json::Value, enabled: bool) -> serde_json::Value {
+    if !enabled {
+        return message.clone();
+    }
+    let is_patch = message
+        .get("type")
+        .and_then(|t| t.as_str())
+        .map(|t| t == "patch")
+        .unwrap_or(false);
+    if !is_patch {
+        return message.clone();
+    }
+    let mut tagged = message.clone();
+    if let Some(obj) = tagged.as_object_mut() {
+        obj.insert("early_ack".to_string(), serde_json::Value::Bool(true));
+    }
+    tagged
+}
+
+/// True when an incoming listener message opts into early-ack.
+pub fn message_requests_early_ack(message: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(message)
+        .ok()
+        .and_then(|v| v.get("early_ack").and_then(|e| e.as_bool()))
+        .unwrap_or(false)
+}
+
+/// The early `pending` ack line emitted by an early-ack-aware listener on patch
+/// receipt before the patch is applied.
+pub fn early_ack_line() -> &'static str {
+    r#"{"type":"ack","status":"pending"}"#
+}
+
+/// Ops-log marker recorded when an early `pending` ack is emitted before the
+/// blocking apply handler runs.
+pub fn early_ack_ops_marker() -> &'static str {
+    "[ipc-socket] early_ack_pending emitted before apply"
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{AckClassification, classify_ack};
+    use super::{
+        AckClassification, classify_ack, early_ack_line, early_ack_ops_marker,
+        early_ack_tagged_message, message_requests_early_ack,
+    };
 
     #[test]
     fn classify_ack_treats_pending_status_as_pending() {
@@ -62,6 +109,7 @@ mod tests {
             classify_ack(r#"{"type":"ack","status":"accepted"}"#),
             AckClassification::Pending
         );
+        assert_eq!(classify_ack(early_ack_line()), AckClassification::Pending);
     }
 
     #[test]
@@ -104,5 +152,42 @@ mod tests {
     fn classify_ack_treats_malformed_json_as_ok() {
         let ack = "not json at all";
         assert_eq!(classify_ack(ack), AckClassification::Ok);
+    }
+
+    #[test]
+    fn message_requests_early_ack_reads_flag() {
+        assert!(message_requests_early_ack(
+            r#"{"type":"patch","early_ack":true}"#
+        ));
+        assert!(!message_requests_early_ack(r#"{"type":"patch"}"#));
+        assert!(!message_requests_early_ack(
+            r#"{"type":"patch","early_ack":false}"#
+        ));
+        assert!(!message_requests_early_ack("not json"));
+    }
+
+    #[test]
+    fn early_ack_tagging_marks_only_enabled_patch_messages() {
+        let patch = serde_json::json!({"type": "patch", "file": "x.md"});
+        let tagged = early_ack_tagged_message(&patch, true);
+        assert_eq!(tagged["early_ack"], serde_json::Value::Bool(true));
+        assert_eq!(tagged["type"], "patch");
+        assert_eq!(tagged["file"], "x.md");
+        assert!(message_requests_early_ack(&tagged.to_string()));
+
+        assert_eq!(early_ack_tagged_message(&patch, false), patch);
+
+        let other = serde_json::json!({"type": "vcs_refresh"});
+        assert_eq!(early_ack_tagged_message(&other, true), other);
+    }
+
+    #[test]
+    fn early_ack_ops_marker_carries_predicate_token() {
+        let marker = early_ack_ops_marker();
+        assert!(
+            marker.contains("early_ack_pending"),
+            "ops marker must carry the predicate token: {marker}"
+        );
+        assert!(!early_ack_line().contains("early_ack_pending"));
     }
 }

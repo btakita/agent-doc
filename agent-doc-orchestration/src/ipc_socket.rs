@@ -33,7 +33,10 @@
 //! refreshes it consumes `.agent-doc/patches/publish-live-buffer.signal` with the
 //! same `{type,file}` payload.
 
-use agent_doc_ipc_protocol::{AckClassification, classify_ack};
+use agent_doc_ipc_protocol::{
+    AckClassification, classify_ack, early_ack_line, early_ack_ops_marker,
+    early_ack_tagged_message, message_requests_early_ack,
+};
 use anyhow::{Context, Result};
 use interprocess::local_socket::{
     GenericFilePath, ListenerOptions, ToFsName,
@@ -144,7 +147,7 @@ pub fn send_message_with_timeout(
     // messages so an early-ack-aware listener emits a `pending` ack on receipt;
     // older listeners ignore the unknown field (skew-safe). Non-patch messages
     // (queue convergence, etc.) are sent verbatim.
-    let outgoing = early_ack_tagged_message(message);
+    let outgoing = early_ack_tagged_message(message, EARLY_ACK_ENABLED);
     let mut msg = serde_json::to_string(&outgoing)?;
     msg.push('\n');
     writer_half.write_all(msg.as_bytes())?;
@@ -221,55 +224,6 @@ pub fn probe_listener_ack(project_root: &Path, timeout: Duration) -> Result<bool
         "probe": "ipc_degraded_self_heal",
     });
     send_message_with_timeout(project_root, &message, timeout).map(|_| true)
-}
-
-/// Tag a `patch` message with the `early_ack` opt-in when [`EARLY_ACK_ENABLED`]
-/// is set. Returns the message unchanged for non-patch types or when the flag is
-/// off (the dormant default), so production wire traffic is byte-identical until
-/// early-ack is activated. Separated out for unit testing.
-fn early_ack_tagged_message(message: &serde_json::Value) -> serde_json::Value {
-    if !EARLY_ACK_ENABLED {
-        return message.clone();
-    }
-    let is_patch = message
-        .get("type")
-        .and_then(|t| t.as_str())
-        .map(|t| t == "patch")
-        .unwrap_or(false);
-    if !is_patch {
-        return message.clone();
-    }
-    let mut tagged = message.clone();
-    if let Some(obj) = tagged.as_object_mut() {
-        obj.insert("early_ack".to_string(), serde_json::Value::Bool(true));
-    }
-    tagged
-}
-
-/// True when an incoming listener message opts into early-ack
-/// (`"early_ack": true`). Used by [`start_listener`] to decide whether to emit a
-/// `pending` ack before the blocking apply handler runs.
-pub fn message_requests_early_ack(message: &str) -> bool {
-    serde_json::from_str::<serde_json::Value>(message)
-        .ok()
-        .and_then(|v| v.get("early_ack").and_then(|e| e.as_bool()))
-        .unwrap_or(false)
-}
-
-/// The early `pending` ack line emitted by an early-ack-aware listener on patch
-/// receipt, before the patch is applied. Classified as
-/// [`AckClassification::Pending`] by the sender (liveness only — not success).
-pub fn early_ack_line() -> &'static str {
-    r#"{"type":"ack","status":"pending"}"#
-}
-
-/// `#x9ds`: the ops.log marker recorded when an early `pending` ack is emitted
-/// before the blocking apply. Distinct from the human-readable stderr line — it
-/// carries the exact `early_ack_pending` predicate token so the `#saev` gate is
-/// provable via the ops.log gate-verify scan (the stderr line's hyphenated
-/// "early-ack pending" text does not contain the token).
-pub fn early_ack_ops_marker() -> &'static str {
-    "[ipc-socket] early_ack_pending emitted before apply"
 }
 
 /// `#jbacceptwedge`: number of per-connection handler threads currently
@@ -874,55 +828,6 @@ mod tests {
     }
 
     #[test]
-    fn early_ack_line_classifies_as_pending() {
-        assert_eq!(classify_ack(early_ack_line()), AckClassification::Pending);
-    }
-
-    #[test]
-    fn early_ack_ops_marker_carries_predicate_token() {
-        // #x9ds: the ops.log marker must contain the exact `early_ack_pending`
-        // token the #saev gate-verify predicate scans for — the human stderr
-        // line ("early-ack pending", hyphenated) does NOT, which is why the
-        // gate was previously unprovable from ops.log.
-        let marker = early_ack_ops_marker();
-        assert!(
-            marker.contains("early_ack_pending"),
-            "ops marker must carry the predicate token: {marker}"
-        );
-        assert!(!early_ack_line().contains("early_ack_pending"));
-    }
-
-    #[test]
-    fn message_requests_early_ack_reads_flag() {
-        assert!(message_requests_early_ack(
-            r#"{"type":"patch","early_ack":true}"#
-        ));
-        assert!(!message_requests_early_ack(r#"{"type":"patch"}"#));
-        assert!(!message_requests_early_ack(
-            r#"{"type":"patch","early_ack":false}"#
-        ));
-        assert!(!message_requests_early_ack("not json"));
-    }
-
-    #[test]
-    fn early_ack_tagging_is_active_for_patches() {
-        // With EARLY_ACK_ENABLED on (#saevon activation), the sender tags
-        // outgoing `patch` messages with `early_ack: true` so an early-ack-aware
-        // listener emits a `pending` ack before the blocking apply. Non-patch
-        // messages stay untagged, and the existing fields are preserved.
-        let patch = serde_json::json!({"type": "patch", "file": "x.md"});
-        let tagged = early_ack_tagged_message(&patch);
-        assert_eq!(tagged["early_ack"], serde_json::Value::Bool(true));
-        assert_eq!(tagged["type"], "patch");
-        assert_eq!(tagged["file"], "x.md");
-        assert!(message_requests_early_ack(&tagged.to_string()));
-
-        // Non-patch traffic must never carry the opt-in flag.
-        let other = serde_json::json!({"type": "vcs_refresh"});
-        assert_eq!(early_ack_tagged_message(&other), other);
-    }
-
-    #[test]
     fn send_message_handles_early_then_terminal_ack() {
         // Full two-phase roundtrip: a flagged patch makes the listener emit a
         // `pending` ack on receipt, then the terminal ack after the handler runs.
@@ -944,8 +849,8 @@ mod tests {
 
         thread::sleep(Duration::from_millis(100));
 
-        // Manually flagged so the listener early-acks even though the sender
-        // auto-injection gate (EARLY_ACK_ENABLED) is off.
+        // Manually flagged so the listener early-acks independent of sender
+        // auto-injection.
         let msg = serde_json::json!({"type": "patch", "early_ack": true});
         let result = send_message(&root, &msg).unwrap();
         let ack: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();

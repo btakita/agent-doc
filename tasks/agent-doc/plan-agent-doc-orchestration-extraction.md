@@ -487,6 +487,11 @@ focused crate under the old path.
   supplied prompt-line predicate. Route/start keep pane capture, harness
   predicates, diagnostics, and submit/resubmit effects while calling the focused
   controller policy directly.
+- `agent-doc-controller` now owns editor route-error diagnostic naming policy:
+  the diagnostics state directory, sanitized per-document diagnostic name, and
+  `.txt` filename rendering. Orchestration keeps canonicalization, project-root
+  lookup, saved-diagnostic deletion, and ops-log emission while importing the
+  focused naming helpers directly.
 - `agent-doc-turn-executor-tmux` now owns context-clear submit policy: active
   composer visibility detection for `/clear` and OpenCode `/new`, submitted
   observation/status vocabulary, Enter-resubmit gating, and clear-submit

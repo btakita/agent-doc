@@ -564,6 +564,12 @@ focused crate under the old path.
   supervisor payload decisions and harness predicates. Both callers import the
   focused policy directly with no local shim or `clear_direct_*` compatibility
   names.
+- `agent-doc-turn-executor-tmux` now also owns Codex prompt-placeholder parsing
+  policy: idle placeholder recognition, wrapped placeholder recovery,
+  safe-placeholder token filtering, and dim-vs-RGB ANSI classification for
+  placeholder text. Orchestration's harness keeps only harness-specific routing
+  decisions and protected-input wording while importing the focused prompt
+  parser directly.
 
 ### Earlier closure finding
 

@@ -313,6 +313,13 @@ focused crate under the old path.
   importing the focused `codex_launch` helpers directly; the old local transcript
   helper functions and pure tests were deleted from orchestration rather than
   kept as facades.
+- `agent-doc-turn-executor` now owns Codex stderr noise filtering policy:
+  marketplace plugin manifest default-prompt warning suppression, skill icon
+  warning suppression, filtered stderr preservation, and suppression counts.
+  Orchestration's Codex backend keeps process stderr collection and error
+  surfacing while importing the focused `codex_launch` filter directly; the old
+  local report/filter helpers and pure tests were deleted instead of retained as
+  facades.
 - `agent-doc-tmux` now owns sync column-memory layout policy and safe-passive
   focus-only expansion policy: restoring remembered sibling panes, preserving
   duplicate-column layout state, returning restoration/expansion events for

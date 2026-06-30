@@ -3,8 +3,7 @@
 use super::*;
 
 use agent_doc_controller::dispatch::{
-    compact_trigger_text, line_contains_trigger, recent_lines_contain_trigger,
-    shares_trigger_prefix, strip_leading_prompt_prefix,
+    recent_lines_contain_trigger, route_trigger_visible_in_current_draft,
 };
 use agent_doc_supervisor::lifecycle::recycle_interrupted_resubmit_should_wait;
 use agent_doc_tmux::pane_current_command_is_bare_shell;
@@ -226,150 +225,6 @@ fn pane_idle_dispatch_ready(content: &str, harness: &HarnessConfig) -> bool {
         .last_prompt_candidate(content)
         .map(|line| harness.is_dispatch_ready_prompt_line(&line))
         .unwrap_or(false)
-}
-
-pub(crate) fn direct_pane_existing_draft_visible(
-    content: &str,
-    trigger: &str,
-    harness: &HarnessConfig,
-) -> bool {
-    let recent_lines: Vec<String> = content
-        .lines()
-        .rev()
-        .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
-        .filter(|line| !line.trim().is_empty())
-        .take(16)
-        .collect();
-    let lines: Vec<&String> = recent_lines.iter().rev().collect();
-    for start in 0..lines.len() {
-        if !line_contains_trigger(lines[start], trigger)
-            && !line_contains_equivalent_agent_doc_path_trigger(lines[start], trigger)
-            && !wrapped_trigger_starts_at_line(&lines, start, trigger)
-        {
-            continue;
-        }
-        let later_has_prompt = lines
-            .iter()
-            .skip(start + 1)
-            .any(|line| harness.is_prompt_line(line));
-        return !later_has_prompt;
-    }
-    false
-}
-
-fn line_contains_equivalent_agent_doc_path_trigger(line: &str, trigger: &str) -> bool {
-    let Some(trigger_path) = single_agent_doc_path_arg(trigger) else {
-        return false;
-    };
-    let stripped = strip_leading_prompt_prefix(line);
-    let tokens: Vec<&str> = stripped.split_whitespace().collect();
-    for pair in tokens.windows(2) {
-        let [command, path_arg] = pair else {
-            continue;
-        };
-        if is_agent_doc_command_token(command)
-            && agent_doc_path_args_equivalent(path_arg, trigger_path)
-        {
-            return true;
-        }
-    }
-    false
-}
-
-fn single_agent_doc_path_arg(command_line: &str) -> Option<&str> {
-    let stripped = strip_leading_prompt_prefix(command_line);
-    let mut tokens = stripped.split_whitespace();
-    let command = tokens.next()?;
-    if !is_agent_doc_command_token(command) {
-        return None;
-    }
-    let path_arg = tokens.next()?;
-    if tokens.next().is_some() {
-        return None;
-    }
-    Some(path_arg)
-}
-
-fn is_agent_doc_command_token(token: &str) -> bool {
-    let token = token.trim_matches(|ch| matches!(ch, '"' | '\'' | '`'));
-    token == "agent-doc" || token == "/agent-doc"
-}
-
-#[derive(Debug, PartialEq, Eq)]
-struct AgentDocPathArg {
-    absolute: bool,
-    components: Vec<String>,
-}
-
-fn agent_doc_path_arg(token: &str) -> Option<AgentDocPathArg> {
-    let trimmed = token.trim_matches(|ch| matches!(ch, '"' | '\'' | '`'));
-    if trimmed.is_empty() || trimmed.starts_with('-') {
-        return None;
-    }
-    let slash_normalized = trimmed.replace('\\', "/");
-    let mut components = Vec::new();
-    for component in slash_normalized.split('/') {
-        if component.is_empty() || component == "." {
-            continue;
-        }
-        if component == ".." {
-            return None;
-        }
-        components.push(component.to_string());
-    }
-    if components.is_empty() {
-        return None;
-    }
-    Some(AgentDocPathArg {
-        absolute: slash_normalized.starts_with('/'),
-        components,
-    })
-}
-
-fn agent_doc_path_args_equivalent(visible: &str, trigger: &str) -> bool {
-    let Some(visible) = agent_doc_path_arg(visible) else {
-        return false;
-    };
-    let Some(trigger) = agent_doc_path_arg(trigger) else {
-        return false;
-    };
-    if visible.components == trigger.components {
-        return true;
-    }
-    if visible.absolute == trigger.absolute {
-        return false;
-    }
-    let (absolute, relative) = if visible.absolute {
-        (&visible, &trigger)
-    } else {
-        (&trigger, &visible)
-    };
-    absolute.components.ends_with(&relative.components)
-}
-
-fn wrapped_trigger_starts_at_line(lines: &[&String], start: usize, trigger: &str) -> bool {
-    let compact_trigger = compact_trigger_text(trigger);
-    if compact_trigger.is_empty() {
-        return false;
-    }
-    let first = compact_trigger_text(strip_leading_prompt_prefix(lines[start]));
-    if first.is_empty() || !shares_trigger_prefix(&first, &compact_trigger) {
-        return false;
-    }
-    let mut joined = first;
-    if joined.contains(&compact_trigger) {
-        return true;
-    }
-    for next in lines.iter().skip(start + 1).take(3) {
-        joined.push_str(&compact_trigger_text(next));
-        if joined.contains(&compact_trigger) {
-            return true;
-        }
-        if joined.len() > compact_trigger.len() + 32 {
-            break;
-        }
-    }
-    false
 }
 
 fn send_direct_pane_enter_resubmit(
@@ -690,7 +545,9 @@ pub(crate) fn send_command_unchecked(
     let mut protected_prompt_input = None;
     let existing_draft_visible = match sessions::capture_pane(tmux, pane) {
         Ok(content) => {
-            let visible = direct_pane_existing_draft_visible(&content, &trigger, harness);
+            let visible = route_trigger_visible_in_current_draft(&content, &trigger, |line| {
+                harness.is_prompt_line(line)
+            });
             if visible {
                 existing_draft_diagnostic_path = preserve_route_pane_snapshot(
                     file,
@@ -1433,7 +1290,9 @@ fn try_late_direct_pane_enter_resubmit_after_unproven_dispatch(
     let trigger = harness.trigger_command(file_path);
     let visible = match sessions::capture_pane(tmux, pane) {
         Ok(content) => {
-            let visible = direct_pane_existing_draft_visible(&content, &trigger, harness);
+            let visible = route_trigger_visible_in_current_draft(&content, &trigger, |line| {
+                harness.is_prompt_line(line)
+            });
             if visible {
                 preserve_route_pane_snapshot(
                     file,
@@ -1881,147 +1740,6 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% used
         assert!(
             !pane_idle_dispatch_ready("Working… (esc to interrupt)\n", &h),
             "a processing pane is not idle — a fast submit must not be re-sent"
-        );
-    }
-
-    #[test]
-    fn direct_pane_existing_draft_detection_enters_only_current_codex_draft() {
-        let harness = HarnessConfig::codex();
-        let trigger = "agent-doc tasks/agent-doc/agent-doc-bugs2.md";
-
-        let drafted = "\
-history line
-› agent-doc tasks/agent-doc/agent-doc-bugs2.md
-gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
-";
-        assert!(
-            direct_pane_existing_draft_visible(drafted, trigger, &harness),
-            "visible Codex composer draft should be eligible for append-free Enter"
-        );
-
-        let accumulated = "\
-› agent-doc tasks/agent-doc/agent-doc-bugs2.md agent-doc tasks/agent-doc/agent-doc-bugs2.md
-gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
-";
-        assert!(
-            direct_pane_existing_draft_visible(accumulated, trigger, &harness),
-            "accumulated duplicate drafts must still be treated as current input"
-        );
-
-        let stale_scrollback = "\
-› agent-doc tasks/agent-doc/agent-doc-bugs2.md
-preflight complete
-›
-";
-        assert!(
-            !direct_pane_existing_draft_visible(stale_scrollback, trigger, &harness),
-            "an idle prompt below the trigger means it is scrollback, not the active draft"
-        );
-
-        let interrupted_with_new_draft = "\
-╭─────────────────────────────────────────────╮
-│ >_ OpenAI Codex (v0.142.0)                  │
-╰─────────────────────────────────────────────╯
-
-› agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/sampleportal.md
-
-■ Conversation interrupted - tell the model what to do differently.
-
-› Use /skills to list available skills
-
-gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% used
-";
-        assert!(
-            !direct_pane_existing_draft_visible(
-                interrupted_with_new_draft,
-                "agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/sampleportal.md",
-                &harness
-            ),
-            "a cancelled route trigger in scrollback must not receive Enter when a newer composer draft exists"
-        );
-    }
-    #[test]
-    fn direct_pane_existing_draft_detection_handles_wrapped_codex_path() {
-        let harness = HarnessConfig::codex();
-        let trigger =
-            "agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md";
-        let content = "\
-› agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-
-doc-bugs2.md
-gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
-";
-
-        assert!(
-            direct_pane_existing_draft_visible(content, trigger, &harness),
-            "wrapped current drafts should be submitted with the profile submit key rather than appended again"
-        );
-    }
-
-    #[test]
-    fn direct_pane_existing_draft_detection_ignores_codex_blank_padding() {
-        let harness = HarnessConfig::codex();
-        let trigger =
-            "agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md";
-        let content = "\
-╭─────────────────────────────────────────────╮
-│ >_ OpenAI Codex (v0.141.0)                  │
-╰─────────────────────────────────────────────╯
-
-  Tip: Use /side to start a side conversation in a temporary fork without polluting the main thread.
-
-
-› agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
-
-
-  gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% used
-
-
-
-
-
-
-
-
-";
-
-        assert!(
-            direct_pane_existing_draft_visible(content, trigger, &harness),
-            "blank-padded Codex composer captures should still expose the current draft for late Enter retry"
-        );
-    }
-
-    #[test]
-    fn direct_pane_existing_draft_detection_matches_relative_codex_path() {
-        let harness = HarnessConfig::codex();
-        let trigger =
-            "agent-doc /home/brian/work/btakita/agent-loop/src/sample-app/tasks/sampleorders.md";
-        let drafted = "\
-› agent-doc tasks/sampleorders.md
-gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% used
-";
-
-        assert!(
-            direct_pane_existing_draft_visible(drafted, trigger, &harness),
-            "a visible relative-path Codex draft for the same target should receive Enter instead of an appended absolute trigger"
-        );
-
-        let stale_scrollback = "\
-› agent-doc tasks/sampleorders.md
-preflight complete
-›
-";
-        assert!(
-            !direct_pane_existing_draft_visible(stale_scrollback, trigger, &harness),
-            "an idle prompt below an equivalent relative-path draft still proves scrollback"
-        );
-
-        let different_target = "\
-› agent-doc tasks/sampleportal.md
-gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% used
-";
-        assert!(
-            !direct_pane_existing_draft_visible(different_target, trigger, &harness),
-            "relative-path equivalence must not collapse different document names"
         );
     }
 }

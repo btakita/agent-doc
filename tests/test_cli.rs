@@ -6146,6 +6146,13 @@ fn test_agent_doc_controller_owns_route_trigger_matching_policy() {
         "pub fn strip_leading_prompt_prefix",
         "pub fn shares_trigger_prefix",
         "pub fn recent_lines_contain_wrapped_trigger",
+        "pub fn route_trigger_visible_in_current_draft",
+        "fn line_contains_equivalent_agent_doc_path_trigger",
+        "fn single_agent_doc_path_arg",
+        "struct AgentDocPathArg",
+        "fn agent_doc_path_arg",
+        "fn agent_doc_path_args_equivalent",
+        "fn wrapped_trigger_starts_at_line",
     ] {
         assert!(
             controller_dispatch.contains(required),
@@ -6167,6 +6174,14 @@ fn test_agent_doc_controller_owns_route_trigger_matching_policy() {
             "fn strip_leading_prompt_prefix",
             "fn shares_trigger_prefix",
             "fn recent_lines_contain_wrapped_trigger",
+            "pub(crate) fn direct_pane_existing_draft_visible",
+            "fn direct_pane_existing_draft_visible",
+            "fn line_contains_equivalent_agent_doc_path_trigger",
+            "fn single_agent_doc_path_arg",
+            "struct AgentDocPathArg",
+            "fn agent_doc_path_arg",
+            "fn agent_doc_path_args_equivalent",
+            "fn wrapped_trigger_starts_at_line",
         ] {
             assert!(
                 !source.contains(forbidden),
@@ -6174,6 +6189,17 @@ fn test_agent_doc_controller_owns_route_trigger_matching_policy() {
             );
         }
     }
+    let route_dispatch =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch.rs"))
+            .unwrap();
+    let start_detection =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/detection.rs"))
+            .unwrap();
+    assert!(
+        route_dispatch.contains("route_trigger_visible_in_current_draft(&content, &trigger")
+            && start_detection.contains("route_trigger_visible_in_current_draft(content, payload"),
+        "route/start should call focused controller current-draft visibility policy directly"
+    );
 }
 
 #[test]

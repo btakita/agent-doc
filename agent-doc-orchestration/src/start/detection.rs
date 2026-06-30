@@ -1,7 +1,9 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
-use agent_doc_controller::dispatch::recent_lines_contain_trigger;
+use agent_doc_controller::dispatch::{
+    recent_lines_contain_trigger, route_trigger_visible_in_current_draft,
+};
 use agent_doc_supervisor::idle_reconcile::recoverable_ready_busy_blocker_reason;
 
 pub(crate) fn record_recent_output(shared: &SupervisorShared, bytes: &[u8]) {
@@ -219,7 +221,9 @@ pub(crate) fn supervisor_pane_payload_pending_in_content(
         return context_clear_command_visible_in_active_input(content, payload, harness);
     }
     recent_lines_contain_trigger(content, payload)
-        || crate::route::direct_pane_existing_draft_visible(content, payload, harness)
+        || route_trigger_visible_in_current_draft(content, payload, |line| {
+            harness.is_prompt_line(line)
+        })
 }
 
 pub(crate) fn context_clear_command_visible_in_active_input(

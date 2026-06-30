@@ -10,6 +10,7 @@ use std::collections::HashSet;
 use agent_doc_element::element;
 use agent_doc_element_backlog::backlog;
 use agent_doc_frontmatter::frontmatter;
+use anyhow::{Context, Result};
 
 use crate::document_queue::{self, QueueEntry, QueuePrompt};
 
@@ -74,6 +75,93 @@ pub fn continuation_guidance(pause_reason: Option<&str>) -> String {
             )
         }
     }
+}
+
+/// A required queue continuation: the document closed cleanly but a ready queue
+/// head remains, so an in-session loop must continue draining instead of
+/// sending a final answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueueContinuation {
+    pub head_prompt: String,
+    pub head_id: Option<String>,
+    pub reason: String,
+}
+
+/// Detect whether already-read document content requires queue continuation.
+///
+/// `snapshot_content` is optional committed/baseline content supplied by the
+/// caller. When present, a modified queue head suppresses continuation so the
+/// normal preflight/halt path can handle the operator edit. This function is
+/// pure content policy: callers own file IO, snapshot loading, recycle-yield
+/// checks, controller pause state, and marker persistence.
+pub fn required_continuation(
+    content: &str,
+    snapshot_content: Option<&str>,
+) -> Result<Option<QueueContinuation>> {
+    let (fm, _) = frontmatter::parse(content)?;
+    if fm.queue_active != Some(true) {
+        return Ok(None);
+    }
+    let components = element::parse(content)?;
+    let Some(queue_component) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return Ok(None);
+    };
+    let has_auto = document_queue::has_auto_attr(&queue_component.attrs);
+    let body = &content[queue_component.open_end..queue_component.close_start];
+    let entries =
+        document_queue::parse(body).context("queue continuation: failed to parse queue")?;
+    let activation = document_queue::resolve_activation(&entries, has_auto, false, true);
+    if !activation.active
+        || document_queue::has_stop_fence_at_head(&activation.entries_after)
+        || document_queue::time_gate_at_head(&activation.entries_after).is_some()
+    {
+        return Ok(None);
+    }
+
+    if let Some(snapshot_content) = snapshot_content
+        && let Ok(snapshot_components) = element::parse(snapshot_content)
+        && let Some(snapshot_queue) = snapshot_components
+            .iter()
+            .find(|component| component.name == "queue")
+    {
+        let snapshot_body = &snapshot_content[snapshot_queue.open_end..snapshot_queue.close_start];
+        if let Ok(snapshot_entries) = document_queue::parse(snapshot_body) {
+            let snapshot_has_auto = document_queue::has_auto_attr(&snapshot_queue.attrs);
+            let snapshot_activation = document_queue::resolve_activation(
+                &snapshot_entries,
+                snapshot_has_auto,
+                false,
+                true,
+            );
+            if document_queue::detect_head_prompt_modified(
+                &snapshot_activation.entries_after,
+                &activation.entries_after,
+            ) {
+                return Ok(None);
+            }
+        }
+    }
+
+    let Some(head) = drainable_head_prompt_for_scope(content, DrainScope::InSessionLoop) else {
+        return Ok(None);
+    };
+    let head_prompt = head.text;
+    let head_id = extract_head_id(&head_prompt);
+    let reason = if has_auto {
+        "active `agent:queue auto` still has a ready head prompt after a clean closeout"
+    } else {
+        "active persisted `agent:queue` (queue_active: true) still has a ready head prompt after a clean closeout"
+    }
+    .to_string();
+
+    Ok(Some(QueueContinuation {
+        reason,
+        head_id,
+        head_prompt,
+    }))
 }
 
 /// Drain scope for computing which backlog ids are deferred.
@@ -734,6 +822,75 @@ mod tests {
         assert!(
             g.contains(CONTINUATION_NO_STALL_GUIDANCE),
             "pause-aware guidance must preserve the normal no-stall closeout rules: {g}"
+        );
+    }
+
+    #[test]
+    fn required_continuation_returns_ready_auto_head() {
+        let content = doc_with_backlog(
+            &["do [#a]", "do [#b]"],
+            &["- [ ] [#a] first", "- [ ] [#b] second"],
+        );
+
+        let continuation = required_continuation(&content, Some(&content))
+            .unwrap()
+            .expect("ready auto queue head");
+
+        assert_eq!(continuation.head_prompt, "do [#a]");
+        assert_eq!(continuation.head_id.as_deref(), Some("a"));
+        assert!(continuation.reason.contains("agent:queue auto"));
+    }
+
+    #[test]
+    fn required_continuation_returns_persisted_active_head_without_auto() {
+        let content = doc_with_backlog(&["do [#persisted]"], &["- [ ] [#persisted] first"])
+            .replace("<!-- agent:queue auto -->", "<!-- agent:queue -->");
+
+        let continuation = required_continuation(&content, Some(&content))
+            .unwrap()
+            .expect("persisted-active queue head");
+
+        assert_eq!(continuation.head_id.as_deref(), Some("persisted"));
+        assert!(continuation.reason.contains("persisted"));
+    }
+
+    #[test]
+    fn required_continuation_none_when_snapshot_head_was_modified() {
+        let snapshot = doc_with_backlog(&["do [#a]"], &["- [ ] [#a] first"]);
+        let current = doc_with_backlog(&["do [#b]"], &["- [ ] [#b] changed"]);
+
+        assert!(
+            required_continuation(&current, Some(&snapshot))
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn required_continuation_skips_deferred_heads_and_stops_when_all_deferred() {
+        let mixed = doc_with_backlog(
+            &["do [#b]", "do [#c]"],
+            &[
+                "- [ ] [#b] [operator-verify] live drive",
+                "- [ ] [#c] plain drainable",
+            ],
+        );
+        let continuation = required_continuation(&mixed, Some(&mixed))
+            .unwrap()
+            .expect("drainable head remains");
+        assert_eq!(continuation.head_id.as_deref(), Some("c"));
+
+        let all_deferred = doc_with_backlog(
+            &["do [#b]", "do [#d]"],
+            &[
+                "- [ ] [#b] [operator-verify] live drive",
+                "- [ ] [#d] [operator-verify] also live",
+            ],
+        );
+        assert!(
+            required_continuation(&all_deferred, Some(&all_deferred))
+                .unwrap()
+                .is_none()
         );
     }
 

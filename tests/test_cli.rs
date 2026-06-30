@@ -2530,11 +2530,28 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
             .exists(),
         "queue journal replay policy should live in the queue crate"
     );
+    let queue_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_continuation.rs")).unwrap();
+    for required_snippet in [
+        "pub struct QueueContinuation",
+        "pub fn required_continuation",
+        "pub fn drainable_head_prompt_for_scope",
+    ] {
+        assert!(
+            queue_policy.contains(required_snippet),
+            "agent-doc-queue must own queue continuation content policy: {required_snippet}"
+        );
+    }
 
     let orchestration_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/queue_continuation.rs"))
             .unwrap();
     for forbidden_snippet in [
+        "pub struct QueueContinuation",
+        "fn detect_in_content",
+        "frontmatter_io::parse_for_file_with_context",
+        "agent_doc_element::element::parse(content)",
+        "document_queue::detect_head_prompt_modified",
         "pub fn deferred_backlog_ids",
         "pub(crate) fn deferred_backlog_ids",
         "pub fn supervisor_deferred_backlog_ids",
@@ -2553,6 +2570,10 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
             "orchestration must not re-own pure queue continuation policy: {forbidden_snippet}"
         );
     }
+    assert!(
+        orchestration_source.contains("queue_policy::required_continuation"),
+        "orchestration queue_continuation should read file/snapshot and call agent-doc-queue directly"
+    );
     let queue_journal_source =
         fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_journal.rs")).unwrap();
     for required_snippet in [

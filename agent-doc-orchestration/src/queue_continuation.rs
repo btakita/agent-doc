@@ -27,16 +27,6 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-/// A required auto-queue continuation: the document closed cleanly but a ready
-/// `agent:queue auto` head remains, so a Codex-managed turn must continue with
-/// `agent-doc <FILE>` instead of sending a final answer.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct QueueContinuation {
-    pub head_prompt: String,
-    pub head_id: Option<String>,
-    pub reason: String,
-}
-
 /// Detect whether `file` currently requires queue continuation.
 ///
 /// True only when: frontmatter `queue_active: true`,
@@ -51,7 +41,7 @@ pub struct QueueContinuation {
 /// never reaches here because the `queue_active` guard above fails first. This
 /// mirrors the codex-hook `active_auto_queue_prompt` logic in one shared,
 /// testable place.
-pub fn detect(file: &Path) -> Result<Option<QueueContinuation>> {
+pub fn detect(file: &Path) -> Result<Option<queue_policy::QueueContinuation>> {
     // `#qpausego` note: a controller `admin queue pause` does NOT short-circuit
     // continuation here. The pause suppresses the *unattended* supervisor
     // idle-watch auto-injection (see `start/idle_watch.rs`), but the attended
@@ -77,7 +67,8 @@ pub fn detect(file: &Path) -> Result<Option<QueueContinuation>> {
         Ok(content) => content,
         Err(_) => return Ok(None),
     };
-    detect_in_content(file, &content)
+    let snapshot_content = crate::snapshot::load(file)?;
+    queue_policy::required_continuation(&content, snapshot_content.as_deref())
 }
 
 /// Whether the document's effective controller queue-control state is `paused`
@@ -156,92 +147,6 @@ pub fn document_queue_controller_pause_reason(file: &Path) -> Option<String> {
     }
 }
 
-fn detect_in_content(file: &Path, content: &str) -> Result<Option<QueueContinuation>> {
-    let rc = crate::graph::RunContext::new(file.to_path_buf());
-    let (fm, _) = crate::frontmatter_io::parse_for_file_with_context(content, file, &rc)?;
-    if fm.queue_active != Some(true) {
-        return Ok(None);
-    }
-    let components = agent_doc_element::element::parse(content)?;
-    let Some(queue_component) = components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
-        return Ok(None);
-    };
-    // `auto` is a start trigger only — continuation is gated on `queue_active:
-    // true` (checked above), so a persisted-active queue without `auto` still
-    // continues (`#active-queue-persisted-no-continue`).
-    let has_auto = agent_doc_queue::document_queue::has_auto_attr(&queue_component.attrs);
-
-    let body = &content[queue_component.open_end..queue_component.close_start];
-    let entries = agent_doc_queue::document_queue::parse(body)
-        .context("queue continuation: failed to parse queue")?;
-    let activation =
-        agent_doc_queue::document_queue::resolve_activation(&entries, has_auto, false, true);
-    if !activation.active
-        || agent_doc_queue::document_queue::has_stop_fence_at_head(&activation.entries_after)
-        || agent_doc_queue::document_queue::time_gate_at_head(&activation.entries_after).is_some()
-    {
-        return Ok(None);
-    }
-
-    // A head edited between the committed snapshot and the file is not a clean
-    // continuation — the operator changed the next prompt, so defer to the
-    // normal preflight/halt path rather than forcing continuation.
-    if let Some(snapshot_content) = crate::snapshot::load(file)?
-        && let Ok(snapshot_components) = agent_doc_element::element::parse(&snapshot_content)
-        && let Some(snapshot_queue) = snapshot_components
-            .iter()
-            .find(|component| component.name == "queue")
-    {
-        let snapshot_body = &snapshot_content[snapshot_queue.open_end..snapshot_queue.close_start];
-        if let Ok(snapshot_entries) = agent_doc_queue::document_queue::parse(snapshot_body) {
-            let snapshot_has_auto =
-                agent_doc_queue::document_queue::has_auto_attr(&snapshot_queue.attrs);
-            let snapshot_activation = agent_doc_queue::document_queue::resolve_activation(
-                &snapshot_entries,
-                snapshot_has_auto,
-                false,
-                true,
-            );
-            if agent_doc_queue::document_queue::detect_head_prompt_modified(
-                &snapshot_activation.entries_after,
-                &activation.entries_after,
-            ) {
-                return Ok(None);
-            }
-        }
-    }
-
-    // #goqueuestall: continuation is computed over the DRAINABLE head set only.
-    // A head whose backlog id carries `[operator-verify]` (never agent-drainable)
-    // is deferred, not a stall (`#qcontdrain`: `[clean-session]` drains in place).
-    // Walk past deferred heads; if every remaining head is deferred, continuation
-    // is NOT required so the session does not perpetually re-converge an
-    // undrainable queue.
-    let head = queue_policy::drainable_head_prompt_for_scope(
-        content,
-        queue_policy::DrainScope::InSessionLoop,
-    );
-    let Some(head) = head else {
-        return Ok(None);
-    };
-    let head_prompt = head.text;
-    let head_id = queue_policy::extract_head_id(&head_prompt);
-    let reason = if has_auto {
-        "active `agent:queue auto` still has a ready head prompt after a clean closeout"
-    } else {
-        "active persisted `agent:queue` (queue_active: true) still has a ready head prompt after a clean closeout"
-    }
-    .to_string();
-    Ok(Some(QueueContinuation {
-        reason,
-        head_id,
-        head_prompt,
-    }))
-}
-
 /// Durable on-disk proof that a closed-out document still owes an auto-queue
 /// continuation. Survives missing Codex hook session state.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -277,7 +182,10 @@ fn marker_path(file: &Path) -> Result<Option<PathBuf>> {
 /// (queue drained, `auto` removed, `queue_active` false, or head advanced).
 /// Best-effort and never fatal to closeout — a marker write/clear failure is
 /// logged, not propagated.
-pub fn reconcile_marker(file: &Path, source_command: &str) -> Option<QueueContinuation> {
+pub fn reconcile_marker(
+    file: &Path,
+    source_command: &str,
+) -> Option<queue_policy::QueueContinuation> {
     match detect(file) {
         Ok(Some(continuation)) => {
             if let Err(err) = write_marker(file, &continuation, source_command) {
@@ -312,7 +220,7 @@ pub fn reconcile_marker(file: &Path, source_command: &str) -> Option<QueueContin
 
 pub fn write_marker(
     file: &Path,
-    continuation: &QueueContinuation,
+    continuation: &queue_policy::QueueContinuation,
     source_command: &str,
 ) -> Result<()> {
     let Some(path) = marker_path(file)? else {
@@ -528,7 +436,7 @@ fn is_foreign_owned_marker(root: &Path, doc: &Path, current_pane: &str) -> bool 
 pub fn pending_marker_continuation_for_roots(
     roots: &[PathBuf],
     current_pane: Option<&str>,
-) -> Result<Option<(PathBuf, QueueContinuation, ContinuationMarker)>> {
+) -> Result<Option<(PathBuf, queue_policy::QueueContinuation, ContinuationMarker)>> {
     let mut seen = std::collections::HashSet::new();
     for root in roots {
         let dir = root.join(".agent-doc/queue-continuations");

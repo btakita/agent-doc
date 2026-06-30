@@ -1462,7 +1462,7 @@ fn owner_pane_queue_edit_deferred_outcome(
     file: &Path,
     queue_synthetic_diff: bool,
     detail: &str,
-    continuation: &crate::queue_continuation::QueueContinuation,
+    continuation: &agent_doc_queue::queue_continuation::QueueContinuation,
 ) -> RunCycleOutcome {
     eprintln!(
         "[run] owner-pane queue edit deferred until current closeout for {} (head_id={} {})",
@@ -1568,7 +1568,7 @@ fn owned_pane_prompt_miss_diagnostic(file: &Path, detail: &str, unresolved: &str
 fn owned_pane_queue_handoff_diagnostic(
     file: &Path,
     detail: &str,
-    continuation: &crate::queue_continuation::QueueContinuation,
+    continuation: &agent_doc_queue::queue_continuation::QueueContinuation,
 ) -> String {
     if let Some(command) =
         agent_doc_queue::queue_command::slash_command_text(&continuation.head_prompt)
@@ -1617,7 +1617,7 @@ fn owned_pane_queue_handoff_diagnostic(
 fn owned_pane_queue_wedge_halt_diagnostic(
     file: &Path,
     detail: &str,
-    continuation: &crate::queue_continuation::QueueContinuation,
+    continuation: &agent_doc_queue::queue_continuation::QueueContinuation,
     count: u32,
 ) -> String {
     let head_excerpt: String = continuation
@@ -2129,7 +2129,7 @@ mod tests {
         // #codex-owned-pane-auto-queue-stuck: the fail-closed handoff diagnostic
         // must name the live head + id, the in-owner-turn recovery path, and warn
         // against re-running the same direct command.
-        let continuation = crate::queue_continuation::QueueContinuation {
+        let continuation = agent_doc_queue::queue_continuation::QueueContinuation {
             head_prompt: "do [#codex-owned-pane-auto-queue-stuck]".to_string(),
             head_id: Some("codex-owned-pane-auto-queue-stuck".to_string()),
             reason: "active `agent:queue auto` still has a ready head prompt".to_string(),
@@ -2150,7 +2150,7 @@ mod tests {
 
     #[test]
     fn owned_pane_queue_handoff_diagnostic_uses_supervisor_for_slash_command() {
-        let continuation = crate::queue_continuation::QueueContinuation {
+        let continuation = agent_doc_queue::queue_continuation::QueueContinuation {
             head_prompt: "  /clear  ".to_string(),
             head_id: None,
             reason: "active `agent:queue auto` still has a ready head prompt".to_string(),
@@ -2440,7 +2440,7 @@ mod tests {
         // agent-doc start from OUTSIDE the pane), and (d) warn against re-running
         // the same direct command. The end-to-end verification on a real wedged
         // Codex pane stays a recommended live-verify (#recguard-wedge-escape-live-verify).
-        let continuation = crate::queue_continuation::QueueContinuation {
+        let continuation = agent_doc_queue::queue_continuation::QueueContinuation {
             head_prompt: "do [#recguard-wedge-escape]".to_string(),
             head_id: Some("recguard-wedge-escape".to_string()),
             reason: "active `agent:queue auto` still has a ready head prompt".to_string(),

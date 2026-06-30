@@ -264,6 +264,12 @@ focused crate under the old path.
   done/kept-open/reaped resolution, open-backlog intersection, and unresolved-id
   decisions. Orchestration keeps cycle/capture loading, open-backlog file IO,
   ops-log emission, guard-mode formatting, and warning rendering.
+- `agent-doc-frontmatter` now owns pending-capture, pending-done, review-done,
+  and auto-done guard precedence/default resolution across document
+  frontmatter and project config. Orchestration keeps only file-backed and
+  cached-context adapters that supply parsed frontmatter/config facts to the
+  focused resolver, and unused cached review/auto adapters were deleted instead
+  of kept as no-shim dead paths.
 
 ### Earlier closure finding
 

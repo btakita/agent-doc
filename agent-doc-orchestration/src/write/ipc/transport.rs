@@ -1045,43 +1045,6 @@ pub(crate) fn log_full_content_ipc_disabled(
     );
 }
 
-pub(crate) fn frontmatter_mode_is_explicit_template(mode: &str) -> bool {
-    matches!(
-        mode.trim().to_ascii_lowercase().as_str(),
-        "template" | "stream"
-    )
-}
-
-pub(crate) fn content_declares_template_frontmatter(content: &str) -> bool {
-    frontmatter::parse(content).ok().is_some_and(|(fm, _)| {
-        fm.format == Some(frontmatter::AgentDocFormat::Template)
-            || fm
-                .mode
-                .as_deref()
-                .is_some_and(frontmatter_mode_is_explicit_template)
-    })
-}
-
-pub(crate) fn content_has_agent_components(content: &str) -> bool {
-    element::parse(content)
-        .ok()
-        .is_some_and(|components| !components.is_empty())
-}
-
-pub(crate) fn full_content_ipc_scope_rejection_reason(
-    contents: &[Option<&str>],
-) -> Option<&'static str> {
-    for content in contents.iter().flatten() {
-        if content_declares_template_frontmatter(content) {
-            return Some("template_frontmatter");
-        }
-        if content_has_agent_components(content) {
-            return Some("agent_component_markers");
-        }
-    }
-    None
-}
-
 pub(crate) fn full_content_ipc_scope_allows(
     file: &Path,
     mode: FullContentIpcMode,
@@ -1090,7 +1053,7 @@ pub(crate) fn full_content_ipc_scope_allows(
     source_content: Option<&str>,
     current_content: Option<&str>,
 ) -> bool {
-    let reason = full_content_ipc_scope_rejection_reason(&[
+    let reason = agent_doc_document_realtime::write_policy::full_content_scope_rejection_reason(&[
         Some(target_content),
         source_content,
         current_content,
@@ -1099,6 +1062,7 @@ pub(crate) fn full_content_ipc_scope_allows(
         return true;
     };
 
+    let reason = reason.as_str();
     let source = full_content_source_label(mode);
     eprintln!(
         "[write] full-content IPC skipped for {}: {} is not eligible for whole-document editor replacement",

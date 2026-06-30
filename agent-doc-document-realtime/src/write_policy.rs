@@ -100,6 +100,60 @@ pub fn decide_full_content_visible_replacement(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FullContentScopeRejection {
+    TemplateFrontmatter,
+    AgentComponentMarkers,
+}
+
+impl FullContentScopeRejection {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::TemplateFrontmatter => "template_frontmatter",
+            Self::AgentComponentMarkers => "agent_component_markers",
+        }
+    }
+}
+
+fn frontmatter_mode_is_explicit_template(mode: &str) -> bool {
+    matches!(
+        mode.trim().to_ascii_lowercase().as_str(),
+        "template" | "stream"
+    )
+}
+
+fn content_declares_template_frontmatter(content: &str) -> bool {
+    agent_doc_frontmatter::frontmatter::parse(content)
+        .ok()
+        .is_some_and(|(fm, _)| {
+            fm.format == Some(agent_doc_frontmatter::frontmatter::AgentDocFormat::Template)
+                || fm
+                    .mode
+                    .as_deref()
+                    .is_some_and(frontmatter_mode_is_explicit_template)
+        })
+}
+
+fn content_has_agent_components(content: &str) -> bool {
+    agent_doc_element::element::parse(content)
+        .ok()
+        .is_some_and(|components| !components.is_empty())
+}
+
+pub fn full_content_scope_rejection_reason(
+    contents: &[Option<&str>],
+) -> Option<FullContentScopeRejection> {
+    for content in contents.iter().flatten() {
+        if content_declares_template_frontmatter(content) {
+            return Some(FullContentScopeRejection::TemplateFrontmatter);
+        }
+        if content_has_agent_components(content) {
+            return Some(FullContentScopeRejection::AgentComponentMarkers);
+        }
+    }
+    None
+}
+
 /// Decision for reconciling an editor buffer against disk when the plugin
 /// reconnects its IPC listener.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1327,6 +1381,40 @@ mod tests {
         assert_eq!(
             decision,
             FullContentVisibleReplacementDecision::RejectStaleSourceBuffer
+        );
+    }
+
+    #[test]
+    fn full_content_scope_rejects_template_frontmatter() {
+        let template_format = "---\nagent_doc_format: template\n---\nplain\n";
+        let stream_mode = "---\nagent_doc_mode: stream\n---\nplain\n";
+
+        assert_eq!(
+            full_content_scope_rejection_reason(&[Some(template_format)]),
+            Some(FullContentScopeRejection::TemplateFrontmatter)
+        );
+        assert_eq!(
+            full_content_scope_rejection_reason(&[Some(stream_mode)]),
+            Some(FullContentScopeRejection::TemplateFrontmatter)
+        );
+    }
+
+    #[test]
+    fn full_content_scope_rejects_agent_component_markers() {
+        let target = "plain\n";
+        let source = "<!-- agent:exchange -->\nbody\n<!-- /agent:exchange -->\n";
+
+        assert_eq!(
+            full_content_scope_rejection_reason(&[Some(target), Some(source), None]),
+            Some(FullContentScopeRejection::AgentComponentMarkers)
+        );
+    }
+
+    #[test]
+    fn full_content_scope_allows_plain_documents() {
+        assert_eq!(
+            full_content_scope_rejection_reason(&[Some("plain\n"), None, Some("other\n")]),
+            None
         );
     }
 

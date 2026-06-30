@@ -9359,6 +9359,8 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         "pub fn decide_visible_write_after_typing",
         "pub struct FullContentSourceProof",
         "pub fn decide_full_content_visible_replacement",
+        "pub enum FullContentScopeRejection",
+        "pub fn full_content_scope_rejection_reason",
         "pub enum ReconnectBufferDecision",
         "pub fn decide_reconnect_buffer",
         "pub enum EditorlessDiskFallbackDecision",
@@ -9395,6 +9397,8 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         "pub struct FullContentSourceProof",
         "pub fn full_content_source_proof",
         "pub fn decide_full_content_visible_replacement",
+        "pub enum FullContentScopeRejection",
+        "pub fn full_content_scope_rejection_reason",
         "pub enum ReconnectBufferDecision",
         "pub fn decide_reconnect_buffer",
         "pub enum EditorlessDiskFallbackDecision",
@@ -9437,6 +9441,26 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
             .contains("agent_doc_document_realtime::write_policy::FullContentSourceProof"),
         "normalization repair payloads should use the focused source-proof type directly"
     );
+    let write_ipc_transport_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc/transport.rs"))
+            .unwrap();
+    assert!(
+        write_ipc_transport_source.contains(
+            "agent_doc_document_realtime::write_policy::full_content_scope_rejection_reason"
+        ),
+        "full-content scope checks should call the focused realtime policy directly"
+    );
+    for forbidden_snippet in [
+        "pub(crate) fn frontmatter_mode_is_explicit_template",
+        "pub(crate) fn content_declares_template_frontmatter",
+        "pub(crate) fn content_has_agent_components",
+        "pub(crate) fn full_content_ipc_scope_rejection_reason",
+    ] {
+        assert!(
+            !write_ipc_transport_source.contains(forbidden_snippet),
+            "write/ipc/transport.rs must not re-own or facade full-content scope policy: {forbidden_snippet}"
+        );
+    }
     for relative in [
         "agent-doc-orchestration/src/crdt_relay.rs",
         "agent-doc-orchestration/src/crdt_relay_host.rs",

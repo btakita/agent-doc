@@ -206,6 +206,17 @@ focused crate under the old path.
   `ops_log::content_hash`, `op_capture::content_hash`, and
   `agent_doc_debounce::content_hash` paths are intentionally deleted rather than
   retained as compatibility shims.
+- We are in the current seam-by-seam extraction wave after the transitional
+  orchestration crate move. Practically, this is **Wave 2**: shrink
+  `agent-doc-orchestration` by moving durable policy into focused domain crates,
+  leaving orchestration as effect adapters.
+- `agent-doc-queue` now owns one-shot backlog/icebox/pending queue-sync request
+  collection and sync-report policy for `agent-doc queue sync`; `queue_cmd`
+  keeps only file IO, rendering, snapshot persistence, and CLI output.
+- Next queue candidate from the fan-out scouts: move queue-head closeout and
+  provenance decision policy from `session_check` into `agent-doc-queue`, while
+  keeping guard-mode formatting, cycle-state loading, and ops logging in
+  orchestration.
 
 ### Earlier closure finding
 

@@ -498,7 +498,10 @@ pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<
     let non_exchange_component_drift =
         has_non_exchange_component_drift_scoped(&snapshot_doc, &head_doc, turn_scope.as_ref());
     let historical_response_marker =
-        crate::session_check::detect_bypassed_response_write_between(&snapshot_doc, &head_doc);
+        agent_doc_turn::document_drift::detect_bypassed_response_write_between(
+            &snapshot_doc,
+            &head_doc,
+        );
     let historical_prompt_prefix_artifact = snapshot_doc != head_doc
         && !non_exchange_component_drift
         && normalize_committed_exchange_artifacts(&snapshot_doc)
@@ -529,8 +532,11 @@ pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<
         return Ok(Some(reason));
     }
 
-    if crate::session_check::detect_bypassed_response_write_between(&head_doc, &current_doc)
-        .is_none()
+    if agent_doc_turn::document_drift::detect_bypassed_response_write_between(
+        &head_doc,
+        &current_doc,
+    )
+    .is_none()
     {
         if crate::write::guard_no_stale_snapshot_reset_drift(
             file,
@@ -737,7 +743,9 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                         has_non_exchange_component_drift_scoped(snapshot, head, turn_scope.as_ref())
                             .then_some("typed_component_drift")
                     }),
-                    crate::session_check::detect_bypassed_response_write_between(snapshot, head),
+                    agent_doc_turn::document_drift::detect_bypassed_response_write_between(
+                        snapshot, head,
+                    ),
                 )
             });
     let file_len = file_content.len();

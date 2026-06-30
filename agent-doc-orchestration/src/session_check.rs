@@ -3368,7 +3368,9 @@ Body\n\
         );
 
         assert_eq!(
-            detect_bypassed_response_write_between(snapshot, current),
+            agent_doc_turn::document_drift::detect_bypassed_response_write_between(
+                snapshot, current
+            ),
             None,
             "ordinary local drift over HEAD should not look like a bypassed response write"
         );

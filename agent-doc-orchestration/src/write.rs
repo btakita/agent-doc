@@ -385,8 +385,11 @@ fn snapshot_persist_mode(
         return SnapshotPersistMode::FinalContent;
     }
 
-    if crate::session_check::detect_bypassed_response_write_between(&ours_norm, &final_norm)
-        .is_some()
+    if agent_doc_turn::document_drift::detect_bypassed_response_write_between(
+        &ours_norm,
+        &final_norm,
+    )
+    .is_some()
     {
         return SnapshotPersistMode::FinalContent;
     }
@@ -1486,7 +1489,10 @@ fn bare_write_placed_response_body(file: &Path) -> Result<bool> {
     let Some(head) = crate::git::show_head(file)? else {
         return Ok(false);
     };
-    Ok(crate::session_check::detect_bypassed_response_write_between(&head, &current).is_some())
+    Ok(
+        agent_doc_turn::document_drift::detect_bypassed_response_write_between(&head, &current)
+            .is_some(),
+    )
 }
 
 fn consume_queue_prompts_for_done_ids_closeout(
@@ -5647,11 +5653,23 @@ scratch
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, before).unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+        let editor_id = "jetbrains-test-editor";
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+            &doc_str,
+            before,
+            editor_id,
+            "jetbrains",
+            "test",
+            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+        )
+        .unwrap();
 
         let patches_dir = agent_doc_dir.join("patches");
         let watcher_dir = patches_dir.clone();
         let ack_dir = agent_doc_dir.join("ack-content");
         let ack_for_watcher = ack_content.to_string();
+        let doc_for_watcher = doc_str.clone();
         let watcher = std::thread::spawn(move || {
             for _ in 0..40 {
                 std::thread::sleep(std::time::Duration::from_millis(50));
@@ -5664,6 +5682,14 @@ scratch
                         && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
                     {
                         let _ = fs::write(ack_dir.join(format!("{pid}.md")), &ack_for_watcher);
+                        let _ = agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+                            &doc_for_watcher,
+                            &ack_for_watcher,
+                            editor_id,
+                            "jetbrains",
+                            "test",
+                            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+                        );
                     }
                     let _ = fs::remove_file(entry.path());
                     return;

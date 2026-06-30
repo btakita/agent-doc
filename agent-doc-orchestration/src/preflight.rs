@@ -1719,7 +1719,9 @@ fn detect_route_queue_snapshot_commit_boundary_recoverable(
     let Some(head) = rc.head_content() else {
         return Ok(false);
     };
-    if crate::session_check::detect_bypassed_response_write_between(&head, &snapshot).is_some() {
+    if agent_doc_turn::document_drift::detect_bypassed_response_write_between(&head, &snapshot)
+        .is_some()
+    {
         return Ok(false);
     }
 

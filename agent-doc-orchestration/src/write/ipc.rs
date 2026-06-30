@@ -2,6 +2,10 @@
 
 use super::*;
 use crate::frontmatter_io;
+use agent_doc_document_realtime::write_policy::{
+    WholeBufferAuthority, WholeBufferAuthorityFacts, WholeBufferDelivery,
+    WholeBufferDeliveryAction, decide_whole_buffer_delivery,
+};
 #[cfg(test)]
 use agent_doc_element_exchange::extract_post_commit_normalization_targets;
 use agent_doc_element_exchange::{
@@ -443,6 +447,50 @@ impl IpcSnapshotSource {
     fn is_ack_content_proven(self) -> bool {
         matches!(self, Self::AckContentSidecar)
     }
+}
+
+fn live_buffer_file_keys(file: &Path) -> Vec<String> {
+    let mut keys = Vec::new();
+    if let Ok(canonical) = file.canonicalize() {
+        keys.push(canonical.to_string_lossy().to_string());
+    }
+    let raw = file.to_string_lossy().to_string();
+    if !keys.iter().any(|key| key == &raw) {
+        keys.push(raw);
+    }
+    keys
+}
+
+pub(crate) fn ack_content_disk_write_authority(
+    file: &Path,
+    editor_id: Option<&str>,
+    content: &str,
+) -> WholeBufferAuthority {
+    let Some(editor_id) = editor_id.map(str::trim).filter(|id| !id.is_empty()) else {
+        return WholeBufferAuthority::AckContentSidecar;
+    };
+    let content_len = content.len();
+    let content_hash = agent_doc_hash::content_hash(content);
+
+    for file_key in live_buffer_file_keys(file) {
+        for snapshot in agent_doc_debounce::live_buffer_snapshots(&file_key) {
+            let same_editor = snapshot
+                .editor_id
+                .as_deref()
+                .is_some_and(|candidate| candidate == editor_id);
+            let same_content =
+                snapshot.len == content_len && snapshot.hash.eq_ignore_ascii_case(&content_hash);
+            if same_editor
+                && same_content
+                && agent_doc_debounce::live_buffer_snapshot_editor_is_live(&snapshot)
+                && snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY)
+            {
+                return WholeBufferAuthority::OperatorTextAuthority;
+            }
+        }
+    }
+
+    WholeBufferAuthority::AckContentSidecar
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1702,13 +1750,22 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
 
     repair_ipc_decision_visible_state(file, &repair_decision, Some(patch_id))?;
     if repair_decision.snap_source.is_ack_content_proven() {
-        mark_ack_content_live_buffer_synced(
+        let authority =
+            ack_content_disk_write_authority(file, editor_id, &repair_decision.snapshot_content);
+        if authority == WholeBufferAuthority::OperatorTextAuthority {
+            mark_ack_content_live_buffer_synced(
+                file,
+                patch_id,
+                editor_id,
+                &repair_decision.snapshot_content,
+            );
+        }
+        write_ack_content_through_to_disk(
             file,
             patch_id,
-            editor_id,
             &repair_decision.snapshot_content,
-        );
-        write_ack_content_through_to_disk(file, patch_id, &repair_decision.snapshot_content)?;
+            authority,
+        )?;
     }
     snapshot::save(file, &repair_decision.snapshot_content)?;
     let crdt_doc = agent_doc_merge::crdt::CrdtDoc::from_text(&repair_decision.snapshot_content);
@@ -1789,15 +1846,41 @@ pub(crate) fn write_ack_content_through_to_disk(
     file: &Path,
     patch_id: &str,
     content: &str,
+    authority: WholeBufferAuthority,
 ) -> Result<()> {
+    let decision = decide_whole_buffer_delivery(WholeBufferAuthorityFacts {
+        delivery: WholeBufferDelivery::AckContentDiskWriteThrough,
+        authority,
+        source_buffer_matches: true,
+        scope_rejection: None,
+        enabled: true,
+    });
+    if decision.action != WholeBufferDeliveryAction::Apply {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "ack_content_disk_write_through_blocked file={} patch_id={} authority={} action={} reason={} len={} hash={}",
+                file.display(),
+                patch_id,
+                authority.as_str(),
+                decision.action.as_str(),
+                decision.reason,
+                content.len(),
+                agent_doc_hash::content_hash(content)
+            ),
+        );
+        return Ok(());
+    }
+
     let before = std::fs::read_to_string(file).ok();
     if before.as_deref() == Some(content) {
         crate::ops_log::log_op(
             file,
             &format!(
-                "ack_content_disk_write_through_skipped file={} patch_id={} reason=already_current len={} hash={}",
+                "ack_content_disk_write_through_skipped file={} patch_id={} authority={} reason=already_current len={} hash={}",
                 file.display(),
                 patch_id,
+                authority.as_str(),
                 content.len(),
                 agent_doc_hash::content_hash(content)
             ),
@@ -1814,9 +1897,10 @@ pub(crate) fn write_ack_content_through_to_disk(
     crate::ops_log::log_op(
         file,
         &format!(
-            "ack_content_disk_write_through file={} patch_id={} before_len={} before_hash={} ack_len={} ack_hash={}",
+            "ack_content_disk_write_through file={} patch_id={} authority={} before_len={} before_hash={} ack_len={} ack_hash={}",
             file.display(),
             patch_id,
+            authority.as_str(),
             before.as_deref().map(str::len).unwrap_or(0),
             before
                 .as_deref()
@@ -2089,33 +2173,59 @@ pub(crate) fn redeliver_full_content_repair_to_editor(
             current_content == expected_bad_state
         ),
     );
-    if current_content != expected_bad_state {
-        eprintln!(
-            "[write] {} editor repair skipped: visible buffer no longer matches the bad state",
-            kind.label()
-        );
-        crate::ops_log::log_op(
+    let source_buffer_matches = current_content == expected_bad_state;
+    let authority = if source_buffer_matches
+        && redelivery_missing_operator_text_authority(
             file,
-            &format!(
-                "{}_editor_redelivery_skipped file={} patch_id={} skip=stale_bad_state expected_len={} expected_hash={} current_len={} current_hash={}",
-                kind.label(),
-                file.display(),
-                source_patch_id.unwrap_or("-"),
-                expected_bad_state.len(),
-                agent_doc_hash::content_hash(expected_bad_state),
-                current_content.len(),
-                agent_doc_hash::content_hash(&current_content)
-            ),
-        );
-        return false;
-    }
-
-    if redelivery_missing_operator_text_authority(
-        file,
-        expected_bad_state,
-        kind.label(),
-        source_patch_id,
-    ) {
+            expected_bad_state,
+            kind.label(),
+            source_patch_id,
+        ) {
+        WholeBufferAuthority::None
+    } else {
+        WholeBufferAuthority::OperatorTextAuthority
+    };
+    let decision = decide_whole_buffer_delivery(WholeBufferAuthorityFacts {
+        delivery: WholeBufferDelivery::EditorRepairRedelivery,
+        authority,
+        source_buffer_matches,
+        scope_rejection: None,
+        enabled: true,
+    });
+    if decision.action != WholeBufferDeliveryAction::Apply {
+        if !source_buffer_matches {
+            eprintln!(
+                "[write] {} editor repair skipped: visible buffer no longer matches the bad state",
+                kind.label()
+            );
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "{}_editor_redelivery_skipped file={} patch_id={} skip=stale_bad_state expected_len={} expected_hash={} current_len={} current_hash={} table_reason={}",
+                    kind.label(),
+                    file.display(),
+                    source_patch_id.unwrap_or("-"),
+                    expected_bad_state.len(),
+                    agent_doc_hash::content_hash(expected_bad_state),
+                    current_content.len(),
+                    agent_doc_hash::content_hash(&current_content),
+                    decision.reason
+                ),
+            );
+        } else if decision.reason != "missing_operator_text_authority" {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "{}_editor_redelivery_skipped file={} patch_id={} skip=authority_table action={} reason={} authority={}",
+                    kind.label(),
+                    file.display(),
+                    source_patch_id.unwrap_or("-"),
+                    decision.action.as_str(),
+                    decision.reason,
+                    authority.as_str()
+                ),
+            );
+        }
         return false;
     }
 

@@ -1,6 +1,10 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use agent_doc_document_realtime::write_policy::{
+    WholeBufferAuthority, WholeBufferAuthorityFacts, WholeBufferDelivery,
+    WholeBufferDeliveryAction, decide_whole_buffer_delivery,
+};
 use agent_doc_element_exchange::{
     extract_post_commit_normalization_targets, normalization_target_counts,
 };
@@ -45,6 +49,34 @@ fn live_editor_delivery_target(file: &Path) -> Option<String> {
     agent_doc_document_realtime::select_live_editor_delivery_target(
         owner_candidate.into_iter().chain(live_buffer_candidates),
     )
+}
+
+fn live_editor_delivery_has_operator_authority(file: &Path) -> bool {
+    let mut file_keys = Vec::new();
+    if let Ok(canonical) = file.canonicalize() {
+        file_keys.push(canonical.to_string_lossy().to_string());
+    }
+    let raw = file.to_string_lossy().to_string();
+    if !file_keys.iter().any(|key| key == &raw) {
+        file_keys.push(raw);
+    }
+
+    if file_keys
+        .iter()
+        .any(|file_key| agent_doc_plugin_owner::live_plugin_owner_consumer_id(file_key).is_some())
+    {
+        return true;
+    }
+
+    file_keys.iter().any(|file_key| {
+        agent_doc_debounce::live_buffer_snapshots(file_key)
+            .into_iter()
+            .any(|snapshot| {
+                agent_doc_debounce::live_buffer_snapshot_editor_is_live(&snapshot)
+                    && snapshot
+                        .has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY)
+            })
+    })
 }
 
 fn target_payload_to_live_editor(
@@ -537,16 +569,24 @@ pub fn try_ipc(
                     }
                     repair_ipc_decision_visible_state(file, &repair_decision, Some(&patch_id))?;
                     if repair_decision.snap_source.is_ack_content_proven() {
-                        mark_ack_content_live_buffer_synced(
+                        let authority = ack_content_disk_write_authority(
                             file,
-                            &patch_id,
                             socket_editor_id.as_deref(),
                             &repair_decision.snapshot_content,
                         );
+                        if authority == WholeBufferAuthority::OperatorTextAuthority {
+                            mark_ack_content_live_buffer_synced(
+                                file,
+                                &patch_id,
+                                socket_editor_id.as_deref(),
+                                &repair_decision.snapshot_content,
+                            );
+                        }
                         write_ack_content_through_to_disk(
                             file,
                             &patch_id,
                             &repair_decision.snapshot_content,
+                            authority,
                         )?;
                     }
                     crate::ops_log::log_op(
@@ -1060,6 +1100,49 @@ pub(crate) fn log_full_content_ipc_disabled(
     );
 }
 
+struct FullContentIpcAuthorityRejectionLog<'a> {
+    file: &'a Path,
+    mode: FullContentIpcMode,
+    patch_id: &'a str,
+    target_content: &'a str,
+    source_content: Option<&'a str>,
+    current_content: Option<&'a str>,
+    authority: WholeBufferAuthority,
+    reason: &'a str,
+}
+
+fn log_full_content_ipc_authority_rejected(facts: FullContentIpcAuthorityRejectionLog<'_>) {
+    let source = facts.mode.source_label();
+    eprintln!(
+        "[write] full-content IPC skipped for {}: whole-buffer delivery rejected ({})",
+        facts.file.display(),
+        facts.reason
+    );
+    crate::ops_log::log_op(
+        facts.file,
+        &format!(
+            "full_content_ipc_authority_rejected file={} source={} patch_id={} authority={} reason={} target_len={} target_hash={} source_len={} source_hash={} current_len={} current_hash={}",
+            facts.file.display(),
+            source,
+            facts.patch_id,
+            facts.authority.as_str(),
+            facts.reason,
+            facts.target_content.len(),
+            agent_doc_hash::content_hash(facts.target_content),
+            facts.source_content.map(str::len).unwrap_or(0),
+            facts
+                .source_content
+                .map(agent_doc_hash::content_hash)
+                .unwrap_or_else(|| "-".to_string()),
+            facts.current_content.map(str::len).unwrap_or(0),
+            facts
+                .current_content
+                .map(agent_doc_hash::content_hash)
+                .unwrap_or_else(|| "-".to_string())
+        ),
+    );
+}
+
 pub(crate) fn full_content_ipc_scope_allows(
     file: &Path,
     mode: FullContentIpcMode,
@@ -1147,25 +1230,64 @@ pub(crate) fn try_ipc_full_content_with_mode(
         return Ok(false);
     }
 
-    if !full_content_ipc_scope_allows(
-        file,
-        mode,
-        &patch_id,
-        content,
-        effective_source_content,
-        before_content.as_deref(),
-    ) {
-        return Ok(false);
+    let scope_rejection =
+        agent_doc_document_realtime::write_policy::full_content_scope_rejection_reason(&[
+            Some(content),
+            effective_source_content,
+            before_content.as_deref(),
+        ]);
+    let authority = if live_editor_delivery_has_operator_authority(file) {
+        WholeBufferAuthority::OperatorTextAuthority
+    } else {
+        WholeBufferAuthority::None
+    };
+    let source_buffer_matches = effective_source_content
+        .zip(before_content.as_deref())
+        .is_some_and(|(source, current)| source == current);
+    let decision = decide_whole_buffer_delivery(WholeBufferAuthorityFacts {
+        delivery: WholeBufferDelivery::FullContentEditorIpc,
+        authority,
+        source_buffer_matches,
+        scope_rejection,
+        enabled: false,
+    });
+    match decision.action {
+        WholeBufferDeliveryAction::Reject if scope_rejection.is_some() => {
+            full_content_ipc_scope_allows(
+                file,
+                mode,
+                &patch_id,
+                content,
+                effective_source_content,
+                before_content.as_deref(),
+            );
+            return Ok(false);
+        }
+        WholeBufferDeliveryAction::Reject => {
+            log_full_content_ipc_authority_rejected(FullContentIpcAuthorityRejectionLog {
+                file,
+                mode,
+                patch_id: &patch_id,
+                target_content: content,
+                source_content: effective_source_content,
+                current_content: before_content.as_deref(),
+                authority,
+                reason: decision.reason,
+            });
+            return Ok(false);
+        }
+        WholeBufferDeliveryAction::ObserveOnly => {
+            log_full_content_ipc_disabled(
+                file,
+                mode,
+                &patch_id,
+                content,
+                effective_source_content,
+                before_content.as_deref(),
+            );
+        }
+        WholeBufferDeliveryAction::Apply => {}
     }
-
-    log_full_content_ipc_disabled(
-        file,
-        mode,
-        &patch_id,
-        content,
-        effective_source_content,
-        before_content.as_deref(),
-    );
     Ok(false)
 }
 
@@ -1637,16 +1759,24 @@ pub(crate) fn write_ipc_and_poll(
             repair_ipc_decision_visible_state(doc_file, &repair_decision, Some(patch_id))?;
             if repair_decision.snap_source.is_ack_content_proven() {
                 let editor_id = payload.get("editor_id").and_then(|value| value.as_str());
-                mark_ack_content_live_buffer_synced(
+                let authority = ack_content_disk_write_authority(
                     doc_file,
-                    patch_id,
                     editor_id,
                     &repair_decision.snapshot_content,
                 );
+                if authority == WholeBufferAuthority::OperatorTextAuthority {
+                    mark_ack_content_live_buffer_synced(
+                        doc_file,
+                        patch_id,
+                        editor_id,
+                        &repair_decision.snapshot_content,
+                    );
+                }
                 write_ack_content_through_to_disk(
                     doc_file,
                     patch_id,
                     &repair_decision.snapshot_content,
+                    authority,
                 )?;
             }
             crate::ops_log::log_op(
@@ -4807,9 +4937,10 @@ mod late_fallback_patch_guard_tests {
         );
         let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
-            ops_log.contains("full_content_ipc_disabled")
-                && ops_log.contains("source=compact_exchange"),
-            "disabled full-content path should be logged:\n{ops_log}"
+            ops_log.contains("full_content_ipc_authority_rejected")
+                && ops_log.contains("source=compact_exchange")
+                && ops_log.contains("reason=stale_source_buffer"),
+            "stale-source full-content rejection should be logged:\n{ops_log}"
         );
     }
 
@@ -4936,9 +5067,10 @@ mod late_fallback_patch_guard_tests {
         assert!(snapshot::load(&doc).unwrap().is_none());
         let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
-            ops_log.contains("full_content_ipc_disabled")
-                && ops_log.contains("source=response_fallback"),
-            "disabled full-content path should be logged:\n{ops_log}"
+            ops_log.contains("full_content_ipc_authority_rejected")
+                && ops_log.contains("source=response_fallback")
+                && ops_log.contains("reason=stale_source_buffer"),
+            "stale-source full-content rejection should be logged:\n{ops_log}"
         );
 
         let _ = fs::remove_file(crate::ipc_socket::socket_path(tmp.path()));
@@ -5252,7 +5384,7 @@ mod late_fallback_patch_guard_tests {
 
         assert!(
             !result,
-            "disabled full-content path should reject before socket delivery"
+            "full-content path should reject before socket delivery"
         );
         assert_eq!(
             calls.load(Ordering::SeqCst),
@@ -5262,7 +5394,11 @@ mod late_fallback_patch_guard_tests {
         assert_eq!(fs::read_to_string(&doc).unwrap(), live);
         assert!(snapshot::load(&doc).unwrap().is_none());
         let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert!(ops_log.contains("full_content_ipc_disabled"));
+        assert!(
+            ops_log.contains("full_content_ipc_authority_rejected")
+                && ops_log.contains("reason=stale_source_buffer"),
+            "stale-source full-content rejection should be logged:\n{ops_log}"
+        );
 
         let _ = fs::remove_file(crate::ipc_socket::socket_path(tmp.path()));
         drop(server);

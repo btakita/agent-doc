@@ -156,6 +156,149 @@ pub fn full_content_scope_rejection_reason(
     None
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WholeBufferDelivery {
+    FullContentEditorIpc,
+    AckContentDiskWriteThrough,
+    EditorRepairRedelivery,
+}
+
+impl WholeBufferDelivery {
+    const fn requires_source_buffer_match(self) -> bool {
+        matches!(
+            self,
+            Self::FullContentEditorIpc | Self::EditorRepairRedelivery
+        )
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::FullContentEditorIpc => "full_content_editor_ipc",
+            Self::AckContentDiskWriteThrough => "ack_content_disk_write_through",
+            Self::EditorRepairRedelivery => "editor_repair_redelivery",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WholeBufferAuthority {
+    OperatorTextAuthority,
+    AckContentSidecar,
+    FileRead,
+    ContentOurs,
+    None,
+}
+
+impl WholeBufferAuthority {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::OperatorTextAuthority => "operator_text_authority",
+            Self::AckContentSidecar => "ack_content_sidecar",
+            Self::FileRead => "file_read",
+            Self::ContentOurs => "content_ours",
+            Self::None => "none",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WholeBufferDeliveryAction {
+    Apply,
+    ObserveOnly,
+    Reject,
+}
+
+impl WholeBufferDeliveryAction {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Apply => "apply",
+            Self::ObserveOnly => "observe_only",
+            Self::Reject => "reject",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WholeBufferAuthorityFacts {
+    pub delivery: WholeBufferDelivery,
+    pub authority: WholeBufferAuthority,
+    pub source_buffer_matches: bool,
+    pub scope_rejection: Option<FullContentScopeRejection>,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WholeBufferAuthorityDecision {
+    pub action: WholeBufferDeliveryAction,
+    pub reason: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WholeBufferAuthorityRule {
+    delivery: WholeBufferDelivery,
+    authority: WholeBufferAuthority,
+    action: WholeBufferDeliveryAction,
+    reason: &'static str,
+}
+
+const WHOLE_BUFFER_AUTHORITY_TABLE: &[WholeBufferAuthorityRule] = &[
+    WholeBufferAuthorityRule {
+        delivery: WholeBufferDelivery::FullContentEditorIpc,
+        authority: WholeBufferAuthority::OperatorTextAuthority,
+        action: WholeBufferDeliveryAction::Apply,
+        reason: "operator_text_authority_source_buffer",
+    },
+    WholeBufferAuthorityRule {
+        delivery: WholeBufferDelivery::AckContentDiskWriteThrough,
+        authority: WholeBufferAuthority::OperatorTextAuthority,
+        action: WholeBufferDeliveryAction::Apply,
+        reason: "operator_text_authority",
+    },
+    WholeBufferAuthorityRule {
+        delivery: WholeBufferDelivery::EditorRepairRedelivery,
+        authority: WholeBufferAuthority::OperatorTextAuthority,
+        action: WholeBufferDeliveryAction::Apply,
+        reason: "operator_text_authority_source_buffer",
+    },
+];
+
+pub fn decide_whole_buffer_delivery(
+    facts: WholeBufferAuthorityFacts,
+) -> WholeBufferAuthorityDecision {
+    if let Some(scope_rejection) = facts.scope_rejection {
+        return WholeBufferAuthorityDecision {
+            action: WholeBufferDeliveryAction::Reject,
+            reason: scope_rejection.as_str(),
+        };
+    }
+
+    if facts.delivery.requires_source_buffer_match() && !facts.source_buffer_matches {
+        return WholeBufferAuthorityDecision {
+            action: WholeBufferDeliveryAction::Reject,
+            reason: "stale_source_buffer",
+        };
+    }
+
+    if facts.delivery == WholeBufferDelivery::FullContentEditorIpc && !facts.enabled {
+        return WholeBufferAuthorityDecision {
+            action: WholeBufferDeliveryAction::ObserveOnly,
+            reason: "disabled_by_default",
+        };
+    }
+
+    WHOLE_BUFFER_AUTHORITY_TABLE
+        .iter()
+        .find(|rule| rule.delivery == facts.delivery && rule.authority == facts.authority)
+        .map(|rule| WholeBufferAuthorityDecision {
+            action: rule.action,
+            reason: rule.reason,
+        })
+        .unwrap_or(WholeBufferAuthorityDecision {
+            action: WholeBufferDeliveryAction::Reject,
+            reason: "missing_operator_text_authority",
+        })
+}
+
 /// Decision for reconciling an editor buffer against disk when the plugin
 /// reconnects its IPC listener.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1357,6 +1500,56 @@ mod tests {
             full_content_scope_rejection_reason(&[Some("plain\n"), None, Some("other\n")]),
             None
         );
+    }
+
+    #[test]
+    fn whole_buffer_table_observes_disabled_full_content() {
+        let decision = decide_whole_buffer_delivery(WholeBufferAuthorityFacts {
+            delivery: WholeBufferDelivery::FullContentEditorIpc,
+            authority: WholeBufferAuthority::OperatorTextAuthority,
+            source_buffer_matches: true,
+            scope_rejection: None,
+            enabled: false,
+        });
+
+        assert_eq!(decision.action, WholeBufferDeliveryAction::ObserveOnly);
+        assert_eq!(decision.reason, "disabled_by_default");
+    }
+
+    #[test]
+    fn whole_buffer_table_rejects_stale_source_before_authority() {
+        let decision = decide_whole_buffer_delivery(WholeBufferAuthorityFacts {
+            delivery: WholeBufferDelivery::FullContentEditorIpc,
+            authority: WholeBufferAuthority::OperatorTextAuthority,
+            source_buffer_matches: false,
+            scope_rejection: None,
+            enabled: false,
+        });
+
+        assert_eq!(decision.action, WholeBufferDeliveryAction::Reject);
+        assert_eq!(decision.reason, "stale_source_buffer");
+    }
+
+    #[test]
+    fn whole_buffer_table_allows_ack_write_through_only_with_operator_authority() {
+        let allowed = decide_whole_buffer_delivery(WholeBufferAuthorityFacts {
+            delivery: WholeBufferDelivery::AckContentDiskWriteThrough,
+            authority: WholeBufferAuthority::OperatorTextAuthority,
+            source_buffer_matches: true,
+            scope_rejection: None,
+            enabled: true,
+        });
+        let blocked = decide_whole_buffer_delivery(WholeBufferAuthorityFacts {
+            delivery: WholeBufferDelivery::AckContentDiskWriteThrough,
+            authority: WholeBufferAuthority::AckContentSidecar,
+            source_buffer_matches: true,
+            scope_rejection: None,
+            enabled: true,
+        });
+
+        assert_eq!(allowed.action, WholeBufferDeliveryAction::Apply);
+        assert_eq!(blocked.action, WholeBufferDeliveryAction::Reject);
+        assert_eq!(blocked.reason, "missing_operator_text_authority");
     }
 
     #[test]

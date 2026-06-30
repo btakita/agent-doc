@@ -86,6 +86,45 @@ pub fn promptless_comment_only_drift(snapshot: &str, current: &str) -> bool {
         == normalize_transient_markers(&agent_doc_diff::strip_comments(current))
 }
 
+pub fn detect_bypassed_response_write_between(
+    snapshot_doc: &str,
+    current_doc: &str,
+) -> Option<String> {
+    let snap_norm = normalize_transient_markers(snapshot_doc);
+    let cur_norm = normalize_transient_markers(current_doc);
+    if cur_norm == snap_norm {
+        return None;
+    }
+    if !crate::closeout_signal::has_new_response_heading_marker(&snap_norm, &cur_norm) {
+        return None;
+    }
+
+    let diff_text = agent_doc_diff::unified_diff_from_contents(&snap_norm, &cur_norm)?;
+
+    let diff = similar::TextDiff::from_lines(&snap_norm, &cur_norm);
+    for change in diff.iter_all_changes() {
+        if change.tag() != similar::ChangeTag::Insert {
+            continue;
+        }
+        let trimmed = change.value().trim();
+        if crate::closeout_signal::is_binary_authored_recovery_diagnostic_heading(trimmed) {
+            continue;
+        }
+        if crate::closeout_signal::is_direct_response_patchback_heading(trimmed) {
+            if let Some(bare_target) =
+                agent_doc_diff::first_bare_prompt_prefix_target_before_marker(&diff_text, trimmed)
+            {
+                return Some(format!(
+                    "{} (bare prompt target missing `❯ `: {})",
+                    trimmed, bare_target
+                ));
+            }
+            return Some(trimmed.to_string());
+        }
+    }
+    None
+}
+
 pub fn mask_exchange_component_content(doc: &str) -> Option<String> {
     mask_components_by_name(doc, &["exchange"])
 }
@@ -172,6 +211,58 @@ mod tests {
         let current = session_doc("body\n");
 
         assert!(promptless_comment_only_drift(&snapshot, &current));
+    }
+
+    #[test]
+    fn bypassed_response_write_reports_heading_and_bare_prompt_target() {
+        let snapshot =
+            "<!-- agent:exchange patch=append -->\n❯ Prior question?\n<!-- /agent:exchange -->\n";
+        let current = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Prior question?\n",
+            "Why was this missed?\n",
+            "### Re: test - gpt-5\n\n",
+            "Body\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let marker = detect_bypassed_response_write_between(snapshot, current).unwrap();
+
+        assert!(marker.contains("### Re: test - gpt-5"));
+        assert!(marker.contains("Why was this missed?"));
+    }
+
+    #[test]
+    fn bypassed_response_write_ignores_non_response_local_drift() {
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "After.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older - gpt-5\n\n",
+            "Completed.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "After. Tuned manually.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older - gpt-5\n\n",
+            "Completed.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert_eq!(
+            detect_bypassed_response_write_between(snapshot, current),
+            None
+        );
     }
 
     fn session_doc(exchange_body: &str) -> String {

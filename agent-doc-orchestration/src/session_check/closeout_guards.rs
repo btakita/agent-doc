@@ -508,53 +508,7 @@ pub fn detect_bypassed_response_write(file: &Path) -> Result<Option<String>> {
         Ok(content) => content,
         Err(_) => return Ok(None),
     };
-    Ok(detect_bypassed_response_write_between(&snapshot, &current))
-}
-
-pub fn detect_bypassed_response_write_between(
-    snapshot_doc: &str,
-    current_doc: &str,
-) -> Option<String> {
-    // Normalize transient markers before comparison — (HEAD) annotations and
-    // boundary IDs legitimately differ between snapshot (clean) and working tree
-    // (preserves HEAD). Without this, preserved (HEAD) markers cause false-positive
-    // "direct response patchback" detection.
-    let norm =
-        |s: &str| agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(s);
-    let snap_norm = norm(snapshot_doc);
-    let cur_norm = norm(current_doc);
-    if cur_norm == snap_norm {
-        return None;
-    }
-    if !agent_doc_turn::closeout_signal::has_new_response_heading_marker(&snap_norm, &cur_norm) {
-        return None;
-    }
-
-    let diff_text = agent_doc_diff::unified_diff_from_contents(&snap_norm, &cur_norm)?;
-
-    let diff = similar::TextDiff::from_lines(&snap_norm, &cur_norm);
-    for change in diff.iter_all_changes() {
-        if change.tag() != similar::ChangeTag::Insert {
-            continue;
-        }
-        let trimmed = change.value().trim();
-        if agent_doc_turn::closeout_signal::is_binary_authored_recovery_diagnostic_heading(trimmed)
-        {
-            continue;
-        }
-        if agent_doc_turn::closeout_signal::is_direct_response_patchback_heading(trimmed) {
-            if let Some(bare_target) =
-                agent_doc_diff::first_bare_prompt_prefix_target_before_marker(&diff_text, trimmed)
-            {
-                return Some(format!(
-                    "{} (bare prompt target missing `❯ `: {})",
-                    trimmed, bare_target
-                ));
-            }
-            return Some(trimmed.to_string());
-        }
-    }
-    None
+    Ok(agent_doc_turn::document_drift::detect_bypassed_response_write_between(&snapshot, &current))
 }
 
 /// `#prompt-preempts-auto-queue`: snapshot-independent detection of a live

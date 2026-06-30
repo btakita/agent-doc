@@ -254,7 +254,7 @@ fn extract_visible_response_patch_between(
     let snapshot_norm = norm(snapshot_doc);
     let current_norm = norm(current_doc);
     if current_norm == snapshot_norm
-        || crate::session_check::detect_bypassed_response_write_between(
+        || agent_doc_turn::document_drift::detect_bypassed_response_write_between(
             &snapshot_norm,
             &current_norm,
         )
@@ -703,8 +703,11 @@ pub fn recover_missing_commit_boundary(file: &Path, event: &str) -> Result<Optio
         crate::git::SnapshotCommitStatus::Committed => head_doc
             .as_deref()
             .filter(|head| {
-                crate::session_check::detect_bypassed_response_write_between(head, &current_doc)
-                    .is_none()
+                agent_doc_turn::document_drift::detect_bypassed_response_write_between(
+                    head,
+                    &current_doc,
+                )
+                .is_none()
             })
             .map(|_| "already-committed HEAD"),
         _ => crate::git::repair_committed_historical_snapshot_drift(file)?

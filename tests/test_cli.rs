@@ -1556,13 +1556,23 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // write-through logs `reason=already_current` when disk already matches
         // the editor-proven content. This is diagnostic context for skipping the
         // write-through effect, not a new flow branch.
-        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 21,
+        // 21 -> 24 (#whole-buffer-authority): ACK-content write-through and
+        // editor-repair redelivery now log the `decide_whole_buffer_delivery`
+        // policy-table reason when the focused realtime policy rejects a
+        // whole-buffer effect. These are diagnostics for the shared authority
+        // decision, not ad hoc orchestration flow branches.
+        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 24,
         // +1 `guard_` (#fcc0-degraded-file-ipc): `IpcPollOptions::convergence`
         // centralizes the existing committed-cycle file-IPC poll guard for
         // convergence callers; this is a constructor for the existing guard, not
         // a new flow guard boundary.
         ("agent-doc-orchestration/src/write/ipc/transport.rs", "guard_") => 9,
-        ("agent-doc-orchestration/src/write/ipc/transport.rs", "reason=") => 10,
+        // 10 -> 14 (#whole-buffer-authority): full-content IPC now logs disabled
+        // and authority-rejected outcomes from `decide_whole_buffer_delivery`,
+        // plus stale-source regression assertions. The write remains blocked
+        // before socket/file delivery; the reasons are routed through the shared
+        // realtime whole-buffer authority policy.
+        ("agent-doc-orchestration/src/write/ipc/transport.rs", "reason=") => 14,
         // +2 (#docdriftgrace): the stale-snapshot reset regression tests call the
         // existing `guard_no_stale_snapshot_reset_drift` boundary for the safe
         // visible rebase and fail-closed active-driver cases. +2 (#docdriftfinalize):
@@ -3574,6 +3584,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub fn exchange_only_promptless_content_drift",
         "pub fn active_session_drift_is_only_exchange_or_backlog_metadata",
         "pub fn promptless_comment_only_drift",
+        "pub fn detect_bypassed_response_write_between",
         "pub fn mask_exchange_component_content",
         "pub fn mask_components_by_name",
     ] {
@@ -3596,6 +3607,16 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         document_drift_source.contains("crate::closeout_signal::is_exchange_response_heading"),
         "document-drift policy should reuse focused closeout response-heading classification"
     );
+    for required in [
+        "crate::closeout_signal::has_new_response_heading_marker",
+        "crate::closeout_signal::is_binary_authored_recovery_diagnostic_heading",
+        "crate::closeout_signal::is_direct_response_patchback_heading",
+    ] {
+        assert!(
+            document_drift_source.contains(required),
+            "document-drift policy should reuse focused direct-patchback classification: {required}"
+        );
+    }
 
     let detect_source = fs::read_to_string(
         manifest_dir.join("agent-doc-orchestration/src/session_check/detect.rs"),
@@ -3675,9 +3696,6 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "agent_doc_turn::closeout_signal::queue_audit_partial_completion_decision",
         "agent_doc_turn::closeout_signal::QueueAuditPartialCompletionEvidence",
         "agent_doc_turn::closeout_signal::QueueAuditPartialCompletionDecision",
-        "agent_doc_turn::closeout_signal::is_direct_response_patchback_heading",
-        "agent_doc_turn::closeout_signal::has_new_response_heading_marker",
-        "agent_doc_turn::closeout_signal::is_binary_authored_recovery_diagnostic_heading",
     ] {
         assert!(
             closeout_guards.contains(required),
@@ -3702,6 +3720,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub(crate) fn exchange_only_promptless_content_drift",
         "pub(crate) fn active_session_drift_is_only_exchange_or_backlog_metadata",
         "pub(crate) fn promptless_comment_only_drift",
+        "pub fn detect_bypassed_response_write_between",
         "pub(crate) fn mask_exchange_component_content",
         "pub(crate) fn mask_components_by_name",
     ] {
@@ -3729,6 +3748,11 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
             "closeout_guards should call focused document-drift policy directly: {required}"
         );
     }
+    assert!(
+        closeout_guards
+            .contains("agent_doc_turn::document_drift::detect_bypassed_response_write_between"),
+        "closeout_guards should call focused bypassed-response classifier directly"
+    );
     assert!(
         detect_source.contains("agent_doc_turn::exchange_tail::prompt_only_exchange_tail"),
         "session_check::detect should call focused prompt-only exchange-tail policy directly"
@@ -6732,9 +6756,17 @@ fn test_project_config_io_tmux_helpers_have_no_config_facade() {
         !closeout_guards.contains("pub(crate) fn first_bare_prompt_prefix_target_before_marker"),
         "session_check closeout guards must not re-own marker-scoped prompt-prefix diff slicing"
     );
+    let document_drift =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn/src/document_drift.rs")).unwrap();
     assert!(
-        closeout_guards.contains("agent_doc_diff::first_bare_prompt_prefix_target_before_marker"),
-        "session_check closeout guards should call the focused diff helper directly"
+        document_drift.contains("agent_doc_diff::first_bare_prompt_prefix_target_before_marker"),
+        "agent-doc-turn document drift should call the focused diff helper directly"
+    );
+    assert!(
+        closeout_guards.contains(
+            "agent_doc_turn::document_drift::detect_bypassed_response_write_between",
+        ),
+        "session_check closeout guards should adapt file IO into the focused document drift classifier"
     );
 }
 

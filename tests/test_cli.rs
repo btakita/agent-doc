@@ -3162,8 +3162,6 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub fn is_binary_authored_recovery_diagnostic_heading",
         "pub fn is_queue_continuation_response_heading",
         "pub fn assistant_response_text",
-        "pub fn free_text_queue_marker_has_bare_heading_residue",
-        "pub fn response_head_plausibly_answers",
         "pub fn response_clearly_completes_pending_id",
         "pub fn response_heading_resolves_to_pending_id",
         "pub fn explicit_done_signal_ids",
@@ -3328,6 +3326,8 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub(crate) fn blocked_signal_tied_to_id",
         "pub(crate) fn free_text_queue_marker_has_bare_heading_residue",
         "pub(crate) fn response_head_plausibly_answers",
+        "agent_doc_turn::closeout_signal::free_text_queue_marker_has_bare_heading_residue",
+        "agent_doc_turn::closeout_signal::response_head_plausibly_answers",
         "pub(crate) const PARTIAL_CLOSEOUT_REMAINING_PHRASES",
         "pub(crate) fn text_has_shipped_signal",
         "pub(crate) fn text_has_partial_remaining_signal",
@@ -3337,15 +3337,12 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
             "queue_head_provenance_guards must not re-own closeout signal policy: {forbidden}"
         );
     }
-    for required in [
-        "agent_doc_turn::closeout_signal::free_text_queue_marker_has_bare_heading_residue",
-        "agent_doc_turn::closeout_signal::response_head_plausibly_answers",
-    ] {
-        assert!(
-            provenance_guards.contains(required),
-            "queue_head_provenance_guards should call focused closeout signal policy directly: {required}"
-        );
-    }
+    assert!(
+        provenance_guards.contains(
+            "agent_doc_queue::queue_closeout_guard::free_text_queue_head_provenance_decision"
+        ),
+        "queue_head_provenance_guards should call focused queue provenance policy directly"
+    );
 
     let partial_staging = fs::read_to_string(
         manifest_dir.join("agent-doc-orchestration/src/session_check/partial_staging.rs"),
@@ -9063,6 +9060,8 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
         "pub fn committed_current_queue_head_ids(",
         "pub fn no_response_live_queue_head_ids(",
         "pub fn queue_head_removal_decision(",
+        "pub struct FreeTextQueueHeadProvenanceDecision",
+        "pub fn free_text_queue_head_provenance_decision(",
         "pub enum QueueHeadRemovalProofSource",
     ] {
         assert!(
@@ -9089,6 +9088,11 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
         "fn committed_queue_contains_active_free_text_head(",
         "fn no_response_live_queue_head_ids(",
         "fn queue_head_removal_decision(",
+        "fn free_text_queue_head_provenance_decision(",
+        "queue_heads::free_text_queue_head_is_completed_residue(",
+        "queue_heads::committed_queue_contains_free_text_head(",
+        "free_text_head_answered_by_response(",
+        "queue_continuation::is_recurring_imperative_head(",
     ] {
         assert!(
             !queue_head_guards.contains(forbidden_snippet)
@@ -9101,10 +9105,8 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
             .contains("agent_doc_queue::queue_closeout_guard::no_response_live_queue_head_ids",)
             && provenance_guards
                 .contains("agent_doc_queue::queue_closeout_guard::queue_head_removal_decision",)
-            && provenance_guards
-                .contains("agent_doc_queue::queue_heads::committed_queue_contains_free_text_head")
             && provenance_guards.contains(
-                "agent_doc_queue::queue_heads::free_text_queue_head_is_completed_residue"
+                "agent_doc_queue::queue_closeout_guard::free_text_queue_head_provenance_decision"
             ),
         "session_check should call queue closeout/provenance policy through agent-doc-queue directly"
     );

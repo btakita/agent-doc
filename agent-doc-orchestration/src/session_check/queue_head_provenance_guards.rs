@@ -1,5 +1,4 @@
 use super::*;
-use agent_doc_queue::queue_response::free_text_head_answered_by_response;
 
 pub(crate) fn check_expect_done_or_gate_guard(
     file: &Path,
@@ -271,10 +270,16 @@ pub(crate) fn check_free_text_queue_head_provenance(
         return Ok(GuardResult::None);
     }
     let content = rc.doc_content();
-    if content.contains("<!-- no-free-text-queue-head-guard -->") {
-        if agent_doc_turn::closeout_signal::free_text_queue_marker_has_bare_heading_residue(
+    let Some(decision) =
+        agent_doc_queue::queue_closeout_guard::free_text_queue_head_provenance_decision(
+            &state.active_free_text_queue_heads,
             &content,
-        ) {
+        )
+    else {
+        return Ok(GuardResult::None);
+    };
+    if decision.suppressed {
+        if decision.bare_heading_residue {
             crate::ops_log::log_op(
                 file,
                 &format!(
@@ -292,55 +297,9 @@ pub(crate) fn check_free_text_queue_head_provenance(
         }
         return Ok(GuardResult::None);
     }
-    let Ok(components) = agent_doc_element::element::parse(&content) else {
-        return Ok(GuardResult::None);
-    };
-    let exchange_text: String = components
-        .iter()
-        .find(|c| c.name == "exchange")
-        .map(|c| c.content(&content).to_string())
-        .unwrap_or_default();
-    let mut unresolved: Vec<String> = Vec::new();
-    let mut response_proven_removed: Vec<String> = Vec::new();
-    let mut completed_residue: Vec<String> = Vec::new();
-    for head in &state.active_free_text_queue_heads {
-        let normalized = head.trim().to_ascii_lowercase();
-        if normalized.is_empty() {
-            continue;
-        }
-        if agent_doc_queue::queue_heads::free_text_queue_head_is_completed_residue(
-            &content,
-            &exchange_text,
-            head,
-        ) {
-            completed_residue.push(head.clone());
-            continue;
-        }
-        // `#qimpstrike`: a recurring imperative command head (`deploy`, `commit`,
-        // `push`, the `#spec-test-commit-push` preset, …) is an executable
-        // directive that is valid every time it is queued. A response that echoed
-        // it as a `> **Queue prompt:**` quote does NOT answer/retire a standing
-        // command, so the provenance guard must leave it active/drainable rather
-        // than flag it as completed residue or unresolved missing-response work.
-        if agent_doc_queue::queue_continuation::is_recurring_imperative_head(head) {
-            continue;
-        }
-        if agent_doc_queue::queue_heads::committed_queue_contains_free_text_head(&content, head) {
-            continue;
-        }
-        if free_text_head_answered_by_response(&exchange_text, head)
-            || agent_doc_turn::closeout_signal::response_head_plausibly_answers(
-                &exchange_text,
-                head,
-            )
-        {
-            response_proven_removed.push(head.clone());
-            continue;
-        }
-        unresolved.push(head.clone());
-    }
-    if !completed_residue.is_empty() {
-        let heads_text = completed_residue
+    if !decision.completed_residue.is_empty() {
+        let heads_text = decision
+            .completed_residue
             .iter()
             .map(|h| format!("{:?}", h))
             .collect::<Vec<_>>()
@@ -358,8 +317,9 @@ pub(crate) fn check_free_text_queue_head_provenance(
             file.display()
         )));
     }
-    if !response_proven_removed.is_empty() {
-        let heads_text = response_proven_removed
+    if !decision.response_proven_removed.is_empty() {
+        let heads_text = decision
+            .response_proven_removed
             .iter()
             .map(|h| format!("{:?}", h))
             .collect::<Vec<_>>()
@@ -373,10 +333,11 @@ pub(crate) fn check_free_text_queue_head_provenance(
             ),
         );
     }
-    if unresolved.is_empty() {
+    if decision.unresolved.is_empty() {
         return Ok(GuardResult::None);
     }
-    let heads_text = unresolved
+    let heads_text = decision
+        .unresolved
         .iter()
         .map(|h| format!("\"{}\"", h))
         .collect::<Vec<_>>()

@@ -293,6 +293,12 @@ focused crate under the old path.
   tree probing, registry/session-log/supervisor evidence gathering, owner
   filtering, recovery side effects, and user-facing sync diagnostics while
   importing the focused resolver directly.
+- `agent-doc-tmux` now also owns stash prune policy: prune cleanup mode
+  vocabulary, stash TTL candidate schema, TTL-enabled candidacy rules, and
+  target pane-id filtering. Orchestration keeps tmux window/pane discovery,
+  registry and supervisor evidence gathering, project config checks, ops-log
+  writes, report-only diagnostics, and `kill-pane` effects while importing the
+  focused prune policy directly.
 - `agent-doc-session-accretion` now owns recent restart-log counting policy:
   session-log timestamp parsing, blank/malformed line skips, recent-window
   filtering, restart-churn event extraction, and restart-heavy event counting.

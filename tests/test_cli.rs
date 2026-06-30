@@ -9149,6 +9149,12 @@ fn test_agent_doc_element_backlog_owns_tracked_line_remove_and_prune_policy() {
         "pub struct TrackedComponentItemDrop",
         "pub fn tracked_component_item_counts",
         "pub fn dropped_tracked_component_items",
+        "pub fn component_matches_tracked_surface",
+        "pub fn maintenance_surface_label",
+        "pub fn should_reap_already_done_mirrors",
+        "pub fn should_reap_ops_proof_completions",
+        "pub fn tracked_body_for_reorder",
+        "pub fn review_counts",
         "pub fn trim_tracked_parent_prefix",
         "pub fn line_is_legacy_done_item",
         "pub fn op_remove_matching_tracked_line",
@@ -9217,6 +9223,32 @@ fn test_agent_doc_element_backlog_owns_tracked_line_remove_and_prune_policy() {
     assert!(
         compact.contains("agent_doc_element_backlog::backlog::dropped_tracked_component_items"),
         "compact should call tracked component preservation policy from agent-doc-element-backlog"
+    );
+
+    let preflight_maintenance = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
+    )
+    .unwrap();
+    for forbidden in [
+        "pub(crate) fn component_matches_tracked_surface",
+        "fn component_matches_tracked_surface",
+        "pub(crate) fn maintenance_surface_label",
+        "pub(crate) fn should_reap_already_done_mirrors",
+        "pub(crate) fn should_reap_ops_proof_completions",
+        "pub(crate) fn tracked_body_for_reorder",
+        "pub(crate) fn review_counts",
+    ] {
+        assert!(
+            !preflight_maintenance.contains(forbidden),
+            "preflight maintenance must stay an adapter, not re-own tracked-surface policy: {forbidden}"
+        );
+    }
+    assert!(
+        preflight_maintenance.contains("component_matches_tracked_surface")
+            && preflight_maintenance.contains("maintenance_surface_label")
+            && preflight_maintenance.contains("tracked_body_for_reorder")
+            && preflight_maintenance.contains("review_counts"),
+        "preflight maintenance should import tracked-surface policy from agent-doc-element-backlog"
     );
 }
 
@@ -9313,6 +9345,7 @@ fn test_agent_doc_element_backlog_owns_ops_proof_completion_policy() {
         "pub(crate) fn is_live_verify_gate",
         "pub(crate) fn contains_successful_ci_proof",
         "pub(crate) fn contains_commit_hash",
+        "fn component_matches_tracked_surface",
     ] {
         assert!(
             !preflight_maintenance.contains(forbidden),
@@ -9324,6 +9357,11 @@ fn test_agent_doc_element_backlog_owns_ops_proof_completion_policy() {
             && preflight_maintenance
                 .contains("agent_doc_element_backlog::ops_proof::ops_proof_completion_candidates"),
         "preflight maintenance should call ops-proof policy from agent-doc-element-backlog directly"
+    );
+    assert!(
+        ops_proof.contains("backlog::component_matches_tracked_surface")
+            && !ops_proof.contains("fn component_matches_tracked_surface"),
+        "ops-proof should use tracked-surface policy from backlog.rs instead of a private duplicate"
     );
 }
 

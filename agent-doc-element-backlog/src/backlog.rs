@@ -603,6 +603,59 @@ pub fn tracked_component_item_counts(content: &str) -> BTreeMap<String, usize> {
     counts
 }
 
+pub fn component_matches_tracked_surface(name: &str, surface: &str) -> bool {
+    if element::is_backlog_component(surface) {
+        element::is_backlog_component(name)
+    } else {
+        name == surface
+    }
+}
+
+pub fn maintenance_surface_label(surface: &str) -> &'static str {
+    if element::is_backlog_component(surface) {
+        "pending"
+    } else if element::is_review_component(surface) {
+        "review"
+    } else {
+        "icebox"
+    }
+}
+
+pub fn should_reap_already_done_mirrors(surface: &str) -> bool {
+    element::is_backlog_component(surface) || element::is_review_component(surface)
+}
+
+pub fn should_reap_ops_proof_completions(surface: &str) -> bool {
+    element::is_backlog_component(surface) || element::is_review_component(surface)
+}
+
+pub fn tracked_body_for_reorder(content: &str) -> Option<&str> {
+    element::parse(content).ok().and_then(|comps| {
+        comps
+            .into_iter()
+            .find(|component| element::is_backlog_component(&component.name))
+            .map(|component| component.content(content))
+    })
+}
+
+pub fn review_counts(content: &str) -> (usize, usize) {
+    let Some(body) = element::parse(content).ok().and_then(|comps| {
+        comps
+            .into_iter()
+            .find(|component| element::is_review_component(&component.name))
+            .map(|component| component.content(content).to_string())
+    }) else {
+        return (0, 0);
+    };
+    let (_, items, _) = parse_items(&body);
+    let review_items: Vec<_> = items.into_iter().filter(|item| !item.is_done()).collect();
+    let gated = review_items
+        .iter()
+        .filter(|item| matches!(item.state, PendingState::Gated))
+        .count();
+    (review_items.len(), gated)
+}
+
 pub fn open_tracked_work_ids_in_content(content: &str) -> Vec<String> {
     let Ok(components) = element::parse(content) else {
         return Vec::new();
@@ -3293,6 +3346,38 @@ mod tests {
         assert_eq!(counts.get("backlog").copied(), Some(3));
         assert_eq!(counts.get("review").copied(), Some(1));
         assert_eq!(counts.get("exchange"), None);
+    }
+
+    #[test]
+    fn tracked_surface_policy_handles_pending_alias_review_and_icebox() {
+        assert!(component_matches_tracked_surface("backlog", "pending"));
+        assert!(component_matches_tracked_surface("pending", "backlog"));
+        assert!(component_matches_tracked_surface("review", "review"));
+        assert!(!component_matches_tracked_surface("icebox", "review"));
+
+        assert_eq!(maintenance_surface_label("backlog"), "pending");
+        assert_eq!(maintenance_surface_label("review"), "review");
+        assert_eq!(maintenance_surface_label("icebox"), "icebox");
+
+        assert!(should_reap_already_done_mirrors("backlog"));
+        assert!(should_reap_already_done_mirrors("review"));
+        assert!(!should_reap_already_done_mirrors("icebox"));
+
+        assert!(should_reap_ops_proof_completions("pending"));
+        assert!(should_reap_ops_proof_completions("review"));
+        assert!(!should_reap_ops_proof_completions("icebox"));
+    }
+
+    #[test]
+    fn tracked_surface_body_and_review_counts_are_document_projections() {
+        assert_eq!(
+            tracked_body_for_reorder(TRACKED_COMPONENT_DOC).map(str::trim),
+            Some("- [ ] [#a1] item one\n- [ ] [#a2] item two\n- [ ] [#a3] item three")
+        );
+        assert_eq!(review_counts(TRACKED_COMPONENT_DOC), (1, 1));
+
+        let no_review = "<!-- agent:backlog -->\n- [ ] [#a] item\n<!-- /agent:backlog -->\n";
+        assert_eq!(review_counts(no_review), (0, 0));
     }
 
     #[test]

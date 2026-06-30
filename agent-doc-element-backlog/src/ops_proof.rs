@@ -25,7 +25,7 @@ pub fn surface_pending_ids(content: &str, surface: &str) -> HashSet<String> {
         .and_then(|comps| {
             comps
                 .into_iter()
-                .find(|c| component_matches_tracked_surface(&c.name, surface))
+                .find(|c| backlog::component_matches_tracked_surface(&c.name, surface))
         })
         .map(|comp| {
             let (_, items, _) = backlog::parse_items(comp.content(content));
@@ -36,14 +36,6 @@ pub fn surface_pending_ids(content: &str, surface: &str) -> HashSet<String> {
                 .collect()
         })
         .unwrap_or_default()
-}
-
-fn component_matches_tracked_surface(name: &str, surface: &str) -> bool {
-    if element::is_backlog_component(surface) {
-        element::is_backlog_component(name)
-    } else {
-        name == surface
-    }
 }
 
 pub fn ops_proof_completion_candidates(body: &str) -> Vec<OpsProofCompletion> {

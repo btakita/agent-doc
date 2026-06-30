@@ -1,6 +1,10 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use agent_doc_element_backlog::backlog::{
+    component_matches_tracked_surface, maintenance_surface_label, review_counts,
+    should_reap_already_done_mirrors, should_reap_ops_proof_completions, tracked_body_for_reorder,
+};
 use agent_doc_queue::queue_response::{
     free_text_head_answered_by_response, queue_prompt_text_is_free_text,
 };
@@ -515,69 +519,6 @@ fn persist_pending_maintenance_doc(
 
     crate::write::guard_visible_write_idle_and_current(file, source, current)?;
     crate::write::converge_or_disk_write(file, current, target, source)
-}
-
-pub(crate) fn component_matches_tracked_surface(name: &str, surface: &str) -> bool {
-    if is_backlog_component(surface) {
-        is_backlog_component(name)
-    } else {
-        name == surface
-    }
-}
-
-pub(crate) fn maintenance_surface_label(surface: &str) -> &str {
-    if is_backlog_component(surface) {
-        "pending"
-    } else if is_review_component(surface) {
-        "review"
-    } else {
-        "icebox"
-    }
-}
-
-pub(crate) fn should_reap_already_done_mirrors(surface: &str) -> bool {
-    is_backlog_component(surface) || is_review_component(surface)
-}
-
-pub(crate) fn should_reap_ops_proof_completions(surface: &str) -> bool {
-    is_backlog_component(surface) || is_review_component(surface)
-}
-
-pub(crate) fn tracked_body_for_reorder(content: &str) -> Option<&str> {
-    agent_doc_element::element::parse(content)
-        .ok()
-        .and_then(|comps| {
-            comps
-                .into_iter()
-                .find(|component| is_backlog_component(&component.name))
-                .map(|component| component.content(content))
-        })
-}
-
-pub(crate) fn review_counts(content: &str) -> (usize, usize) {
-    let Some(body) = agent_doc_element::element::parse(content)
-        .ok()
-        .and_then(|comps| {
-            comps
-                .into_iter()
-                .find(|component| is_review_component(&component.name))
-                .map(|component| component.content(content).to_string())
-        })
-    else {
-        return (0, 0);
-    };
-    let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(&body);
-    let review_items: Vec<_> = items.into_iter().filter(|item| !item.is_done()).collect();
-    let gated = review_items
-        .iter()
-        .filter(|item| {
-            matches!(
-                item.state,
-                agent_doc_element_backlog::backlog::PendingState::Gated
-            )
-        })
-        .count();
-    (review_items.len(), gated)
 }
 
 /// Opportunistic gated-review auto-verification (`#optverify` / `#optv3`).

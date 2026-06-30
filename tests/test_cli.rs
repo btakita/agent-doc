@@ -6678,6 +6678,44 @@ fn test_agent_doc_element_review_owns_review_projection_and_ungate_planning() {
 }
 
 #[test]
+fn test_agent_doc_element_backlog_owns_tracked_line_remove_and_prune_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let backlog_model =
+        fs::read_to_string(manifest_dir.join("agent-doc-element-backlog/src/backlog.rs")).unwrap();
+    for required in [
+        "pub fn trim_tracked_parent_prefix",
+        "pub fn line_is_legacy_done_item",
+        "pub fn op_remove_matching_tracked_line",
+        "pub fn op_prune_legacy_done_lines",
+    ] {
+        assert!(
+            backlog_model.contains(required),
+            "agent-doc-element-backlog must own tracked line remove/prune policy"
+        );
+    }
+
+    let pending_cmd =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/pending_cmd.rs"))
+            .unwrap();
+    for forbidden in [
+        "fn trim_tracked_parent_prefix",
+        "fn line_is_legacy_done_item",
+        "let lines: Vec<&str> = existing.lines().collect();",
+        ".filter(|line| !line_is_legacy_done_item(line))",
+    ] {
+        assert!(
+            !pending_cmd.contains(forbidden),
+            "pending_cmd must stay a file-IO adapter, not a tracked line remove/prune facade"
+        );
+    }
+    assert!(
+        pending_cmd.contains("backlog::op_remove_matching_tracked_line")
+            && pending_cmd.contains("backlog::op_prune_legacy_done_lines"),
+        "pending_cmd should call tracked line remove/prune policy from agent-doc-element-backlog"
+    );
+}
+
+#[test]
 fn test_focus_no_stash_promote_compatibility_shim_is_removed() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     for relative in [

@@ -68,35 +68,6 @@ fn persist_pending_write(file: &Path, current: &str, target: &str) -> Result<()>
     crate::write::converge_or_disk_write(file, current, target, "pending_write")
 }
 
-fn trim_tracked_parent_prefix(line: &str) -> &str {
-    let trimmed = line.trim();
-    if let Some(rest) = trimmed.strip_prefix("- ") {
-        return rest.trim_start();
-    }
-
-    let digit_len = trimmed.bytes().take_while(|b| b.is_ascii_digit()).count();
-    if digit_len == 0 {
-        return trimmed;
-    }
-    let (_, tail) = trimmed.split_at(digit_len);
-    let Some(tail) = tail.strip_prefix('.') else {
-        return trimmed;
-    };
-    if !tail.starts_with(char::is_whitespace) {
-        return trimmed;
-    }
-    tail.trim_start()
-}
-
-fn line_is_legacy_done_item(line: &str) -> bool {
-    let trimmed = line.trim();
-    let after_marker = trim_tracked_parent_prefix(line);
-    trimmed.starts_with("\u{2705}")
-        || after_marker.starts_with("[x]")
-        || after_marker.starts_with("[X]")
-        || after_marker.starts_with("[done]")
-}
-
 #[derive(Clone, Copy)]
 enum TrackedList {
     Backlog,
@@ -821,29 +792,13 @@ pub fn icebox_reap(file: &Path) -> Result<()> {
 fn remove_from_list(file: &Path, list: TrackedList, target: &str, contains: bool) -> Result<()> {
     let (full_content, comp) = find_tracked_list_component(file, list)?;
     let existing = &full_content[comp.open_end..comp.close_start];
-    let lines: Vec<&str> = existing.lines().collect();
-    let new_lines: Vec<String> = if contains {
-        lines
-            .iter()
-            .filter(|line| !line.contains(target))
-            .map(|s| s.to_string())
-            .collect()
-    } else {
-        lines
-            .iter()
-            .filter(|line| {
-                let trimmed = trim_tracked_parent_prefix(line);
-                trimmed != target
-            })
-            .map(|s| s.to_string())
-            .collect()
-    };
+    let (new_content, removed) =
+        backlog::op_remove_matching_tracked_line(existing, target, contains);
 
-    if new_lines.len() == lines.len() {
+    if !removed {
         eprintln!("[{}] no matching item found", list.label());
     }
 
-    let new_content = new_lines.join("\n");
     let new_doc = comp.replace_content(&full_content, &new_content);
     persist_pending_write(file, &full_content, &new_doc)?;
     Ok(())
@@ -864,20 +819,13 @@ pub fn icebox_remove(file: &Path, target: &str, contains: bool) -> Result<()> {
 pub fn prune(file: &Path) -> Result<()> {
     let (full_content, comp) = find_pending_component(file)?;
     let existing = &full_content[comp.open_end..comp.close_start];
-    let lines: Vec<&str> = existing.lines().collect();
-    let new_lines: Vec<String> = lines
-        .iter()
-        .filter(|line| !line_is_legacy_done_item(line))
-        .map(|s| s.to_string())
-        .collect();
+    let (new_content, removed) = backlog::op_prune_legacy_done_lines(existing);
 
-    if new_lines.len() == lines.len() {
+    if removed == 0 {
         eprintln!("[pending] no completed items to prune");
         return Ok(());
     }
 
-    let removed = lines.len() - new_lines.len();
-    let new_content = new_lines.join("\n");
     let new_doc = comp.replace_content(&full_content, &new_content);
     persist_pending_write(file, &full_content, &new_doc)?;
     eprintln!("[pending] pruned {} completed items", removed);

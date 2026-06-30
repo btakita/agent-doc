@@ -754,6 +754,65 @@ pub fn normalize_pending_id(id: &str) -> String {
     id.trim().trim_start_matches('#').to_ascii_lowercase()
 }
 
+pub fn trim_tracked_parent_prefix(line: &str) -> &str {
+    let trimmed = line.trim();
+    if let Some(rest) = trimmed.strip_prefix("- ") {
+        return rest.trim_start();
+    }
+
+    let digit_len = trimmed.bytes().take_while(|b| b.is_ascii_digit()).count();
+    if digit_len == 0 {
+        return trimmed;
+    }
+    let (_, tail) = trimmed.split_at(digit_len);
+    let Some(tail) = tail.strip_prefix('.') else {
+        return trimmed;
+    };
+    if !tail.starts_with(char::is_whitespace) {
+        return trimmed;
+    }
+    tail.trim_start()
+}
+
+pub fn line_is_legacy_done_item(line: &str) -> bool {
+    let trimmed = line.trim();
+    let after_marker = trim_tracked_parent_prefix(line);
+    trimmed.starts_with("\u{2705}")
+        || after_marker.starts_with("[x]")
+        || after_marker.starts_with("[X]")
+        || after_marker.starts_with("[done]")
+}
+
+pub fn op_remove_matching_tracked_line(body: &str, target: &str, contains: bool) -> (String, bool) {
+    let lines: Vec<&str> = body.lines().collect();
+    let new_lines: Vec<String> = if contains {
+        lines
+            .iter()
+            .filter(|line| !line.contains(target))
+            .map(|line| line.to_string())
+            .collect()
+    } else {
+        lines
+            .iter()
+            .filter(|line| trim_tracked_parent_prefix(line) != target)
+            .map(|line| line.to_string())
+            .collect()
+    };
+    let removed = new_lines.len() != lines.len();
+    (new_lines.join("\n"), removed)
+}
+
+pub fn op_prune_legacy_done_lines(body: &str) -> (String, usize) {
+    let lines: Vec<&str> = body.lines().collect();
+    let new_lines: Vec<String> = lines
+        .iter()
+        .filter(|line| !line_is_legacy_done_item(line))
+        .map(|line| line.to_string())
+        .collect();
+    let removed = lines.len().saturating_sub(new_lines.len());
+    (new_lines.join("\n"), removed)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SymptomDedupeKey {
     pub invariant_id: String,
@@ -5273,5 +5332,35 @@ mod tests {
         let report = detect_dropped_from_history(current, baseline, &HashSet::new()).unwrap();
         let ids: Vec<&str> = report.dropped.iter().map(|i| i.id.as_str()).collect();
         assert_eq!(ids, vec!["item1"]);
+    }
+
+    #[test]
+    fn remove_matching_tracked_line_uses_parent_prefix_for_exact_match() {
+        let body = "1. [ ] [#one] First\n- [ ] [#two] Second\n  - child detail";
+
+        let (updated, removed) = op_remove_matching_tracked_line(body, "[ ] [#one] First", false);
+
+        assert!(removed);
+        assert_eq!(updated, "- [ ] [#two] Second\n  - child detail");
+    }
+
+    #[test]
+    fn remove_matching_tracked_line_supports_contains_match() {
+        let body = "- [ ] [#one] First\n- [ ] [#two] Second";
+
+        let (updated, removed) = op_remove_matching_tracked_line(body, "#two", true);
+
+        assert!(removed);
+        assert_eq!(updated, "- [ ] [#one] First");
+    }
+
+    #[test]
+    fn prune_legacy_done_lines_removes_old_done_shapes() {
+        let body = "- [ ] [#open] Open\n1. [x] [#done] Done\n✅ legacy done\n- [done] named done";
+
+        let (updated, removed) = op_prune_legacy_done_lines(body);
+
+        assert_eq!(removed, 3);
+        assert_eq!(updated, "- [ ] [#open] Open");
     }
 }

@@ -6,6 +6,14 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.34.65
 
+- **Ack-content closeout now clears the live-buffer commit barrier.**
+  Socket `already_applied` retries that adopt a JetBrains ack-content proof now
+  mark the targeted live-buffer sidecar as synced before commit-barrier checks.
+  This keeps a response that is already visible in the editor from staying
+  blocked on an older unsynced live-buffer epoch while disk still lags the
+  editor. JetBrains plugin `0.2.200` also publishes the same synced-buffer proof
+  through the editor FFI when it writes ack-content.
+
 - **Socket `already_applied` closeout now carries ack-content proof.**
   JetBrains patch-id dedup paths now write the current editor buffer to the
   normal `.agent-doc/ack-content/<patch_id>.md` sidecar before returning

@@ -43,6 +43,7 @@ import java.security.MessageDigest
  * applied by the same plugin instance that handles the parent's patches.
  */
 class PatchWatcher(private val project: Project) : Disposable {
+    private val operatorTextAuthorityCapability = "operator_text_authority_v1"
 
     private data class RootState(
         val root: String,
@@ -147,10 +148,35 @@ class PatchWatcher(private val project: Project) : Disposable {
         val content = currentContentForAck(patch.file) ?: return false
         val ok = writeAckContent(patch.patchId, content, patch.file)
         if (ok) {
+            reportAckContentSynced(patch.file, content, source)
             LOG.info("[ack-content] already_applied source=$source patch_id ${patch.patchId} content_len=${content.length}")
         }
         return ok
     }
+
+    private fun reportAckContentSynced(filePath: String, content: String, source: String) {
+        val lib = AgentDocLib.get() ?: return
+        try {
+            lib.agent_doc_document_synced_digest_content_for_editor_v2(
+                filePath,
+                content,
+                EditorIdentity.id,
+                "jetbrains",
+                patchWatcherPluginVersion(),
+                operatorTextAuthorityCapability,
+            )
+            LOG.debug("[ack-content] synced live-buffer source=$source file=$filePath content_len=${content.length}")
+        } catch (_: UnsatisfiedLinkError) {
+            LOG.debug("[ack-content] synced live-buffer FFI unavailable for $filePath")
+        } catch (_: NoSuchMethodError) {
+            LOG.debug("[ack-content] synced live-buffer FFI missing for $filePath")
+        } catch (e: Throwable) {
+            LOG.debug("[ack-content] synced live-buffer report failed for $filePath: ${e.message}")
+        }
+    }
+
+    private fun patchWatcherPluginVersion(): String =
+        javaClass.`package`?.implementationVersion ?: "dev"
 
     fun start() {
         if (running) return

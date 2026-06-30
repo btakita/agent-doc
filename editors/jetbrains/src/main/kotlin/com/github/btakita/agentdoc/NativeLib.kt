@@ -245,6 +245,14 @@ interface AgentDocLib : Library {
         editor_version: String,
         capabilities_csv: String,
     )
+    fun agent_doc_document_synced_digest_content_for_editor_v2(
+        file_path: String,
+        content: String,
+        editor_id: String,
+        editor_kind: String,
+        editor_version: String,
+        capabilities_csv: String,
+    )
 
     /** Clear this editor instance's live-buffer sidecar for a closed document. */
     fun agent_doc_document_closed_for_editor(file_path: String, editor_id: String)

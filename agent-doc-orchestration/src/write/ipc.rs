@@ -1338,6 +1338,7 @@ pub fn materialize_response_in_current_exchange(
 pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
     file: &Path,
     patch_id: &str,
+    editor_id: Option<&str>,
     baseline: Option<&str>,
     content_ours: Option<&str>,
     normalize_prefix_lines: Option<&[String]>,
@@ -1521,6 +1522,14 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
     }
 
     repair_ipc_decision_visible_state(file, &repair_decision, Some(patch_id))?;
+    if repair_decision.snap_source.is_ack_content_proven() {
+        mark_ack_content_live_buffer_synced(
+            file,
+            patch_id,
+            editor_id,
+            &repair_decision.snapshot_content,
+        );
+    }
     snapshot::save(file, &repair_decision.snapshot_content)?;
     let crdt_doc = agent_doc_merge::crdt::CrdtDoc::from_text(&repair_decision.snapshot_content);
     snapshot::save_document_crdt(
@@ -1540,6 +1549,60 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
         ),
     );
     Ok(AlreadyAppliedSnapshotOutcome::Persisted)
+}
+
+pub(crate) fn mark_ack_content_live_buffer_synced(
+    file: &Path,
+    patch_id: &str,
+    editor_id: Option<&str>,
+    content: &str,
+) {
+    let Some(editor_id) = editor_id.map(str::trim).filter(|id| !id.is_empty()) else {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "ack_content_live_buffer_sync_skipped file={} patch_id={} reason=no_editor_id",
+                file.display(),
+                patch_id
+            ),
+        );
+        return;
+    };
+    let path = file
+        .canonicalize()
+        .unwrap_or_else(|_| file.to_path_buf())
+        .to_string_lossy()
+        .to_string();
+    match agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
+        &path,
+        content,
+        editor_id,
+        "ipc",
+        "unknown",
+        &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+    ) {
+        Ok(()) => crate::ops_log::log_op(
+            file,
+            &format!(
+                "ack_content_live_buffer_synced file={} patch_id={} editor_id={} len={} hash={}",
+                file.display(),
+                patch_id,
+                editor_id,
+                content.len(),
+                agent_doc_hash::content_hash(content)
+            ),
+        ),
+        Err(err) => crate::ops_log::log_op(
+            file,
+            &format!(
+                "ack_content_live_buffer_sync_failed file={} patch_id={} editor_id={} error={}",
+                file.display(),
+                patch_id,
+                editor_id,
+                err
+            ),
+        ),
+    }
 }
 
 pub(crate) fn normalization_prefix_observation_counts(

@@ -502,6 +502,7 @@ pub fn record_live_buffer_digest_for_editor(
             editor_version: None,
             capabilities: &[],
         },
+        false,
     )
 }
 
@@ -530,6 +531,7 @@ pub fn record_live_buffer_digest_content_for_editor(
             editor_version: None,
             capabilities: &[],
         },
+        false,
     )
 }
 
@@ -552,6 +554,36 @@ pub fn record_live_buffer_digest_content_for_editor_with_capabilities(
             editor_version: Some(editor_version),
             capabilities,
         },
+        false,
+    )
+}
+
+/// Record editor-visible content that is already synced/proven for commit.
+///
+/// Unlike the normal document-change report, this marks `last_synced_epoch` at the
+/// newly-written epoch. Editor integrations use it after an IPC ack-content proof:
+/// the patch is visible in the editor buffer, so the commit barrier must not keep
+/// treating an older live-buffer epoch as unsynced.
+pub fn record_live_buffer_synced_content_for_editor_with_capabilities(
+    file: &str,
+    content: &str,
+    editor_id: &str,
+    editor_kind: &str,
+    editor_version: &str,
+    capabilities: &[&str],
+) -> std::io::Result<()> {
+    write_live_buffer_snapshot_with_metadata(
+        file,
+        content.len(),
+        content_hash(content),
+        Some(content.to_string()),
+        LiveBufferSnapshotMetadata {
+            editor_id: Some(editor_id),
+            editor_kind: Some(editor_kind),
+            editor_version: Some(editor_version),
+            capabilities,
+        },
+        true,
     )
 }
 
@@ -561,6 +593,7 @@ fn write_live_buffer_snapshot_with_metadata(
     hash: String,
     content: Option<String>,
     metadata: LiveBufferSnapshotMetadata<'_>,
+    mark_synced: bool,
 ) -> std::io::Result<()> {
     let live_path = live_buffer_snapshot_path_for_editor(file, metadata.editor_id);
     let previous = read_live_buffer_snapshot(file, &live_path);
@@ -569,11 +602,15 @@ fn write_live_buffer_snapshot_with_metadata(
         .map(|snapshot| snapshot.edit_epoch)
         .unwrap_or(0)
         .saturating_add(1);
-    let last_synced_epoch = previous
-        .as_ref()
-        .map(|snapshot| snapshot.last_synced_epoch)
-        .unwrap_or(0)
-        .min(edit_epoch);
+    let last_synced_epoch = if mark_synced {
+        edit_epoch
+    } else {
+        previous
+            .as_ref()
+            .map(|snapshot| snapshot.last_synced_epoch)
+            .unwrap_or(0)
+            .min(edit_epoch)
+    };
     let state_vector_b64 = previous
         .as_ref()
         .and_then(|snapshot| snapshot.state_vector_b64.clone());
@@ -1482,6 +1519,39 @@ mod tests {
         assert_eq!(flushed[0].effective_last_synced_epoch, 2);
         assert!(flushed[0].disk_matches);
         assert!(!flushed[0].in_flight);
+    }
+
+    #[test]
+    fn synced_live_buffer_report_clears_epoch_barrier_before_disk_catches_up() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc").join("live-buffer")).unwrap();
+        let doc = tmp.path().join("ack-content-synced.md");
+        std::fs::write(&doc, "before\n").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        document_changed_with_content_for_editor(
+            &doc_str,
+            "before\nunsaved\n",
+            Some("jetbrains:test"),
+        );
+        assert!(editor_sync_statuses(&doc_str)[0].in_flight);
+
+        let ack_content = "before\n### Re: done\n";
+        record_live_buffer_synced_content_for_editor_with_capabilities(
+            &doc_str,
+            ack_content,
+            "jetbrains:test",
+            "jetbrains",
+            "test",
+            &[OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+        )
+        .unwrap();
+
+        let statuses = editor_sync_statuses(&doc_str);
+        assert_eq!(statuses.len(), 1);
+        assert_eq!(statuses[0].edit_epoch, statuses[0].last_synced_epoch);
+        assert!(!statuses[0].disk_matches);
+        assert!(!statuses[0].in_flight);
     }
 
     #[test]

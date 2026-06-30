@@ -357,7 +357,8 @@ pub fn try_ipc(
                 );
             }
         }
-        target_payload_to_live_editor(file, &mut socket_payload, "socket_patch");
+        let socket_editor_id =
+            target_payload_to_live_editor(file, &mut socket_payload, "socket_patch");
         crate::ops_log::log_op(
             file,
             &format!(
@@ -520,6 +521,14 @@ pub fn try_ipc(
                         let _ = std::fs::remove_file(path);
                     }
                     repair_ipc_decision_visible_state(file, &repair_decision, Some(&patch_id))?;
+                    if repair_decision.snap_source.is_ack_content_proven() {
+                        mark_ack_content_live_buffer_synced(
+                            file,
+                            &patch_id,
+                            socket_editor_id.as_deref(),
+                            &repair_decision.snapshot_content,
+                        );
+                    }
                     crate::ops_log::log_op(
                         file,
                         &format!(
@@ -680,6 +689,7 @@ pub fn try_ipc(
                 if persist_already_applied_socket_content_ours_snapshot(
                     file,
                     &patch_id,
+                    socket_editor_id.as_deref(),
                     baseline,
                     content_ours,
                     normalize_prefix_lines,
@@ -2656,6 +2666,23 @@ mod submodule_patch_routing_tests {
         fs::write(&doc, baseline).unwrap();
         crate::snapshot::save(&doc, baseline).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+        let editor_id = "jetbrains-test-editor";
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+            &doc_str,
+            editor_ack_content,
+            editor_id,
+            "jetbrains",
+            "test",
+            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+        )
+        .unwrap();
+        assert!(
+            agent_doc_debounce::editor_sync_statuses(&doc_str)
+                .iter()
+                .any(|status| status.in_flight),
+            "fixture should start with an in-flight editor epoch"
+        );
 
         let patch_id = "already-applied-ack-content";
         fs::write(
@@ -2698,12 +2725,19 @@ mod submodule_patch_routing_tests {
             baseline,
             "try_ipc should not directly overwrite disk while adopting editor proof"
         );
+        assert!(
+            agent_doc_debounce::editor_sync_statuses(&doc_str)
+                .iter()
+                .all(|status| !status.in_flight),
+            "already_applied ack-content should mark the targeted live-buffer epoch synced"
+        );
 
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             log.contains("ipc_socket_already_applied_skip_file_fallback")
                 && log.contains("ipc_socket_already_applied_snapshot")
-                && log.contains("snap_source=ack_content_sidecar"),
+                && log.contains("snap_source=ack_content_sidecar")
+                && log.contains("ack_content_live_buffer_synced"),
             "already_applied ack-content adoption should be auditable:\n{log}"
         );
     }
@@ -2846,6 +2880,7 @@ mod submodule_patch_routing_tests {
         let outcome = persist_already_applied_socket_content_ours_snapshot(
             &doc,
             "already-applied-missing",
+            None,
             Some(baseline),
             Some(content_ours),
             None,

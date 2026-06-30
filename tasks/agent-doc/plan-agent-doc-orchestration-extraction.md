@@ -460,7 +460,13 @@ should be deleted during extraction.
   delivery adapters while importing the focused exchange helpers directly.
 - `agent-doc-element-backlog` already owned open backlog id extraction; preflight
   now calls `open_backlog_ids_in_content` directly for `do #id` closeout
-  evidence instead of re-parsing backlog components locally.
+  evidence instead of re-parsing backlog components locally. It also owns pure
+  tracked-work target id normalization/extraction from
+  backlog/review/done/icebox component bodies, including preferred-component
+  selection and fallback to active backlog or other tracked-work components.
+  Write-side pending checks and cycle-state checkpoint normalization keep file
+  IO, persisted-cycle state, baselines, and guard formatting while calling the
+  focused backlog parser directly.
 - `agent-doc-turn` now owns committed-without-response-body closeout policy:
   detecting assistant `### Re:` response bodies in `agent:exchange` and deciding
   whether committed cycles with no visible response body pass, skip as no-op

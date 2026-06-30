@@ -81,6 +81,23 @@ describe('patchGuard', () => {
         assert.ok(source.includes('typing debounce timed out before reposition'));
     });
 
+    it('does not replay stale-generation patch refusals through delayed retry', () => {
+        const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
+        const verifyStart = source.indexOf('private verifyApplyProof(');
+        const verifyEnd = source.indexOf('/**', verifyStart);
+        const verifyBody = source.slice(verifyStart, verifyEnd);
+        const fileApplyFailedIdx = source.indexOf("'file_apply_failed'");
+
+        assert.ok(verifyStart >= 0, 'VS Code patch watcher must have apply-proof validation');
+        assert.ok(verifyBody.includes('stale editor generation before ${operation}'));
+        assert.strictEqual(
+            verifyBody.includes('this.schedulePatchRetry(patchFilePath)'),
+            false,
+            'stale editor-generation refusal must not queue an old IPC payload for delayed replay',
+        );
+        assert.ok(fileApplyFailedIdx >= 0, 'failed apply must be handed back to binary retry accounting');
+    });
+
     it('requires ack-content proof before file patch apply can delete the patch file', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
         const applyIdx = source.indexOf('const applied = await this.applyPatch(patch, uri.fsPath)');

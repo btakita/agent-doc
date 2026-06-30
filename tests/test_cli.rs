@@ -3334,6 +3334,10 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     }
     let write_adapter =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    let realtime_write_policy = fs::read_to_string(
+        manifest_dir.join("agent-doc-document-realtime/src/write_policy.rs"),
+    )
+    .unwrap();
     for forbidden in [
         "pub(crate) fn line_is_carry_forward_signal",
         "fn carry_forward_signal_candidate",
@@ -3346,8 +3350,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         );
     }
     assert!(
-        write_adapter.contains("use agent_doc_turn::closeout_signal::line_is_carry_forward_signal"),
-        "write.rs should import carry-forward closeout signal policy directly"
+        realtime_write_policy
+            .contains("use agent_doc_turn::closeout_signal::line_is_carry_forward_signal"),
+        "realtime write policy should import carry-forward closeout signal policy directly"
     );
     for required in [
         "pub enum CloseoutGuardReason",
@@ -11723,6 +11728,72 @@ fn test_agent_doc_document_realtime_owns_safe_mutation_classification() {
             && git_source.contains("classify_committed_historical_agent_doc_mutation"),
         "git.rs should call the focused realtime safe mutation policy directly"
     );
+}
+
+#[test]
+fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let realtime_write_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime/src/write_policy.rs"))
+            .unwrap();
+    for required_snippet in [
+        "pub enum SnapshotPersistMode",
+        "pub fn snapshot_persist_mode",
+        "pub fn snapshot_persist_mode_with_current",
+        "pub fn snapshot_content_to_persist",
+        "pub fn ipc_snapshot_would_absorb_live_prompt_drift_after_preflight",
+        "pub fn response_target_disjoint_from_user_edit",
+        "pub fn dropped_prompt_lines_after_content_ours",
+        "pub fn prompt_bearing_user_changes_between",
+        "pub fn exchange_component_text",
+        "merge_contents: impl FnOnce(&str, &str, &str) -> Option<String>",
+    ] {
+        assert!(
+            realtime_write_policy.contains(required_snippet),
+            "agent-doc-document-realtime must own snapshot/live-drift write policy: {required_snippet}"
+        );
+    }
+
+    let write_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    for forbidden_snippet in [
+        "enum SnapshotPersistMode",
+        "fn snapshot_persist_mode(",
+        "fn snapshot_persist_mode_with_current(",
+        "pub fn ipc_snapshot_would_absorb_live_prompt_drift_after_preflight",
+        "pub fn response_target_disjoint_from_user_edit",
+        "fn dropped_prompt_lines_after_content_ours(",
+        "fn prompt_bearing_user_changes_between(",
+        "fn exchange_component_text(",
+    ] {
+        assert!(
+            !write_source.contains(forbidden_snippet),
+            "write.rs must not re-own realtime snapshot/live-drift policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        write_source.contains("agent_doc_document_realtime::write_policy::{")
+            && write_source.contains("snapshot_persist_mode_with_current")
+            && write_source.contains("ipc_snapshot_would_absorb_live_prompt_drift_after_preflight"),
+        "write.rs should call focused realtime snapshot/live-drift policy directly"
+    );
+
+    let sim_world = fs::read_to_string(manifest_dir.join("src/sim_world.rs")).unwrap();
+    let sim_engine = fs::read_to_string(manifest_dir.join("src/sim_world/engine.rs")).unwrap();
+    for source in [sim_world, sim_engine] {
+        assert!(
+            !source.contains(
+                "agent_doc_orchestration::write::ipc_snapshot_would_absorb_live_prompt_drift_after_preflight"
+            ),
+            "root simulation should not use the old orchestration write policy path"
+        );
+        assert!(
+            !source.contains(
+                "agent_doc_orchestration::write::response_target_disjoint_from_user_edit"
+            ),
+            "root simulation should not use the old orchestration forward-merge path"
+        );
+    }
 }
 
 #[test]

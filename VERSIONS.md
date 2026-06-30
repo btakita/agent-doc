@@ -6,6 +6,15 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.34.65
 
+- **Editor IPC conflict replay is fail-closed across JetBrains and VS Code.**
+  JetBrains no longer keeps conflict-deferred patch ids or replays old IPC
+  payloads after an IntelliJ File Cache Conflict resolves; conflict detection now
+  records `file_cache_conflict_pending`, deletes the queued file patch, refreshes
+  visual tokens, and leaves response retry ownership with the binary. VS Code now
+  mirrors the same no-replay boundary for stale editor-generation apply-proof
+  failures while preserving active-typing debounce retries. JetBrains plugin
+  `0.2.201` and VS Code extension `0.2.35` include the editor-side changes.
+
 - **Socket `already_applied` now requires response materialization proof.**
   The already-applied IPC path no longer saves `content_ours` as the committed
   snapshot unless the expected response is actually present in the selected

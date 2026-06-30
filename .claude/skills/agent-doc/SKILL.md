@@ -2,7 +2,7 @@
 description: "Interactive markdown session. TRIGGER: user invokes /agent-doc <file>. Requires a markdown session document, installed CLI, and write+commit every cycle."
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.34.63"
+agent-doc-version: "0.34.65"
 ---
 
 # agent-doc
@@ -15,7 +15,7 @@ This shared hot path serves Claude Code, Codex, OpenCode, Cursor, and direct har
 
 ## Dynamic Context Map
 
-Use this SKILL.md as the hot-path router. Load linked files only when their branch is active: invocation and harness drift → [runbooks/harness-invocation.md](runbooks/harness-invocation.md); preflight planning → [runbooks/planning-dispatch.md](runbooks/planning-dispatch.md); response and pending updates → [runbooks/respond.md](runbooks/respond.md) plus [runbooks/pending-ops.md](runbooks/pending-ops.md); persistence and manual repair → [runbooks/persist-closeout.md](runbooks/persist-closeout.md) plus [runbooks/commit.md](runbooks/commit.md); context-authoring policy → [runbooks/dynamic-context.md](runbooks/dynamic-context.md); durable concept definitions and vocabulary → [okf/index.md](okf/index.md). Do not copy runbook or OKF detail back into this file unless it is required every cycle.
+Use this SKILL.md as the hot-path router. Load linked files only when their branch is active: invocation and harness drift → [runbooks/harness-invocation.md](runbooks/harness-invocation.md); preflight planning → [runbooks/planning-dispatch.md](runbooks/planning-dispatch.md); response and backlog updates → [runbooks/respond.md](runbooks/respond.md) plus [runbooks/pending-ops.md](runbooks/pending-ops.md); persistence and manual repair → [runbooks/persist-closeout.md](runbooks/persist-closeout.md) plus [runbooks/commit.md](runbooks/commit.md); context-authoring policy → [runbooks/dynamic-context.md](runbooks/dynamic-context.md); durable concept definitions and vocabulary → [okf/index.md](okf/index.md). Do not copy runbook or OKF detail back into this file unless it is required every cycle.
 
 ## Invocation
 
@@ -87,17 +87,17 @@ After preflight, run `agent-doc plan <FILE>` and treat `prompt_targets`, `execut
 
 Full detail (session-accretion anchors, streaming checkpoints, `#agent-doc-bug` plan proof): [runbooks/respond.md](runbooks/respond.md).
 
-### 1b. Update pending (template mode)
+### 1b. Update backlog (template mode)
 
-Mutate `<!-- agent:backlog -->` only through granular `agent-doc write` flags (`--pending-add`, `--done <id>`, `--pending-edit "id=text"`, `--pending-gate`, `--pending-ungate`, `--pending-reorder`, `--review-add`/`--review-edit`); full-replace via `patch:backlog`/`patch:review` is rejected.
+Mutate `<!-- agent:backlog -->` only through granular `agent-doc write` flags (`--backlog-add`, `--done <id>`, `--backlog-edit "id=text"`, `--backlog-gate`, `--backlog-ungate`, `--backlog-reorder`, `--review-add`/`--review-edit`, `--icebox-add*`); full-replace via `patch:backlog`/`patch:review` is rejected.
 
-**Pending capture rule:** if the response creates concrete follow-up work, add it to `agent:backlog` in the same cycle. Put new items at the beginning of `agent:backlog`. When one `agent-doc write` carries several `--pending-add` flags, they land in flag order top-down — the first flag is topmost ("what you read is what you get") — and the `agent:queue` backlog mirror matches that order; for a specific interleave with existing items use `--pending-add-after`/`--pending-add-before`. If you are extending an ordered batch already in pending, insert the new item adjacent to its predecessor. If the item is only a recommendation, include `[recommended]`.
+**Backlog capture rule:** if the response creates concrete follow-up work, add it to `agent:backlog` in the same cycle. Put new items at the beginning of `agent:backlog`. When one `agent-doc write` carries several `--backlog-add` flags, they land in flag order top-down — the first flag is topmost ("what you read is what you get") — and the `agent:queue` backlog mirror matches that order; for a specific interleave with existing items use `--backlog-add-after`/`--backlog-add-before`. If you are extending an ordered batch already in backlog, insert the new item adjacent to its predecessor. If the item is only a recommendation, include `[recommended]`.
 
-**Plan-backed pending items:** create the plan file first and include that exact plan file path in the pending text. For multi-phase implementation work, prefer one backlog ID per actionable phase (for example `#crdtrespfx1`, `#crdtrespfx2`) instead of one parent ID that gets repeatedly `--pending-gate`d after partial progress; keep the parent plan file as context, but queue and close out concrete phase IDs.
+**Plan-backed backlog items:** create the plan file first and include that exact plan file path in the backlog text. For multi-phase implementation work, prefer one backlog ID per actionable phase (for example `#crdtrespfx1`, `#crdtrespfx2`) instead of one parent ID that gets repeatedly `--backlog-gate`d after partial progress; keep the parent plan file as context, but queue and close out concrete phase IDs.
 
-**`do #id` closeout rule:** record `--done` (completed), `--pending-gate` (code-complete, awaiting review/external validation), or explain concretely why it stays open — `session-check` enforces `pending_done_guard`.
+**`do #id` closeout rule:** record `--done` (completed), `--backlog-gate` (code-complete, awaiting review/external validation), or explain concretely why it stays open — `session-check` enforces `pending_done_guard`.
 
-**Complete over gate (default to finishing the work).** A turn's job is to **complete** its task, not to file a tracking item. Strongly prefer `--done`: do the implementation, tests, build/install, and verification this cycle and close the item. Use `--pending-gate` / `agent:review` (a gated `[/]` item) **only under exceptional conditions** — work that is genuinely blocked on something this turn cannot do (a required live editor/pane verification, an external approval, a CI/billing outage), and say exactly what unblocks it. Do **not** gate to avoid effort, to "track for later" what you could finish now, or to record a hypothesis. When follow-up work is real but not blocked, put it in `agent:backlog` as an **actionable** item, not in `agent:review`. If a gated review item's blocking condition is not actually met or is stale, convert it to an actionable backlog item (or `--done` it if already satisfied) and remove the review item — keep `agent:review` small (target < 10) so the actionable list stays legible. Prefer automated completion detection (log/state checks the binary can evaluate) over a human-gated review item wherever possible.
+**Complete over gate (default to finishing the work).** A turn's job is to **complete** its task, not to file a tracking item. Strongly prefer `--done`: do the implementation, tests, build/install, and verification this cycle and close the item. Use `--backlog-gate` / `agent:review` (a gated `[/]` item) **only under exceptional conditions** — work that is genuinely blocked on something this turn cannot do (a required live editor/pane verification, an external approval, a CI/billing outage), and say exactly what unblocks it. Do **not** gate to avoid effort, to "track for later" what you could finish now, or to record a hypothesis. When follow-up work is real but not blocked, put it in `agent:backlog` as an **actionable** item, not in `agent:review`. If a gated review item's blocking condition is not actually met or is stale, convert it to an actionable backlog item (or `--done` it if already satisfied) and remove the review item — keep `agent:review` small (target < 10) so the actionable list stays legible. Prefer automated completion detection (log/state checks the binary can evaluate) over a human-gated review item wherever possible.
 
 Full detail (cross-document rule, icebox, `agent:done`): [runbooks/respond.md](runbooks/respond.md) and [runbooks/pending-ops.md](runbooks/pending-ops.md).
 

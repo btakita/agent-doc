@@ -9,6 +9,8 @@ use agent_doc_document::commit_normalization::{
 };
 use agent_doc_document::transient_markers::strip_boundary_markers;
 use agent_doc_prompt_lines::text_line_looks_like_prompt_target;
+use agent_doc_queue::queue_prompt_drift::queue_prompt_deletions_between;
+use agent_doc_turn::closeout_signal::line_is_carry_forward_signal;
 use anyhow::Result;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
@@ -75,6 +77,341 @@ impl FullContentSourceProof {
 
 pub fn full_content_source_proof(before_content: Option<&str>) -> Option<FullContentSourceProof> {
     before_content.map(FullContentSourceProof::from_content)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SnapshotPersistMode {
+    FinalContent,
+    ContentOurs,
+}
+
+pub fn snapshot_persist_mode(
+    baseline: Option<&str>,
+    content_ours: &str,
+    final_content: &str,
+) -> SnapshotPersistMode {
+    if baseline.is_none() {
+        return SnapshotPersistMode::FinalContent;
+    }
+
+    let ours_norm = strip_boundary_markers(content_ours);
+    let final_norm = strip_boundary_markers(final_content);
+    if ours_norm == final_norm {
+        return SnapshotPersistMode::FinalContent;
+    }
+
+    if agent_doc_turn::document_drift::detect_bypassed_response_write_between(
+        &ours_norm,
+        &final_norm,
+    )
+    .is_some()
+    {
+        return SnapshotPersistMode::FinalContent;
+    }
+
+    let ours_prompt_norm = agent_doc_diff::strip_comments(&ours_norm);
+    let final_prompt_norm = agent_doc_diff::strip_comments(&final_norm);
+    let Some(diff_text) =
+        agent_doc_diff::unified_diff_from_contents(&ours_prompt_norm, &final_prompt_norm)
+    else {
+        return SnapshotPersistMode::FinalContent;
+    };
+    let has_prompt_bearing_user_drift = agent_doc_diff::classify_prompt_bearing_changes(&diff_text)
+        .iter()
+        .any(|change| {
+            matches!(
+                change.kind,
+                agent_doc_diff::PromptBearingChangeKind::PromptTarget
+                    | agent_doc_diff::PromptBearingChangeKind::ContentEdit
+            )
+        });
+
+    if has_prompt_bearing_user_drift {
+        SnapshotPersistMode::ContentOurs
+    } else {
+        SnapshotPersistMode::FinalContent
+    }
+}
+
+pub fn snapshot_persist_mode_with_current(
+    baseline: Option<&str>,
+    base: &str,
+    content_current: &str,
+    content_ours: &str,
+    final_content: &str,
+) -> SnapshotPersistMode {
+    if baseline.is_some()
+        && strip_boundary_markers(base) != strip_boundary_markers(content_current)
+        && (has_prompt_bearing_user_drift(base, content_current)
+            || non_exchange_drift_carries_directive(base, content_current))
+    {
+        return SnapshotPersistMode::ContentOurs;
+    }
+
+    snapshot_persist_mode(baseline, content_ours, final_content)
+}
+
+pub fn snapshot_content_to_persist<'a>(
+    mode: SnapshotPersistMode,
+    content_ours: &'a str,
+    final_content: &'a str,
+) -> &'a str {
+    match mode {
+        SnapshotPersistMode::FinalContent => final_content,
+        SnapshotPersistMode::ContentOurs => content_ours,
+    }
+}
+
+fn non_exchange_drift_carries_directive(base: &str, current: &str) -> bool {
+    let base_norm = strip_boundary_markers(base);
+    let current_norm = strip_boundary_markers(current);
+    if base_norm == current_norm {
+        return false;
+    }
+    if !outside_component_content_changed(&base_norm, &current_norm, "exchange") {
+        return false;
+    }
+    added_nonblank_lines(&base_norm, &current_norm)
+        .iter()
+        .any(|line| line_is_carry_forward_signal(line))
+}
+
+fn outside_component_content_changed(left: &str, right: &str, component_name: &str) -> bool {
+    let left_component = match agent_doc_element::element::parse(left) {
+        Ok(components) => components.into_iter().find(|c| c.name == component_name),
+        Err(_) => return left != right,
+    };
+    let right_component = match agent_doc_element::element::parse(right) {
+        Ok(components) => components.into_iter().find(|c| c.name == component_name),
+        Err(_) => return left != right,
+    };
+
+    let Some(left_component) = left_component else {
+        return left != right;
+    };
+    let Some(right_component) = right_component else {
+        return true;
+    };
+
+    left[..left_component.open_end] != right[..right_component.open_end]
+        || left[left_component.close_start..] != right[right_component.close_start..]
+}
+
+fn has_prompt_bearing_user_drift(base: &str, current: &str) -> bool {
+    !prompt_bearing_user_changes_between(base, current).is_empty()
+}
+
+pub fn prompt_bearing_user_changes_between(
+    base: &str,
+    current: &str,
+) -> Vec<agent_doc_diff::PromptBearingChange> {
+    let base_norm = strip_boundary_markers(base);
+    let current_norm = strip_boundary_markers(current);
+    let base_prompt_norm = agent_doc_diff::strip_comments(&base_norm);
+    let current_prompt_norm = agent_doc_diff::strip_comments(&current_norm);
+    let Some(diff_text) =
+        agent_doc_diff::unified_diff_from_contents(&base_prompt_norm, &current_prompt_norm)
+    else {
+        return Vec::new();
+    };
+    let mut changes: Vec<_> = agent_doc_diff::classify_prompt_bearing_changes(&diff_text)
+        .into_iter()
+        .filter(|change| {
+            matches!(
+                change.kind,
+                agent_doc_diff::PromptBearingChangeKind::PromptTarget
+                    | agent_doc_diff::PromptBearingChangeKind::ContentEdit
+            )
+        })
+        .collect();
+    if diff_text.lines().any(|line| {
+        let Some(added) = line.strip_prefix('+') else {
+            return false;
+        };
+        if line.starts_with("+++") {
+            return false;
+        }
+        let trimmed = added.trim();
+        trimmed.starts_with('❯') || text_line_looks_like_prompt_target(trimmed)
+    }) {
+        for line in diff_text.lines() {
+            let Some(added) = line.strip_prefix('+') else {
+                continue;
+            };
+            if line.starts_with("+++") {
+                continue;
+            }
+            let trimmed = added.trim();
+            if trimmed.starts_with('❯') || text_line_looks_like_prompt_target(trimmed) {
+                let text = trimmed
+                    .strip_prefix('❯')
+                    .unwrap_or(trimmed)
+                    .trim()
+                    .to_string();
+                if !changes.iter().any(|change| {
+                    change.kind == agent_doc_diff::PromptBearingChangeKind::PromptTarget
+                        && change.text.trim() == text
+                }) {
+                    changes.push(agent_doc_diff::PromptBearingChange {
+                        kind: agent_doc_diff::PromptBearingChangeKind::PromptTarget,
+                        text,
+                    });
+                }
+            }
+        }
+    }
+    changes
+}
+
+fn prompt_bearing_change_owned_by_content_ours(
+    change: &agent_doc_diff::PromptBearingChange,
+    owned_changes: &[agent_doc_diff::PromptBearingChange],
+) -> bool {
+    let text = normalized_prompt_line(&change.text);
+    owned_changes
+        .iter()
+        .any(|owned| owned.kind == change.kind && normalized_prompt_line(&owned.text) == text)
+}
+
+pub fn ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
+    baseline: &str,
+    snapshot_candidate: &str,
+    content_ours: &str,
+) -> bool {
+    let baseline_norm = strip_boundary_markers(baseline);
+    let candidate_norm = strip_boundary_markers(snapshot_candidate);
+    let ours_norm = strip_boundary_markers(content_ours);
+    if outside_component_content_changed(&baseline_norm, &candidate_norm, "exchange")
+        && outside_component_content_changed(&ours_norm, &candidate_norm, "exchange")
+    {
+        return true;
+    }
+
+    let candidate_changes = prompt_bearing_user_changes_between(baseline, snapshot_candidate);
+    if candidate_changes.is_empty() {
+        return false;
+    }
+    let owned_changes = prompt_bearing_user_changes_between(baseline, content_ours);
+    candidate_changes
+        .iter()
+        .any(|change| !prompt_bearing_change_owned_by_content_ours(change, &owned_changes))
+}
+
+fn added_nonblank_lines(baseline: &str, candidate: &str) -> Vec<String> {
+    let base: HashSet<&str> = baseline
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    candidate
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !base.contains(line))
+        .map(|line| line.to_string())
+        .collect()
+}
+
+pub fn response_target_disjoint_from_user_edit(
+    baseline: &str,
+    content_ours: &str,
+    candidate: &str,
+    merge_contents: impl FnOnce(&str, &str, &str) -> Option<String>,
+) -> bool {
+    if strip_boundary_markers(candidate) == strip_boundary_markers(content_ours) {
+        return false;
+    }
+    let user_added = added_nonblank_lines(baseline, candidate);
+    if user_added.is_empty() {
+        return false;
+    }
+    if !queue_prompt_deletions_between(baseline, candidate).is_empty() {
+        return false;
+    }
+
+    let baseline_ex = exchange_component_text(baseline);
+    let candidate_ex = exchange_component_text(candidate);
+    let ours_ex = exchange_component_text(content_ours);
+    let response_ex_added: HashSet<String> = added_nonblank_lines(&baseline_ex, &ours_ex)
+        .into_iter()
+        .collect();
+    let user_ex_added = added_nonblank_lines(&baseline_ex, &candidate_ex)
+        .into_iter()
+        .any(|line| !response_ex_added.contains(&line));
+    if user_ex_added {
+        return false;
+    }
+
+    let response_added_set: HashSet<String> = added_nonblank_lines(baseline, content_ours)
+        .into_iter()
+        .collect();
+    let user_carries_directive = user_added
+        .iter()
+        .filter(|line| !response_added_set.contains(*line))
+        .any(|line| line_is_carry_forward_signal(line));
+    if user_carries_directive {
+        return false;
+    }
+
+    let Some(merged) = merge_contents(baseline, content_ours, candidate) else {
+        return false;
+    };
+    if merged.contains("<<<<<<<") || merged.contains(">>>>>>>") {
+        return false;
+    }
+    let merged_lines: HashSet<&str> = merged
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    let response_added = added_nonblank_lines(baseline, content_ours);
+    response_added
+        .iter()
+        .all(|line| merged_lines.contains(line.as_str()))
+        && user_added
+            .iter()
+            .all(|line| merged_lines.contains(line.as_str()))
+}
+
+pub fn exchange_component_text(doc: &str) -> String {
+    let Ok(components) = agent_doc_element::element::parse(doc) else {
+        return String::new();
+    };
+    components
+        .iter()
+        .find(|component| component.name == "exchange")
+        .map(|component| component.content(doc).to_string())
+        .unwrap_or_default()
+}
+
+pub fn dropped_prompt_lines_after_content_ours(
+    baseline: &str,
+    candidate: &str,
+    content_ours: &str,
+) -> Vec<String> {
+    let baseline_ex = exchange_component_text(baseline);
+    let candidate_ex = exchange_component_text(candidate);
+    let content_ours_ex = exchange_component_text(content_ours);
+
+    let candidate_changes = prompt_bearing_user_changes_between(&baseline_ex, &candidate_ex);
+    if candidate_changes.is_empty() {
+        return Vec::new();
+    }
+    let owned_changes = prompt_bearing_user_changes_between(&baseline_ex, &content_ours_ex);
+    candidate_changes
+        .into_iter()
+        .filter(|change| change.kind == agent_doc_diff::PromptBearingChangeKind::PromptTarget)
+        .filter(|change| !prompt_bearing_change_owned_by_content_ours(change, &owned_changes))
+        .map(|change| change.text.trim().to_string())
+        .filter(|text| !text.is_empty() && !text.contains('\n'))
+        .collect()
+}
+
+fn normalized_prompt_line(line: &str) -> String {
+    line.trim()
+        .strip_prefix('❯')
+        .unwrap_or_else(|| line.trim())
+        .trim()
+        .to_string()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2012,5 +2349,273 @@ mod tests {
             classify_safe_out_of_band_agent_doc_mutation(snapshot_doc, file_doc),
             Some("exchange")
         );
+    }
+
+    #[test]
+    fn dropped_prompt_lines_after_content_ours_captures_unowned_prompt() {
+        let baseline = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nAnswered.\n",
+            "<!-- agent:boundary:b0 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let candidate = baseline.replace(
+            "<!-- agent:boundary:b0 -->",
+            "go\n<!-- agent:boundary:b0 -->",
+        );
+
+        let dropped = dropped_prompt_lines_after_content_ours(baseline, &candidate, baseline);
+        assert_eq!(dropped, vec!["go".to_string()]);
+    }
+
+    #[test]
+    fn dropped_prompt_lines_after_content_ours_empty_when_content_ours_owns_prompt() {
+        let baseline = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nAnswered.\n",
+            "<!-- agent:boundary:b0 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let with_go = baseline.replace(
+            "<!-- agent:boundary:b0 -->",
+            "go\n<!-- agent:boundary:b0 -->",
+        );
+
+        let dropped = dropped_prompt_lines_after_content_ours(baseline, &with_go, &with_go);
+        assert!(dropped.is_empty());
+    }
+
+    #[test]
+    fn explicit_baseline_preserves_concurrent_user_edits_for_next_cycle() {
+        let baseline = Some("baseline");
+        let content_ours =
+            "<!-- agent:exchange -->\n### Re: answer\nDone.\n<!-- /agent:exchange -->\n";
+        let final_content = "<!-- agent:exchange -->\n### Re: answer\nDone.\n❯ late follow-up\n<!-- /agent:exchange -->\n";
+
+        assert_eq!(
+            snapshot_persist_mode(baseline, content_ours, final_content),
+            SnapshotPersistMode::ContentOurs
+        );
+        assert_eq!(
+            snapshot_content_to_persist(
+                snapshot_persist_mode(baseline, content_ours, final_content),
+                content_ours,
+                final_content
+            ),
+            content_ours
+        );
+    }
+
+    #[test]
+    fn explicit_baseline_forward_merges_concurrent_comment_tail_into_this_cycle() {
+        let baseline = Some("baseline");
+        let base = "<!-- agent:exchange -->\n❯ prompt\n<!-- /agent:exchange -->\n###\n\n<!--\nold note\n-->\n";
+        let content_current = "<!-- agent:exchange -->\n❯ prompt\n<!-- /agent:exchange -->\n###\n\n<!--\nedited note\n-->\n";
+        let content_ours = "<!-- agent:exchange -->\n❯ prompt\n### Re: answer\nDone.\n<!-- /agent:exchange -->\n###\n\n<!--\nold note\n-->\n";
+        let final_content = "<!-- agent:exchange -->\n❯ prompt\n### Re: answer\nDone.\n<!-- /agent:exchange -->\n###\n\n<!--\nedited note\n-->\n";
+
+        assert_eq!(
+            snapshot_persist_mode_with_current(
+                baseline,
+                base,
+                content_current,
+                content_ours,
+                final_content
+            ),
+            SnapshotPersistMode::FinalContent
+        );
+        assert_eq!(
+            snapshot_content_to_persist(
+                snapshot_persist_mode_with_current(
+                    baseline,
+                    base,
+                    content_current,
+                    content_ours,
+                    final_content
+                ),
+                content_ours,
+                final_content
+            ),
+            final_content
+        );
+    }
+
+    #[test]
+    fn implicit_baseline_still_persists_final_merged_disk_state() {
+        let content_ours =
+            "<!-- agent:exchange -->\n### Re: answer\nDone.\n<!-- /agent:exchange -->\n";
+        let final_content = "<!-- agent:exchange -->\n### Re: answer\nDone.\n❯ late follow-up\n<!-- /agent:exchange -->\n";
+
+        assert_eq!(
+            snapshot_persist_mode(None, content_ours, final_content),
+            SnapshotPersistMode::FinalContent
+        );
+        assert_eq!(
+            snapshot_content_to_persist(
+                snapshot_persist_mode(None, content_ours, final_content),
+                content_ours,
+                final_content
+            ),
+            final_content
+        );
+    }
+
+    #[test]
+    fn explicit_baseline_keeps_final_content_when_delta_is_prior_streamed_agent_prefix() {
+        let baseline = Some("baseline");
+        let content_ours = "<!-- agent:exchange -->\nImplemented and verified.\n\nVerification:\n- `cargo test`\n<!-- /agent:exchange -->\n";
+        let final_content = "<!-- agent:exchange -->\n### Re: orchestrate streaming — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test`\n<!-- /agent:exchange -->\n";
+
+        assert_eq!(
+            snapshot_persist_mode(baseline, content_ours, final_content),
+            SnapshotPersistMode::FinalContent
+        );
+        assert_eq!(
+            snapshot_content_to_persist(
+                snapshot_persist_mode(baseline, content_ours, final_content),
+                content_ours,
+                final_content
+            ),
+            final_content
+        );
+    }
+
+    #[test]
+    fn response_target_disjoint_from_user_edit_carries_queue_directives_forward() {
+        let baseline = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #fix\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#fix]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let ours = baseline.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: do #fix — opus-4-8\n\nImplemented.\n<!-- /agent:exchange -->",
+        );
+        let candidate = ours.replace(
+            "- do [#fix]\n<!-- /agent:queue -->",
+            "- do [#fix]\n- do [#user-added-directive]\n<!-- /agent:queue -->",
+        );
+
+        assert!(!response_target_disjoint_from_user_edit(
+            baseline,
+            &ours,
+            &candidate,
+            |_, _, candidate| Some(candidate.to_string())
+        ));
+    }
+
+    #[test]
+    fn response_target_disjoint_from_user_edit_accepts_plain_outside_edit() {
+        let baseline = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #fix\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!--\nold parked note body\n-->\n",
+        )
+        .to_string();
+        let ours = baseline.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: do #fix — opus-4-8\n\nImplemented and verified with a long-enough response body to matter.\n<!-- /agent:exchange -->",
+        );
+        let candidate = ours.replace("old parked note body", "edited parked note body");
+
+        assert!(response_target_disjoint_from_user_edit(
+            &baseline,
+            &ours,
+            &candidate,
+            |_, _, candidate| Some(candidate.to_string())
+        ));
+    }
+
+    #[test]
+    fn response_target_disjoint_from_user_edit_blocks_unproven_queue_deletion() {
+        let baseline = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #fix\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#keep]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!--\nold parked note body\n-->\n",
+        )
+        .to_string();
+        let ours = baseline.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: do #fix — opus-4-8\n\nImplemented and verified with a long-enough response body to matter.\n<!-- /agent:exchange -->",
+        );
+        let candidate = ours
+            .replace("- do [#keep]\n", "")
+            .replace("old parked note body", "edited parked note body");
+
+        assert!(!response_target_disjoint_from_user_edit(
+            &baseline,
+            &ours,
+            &candidate,
+            |_, _, candidate| Some(candidate.to_string())
+        ));
+    }
+
+    #[test]
+    fn response_target_disjoint_from_user_edit_blocks_response_rewrite_and_new_prompt() {
+        let baseline = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #fix\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let ours = baseline.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: do #fix — opus-4-8\n\nImplemented the fix and verified it end to end.\n<!-- /agent:exchange -->",
+        );
+        let rewritten = ours.replace(
+            "Implemented the fix and verified it end to end.",
+            "User rewrote the committed response body inside the live buffer.",
+        );
+        let new_prompt = ours.replace(
+            "<!-- /agent:exchange -->",
+            "❯ a brand new prompt typed during closeout\n<!-- /agent:exchange -->",
+        );
+
+        for candidate in [rewritten, new_prompt, ours.clone()] {
+            assert!(!response_target_disjoint_from_user_edit(
+                baseline,
+                &ours,
+                &candidate,
+                |_, _, candidate| Some(candidate.to_string())
+            ));
+        }
+    }
+
+    #[test]
+    fn response_target_disjoint_from_user_edit_requires_clean_merge() {
+        let baseline = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #fix\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!--\nold note\n-->\n",
+        );
+        let ours = baseline.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: do #fix — opus-4-8\n\nImplemented.\n<!-- /agent:exchange -->",
+        );
+        let candidate = ours.replace("old note", "edited note");
+
+        assert!(!response_target_disjoint_from_user_edit(
+            baseline,
+            &ours,
+            &candidate,
+            |_, _, _| None
+        ));
+        assert!(!response_target_disjoint_from_user_edit(
+            baseline,
+            &ours,
+            &candidate,
+            |_, _, _| Some("<<<<<<< conflict\n>>>>>>>".to_string())
+        ));
     }
 }

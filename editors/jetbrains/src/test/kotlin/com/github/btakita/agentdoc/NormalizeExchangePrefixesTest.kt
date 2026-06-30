@@ -232,14 +232,6 @@ One.
     }
 
     @Test
-    fun `memory disk conflict cancel classifier only rejects deferred unsaved divergence`() {
-        assertTrue(memoryDiskConflictCancelLikelyUtil(true, true, 11L, 12L))
-        assertFalse(memoryDiskConflictCancelLikelyUtil(false, true, 11L, 12L))
-        assertFalse(memoryDiskConflictCancelLikelyUtil(true, false, 11L, 12L))
-        assertFalse(memoryDiskConflictCancelLikelyUtil(true, true, 12L, 12L))
-    }
-
-    @Test
     fun `component patch op override accepts known modes`() {
         assertEquals("replace", componentPatchModeOverrideUtil(" REPLACE "))
         assertEquals("append", componentPatchModeOverrideUtil("append"))
@@ -315,21 +307,27 @@ One.
     }
 
     @Test
-    fun `plugin defers file cache conflict writes before mutating document`() {
+    fun `plugin rejects file cache conflict writes before mutating document`() {
         val sourcePath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
             Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
         ).first { Files.exists(it) }
         val source = Files.readString(sourcePath)
 
-        assertTrue(source.contains("memoryDiskConflictDeferredPatchIds"))
         assertTrue(source.contains("hasPendingMemoryDiskConflict(targetFile)"))
-        assertTrue(source.contains("File Cache Conflict kept memory changes"))
+        assertTrue(source.contains("lastApplyBlockedForFileCacheConflict = true"))
         assertTrue(source.contains("ui_outcome=real_component_conflict"))
-        assertTrue(source.contains("schedulePatchRetry(patchFile, \"${'$'}UI_OUTCOME_REAL_COMPONENT_CONFLICT File Cache Conflict pending\")"))
+        assertTrue(source.contains("Patch blocked by File Cache Conflict; deleted queued payload"))
         assertTrue(source.contains("recordFileCacheConflictOps("))
         assertTrue(source.contains("\"editor_ipc_convergence\""))
         assertTrue(source.contains("\"write_finalize_ipc\""))
+        assertFalse(source.contains("memoryDiskConflictDeferredPatchIds"))
+        assertFalse(source.contains("markPatchDeferredForMemoryDiskConflict"))
+        assertFalse(source.contains("wasPatchDeferredForMemoryDiskConflict"))
+        assertFalse(source.contains("clearPatchDeferredForMemoryDiskConflict"))
+        assertFalse(source.contains("memoryDiskConflictCancelLikelyUtil"))
+        assertFalse(source.contains("File Cache Conflict kept memory changes"))
+        assertFalse(source.contains("File Cache Conflict pending\")"))
     }
 
     @Test
@@ -397,20 +395,11 @@ One.
         val patchWatcher = Files.readString(patchWatcherPath)
         val visualHighlighter = Files.readString(visualHighlighterPath)
 
-        val pendingConflict = patchWatcher.indexOf("hasPendingMemoryDiskConflict(targetFile)")
-        val pendingRefresh = patchWatcher.indexOf("refreshVisualHighlightersAfterFileCacheConflict(targetFile, \"pending\")")
-        val cancelClassifier = patchWatcher.indexOf("memoryDiskConflictCancelLikelyUtil(")
-        val cancelRefresh = patchWatcher.indexOf("refreshVisualHighlightersAfterFileCacheConflict(targetFile, \"cancel\")")
-        val clearConflict = patchWatcher.indexOf("clearPatchDeferredForMemoryDiskConflict(patch)")
-        val resolvedRefresh = patchWatcher.indexOf("refreshVisualHighlightersAfterFileCacheConflict(targetFile, \"resolved\")")
-        val documentWrite = patchWatcher.indexOf("applyMinimalDocumentEditUtil(document, content, result)")
-        val appliedRefresh = patchWatcher.indexOf("refreshVisualHighlightersAfterFileCacheConflict(targetFile, \"applied\")")
+        val conflict = patchWatcher.indexOf("hasPendingMemoryDiskConflict(targetFile)")
+        val conflictRefresh = patchWatcher.indexOf("refreshVisualHighlightersAfterFileCacheConflict(targetFile, \"blocked\")")
 
         assertTrue(visualHighlighter.contains("fun refreshFile(file: VirtualFile)"))
-        assertTrue(pendingConflict >= 0 && pendingRefresh > pendingConflict)
-        assertTrue(cancelClassifier >= 0 && cancelRefresh > cancelClassifier)
-        assertTrue(clearConflict >= 0 && resolvedRefresh > clearConflict)
-        assertTrue(documentWrite >= 0 && appliedRefresh > documentWrite)
+        assertTrue(conflict >= 0 && conflictRefresh > conflict)
         assertTrue(patchWatcher.contains("VisualHighlighterManager.getInstance(project).refreshFile(targetFile)"))
     }
 

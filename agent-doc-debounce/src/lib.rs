@@ -1051,6 +1051,23 @@ fn live_buffer_snapshot_diverges_from_content(
         }
     }
 
+    if snapshot.has_capability(OPERATOR_TEXT_AUTHORITY_CAPABILITY) {
+        log_live_buffer_decision_with_details(
+            file,
+            "diverges",
+            "operator_text_authority_digest_differs",
+            &format!(
+                " buffer_len={} buffer_hash={} expected_len={} expected_hash={} editor_id={}",
+                snapshot.len,
+                snapshot.hash,
+                expected_len,
+                expected_hash,
+                snapshot.editor_id.as_deref().unwrap_or("-")
+            ),
+        );
+        return true;
+    }
+
     // #pcp2 write-provenance positive attribution: if agent-doc recorded a disk
     // write to this document *after* the editor last reported its buffer, the
     // editor digest lags agent-doc's own write — not a user edit — so suppress.
@@ -1829,6 +1846,49 @@ mod tests {
         assert!(
             !log.contains("reason=write_provenance_newer_than_buffer"),
             "write provenance must not suppress content-backed operator text: {log}"
+        );
+    }
+
+    #[test]
+    fn write_provenance_does_not_suppress_capability_backed_operator_digest() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc").join("live-buffer")).unwrap();
+        let doc = tmp.path().join("prov-capability-backed-unsaved.md");
+        std::fs::write(&doc, "saved").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        let unsaved = "saved plus operator text";
+        write_live_buffer_snapshot_with_metadata(
+            &doc_str,
+            unsaved.len(),
+            content_hash(unsaved),
+            None,
+            LiveBufferSnapshotMetadata {
+                editor_id: Some("jetbrains-test"),
+                editor_kind: Some("jetbrains"),
+                editor_version: Some("test"),
+                capabilities: &[OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+            },
+            false,
+        )
+        .unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        record_write_provenance(&doc_str, 5, &content_hash("saved"), "wid-stale", "agent").unwrap();
+
+        assert!(
+            live_buffer_diverges_from_content(&doc_str, "saved").is_some(),
+            "operator-authority digest must remain protected even when older than write provenance"
+        );
+        let log = std::fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log"))
+            .expect("ops.log written");
+        assert!(
+            log.contains("reason=operator_text_authority_digest_differs"),
+            "expected operator-authority digest divergence marker, got: {log}"
+        );
+        assert!(
+            !log.contains("reason=write_provenance_newer_than_buffer"),
+            "write provenance must not suppress operator-authority digest: {log}"
         );
     }
 

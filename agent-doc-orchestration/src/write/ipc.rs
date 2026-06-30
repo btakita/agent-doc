@@ -4,7 +4,7 @@ use super::*;
 use crate::frontmatter_io;
 use agent_doc_document_realtime::write_policy::{
     WholeBufferAuthority, WholeBufferAuthorityFacts, WholeBufferDelivery,
-    WholeBufferDeliveryAction, decide_whole_buffer_delivery,
+    WholeBufferDeliveryAction, decide_whole_buffer_delivery, exchange_component_text,
 };
 #[cfg(test)]
 use agent_doc_element_exchange::extract_post_commit_normalization_targets;
@@ -1051,8 +1051,12 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
     // falls through to a visible-repair-required content_ours adoption. The
     // caller must prove the editor/worktree accepted that repaired state before
     // closeout can commit.
-    if response_target_disjoint_from_user_edit(base, &queue_reconciled_ours, &candidate)
-        && let Ok(union) = crate::merge::merge_contents(base, &queue_reconciled_ours, &candidate)
+    if response_target_disjoint_from_user_edit(
+        base,
+        &queue_reconciled_ours,
+        &candidate,
+        |base, ours, theirs| crate::merge::merge_contents(base, ours, theirs).ok(),
+    ) && let Ok(union) = crate::merge::merge_contents(base, &queue_reconciled_ours, &candidate)
         && !union.contains("<<<<<<<")
     {
         crate::ops_log::log_op(

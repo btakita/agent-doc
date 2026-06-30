@@ -6,7 +6,8 @@ use agent_doc_document_realtime::write_policy::live_prompt_drift_auto_recovery_s
 use agent_doc_document_realtime::write_policy::{
     AckMismatchRecovery, classify_ack_mismatch_recovery,
     exchange_change_is_safe_historical_reduction, live_prompt_drift_recovery_target,
-    snapshot_contains_dropped_prompt, stale_snapshot_reset_drift,
+    prompt_bearing_user_changes_between, snapshot_contains_dropped_prompt,
+    stale_snapshot_reset_drift,
 };
 
 pub fn guard_no_stale_snapshot_reset_drift(

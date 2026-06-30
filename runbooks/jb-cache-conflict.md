@@ -4,8 +4,8 @@ When IntelliJ has a session document open and the binary writes through IPC, the
 
 ## Dialog Contract
 
-- **Accept** — the plugin applies the patch through its Document API. The cycle reaches `committed` normally; nothing else for the user to do.
-- **Cancel** — the plugin must refuse the apply and signal failure so the binary can recover or fail closed. Historically the working tree could be left with a partial write while the cycle stayed at `WriteApplied` — see "Recovery" below.
+- **Accept / Load FS changes** — IntelliJ resolves its cache state, but the plugin must not replay a payload that was already blocked by conflict detection. The binary-owned retry path keeps responsibility for the response.
+- **Cancel / Keep memory changes** — IntelliJ preserves the visible editor buffer. The plugin must not write over that memory state; it has already signaled failure so the binary can recover or fail closed. Historically the working tree could be left with a partial write while the cycle stayed at `WriteApplied` — see "Recovery" below.
 
 ## Recovery
 
@@ -42,27 +42,26 @@ After a successful compact commit, the binary writes the VCS refresh signal when
 
 ## Plugin-Side Notes
 
-The JetBrains plugin refuses to mutate an open document while IntelliJ has a pending File Cache Conflict for that file. It records the patch as conflict-deferred, waits for the dialog to resolve, and then:
+The JetBrains plugin refuses to mutate an open document while IntelliJ has a pending File Cache Conflict for that file. Conflict detection is terminal for that IPC payload:
 
-- after **Accept / Load FS changes**, retries against the reloaded document and can apply normally;
-- after **Cancel / Keep memory changes**, detects the still-unsaved memory/disk divergence, returns a failed socket acknowledgement, and leaves file-IPC patch files in place instead of writing over the user's chosen memory state.
+- socket IPC returns failure so the binary can retain the response and retry through the normal closeout path;
+- file-watch IPC records `file_cache_conflict_pending`, deletes the queued patch file, and leaves the response for binary-owned retry rather than replaying the old payload later;
+- the plugin refreshes `VisualHighlighterManager` on the blocked path so shared `agent_doc_visual_tokens_json` ranges do not remain stranded in the pre-conflict state.
 
-The same plugin-side path reschedules `VisualHighlighterManager` after pending/conflict-cancel checks, after an accepted dialog reloads the document, and after any deferred patch mutates the visible buffer. That keeps shared `agent_doc_visual_tokens_json` ranges reapplied across File Cache Conflict resolution instead of relying on IntelliJ's markdown cache refresh timing.
+The plugin must not keep a conflict-deferred patch id, wait for the dialog to resolve, or apply the old payload after the user chooses either **Accept / Load FS changes** or **Cancel / Keep memory changes**.
 
 The binary-side auto-recovery above remains the defense-in-depth path for older plugin versions or any case where the response had already reached the working tree before the refusal.
 
 ## Late-Accept Replay (`#jbccacceptdup`)
 
-When the user leaves the File Cache Conflict dialog open past the IPC ack window and accepts it **after** the cycle has already reached `commit_success`, the plugin still has a deferred IPC payload queued for the now-stale cycle. Accepting replays that payload on top of the committed working tree, producing a second `### Re: …` block that duplicates the response already in HEAD. The next `agent-doc preflight` then drift-recovers and auto-commits the duplicated state.
+Historically, when the user left the File Cache Conflict dialog open past the IPC ack window and accepted it **after** the cycle had already reached `commit_success`, the plugin still had a deferred IPC payload queued for the now-stale cycle. Accepting replayed that payload on top of the committed working tree, producing a second `### Re: …` block that duplicated the response already in HEAD. The next `agent-doc preflight` then drift-recovered and auto-committed the duplicated state.
 
 Deterministic SimWorld coverage for this branch lives in `src/agent-doc/src/sim_world.rs`:
 
 - `jb_cache_conflict_accept_late_replays_duplicate_response_today` — failing baseline: post-commit replay yields two `### Re:` blocks with `snapshot` still pinned to the original commit.
 - `jb_cache_conflict_accept_late_replay_manual_repair_recovers_today` — documented manual recovery: operator removes the replayed block and re-commits so the snapshot tracks the cleaned working tree (`dedupe_responses` only handles identical-body duplicates, so the operator-edit path is the safe baseline).
 
-Full fix plan: `tasks/agent-doc/plan-jb-cache-conflict-accept-duplicates-response.md`. Both scenarios should be replaced (or their assertions inverted) once the plugin / IPC apply path revalidates against HEAD before mutation and rejects the duplicate replay at apply time.
-
-Operator workaround until that fix ships: accept the File Cache Conflict dialog immediately. Accepting after the IPC ack window has expired is what feeds the duplicate.
+The current plugin-side fix is simpler than the original plan: pending File Cache Conflict blocks do not queue deferred payloads, so late Accept has no old response patch to replay. The historical SimWorld scenarios remain useful as regression references for older plugin versions.
 
 ## See Also
 

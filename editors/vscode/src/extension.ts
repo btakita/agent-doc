@@ -2687,9 +2687,6 @@ class PatchWatcher implements vscode.Disposable {
             return true;
         }
         this.outputChannel.appendLine(`PatchWatcher: stale editor generation before ${operation} for ${filePath}; rejecting patch`);
-        if (patchFilePath) {
-            this.schedulePatchRetry(patchFilePath);
-        }
         return false;
     }
 

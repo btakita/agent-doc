@@ -1710,7 +1710,7 @@ impl SimWorld {
         snapshot_candidate: &str,
     ) {
         self.doc = snapshot_candidate.to_string();
-        if agent_doc_orchestration::write::ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
+        if agent_doc_document_realtime::write_policy::ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
             baseline,
             snapshot_candidate,
             content_ours,
@@ -1737,7 +1737,7 @@ impl SimWorld {
         snapshot_candidate: &str,
     ) {
         self.doc = snapshot_candidate.to_string();
-        if !agent_doc_orchestration::write::ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
+        if !agent_doc_document_realtime::write_policy::ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
             baseline,
             snapshot_candidate,
             content_ours,
@@ -1745,10 +1745,13 @@ impl SimWorld {
             self.snapshot = snapshot_candidate.to_string();
             return;
         }
-        if agent_doc_orchestration::write::response_target_disjoint_from_user_edit(
+        if agent_doc_document_realtime::write_policy::response_target_disjoint_from_user_edit(
             baseline,
             content_ours,
             snapshot_candidate,
+            |base, ours, theirs| {
+                agent_doc_orchestration::merge::merge_contents(base, ours, theirs).ok()
+            },
         ) {
             let union = agent_doc_orchestration::merge::merge_contents(
                 baseline,

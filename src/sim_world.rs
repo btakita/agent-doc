@@ -5746,7 +5746,7 @@ fn ipc_snapshot_guard_blocks_live_queue_drift_after_preflight() {
     );
 
     assert!(
-        agent_doc_orchestration::write::ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
+        agent_doc_document_realtime::write_policy::ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
             &baseline,
             &ack_candidate,
             &content_ours,

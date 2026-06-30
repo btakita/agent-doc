@@ -72,9 +72,6 @@ class PatchWatcher(private val project: Project) : Disposable {
     /** Boundary reposition requests delayed because the target document is still being edited. */
     private val scheduledRepositionRetries = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
-    /** Patch ids that already hit an IntelliJ File Cache Conflict and must not write on Cancel. */
-    private val memoryDiskConflictDeferredPatchIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
-
     @Volatile private var memoryDiskConflictReflectionWarned = false
 
     /**
@@ -93,9 +90,7 @@ class PatchWatcher(private val project: Project) : Disposable {
      */
     @Volatile private var lastApplyWasNoOp = false
 
-    @Volatile private var lastApplyWasDeferredForConflict = false
-
-    @Volatile private var lastApplyRejectedConflictCancel = false
+    @Volatile private var lastApplyBlockedForFileCacheConflict = false
 
     @Volatile private var running = false
 
@@ -546,11 +541,16 @@ class PatchWatcher(private val project: Project) : Disposable {
                         stateGeneration,
                     )
                 } else {
+                    val retryReason = if (lastApplyBlockedForFileCacheConflict) {
+                        "file_cache_conflict_pending"
+                    } else {
+                        "socket_apply_failed"
+                    }
                     StateProjectionBridge.recordEditorRetryRequested(
                         patch.file,
                         patch.patchId,
                         stateGeneration,
-                        "socket_apply_failed",
+                        retryReason,
                     )
                 }
                 if (applied || wasNoOp) {
@@ -930,22 +930,15 @@ class PatchWatcher(private val project: Project) : Disposable {
                         stateGeneration,
                     )
                     patchFile.delete()
-                } else if (lastApplyWasDeferredForConflict) {
+                } else if (lastApplyBlockedForFileCacheConflict) {
                     StateProjectionBridge.recordEditorRetryRequested(
                         patch.file,
                         patch.patchId,
                         stateGeneration,
                         "file_cache_conflict_pending",
                     )
-                    schedulePatchRetry(patchFile, "$UI_OUTCOME_REAL_COMPONENT_CONFLICT File Cache Conflict pending")
-                } else if (lastApplyRejectedConflictCancel) {
-                    StateProjectionBridge.recordEditorRetryRequested(
-                        patch.file,
-                        patch.patchId,
-                        stateGeneration,
-                        "file_cache_conflict_cancelled",
-                    )
-                    LOG.warn("Patch rejected after File Cache Conflict cancel, leaving file for explicit retry: ${patchFile.name} $UI_OUTCOME_REAL_COMPONENT_CONFLICT")
+                    LOG.warn("Patch blocked by File Cache Conflict; deleted queued payload and left response for binary retry: ${patchFile.name} $UI_OUTCOME_REAL_COMPONENT_CONFLICT")
+                    patchFile.delete()
                 } else {
                     StateProjectionBridge.recordEditorRetryRequested(
                         patch.file,
@@ -1106,8 +1099,7 @@ class PatchWatcher(private val project: Project) : Disposable {
 
     private fun applyPatch(patch: IpcPatch): Boolean {
         lastApplyWasNoOp = false
-        lastApplyWasDeferredForConflict = false
-        lastApplyRejectedConflictCancel = false
+        lastApplyBlockedForFileCacheConflict = false
 
         var targetFile = LocalFileSystem.getInstance().findFileByPath(patch.file)
         if (targetFile == null) {
@@ -1144,52 +1136,22 @@ class PatchWatcher(private val project: Project) : Disposable {
         }
 
         if (hasPendingMemoryDiskConflict(targetFile)) {
-            markPatchDeferredForMemoryDiskConflict(patch)
-            lastApplyWasDeferredForConflict = true
+            lastApplyBlockedForFileCacheConflict = true
             val proof = fileCacheConflictProof(patch, document, targetFile, fdm)
             recordFileCacheConflictOps(
                 patch,
-                "pending",
+                "blocked",
                 "editor_ipc_convergence",
                 "apply_patch",
                 "write_finalize_ipc",
                 proof,
             )
             LOG.warn(
-                "[patch-watcher] File Cache Conflict pending for ${patch.file}; deferring patch until user resolves dialog " +
+                "[patch-watcher] File Cache Conflict pending for ${patch.file}; rejecting patch without mutating document " +
                     "$proof $UI_OUTCOME_REAL_COMPONENT_CONFLICT"
             )
-            refreshVisualHighlightersAfterFileCacheConflict(targetFile, "pending")
+            refreshVisualHighlightersAfterFileCacheConflict(targetFile, "blocked")
             return false
-        }
-
-        val wasDeferredForConflict = wasPatchDeferredForMemoryDiskConflict(patch)
-        if (memoryDiskConflictCancelLikelyUtil(
-                wasDeferredForConflict,
-                fdm.isDocumentUnsaved(document),
-                document.modificationStamp,
-                targetFile.modificationStamp,
-            )
-        ) {
-            lastApplyRejectedConflictCancel = true
-            val proof = fileCacheConflictProof(patch, document, targetFile, fdm)
-            recordFileCacheConflictOps(
-                patch,
-                "cancel",
-                "editor_ipc_convergence",
-                "apply_patch",
-                "write_finalize_ipc",
-                proof,
-            )
-            LOG.warn(
-                "[patch-watcher] File Cache Conflict kept memory changes for ${patch.file}; rejecting patch without mutating document " +
-                    "$proof $UI_OUTCOME_REAL_COMPONENT_CONFLICT"
-            )
-            refreshVisualHighlightersAfterFileCacheConflict(targetFile, "cancel")
-            return false
-        }
-        if (wasDeferredForConflict) {
-            clearPatchDeferredForMemoryDiskConflict(patch)
         }
 
         if (fdm.isDocumentUnsaved(document)) {
@@ -1197,9 +1159,6 @@ class PatchWatcher(private val project: Project) : Disposable {
         } else {
             // Reload from disk to pick up boundary changes from agent-doc boundary
             fdm.reloadFromDisk(document)
-        }
-        if (wasDeferredForConflict) {
-            refreshVisualHighlightersAfterFileCacheConflict(targetFile, "resolved")
         }
 
         // Compute the patched result OUTSIDE the write action to avoid
@@ -1346,9 +1305,6 @@ class PatchWatcher(private val project: Project) : Disposable {
             return false
         }
 
-        if (wasDeferredForConflict) {
-            refreshVisualHighlightersAfterFileCacheConflict(targetFile, "applied")
-        }
         if (!writeAckContent(patch.patchId, document.text, patch.file)) {
             return false
         }
@@ -1362,17 +1318,6 @@ class PatchWatcher(private val project: Project) : Disposable {
 
     private fun patchConflictKey(patch: IpcPatch): String =
         patch.patchId ?: patch.file
-
-    private fun markPatchDeferredForMemoryDiskConflict(patch: IpcPatch) {
-        memoryDiskConflictDeferredPatchIds.add(patchConflictKey(patch))
-    }
-
-    private fun wasPatchDeferredForMemoryDiskConflict(patch: IpcPatch): Boolean =
-        memoryDiskConflictDeferredPatchIds.contains(patchConflictKey(patch))
-
-    private fun clearPatchDeferredForMemoryDiskConflict(patch: IpcPatch) {
-        memoryDiskConflictDeferredPatchIds.remove(patchConflictKey(patch))
-    }
 
     private fun fileCacheConflictProof(
         patch: IpcPatch,
@@ -1495,7 +1440,7 @@ class PatchWatcher(private val project: Project) : Disposable {
         } catch (e: Exception) {
             if (!memoryDiskConflictReflectionWarned) {
                 memoryDiskConflictReflectionWarned = true
-                LOG.warn("[patch-watcher] unable to inspect IntelliJ File Cache Conflict state; proceeding without conflict deferral", e)
+                LOG.warn("[patch-watcher] unable to inspect IntelliJ File Cache Conflict state; proceeding without conflict guard", e)
             }
             false
         }
@@ -2337,14 +2282,6 @@ internal fun fullContentExpectedBufferMatchesUtil(
     }
     return sha256HexUtf8(currentContent) == expectedHash
 }
-
-internal fun memoryDiskConflictCancelLikelyUtil(
-    wasDeferredForConflict: Boolean,
-    documentUnsaved: Boolean,
-    documentModificationStamp: Long,
-    fileModificationStamp: Long,
-): Boolean =
-    wasDeferredForConflict && documentUnsaved && documentModificationStamp != fileModificationStamp
 
 internal fun componentPatchModeOverrideUtil(op: String?): String? =
     when (op?.trim()?.lowercase()) {

@@ -64,6 +64,69 @@ pub fn ensure_review_component_in_document(content: &str) -> Result<(String, ele
     Ok((content, comp))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewItemRemovalPlan {
+    pub content: String,
+    pub removed: Vec<backlog::PendingItem>,
+}
+
+fn canonicalize_review_content(content: &str, doc_id: &str) -> String {
+    let (canonical, _) = backlog::backfill(content, doc_id, &std::collections::HashSet::new());
+    canonical
+}
+
+fn take_review_items_from_document(
+    content: &str,
+    id: &str,
+    doc_id: &str,
+) -> Result<ReviewItemRemovalPlan> {
+    let comp =
+        find_review_component_in_content(content)?.context("document has no review component")?;
+    let existing = comp.content(content);
+    let (new_content, removed) = backlog::op_take_all_by_id(existing, id);
+    if removed.is_empty() {
+        anyhow::bail!(
+            "review item not found: #{}",
+            backlog::normalize_pending_id(id)
+        );
+    }
+    let canonical = canonicalize_review_content(&new_content, doc_id);
+    Ok(ReviewItemRemovalPlan {
+        content: comp.replace_content(content, &canonical),
+        removed,
+    })
+}
+
+/// Remove every review item matching `id` from already-read document content.
+///
+/// The returned document is updated in-memory only. Callers own file IO and
+/// writeback.
+pub fn remove_review_items_from_document(
+    content: &str,
+    id: &str,
+    doc_id: &str,
+) -> Result<ReviewItemRemovalPlan> {
+    take_review_items_from_document(content, id, doc_id)
+}
+
+/// Remove matching review items and normalize them to Done for archival.
+///
+/// The returned document no longer contains the review items; callers still own
+/// archiving the returned items to any external `agent:done` component and
+/// persisting the document.
+pub fn resolve_review_items_in_document(
+    content: &str,
+    id: &str,
+    doc_id: &str,
+) -> Result<ReviewItemRemovalPlan> {
+    let mut plan = take_review_items_from_document(content, id, doc_id)?;
+    for item in &mut plan.removed {
+        item.state = backlog::PendingState::Done;
+        item.gate_type = None;
+    }
+    Ok(plan)
+}
+
 /// A token-efficient view of one gated `agent:review` item (`#review-list-query`).
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ReviewItemView {
@@ -428,5 +491,64 @@ mod tests {
         assert_eq!(plan.report.skipped, vec!["rev1", "rev2"]);
         assert_eq!(plan.report.added, vec!["rev3"]);
         assert_eq!(plan.task_texts, vec![ungate_task_text("rev3")]);
+    }
+
+    #[test]
+    fn remove_review_items_removes_every_matching_id_from_document() {
+        let content = concat!(
+            "<!-- agent:review -->\n",
+            "- [/] [#saevon] activate early-ack\n",
+            "- [/] [#saevon] activate early-ack duplicate\n",
+            "- [/] [#keep1] keep this one\n",
+            "<!-- /agent:review -->\n",
+        );
+
+        let plan = remove_review_items_from_document(content, "saevon", "doc1").unwrap();
+        let review_body = find_review_component_in_content(&plan.content)
+            .unwrap()
+            .unwrap()
+            .content(&plan.content)
+            .to_string();
+
+        assert_eq!(plan.removed.len(), 2);
+        assert!(!review_body.contains("[#saevon]"), "{review_body}");
+        assert!(review_body.contains("[#keep1]"), "{review_body}");
+        assert_eq!(plan.removed[0].state, backlog::PendingState::Gated);
+    }
+
+    #[test]
+    fn remove_review_items_errors_when_id_is_absent() {
+        let content = concat!(
+            "<!-- agent:review -->\n",
+            "- [/] [#aa11] only item\n",
+            "<!-- /agent:review -->\n",
+        );
+
+        let err = remove_review_items_from_document(content, "nope99", "doc1").unwrap_err();
+
+        assert!(format!("{err:#}").contains("#nope99"), "{err:#}");
+    }
+
+    #[test]
+    fn resolve_review_items_normalizes_removed_items_to_done() {
+        let content = concat!(
+            "<!-- agent:review -->\n",
+            "- [/release] [#aa11] finished work\n",
+            "- [/] [#bb22] still gated\n",
+            "<!-- /agent:review -->\n",
+        );
+
+        let plan = resolve_review_items_in_document(content, "aa11", "doc1").unwrap();
+        let review_body = find_review_component_in_content(&plan.content)
+            .unwrap()
+            .unwrap()
+            .content(&plan.content)
+            .to_string();
+
+        assert_eq!(plan.removed.len(), 1);
+        assert_eq!(plan.removed[0].state, backlog::PendingState::Done);
+        assert!(plan.removed[0].gate_type.is_none());
+        assert!(!review_body.contains("[#aa11]"), "{review_body}");
+        assert!(review_body.contains("[#bb22]"), "{review_body}");
     }
 }

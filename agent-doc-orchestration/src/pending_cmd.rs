@@ -22,7 +22,8 @@ use agent_doc_element::element::is_backlog_component;
 use agent_doc_element_backlog::backlog;
 use agent_doc_element_review::{
     ReviewItemView, ReviewListFilter, UngateTasksReport, ensure_review_component_in_document,
-    find_review_component_in_content,
+    find_review_component_in_content, remove_review_items_from_document,
+    resolve_review_items_in_document,
 };
 
 thread_local! {
@@ -454,23 +455,12 @@ pub fn review_edit(file: &Path, id: &str, text: &str) -> Result<()> {
 /// document has no review component or no item matches the id.
 pub fn review_remove(file: &Path, id: &str) -> Result<()> {
     let full_content = std::fs::read_to_string(file).context("failed to read document")?;
-    let comp = find_review_component_in_content(&full_content)?
-        .context("document has no review component")?;
-    let existing = &full_content[comp.open_end..comp.close_start];
-    let (new_content, removed) = backlog::op_take_all_by_id(existing, id);
-    if removed.is_empty() {
-        anyhow::bail!(
-            "review item not found: #{}",
-            backlog::normalize_pending_id(id)
-        );
-    }
-    let canonical = canonicalize_component_content(file, &new_content);
-    let new_doc = comp.replace_content(&full_content, &canonical);
-    persist_pending_write(file, &full_content, &new_doc)?;
+    let plan = remove_review_items_from_document(&full_content, id, &doc_id_for(file))?;
+    persist_pending_write(file, &full_content, &plan.content)?;
     eprintln!(
         "[pending] review-remove: removed {} entr{} for #{}",
-        removed.len(),
-        if removed.len() == 1 { "y" } else { "ies" },
+        plan.removed.len(),
+        if plan.removed.len() == 1 { "y" } else { "ies" },
         backlog::normalize_pending_id(id)
     );
     Ok(())
@@ -483,32 +473,15 @@ pub fn review_remove(file: &Path, id: &str) -> Result<()> {
 /// no item matches the id.
 pub fn review_resolve(file: &Path, id: &str) -> Result<()> {
     let full_content = std::fs::read_to_string(file).context("failed to read document")?;
-    let comp = find_review_component_in_content(&full_content)?
-        .context("document has no review component")?;
-    let existing = &full_content[comp.open_end..comp.close_start];
-    let (new_content, mut removed) = backlog::op_take_all_by_id(existing, id);
-    if removed.is_empty() {
-        anyhow::bail!(
-            "review item not found: #{}",
-            backlog::normalize_pending_id(id)
-        );
-    }
-    // Archive as Done so the canonical agent:done entry renders `[x]`, regardless
-    // of the review item's prior gated/open state.
-    for item in &mut removed {
-        item.state = backlog::PendingState::Done;
-        item.gate_type = None;
-    }
-    let canonical = canonicalize_component_content(file, &new_content);
-    let new_doc = comp.replace_content(&full_content, &canonical);
-    let archived = crate::preflight::archive_pending_done(file, &new_doc, &removed)
+    let plan = resolve_review_items_in_document(&full_content, id, &doc_id_for(file))?;
+    let archived = crate::preflight::archive_pending_done(file, &plan.content, &plan.removed)
         .context("failed to archive resolved review item(s) to agent:done")?
-        .unwrap_or(new_doc);
+        .unwrap_or(plan.content);
     persist_pending_write(file, &full_content, &archived)?;
     eprintln!(
         "[pending] review-resolve: archived {} entr{} for #{} to agent:done",
-        removed.len(),
-        if removed.len() == 1 { "y" } else { "ies" },
+        plan.removed.len(),
+        if plan.removed.len() == 1 { "y" } else { "ies" },
         backlog::normalize_pending_id(id)
     );
     Ok(())

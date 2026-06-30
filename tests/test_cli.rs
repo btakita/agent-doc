@@ -6626,6 +6626,9 @@ fn test_agent_doc_element_review_owns_review_projection_and_ungate_planning() {
         "pub struct ReviewListFilter",
         "pub fn find_review_component_in_content",
         "pub fn ensure_review_component_in_document",
+        "pub struct ReviewItemRemovalPlan",
+        "pub fn remove_review_items_from_document",
+        "pub fn resolve_review_items_in_document",
         "pub fn review_item_views_from_content",
         "pub struct UngateTasksReport",
         "pub struct UngateTasksPlan",
@@ -6650,6 +6653,8 @@ fn test_agent_doc_element_review_owns_review_projection_and_ungate_planning() {
         "fn ungate_task_text",
         "fn extract_review_tags",
         "fn extract_review_next",
+        "backlog::op_take_all_by_id(existing, id)",
+        "item.state = backlog::PendingState::Done",
     ] {
         assert!(
             !pending_cmd.contains(forbidden),
@@ -6660,6 +6665,11 @@ fn test_agent_doc_element_review_owns_review_projection_and_ungate_planning() {
         pending_cmd.contains("find_review_component_in_content")
             && pending_cmd.contains("ensure_review_component_in_document"),
         "pending_cmd should call review component helpers from agent-doc-element-review"
+    );
+    assert!(
+        pending_cmd.contains("remove_review_items_from_document")
+            && pending_cmd.contains("resolve_review_items_in_document"),
+        "pending_cmd should delegate review removal/resolve planning to agent-doc-element-review directly"
     );
     assert!(
         pending_cmd.contains("agent_doc_element_review::review_item_views_from_content"),

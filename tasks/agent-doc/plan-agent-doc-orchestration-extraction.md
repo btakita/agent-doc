@@ -237,9 +237,11 @@ focused crate under the old path.
 - `agent-doc-prompt-contract` now owns harness prompt parsing policy: stripping
   binary-owned `agent-doc <file>` invocations, classifying claim/compact
   invocations as non-session prompts, matching the invoked file, preserving
-  non-invocation prompt bodies, and rendering the synthetic harness diff.
-  Orchestration keeps only the env/Codex-hook prompt-source adapter and imports
-  the focused parser directly.
+  non-invocation prompt bodies, reverse-scanning Codex hook prompt text for the
+  real invocation while ignoring fenced placeholders, and rendering the
+  synthetic harness diff. Orchestration keeps only the env/Codex-hook
+  prompt-source adapter plus cwd/canonicalization path IO and imports the
+  focused parser directly.
 - `agent-doc-prompt-context` now owns document-section prompt context selection:
   deciding when session-accretion warnings with prompt targets should use the
   bounded response-context pack, parsing components for that pack, and falling

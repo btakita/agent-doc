@@ -380,6 +380,12 @@ should be deleted during extraction.
   prompt. Orchestration keeps journal path resolution, JSONL sidecar IO, fsync,
   live-buffer sidecar reads, snapshot reads, and clear/remove effects while
   calling the focused queue policy directly.
+- `agent-doc-queue` also owns replay-neutralized queue-addition commit policy:
+  queue-entry commit signatures, entry count comparison, and deciding when
+  queue-only visible drift preserved an operator-added prompt even though
+  replay-hash normalization neutralized the queue component. Git closeout keeps
+  HEAD/snapshot/file reads, commit creation, and ops-log formatting while calling
+  the focused queue policy directly.
 - `agent-doc-queue` now owns drain-owner lease policy and sidecar storage for
   queue drains: the Claude `/loop` owner tag, persisted lease schema, TTL
   resolution, freshness filtering, loop-owner filtering, and read/write/clear
@@ -423,8 +429,11 @@ should be deleted during extraction.
 - `agent-doc-document::transient_markers` now owns transient document marker
   normalization: boundary stripping, `(HEAD)` heading cleanup, guard-marker
   stripping, pipeline-frontmatter normalization, and post-commit `Re:` heading
-  attribution normalization. It also owns pure post-commit document repair
-  policy for exchange prompt-prefix equivalence and stale committed-response
+  attribution normalization. It also owns replay-hash document normalization:
+  neutralizing queue component churn and queue activation frontmatter while
+  preserving real response-body changes for stale-cycle hash comparisons. It
+  also owns pure post-commit document repair policy for exchange prompt-prefix
+  equivalence and stale committed-response
   collapse: comparing exchange prompt-prefix-normalized documents, detecting
   collapsed committed response headings, and producing the log-free document
   repair that restores the committed exchange while preserving other component

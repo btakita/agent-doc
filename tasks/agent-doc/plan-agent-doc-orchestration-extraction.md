@@ -180,7 +180,9 @@ real orchestration work, such as reading files, resolving frontmatter in project
 context, querying git/tmux/process/IPC/SQLite state, building response TOCs, or
 supplying gathered facts to focused policy. Those adapters are not compatibility
 facades as long as they do not preserve an obsolete policy API or re-export a
-focused crate under the old path.
+focused crate under the old path. These effect adapters are part of the
+post-epic architecture; only compatibility shims/facades are temporary and
+should be deleted during extraction.
 
 ### Modified execution plan
 
@@ -424,6 +426,13 @@ focused crate under the old path.
   patchback responses through replay-guard classification. The write layer keeps
   retry/file/ops-log adapters and imports the focused template helpers directly
   instead of preserving `write::materialize` wrappers.
+- `agent-doc-template::stale_baseline` now owns stale-baseline template policy:
+  default append-component classification for `exchange` and `findings`,
+  boundary-insensitive comparison, append-vs-replace component filtering,
+  missing append component/content detection, empty append-content skips, and
+  non-template prefix fallback. Write/git paths keep git HEAD lookup, rebase
+  decision placement, retry/file/ops-log adapters, and tests that exercise the
+  effect boundary while importing the focused policy directly.
 - `agent-doc-element-exchange` now owns pure exchange element prompt/content
   helpers and prefix-repair normalization policy: exchange body lookup/length,
   prompt-line normalization and counting, line-segment splitting,

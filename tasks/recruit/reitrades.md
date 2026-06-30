@@ -7,6 +7,8 @@ agent_doc_write: crdt
 ## Status
 
 <!-- agent:status patch=replace -->
+
+🔴 (restart/recycle your supervisor)
 <!-- /agent:status -->
 
 ## Exchange
@@ -295,7 +297,7 @@ At **$125/hr**, that means:
 - Full listed scope: **$65k-$100k**
 
 For Artur, I would not lead with the full upper bound unless asked for every item. I would say: “I can phase this so you are not committing to the whole list upfront. The first production tranche is probably 260-380 hours; the full V1.2 list is more like 520-800 hours once we include migrations, QA, OM/document extraction, and production safety.”
-<!-- agent:boundary:37e648c6 -->
+<!-- agent:boundary:a9a3c502 -->
 <!-- /agent:exchange -->
 
 ## Queue

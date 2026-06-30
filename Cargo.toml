@@ -12,6 +12,7 @@ members = [
     "agent-doc-fs",
     "agent-doc-model-tier",
     "agent-doc-prompt-cache",
+    "agent-doc-prompt-context",
     "agent-doc-session-accretion",
     "agent-doc-secret-redact",
     "agent-doc-element",

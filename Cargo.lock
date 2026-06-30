@@ -359,6 +359,7 @@ dependencies = [
  "agent-doc-merge",
  "agent-doc-model-tier",
  "agent-doc-prompt-cache",
+ "agent-doc-prompt-context",
  "agent-doc-queue",
  "agent-doc-secret-redact",
  "agent-doc-session-accretion",
@@ -422,6 +423,15 @@ dependencies = [
  "hex",
  "serde",
  "sha2 0.11.0",
+]
+
+[[package]]
+name = "agent-doc-prompt-context"
+version = "0.34.65"
+dependencies = [
+ "agent-doc-element",
+ "agent-doc-element-backlog",
+ "agent-doc-session-accretion",
 ]
 
 [[package]]

@@ -3676,6 +3676,7 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
         "pub fn restart_or_drain_guidance(",
         "pub fn compaction_guidance(",
         "pub fn exchange_metrics(",
+        "pub fn is_restart_churn_event(",
     ] {
         assert!(
             focused_source.contains(required_snippet),
@@ -3696,6 +3697,8 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
         "fn exchange_metrics(",
         "pub fn level_label(",
         "fn level_label(",
+        "pub fn is_restart_churn_event(",
+        "fn is_restart_churn_event(",
         "pub use agent_doc_session_accretion",
         "type SessionAccretion",
     ] {
@@ -3760,6 +3763,107 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
         assert!(
             !dependencies.contains_key(forbidden),
             "agent-doc-session-accretion must stay free of orchestration, git, editor IPC, sqlite, or tmux-router effects"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-prompt-context")),
+        "agent-doc-prompt-context must stay a first-class workspace crate"
+    );
+
+    let focused_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-prompt-context/src/lib.rs")).unwrap();
+    for required_snippet in [
+        "pub struct BoundedResponseContext",
+        "pub fn render_full_document_section(",
+        "pub fn render_bounded_response_context(",
+        "fn render_prompt_targets(",
+        "fn extract_session_summary(",
+        "fn render_backlog_head(",
+        "fn render_recent_exchange_turns(",
+        "fn collect_recent_exchange_turn_sections(",
+        "fn render_available_components(",
+    ] {
+        assert!(
+            focused_source.contains(required_snippet),
+            "agent-doc-prompt-context must own pure prompt-context rendering policy: {required_snippet}"
+        );
+    }
+
+    let orchestration_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/prompt_context.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "fn render_prompt_targets(",
+        "fn extract_session_summary(",
+        "fn render_backlog_head(",
+        "fn render_recent_exchange_turns(",
+        "fn collect_recent_exchange_turn_sections(",
+        "fn render_available_components(",
+        "pub use agent_doc_prompt_context",
+    ] {
+        assert!(
+            !orchestration_source.contains(forbidden_snippet),
+            "orchestration must not re-own or facade pure prompt-context rendering policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        orchestration_source.contains("agent_doc_prompt_context::{")
+            && orchestration_source
+                .contains("render_bounded_response_context(BoundedResponseContext")
+            && orchestration_source.contains("frontmatter_io::parse_for_file_with_context")
+            && orchestration_source.contains("crate::response_toc::render_prompt_toc"),
+        "orchestration prompt_context should gather project context then call focused rendering policy directly"
+    );
+
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
+    assert!(
+        orchestration_dependencies.contains_key("agent-doc-prompt-context"),
+        "orchestration must depend on the focused prompt-context crate directly"
+    );
+
+    let focused_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-prompt-context/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&focused_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    for required in [
+        "agent-doc-element",
+        "agent-doc-element-backlog",
+        "agent-doc-session-accretion",
+    ] {
+        assert!(
+            dependencies.contains_key(required),
+            "agent-doc-prompt-context should depend on {required} for pure rendering inputs"
+        );
+    }
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "agent-doc-frontmatter",
+        "agent-doc-fs",
+        "agent-doc-workflow",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-prompt-context must stay free of orchestration and project/effect dependencies"
         );
     }
 }

@@ -31,7 +31,7 @@
 use agent_doc_session_accretion::{
     DEFAULT_CLEAR_THRESHOLD, POST_COMPACTION_NOOP_GRACE_SECS, RECENT_WINDOW_SECS,
     SessionAccretionInput, SessionAccretionReport, evaluate_session_accretion, exchange_metrics,
-    level_label,
+    is_restart_churn_event, level_label,
 };
 #[cfg(test)]
 use agent_doc_session_accretion::{
@@ -332,14 +332,6 @@ fn recent_restart_metrics(file: &Path, session_id: &str, now: u64) -> Result<usi
         }
     }
     Ok(count)
-}
-
-fn is_restart_churn_event(event: &str) -> bool {
-    event.contains("fresh_restart")
-        || event.starts_with("auto_trigger_timeout ")
-        || event.starts_with("startup_miss")
-        || event.contains("ctrl_d")
-        || event.contains("Ctrl-D")
 }
 
 fn cycles_log_path(file: &Path) -> Result<Option<PathBuf>> {

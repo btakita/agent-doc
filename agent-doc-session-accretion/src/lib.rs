@@ -262,6 +262,15 @@ pub fn exchange_metrics(content: &str) -> (usize, usize) {
     (exchange_lines, response_sections)
 }
 
+/// Deterministic session-log event classifier for restart-heavy churn.
+pub fn is_restart_churn_event(event: &str) -> bool {
+    event.contains("fresh_restart")
+        || event.starts_with("auto_trigger_timeout ")
+        || event.starts_with("startup_miss")
+        || event.contains("ctrl_d")
+        || event.contains("Ctrl-D")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -368,5 +377,24 @@ mod tests {
         assert!(draining.contains("do NOT stop"), "got: {draining}");
         assert!(draining.contains("#drain-no-defer"), "got: {draining}");
         assert!(!draining.contains("Restart cleanly"), "got: {draining}");
+    }
+
+    #[test]
+    fn restart_churn_classifier_matches_known_restart_events() {
+        for event in [
+            "fresh_restart",
+            "session fresh_restart from supervisor",
+            "auto_trigger_timeout session idle",
+            "startup_miss pending launch",
+            "received ctrl_d from pane",
+            "received Ctrl-D from pane",
+        ] {
+            assert!(is_restart_churn_event(event), "event should churn: {event}");
+        }
+    }
+
+    #[test]
+    fn restart_churn_classifier_rejects_non_churn_event() {
+        assert!(!is_restart_churn_event("commit completed normally"));
     }
 }

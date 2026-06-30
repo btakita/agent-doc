@@ -1466,7 +1466,7 @@ fn safe_passive_prune_cleanup_mode_at(
     col_args: &[String],
     window: Option<&str>,
     now_ms: u64,
-) -> resync::PruneCleanupMode {
+) -> agent_doc_tmux::PruneCleanupMode {
     let fingerprint = sync_prune_fingerprint(col_args, window);
     let throttle_ms = SAFE_PASSIVE_STASH_CLEANUP_THROTTLE.as_millis() as u64;
     let fresh_unchanged = std::fs::read_to_string(state_path)
@@ -1489,7 +1489,7 @@ fn safe_passive_prune_cleanup_mode_at(
             let _ = std::fs::write(state_path, raw);
         }
     }
-    resync::PruneCleanupMode::SkipExpensiveStashCleanup
+    agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
 }
 
 fn safe_passive_prune_cleanup_mode(
@@ -1497,9 +1497,9 @@ fn safe_passive_prune_cleanup_mode(
     col_args: &[String],
     window: Option<&str>,
     focus: Option<&str>,
-) -> resync::PruneCleanupMode {
+) -> agent_doc_tmux::PruneCleanupMode {
     if !matches!(auto_start_mode, AutoStartMode::SafePassive) {
-        return resync::PruneCleanupMode::Full;
+        return agent_doc_tmux::PruneCleanupMode::Full;
     }
     // Editor-driven safe-passive sync is the fast handoff path. It still prunes
     // stale registry rows and retained dead non-stash panes, but it must not
@@ -1507,7 +1507,7 @@ fn safe_passive_prune_cleanup_mode(
     // detach any extra visible pane from the active editor projection.
     let state_path = sync_prune_state_path_for_sync(col_args, focus);
     let _ = safe_passive_prune_cleanup_mode_at(&state_path, col_args, window, epoch_millis_now());
-    resync::PruneCleanupMode::SkipExpensiveStashCleanup
+    agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
 }
 
 fn effective_sync_columns(
@@ -2177,7 +2177,7 @@ fn run_with_options_internal(
         safe_passive_prune_cleanup_mode(auto_start_mode, col_args, window, focus);
     if matches!(
         prune_cleanup_mode,
-        resync::PruneCleanupMode::SkipExpensiveStashCleanup
+        agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
     ) {
         sync_log("safe_passive_prune_cleanup_skipped reason=unchanged_recent_layout");
     }
@@ -6875,10 +6875,16 @@ mod tests {
         let cols = vec!["tasks/a.md,tasks/b.md".to_string()];
 
         let first = safe_passive_prune_cleanup_mode_at(&state_path, &cols, Some("agent:1"), 1_000);
-        assert_eq!(first, resync::PruneCleanupMode::SkipExpensiveStashCleanup);
+        assert_eq!(
+            first,
+            agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
+        );
 
         let second = safe_passive_prune_cleanup_mode_at(&state_path, &cols, Some("agent:1"), 1_500);
-        assert_eq!(second, resync::PruneCleanupMode::SkipExpensiveStashCleanup);
+        assert_eq!(
+            second,
+            agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
+        );
     }
     #[test]
     fn safe_passive_prune_cleanup_skips_stash_scan_for_editor_handoff() {
@@ -6897,7 +6903,7 @@ mod tests {
                 Some("agent:1"),
                 Some("tasks/a.md")
             ),
-            resync::PruneCleanupMode::SkipExpensiveStashCleanup
+            agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
         );
 
         let changed_focus = safe_passive_prune_cleanup_mode(
@@ -6908,7 +6914,7 @@ mod tests {
         );
         assert_eq!(
             changed_focus,
-            resync::PruneCleanupMode::SkipExpensiveStashCleanup
+            agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
         );
 
         let changed_cols = vec!["tasks/a.md".to_string(), "tasks/b.md".to_string()];
@@ -6919,7 +6925,7 @@ mod tests {
                 Some("agent:1"),
                 Some("tasks/b.md"),
             ),
-            resync::PruneCleanupMode::SkipExpensiveStashCleanup
+            agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
         );
     }
     #[test]
@@ -6931,11 +6937,11 @@ mod tests {
 
         assert_eq!(
             safe_passive_prune_cleanup_mode_at(&state_path, &cols, Some("agent:1"), 1_000),
-            resync::PruneCleanupMode::SkipExpensiveStashCleanup
+            agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
         );
         assert_eq!(
             safe_passive_prune_cleanup_mode_at(&state_path, &changed_cols, Some("agent:1"), 1_100),
-            resync::PruneCleanupMode::SkipExpensiveStashCleanup
+            agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
         );
 
         let expired_ms = 1_100 + SAFE_PASSIVE_STASH_CLEANUP_THROTTLE.as_millis() as u64;
@@ -6946,7 +6952,7 @@ mod tests {
                 Some("agent:1"),
                 expired_ms
             ),
-            resync::PruneCleanupMode::SkipExpensiveStashCleanup
+            agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
         );
     }
     #[test]

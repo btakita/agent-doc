@@ -2432,8 +2432,10 @@ fn test_agent_doc_prompt_cache_owns_prompt_cache_policy() {
     assert!(dependencies.contains_key("serde"));
     assert!(dependencies.contains_key("sha2"));
     for forbidden in [
+        "agent-doc-controller",
         "agent-doc-core",
         "agent-doc-orchestration",
+        "agent-doc-project-config-io",
         "agent-doc-tmux-commands",
         "agent-doc-tmux-io",
         "anyhow",
@@ -9005,6 +9007,79 @@ fn test_agent_doc_tmux_owns_destructive_repair_policy() {
         assert!(
             !dependencies.contains_key(forbidden),
             "agent-doc-tmux destructive repair policy must stay free of orchestration, git, editor IPC, sqlite, or tmux-router effects"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_tmux_owns_stash_prune_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let tmux_manifest = fs::read_to_string(manifest_dir.join("agent-doc-tmux/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&tmux_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+
+    let tmux_source = fs::read_to_string(manifest_dir.join("agent-doc-tmux/src/lib.rs")).unwrap();
+    for required in [
+        "pub enum PruneCleanupMode",
+        "pub struct StashTtlCandidate",
+        "pub fn stash_ttl_prune_candidate(",
+        "pub fn stash_ttl_prune_targets(",
+    ] {
+        assert!(
+            tmux_source.contains(required),
+            "agent-doc-tmux must own stash prune policy: {required}"
+        );
+    }
+
+    let resync_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/resync.rs")).unwrap();
+    for forbidden in [
+        "pub enum PruneCleanupMode",
+        "pub struct StashTtlCandidate",
+        "pub fn stash_ttl_prune_candidate(",
+        "pub fn stash_ttl_prune_targets(",
+        "pub use agent_doc_tmux",
+        "pub(crate) use agent_doc_tmux",
+    ] {
+        assert!(
+            !resync_source.contains(forbidden),
+            "resync.rs must keep prune effects only, not re-own or facade stash prune policy: {forbidden}"
+        );
+    }
+    assert!(
+        resync_source.contains(
+            "use agent_doc_tmux::{PruneCleanupMode, StashTtlCandidate, stash_ttl_prune_targets};"
+        ),
+        "resync.rs should import focused stash prune policy directly"
+    );
+
+    let sync_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync.rs")).unwrap();
+    assert!(
+        !sync_source.contains("resync::PruneCleanupMode")
+            && !sync_source.contains("crate::resync::PruneCleanupMode"),
+        "sync.rs must not route prune cleanup mode through resync.rs"
+    );
+    assert!(
+        sync_source.contains("agent_doc_tmux::PruneCleanupMode"),
+        "sync.rs should use the focused prune cleanup mode directly"
+    );
+
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "agent-doc-tmux-commands",
+        "agent-doc-tmux-io",
+        "anyhow",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-tmux stash prune policy must stay free of orchestration, git, editor IPC, sqlite, tmux command, or tmux-router effects"
         );
     }
 }

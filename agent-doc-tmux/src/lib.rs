@@ -617,6 +617,61 @@ pub fn destructive_repair_throttled(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PruneCleanupMode {
+    Full,
+    PreserveLiveAgentStashPanes,
+    SkipExpensiveStashCleanup,
+}
+
+/// `#stash-session-ttl-prune`: one stash pane's candidacy for opt-in TTL reaping.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StashTtlCandidate {
+    pub pane_id: String,
+    /// Seconds since the pane's window last saw activity (`#{window_activity}`).
+    pub idle_secs: u64,
+    /// The currently active/visible pane is never reaped, regardless of idle time.
+    pub is_active_pane: bool,
+    /// Only an agent-doc pane parked in the `stash` window is eligible.
+    pub is_agent_doc_stash_pane: bool,
+}
+
+/// `#stash-session-ttl-prune`: pure, **non-destructive** decision for whether a
+/// stash-parked agent-doc pane is eligible for opt-in TTL reaping. Conservative
+/// by construction (see `tasks/agent-doc/plan-stash-session-ttl-prune.md`): the
+/// actual `kill-pane` wiring, the idle-signal query, the config knob, and live
+/// verification are all gated — this is only the reusable decision core.
+///
+/// Returns true only when ALL hold: TTL is enabled (`ttl_secs > 0`; `0`/unset
+/// disables), the pane is an agent-doc pane parked in the stash window, it is not
+/// the active/visible pane, and it has been idle strictly longer than the TTL.
+pub fn stash_ttl_prune_candidate(
+    idle_secs: u64,
+    ttl_secs: u64,
+    is_active_pane: bool,
+    is_agent_doc_stash_pane: bool,
+) -> bool {
+    ttl_secs > 0 && is_agent_doc_stash_pane && !is_active_pane && idle_secs > ttl_secs
+}
+
+/// Filter a candidate list to the pane ids eligible for TTL reaping. With
+/// `ttl_secs == 0` (disabled / unset) this always returns empty, so the feature
+/// is inert until explicitly configured.
+pub fn stash_ttl_prune_targets(candidates: &[StashTtlCandidate], ttl_secs: u64) -> Vec<String> {
+    candidates
+        .iter()
+        .filter(|c| {
+            stash_ttl_prune_candidate(
+                c.idle_secs,
+                ttl_secs,
+                c.is_active_pane,
+                c.is_agent_doc_stash_pane,
+            )
+        })
+        .map(|c| c.pane_id.clone())
+        .collect()
+}
+
 pub fn transition_tmux(
     current: &TmuxRealtimeState,
     event: &TmuxObservation,
@@ -685,6 +740,20 @@ mod tests {
             window_name: window_name.to_string(),
             current_command: "agent-doc".to_string(),
             sources: sources.iter().cloned().collect(),
+        }
+    }
+
+    fn stash_ttl_candidate(
+        pane: &str,
+        idle: u64,
+        active: bool,
+        agentdoc_stash: bool,
+    ) -> StashTtlCandidate {
+        StashTtlCandidate {
+            pane_id: pane.to_string(),
+            idle_secs: idle,
+            is_active_pane: active,
+            is_agent_doc_stash_pane: agentdoc_stash,
         }
     }
 
@@ -1173,5 +1242,40 @@ mod tests {
         );
         assert!(!repair_layout_skips_rescue_phase(false, 0, false));
         assert!(!repair_layout_skips_rescue_phase(true, 2, true));
+    }
+
+    #[test]
+    fn stash_ttl_disabled_ttl_never_prunes() {
+        assert!(!stash_ttl_prune_candidate(99_999, 0, false, true));
+        let targets = stash_ttl_prune_targets(&[stash_ttl_candidate("%1", 99_999, false, true)], 0);
+        assert!(targets.is_empty(), "disabled TTL must reap nothing");
+    }
+
+    #[test]
+    fn stash_ttl_active_pane_is_never_reaped() {
+        assert!(!stash_ttl_prune_candidate(10_000, 300, true, true));
+    }
+
+    #[test]
+    fn stash_ttl_only_agent_doc_stash_panes_are_eligible() {
+        assert!(!stash_ttl_prune_candidate(10_000, 300, false, false));
+    }
+
+    #[test]
+    fn stash_ttl_idle_must_strictly_exceed_ttl() {
+        assert!(!stash_ttl_prune_candidate(300, 300, false, true));
+        assert!(stash_ttl_prune_candidate(301, 300, false, true));
+    }
+
+    #[test]
+    fn stash_ttl_targets_filters_only_eligible_panes() {
+        let candidates = vec![
+            stash_ttl_candidate("%idle-old", 1_000, false, true),
+            stash_ttl_candidate("%active", 1_000, true, true),
+            stash_ttl_candidate("%fresh", 100, false, true),
+            stash_ttl_candidate("%not-stash", 1_000, false, false),
+        ];
+        let targets = stash_ttl_prune_targets(&candidates, 300);
+        assert_eq!(targets, vec!["%idle-old".to_string()]);
     }
 }

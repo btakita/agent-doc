@@ -408,6 +408,11 @@ focused crate under the old path.
   state, and error wrapping; root simulator/tests import the focused protocol
   crate directly instead of the old
   `agent_doc_orchestration::ipc_socket::{classify_ack,AckClassification}` path.
+- `agent-doc-document-realtime` now owns full-content visible replacement scope
+  policy: rejecting whole-document editor replacement for template frontmatter
+  and agent component markers across target/source/current buffers. The IPC
+  transport keeps only mode-specific logging and file/effect control while
+  calling the focused realtime write-policy helper directly.
 
 ### Earlier closure finding
 

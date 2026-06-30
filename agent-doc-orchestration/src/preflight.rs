@@ -634,7 +634,7 @@ fn tracked_work_component_fingerprint(
     } else {
         component.name.clone()
     };
-    let hash = crate::ops_log::content_hash(component.content(content));
+    let hash = agent_doc_hash::content_hash(component.content(content));
     let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(component.content(content));
     let item_ids = items
         .into_iter()
@@ -2724,8 +2724,7 @@ fn links_cache_dir(file: &Path) -> Option<std::path::PathBuf> {
 
 /// Compute a cache filename for a URL.
 fn url_cache_path(cache_dir: &Path, url: &str) -> std::path::PathBuf {
-    use sha2::{Digest, Sha256};
-    let hash = hex::encode(Sha256::digest(url.as_bytes()));
+    let hash = agent_doc_hash::content_hash(url);
     cache_dir.join(format!("{}.txt", hash))
 }
 

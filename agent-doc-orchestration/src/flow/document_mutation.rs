@@ -31,7 +31,7 @@ pub fn parse_template_patchback(
                 "template_patchback_parse_shape file={} source={} response_hash={} markers={} patches={} exchange_patches={} unmatched_len={}",
                 file.display(),
                 source,
-                crate::ops_log::content_hash(response),
+                agent_doc_hash::content_hash(response),
                 plan.marker_count,
                 plan.patches.len(),
                 plan.exchange_patch_count,
@@ -47,7 +47,7 @@ pub fn parse_template_patchback(
                 "template_patchback_malformed_rejected file={} source={} response_hash={} markers={} unmatched_len={} reason=patch_markers_without_closed_blocks",
                 file.display(),
                 source,
-                crate::ops_log::content_hash(response),
+                agent_doc_hash::content_hash(response),
                 plan.marker_count,
                 plan.unmatched.trim().len()
             ),
@@ -63,7 +63,7 @@ pub fn parse_template_patchback(
                 "template_patchback_escaped_component_rejected file={} source={} response_hash={} component_blocks={} reason=raw_component_markers_without_patch_blocks",
                 file.display(),
                 source,
-                crate::ops_log::content_hash(response),
+                agent_doc_hash::content_hash(response),
                 plan.raw_component_block_count
             ),
         );

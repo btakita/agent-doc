@@ -137,8 +137,7 @@ pub fn queue_file_ipc_reposition_boundary(
         payload["cycle_id"] = serde_json::Value::String(cs.cycle_id);
     }
     if let Ok(live) = std::fs::read_to_string(file) {
-        payload["baseline_hash"] =
-            serde_json::Value::String(agent_doc_debounce::content_hash(&live));
+        payload["baseline_hash"] = serde_json::Value::String(agent_doc_hash::content_hash(&live));
     }
     target_payload_to_live_editor(file, &mut payload, "file_reposition");
 
@@ -315,9 +314,9 @@ pub fn try_ipc(
         });
         if let Some(target_baseline) = ipc_before_content.as_deref().or(baseline) {
             socket_payload["baseline_hash"] =
-                serde_json::Value::String(agent_doc_debounce::content_hash(target_baseline));
+                serde_json::Value::String(agent_doc_hash::content_hash(target_baseline));
             socket_payload["baseline_normalized_hash"] =
-                serde_json::Value::String(agent_doc_debounce::content_hash(
+                serde_json::Value::String(agent_doc_hash::content_hash(
                     &crate::git::normalize_transient_agent_doc_markers(target_baseline),
                 ));
         }
@@ -509,11 +508,11 @@ pub fn try_ipc(
                             patch_id,
                             repair_decision.snap_source.label(),
                             repair_decision.snapshot_content.len(),
-                            crate::ops_log::content_hash(&repair_decision.snapshot_content),
+                            agent_doc_hash::content_hash(&repair_decision.snapshot_content),
                             ipc_before_content.as_deref().map(str::len).unwrap_or(0),
                             ipc_before_content
                                 .as_deref()
-                                .map(crate::ops_log::content_hash)
+                                .map(agent_doc_hash::content_hash)
                                 .unwrap_or_else(|| "-".to_string())
                         ),
                     );
@@ -808,9 +807,9 @@ pub fn try_ipc(
     });
     if let Some(target_baseline) = ipc_before_content.as_deref().or(baseline) {
         ipc_payload["baseline_hash"] =
-            serde_json::Value::String(agent_doc_debounce::content_hash(target_baseline));
+            serde_json::Value::String(agent_doc_hash::content_hash(target_baseline));
         ipc_payload["baseline_normalized_hash"] =
-            serde_json::Value::String(agent_doc_debounce::content_hash(
+            serde_json::Value::String(agent_doc_hash::content_hash(
                 &crate::git::normalize_transient_agent_doc_markers(target_baseline),
             ));
     }
@@ -1033,14 +1032,14 @@ pub(crate) fn log_full_content_ipc_disabled(
             source,
             patch_id,
             target_content.len(),
-            crate::ops_log::content_hash(target_content),
+            agent_doc_hash::content_hash(target_content),
             source_content.map(str::len).unwrap_or(0),
             source_content
-                .map(crate::ops_log::content_hash)
+                .map(agent_doc_hash::content_hash)
                 .unwrap_or_else(|| "-".to_string()),
             current_content.map(str::len).unwrap_or(0),
             current_content
-                .map(crate::ops_log::content_hash)
+                .map(agent_doc_hash::content_hash)
                 .unwrap_or_else(|| "-".to_string())
         ),
     );
@@ -1115,14 +1114,14 @@ pub(crate) fn full_content_ipc_scope_allows(
             patch_id,
             reason,
             target_content.len(),
-            crate::ops_log::content_hash(target_content),
+            agent_doc_hash::content_hash(target_content),
             source_content.map(str::len).unwrap_or(0),
             source_content
-                .map(crate::ops_log::content_hash)
+                .map(agent_doc_hash::content_hash)
                 .unwrap_or_else(|| "-".to_string()),
             current_content.map(str::len).unwrap_or(0),
             current_content
-                .map(crate::ops_log::content_hash)
+                .map(agent_doc_hash::content_hash)
                 .unwrap_or_else(|| "-".to_string())
         ),
     );
@@ -1979,7 +1978,7 @@ pub(crate) fn build_ipc_node_patches_json(before: Option<&str>, after: Option<&s
                     "op": "remove",
                     "content": before_source,
                     "expected_content": before_source,
-                    "expected_content_hash": agent_doc_debounce::content_hash(&before_source),
+                    "expected_content_hash": agent_doc_hash::content_hash(&before_source),
                 }));
             }
         }
@@ -2027,7 +2026,7 @@ pub(crate) fn build_ipc_node_patches_json(before: Option<&str>, after: Option<&s
                 "op": op,
                 "content": after_source,
                 "expected_content": before_source,
-                "expected_content_hash": agent_doc_debounce::content_hash(&before_source),
+                "expected_content_hash": agent_doc_hash::content_hash(&before_source),
             }));
         }
 
@@ -2055,7 +2054,7 @@ pub(crate) fn build_ipc_node_patches_json(before: Option<&str>, after: Option<&s
                     let before_source = ipc_node_source(before, node);
                     patch["expected_content"] = Value::String(before_source.clone());
                     patch["expected_content_hash"] =
-                        Value::String(agent_doc_debounce::content_hash(&before_source));
+                        Value::String(agent_doc_hash::content_hash(&before_source));
                 }
                 if let Some(anchor) = after_shared[..index].last() {
                     patch["after"] = Value::String((*anchor).to_string());
@@ -4086,7 +4085,7 @@ mod late_fallback_patch_guard_tests {
         assert_eq!(bad_state.len, "bad editor state".len());
         assert_eq!(
             bad_state.hash,
-            crate::ops_log::content_hash("bad editor state")
+            agent_doc_hash::content_hash("bad editor state")
         );
         assert_eq!(decision.normalize_prefix_lines, vec!["bad editor state"]);
     }

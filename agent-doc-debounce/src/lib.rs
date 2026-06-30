@@ -63,8 +63,8 @@
 //!   `is_typing_via_file` returns `false`
 //! - no_indicator_file: nonexistent path → `is_typing_via_file` returns `false`
 
+use agent_doc_hash::content_hash;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -146,13 +146,6 @@ pub fn document_changed_with_content_for_editor(
             file, e
         );
     }
-}
-
-/// Compute the SHA-256 hex digest used for live-buffer sidecars.
-pub fn content_hash(content: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(content.as_bytes());
-    hex::encode(hasher.finalize())
 }
 
 /// Check if the document has been idle (no changes) for at least `debounce_ms`.

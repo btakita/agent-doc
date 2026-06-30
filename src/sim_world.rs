@@ -6015,12 +6015,12 @@ fn baseline_drift_benign_user_commit_outside_response_auto_refreshes() {
         .unwrap();
     assert_eq!(
         refreshed.file_hash.as_deref(),
-        Some(agent_doc_orchestration::ops_log::content_hash(&world.doc).as_str()),
+        Some(agent_doc_hash::content_hash(&world.doc).as_str()),
         "file hash should refresh to the user-committed document"
     );
     assert_eq!(
         refreshed.snapshot_hash.as_deref(),
-        Some(agent_doc_orchestration::ops_log::content_hash(&world.doc).as_str()),
+        Some(agent_doc_hash::content_hash(&world.doc).as_str()),
         "snapshot hash should refresh to the user-committed baseline"
     );
     let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
@@ -6072,12 +6072,12 @@ fn baseline_drift_user_edit_matches_normalized_response_adopts() {
         .unwrap();
     assert_eq!(
         refreshed.file_hash.as_deref(),
-        Some(agent_doc_orchestration::ops_log::content_hash(&world.doc).as_str()),
+        Some(agent_doc_hash::content_hash(&world.doc).as_str()),
         "file hash should reflect the normalized user-cleaned response"
     );
     assert_eq!(
         refreshed.snapshot_hash.as_deref(),
-        Some(agent_doc_orchestration::ops_log::content_hash(&world.doc).as_str()),
+        Some(agent_doc_hash::content_hash(&world.doc).as_str()),
         "snapshot hash should reflect the normalized user-cleaned response"
     );
 }

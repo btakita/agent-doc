@@ -2077,7 +2077,7 @@ mod tests {
         drainable: bool,
     ) {
         let document_hash = snapshot::doc_hash(&doc.canonicalize().unwrap()).unwrap();
-        let prompt_hash = crate::ops_log::content_hash(prompt_text);
+        let prompt_hash = agent_doc_hash::content_hash(prompt_text);
         let event = crate::state_backbone::StateEvent::new(
             format!("test-typed-selected-head:{node_key}:{prompt_hash}"),
             crate::state_backbone::StateFact::QueueHeadSelected {
@@ -3277,10 +3277,7 @@ old status\n\
         let prov = agent_doc_debounce::write_provenance(&key)
             .expect("direct-run document write should record provenance");
         assert_eq!(prov.len, "direct run body".len());
-        assert_eq!(
-            prov.hash,
-            agent_doc_debounce::content_hash("direct run body")
-        );
+        assert_eq!(prov.hash, agent_doc_hash::content_hash("direct run body"));
         assert_eq!(prov.actor, "agent");
         assert!(!prov.write_id.is_empty());
     }

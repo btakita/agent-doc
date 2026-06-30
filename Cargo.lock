@@ -35,6 +35,7 @@ dependencies = [
  "agent-doc-ffi",
  "agent-doc-frontmatter",
  "agent-doc-fs",
+ "agent-doc-hash",
  "agent-doc-markdown-ast",
  "agent-doc-merge",
  "agent-doc-model-tier",
@@ -57,7 +58,6 @@ dependencies = [
  "clap",
  "existence",
  "filetime",
- "hex",
  "indexmap",
  "instruction-files",
  "libc",
@@ -68,7 +68,6 @@ dependencies = [
  "pulldown-cmark",
  "serde",
  "serde_json",
- "sha2 0.11.0",
  "similar",
  "tempfile",
  "tiny_http",
@@ -100,12 +99,11 @@ dependencies = [
 name = "agent-doc-debounce"
 version = "0.34.65"
 dependencies = [
+ "agent-doc-hash",
  "agent-doc-log-time",
- "hex",
  "libc",
  "serde",
  "serde_json",
- "sha2 0.11.0",
  "tempfile",
 ]
 
@@ -295,6 +293,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-doc-hash"
+version = "0.34.65"
+dependencies = [
+ "hex",
+ "sha2 0.11.0",
+]
+
+[[package]]
 name = "agent-doc-lease"
 version = "0.34.65"
 
@@ -353,6 +359,7 @@ dependencies = [
  "agent-doc-element-review",
  "agent-doc-frontmatter",
  "agent-doc-fs",
+ "agent-doc-hash",
  "agent-doc-lease",
  "agent-doc-log-time",
  "agent-doc-markdown-ast",
@@ -384,7 +391,6 @@ dependencies = [
  "clap",
  "filetime",
  "fs2",
- "hex",
  "htmd",
  "indexmap",
  "instruction-files",
@@ -400,7 +406,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
- "sha2 0.11.0",
  "similar",
  "tagpath",
  "tempfile",

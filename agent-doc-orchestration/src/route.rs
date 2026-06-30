@@ -291,7 +291,7 @@ fn route_write_document(
                 reason,
                 file.display(),
                 next_content.len(),
-                crate::ops_log::content_hash(next_content)
+                agent_doc_hash::content_hash(next_content)
             ),
         );
         Ok(())
@@ -489,7 +489,7 @@ fn append_editor_route_attempt(message: &mut String) {
 }
 
 fn short_content_hash(content: &str) -> String {
-    let hash = crate::ops_log::content_hash(content);
+    let hash = agent_doc_hash::content_hash(content);
     hash[..hash.len().min(12)].to_string()
 }
 
@@ -531,7 +531,7 @@ fn preserve_route_pane_snapshot(
     content: &str,
 ) -> RoutePaneSnapshot {
     let redacted = agent_doc_secret_redact::redact(content);
-    let hash = crate::ops_log::content_hash(&redacted);
+    let hash = agent_doc_hash::content_hash(&redacted);
     let short_hash = &hash[..hash.len().min(12)];
     let snapshot = RoutePaneSnapshot {
         len: redacted.len(),
@@ -2523,7 +2523,7 @@ fn enqueue_route_dispatch_prompt(
                     &format!(
                         "route_queue_dispatch_unparseable_preserved file={} prompt_hash={} reason={}",
                         file.display(),
-                        crate::ops_log::content_hash(&prompt_text),
+                        agent_doc_hash::content_hash(&prompt_text),
                         parse_err
                     ),
                 );

@@ -502,7 +502,7 @@ fn persist_pending_maintenance_doc(
                 "{source}_writeback file={} transport=disk_force reason=force_disk len={} hash={}",
                 file.display(),
                 target.len(),
-                crate::ops_log::content_hash(target)
+                agent_doc_hash::content_hash(target)
             ),
         );
         return Ok(());
@@ -1411,7 +1411,7 @@ fn selected_queue_head_node_key(content: &str, head_text: &str) -> Option<String
     if trimmed.is_empty() {
         return None;
     }
-    let hash = crate::ops_log::content_hash(trimmed);
+    let hash = agent_doc_hash::content_hash(trimmed);
     let short_hash = &hash[..hash.len().min(12)];
     Some(format!("queue:entry:0:{short_hash}"))
 }
@@ -1435,7 +1435,7 @@ fn record_selected_queue_head_state(
         return Ok(());
     };
     let document_hash = crate::pending_cmd::doc_id_for(&canonical);
-    let content_hash = crate::ops_log::content_hash(head_text);
+    let content_hash = agent_doc_hash::content_hash(head_text);
     let event = crate::state_backbone::StateEvent::new(
         format!("queue-head-selected:{document_hash}:{node_key}:0:{content_hash}"),
         crate::state_backbone::StateFact::QueueHeadSelected {
@@ -1482,7 +1482,7 @@ fn record_deferred_queue_head_state(
         return Ok(());
     };
     let document_hash = crate::pending_cmd::doc_id_for(&canonical);
-    let content_hash = crate::ops_log::content_hash(head_text);
+    let content_hash = agent_doc_hash::content_hash(head_text);
     let selected_event = crate::state_backbone::StateEvent::new(
         format!("queue-head-deferred-selected:{document_hash}:{node_key}:0:{content_hash}"),
         crate::state_backbone::StateFact::QueueHeadSelected {
@@ -1496,7 +1496,7 @@ fn record_deferred_queue_head_state(
     );
     let selected_inserted =
         crate::project_controller::append_state_event(&project_root, &selected_event)?;
-    let reason_hash = crate::ops_log::content_hash(reason);
+    let reason_hash = agent_doc_hash::content_hash(reason);
     let deferred_event = crate::state_backbone::StateEvent::new(
         format!("queue-head-deferred:{document_hash}:{node_key}:0:{reason_hash}:{content_hash}"),
         crate::state_backbone::StateFact::QueueHeadDeferred {
@@ -1526,7 +1526,7 @@ fn record_deferred_queue_head_state(
 }
 
 fn queue_worklist_hash(entries: &[agent_doc_queue::document_queue::QueueEntry]) -> String {
-    crate::ops_log::content_hash(&agent_doc_queue::document_queue::render(entries))
+    agent_doc_hash::content_hash(&agent_doc_queue::document_queue::render(entries))
 }
 
 fn queue_prompt_node_key(
@@ -1555,7 +1555,7 @@ fn queue_prompt_node_key(
     if trimmed.is_empty() {
         return None;
     }
-    let hash = crate::ops_log::content_hash(trimmed);
+    let hash = agent_doc_hash::content_hash(trimmed);
     let short_hash = &hash[..hash.len().min(12)];
     Some(format!("queue:entry:{index}:{short_hash}"))
 }

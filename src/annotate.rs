@@ -30,9 +30,9 @@
 //! - `cache_invalidation`: file changed after sidecar → regenerates
 //! - `cache_valid_skips`: no changes → returns existing path without regen
 
+use agent_doc_hash::content_hash;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use similar::{ChangeTag, TextDiff};
 use std::path::{Path, PathBuf};
 
@@ -72,17 +72,6 @@ pub struct AnnotationSidecar {
     pub file_content_hash: String,
     /// Per-line attributions, ordered by line number.
     pub lines: Vec<LineAnnotation>,
-}
-
-/// Compute SHA256 hex hash of a string's content.
-fn content_hash(content: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(content.as_bytes());
-    hasher
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
 }
 
 /// Compute the sidecar path for a document.

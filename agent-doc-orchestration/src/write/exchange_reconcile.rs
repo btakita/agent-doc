@@ -169,8 +169,8 @@ pub(crate) fn file_ipc_consumed_without_live_exchange_ack(
         return false;
     }
 
-    let before_hash = crate::ops_log::content_hash(before);
-    let after_hash = crate::ops_log::content_hash(after);
+    let before_hash = agent_doc_hash::content_hash(before);
+    let after_hash = agent_doc_hash::content_hash(after);
     eprintln!(
         "[write] file IPC consumed for {} with live exchange edits but no ack-content proof and no exchange materialization — retry required before snapshot/commit",
         file.display()

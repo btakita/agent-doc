@@ -1,9 +1,9 @@
 //! CLI integration tests for agent-doc.
 
+use agent_doc_hash::content_hash;
 use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
-use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -46,18 +46,14 @@ fn init_git_repo(root: &Path, tracked: &Path) {
 
 fn seed_snapshot(root: &Path, doc: &Path, content: &str) {
     let canonical = doc.canonicalize().unwrap();
-    let mut hasher = Sha256::new();
-    hasher.update(canonical.to_string_lossy().as_bytes());
-    let hash = hex::encode(hasher.finalize());
+    let hash = content_hash(canonical.to_string_lossy().as_ref());
     let snapshot = root.join(".agent-doc/snapshots").join(format!("{hash}.md"));
     fs::write(snapshot, content).unwrap();
 }
 
 fn cycle_state_path(root: &Path, doc: &Path) -> PathBuf {
     let canonical = doc.canonicalize().unwrap();
-    let mut hasher = Sha256::new();
-    hasher.update(canonical.to_string_lossy().as_bytes());
-    let hash = hex::encode(hasher.finalize());
+    let hash = content_hash(canonical.to_string_lossy().as_ref());
     root.join(".agent-doc/state/cycles")
         .join(format!("{hash}.json"))
 }
@@ -6960,6 +6956,109 @@ fn test_agent_doc_tmux_commands_owns_submit_profile_policy() {
             !dependencies.contains_key(forbidden),
             "agent-doc-tmux-commands submit policy must stay free of orchestration, git, editor IPC, sqlite, or tmux-router effects"
         );
+    }
+}
+
+#[test]
+fn test_agent_doc_hash_owns_sha256_content_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let root_manifest: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let workspace_members = root_manifest["workspace"]["members"].as_array().unwrap();
+    assert!(
+        workspace_members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-hash")),
+        "agent-doc-hash must be a workspace member"
+    );
+    let root_dependencies = root_manifest["dependencies"].as_table().unwrap();
+    assert!(
+        root_dependencies.contains_key("agent-doc-hash"),
+        "root crate callers should depend on agent-doc-hash directly"
+    );
+
+    let hash_source = fs::read_to_string(manifest_dir.join("agent-doc-hash/src/lib.rs")).unwrap();
+    assert!(
+        hash_source.contains("pub fn content_hash(")
+            && hash_source.contains("pub fn bytes_hash(")
+            && hash_source.contains("Sha256::new()"),
+        "agent-doc-hash must own the shared SHA-256 hex implementation"
+    );
+
+    let debounce_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-debounce/Cargo.toml")).unwrap();
+    let debounce_manifest: toml::Value = toml::from_str(&debounce_manifest).unwrap();
+    let debounce_dependencies = debounce_manifest["dependencies"].as_table().unwrap();
+    assert!(
+        debounce_dependencies.contains_key("agent-doc-hash")
+            && !debounce_dependencies.contains_key("sha2")
+            && !debounce_dependencies.contains_key("hex"),
+        "agent-doc-debounce should call the focused hash crate instead of owning SHA-256 deps"
+    );
+
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    let orchestration_dependencies = orchestration_manifest["dependencies"].as_table().unwrap();
+    assert!(
+        orchestration_dependencies.contains_key("agent-doc-hash")
+            && !orchestration_dependencies.contains_key("sha2")
+            && !orchestration_dependencies.contains_key("hex"),
+        "agent-doc-orchestration should call the focused hash crate instead of owning SHA-256 deps"
+    );
+
+    for relative in [
+        "agent-doc-orchestration/src/ops_log.rs",
+        "agent-doc-orchestration/src/op_capture.rs",
+        "agent-doc-debounce/src/lib.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        for forbidden in [
+            "pub fn content_hash(",
+            "fn content_hash(",
+            "use sha2::",
+            "hex::encode(",
+            "pub use agent_doc_hash",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{relative} must not keep a content-hash shim or local SHA-256 policy: {forbidden}"
+            );
+        }
+    }
+
+    fn collect_rs_files(dir: &Path, files: &mut Vec<PathBuf>) {
+        for entry in fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                collect_rs_files(&path, files);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                files.push(path);
+            }
+        }
+    }
+
+    for relative in [
+        "src",
+        "agent-doc-orchestration/src",
+        "agent-doc-debounce/src",
+    ] {
+        let mut files = Vec::new();
+        collect_rs_files(&manifest_dir.join(relative), &mut files);
+        for file in files {
+            let source = fs::read_to_string(&file).unwrap();
+            for forbidden in [
+                "ops_log::content_hash",
+                "op_capture::content_hash",
+                "agent_doc_debounce::content_hash",
+            ] {
+                assert!(
+                    !source.contains(forbidden),
+                    "callers must import agent_doc_hash directly instead of old path {forbidden} in {}",
+                    file.display()
+                );
+            }
+        }
     }
 }
 

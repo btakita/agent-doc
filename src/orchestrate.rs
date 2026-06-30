@@ -822,7 +822,7 @@ fn active_queue_hash(doc: &str) -> Result<Option<String>> {
     if !activation.active {
         return Ok(None);
     }
-    Ok(Some(agent_doc_orchestration::ops_log::content_hash(
+    Ok(Some(agent_doc_hash::content_hash(
         &agent_doc_queue::document_queue::render(&activation.entries_after),
     )))
 }

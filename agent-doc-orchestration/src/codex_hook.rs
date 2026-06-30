@@ -590,7 +590,7 @@ fn log_codex_stop_queue_continuation(file: &Path, prompt: &str, source: &str) {
             source,
             agent_doc_mcp_configured_for(file),
             prompt.len(),
-            crate::ops_log::content_hash(prompt),
+            agent_doc_hash::content_hash(prompt),
         ),
     );
 }
@@ -603,7 +603,7 @@ fn log_codex_fresh_context_handoff(file: &Path, prompt: &str, source: &str, reas
             file.display(),
             source,
             prompt.len(),
-            crate::ops_log::content_hash(prompt),
+            agent_doc_hash::content_hash(prompt),
             reason,
         ),
     );
@@ -1343,7 +1343,7 @@ fn save_blocked_stop_payload(
         .with_context(|| format!("create blocked-stop dir {}", dir.display()))?;
     let filename = format!(
         "{}-{}.json",
-        crate::ops_log::content_hash(canonical.to_string_lossy().as_ref()),
+        agent_doc_hash::content_hash(canonical.to_string_lossy().as_ref()),
         now_millis()
     );
     let path = dir.join(filename);
@@ -1352,7 +1352,7 @@ fn save_blocked_stop_payload(
         file: canonical.display().to_string(),
         kind,
         reason,
-        payload_sha256: crate::ops_log::content_hash(payload),
+        payload_sha256: agent_doc_hash::content_hash(payload),
         last_assistant_message: (!payload.trim().is_empty()).then_some(payload),
         last_prompt: last_prompt.filter(|prompt| !prompt.trim().is_empty()),
     };
@@ -1674,7 +1674,7 @@ fn clear_state(root: &Path, session_id: &str) -> Result<()> {
 }
 
 fn state_path(root: &Path, session_id: &str) -> PathBuf {
-    let hash = crate::ops_log::content_hash(session_id);
+    let hash = agent_doc_hash::content_hash(session_id);
     root.join(".agent-doc/codex-hooks/sessions")
         .join(format!("{hash}.json"))
 }
@@ -3164,7 +3164,7 @@ agent-doc {}\n",
             ops_log.contains("codex_stop_queue_continuation")
                 && ops_log.contains("source=tracked_state")
                 && ops_log.contains("mcp_configured=true")
-                && ops_log.contains(&crate::ops_log::content_hash("do #fix2")),
+                && ops_log.contains(&agent_doc_hash::content_hash("do #fix2")),
             "Stop hook should log tracked queue-continuation proof:\n{ops_log}"
         );
         assert!(
@@ -3219,7 +3219,7 @@ agent-doc {}\n",
             ops_log.contains("codex_stop_queue_continuation")
                 && ops_log.contains("source=durable_marker")
                 && ops_log.contains("mcp_configured=false")
-                && ops_log.contains(&crate::ops_log::content_hash(
+                && ops_log.contains(&agent_doc_hash::content_hash(
                     "do [#seopdp] deploy product page"
                 )),
             "Stop hook should log durable-marker queue-continuation proof:\n{ops_log}"

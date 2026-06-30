@@ -115,7 +115,7 @@ impl OperationProofRecord {
 
 pub fn proof_ledger_path(project_root: &Path, document_path: &Path) -> PathBuf {
     let document_key = proof_ledger_document_key(project_root, document_path);
-    let document_hash = crate::ops_log::content_hash(&document_key);
+    let document_hash = agent_doc_hash::content_hash(&document_key);
     project_root
         .join(".agent-doc")
         .join("proof-ledger")
@@ -205,7 +205,7 @@ mod tests {
             operation_kind,
             outcome,
             subject_id: Some("subject-1".to_string()),
-            content_hash: crate::ops_log::content_hash(content),
+            content_hash: agent_doc_hash::content_hash(content),
             proof_kind: ProofEvidenceKind::QueueHeadIdentity,
             proof: format!("proof-for-{operation_id}"),
             recorded_at_ms: 42,
@@ -221,7 +221,7 @@ mod tests {
                 operation_kind: ProofOperationKind::QueueHead,
                 outcome: ProofOutcome::Consumed,
                 subject_id: None,
-                content_hash: crate::ops_log::content_hash("head"),
+                content_hash: agent_doc_hash::content_hash("head"),
                 proof_kind: ProofEvidenceKind::QueueHeadIdentity,
                 proof: "proof".to_string(),
                 recorded_at_ms: 1,
@@ -247,7 +247,7 @@ mod tests {
                 operation_kind: ProofOperationKind::QueueHead,
                 outcome: ProofOutcome::Consumed,
                 subject_id: None,
-                content_hash: crate::ops_log::content_hash("head"),
+                content_hash: agent_doc_hash::content_hash("head"),
                 proof_kind: ProofEvidenceKind::QueueHeadIdentity,
                 proof: String::new(),
                 recorded_at_ms: 1,

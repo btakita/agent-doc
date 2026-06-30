@@ -2925,12 +2925,12 @@ mod tests {
         assert_eq!(refreshed.state, crate::capture::CaptureState::Committed);
         assert_eq!(
             refreshed.file_hash.as_deref(),
-            Some(crate::ops_log::content_hash(&content).as_str()),
+            Some(agent_doc_hash::content_hash(&content).as_str()),
             "capture file hash should refresh to the recovered visible file"
         );
         assert_eq!(
             refreshed.snapshot_hash.as_deref(),
-            Some(crate::ops_log::content_hash(&snapshot_content).as_str()),
+            Some(agent_doc_hash::content_hash(&snapshot_content).as_str()),
             "capture snapshot hash should refresh to the recovered snapshot"
         );
     }
@@ -3225,12 +3225,12 @@ mod tests {
             .unwrap();
         assert_eq!(
             refreshed.file_hash.as_deref(),
-            Some(crate::ops_log::content_hash(&current).as_str()),
+            Some(agent_doc_hash::content_hash(&current).as_str()),
             "preflight should refresh the capture file hash before replay"
         );
         assert_eq!(
             refreshed.snapshot_hash.as_deref(),
-            Some(crate::ops_log::content_hash(&current).as_str()),
+            Some(agent_doc_hash::content_hash(&current).as_str()),
             "preflight should refresh the capture snapshot hash before replay"
         );
         let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();

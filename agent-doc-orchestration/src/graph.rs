@@ -28,9 +28,7 @@ use std::sync::Arc;
 use agent_doc_element::element::{self, Component};
 use agent_doc_frontmatter::frontmatter::{self, Frontmatter};
 use agent_doc_frontmatter::project_config::ProjectConfig;
-use hex;
 use lazily::{CellHandle, Context, SlotHandle};
-use sha2::{Digest, Sha256};
 
 use crate::cycle_state::CycleState;
 use crate::project_config_io;
@@ -618,9 +616,7 @@ impl SshContextValue {
 }
 
 fn hash_path_str(path: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(path.as_bytes());
-    hex::encode(hasher.finalize())
+    agent_doc_hash::content_hash(path)
 }
 
 pub struct ActorContext {

@@ -168,7 +168,7 @@ fn wait_for_stable_content_editor(
     if let Some(stable) = agent_doc_debounce::editor_buffer_stable(doc_str, EDITOR_DEBOUNCE_MS) {
         let current = std::fs::read_to_string(doc)?;
         if let Some(ref hash) = stable.hash {
-            let expected = agent_doc_debounce::content_hash(&current);
+            let expected = agent_doc_hash::content_hash(&current);
             if hash.eq_ignore_ascii_case(&expected) {
                 eprintln!(
                     "[diff] Editor buffer stable (version={}, hash match), returning immediately",
@@ -205,7 +205,7 @@ fn wait_for_stable_content_editor(
             stable.version, stable.dirty
         );
         if let Some(ref hash) = stable.hash {
-            let expected = agent_doc_debounce::content_hash(&current);
+            let expected = agent_doc_hash::content_hash(&current);
             if hash.eq_ignore_ascii_case(&expected) {
                 return Ok(current);
             }
@@ -743,7 +743,7 @@ mod tests {
             dirty: false,
             last_edit_timestamp_ms: now,
             save_timestamp_ms: Some(now),
-            hash: Some(agent_doc_debounce::content_hash(content)),
+            hash: Some(agent_doc_hash::content_hash(content)),
             content_len: Some(content.len()),
             session_id: None,
         };

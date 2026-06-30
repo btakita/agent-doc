@@ -151,7 +151,7 @@ fn item_fingerprint(item: &QueueItem) -> String {
         "command={} bytes={} sha256={}",
         sanitize_progress_field(item.command.as_deref().unwrap_or("prompt")),
         item.raw.len(),
-        agent_doc_orchestration::ops_log::content_hash(&item.raw)
+        agent_doc_hash::content_hash(&item.raw)
     )
 }
 
@@ -590,7 +590,7 @@ mod tests {
         );
         assert!(ops.contains("command=doctor bytes=7"), "{ops}");
         assert!(
-            ops.contains(&agent_doc_orchestration::ops_log::content_hash("/doctor")),
+            ops.contains(&agent_doc_hash::content_hash("/doctor")),
             "{ops}"
         );
         assert!(

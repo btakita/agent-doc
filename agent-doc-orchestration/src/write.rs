@@ -3372,8 +3372,8 @@ pub(crate) fn guard_visible_write_idle_and_current(
                     "visible_write_deferred_current_changed file={} source={} expected_hash={} current_hash={}",
                     file.display(),
                     source,
-                    crate::ops_log::content_hash(expected_current),
-                    crate::ops_log::content_hash(&fresh_current)
+                    agent_doc_hash::content_hash(expected_current),
+                    agent_doc_hash::content_hash(&fresh_current)
                 ),
             );
             anyhow::bail!(
@@ -3413,11 +3413,11 @@ fn guard_visible_write_reconcile(
         // closed. This replaces the coarse "any live-buffer divergence blocks
         // finalize" gate with an actor-aware check (the live-buffer actor is not
         // diverging when it already equals disk).
-        let disk_hash = crate::ops_log::content_hash(&actual_current);
+        let disk_hash = agent_doc_hash::content_hash(&actual_current);
         let editor_matches_disk =
             live.len == actual_current.len() && live.hash.eq_ignore_ascii_case(&disk_hash);
         if editor_matches_disk {
-            let expected_hash = crate::ops_log::content_hash(expected_current);
+            let expected_hash = agent_doc_hash::content_hash(expected_current);
             crate::ops_log::log_op(
                 file,
                 &format!(
@@ -3445,7 +3445,7 @@ fn guard_visible_write_reconcile(
                     file.display(),
                     source,
                     expected_current.len(),
-                    crate::ops_log::content_hash(expected_current),
+                    agent_doc_hash::content_hash(expected_current),
                     live.len,
                     live.hash,
                     live.timestamp_ms
@@ -3471,8 +3471,8 @@ fn guard_visible_write_reconcile(
             "visible_write_disk_drift_reconcilable file={} source={} expected_hash={} current_hash={}",
             file.display(),
             source,
-            crate::ops_log::content_hash(expected_current),
-            crate::ops_log::content_hash(&actual_current)
+            agent_doc_hash::content_hash(expected_current),
+            agent_doc_hash::content_hash(&actual_current)
         ),
     );
     Ok(VisibleWriteReconcile::DiskDrifted {
@@ -3615,8 +3615,8 @@ fn log_exchange_write_diagnostic(
         return;
     }
 
-    let before_hash = crate::ops_log::content_hash(before);
-    let after_hash = crate::ops_log::content_hash(after);
+    let before_hash = agent_doc_hash::content_hash(before);
+    let after_hash = agent_doc_hash::content_hash(after);
     let live_exchange_edited = exchange_has_live_user_edit(baseline, before);
     let prompt_text_duplicated = exchange_prompt_text_duplicated(before, after);
     let before_prefix_count = before_exchange
@@ -4538,7 +4538,7 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
                 &format!(
                     "write_authority action=routed transport=write_queue len={} hash={}",
                     content.len(),
-                    crate::ops_log::content_hash(content)
+                    agent_doc_hash::content_hash(content)
                 ),
             );
         }
@@ -4584,7 +4584,7 @@ pub(crate) fn record_document_write_provenance(path: &Path, content: &str) {
         .to_string_lossy()
         .to_string();
     let write_id = uuid::Uuid::new_v4().to_string();
-    let hash = agent_doc_debounce::content_hash(content);
+    let hash = agent_doc_hash::content_hash(content);
     if let Err(e) = agent_doc_debounce::record_write_provenance(
         &canonical,
         content.len(),
@@ -4628,10 +4628,7 @@ mod tests {
         let prov = agent_doc_debounce::write_provenance(&doc_key)
             .expect("document write should record provenance");
         assert_eq!(prov.len, "hello document".len());
-        assert_eq!(
-            prov.hash,
-            agent_doc_debounce::content_hash("hello document")
-        );
+        assert_eq!(prov.hash, agent_doc_hash::content_hash("hello document"));
         assert_eq!(prov.actor, "agent");
         assert!(!prov.write_id.is_empty());
 
@@ -4871,7 +4868,7 @@ mod tests {
         );
         assert_eq!(
             payload["baseline_hash"].as_str(),
-            Some(agent_doc_debounce::content_hash(content).as_str()),
+            Some(agent_doc_hash::content_hash(content).as_str()),
             "queued reposition patch must tag the baseline content hash it targets"
         );
         // Reposition-only invariant: no response body re-materialized.
@@ -5418,7 +5415,7 @@ scratch
         agent_doc_debounce::record_live_buffer_digest(
             &doc_str,
             live_buffer.len(),
-            &agent_doc_debounce::content_hash(&live_buffer),
+            &agent_doc_hash::content_hash(&live_buffer),
         )
         .unwrap();
 
@@ -5462,7 +5459,7 @@ scratch
         agent_doc_debounce::record_live_buffer_digest(
             &doc_str,
             drifted.len(),
-            &agent_doc_debounce::content_hash(&drifted),
+            &agent_doc_hash::content_hash(&drifted),
         )
         .unwrap();
 
@@ -5490,7 +5487,7 @@ scratch
         assert!(
             log.contains(&format!(
                 "expected_hash={}",
-                crate::ops_log::content_hash(expected)
+                agent_doc_hash::content_hash(expected)
             )),
             "marker must carry expected hash: {log}"
         );
@@ -5501,7 +5498,7 @@ scratch
         assert!(
             log.contains(&format!(
                 "disk_hash={}",
-                crate::ops_log::content_hash(&drifted)
+                agent_doc_hash::content_hash(&drifted)
             )),
             "marker must carry disk hash: {log}"
         );
@@ -5512,7 +5509,7 @@ scratch
         assert!(
             log.contains(&format!(
                 "live_hash={}",
-                crate::ops_log::content_hash(&drifted)
+                agent_doc_hash::content_hash(&drifted)
             )),
             "marker must carry live-buffer hash: {log}"
         );

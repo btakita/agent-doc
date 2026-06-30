@@ -31,7 +31,6 @@
 //! - `log_cycle_appends_multiple`: multiple entries → multiple lines
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -143,13 +142,6 @@ pub struct CycleEntry {
     pub file_hash: Option<String>,
 }
 
-/// Compute SHA256 hex hash of content.
-pub fn content_hash(content: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(content.as_bytes());
-    hex::encode(hasher.finalize())
-}
-
 /// Get the current git HEAD commit hash for a file.
 fn git_head_hash(file: &Path) -> Option<String> {
     let output = std::process::Command::new("git")
@@ -209,8 +201,8 @@ fn try_log_cycle(
         file: relative,
         timestamp: iso_timestamp(),
         commit_hash: git_head_hash(file),
-        snapshot_hash: snapshot_content.map(content_hash),
-        file_hash: file_content.map(content_hash),
+        snapshot_hash: snapshot_content.map(agent_doc_hash::content_hash),
+        file_hash: file_content.map(agent_doc_hash::content_hash),
     };
 
     let json = serde_json::to_string(&entry).ok()?;

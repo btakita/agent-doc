@@ -1166,7 +1166,7 @@ fn document_dirty_after_committed_cycle(file: &Path) -> Result<bool> {
     };
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    Ok(agent_doc_orchestration::ops_log::content_hash(&content) != hash)
+    Ok(agent_doc_hash::content_hash(&content) != hash)
 }
 
 fn protected_clear_input_reason(
@@ -2161,7 +2161,7 @@ fn clear_direct_submit_blocked_message(
 }
 
 fn short_clear_submit_content_hash(content: &str) -> String {
-    let hash = agent_doc_orchestration::ops_log::content_hash(content);
+    let hash = agent_doc_hash::content_hash(content);
     hash[..hash.len().min(12)].to_string()
 }
 

@@ -510,7 +510,7 @@ fn apply_compacted_document(
                 "compact_writeback file={} transport=disk_force reason=force_disk len={} hash={}",
                 file.display(),
                 compacted.len(),
-                crate::ops_log::content_hash(compacted)
+                agent_doc_hash::content_hash(compacted)
             ),
         );
     } else {
@@ -2113,7 +2113,7 @@ mod tests {
         agent_doc_debounce::record_live_buffer_digest(
             &file_str,
             live_buffer.len(),
-            &agent_doc_debounce::content_hash(&live_buffer),
+            &agent_doc_hash::content_hash(&live_buffer),
         )
         .unwrap();
 
@@ -2161,7 +2161,7 @@ mod tests {
         agent_doc_debounce::record_live_buffer_digest(
             &file_str,
             stale_snapshot.len(),
-            &agent_doc_debounce::content_hash(stale_snapshot),
+            &agent_doc_hash::content_hash(stale_snapshot),
         )
         .unwrap();
 

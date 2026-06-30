@@ -61,7 +61,7 @@ pub fn record_context_clear_in_flight(
         target: target.to_string(),
         harness: harness.to_string(),
         command: command.to_string(),
-        head_sha256: active_head.map(crate::ops_log::content_hash),
+        head_sha256: active_head.map(agent_doc_hash::content_hash),
         head_bytes: active_head.map(str::len),
         written_at: now_secs(),
     };
@@ -123,7 +123,7 @@ mod tests {
         assert_eq!(marker.head_bytes, Some("do [#a]".len()));
         assert_eq!(
             marker.head_sha256.as_deref(),
-            Some(crate::ops_log::content_hash("do [#a]").as_str())
+            Some(agent_doc_hash::content_hash("do [#a]").as_str())
         );
 
         clear_context_clear_in_flight(&doc).unwrap();

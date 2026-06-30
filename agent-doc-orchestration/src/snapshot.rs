@@ -92,7 +92,6 @@
 
 use anyhow::{Context, Result};
 use fs2::FileExt;
-use sha2::{Digest, Sha256};
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 
@@ -120,9 +119,7 @@ pub fn doc_hash_from_str(absolute_path: &str) -> String {
 }
 
 fn hash_path_str(path: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(path.as_bytes());
-    hex::encode(hasher.finalize())
+    agent_doc_hash::content_hash(path)
 }
 
 /// Compute the advisory lock file path for a given document.

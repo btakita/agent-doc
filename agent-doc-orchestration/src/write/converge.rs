@@ -429,7 +429,7 @@ pub(crate) fn log_live_prompt_drift_auto_recovered(
             file.display(),
             target.len(),
             file_content.len(),
-            crate::ops_log::content_hash(target),
+            agent_doc_hash::content_hash(target),
             ipc_listener_active,
             transport
         ),
@@ -796,7 +796,7 @@ pub(crate) fn try_editor_converge_live_prompt_drift(
                 .map(Vec::len)
                 .unwrap_or(0),
             payload.get("frontmatter").is_some(),
-            crate::ops_log::content_hash(target)
+            agent_doc_hash::content_hash(target)
         ),
     );
 
@@ -1019,7 +1019,7 @@ fn try_detached_disk_write(
             file.display(),
             reason,
             target.len(),
-            crate::ops_log::content_hash(target)
+            agent_doc_hash::content_hash(target)
         ),
     );
     Ok(true)
@@ -1041,7 +1041,7 @@ fn refresh_editor_after_ack_mismatch(
     current_content: &str,
     source: &str,
 ) -> AckMismatchRefreshOutcome {
-    let stale_hash = crate::ops_log::content_hash(recovered);
+    let stale_hash = agent_doc_hash::content_hash(recovered);
     let Some(recovery) = classify_ack_mismatch_recovery(
         target,
         recovered,
@@ -1070,7 +1070,7 @@ fn refresh_editor_after_ack_mismatch(
             AckMismatchRefreshOutcome::ReplayedTarget,
         ),
     };
-    let target_hash = crate::ops_log::content_hash(refresh_content);
+    let target_hash = agent_doc_hash::content_hash(refresh_content);
     let failure_action = match recovery {
         AckMismatchRecovery::RevertUntrustedAckToCurrent => {
             "left_untrusted_ack_content_editor_owned"
@@ -1674,8 +1674,8 @@ pub(crate) fn editor_convergence_payload(
         "node_patches": node_patches,
         "unmatched": "",
         "baseline": current_content,
-        "baseline_hash": agent_doc_debounce::content_hash(current_content),
-        "baseline_normalized_hash": agent_doc_debounce::content_hash(&normalized_baseline),
+        "baseline_hash": agent_doc_hash::content_hash(current_content),
+        "baseline_normalized_hash": agent_doc_hash::content_hash(&normalized_baseline),
         "reposition_boundary": false,
         "patch_id": patch_id,
     });
@@ -2598,15 +2598,15 @@ mod core_tests {
 
         assert_eq!(
             payload["baseline_hash"].as_str(),
-            Some(agent_doc_debounce::content_hash(&source).as_str()),
+            Some(agent_doc_hash::content_hash(&source).as_str()),
             "socket convergence payloads must carry the raw generation fence"
         );
         assert_eq!(
             payload["baseline_normalized_hash"].as_str(),
             Some(
-                agent_doc_debounce::content_hash(
-                    &crate::git::normalize_transient_agent_doc_markers(&source)
-                )
+                agent_doc_hash::content_hash(&crate::git::normalize_transient_agent_doc_markers(
+                    &source
+                ))
                 .as_str()
             ),
             "socket convergence payloads must also carry the transient-marker-normalized fence"

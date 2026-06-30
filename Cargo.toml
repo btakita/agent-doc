@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "agent-doc-hash",
     "agent-doc-log-time",
     "agent-doc-lease",
     "agent-doc-debounce",
@@ -86,6 +87,7 @@ agent-doc-element-review = { path = "agent-doc-element-review", version = "0.34.
 agent-doc-ffi = { path = "agent-doc-ffi", version = "0.34.65" }
 agent-doc-frontmatter = { path = "agent-doc-frontmatter", version = "0.34.65" }
 agent-doc-fs = { path = "agent-doc-fs", version = "0.34.65" }
+agent-doc-hash = { path = "agent-doc-hash", version = "0.34.65" }
 agent-doc-markdown-ast = { path = "agent-doc-markdown-ast", version = "0.34.65" }
 agent-doc-merge = { path = "agent-doc-merge", version = "0.34.65" }
 agent-doc-model-tier = { path = "agent-doc-model-tier", version = "0.34.65" }
@@ -107,7 +109,6 @@ clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 similar = "3"
-sha2 = "0.11"
 toml = "1.1"
 ureq = { version = "3", features = ["json"] }
 tempfile = "3"
@@ -139,7 +140,6 @@ agent-doc-orchestration = { path = "agent-doc-orchestration", version = "0.34.65
 assert_cmd = "2"
 existence = "0.4"
 filetime = "0.2"
-hex = "0.4"
 module-harness = "0.2.1"
 predicates = "3"
 proptest = "1"

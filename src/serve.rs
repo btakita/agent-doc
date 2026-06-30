@@ -856,7 +856,7 @@ fn read_doc_fingerprint(doc: &Path) -> Result<DocFingerprint> {
         .and_then(system_time_ms);
     Ok(DocFingerprint {
         bytes: content.len(),
-        hash: agent_doc_orchestration::ops_log::content_hash(&content),
+        hash: agent_doc_hash::content_hash(&content),
         modified_ms,
     })
 }

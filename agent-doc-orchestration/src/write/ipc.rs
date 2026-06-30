@@ -483,7 +483,7 @@ pub(crate) struct EditorBadStateFingerprint {
 impl EditorBadStateFingerprint {
     fn new(content: String) -> Self {
         let len = content.len();
-        let hash = crate::ops_log::content_hash(&content);
+        let hash = agent_doc_hash::content_hash(&content);
         Self { content, len, hash }
     }
 
@@ -775,7 +775,7 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
                 patch_id.unwrap_or("-"),
                 reason,
                 ours.len(),
-                crate::ops_log::content_hash(ours),
+                agent_doc_hash::content_hash(ours),
             ),
         );
         return false;
@@ -819,9 +819,9 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
             patch_id.unwrap_or("-"),
             prior_source,
             decision.snapshot_content.len(),
-            crate::ops_log::content_hash(&decision.snapshot_content),
+            agent_doc_hash::content_hash(&decision.snapshot_content),
             ours.len(),
-            crate::ops_log::content_hash(ours)
+            agent_doc_hash::content_hash(ours)
         ),
     );
     log_ipc_proof_failure(
@@ -834,9 +834,9 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
             "snap_source={} candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={}",
             prior_source,
             decision.snapshot_content.len(),
-            crate::ops_log::content_hash(&decision.snapshot_content),
+            agent_doc_hash::content_hash(&decision.snapshot_content),
             ours.len(),
-            crate::ops_log::content_hash(ours)
+            agent_doc_hash::content_hash(ours)
         ),
     );
     let _ = crate::cycle_state::record_ipc_snapshot_adoption_blocked(file);
@@ -879,13 +879,13 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
                 source,
                 patch_id.unwrap_or("-"),
                 base.len(),
-                crate::ops_log::content_hash(base),
+                agent_doc_hash::content_hash(base),
                 candidate.len(),
-                crate::ops_log::content_hash(&candidate),
+                agent_doc_hash::content_hash(&candidate),
                 queue_reconciled_ours.len(),
-                crate::ops_log::content_hash(&queue_reconciled_ours),
+                agent_doc_hash::content_hash(&queue_reconciled_ours),
                 merged_doc.len(),
-                crate::ops_log::content_hash(&merged_doc),
+                agent_doc_hash::content_hash(&merged_doc),
                 outcome_count,
                 ack_count,
             ),
@@ -950,9 +950,9 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
                 source,
                 patch_id.unwrap_or("-"),
                 candidate.len(),
-                crate::ops_log::content_hash(&candidate),
+                agent_doc_hash::content_hash(&candidate),
                 union.len(),
-                crate::ops_log::content_hash(&union),
+                agent_doc_hash::content_hash(&union),
             ),
         );
         let visible_repair_required = !ack_content_contains_latest_response(&candidate, &union);
@@ -1024,9 +1024,9 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
             patch_id.unwrap_or("-"),
             live_candidate_contains_response,
             candidate.len(),
-            crate::ops_log::content_hash(&candidate),
+            agent_doc_hash::content_hash(&candidate),
             queue_reconciled_ours.len(),
-            crate::ops_log::content_hash(&queue_reconciled_ours),
+            agent_doc_hash::content_hash(&queue_reconciled_ours),
         ),
     );
     true
@@ -1107,7 +1107,7 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_prompt_duplication(
                 patch_id.unwrap_or("-"),
                 reason,
                 ours.len(),
-                crate::ops_log::content_hash(ours),
+                agent_doc_hash::content_hash(ours),
             ),
         );
         return false;
@@ -1150,9 +1150,9 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_prompt_duplication(
             prior_source,
             duplicate_count,
             decision.snapshot_content.len(),
-            crate::ops_log::content_hash(&decision.snapshot_content),
+            agent_doc_hash::content_hash(&decision.snapshot_content),
             ours.len(),
-            crate::ops_log::content_hash(ours)
+            agent_doc_hash::content_hash(ours)
         ),
     );
     log_ipc_proof_failure(
@@ -1166,9 +1166,9 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_prompt_duplication(
             prior_source,
             duplicate_count,
             decision.snapshot_content.len(),
-            crate::ops_log::content_hash(&decision.snapshot_content),
+            agent_doc_hash::content_hash(&decision.snapshot_content),
             ours.len(),
-            crate::ops_log::content_hash(ours)
+            agent_doc_hash::content_hash(ours)
         ),
     );
     let _ = crate::cycle_state::record_ipc_snapshot_adoption_blocked(file);
@@ -1214,10 +1214,10 @@ pub(crate) fn log_ipc_snapshot_adoption_allowed(
             patch_id.unwrap_or("-"),
             decision.snap_source.label(),
             decision.snapshot_content.len(),
-            crate::ops_log::content_hash(&decision.snapshot_content),
+            agent_doc_hash::content_hash(&decision.snapshot_content),
             content_ours.map(|o| o.len()).unwrap_or(0),
             content_ours
-                .map(crate::ops_log::content_hash)
+                .map(agent_doc_hash::content_hash)
                 .unwrap_or_else(|| "-".to_string()),
             drift_recheck,
             dup_recheck,
@@ -1270,9 +1270,9 @@ pub(crate) fn log_ipcfullprompt_corruption_if_any(
             source,
             patch_id.unwrap_or("-"),
             candidate.len(),
-            crate::ops_log::content_hash(candidate),
+            agent_doc_hash::content_hash(candidate),
             base.len(),
-            crate::ops_log::content_hash(base),
+            agent_doc_hash::content_hash(base),
             summary,
         ),
     );
@@ -1373,9 +1373,9 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
                 patch_id,
                 response_present,
                 current.len(),
-                crate::ops_log::content_hash(current),
+                agent_doc_hash::content_hash(current),
                 ours.len(),
-                crate::ops_log::content_hash(ours),
+                agent_doc_hash::content_hash(ours),
                 prompt_drift
             ),
         );
@@ -1411,11 +1411,11 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
                     "content_ours_snapshot_visible_response_repair",
                     &format!(
                         "response_sha256={} current_len={} current_hash={} repaired_len={} repaired_hash={}",
-                        crate::ops_log::content_hash(expected_response),
+                        agent_doc_hash::content_hash(expected_response),
                         current.len(),
-                        crate::ops_log::content_hash(current),
+                        agent_doc_hash::content_hash(current),
                         repaired_current.len(),
-                        crate::ops_log::content_hash(&repaired_current)
+                        agent_doc_hash::content_hash(&repaired_current)
                     ),
                 );
                 guard_visible_write_idle_and_current(
@@ -1431,9 +1431,9 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
                         file.display(),
                         patch_id,
                         repaired_current.len(),
-                        crate::ops_log::content_hash(&repaired_current),
+                        agent_doc_hash::content_hash(&repaired_current),
                         ours.len(),
-                        crate::ops_log::content_hash(ours)
+                        agent_doc_hash::content_hash(ours)
                     ),
                 );
             } else {
@@ -1445,9 +1445,9 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
                     "file_ipc_fallback",
                     &format!(
                         "response_sha256={} current_len={} current_hash={}",
-                        crate::ops_log::content_hash(expected_response),
+                        agent_doc_hash::content_hash(expected_response),
                         current.len(),
-                        crate::ops_log::content_hash(current)
+                        agent_doc_hash::content_hash(current)
                     ),
                 );
                 return Ok(AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
@@ -1509,7 +1509,7 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
             patch_id,
             repair_decision.snap_source.label(),
             repair_decision.snapshot_content.len(),
-            crate::ops_log::content_hash(&repair_decision.snapshot_content)
+            agent_doc_hash::content_hash(&repair_decision.snapshot_content)
         ),
     );
     Ok(AlreadyAppliedSnapshotOutcome::Persisted)
@@ -1627,9 +1627,9 @@ pub(crate) fn ipc_repair_decision_from_sidecar(
                 file.display(),
                 patch_id.unwrap_or("-"),
                 bad_state.len(),
-                crate::ops_log::content_hash(&bad_state),
+                agent_doc_hash::content_hash(&bad_state),
                 repaired.len(),
-                crate::ops_log::content_hash(&repaired),
+                agent_doc_hash::content_hash(&repaired),
                 required_prefix_count,
                 observed_prefix_count,
                 duplicate_prompt_count
@@ -1769,9 +1769,9 @@ pub(crate) fn redeliver_full_content_repair_to_editor(
             file.display(),
             source_patch_id.unwrap_or("-"),
             expected_bad_state.len(),
-            crate::ops_log::content_hash(expected_bad_state),
+            agent_doc_hash::content_hash(expected_bad_state),
             current_content.len(),
-            crate::ops_log::content_hash(&current_content),
+            agent_doc_hash::content_hash(&current_content),
             current_content == expected_bad_state
         ),
     );
@@ -1788,9 +1788,9 @@ pub(crate) fn redeliver_full_content_repair_to_editor(
                 file.display(),
                 source_patch_id.unwrap_or("-"),
                 expected_bad_state.len(),
-                crate::ops_log::content_hash(expected_bad_state),
+                agent_doc_hash::content_hash(expected_bad_state),
                 current_content.len(),
-                crate::ops_log::content_hash(&current_content)
+                agent_doc_hash::content_hash(&current_content)
             ),
         );
         return false;
@@ -1834,7 +1834,7 @@ pub(crate) fn redeliver_full_content_repair_to_editor(
                 file.display(),
                 source_patch_id.unwrap_or("-"),
                 expected_bad_state.len(),
-                crate::ops_log::content_hash(expected_bad_state),
+                agent_doc_hash::content_hash(expected_bad_state),
                 live.len,
                 live.hash
             ),
@@ -1858,7 +1858,7 @@ pub(crate) fn redeliver_full_content_repair_to_editor(
                     source_patch_id.unwrap_or("-"),
                     repaired_content.len(),
                     expected_bad_state.len(),
-                    crate::ops_log::content_hash(expected_bad_state)
+                    agent_doc_hash::content_hash(expected_bad_state)
                 ),
             );
             true
@@ -1975,9 +1975,9 @@ pub(crate) fn verify_normalization_repair_observed(
             patch_id,
             transport,
             observed.len(),
-            crate::ops_log::content_hash(&observed),
+            agent_doc_hash::content_hash(&observed),
             repaired_content.len(),
-            crate::ops_log::content_hash(repaired_content),
+            agent_doc_hash::content_hash(repaired_content),
             observed_matches
         ),
     );
@@ -2022,9 +2022,9 @@ pub(crate) fn try_ipc_normalization_repair_patch(
                 file.display(),
                 source_patch_id.unwrap_or("-"),
                 expected_bad_state.len(),
-                crate::ops_log::content_hash(expected_bad_state),
+                agent_doc_hash::content_hash(expected_bad_state),
                 current_content.len(),
-                crate::ops_log::content_hash(&current_content)
+                agent_doc_hash::content_hash(&current_content)
             ),
         );
         return Ok(false);
@@ -2058,9 +2058,9 @@ pub(crate) fn try_ipc_normalization_repair_patch(
             source_patch_id.unwrap_or("-"),
             normalize_prefix_lines.len(),
             expected_bad_state.len(),
-            crate::ops_log::content_hash(expected_bad_state),
+            agent_doc_hash::content_hash(expected_bad_state),
             repaired_content.len(),
-            crate::ops_log::content_hash(repaired_content)
+            agent_doc_hash::content_hash(repaired_content)
         ),
     );
 
@@ -2257,11 +2257,11 @@ pub(crate) fn repair_ipc_decision_visible_state(
             bad_len,
             bad_hash,
             decision.snapshot_content.len(),
-            crate::ops_log::content_hash(&decision.snapshot_content),
+            agent_doc_hash::content_hash(&decision.snapshot_content),
             current.as_deref().map(str::len).unwrap_or(0),
             current
                 .as_deref()
-                .map(crate::ops_log::content_hash)
+                .map(agent_doc_hash::content_hash)
                 .unwrap_or_else(|| "-".to_string()),
             decision.normalize_prefix_lines.len(),
             duplicate_prompt_line_count(
@@ -2310,7 +2310,7 @@ pub(crate) fn repair_ipc_decision_visible_state(
             bad_len,
             bad_hash,
             decision.snapshot_content.len(),
-            crate::ops_log::content_hash(&decision.snapshot_content)
+            agent_doc_hash::content_hash(&decision.snapshot_content)
         ),
     );
     let detail = format!(
@@ -2319,7 +2319,7 @@ pub(crate) fn repair_ipc_decision_visible_state(
         bad_len,
         bad_hash,
         decision.snapshot_content.len(),
-        crate::ops_log::content_hash(&decision.snapshot_content)
+        agent_doc_hash::content_hash(&decision.snapshot_content)
     );
     if let Err(err) = crate::cycle_state::record_editor_convergence_required(
         file,
@@ -2531,7 +2531,7 @@ fn log_content_ours_adoption_refused_stale_supervisor(
             patch_id.unwrap_or("-"),
             guard,
             content_ours.len(),
-            crate::ops_log::content_hash(content_ours),
+            agent_doc_hash::content_hash(content_ours),
             stale_message
         ),
     );
@@ -2545,7 +2545,7 @@ fn log_content_ours_adoption_refused_stale_supervisor(
             "guard={} content_ours_len={} content_ours_hash={}",
             guard,
             content_ours.len(),
-            crate::ops_log::content_hash(content_ours)
+            agent_doc_hash::content_hash(content_ours)
         ),
     );
 }
@@ -3935,7 +3935,7 @@ agent response
         assert_eq!(payload["expected_content_len"], bad_state.len());
         assert_eq!(
             payload["expected_content_hash"],
-            crate::ops_log::content_hash(bad_state)
+            agent_doc_hash::content_hash(bad_state)
         );
 
         let disk = std::fs::read_to_string(&doc).unwrap();

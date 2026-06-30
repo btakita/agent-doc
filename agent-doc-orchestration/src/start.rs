@@ -523,7 +523,7 @@ fn log_idle_queue_drain_submit(
             idle_queue_submit_mode(shared, harness),
             target,
             active_head.len(),
-            crate::ops_log::content_hash(active_head),
+            agent_doc_hash::content_hash(active_head),
             drain_payload.len(),
         ),
     );
@@ -663,7 +663,7 @@ fn route_owned_file_dirty_after_commit(
     state
         .file_hash
         .as_ref()
-        .is_some_and(|hash| crate::ops_log::content_hash(content) != *hash)
+        .is_some_and(|hash| agent_doc_hash::content_hash(content) != *hash)
 }
 
 fn route_owned_liveness_reason(
@@ -2617,7 +2617,7 @@ mod th {
     ) -> crate::cycle_state::CycleState {
         let mut state = test_cycle("cycle-2", agent_doc_turn::CyclePhase::Committed, 20);
         state.file = path.display().to_string();
-        state.file_hash = Some(crate::ops_log::content_hash(content));
+        state.file_hash = Some(agent_doc_hash::content_hash(content));
         state
     }
     // #jb-run-agent-doc-busy-queue-dispatch-deadlock: the supervisor idle-queue

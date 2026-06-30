@@ -2638,7 +2638,7 @@ fn dispatch_blocked_proof_fields(
         fields.push(format!("blocked_head_bytes={}", head.len()));
         fields.push(format!(
             "blocked_head_sha256={}",
-            crate::ops_log::content_hash(&head)
+            agent_doc_hash::content_hash(&head)
         ));
     }
     if let Some(harness) = dispatch_diagnostic_field(diagnostic_payload, "harness") {
@@ -2647,7 +2647,7 @@ fn dispatch_blocked_proof_fields(
         fields.push(format!("trigger_bytes={}", trigger.len()));
         fields.push(format!(
             "trigger_sha256={}",
-            crate::ops_log::content_hash(&trigger)
+            agent_doc_hash::content_hash(&trigger)
         ));
     }
     fields.join(" ")

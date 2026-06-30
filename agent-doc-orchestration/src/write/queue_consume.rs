@@ -193,7 +193,7 @@ pub(crate) fn record_queue_consumption_proofs(
     };
     let document_hash = queue_state_document_hash(&canonical);
     for (index, consumed_text) in plan.consumed_texts.iter().enumerate() {
-        let content_hash = crate::ops_log::content_hash(consumed_text);
+        let content_hash = agent_doc_hash::content_hash(consumed_text);
         let node_id = plan
             .node_ops
             .get(index)
@@ -344,7 +344,7 @@ fn record_next_queue_head_selected_state(
     else {
         return Ok(());
     };
-    let content_hash = crate::ops_log::content_hash(&head_text);
+    let content_hash = agent_doc_hash::content_hash(&head_text);
     let drainable = !stop_fence_at_head
         && agent_doc_queue::queue_continuation::live_drainable_continuation_head(
             content,
@@ -377,7 +377,7 @@ fn record_next_queue_head_selected_state(
     );
     if stop_fence_at_head {
         let reason = "stop_fence";
-        let reason_hash = crate::ops_log::content_hash(reason);
+        let reason_hash = agent_doc_hash::content_hash(reason);
         let deferred_event = crate::state_backbone::StateEvent::new(
             format!(
                 "queue-head-deferred:{document_hash}:{node_key}:0:{reason_hash}:{content_hash}"
@@ -1322,7 +1322,7 @@ pub fn prune_noise_queue_heads(file: &Path) -> Result<usize> {
         snapshot::save(file, &snap)?;
     }
 
-    let base_hash = crate::ops_log::content_hash(&content);
+    let base_hash = agent_doc_hash::content_hash(&content);
     eprintln!(
         "[queue] pruned {struck} predicate-proven head(s): noise + orphan id-backed (#goqstall2/#orphanqhead)"
     );
@@ -1466,7 +1466,7 @@ pub fn strike_orphan_id_backed_queue_head(file: &Path, id: &str) -> Result<bool>
         }
         None => None,
     };
-    let base_hash = crate::ops_log::content_hash(&content);
+    let base_hash = agent_doc_hash::content_hash(&content);
     converge_document_or_disk(file, &new_document, &content, "orphan_id_head_strike")
         .context("orphan strike: failed to write document")?;
     if let Some(snap) = new_snapshot {
@@ -1541,7 +1541,7 @@ pub fn acknowledge_open_id_backed_queue_head(file: &Path, id: &str) -> Result<bo
         }
         None => None,
     };
-    let base_hash = crate::ops_log::content_hash(&content);
+    let base_hash = agent_doc_hash::content_hash(&content);
     converge_document_or_disk(file, &new_document, &content, "open_id_head_ack")
         .context("open-id ack: failed to write document")?;
     if let Some(snap) = new_snapshot {
@@ -1933,7 +1933,7 @@ pub(crate) fn queue_prompt_node_keys_for_count(
         .iter()
         .enumerate()
         .map(|(index, text)| {
-            let hash = crate::ops_log::content_hash(text);
+            let hash = agent_doc_hash::content_hash(text);
             let short_hash = &hash[..hash.len().min(12)];
             format!("queue:entry:{index}:{short_hash}")
         })
@@ -1976,7 +1976,7 @@ pub(crate) fn queue_prompt_node_keys_for_done_ids(
         .iter()
         .enumerate()
         .map(|(index, text)| {
-            let hash = crate::ops_log::content_hash(text);
+            let hash = agent_doc_hash::content_hash(text);
             let short_hash = &hash[..hash.len().min(12)];
             format!("queue:done:{index}:{short_hash}")
         })
@@ -3113,7 +3113,7 @@ mod core_tests {
         assert!(records[0].proof.contains("Run queued thing"));
         assert_eq!(
             records[0].content_hash,
-            crate::ops_log::content_hash("Run queued thing")
+            agent_doc_hash::content_hash("Run queued thing")
         );
         assert_eq!(
             records[1].operation_kind,

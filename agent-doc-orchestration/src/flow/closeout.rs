@@ -490,9 +490,9 @@ pub(crate) fn record_terminal_closeout_proof(file: &Path, did_commit: bool) -> R
     })?;
     let head_content = crate::git::show_head(&canonical)?
         .with_context(|| format!("terminal proof: missing HEAD for {}", canonical.display()))?;
-    let file_hash = crate::ops_log::content_hash(&file_content);
-    let snapshot_hash = crate::ops_log::content_hash(&snapshot_content);
-    let head_hash = crate::ops_log::content_hash(&head_content);
+    let file_hash = agent_doc_hash::content_hash(&file_content);
+    let snapshot_hash = agent_doc_hash::content_hash(&snapshot_content);
+    let head_hash = agent_doc_hash::content_hash(&head_content);
     if snapshot_hash != head_hash {
         anyhow::bail!(
             "terminal proof mismatch for {}: file_hash={} snapshot_hash={} head_hash={}",
@@ -510,7 +510,7 @@ pub(crate) fn record_terminal_closeout_proof(file: &Path, did_commit: bool) -> R
     let state_file_hash_matches = state.file_hash.as_deref() == Some(file_hash.as_str());
     let state_snapshot_hash_matches =
         state.snapshot_hash.as_deref() == Some(snapshot_hash.as_str());
-    let content_hash = crate::ops_log::content_hash(&format!(
+    let content_hash = agent_doc_hash::content_hash(&format!(
         "cycle_id={}\nphase={}\nlast_event={}\nfile_hash={}\nsnapshot_hash={}\nhead_hash={}\ndid_commit={}\nstate_file_hash_matches={}\nstate_snapshot_hash_matches={}\nagreement={}\n",
         state.cycle_id,
         state.phase.as_str(),
@@ -734,7 +734,7 @@ pub fn gather_closeout_recovery_evidence(file: &Path) -> Result<CloseoutRecovery
     })?;
     let visible_markdown_hash = crate::capture::replay_file_hash(&visible);
     let snapshot = crate::snapshot::load(file)?;
-    let snapshot_hash = snapshot.as_deref().map(crate::ops_log::content_hash);
+    let snapshot_hash = snapshot.as_deref().map(agent_doc_hash::content_hash);
     let cycle = crate::cycle_state::load(file)?;
     let active_cycle = cycle.as_ref().map(|state| CloseoutCycleEvidence {
         cycle_id: state.cycle_id.clone(),
@@ -1819,7 +1819,7 @@ mod tests {
         );
         assert_eq!(
             evidence.snapshot_hash.as_deref(),
-            Some(crate::ops_log::content_hash(base).as_str())
+            Some(agent_doc_hash::content_hash(base).as_str())
         );
         assert_eq!(
             evidence.active_cycle,

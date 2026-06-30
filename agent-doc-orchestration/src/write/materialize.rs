@@ -64,8 +64,8 @@ pub(crate) fn ipc_response_materialized_or_fallback(
     if response_materialized_in_content(response, content) {
         return true;
     }
-    let response_hash = crate::ops_log::content_hash(response);
-    let content_hash = crate::ops_log::content_hash(content);
+    let response_hash = agent_doc_hash::content_hash(response);
+    let content_hash = agent_doc_hash::content_hash(content);
     eprintln!(
         "[write] IPC {} consumed a patch for {}, but the materialized content is missing the captured response body — retry required before snapshot/commit",
         source,
@@ -221,7 +221,7 @@ pub(crate) fn log_partial_response_materialization_for_retry(
             "ipc_partial_materialization_retained_for_retry file={} source={} response_sha256={} current_len={} stripped_len={}",
             file.display(),
             source,
-            crate::ops_log::content_hash(response),
+            agent_doc_hash::content_hash(response),
             current.len(),
             repaired.len()
         ),

@@ -40,7 +40,7 @@ pub fn unresolved_backlog_capture_targets(
                     })
                 });
             let current_hash = component
-                .map(|component| crate::ops_log::content_hash(component.content(&content)));
+                .map(|component| agent_doc_hash::content_hash(component.content(&content)));
             match (&target.baseline_hash, current_hash) {
                 (Some(expected), Some(current)) => current == *expected,
                 (Some(_), None) => true,
@@ -1033,7 +1033,7 @@ mod precommit_pending_capture_tests {
             .iter()
             .find(|component| agent_doc_element::element::is_backlog_component(&component.name))
             .unwrap();
-        crate::ops_log::content_hash(component.content(&content))
+        agent_doc_hash::content_hash(component.content(&content))
     }
 
     fn init_git_repo(root: &Path, tracked: &Path) {

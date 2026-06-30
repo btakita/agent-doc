@@ -1087,7 +1087,7 @@ impl SimWorld {
             self.record_ops_proof(format!(
                 "idle_queue_watch_context_reset head_bytes={} head_sha256={} reason=\"active queue head is a [focused-cycle] item - clearing to continue in a fresh agent context (#qfocsup)\"",
                 head.len(),
-                agent_doc_orchestration::ops_log::content_hash(&head)
+                agent_doc_hash::content_hash(&head)
             ));
         }
     }
@@ -1453,7 +1453,7 @@ impl SimWorld {
         self.record_ops_proof(format!(
             "session_check_supervisor_drain_handoff ui_outcome=deferred_for_supervisor_drain next_action=yield_to_supervisor_clear_and_continue head_bytes={} head_sha256={} proof_marker=#qfocsup",
             head.len(),
-            agent_doc_orchestration::ops_log::content_hash(&head)
+            agent_doc_hash::content_hash(&head)
         ));
         Ok(())
     }
@@ -1476,7 +1476,7 @@ impl SimWorld {
         self.record_ops_proof(format!(
             "fresh_agent_drain_evidence head_bytes={} head_sha256={} result=consumed response_materialized=true",
             head.len(),
-            agent_doc_orchestration::ops_log::content_hash(&head)
+            agent_doc_hash::content_hash(&head)
         ));
         Ok(())
     }

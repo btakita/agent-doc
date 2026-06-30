@@ -27,18 +27,18 @@
 //! - `editor_ops_for_base` returns `Some(ops)` **only** when the stored
 //!   `base_hash` matches the hash of the supplied base text; otherwise `None`.
 //! - `clear_op_capture` is idempotent — clearing an absent sidecar is `Ok(())`.
-//! - `content_hash` is the single source of the base-hash function shared by the
-//!   producer (editor, via FFI) and the consumer (merge).
+//! - `agent_doc_hash::content_hash` is the single source of the base-hash
+//!   function shared by the producer (editor, via FFI) and the consumer (merge).
 //!
 //! Wiring point (`#qnodemerge4wire` part 3): `merge::merge_contents_crdt_with_ops`
 //! loads ops via `editor_ops_for_base`, passes them to `merge_with_editor_ops`,
 //! and clears the sidecar after the merge.
 
 use agent_doc_fs::read_optional_text;
+use agent_doc_hash::content_hash;
 use agent_doc_merge::crdt::EditorOp;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -113,14 +113,6 @@ pub struct OpCaptureSidecar {
     /// Last-update wall-clock (ms since epoch), best-effort, for GC.
     #[serde(default)]
     pub updated_ms: u128,
-}
-
-/// Compute the SHA256 hex hash of arbitrary text — the base-hash function shared
-/// by the producer (editor reporters, via FFI) and the consumer (merge).
-pub fn content_hash(text: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(text.as_bytes());
-    hex::encode(hasher.finalize())
 }
 
 /// Path to the op-capture sidecar for `doc`:

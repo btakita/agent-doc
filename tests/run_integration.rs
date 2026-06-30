@@ -1,3 +1,4 @@
+use agent_doc_hash::content_hash;
 use agent_doc_orchestration::{
     cycle_state, project_controller, snapshot, state_backbone, turn_scope_store,
 };
@@ -6,7 +7,6 @@ use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
@@ -304,9 +304,7 @@ fn assert_terminal_closeout_proof(root: &Path, doc: &Path) {
 
 fn seed_snapshot(root: &Path, doc: &Path) {
     let canonical = doc.canonicalize().unwrap();
-    let mut hasher = Sha256::new();
-    hasher.update(canonical.to_string_lossy().as_bytes());
-    let hash = hex::encode(hasher.finalize());
+    let hash = content_hash(canonical.to_string_lossy().as_ref());
     let snapshot = root.join(".agent-doc/snapshots").join(format!("{hash}.md"));
     fs::write(snapshot, fs::read_to_string(doc).unwrap()).unwrap();
 }

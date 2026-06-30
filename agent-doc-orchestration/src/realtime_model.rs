@@ -429,8 +429,8 @@ pub fn broadcast_editor_change(
             "node_patches": delta.node_patches,
             "unmatched": "",
             "baseline": peer_baseline,
-            "baseline_hash": agent_doc_debounce::content_hash(peer_baseline),
-            "baseline_normalized_hash": agent_doc_debounce::content_hash(
+            "baseline_hash": agent_doc_hash::content_hash(peer_baseline),
+            "baseline_normalized_hash": agent_doc_hash::content_hash(
                 &crate::git::normalize_transient_agent_doc_markers(peer_baseline),
             ),
             "reposition_boundary": false,
@@ -656,7 +656,7 @@ mod tests {
         LiveBufferSnapshot {
             path: "doc.md".to_string(),
             len: body.len(),
-            hash: agent_doc_debounce::content_hash(body),
+            hash: agent_doc_hash::content_hash(body),
             timestamp_ms: generation,
             edit_epoch: 0,
             last_synced_epoch: 0,
@@ -826,13 +826,11 @@ mod tests {
         assert_eq!(payload["file"], canonical);
         assert_eq!(
             payload["baseline_hash"],
-            agent_doc_debounce::content_hash(&peer)
+            agent_doc_hash::content_hash(&peer)
         );
         assert_eq!(
             payload["baseline_normalized_hash"],
-            agent_doc_debounce::content_hash(&crate::git::normalize_transient_agent_doc_markers(
-                &peer
-            ))
+            agent_doc_hash::content_hash(&crate::git::normalize_transient_agent_doc_markers(&peer))
         );
         assert_eq!(payload["patches"][0]["component"], "backlog");
         assert_eq!(payload["patches"][0]["op"], "replace");

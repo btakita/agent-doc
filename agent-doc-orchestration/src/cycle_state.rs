@@ -423,8 +423,8 @@ pub fn start_preflight_with_task(
         last_event: "preflight_started".to_string(),
         started_at: now,
         updated_at: now,
-        snapshot_hash: snapshot_content.map(crate::ops_log::content_hash),
-        file_hash: file_content.map(crate::ops_log::content_hash),
+        snapshot_hash: snapshot_content.map(agent_doc_hash::content_hash),
+        file_hash: file_content.map(agent_doc_hash::content_hash),
         normalized_snapshot_hash: snapshot_content.map(normalized_content_hash),
         normalized_file_hash: file_content.map(normalized_content_hash),
         capture_id: None,
@@ -611,8 +611,8 @@ pub fn mark_write_applied(
     state.phase = next_phase;
     state.last_event = event.to_string();
     state.updated_at = now_secs();
-    state.snapshot_hash = snapshot_content.map(crate::ops_log::content_hash);
-    state.file_hash = file_content.map(crate::ops_log::content_hash);
+    state.snapshot_hash = snapshot_content.map(agent_doc_hash::content_hash);
+    state.file_hash = file_content.map(agent_doc_hash::content_hash);
     state.normalized_snapshot_hash = snapshot_content.map(normalized_content_hash);
     state.normalized_file_hash = file_content.map(normalized_content_hash);
     save(file, &state)?;
@@ -638,8 +638,8 @@ pub fn mark_response_captured(
     state.phase = next_phase;
     state.last_event = event.to_string();
     state.updated_at = now_secs();
-    state.snapshot_hash = snapshot_content.map(crate::ops_log::content_hash);
-    state.file_hash = file_content.map(crate::ops_log::content_hash);
+    state.snapshot_hash = snapshot_content.map(agent_doc_hash::content_hash);
+    state.file_hash = file_content.map(agent_doc_hash::content_hash);
     state.normalized_snapshot_hash = snapshot_content.map(normalized_content_hash);
     state.normalized_file_hash = file_content.map(normalized_content_hash);
     state.capture_id = Some(state.cycle_id.clone());
@@ -1162,11 +1162,11 @@ pub fn mark_committed(
     state.updated_at = now_secs();
     state.blocked_closeout = None;
     if let Some(snapshot) = snapshot_content {
-        state.snapshot_hash = Some(crate::ops_log::content_hash(snapshot));
+        state.snapshot_hash = Some(agent_doc_hash::content_hash(snapshot));
         state.normalized_snapshot_hash = Some(normalized_content_hash(snapshot));
     }
     if let Some(content) = file_content {
-        state.file_hash = Some(crate::ops_log::content_hash(content));
+        state.file_hash = Some(agent_doc_hash::content_hash(content));
         state.normalized_file_hash = Some(normalized_content_hash(content));
     }
     save(file, &state)?;
@@ -1259,11 +1259,11 @@ pub fn mark_abandoned(
     state.last_event = event.to_string();
     state.updated_at = now_secs();
     if let Some(snapshot) = snapshot_content {
-        state.snapshot_hash = Some(crate::ops_log::content_hash(snapshot));
+        state.snapshot_hash = Some(agent_doc_hash::content_hash(snapshot));
         state.normalized_snapshot_hash = Some(normalized_content_hash(snapshot));
     }
     if let Some(content) = file_content {
-        state.file_hash = Some(crate::ops_log::content_hash(content));
+        state.file_hash = Some(agent_doc_hash::content_hash(content));
         state.normalized_file_hash = Some(normalized_content_hash(content));
     }
     save(file, &state)?;
@@ -1435,7 +1435,7 @@ fn normalized_content_hash(content: &str) -> String {
     // component so response-replay / stale-lock recovery stays stable across
     // queue-maintenance churn (#adoc-queue-ipc-buffer-divergence #4). Must match
     // repair.rs's compare-side normalization exactly.
-    crate::ops_log::content_hash(&crate::git::normalize_for_replay_hash(content))
+    agent_doc_hash::content_hash(&crate::git::normalize_for_replay_hash(content))
 }
 
 fn normalize_pending_id(id: &str) -> String {
@@ -2047,7 +2047,7 @@ mod tests {
         mark_committed(&doc, "commit_success", Some("body"), Some("body")).unwrap();
 
         let state = mark_write_applied(&doc, "repair_applied", Some("new"), Some("new")).unwrap();
-        let body_hash = crate::ops_log::content_hash("body");
+        let body_hash = agent_doc_hash::content_hash("body");
         assert_eq!(state.phase, CyclePhase::Committed);
         assert_eq!(state.last_event, "commit_success");
         assert_eq!(state.snapshot_hash.as_deref(), Some(body_hash.as_str()));

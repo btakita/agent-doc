@@ -39,9 +39,9 @@
 //! - `test_plan_detects_recommendation_request`
 //! - `test_plan_no_false_positive_on_questions`
 
+use agent_doc_hash::content_hash;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -731,7 +731,7 @@ pub(crate) fn loaded_context_record(
         source_id: source_id.to_string(),
         source_kind: source_kind.to_string(),
         path: path.to_string(),
-        content_hash: sha256_hex(content),
+        content_hash: content_hash(content),
         concept_id: concept_id.map(str::to_string),
         loaded_at: loaded_at.to_string(),
         expansion_reason: expansion_reason.to_string(),
@@ -762,13 +762,6 @@ pub(crate) fn build_loaded_context_ledger(
         entries,
         duplicate_expansions_suppressed,
     }
-}
-
-fn sha256_hex(content: &str) -> String {
-    Sha256::digest(content.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
 }
 
 fn display_path(path: &Path) -> String {

@@ -419,7 +419,7 @@ fn normalized_content_hash(content: &str) -> String {
     // alone does not block recovery of an already-materialized response
     // (#adoc-queue-ipc-buffer-divergence #4). Must match cycle_state.rs's
     // store-side normalization exactly.
-    crate::ops_log::content_hash(&crate::git::normalize_for_replay_hash(content))
+    agent_doc_hash::content_hash(&crate::git::normalize_for_replay_hash(content))
 }
 
 fn preflight_cycle_age_secs(state: &crate::cycle_state::CycleState) -> u64 {
@@ -469,10 +469,10 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
         )
     })?;
     let snapshot_content = snapshot::load(file)?;
-    let current_file_hash = crate::ops_log::content_hash(&file_content);
+    let current_file_hash = agent_doc_hash::content_hash(&file_content);
     let current_snapshot_hash = snapshot_content
         .as_deref()
-        .map(crate::ops_log::content_hash);
+        .map(agent_doc_hash::content_hash);
     let current_normalized_file_hash = normalized_content_hash(&file_content);
     let current_normalized_snapshot_hash = snapshot_content.as_deref().map(normalized_content_hash);
 
@@ -1292,7 +1292,7 @@ fn save_blocked_repair_payload(
         .with_context(|| format!("create blocked repair dir {}", dir.display()))?;
     let filename = format!(
         "{}-{}.json",
-        crate::ops_log::content_hash(canonical.to_string_lossy().as_ref()),
+        agent_doc_hash::content_hash(canonical.to_string_lossy().as_ref()),
         now_millis()
     );
     let path = dir.join(filename);
@@ -1300,7 +1300,7 @@ fn save_blocked_repair_payload(
         captured_at: now_secs(),
         file: canonical.display().to_string(),
         reason,
-        payload_sha256: crate::ops_log::content_hash(response),
+        payload_sha256: agent_doc_hash::content_hash(response),
         response_body: response,
     };
     let json = serde_json::to_string_pretty(&record)?;
@@ -1543,7 +1543,7 @@ fn respect_manual_exchange_tail_removal_if_safe(
     let Some(snapshot_content) = snapshot::load(file)? else {
         return Ok(false);
     };
-    if capture.snapshot_hash != Some(crate::ops_log::content_hash(&snapshot_content)) {
+    if capture.snapshot_hash != Some(agent_doc_hash::content_hash(&snapshot_content)) {
         return Ok(false);
     }
 
@@ -1953,7 +1953,7 @@ fn replay_orphaned_response_through_strict_write(
             file.display(),
             if is_template { "template" } else { "append" },
             force_disk,
-            crate::ops_log::content_hash(response)
+            agent_doc_hash::content_hash(response)
         ),
     );
     write::run_command_with_response(
@@ -2000,7 +2000,7 @@ fn replay_crdt_patchback_through_strict_write(
             "repair_replay_via_strict_write file={} mode=crdt force_disk={} response_hash={}",
             file.display(),
             force_disk,
-            crate::ops_log::content_hash(response)
+            agent_doc_hash::content_hash(response)
         ),
     );
     eprintln!(

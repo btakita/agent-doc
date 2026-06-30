@@ -2573,8 +2573,8 @@ fn emit_postcommit_worktree_check(file: &Path) {
     };
     let head_norm = normalize_for_replay_hash(&head_doc);
     let tree_norm = normalize_for_replay_hash(&working);
-    let head_sha = crate::ops_log::content_hash(&head_norm);
-    let tree_sha = crate::ops_log::content_hash(&tree_norm);
+    let head_sha = agent_doc_hash::content_hash(&head_norm);
+    let tree_sha = agent_doc_hash::content_hash(&tree_norm);
     let matches = head_norm == tree_norm;
     crate::ops_log::log_op(
         file,

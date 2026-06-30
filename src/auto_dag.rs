@@ -226,7 +226,7 @@ fn schedule_id(file: &Path, seed: &AutoDagScheduleSeed) -> Result<String> {
         "schedule": seed,
     });
     let doc_hash = agent_doc_orchestration::snapshot::doc_hash(file)?;
-    let seed_hash = agent_doc_orchestration::ops_log::content_hash(&seed.to_string());
+    let seed_hash = agent_doc_hash::content_hash(&seed.to_string());
     Ok(format!("dag-{}-{}", &doc_hash[..8], &seed_hash[..12]))
 }
 

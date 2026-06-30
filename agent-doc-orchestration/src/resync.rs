@@ -1435,7 +1435,7 @@ fn finish_unfinished_turn(file: &Path) -> Result<()> {
     for _ in 0..4 {
         let before = std::fs::read_to_string(file)
             .ok()
-            .map(|c| crate::ops_log::content_hash(&c));
+            .map(|c| agent_doc_hash::content_hash(&c));
         // Always attempt repair: it is a no-op on a clean document, and a stranded
         // pending response does not necessarily register as a session-check
         // interruption (no open cycle yet). `repair` bails on an interruption that
@@ -1452,7 +1452,7 @@ fn finish_unfinished_turn(file: &Path) -> Result<()> {
         }
         let after = std::fs::read_to_string(file)
             .ok()
-            .map(|c| crate::ops_log::content_hash(&c));
+            .map(|c| agent_doc_hash::content_hash(&c));
         if before == after {
             break; // no progress this pass and still not clean — stop looping
         }

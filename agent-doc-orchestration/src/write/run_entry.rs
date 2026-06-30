@@ -1266,9 +1266,9 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
         "baseline": ipc_baseline.unwrap_or(""),
     });
     ipc_payload["baseline_hash"] =
-        serde_json::Value::String(agent_doc_debounce::content_hash(&content_at_start));
+        serde_json::Value::String(agent_doc_hash::content_hash(&content_at_start));
     ipc_payload["baseline_normalized_hash"] =
-        serde_json::Value::String(agent_doc_debounce::content_hash(
+        serde_json::Value::String(agent_doc_hash::content_hash(
             &crate::git::normalize_transient_agent_doc_markers(&content_at_start),
         ));
     ipc_payload["patch_id"] = serde_json::Value::String(patch_id.clone());
@@ -1618,7 +1618,7 @@ pub fn apply_template_from_string_with_options(
                 "apply_template_writeback file={} transport=disk_force reason=force_disk len={} hash={}",
                 file.display(),
                 final_content.len(),
-                crate::ops_log::content_hash(&final_content)
+                agent_doc_hash::content_hash(&final_content)
             ),
         );
     } else {

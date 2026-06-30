@@ -162,7 +162,7 @@ impl PartialCheckpointWriter {
             return Ok(None);
         }
 
-        let response_sha256 = crate::ops_log::content_hash(response);
+        let response_sha256 = agent_doc_hash::content_hash(response);
         if self.last_response_sha256.as_deref() == Some(response_sha256.as_str()) {
             return Ok(None);
         }
@@ -219,7 +219,7 @@ pub fn capture_response(file: &Path, response: &str) -> Result<CaptureRecord> {
     let file_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {} for response capture", file.display()))?;
     let snapshot_content = crate::snapshot::load(file)?;
-    let response_sha256 = crate::ops_log::content_hash(response);
+    let response_sha256 = agent_doc_hash::content_hash(response);
     let existing_cycle_id = crate::cycle_state::load(file)?.map(|s| s.cycle_id);
     let capture_id = existing_cycle_id.unwrap_or_else(|| format!("synthetic-{}", now_millis()));
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
@@ -249,7 +249,7 @@ pub fn capture_response(file: &Path, response: &str) -> Result<CaptureRecord> {
         discarded_at: None,
         snapshot_hash: snapshot_content
             .as_deref()
-            .map(crate::ops_log::content_hash),
+            .map(agent_doc_hash::content_hash),
         file_hash: Some(replay_file_hash(&file_content)),
         response_sha256: response_sha256.clone(),
         response_body: redacted_response,
@@ -280,7 +280,7 @@ fn checkpoint_partial_response_for_cycle(
         )
     })?;
     let snapshot_content = crate::snapshot::load(file)?;
-    let response_sha256 = crate::ops_log::content_hash(response);
+    let response_sha256 = agent_doc_hash::content_hash(response);
     let checkpoint_id = format!("{cycle_id}-partial");
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let metadata = metadata_from_frontmatter(&file_content);
@@ -304,7 +304,7 @@ fn checkpoint_partial_response_for_cycle(
         checkpoint_count,
         snapshot_hash: snapshot_content
             .as_deref()
-            .map(crate::ops_log::content_hash),
+            .map(agent_doc_hash::content_hash),
         file_hash: Some(replay_file_hash(&file_content)),
         response_sha256,
         response_body: redacted_response,
@@ -451,7 +451,7 @@ pub fn latest_committed(file: &Path) -> Result<Option<CaptureRecord>> {
 /// drift and fail the replay baseline. Stripping it keeps replay validation
 /// invariant to the mirror, matching the diff layer.
 pub(crate) fn replay_file_hash(content: &str) -> String {
-    crate::ops_log::content_hash(
+    agent_doc_hash::content_hash(
         &agent_doc_frontmatter::frontmatter::strip_pipeline_block_lines(content),
     )
 }
@@ -478,7 +478,7 @@ pub fn replay_baseline_drifted(file: &Path, capture: &CaptureRecord) -> Result<b
     let current_snapshot = crate::snapshot::load(file)?;
     let current_snapshot_hash = current_snapshot
         .as_deref()
-        .map(crate::ops_log::content_hash);
+        .map(agent_doc_hash::content_hash);
     let file_mismatch = capture.file_hash.as_deref() != Some(current_file_hash.as_str());
     let snapshot_mismatch = capture.snapshot_hash != current_snapshot_hash;
     Ok(file_mismatch || snapshot_mismatch)
@@ -491,7 +491,7 @@ pub fn validate_replay(file: &Path, capture: &CaptureRecord) -> Result<()> {
     let current_snapshot = crate::snapshot::load(file)?;
     let current_snapshot_hash = current_snapshot
         .as_deref()
-        .map(crate::ops_log::content_hash);
+        .map(agent_doc_hash::content_hash);
 
     let file_mismatch = capture.file_hash.as_deref() != Some(current_file_hash.as_str());
     let snapshot_mismatch = capture.snapshot_hash != current_snapshot_hash;
@@ -803,7 +803,7 @@ fn update_active_state(file: &Path, state: CaptureState) -> Result<()> {
             let current_snapshot = crate::snapshot::load(file)?;
             let current_snapshot_hash = current_snapshot
                 .as_deref()
-                .map(crate::ops_log::content_hash);
+                .map(agent_doc_hash::content_hash);
             if record.snapshot_hash != current_snapshot_hash {
                 record.snapshot_hash = current_snapshot_hash;
                 changed = true;
@@ -1225,7 +1225,7 @@ mod tests {
         std::fs::write(&doc, after_user_commit).unwrap();
         crate::snapshot::save(&doc, after_user_commit).unwrap();
         assert_ne!(
-            crate::ops_log::content_hash(after_user_commit),
+            agent_doc_hash::content_hash(after_user_commit),
             capture.file_hash.clone().unwrap()
         );
 
@@ -1234,12 +1234,12 @@ mod tests {
         let refreshed = load_active(&doc).unwrap().unwrap();
         assert_eq!(
             refreshed.file_hash.as_deref(),
-            Some(crate::ops_log::content_hash(after_user_commit).as_str()),
+            Some(agent_doc_hash::content_hash(after_user_commit).as_str()),
             "file_hash should be refreshed to current"
         );
         assert_eq!(
             refreshed.snapshot_hash.as_deref(),
-            Some(crate::ops_log::content_hash(after_user_commit).as_str()),
+            Some(agent_doc_hash::content_hash(after_user_commit).as_str()),
             "snapshot_hash should be refreshed to current"
         );
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
@@ -1283,7 +1283,7 @@ mod tests {
         let refreshed = load_active(&doc).unwrap().unwrap();
         assert_eq!(
             refreshed.file_hash.as_deref(),
-            Some(crate::ops_log::content_hash(cleaned_doc).as_str()),
+            Some(agent_doc_hash::content_hash(cleaned_doc).as_str()),
             "file_hash should reflect the user-cleaned document"
         );
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();

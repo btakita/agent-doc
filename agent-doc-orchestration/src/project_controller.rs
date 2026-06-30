@@ -2255,7 +2255,7 @@ fn emit_actor_projection(project_root: &Path) -> Result<()> {
 
 fn actor_projection_intended_hash(project_root: &Path) -> Result<String> {
     let store = load_actor_store(project_root)?;
-    Ok(crate::ops_log::content_hash(&serde_json::to_string_pretty(
+    Ok(agent_doc_hash::content_hash(&serde_json::to_string_pretty(
         &store,
     )?))
 }
@@ -2314,7 +2314,7 @@ pub fn store_layout_state(project_root: &Path, columns: &[String]) -> Result<()>
     store_layout_state_in_db(&conn, DEFAULT_LAYOUT_SCOPE, columns)?;
     let intended_hash = serde_json::to_string(columns)
         .ok()
-        .map(|content| crate::ops_log::content_hash(&content));
+        .map(|content| agent_doc_hash::content_hash(&content));
     if let Err(err) = emit_layout_projection(project_root) {
         record_projection_diagnostic_with_metadata(
             project_root,
@@ -2396,7 +2396,7 @@ fn emit_sessions_projection(
 
     let intended_hash = serde_json::to_string_pretty(&registry)
         .ok()
-        .map(|content| crate::ops_log::content_hash(&content));
+        .map(|content| agent_doc_hash::content_hash(&content));
     if let Err(err) = crate::sessions::save_in(project_root, &registry) {
         record_projection_diagnostic_with_metadata(
             project_root,
@@ -4587,12 +4587,12 @@ mod tests {
         assert!(error.contains(&format!("blocked_head_bytes={}", expected_head.len())));
         assert!(error.contains(&format!(
             "blocked_head_sha256={}",
-            crate::ops_log::content_hash(expected_head)
+            agent_doc_hash::content_hash(expected_head)
         )));
         assert!(error.contains(&format!("trigger_bytes={}", expected_trigger.len())));
         assert!(error.contains(&format!(
             "trigger_sha256={}",
-            crate::ops_log::content_hash(&expected_trigger)
+            agent_doc_hash::content_hash(&expected_trigger)
         )));
 
         let conn = open_state_db(dir.path()).unwrap();
@@ -4614,11 +4614,11 @@ mod tests {
         );
         assert!(diagnostic_payload.contains(&format!(
             "blocked_head_sha256={}",
-            crate::ops_log::content_hash(expected_head)
+            agent_doc_hash::content_hash(expected_head)
         )));
         assert!(diagnostic_payload.contains(&format!(
             "trigger_sha256={}",
-            crate::ops_log::content_hash(&expected_trigger)
+            agent_doc_hash::content_hash(&expected_trigger)
         )));
         let backpressure: i64 = conn
             .query_row(

@@ -302,7 +302,7 @@ fn build_step(
         result.missing_fact_sources,
         result.disproof_markers
     );
-    let content_hash = crate::ops_log::content_hash(&fingerprint);
+    let content_hash = agent_doc_hash::content_hash(&fingerprint);
     let mut step = WorkflowAutofixStep {
         invariant_id: result.id,
         action: action.to_string(),

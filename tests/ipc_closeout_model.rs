@@ -1,3 +1,4 @@
+use agent_doc_hash::content_hash;
 use agent_doc_turn::closeout_recovery::{
     CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput, CloseoutRecoveryState,
     closeout_recovery_decision_from_state,
@@ -6,7 +7,6 @@ use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
 use proptest::prelude::*;
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
@@ -132,9 +132,7 @@ fn expected_closeout_recovery_decision(
 
 fn doc_hash(doc: &Path) -> String {
     let canonical = doc.canonicalize().unwrap();
-    let mut hasher = Sha256::new();
-    hasher.update(canonical.to_string_lossy().as_bytes());
-    hex::encode(hasher.finalize())
+    content_hash(canonical.to_string_lossy().as_ref())
 }
 
 fn session_doc_content() -> String {

@@ -73,7 +73,7 @@ pub fn run(
                 "reset_resume_clear_writeback file={} transport=disk_force reason=force_disk len={} hash={}",
                 file.display(),
                 updated.len(),
-                agent_doc_orchestration::ops_log::content_hash(&updated)
+                agent_doc_hash::content_hash(&updated)
             ),
         );
     } else {

@@ -311,7 +311,7 @@ fn idle_queue_context_reset_ops_log_message(
         clear_cmd,
         target,
         active_head.len(),
-        crate::ops_log::content_hash(active_head),
+        agent_doc_hash::content_hash(active_head),
         reason,
     )
 }
@@ -462,7 +462,7 @@ fn idle_queue_resubmit_pending_payload(
                     pane,
                     payload_kind,
                     active_head.len(),
-                    crate::ops_log::content_hash(active_head),
+                    agent_doc_hash::content_hash(active_head),
                     payload.len()
                 ),
             );
@@ -479,7 +479,7 @@ fn idle_queue_resubmit_pending_payload(
                     pane,
                     payload_kind,
                     active_head.len(),
-                    crate::ops_log::content_hash(active_head),
+                    agent_doc_hash::content_hash(active_head),
                     err.to_string()
                 ),
             );
@@ -2404,7 +2404,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 path.display(),
                                 harness.binary,
                                 head.len(),
-                                crate::ops_log::content_hash(head),
+                                agent_doc_hash::content_hash(head),
                                 clear_cmd
                             ),
                         );

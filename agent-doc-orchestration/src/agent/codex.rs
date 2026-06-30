@@ -515,7 +515,7 @@ fn managed_network_child_proof_cache_key(
         "env": env_pairs,
     })
     .to_string();
-    crate::ops_log::content_hash(&raw)
+    agent_doc_hash::content_hash(&raw)
 }
 
 fn managed_network_child_proof_is_cached(key: &str) -> bool {

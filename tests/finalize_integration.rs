@@ -1,7 +1,7 @@
+use agent_doc_hash::content_hash;
 use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
@@ -129,9 +129,7 @@ fn cycle_state_path(root: &Path, doc: &Path) -> PathBuf {
 
 fn doc_hash(doc: &Path) -> String {
     let canonical = doc.canonicalize().unwrap();
-    let mut hasher = Sha256::new();
-    hasher.update(canonical.to_string_lossy().as_bytes());
-    hex::encode(hasher.finalize())
+    content_hash(canonical.to_string_lossy().as_ref())
 }
 
 fn read_cycle_phase(root: &Path, doc: &Path) -> Option<String> {

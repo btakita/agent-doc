@@ -1,0 +1,14 @@
+[package]
+name = "agent-doc-hash"
+version = "0.34.65"
+edition = "2024"
+description = "Content hashing helpers for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_hash"
+
+[dependencies]
+hex = "0.4"
+sha2 = "0.11"

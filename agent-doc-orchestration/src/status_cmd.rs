@@ -36,7 +36,7 @@ pub fn set_with_options(file: &Path, text: &str, force_disk: bool) -> Result<()>
                 "status_set_writeback file={} transport=disk_force reason=force_disk len={} hash={}",
                 file.display(),
                 new_doc.len(),
-                crate::ops_log::content_hash(&new_doc)
+                agent_doc_hash::content_hash(&new_doc)
             ),
         );
         return Ok(());

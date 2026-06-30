@@ -1454,7 +1454,7 @@ pub unsafe extern "C" fn agent_doc_reconnect_buffer_decision(
 /// number of bytes removed at `offset` and `insert_text` may be null. `offset`
 /// and `delete_len` are byte offsets/lengths into the buffer the op was captured
 /// against, whose text hashes to `base_hash` (see
-/// [`agent_doc_orchestration::op_capture::content_hash`]). A later merge trusts
+/// [`agent_doc_hash::content_hash`]). A later merge trusts
 /// the op only when its resolved base hashes to the same value; otherwise the op
 /// is silently disqualified and the merge falls back to the diff-guess (never
 /// worse than today).
@@ -2603,7 +2603,7 @@ mod tests {
         std::fs::write(&doc, "# plan\n").unwrap();
 
         let base_text = "hello world\n";
-        let base_hash = op_capture::content_hash(base_text);
+        let base_hash = agent_doc_hash::content_hash(base_text);
 
         let file_c = CString::new(doc.to_str().unwrap()).unwrap();
         let base_c = CString::new(base_hash.as_str()).unwrap();
@@ -2694,7 +2694,7 @@ mod tests {
         std::fs::write(&doc, "# plan\n").unwrap();
 
         let base_text = "café 日本 😀\n";
-        let base_hash = op_capture::content_hash(base_text);
+        let base_hash = agent_doc_hash::content_hash(base_text);
         let offset = "café ".len() as i64;
         let delete_len = "日本".len() as i64;
 

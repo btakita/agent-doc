@@ -56,7 +56,7 @@ fn persist_pending_write(file: &Path, current: &str, target: &str) -> Result<()>
                 "pending_write_writeback file={} transport=disk_force reason=force_disk len={} hash={}",
                 file.display(),
                 target.len(),
-                crate::ops_log::content_hash(target)
+                agent_doc_hash::content_hash(target)
             ),
         );
         return Ok(());

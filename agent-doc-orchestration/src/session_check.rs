@@ -219,7 +219,7 @@ fn log_supervisor_drain_handoff(file: &Path, head: &str, outcome_fields: &str) {
             "session_check_supervisor_drain_handoff file={} head_bytes={} head_sha256={} {}",
             file.display(),
             head.len(),
-            crate::ops_log::content_hash(head),
+            agent_doc_hash::content_hash(head),
             outcome_fields
         ),
     );
@@ -1284,7 +1284,7 @@ mod tests {
         let session_id = "codex-session";
         let state_dir = root.join(".agent-doc/codex-hooks/sessions");
         fs::create_dir_all(&state_dir).unwrap();
-        let hash = crate::ops_log::content_hash(session_id);
+        let hash = agent_doc_hash::content_hash(session_id);
         let state_path = state_dir.join(format!("{hash}.json"));
         let payload = serde_json::json!({
             "session_id": session_id,
@@ -1451,7 +1451,7 @@ mod tests {
             .iter()
             .find(|component| agent_doc_element::element::is_backlog_component(&component.name))
             .unwrap();
-        crate::ops_log::content_hash(component.content(&content))
+        agent_doc_hash::content_hash(component.content(&content))
     }
     // `#do-id-closeout-open-backlog`: a resolved `do [#id]` directive must end
     // with an explicit lifecycle outcome for its target id.

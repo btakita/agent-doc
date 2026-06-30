@@ -121,7 +121,7 @@ pub fn merge_contents_crdt_with_ops(
                 &format!(
                     "editor_ops_for_base accepted=true ops={} base={} {} #qnodemerge4wire",
                     ops.len(),
-                    crate::op_capture::content_hash(&base_text)
+                    agent_doc_hash::content_hash(&base_text)
                         .get(..12)
                         .unwrap_or_default(),
                     summarize_editor_ops_for_log(ops)
@@ -812,7 +812,7 @@ User line 2.
         let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state();
 
         // The editor appended "User edit.\n" — captured against the merge base.
-        let base_hash = crate::op_capture::content_hash(base);
+        let base_hash = agent_doc_hash::content_hash(base);
         crate::op_capture::record_editor_op(
             &doc,
             &base_hash,
@@ -859,7 +859,7 @@ User line 2.
 
         let base = "café 日本 😀\n";
         let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(base).encode_state();
-        let base_hash = crate::op_capture::content_hash(base);
+        let base_hash = agent_doc_hash::content_hash(base);
         crate::op_capture::record_editor_op(
             &doc,
             &base_hash,
@@ -921,7 +921,7 @@ User line 2.
         // Op recorded against a stale base that no longer matches the merge base.
         crate::op_capture::record_editor_op(
             &doc,
-            &crate::op_capture::content_hash("a totally different base\n"),
+            &agent_doc_hash::content_hash("a totally different base\n"),
             agent_doc_merge::crdt::EditorOp::Insert {
                 offset: 0,
                 text: "x".to_string(),

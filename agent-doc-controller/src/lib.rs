@@ -11,6 +11,7 @@ pub mod claim;
 pub mod command_line;
 pub mod dispatch;
 pub mod editor_route_error;
+pub mod fleet;
 pub mod operator_clear;
 pub mod recycle;
 pub mod status;

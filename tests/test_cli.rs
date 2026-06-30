@@ -7656,6 +7656,91 @@ fn test_agent_doc_controller_owns_editor_route_error_naming_policy() {
 }
 
 #[test]
+fn test_agent_doc_controller_owns_fleet_dashboard_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let controller_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller/src/lib.rs")).unwrap();
+    let controller_fleet =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller/src/fleet.rs")).unwrap();
+
+    assert!(
+        controller_lib.contains("pub mod fleet;"),
+        "agent-doc-controller should expose fleet dashboard policy as a focused module"
+    );
+    for required in [
+        "pub struct AdminActor",
+        "pub struct AdminFinding",
+        "pub struct DashboardRow",
+        "pub struct DashboardActorDiagnostics",
+        "pub struct DashboardModel",
+        "pub fn build_dashboard_model(",
+        "pub fn build_dashboard_model_with_diagnostics(",
+        "pub fn render_dashboard(",
+    ] {
+        assert!(
+            controller_fleet.contains(required),
+            "agent-doc-controller must own fleet dashboard policy: {required}"
+        );
+    }
+
+    let orchestration_admin =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/admin.rs")).unwrap();
+    let orchestration_dashboard =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/dashboard.rs")).unwrap();
+    for forbidden in [
+        "pub struct AdminActor",
+        "pub struct AdminFinding",
+        "pub struct DashboardRow",
+        "pub struct DashboardActorDiagnostics",
+        "pub struct DashboardModel",
+        "pub fn build_dashboard_model(",
+        "pub fn build_dashboard_model_with_diagnostics(",
+        "pub fn render_dashboard(",
+        "fn truncate(",
+        "fn queue_summary(",
+        "fn row_flags(",
+        "pub use agent_doc_controller::fleet",
+        "pub(crate) use agent_doc_controller::fleet",
+    ] {
+        assert!(
+            !orchestration_admin.contains(forbidden)
+                && !orchestration_dashboard.contains(forbidden),
+            "orchestration must not re-own or facade fleet dashboard policy: {forbidden}"
+        );
+    }
+    assert!(
+        orchestration_admin
+            .contains("use agent_doc_controller::fleet::{AdminActor, AdminFinding};"),
+        "admin should construct focused fleet actor/finding rows directly"
+    );
+    assert!(
+        orchestration_dashboard.contains("use agent_doc_controller::fleet::{")
+            && orchestration_dashboard.contains("build_dashboard_model_with_diagnostics")
+            && orchestration_dashboard.contains("render_dashboard"),
+        "dashboard should call focused fleet model/rendering policy directly"
+    );
+
+    let controller_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&controller_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-controller fleet policy must stay free of core, orchestration, git, editor IPC, sqlite, or tmux crates"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();

@@ -24,35 +24,12 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::sessions;
+use agent_doc_controller::fleet::{AdminActor, AdminFinding};
 use agent_doc_controller::status::{ControllerFreshnessStatus, ControllerProcessFreshness};
 use agent_doc_sqlite::state_store::ActorState;
 use tmux_router::{Registry as SessionRegistry, Tmux};
 
 type ActorStore = BTreeMap<String, agent_doc_sqlite::state_store::ActorRecord>;
-
-/// One enumerated actor row (`admin list`).
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct AdminActor {
-    pub document_id: String,
-    pub session_id: String,
-    pub pane: String,
-    pub window: String,
-    pub harness: String,
-    pub generation: u64,
-    pub state: String,
-    pub pane_alive: bool,
-    pub supervisor_pid: Option<u32>,
-    pub cwd: Option<String>,
-}
-
-/// One derived diagnostic (`admin detect`).
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct AdminFinding {
-    pub kind: String,
-    pub detail: String,
-    pub documents: Vec<String>,
-    pub pane: Option<String>,
-}
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct ReapAllStaleSummary {

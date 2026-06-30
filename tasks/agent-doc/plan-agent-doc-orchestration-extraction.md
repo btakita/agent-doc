@@ -290,6 +290,12 @@ focused crate under the old path.
   halt effects, cycle abandonment, ops-log emission, and fact projection; the
   old `run.rs` message-builder functions were deleted instead of kept as local
   facades.
+- `agent-doc-turn-executor` now owns Codex launch transport rejection policy:
+  detecting 403 WebSocket / 429 HTTPS fallback failures and formatting the
+  retry/restart diagnostic. Orchestration's Codex backend keeps process launch,
+  stderr filtering, stream iteration, and error propagation while importing the
+  focused `codex_launch` helpers directly; the old local transport
+  classifier/formatter functions were deleted rather than wrapped.
 - `agent-doc-tmux` now owns sync column-memory layout policy and safe-passive
   focus-only expansion policy: restoring remembered sibling panes, preserving
   duplicate-column layout state, returning restoration/expansion events for

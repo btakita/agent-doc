@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
+use agent_doc_workflow::doctor::classify_ops_marker;
 use agent_doc_workflow::invariants::{
     RemediationAction, WorkflowInvariant, WorkflowInvariantCatalog, WorkflowInvariantId,
     workflow_invariant_catalog,
@@ -835,35 +836,6 @@ fn lookup_string_array(value: &Value, key: &str) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
-}
-
-fn classify_ops_marker(line: &str) -> Option<&'static str> {
-    if line.contains("failed_stage=queue_paused")
-        && (line.contains("reason=#qchurn")
-            || line.contains("stale host supervisor")
-            || line.contains("supervisor_binary_stale"))
-    {
-        return Some("stale_queue_pause");
-    }
-    if line.contains("supervisor_binary_stale") || line.contains("stale host supervisor") {
-        return Some("stale_supervisor");
-    }
-    if line.contains("retry_on_current_generation") || line.contains("supervisor_restart_redirect")
-    {
-        return Some("retry_on_current_generation");
-    }
-    if line.contains("stale_generation") || line.contains("stale generation") {
-        return Some("stale_generation_block");
-    }
-    if line.contains("File Cache Conflict")
-        || line.contains("ipc_proof_insufficient")
-        || line.contains("editor_convergence_ack_mismatch")
-        || line.contains("editor_convergence_no_ack")
-        || line.contains("live_prompt_drift_after_preflight")
-    {
-        return Some("editor_convergence_failure");
-    }
-    None
 }
 
 fn has_marker(ops: &OpsLogDoctorFacts, marker: &str) -> bool {

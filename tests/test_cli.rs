@@ -5667,6 +5667,7 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/lib.rs")).unwrap();
     for required in [
         "pub mod invariants;",
+        "pub mod doctor;",
         "pub mod session_cycle;",
         "pub enum WorkflowEvidenceKind",
         "pub enum WorkflowProof",
@@ -5714,6 +5715,30 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
             "agent-doc-workflow must own workflow invariant catalog policy: {required}"
         );
     }
+
+    let workflow_doctor =
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/doctor.rs")).unwrap();
+    assert!(
+        workflow_doctor.contains("pub fn classify_ops_marker("),
+        "agent-doc-workflow must own workflow doctor ops-log marker classification"
+    );
+    let orchestration_doctor =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/doctor.rs")).unwrap();
+    for forbidden in [
+        "fn classify_ops_marker(",
+        "pub fn classify_ops_marker(",
+        "pub use agent_doc_workflow::doctor",
+        "pub(crate) use agent_doc_workflow::doctor",
+    ] {
+        assert!(
+            !orchestration_doctor.contains(forbidden),
+            "orchestration doctor must gather facts, not re-own or facade ops marker classification: {forbidden}"
+        );
+    }
+    assert!(
+        orchestration_doctor.contains("use agent_doc_workflow::doctor::classify_ops_marker;"),
+        "orchestration doctor should call the focused ops marker classifier directly"
+    );
 
     let flow_mod =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/mod.rs")).unwrap();

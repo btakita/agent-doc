@@ -266,10 +266,23 @@ focused crate under the old path.
   timing constants. Orchestration keeps only marker path resolution, JSON
   sidecar reads/writes/clears, sleep/poll loops, and user-facing diagnostics
   while importing the focused marker contracts directly.
+- `agent-doc-plugin-owner` now owns editor plugin-owner lease policy: persisted
+  lease schema, TTL env/default resolution, lease path election, pid liveness,
+  live-editor attachment facts, merge ownership projection, live consumer-id
+  lookup, acquire/refresh, and release semantics. Orchestration keeps only the
+  write/IPC/CRDT call sites and test setup; the old
+  `agent-doc-orchestration/src/plugin_owner.rs` module was deleted rather than
+  retained as a facade.
 - We are in the current seam-by-seam extraction wave after the transitional
   orchestration crate move. Practically, this is **Wave 2**: shrink
   `agent-doc-orchestration` by moving durable policy into focused domain crates,
   leaving orchestration as effect adapters.
+- Next fan-out candidates from the Wave 2 extractor pass:
+  `route_in_flight` route-submit marker schema/TTL/reason policy should move to
+  `agent-doc-supervisor` while orchestration keeps file IO, guard drop, and ops
+  logging; `session_accretion::recent_restart_metrics` should move its pure
+  restart-log counter into `agent-doc-session-accretion` while orchestration
+  keeps session-log path/read effects and document/session lookup.
 - `agent-doc-queue` now owns one-shot backlog/icebox/pending queue-sync request
   collection and sync-report policy for `agent-doc queue sync`; `queue_cmd`
   keeps only file IO, rendering, snapshot persistence, and CLI output.

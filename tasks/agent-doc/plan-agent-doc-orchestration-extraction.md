@@ -383,6 +383,13 @@ focused crate under the old path.
   live with active queue-head projection. Orchestration keeps file reading,
   queue-edit lease ownership, write-layer strike calls, and CLI diagnostics while
   calling the focused classifier directly.
+- `agent-doc-queue` now owns route queue-dispatch policy as a whole layer:
+  prompt-text extraction from routed changes, operator-priority pinning,
+  preemptive queue insertion/single-auto supersession, queue component creation,
+  route activation content transforms, inactive queue-head selection, marker
+  `go`/`start`/`stop` handling, and committed-snapshot head backing checks.
+  Route keeps only file/frontmatter/snapshot adapters, queue locks, editor
+  convergence, snapshot writes, and ops-log diagnostics.
 - `agent-doc-element-backlog` already owned open backlog id extraction; preflight
   now calls `open_backlog_ids_in_content` directly for `do #id` closeout
   evidence instead of re-parsing backlog components locally.

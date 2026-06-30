@@ -230,6 +230,11 @@ focused crate under the old path.
   non-invocation prompt bodies, and rendering the synthetic harness diff.
   Orchestration keeps only the env/Codex-hook prompt-source adapter and imports
   the focused parser directly.
+- `agent-doc-supervisor` now owns supervisor child launch-argument precedence:
+  resolving frontmatter/config `agent_args` plus harness-specific Claude/Codex/
+  OpenCode aliases and the Claude env fallback from a focused fact struct.
+  Orchestration keeps only frontmatter/config/env fact projection and calls the
+  focused resolver directly from start/run assembly.
 - We are in the current seam-by-seam extraction wave after the transitional
   orchestration crate move. Practically, this is **Wave 2**: shrink
   `agent-doc-orchestration` by moving durable policy into focused domain crates,

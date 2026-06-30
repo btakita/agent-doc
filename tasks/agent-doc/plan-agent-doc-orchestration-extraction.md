@@ -423,8 +423,14 @@ should be deleted during extraction.
 - `agent-doc-document::transient_markers` now owns transient document marker
   normalization: boundary stripping, `(HEAD)` heading cleanup, guard-marker
   stripping, pipeline-frontmatter normalization, and post-commit `Re:` heading
-  attribution normalization. Git, preflight, session-check, realtime policy,
-  repair, graph, and write paths call the focused document crate directly.
+  attribution normalization. It also owns pure post-commit document repair
+  policy for exchange prompt-prefix equivalence and stale committed-response
+  collapse: comparing exchange prompt-prefix-normalized documents, detecting
+  collapsed committed response headings, and producing the log-free document
+  repair that restores the committed exchange while preserving other component
+  drift. Git, preflight, session-check, realtime policy, repair, graph, and
+  write paths call the focused document crate directly while keeping file, git,
+  snapshot, and ops-log adapters outside the pure policy.
 - `agent-doc-template::response_materialization` now owns more template
   response-materialization policy: constructing materialization probes from raw
   template responses, stripping transient guard markers from probes, removing
@@ -456,8 +462,8 @@ should be deleted during extraction.
   boundaries, prompt-authority checks, and boundary marker preservation or
   regeneration. `write`, `write/exchange_reconcile`, `write/normalize`, git
   closeout, repair, and IPC paths keep component replacement,
-  duplicate-repair orchestration, shrink-guard, file, git, ops-log, and
-  delivery adapters while importing the focused exchange helpers directly.
+  duplicate-repair orchestration, shrink-guard, file, git, ops-log, snapshot,
+  and delivery adapters while importing the focused exchange helpers directly.
 - `agent-doc-element-backlog` already owned open backlog id extraction; preflight
   now calls `open_backlog_ids_in_content` directly for `do #id` closeout
   evidence instead of re-parsing backlog components locally. It also owns pure

@@ -2687,6 +2687,58 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
 }
 
 #[test]
+fn test_agent_doc_queue_owns_queue_convergence_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let queue_lib = fs::read_to_string(manifest_dir.join("agent-doc-queue/src/lib.rs")).unwrap();
+    assert!(
+        queue_lib.contains("pub mod queue_convergence;"),
+        "agent-doc-queue should expose queue convergence policy"
+    );
+
+    let queue_convergence =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_convergence.rs")).unwrap();
+    for required_snippet in [
+        "pub fn realign_baseline_to_converged_queue(",
+        "pub fn queue_body_diff_is_non_selected_future_state(",
+        "fn first_queue_prompt_identity(",
+        "fn content_without_queue_body(",
+        "fn strip_exchange_boundary_lines(",
+        "fn realign_component_when_only_in_progress_marker_changed(",
+    ] {
+        assert!(
+            queue_convergence.contains(required_snippet),
+            "agent-doc-queue must own queue convergence policy: {required_snippet}"
+        );
+    }
+
+    let preflight_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "fn realign_baseline_to_converged_queue(",
+        "fn queue_body_diff_is_non_selected_future_state(",
+        "fn first_queue_prompt_identity(",
+        "fn queue_prompt_identity(",
+        "fn content_without_queue_body(",
+        "fn strip_exchange_boundary_lines(",
+        "fn realign_component_when_only_in_progress_marker_changed(",
+        "fn pending_body_without_in_progress_markers(",
+        "pub use agent_doc_queue::queue_convergence",
+    ] {
+        assert!(
+            !preflight_run.contains(forbidden_snippet),
+            "preflight/run.rs must not re-own or facade queue convergence policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        preflight_run.contains("use agent_doc_queue::queue_convergence::{")
+            && preflight_run.contains("realign_baseline_to_converged_queue")
+            && preflight_run.contains("queue_body_diff_is_non_selected_future_state"),
+        "preflight/run.rs should call focused queue convergence policy directly"
+    );
+}
+
+#[test]
 fn test_agent_doc_queue_owns_do_directive_target_parsing() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let queue_directive =

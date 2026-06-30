@@ -11,6 +11,7 @@ pub mod queue_closeout_guard;
 pub mod queue_command;
 pub mod queue_consume;
 pub mod queue_continuation;
+pub mod queue_convergence;
 pub mod queue_directive;
 pub mod queue_edit_owner;
 pub mod queue_heads;

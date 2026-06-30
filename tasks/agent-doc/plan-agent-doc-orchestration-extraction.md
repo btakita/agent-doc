@@ -296,6 +296,14 @@ focused crate under the old path.
   stderr filtering, stream iteration, and error propagation while importing the
   focused `codex_launch` helpers directly; the old local transport
   classifier/formatter functions were deleted rather than wrapped.
+- `agent-doc-turn-executor` now owns child capability-probe failure
+  classification: network DNS/sandbox/refusal/timeout, required-SSH
+  usage/sandbox/DNS/timeout, and writable-root sandbox/index-lock/missing-target
+  messages. Orchestration's Codex backend keeps child process execution, marker
+  validation, OpenCode usage-output detection/ANSI stripping, stdout/stderr
+  fact extraction, and error propagation while importing the focused
+  `codex_launch` helpers directly; the old local classifier functions were
+  deleted instead of retained as facades.
 - `agent-doc-tmux` now owns sync column-memory layout policy and safe-passive
   focus-only expansion policy: restoring remembered sibling panes, preserving
   duplicate-column layout state, returning restoration/expansion events for

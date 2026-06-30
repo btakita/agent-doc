@@ -1100,7 +1100,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             eprintln!("[preflight] warning: {}", warning.message);
             warnings.push(warning);
         }
-        if let Some(warning) = misplaced_component_attr_warning(file, &content) {
+        if let Some(warning) = component_attr_warning_for_file(file, &content) {
             eprintln!("[preflight] warning: {}", warning.message);
             warnings.push(warning);
         }

@@ -7866,6 +7866,38 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
         "preflight queue_tombstone should load/save sidecars and call focused queue tombstone policy directly"
     );
 
+    let component_attrs =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/component_attrs.rs")).unwrap();
+    for required in [
+        "pub struct ComponentAttrWarning",
+        "pub fn component_attr_warning",
+        "pub fn message_body",
+    ] {
+        assert!(
+            component_attrs.contains(required),
+            "agent-doc-queue should own component attribute warning policy: {required}"
+        );
+    }
+    let preflight_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    for forbidden_snippet in [
+        "QUEUE_ONLY_COMPONENT_ATTRS",
+        "KNOWN_COMPONENT_ATTRS",
+        "fn misplaced_component_attr_warning",
+        "BacklogQueueSyncMode::parse(value)",
+    ] {
+        assert!(
+            !preflight_source.contains(forbidden_snippet),
+            "preflight.rs must not re-own or facade component attribute warning policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        preflight_source
+            .contains("agent_doc_queue::component_attrs::component_attr_warning(content)")
+            && preflight_source.contains("fn component_attr_warning_for_file("),
+        "preflight should only adapt focused component-attr warning facts into PreflightWarning"
+    );
+
     let queue_cmd =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/queue_cmd.rs")).unwrap();
     for forbidden_snippet in [

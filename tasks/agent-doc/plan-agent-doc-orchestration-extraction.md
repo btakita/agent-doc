@@ -424,6 +424,11 @@ focused crate under the old path.
   cached-context adapters that supply parsed frontmatter/config facts to the
   focused resolver, and unused cached review/auto adapters were deleted instead
   of kept as no-shim dead paths.
+- `agent-doc-frontmatter` now owns cross-document security-review policy for
+  shared collaboration documents: same-document bypass, shared source/target
+  missing-review classification, and blank-review handling. Orchestration keeps
+  only path canonicalization, source/target display labels, and user-facing
+  error formatting while importing the focused decision directly.
 - `agent-doc-turn` now owns closeout recovery evidence-to-state
   classification and closeout content-component signature policy. Orchestration
   gathers cycle/snapshot/HEAD/visible/submodule facts, classifies file-backed

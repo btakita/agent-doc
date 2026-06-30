@@ -77,6 +77,39 @@ pub fn continuation_guidance(pause_reason: Option<&str>) -> String {
     }
 }
 
+/// Effective continuation fields for preflight/session status output after
+/// applying non-drain stop-or-yield policy supplied by orchestration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectiveContinuationOutput {
+    pub required: bool,
+    pub guidance: Option<String>,
+}
+
+/// Resolve queue continuation output after the caller supplies effect-derived
+/// facts such as a pending supervisor recycle yield.
+pub fn effective_continuation_output(
+    raw_required: bool,
+    recycle_yield_pending: bool,
+    pause_reason: Option<&str>,
+) -> EffectiveContinuationOutput {
+    if recycle_yield_pending {
+        return EffectiveContinuationOutput {
+            required: false,
+            guidance: Some(RECYCLE_YIELD_GUIDANCE.to_string()),
+        };
+    }
+    if raw_required {
+        return EffectiveContinuationOutput {
+            required: true,
+            guidance: Some(continuation_guidance(pause_reason)),
+        };
+    }
+    EffectiveContinuationOutput {
+        required: false,
+        guidance: None,
+    }
+}
+
 /// A required queue continuation: the document closed cleanly but a ready queue
 /// head remains, so an in-session loop must continue draining instead of
 /// sending a final answer.
@@ -879,6 +912,33 @@ mod tests {
             g.contains(CONTINUATION_NO_STALL_GUIDANCE),
             "pause-aware guidance must preserve the normal no-stall closeout rules: {g}"
         );
+    }
+
+    #[test]
+    fn effective_continuation_output_suppresses_required_for_recycle_yield() {
+        let output = effective_continuation_output(true, true, Some("operator pause"));
+        assert!(!output.required);
+        assert_eq!(
+            output.guidance.as_deref(),
+            Some(RECYCLE_YIELD_GUIDANCE),
+            "recycle-yield guidance should replace normal continuation guidance"
+        );
+    }
+
+    #[test]
+    fn effective_continuation_output_preserves_pause_guidance_when_required() {
+        let output = effective_continuation_output(true, false, Some("operator pause"));
+        assert!(output.required);
+        let guidance = output.guidance.expect("required continuation has guidance");
+        assert!(guidance.contains("recorded pause reason: operator pause"));
+        assert!(guidance.contains(CONTINUATION_NO_STALL_GUIDANCE));
+    }
+
+    #[test]
+    fn effective_continuation_output_has_no_guidance_when_not_required() {
+        let output = effective_continuation_output(false, false, None);
+        assert!(!output.required);
+        assert_eq!(output.guidance, None);
     }
 
     #[test]

@@ -3606,6 +3606,23 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         );
     }
 
+    let preflight_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
+    assert!(
+        preflight_run.contains("agent_doc_element_backlog::backlog::open_backlog_ids_in_content"),
+        "preflight should call focused open-backlog id extraction directly"
+    );
+    for forbidden in [
+        "agent_doc_element_backlog::backlog::parse_items(component.content(content))",
+        ".filter(|component| {\n                            agent_doc_element::element::is_backlog_component(&component.name)",
+    ] {
+        assert!(
+            !preflight_run.contains(forbidden),
+            "preflight must not re-own open backlog id extraction policy: {forbidden}"
+        );
+    }
+
     let pending_guards = fs::read_to_string(
         manifest_dir.join("agent-doc-orchestration/src/session_check/pending_guards.rs"),
     )
@@ -7749,7 +7766,9 @@ fn test_agent_doc_queue_owns_continuation_guidance_policy() {
     assert!(
         queue_policy.contains("pub const CONTINUATION_NO_STALL_GUIDANCE")
             && queue_policy.contains("pub const RECYCLE_YIELD_GUIDANCE")
-            && queue_policy.contains("pub fn continuation_guidance"),
+            && queue_policy.contains("pub fn continuation_guidance")
+            && queue_policy.contains("pub struct EffectiveContinuationOutput")
+            && queue_policy.contains("pub fn effective_continuation_output"),
         "agent-doc-queue must own queue continuation guidance policy"
     );
 
@@ -7760,6 +7779,7 @@ fn test_agent_doc_queue_owns_continuation_guidance_policy() {
         "pub const CONTINUATION_NO_STALL_GUIDANCE",
         "pub const RECYCLE_YIELD_GUIDANCE",
         "pub fn continuation_guidance",
+        "pub fn effective_continuation_output",
     ] {
         assert!(
             !orchestration_adapter.contains(forbidden),
@@ -7773,16 +7793,27 @@ fn test_agent_doc_queue_owns_continuation_guidance_policy() {
     let session_check =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_check.rs"))
             .unwrap();
-    for source in [preflight_run, session_check] {
+    assert!(
+        preflight_run
+            .contains("agent_doc_queue::queue_continuation::effective_continuation_output"),
+        "preflight should delegate effective continuation output policy to agent-doc-queue"
+    );
+    for forbidden in [
+        "queue_state.queue_continuation_required && !recycle_yield_pending",
+        "let queue_continuation_guidance = if recycle_yield_pending",
+        "RECYCLE_YIELD_GUIDANCE.to_string()",
+    ] {
         assert!(
-            source.contains("agent_doc_queue::queue_continuation::continuation_guidance")
-                || source.contains("agent_doc_queue::queue_continuation::RECYCLE_YIELD_GUIDANCE")
-                || source.contains(
-                    "agent_doc_queue::queue_continuation::CONTINUATION_NO_STALL_GUIDANCE"
-                ),
-            "orchestration callers should use agent-doc-queue guidance directly"
+            !preflight_run.contains(forbidden),
+            "preflight/run.rs must not re-own effective continuation output policy: {forbidden}"
         );
     }
+    assert!(
+        session_check.contains("agent_doc_queue::queue_continuation::continuation_guidance")
+            || session_check
+                .contains("agent_doc_queue::queue_continuation::CONTINUATION_NO_STALL_GUIDANCE"),
+        "session_check should use agent-doc-queue guidance directly"
+    );
 }
 
 #[test]

@@ -1187,30 +1187,12 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         if directive_target_ids.is_empty() {
             Vec::new()
         } else {
-            // Read the live document once for the open-backlog set.
-            let parsed = std::fs::read_to_string(file).ok().and_then(|content| {
-                agent_doc_element::element::parse(&content)
-                    .ok()
-                    .map(|components| (content, components))
-            });
-            let open_backlog: std::collections::HashSet<String> = parsed
-                .as_ref()
-                .map(|(content, components)| {
-                    components
-                        .iter()
-                        .filter(|component| {
-                            agent_doc_element::element::is_backlog_component(&component.name)
-                        })
-                        .flat_map(|component| {
-                            let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(
-                                component.content(content),
-                            );
-                            items
-                        })
-                        .filter(|item| !item.is_done())
-                        .map(|item| item.id)
-                        .filter(|id| !id.is_empty())
-                        .collect::<std::collections::HashSet<String>>()
+            let open_backlog: std::collections::HashSet<String> = std::fs::read_to_string(file)
+                .ok()
+                .map(|content| {
+                    agent_doc_element_backlog::backlog::open_backlog_ids_in_content(&content)
+                        .into_iter()
+                        .collect()
                 })
                 .unwrap_or_default();
             let synced_queue_ids = queue_state
@@ -1394,17 +1376,13 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // lets the `execve` recycle fire), and surface the recycle-yield guidance so
     // the agent understands the yield is intentional and resumes after recycle.
     let recycle_yield_pending = crate::recycle_yield::recycle_yield_pending(file);
-    let queue_continuation_required =
-        queue_state.queue_continuation_required && !recycle_yield_pending;
-    let queue_continuation_guidance = if recycle_yield_pending {
-        Some(agent_doc_queue::queue_continuation::RECYCLE_YIELD_GUIDANCE.to_string())
-    } else {
-        queue_continuation_required.then(|| {
-            agent_doc_queue::queue_continuation::continuation_guidance(
-                queue_state.queue_pause_reason.as_deref(),
-            )
-        })
-    };
+    let effective_continuation = agent_doc_queue::queue_continuation::effective_continuation_output(
+        queue_state.queue_continuation_required,
+        recycle_yield_pending,
+        queue_state.queue_pause_reason.as_deref(),
+    );
+    let queue_continuation_required = effective_continuation.required;
+    let queue_continuation_guidance = effective_continuation.guidance;
 
     // `#qstallguard` Layer B: reconcile the continuation-pending marker dropped by
     // the prior clean closeout (session-check). If drainable work remained, the

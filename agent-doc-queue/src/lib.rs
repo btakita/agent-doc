@@ -20,5 +20,6 @@ pub mod queue_heads;
 pub mod queue_journal;
 pub mod queue_preemption;
 pub mod queue_prompt_drift;
+pub mod queue_replay;
 pub mod queue_response;
 pub mod route_dispatch;

@@ -1353,7 +1353,9 @@ fn normalized_content_hash(content: &str) -> String {
     // component so response-replay / stale-lock recovery stays stable across
     // queue-maintenance churn (#adoc-queue-ipc-buffer-divergence #4). Must match
     // repair.rs's compare-side normalization exactly.
-    agent_doc_hash::content_hash(&crate::git::normalize_for_replay_hash(content))
+    agent_doc_hash::content_hash(
+        &agent_doc_document::transient_markers::normalize_for_replay_hash(content),
+    )
 }
 
 fn normalize_checkpoint_task_id(id: &str) -> String {

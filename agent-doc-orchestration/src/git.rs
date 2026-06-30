@@ -91,13 +91,13 @@
 //! - submodule_noop_commit_updates_stale_parent_pointer: no-op commit in submodule still updates stale parent pointer
 
 use agent_doc_document::transient_markers::{
-    exchange_prompt_prefix_equivalent, normalize_post_commit_re_heading_drift,
-    normalize_transient_agent_doc_markers, repair_stale_agent_response_collapse_doc,
-    strip_guard_markers, strip_head_markers,
+    exchange_prompt_prefix_equivalent, normalize_for_replay_hash,
+    normalize_post_commit_re_heading_drift, normalize_transient_agent_doc_markers,
+    repair_stale_agent_response_collapse_doc, strip_guard_markers, strip_head_markers,
 };
 use anyhow::{Context, Result};
 use fs2::FileExt;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -938,7 +938,10 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             || stale_response_collapse_repaired)
         && let Some(head) = head_doc.as_deref()
         && let Some(added_prompts) =
-            preserved_queue_additions_neutralized_by_replay(head, &file_content)
+            agent_doc_queue::queue_replay::preserved_queue_additions_neutralized_by_replay(
+                head,
+                &file_content,
+            )
     {
         eprintln!(
             "[commit] committing preserved queue addition drift for {} ({} prompt(s)); replay normalization neutralized the queue component",
@@ -2111,109 +2114,6 @@ fn classify_post_commit_local_drift(
         return Some(kind);
     }
     Some(PostCommitLocalDriftKind::WorkingTreeEdits)
-}
-
-fn queue_entry_commit_signature(entry: &agent_doc_queue::document_queue::QueueEntry) -> String {
-    match entry {
-        agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
-            format!("prompt:{}:{}", prompt.multiline, prompt.text.trim())
-        }
-        agent_doc_queue::document_queue::QueueEntry::Completed(prompt) => {
-            format!("completed:{}:{}", prompt.multiline, prompt.text.trim())
-        }
-        agent_doc_queue::document_queue::QueueEntry::Preset(preset) => {
-            format!("preset:{}", preset.trim())
-        }
-        agent_doc_queue::document_queue::QueueEntry::Dispatch(dispatch) => {
-            format!("dispatch:{}", dispatch.trim())
-        }
-        agent_doc_queue::document_queue::QueueEntry::StartFence(Some(at)) => {
-            format!("start:{}", at.trim())
-        }
-        agent_doc_queue::document_queue::QueueEntry::StartFence(None) => "start:".to_string(),
-        agent_doc_queue::document_queue::QueueEntry::StopFence => "stop:".to_string(),
-        agent_doc_queue::document_queue::QueueEntry::Freeform(line) => {
-            format!("freeform:{}", line.trim())
-        }
-    }
-}
-
-fn queue_entry_count_map(
-    entries: &[agent_doc_queue::document_queue::QueueEntry],
-) -> HashMap<String, (usize, bool)> {
-    let mut counts = HashMap::new();
-    for entry in entries {
-        let key = queue_entry_commit_signature(entry);
-        let is_prompt = matches!(
-            entry,
-            agent_doc_queue::document_queue::QueueEntry::Prompt(_)
-        );
-        let slot = counts.entry(key).or_insert((0usize, is_prompt));
-        slot.0 += 1;
-        slot.1 |= is_prompt;
-    }
-    counts
-}
-
-/// `#editorbufwin` P2 — when the visible document differs from clean HEAD only
-/// inside `agent:queue`, replay normalization reports `match=true` because queue
-/// churn is deliberately neutralized. In that narrow shape, commit a preserved
-/// editor-buffer queue addition into the snapshot/HEAD so the operator's queue
-/// edit is durable and session-check does not need a manual reset-from-current.
-///
-/// Conservative rules:
-/// - HEAD's queue entries must still be present with at least the same counts
-///   (no queue deletions or unstrikes are accepted here).
-/// - Every extra working entry must be an active prompt.
-/// - Non-queue document content must compare equal under replay normalization.
-fn preserved_queue_additions_neutralized_by_replay(
-    head_doc: &str,
-    current_doc: &str,
-) -> Option<usize> {
-    if head_doc == current_doc {
-        return None;
-    }
-    if normalize_for_replay_hash(head_doc) != normalize_for_replay_hash(current_doc) {
-        return None;
-    }
-
-    let head_components = agent_doc_element::element::parse(head_doc).ok()?;
-    let current_components = agent_doc_element::element::parse(current_doc).ok()?;
-    let head_queue = head_components
-        .iter()
-        .find(|component| component.name == "queue")?;
-    let current_queue = current_components
-        .iter()
-        .find(|component| component.name == "queue")?;
-    let head_entries = agent_doc_queue::document_queue::parse(head_queue.content(head_doc)).ok()?;
-    let current_entries =
-        agent_doc_queue::document_queue::parse(current_queue.content(current_doc)).ok()?;
-    let head_counts = queue_entry_count_map(&head_entries);
-    let current_counts = queue_entry_count_map(&current_entries);
-
-    for (key, (head_count, _)) in &head_counts {
-        let current_count = current_counts
-            .get(key)
-            .map(|(count, _)| *count)
-            .unwrap_or(0);
-        if current_count < *head_count {
-            return None;
-        }
-    }
-
-    let mut added_prompts = 0usize;
-    for (key, (current_count, is_prompt)) in &current_counts {
-        let head_count = head_counts.get(key).map(|(count, _)| *count).unwrap_or(0);
-        if *current_count <= head_count {
-            continue;
-        }
-        if !*is_prompt {
-            return None;
-        }
-        added_prompts += current_count - head_count;
-    }
-
-    (added_prompts > 0).then_some(added_prompts)
 }
 
 fn repair_stale_agent_response_collapse_worktree(

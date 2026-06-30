@@ -109,6 +109,41 @@ pub fn normalize_transient_agent_doc_markers(content: &str) -> String {
     ))
 }
 
+/// Replace the `agent:queue` component with a canonical empty placeholder for
+/// replay-hash comparisons.
+pub fn neutralize_queue_component(content: &str) -> String {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return content.to_string();
+    };
+    let Some(queue) = components.iter().find(|c| c.name == "queue") else {
+        return content.to_string();
+    };
+    let mut out = String::with_capacity(content.len());
+    out.push_str(&content[..queue.open_start]);
+    out.push_str("<!-- agent:queue -->\n<!-- /agent:queue -->");
+    out.push_str(&content[queue.close_end..]);
+    out
+}
+
+/// Drop transient queue activation frontmatter for replay-hash comparisons.
+pub fn strip_queue_active_frontmatter(content: &str) -> String {
+    content
+        .lines()
+        .filter(|line| {
+            let t = line.trim_start();
+            !t.starts_with("queue_active:") && !t.starts_with("queue:")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Normalization used for response-replay / stale-cycle hash matching.
+pub fn normalize_for_replay_hash(content: &str) -> String {
+    normalize_transient_agent_doc_markers(&strip_queue_active_frontmatter(
+        &neutralize_queue_component(content),
+    ))
+}
+
 pub fn strip_re_heading_attribution(content: &str) -> String {
     let code_ranges = code_block_byte_ranges(content);
     let mut result_lines: Vec<String> = Vec::new();
@@ -412,6 +447,40 @@ mod tests {
         assert_eq!(
             normalize_transient_agent_doc_markers(input),
             "---\ntitle: test\n---\n\n### Re: topic\nAnswer."
+        );
+    }
+
+    #[test]
+    fn normalize_for_replay_hash_neutralizes_queue_churn() {
+        let with_active_queue = concat!(
+            "---\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: topic — gpt-5\nResponse body.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "preset #spec-test\n- do [#a]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        let with_drained_queue = concat!(
+            "---\nagent_doc_format: template\nqueue_active: false\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: topic — gpt-5\nResponse body.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n"
+        );
+
+        assert_eq!(
+            normalize_for_replay_hash(with_active_queue),
+            normalize_for_replay_hash(with_drained_queue),
+            "queue-only churn must not change the replay normalization"
+        );
+
+        let with_changed_response = with_active_queue.replace("Response body.", "Different body.");
+        assert_ne!(
+            normalize_for_replay_hash(with_active_queue),
+            normalize_for_replay_hash(&with_changed_response),
+            "a real response-body change must still change the replay normalization"
         );
     }
 

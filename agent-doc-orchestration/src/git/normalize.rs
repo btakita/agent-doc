@@ -2,61 +2,6 @@
 
 use super::*;
 
-/// Replace the `agent:queue` component (opening-tag attributes + body) with a
-/// canonical empty placeholder.
-///
-/// The queue is rewritten by preflight queue-maintenance on essentially every
-/// cycle (activation toggles, `auto` strip, head strike, dedup, IPC-buffer
-/// merge artifacts) independently of the response body, which always targets
-/// `exchange`/`output`. Neutralizing it before hashing keeps response-replay /
-/// stale-lock recovery stable across queue churn (#adoc-queue-ipc-buffer-divergence
-/// root cause #4: the capture-replay guard must validate the response body, not
-/// a whole-document hash that queue-component churn invalidates).
-pub(crate) fn neutralize_queue_component(content: &str) -> String {
-    let Ok(components) = agent_doc_element::element::parse(content) else {
-        return content.to_string();
-    };
-    let Some(queue) = components.iter().find(|c| c.name == "queue") else {
-        return content.to_string();
-    };
-    let mut out = String::with_capacity(content.len());
-    out.push_str(&content[..queue.open_start]);
-    out.push_str("<!-- agent:queue -->\n<!-- /agent:queue -->");
-    out.push_str(&content[queue.close_end..]);
-    out
-}
-
-/// Drop the transient queue activation frontmatter — the canonical `queue:`
-/// control (`#queue-state-unify`) and the deprecated `queue_active:` line — which
-/// queue maintenance toggles in lockstep with the `agent:queue` component and is
-/// likewise independent of the response body. Both are normalized away together
-/// so a legacy `queue_active:` and a migrated `queue: start|stop` compare equal,
-/// avoiding the snapshot/HEAD drift loop. Only used for replay-hash
-/// normalization, never persisted.
-pub(crate) fn strip_queue_active_frontmatter(content: &str) -> String {
-    content
-        .lines()
-        .filter(|line| {
-            let t = line.trim_start();
-            !t.starts_with("queue_active:") && !t.starts_with("queue:")
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// Normalization used for response-replay / stale-cycle hash matching.
-///
-/// Builds on [`normalize_transient_agent_doc_markers`] (boundary/`(HEAD)`/guard
-/// markers) and additionally neutralizes the `agent:queue` component **and** the
-/// `queue_active:` frontmatter flag so that independent queue-maintenance churn
-/// does not invalidate the match. Used by both `cycle_state` (store side) and
-/// `repair` (compare side) so the two always normalize identically.
-pub fn normalize_for_replay_hash(content: &str) -> String {
-    normalize_transient_agent_doc_markers(&strip_queue_active_frontmatter(
-        &neutralize_queue_component(content),
-    ))
-}
-
 pub(crate) fn is_response_heading_line(trimmed: &str) -> bool {
     trimmed.starts_with("### Re:")
         || trimmed.starts_with("#### Re:")
@@ -280,44 +225,7 @@ pub(crate) fn redact_component_contents_for_absorb(body: &str) -> Option<String>
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    #[test]
-    fn normalize_for_replay_hash_neutralizes_queue_churn() {
-        // #adoc-queue-ipc-buffer-divergence root cause #4: queue-maintenance
-        // churn (auto strip + activation toggle + drain) must not change the
-        // replay-hash normalization, because the response body lives in
-        // `exchange`, not `queue`.
-        let with_active_queue = concat!(
-            "---\nagent_doc_format: template\nqueue_active: true\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "### Re: topic — gpt-5\nResponse body.\n",
-            "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue auto -->\n",
-            "preset #spec-test\n- do [#a]\n",
-            "<!-- /agent:queue -->\n"
-        );
-        // Same response; queue halted/drained (the post-maintenance shape).
-        let with_drained_queue = concat!(
-            "---\nagent_doc_format: template\nqueue_active: false\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "### Re: topic — gpt-5\nResponse body.\n",
-            "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue -->\n",
-            "<!-- /agent:queue -->\n"
-        );
-        assert_eq!(
-            normalize_for_replay_hash(with_active_queue),
-            normalize_for_replay_hash(with_drained_queue),
-            "queue-only churn must not change the replay normalization"
-        );
 
-        // A genuine response-body change still registers as different.
-        let with_changed_response = with_active_queue.replace("Response body.", "Different body.");
-        assert_ne!(
-            normalize_for_replay_hash(with_active_queue),
-            normalize_for_replay_hash(&with_changed_response),
-            "a real response-body change must still change the replay normalization"
-        );
-    }
     #[test]
     fn canonicalize_answered_prompt_prefixes_uses_opt_in_prompt_start() {
         let exchange = "\

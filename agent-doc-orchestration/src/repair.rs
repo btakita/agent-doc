@@ -422,7 +422,9 @@ fn normalized_content_hash(content: &str) -> String {
     // alone does not block recovery of an already-materialized response
     // (#adoc-queue-ipc-buffer-divergence #4). Must match cycle_state.rs's
     // store-side normalization exactly.
-    agent_doc_hash::content_hash(&crate::git::normalize_for_replay_hash(content))
+    agent_doc_hash::content_hash(
+        &agent_doc_document::transient_markers::normalize_for_replay_hash(content),
+    )
 }
 
 fn preflight_cycle_age_secs(state: &crate::cycle_state::CycleState) -> u64 {

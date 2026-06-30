@@ -61,8 +61,8 @@ fn editor_buffer_converged_to_head(file: &std::path::Path) -> bool {
         Ok(doc) => doc,
         Err(_) => return true,
     };
-    crate::git::normalize_for_replay_hash(&head_doc)
-        == crate::git::normalize_for_replay_hash(&working)
+    agent_doc_document::transient_markers::normalize_for_replay_hash(&head_doc)
+        == agent_doc_document::transient_markers::normalize_for_replay_hash(&working)
 }
 
 /// `#fbwire` Phase 2 — gather the four [`agent_doc_document_realtime::convergence_gate::ConvergenceFacts`]

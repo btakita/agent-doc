@@ -2707,6 +2707,35 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
             && !start_run_source.contains("crate::queue_journal::merge_missing_into_content"),
         "startup replay should merge through the focused queue journal policy directly"
     );
+    let queue_replay_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_replay.rs")).unwrap();
+    for required_snippet in [
+        "pub fn queue_entry_commit_signature(",
+        "pub fn preserved_queue_additions_neutralized_by_replay(",
+    ] {
+        assert!(
+            queue_replay_source.contains(required_snippet),
+            "agent-doc-queue must own queue replay-normalization policy: {required_snippet}"
+        );
+    }
+    let git_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+    for forbidden_snippet in [
+        "fn queue_entry_commit_signature(",
+        "fn queue_entry_count_map(",
+        "fn preserved_queue_additions_neutralized_by_replay(",
+    ] {
+        assert!(
+            !git_source.contains(forbidden_snippet),
+            "git.rs must not re-own queue replay-normalization policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        git_source.contains(
+            "agent_doc_queue::queue_replay::preserved_queue_additions_neutralized_by_replay"
+        ),
+        "git.rs should call focused queue replay-normalization policy directly"
+    );
 
     let queue_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-queue/Cargo.toml")).unwrap();
@@ -10531,6 +10560,9 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
         "pub fn strip_head_markers(",
         "pub fn strip_guard_markers(",
         "pub fn normalize_transient_agent_doc_markers(",
+        "pub fn neutralize_queue_component",
+        "pub fn strip_queue_active_frontmatter",
+        "pub fn normalize_for_replay_hash",
         "pub fn strip_re_heading_attribution(",
         "pub fn normalize_post_commit_re_heading_drift(",
         "pub fn strip_exchange_prompt_prefixes_for_compare",
@@ -10565,14 +10597,18 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
         "agent-doc-orchestration/src/graph.rs",
         "agent-doc-orchestration/src/realtime_model.rs",
         "agent-doc-orchestration/src/repair.rs",
+        "agent-doc-orchestration/src/cycle_state.rs",
+        "agent-doc-orchestration/src/start/idle_watch.rs",
         "agent-doc-document-realtime/src/write_policy.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
             !source.contains("crate::git::normalize_transient_agent_doc_markers")
                 && !source.contains("crate::git::strip_guard_markers")
+                && !source.contains("crate::git::normalize_for_replay_hash")
                 && !source.contains("git::normalize_transient_agent_doc_markers")
-                && !source.contains("git::strip_guard_markers"),
+                && !source.contains("git::strip_guard_markers")
+                && !source.contains("git::normalize_for_replay_hash"),
             "{relative} must call focused transient marker policy directly, not through git"
         );
     }
@@ -10593,6 +10629,12 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
     for forbidden in [
         "pub fn normalize_transient_agent_doc_markers(",
         "fn normalize_transient_agent_doc_markers(",
+        "pub fn neutralize_queue_component(",
+        "fn neutralize_queue_component(",
+        "pub fn strip_queue_active_frontmatter(",
+        "fn strip_queue_active_frontmatter(",
+        "pub fn normalize_for_replay_hash(",
+        "fn normalize_for_replay_hash(",
         "pub fn normalize_post_commit_re_heading_drift(",
         "fn normalize_post_commit_re_heading_drift(",
         "fn strip_re_heading_attribution(",
@@ -10607,6 +10649,9 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
         "fn strip_head_markers(",
         "fn strip_guard_markers(",
         "fn code_block_byte_ranges(",
+        "fn neutralize_queue_component(",
+        "fn strip_queue_active_frontmatter(",
+        "fn normalize_for_replay_hash(",
         "fn strip_exchange_prompt_prefixes_for_compare(",
         "fn exchange_prompt_prefix_equivalent(",
         "fn exchange_component(doc: &str)",

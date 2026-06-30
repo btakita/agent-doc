@@ -12,7 +12,6 @@ agent_doc_write: crdt
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-
 ### Re: REItrades / Artur Muller profile and reply draft — gpt-5
 
 Name note: use **Artur Muller**, not Arthur. His LinkedIn URL, public snippets, and message signature all use Artur.
@@ -102,7 +101,58 @@ Brian
 - REItrades LinkedIn company page: https://www.linkedin.com/company/reitradesmarketplace
 - REJournals article by Artur Muller, August 20, 2025: https://rejournals.com/streamlined-commercial-real-estate-sales-ai-powered-and-automated/
 - Supplied feature brief: `tasks/recruit/rei-trades/reitrades-v1.2.md`
-<!-- agent:boundary:ccc49368 -->
+
+### Re: Correction — REItrades is already launched — gpt-5
+
+Correct. I should frame REItrades as an already-launched/live platform, not as something still trying to reach an initial launch.
+
+Evidence from the current site and the platform demo:
+
+- The public site has live **Login** and **Apply to Join** CTAs at `app.reitrades.com`.
+- The home page positions REItrades as an active principal-to-principal CRE marketplace and shows current buyer-network counts: **5,861 individuals** and **3,247 companies**.
+- The site describes live product surfaces: My Listings, Browse Active Listings, Deal Flow Management, Buyer Network Analytics, NDA/LOI e-signature, direct buyer/seller chat, secure file sharing, due diligence tracking, task management, and real-time notifications.
+- The YouTube video is titled **“REItrades Video Demo”** and shows the launched app UI: dashboard, listing creation, generated teaser/OM materials, buyer analytics, apply-to-join, NDA signing, LOI submission, listing analytics, files, chat, due diligence tracking, and task tracking. Its caption closes with “Visit us at reitrades.com.”
+
+So the V1.2 work should be described as **post-launch product expansion and production hardening**:
+
+- The right phrase is not “MVP” or “first launch”; use **“first V1.2 production tranche”** or **“first scoped post-launch phase.”**
+- The estimate should account for live-system constraints: preserving existing seller/buyer workflows, migrations for production listings, QA around NDA/LOI/email/document flows, and avoiding regressions in a launched marketplace.
+- The brief’s “Beta Soft Launch 10/14/2025” line means they already have a beta-launched product and are now building the next phase.
+
+**Updated wording for Artur**
+
+Hi Artur,
+
+Thanks for sending this over. I reviewed the V1.2 feature list, the current REItrades site, and the platform demo. This is a fit for me. My read is that REItrades is already live, so I would treat this as a post-launch product expansion and production hardening phase rather than a greenfield build.
+
+The work is in the zone I usually handle: Rust backend work, Vue/admin UI, Postgres data modeling and migrations, permissions, production workflow changes, integrations, document/PDF generation, and AI-assisted extraction/automation.
+
+Because the platform is already launched, I would want to sequence the work carefully around the existing seller/buyer workflows. The admin DBMS improvements, broker account workflow, and listing/OM rebuild all touch shared data models, permissions, auditability, email/document workflows, and production transaction paths, so I would avoid treating everything as one large patch.
+
+Roughly, assuming the existing codebase is in reasonable shape:
+
+- 3-5 days for a technical audit, implementation plan, and milestone breakdown
+- 2-3 weeks for the admin DBMS enhancements
+- 2-3 weeks for the broker account / approval / permissions workflow
+- 2-3 weeks for the first asset class of the listing creation + OM rebuild
+- another 3-5+ weeks for additional asset classes, production migrations, OM polish, Stripe/MailerLite/DocuSign edges, AI/document extraction, QA, and hardening
+
+So for the full V1.2 scope I would ballpark **9-14 weeks**. If budget is tight, I would suggest cutting a first scoped post-launch phase around the highest-value admin improvements, the broker approval flow, and one asset class for the listing/OM rebuild. That would likely be more like **5-7 weeks**, with weekly demos and review points so you can keep the spend controlled.
+
+For cost, my standard rate for this kind of senior full-stack contract work is **$125/hr**. That puts a first scoped phase roughly in the **$25k-$35k** range and the broader V1.2 scope roughly in the **$45k-$70k** range, depending on what I find in the codebase and how broad the document extraction / OM generation requirements become.
+
+One caveat: for the AI-generated content and old OM/flyer extraction, I would design for high accuracy with validation, source-of-truth data, confidence checks, and admin review. I would not present AI extraction as inherently 100% accurate without a verification path, especially if those materials are going to buyers.
+
+A good next step would be for me to spend a few days reviewing the repo, current data model, existing listing/OM flow, and integration points. From there I can give you a tighter milestone plan and either work hourly with weekly caps or price the first phase more concretely.
+
+Thanks again,
+Brian
+
+**Source additions**
+
+- Platform demo: https://www.youtube.com/watch?v=1Q8RdnQwYLw
+- Current site: https://reitrades.com/
+<!-- agent:boundary:9a9e5d3d -->
 <!-- /agent:exchange -->
 
 ## Queue

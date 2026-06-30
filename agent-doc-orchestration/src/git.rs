@@ -528,6 +528,22 @@ pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<
     if crate::session_check::detect_bypassed_response_write_between(&head_doc, &current_doc)
         .is_none()
     {
+        if crate::write::guard_no_stale_snapshot_reset_drift(
+            file,
+            Some(&head_doc),
+            &current_doc,
+            "historical snapshot repair",
+        )? {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "snapshot_repair file={} reason={} basis=visible_rebase_guard",
+                    file.display(),
+                    reason
+                ),
+            );
+            return Ok(Some(reason));
+        }
         let basis = if is_safe_user_only_follow_up_after_committed_head(&head_doc, &current_doc) {
             "head_follow_up"
         } else {
@@ -7297,6 +7313,132 @@ Duplicate replay should stay live.
             "the archived response must not remain in HEAD after compaction:\n{head_doc}"
         );
     }
+
+    #[test]
+    fn repair_historical_snapshot_drift_keeps_compacted_visible_file() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("session.md");
+        let stale_snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "stable status.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older - gpt-5\n\n",
+            "Earlier work.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n",
+        );
+        fs::write(&doc, stale_snapshot).unwrap();
+        crate::snapshot::save(&doc, stale_snapshot).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial session", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let old_blocks = (0..12)
+            .map(|idx| {
+                format!(
+                    "### Re: archived {idx} - gpt-5\n\n{}\n",
+                    "Archived response body.\n".repeat(12)
+                )
+            })
+            .collect::<String>();
+        let head = format!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n\
+## Status\n\n\
+<!-- agent:status patch=replace -->\n\
+stable status.\n\
+<!-- /agent:status -->\n\n\
+## Exchange\n\n\
+<!-- agent:exchange patch=append -->\n{old_blocks}<!-- /agent:exchange -->\n\n\
+## Queue\n\n\
+<!-- agent:queue -->\n\
+<!-- /agent:queue -->\n"
+        );
+        fs::write(&doc, &head).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "long exchange head", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let compacted = "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n\
+## Status\n\n\
+<!-- agent:status patch=replace -->\n\
+stable status.\n\
+<!-- /agent:status -->\n\n\
+## Exchange\n\n\
+<!-- agent:exchange patch=append -->\n\
+### Session Summary\n\n\
+*Compacted. Content archived to `.agent-doc/archives/session.md`*\n\n\
+Compacted content:\n\
+- Archived 12 response topic(s): archived 0; archived 1; archived 2; 9 more\n\
+- Prior summary/context: compacted prior responses\n\
+<!-- /agent:exchange -->\n\n\
+## Queue\n\n\
+<!-- agent:queue -->\n\
+<!-- /agent:queue -->\n";
+        fs::write(&doc, compacted).unwrap();
+        crate::snapshot::save(&doc, stale_snapshot).unwrap();
+        let scope =
+            agent_doc_turn::turn_scope::TurnScope::for_driver_with_exchange_tail(None, Some(0));
+        crate::turn_scope_store::save(&doc, &scope).unwrap();
+
+        let repaired = repair_committed_historical_snapshot_drift(&doc)
+            .expect("historical repair should not restore pre-compact HEAD");
+
+        assert_eq!(repaired, Some("exchange"));
+        assert_eq!(
+            crate::snapshot::load(&doc).unwrap(),
+            Some(compacted.to_string()),
+            "snapshot repair must preserve the visible compacted document"
+        );
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("snapshot_repair file=")
+                && log.contains("basis=visible_rebase_guard")
+                && log.contains("stale_snapshot_visible_rebased")
+                && !log.contains("basis=head_local_drift"),
+            "repair should be auditable as visible-rebase, not head-local rewind:\n{log}"
+        );
+    }
+
     #[test]
     fn commit_allows_clean_exchange_only_compaction_with_head_marker_worktree() {
         use std::fs;

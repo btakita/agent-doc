@@ -6,6 +6,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.34.65
 
+- **Historical snapshot repair no longer restores stale pre-compact HEAD over
+  the visible editor document.** The `head_local_drift` repair path now runs the
+  stale-snapshot reset guard against HEAD before saving it as the snapshot. Safe
+  visible compactions rebase the snapshot to the editor-visible file, and unsafe
+  large shrinkage fails closed instead of feeding stale HEAD back into IPC/CRDT
+  convergence after an IDE restart.
+
 - **Ack-content closeout now clears the live-buffer commit barrier.**
   Socket `already_applied` retries that adopt a JetBrains ack-content proof now
   mark the targeted live-buffer sidecar as synced before commit-barrier checks.

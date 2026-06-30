@@ -212,6 +212,12 @@ focused crate under the old path.
   remains the snapshot/file/editor wait adapter and imports the focused helpers
   directly; the local helper implementations and pure tests were removed from
   orchestration rather than kept as wrappers.
+- `agent-doc-diff` now also owns the partial-staging companion classifier:
+  filtering committed/dirty path evidence, deciding source/test relatedness,
+  extracting changed literals from committed and dirty diffs, and returning the
+  sorted overlapping-literal finding. Orchestration keeps only git repo
+  discovery, git command execution, repo-path attachment, ops-log emission, and
+  warning rendering.
 - `agent-doc-prompt-contract` now owns prompt preset request resolution:
   combining diff-level and harness-diff preset directives with prompt-target
   preset references, canonicalizing bare hashtag aliases, preserving ordered

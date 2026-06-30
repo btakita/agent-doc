@@ -1122,7 +1122,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // live editor buffer ahead of disk through `log_closeout_guard_event`
         // with `CloseoutGuardReason::ReplicaDeliveryPending`, blocking stale
         // already-current/pre-stage commits until editor delivery is proven.
-        ("agent-doc-orchestration/src/git.rs", "guard_") => 20,
+        // +1 (#preserved-queue-replay-neutralized): the committed git path now
+        // runs the same stale-snapshot reset drift guard before classifying a
+        // preserved queue addition neutralized by replay normalization. This is
+        // the existing reset-drift guard call, not a new guard boundary.
+        ("agent-doc-orchestration/src/git.rs", "guard_") => 21,
         // #safe-mutation-extract: safe out-of-band mutation classification moved
         // into the focused realtime write policy crate. The four `guard_` tokens
         // are the existing transient marker stripper name/call plus two policy
@@ -1141,7 +1145,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // and the 3 `#editorbufwin` P2 `reason=preserved_queue_addition_replay_neutralized`
         // markers/assertions (replay-neutralized queue additions are committed only after
         // closeout recovery evidence, not during ordinary independent queue edits).
-        ("agent-doc-orchestration/src/git.rs", "reason=") => 7,
+        // 7 -> 8 (#preserved-queue-replay-neutralized): a second regression
+        // assertion covers the same replay-neutralized queue-addition recovery
+        // after stale exchange-collapse cleanup. The production reason remains
+        // the existing typed recovery diagnostic.
+        ("agent-doc-orchestration/src/git.rs", "reason=") => 8,
         ("src/orchestrate.rs", "guard_") => 0,
         ("src/orchestrate/dag.rs", "guard_") => 2,
         // +1 (`reason=probe_inspection_only`): `preflight --probe` logs why it
@@ -11272,6 +11280,61 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
             "agent-doc-queue must keep active queue-head projection free of orchestration/effect dependencies: {forbidden_dependency}"
         );
     }
+}
+
+#[test]
+fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let route_dispatch =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/route_dispatch.rs")).unwrap();
+    for required_snippet in [
+        "pub fn route_prompt_text_for_change(",
+        "pub fn operator_prioritize_route_prompt(",
+        "pub fn prepare_route_dispatch_queue_update(",
+        "pub fn activate_existing_route_queue_content(",
+        "pub fn inactive_route_queue_head(",
+        "pub fn committed_snapshot_backs_queue_head(",
+        "pub enum RouteInactiveQueueHead",
+        "pub struct RouteDispatchQueueUpdate",
+    ] {
+        assert!(
+            route_dispatch.contains(required_snippet),
+            "agent-doc-queue must own route-dispatch queue policy: {required_snippet}"
+        );
+    }
+
+    let route_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+    let route_cycle_ack =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/cycle_ack.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "fn queue_prompt_text_for_route_change(",
+        "fn operator_prioritize_route_prompt(",
+        "fn route_queue_head_backed_by_committed_snapshot(",
+        "fn strip_queue_component_auto_attr(",
+        "fn insert_queue_component(",
+        "document_queue::resolve_activation(",
+        "document_queue::has_stop_fence_at_head(",
+        "document_queue::time_gate_at_head(",
+        "document_queue::marker_control(",
+    ] {
+        assert!(
+            !route_source.contains(forbidden_snippet)
+                && !route_cycle_ack.contains(forbidden_snippet),
+            "route must stay an effect adapter and not re-own route-dispatch queue policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        route_source
+            .contains("agent_doc_queue::route_dispatch::prepare_route_dispatch_queue_update")
+            && route_source.contains("agent_doc_queue::route_dispatch::inactive_route_queue_head")
+            && route_source
+                .contains("agent_doc_queue::route_dispatch::activate_existing_route_queue_content")
+            && route_cycle_ack
+                .contains("agent_doc_queue::route_dispatch::route_prompt_text_for_change"),
+        "route should call route-dispatch queue policy through agent-doc-queue directly"
+    );
 }
 
 #[test]

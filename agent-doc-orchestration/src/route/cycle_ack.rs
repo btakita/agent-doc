@@ -270,7 +270,7 @@ pub(crate) fn pending_prompt_bearing_context_for_route(
         .find(|line| !line.trim().is_empty())
         .unwrap_or(change.text.as_str())
         .trim();
-    let prompt_text = queue_prompt_text_for_route_change(&change.text)
+    let prompt_text = agent_doc_queue::route_dispatch::route_prompt_text_for_change(&change.text)
         .unwrap_or_else(|| preview.trim_start_matches('❯').trim().to_string());
     let slash_command = agent_doc_queue::queue_command::slash_command_text(&prompt_text);
     Ok(Some(PendingPromptBearingRouteContext {

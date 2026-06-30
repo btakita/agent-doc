@@ -2374,41 +2374,6 @@ fn extract_recovery_command(recommended: &str) -> Option<String> {
     }
 }
 
-fn queue_prompt_text_for_route_change(change_text: &str) -> Option<String> {
-    let mut lines = Vec::new();
-    for line in change_text.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with("<!-- agent:boundary:") {
-            continue;
-        }
-        let without_prompt_prefix = trimmed
-            .strip_prefix('❯')
-            .or_else(|| trimmed.strip_prefix('>'))
-            .map(str::trim)
-            .unwrap_or(trimmed);
-        if !without_prompt_prefix.is_empty() {
-            lines.push(without_prompt_prefix.to_string());
-        }
-    }
-    let text = lines.join("\n").trim().to_string();
-    if text.is_empty() { None } else { Some(text) }
-}
-
-fn operator_prioritize_route_prompt(prompt_text: String) -> String {
-    if agent_doc_queue::queue_command::is_slash_command(&prompt_text) {
-        return prompt_text;
-    }
-    if agent_doc_queue::document_queue::is_prioritized(&prompt_text) {
-        prompt_text
-    } else {
-        format!(
-            "{} {}",
-            agent_doc_queue::document_queue::PRIORITIZED_MARKER,
-            agent_doc_queue::document_queue::strip_priority_markers(&prompt_text)
-        )
-    }
-}
-
 /// Enqueue a routed dispatch prompt into a document's `agent:queue`.
 ///
 /// `priority` marks a manual operator dispatch (JB `Run Agent Doc`) into a
@@ -2422,144 +2387,31 @@ fn enqueue_route_dispatch_prompt(
     source: &str,
     priority: bool,
 ) -> Result<RouteQueueEnqueueOutcome> {
-    let prompt_text = queue_prompt_text_for_route_change(prompt_text)
-        .ok_or_else(|| anyhow::anyhow!("route queue prompt is empty"))?;
-    let prompt_text = if priority {
-        operator_prioritize_route_prompt(prompt_text)
-    } else {
-        prompt_text
-    };
-    let prompt_identity = agent_doc_queue::document_queue::strip_priority_markers(&prompt_text);
     let _lock = acquire_route_queue_lock(file)?;
     let original = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    let mut content = frontmatter::merge_queue_state(&original, true)?;
-    let components = agent_doc_element::element::parse(&content)?;
-    let mut component_created = false;
-    let mut already_present = false;
-    let mut appended = false;
-    let mut superseded = false;
-
-    if let Some(queue_component) = components
-        .iter()
-        .find(|component| component.name == "queue")
-        .cloned()
-    {
-        let body = &content[queue_component.open_end..queue_component.close_start];
-        match agent_doc_queue::document_queue::parse(body) {
-            Ok(mut entries) => {
-                already_present = agent_doc_queue::document_queue::prompts(&entries)
-                    .iter()
-                    .any(|prompt| {
-                        agent_doc_queue::document_queue::strip_priority_markers(&prompt.text)
-                            == prompt_identity
-                    });
-                if !already_present {
-                    let active_prompt_count = entries
-                        .iter()
-                        .filter(|entry| {
-                            matches!(
-                                entry,
-                                agent_doc_queue::document_queue::QueueEntry::Prompt(_)
-                            )
-                        })
-                        .count();
-                    // #jb-run-preempt-autoloop-priority: a priority dispatch must
-                    // preempt, so it never supersedes a lone prompt — replacing
-                    // would silently drop the pending queue item the manual run
-                    // is jumping ahead of. Non-priority keeps the stale-prompt update.
-                    let replace_single_auto_prompt = !priority
-                        && agent_doc_queue::document_queue::has_auto_attr(&queue_component.attrs)
-                        && active_prompt_count == 1;
-                    if replace_single_auto_prompt {
-                        for entry in &mut entries {
-                            if let agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) =
-                                entry
-                            {
-                                prompt.multiline = prompt_text.contains('\n');
-                                prompt.text = prompt_text.clone();
-                                superseded = true;
-                                break;
-                            }
-                        }
-                    } else {
-                        let new_prompt = agent_doc_queue::document_queue::QueueEntry::Prompt(
-                            agent_doc_queue::document_queue::QueuePrompt {
-                                multiline: prompt_text.contains('\n'),
-                                text: prompt_text.clone(),
-                            },
-                        );
-                        if priority {
-                            // Insert ahead of the first actionable prompt, preserving
-                            // any leading queue directives (preset / start fence).
-                            let insert_at = entries
-                                .iter()
-                                .position(|entry| {
-                                    matches!(
-                                        entry,
-                                        agent_doc_queue::document_queue::QueueEntry::Prompt(_)
-                                    )
-                                })
-                                .unwrap_or(entries.len());
-                            entries.insert(insert_at, new_prompt);
-                        } else {
-                            entries.push(new_prompt);
-                        }
-                        appended = true;
-                    }
-                }
-                let rendered = agent_doc_queue::document_queue::render(&entries);
-                content = queue_component.replace_content(&content, &rendered);
-            }
-            Err(parse_err) => {
-                // The existing agent:queue body is polluted (e.g. user prose /
-                // log dumps merged into the component by an earlier corruption).
-                // Do NOT brick the route by propagating a fatal parse error —
-                // preserve the existing body verbatim and append the new pending
-                // dispatch as a well-formed entry beneath it, leaving the
-                // corruption for separate repair (#jb-run-agent-doc-response-queue-contamination).
-                crate::ops_log::log_op(
-                    file,
-                    &format!(
-                        "route_queue_dispatch_unparseable_preserved file={} prompt_hash={} reason={}",
-                        file.display(),
-                        agent_doc_hash::content_hash(&prompt_text),
-                        parse_err
-                    ),
-                );
-                let new_rendered = agent_doc_queue::document_queue::render(std::slice::from_ref(
-                    &agent_doc_queue::document_queue::QueueEntry::Prompt(
-                        agent_doc_queue::document_queue::QueuePrompt {
-                            multiline: prompt_text.contains('\n'),
-                            text: prompt_text.clone(),
-                        },
-                    ),
-                ));
-                // Dedup against the raw body so a repeated dispatch into an
-                // already-polluted queue stays idempotent.
-                if body.lines().any(|line| line.trim() == new_rendered.trim())
-                    || body.contains(prompt_text.as_str())
-                {
-                    already_present = true;
-                    content = queue_component.replace_content(&content, body);
-                } else {
-                    let mut preserved = body.to_string();
-                    if !preserved.is_empty() && !preserved.ends_with('\n') {
-                        preserved.push('\n');
-                    }
-                    preserved.push_str(&new_rendered);
-                    appended = true;
-                    content = queue_component.replace_content(&content, &preserved);
-                }
-            }
-        }
-        content = strip_queue_component_auto_attr(&content)?;
-    } else {
-        component_created = true;
-        appended = true;
-        content = insert_queue_component(&content, &prompt_text)?;
+    let update = agent_doc_queue::route_dispatch::prepare_route_dispatch_queue_update(
+        &original,
+        prompt_text,
+        priority,
+    )?;
+    if let Some(parse_err) = update.unparseable_queue_error.as_deref() {
+        // The existing agent:queue body is polluted (e.g. user prose / log dumps
+        // merged into the component by an earlier corruption). The focused queue
+        // transform preserves the polluted body and appends the pending dispatch;
+        // route owns only the effect-side diagnostic.
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_queue_dispatch_unparseable_preserved file={} prompt_hash={} reason={}",
+                file.display(),
+                agent_doc_hash::content_hash(&update.prompt_text),
+                parse_err
+            ),
+        );
     }
 
+    let content = update.content;
     let activated = content != original;
     if activated {
         route_write_document(file, &content, &original, "route_dispatch_queue").with_context(
@@ -2583,20 +2435,20 @@ fn enqueue_route_dispatch_prompt(
             "route_dispatch_queued file={} source={} appended={} already_present={} superseded={} component_created={} activated={} prompt={:?}",
             file.display(),
             source,
-            appended,
-            already_present,
-            superseded,
-            component_created,
+            update.appended,
+            update.already_present,
+            update.superseded,
+            update.component_created,
             activated,
-            prompt_text
+            update.prompt_text
         ),
     );
     Ok(RouteQueueEnqueueOutcome {
-        prompt_text,
-        appended,
-        already_present,
-        superseded,
-        component_created,
+        prompt_text: update.prompt_text,
+        appended: update.appended,
+        already_present: update.already_present,
+        superseded: update.superseded,
+        component_created: update.component_created,
         activated,
     })
 }
@@ -2638,99 +2490,8 @@ fn inactive_route_queue_head(file: &Path) -> Result<Option<String>> {
 fn inactive_route_queue_head_in_content(file: &Path, content: &str) -> Result<Option<String>> {
     let rc = crate::graph::RunContext::new(file.to_path_buf());
     let (fm, _) = frontmatter_io::parse_for_file_with_context(content, file, &rc)?;
-    if fm.queue_active == Some(true) {
-        return Ok(None);
-    }
-    let components = agent_doc_element::element::parse(content)?;
-    let Some(queue_component) = components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
-        return Ok(None);
-    };
-    // A marker-side queue control (`start`/`go`/`stop`, #queue-state-unify) is
-    // the marker spelling of the canonical `queue:` frontmatter control:
-    // `start`/`go` are a fresh-activation gesture equivalent to the legacy `auto`
-    // attribute, and `stop` forces the queue inactive. Mirror preflight's
-    // `has_auto` resolution so JB `Run Agent Doc` activates a `queue: stop` +
-    // `<!-- agent:queue go -->` document instead of treating `go` as inert.
-    let marker_control = agent_doc_queue::document_queue::marker_control(&queue_component.attrs);
-    if matches!(
-        marker_control,
-        Some(agent_doc_frontmatter::frontmatter::QueueControl::Stop)
-    ) {
-        return Ok(None);
-    }
-    let has_auto = agent_doc_queue::document_queue::has_auto_attr(&queue_component.attrs)
-        || matches!(
-            marker_control,
-            Some(agent_doc_frontmatter::frontmatter::QueueControl::Start)
-        );
-    let body = &content[queue_component.open_end..queue_component.close_start];
-    let entries = agent_doc_queue::document_queue::parse(body)?;
-    let activation =
-        agent_doc_queue::document_queue::resolve_activation(&entries, has_auto, false, false);
-    if !activation.active
-        || agent_doc_queue::document_queue::has_stop_fence_at_head(&activation.entries_after)
-        || agent_doc_queue::document_queue::time_gate_at_head(&activation.entries_after).is_some()
-    {
-        return Ok(None);
-    }
-    let Some(head) = agent_doc_queue::document_queue::first_prompt(&activation.entries_after)
-    else {
-        return Ok(None);
-    };
-    let head_text = head.text.clone();
-    // #qdispatchloss: never let route consume/dispatch an inactive queue head
-    // that is not backed by the committed snapshot. The head is read from the
-    // live disk buffer, which the JB plugin may have synced from an
-    // *uncommitted* operator edit (possibly half-typed). Activating/dispatching
-    // it moves a bad/partial line into the agent prompt and then loses it — the
-    // consume never lands in a committed snapshot, so the item is gone and the
-    // turn stalls uncommitted. When the head diverges from the committed
-    // snapshot, treat it as "still being edited" and fail closed (defer) so the
-    // next preflight commits the queue edit first and dispatches the head
-    // through the committed path. (Active-queue continuation heads go through
-    // `queue_continuation::live_continuation_head`, not this inactive-activation
-    // path, so the running auto-loop is unaffected.)
-    if !route_queue_head_backed_by_committed_snapshot(file, &head_text) {
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "route_dispatch_uncommitted_head file={} decision=defer reason=head_not_in_committed_snapshot head={:?}",
-                file.display(),
-                agent_doc_secret_redact::redact(&head_text)
-            ),
-        );
-        return Ok(None);
-    }
-    Ok(Some(head_text))
-}
-
-/// `#qdispatchloss`: prove a candidate inactive queue head is backed by the
-/// committed snapshot before route consumes/dispatches it.
-///
-/// Route selects the head from the live on-disk document
-/// (`std::fs::read_to_string`), but the JB plugin may have synced an
-/// uncommitted operator edit to disk before it reaches a git-committed
-/// snapshot. Comparing the candidate head text against the queue prompts in the
-/// committed snapshot (`snapshot::load`) distinguishes a durable, committed head
-/// (safe to dispatch) from a fresh editor-buffer-only edit (must defer).
-///
-/// Conservative by design — only a head that is provably absent from a present
-/// committed queue is treated as uncommitted:
-/// - no committed snapshot yet (untracked scaffold) → allow (bootstrap escape
-///   hatch; nothing to diverge from);
-/// - snapshot unreadable / unparseable / queue body unparseable → allow (cannot
-///   prove divergence, so do not stall a legitimate drain);
-/// - committed snapshot has a queue component but the head text is not among its
-///   prompt/completed entries → NOT backed (fail closed);
-/// - committed snapshot has no queue component at all → NOT backed (the head is
-///   a fresh uncommitted queue edit).
-fn route_queue_head_backed_by_committed_snapshot(file: &Path, head_text: &str) -> bool {
-    let snapshot = match crate::snapshot::load(file) {
-        Ok(Some(snapshot)) => snapshot,
-        Ok(None) => return true,
+    let committed_snapshot = match crate::snapshot::load(file) {
+        Ok(snapshot) => snapshot,
         Err(err) => {
             crate::ops_log::log_op(
                 file,
@@ -2740,31 +2501,30 @@ fn route_queue_head_backed_by_committed_snapshot(file: &Path, head_text: &str) -
                     err
                 ),
             );
-            return true;
+            None
         }
     };
-    let components = match agent_doc_element::element::parse(&snapshot) {
-        Ok(components) => components,
-        Err(_) => return true,
-    };
-    let Some(queue_component) = components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
-        return false;
-    };
-    let body = &snapshot[queue_component.open_end..queue_component.close_start];
-    let entries = match agent_doc_queue::document_queue::parse(body) {
-        Ok(entries) => entries,
-        Err(_) => return true,
-    };
-    entries.iter().any(|entry| match entry {
-        agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
-        | agent_doc_queue::document_queue::QueueEntry::Completed(prompt) => {
-            prompt.text == head_text
+    match agent_doc_queue::route_dispatch::inactive_route_queue_head(
+        content,
+        fm.queue_active,
+        committed_snapshot.as_deref(),
+    )? {
+        agent_doc_queue::route_dispatch::RouteInactiveQueueHead::None => Ok(None),
+        agent_doc_queue::route_dispatch::RouteInactiveQueueHead::Dispatchable(head_text) => {
+            Ok(Some(head_text))
         }
-        _ => false,
-    })
+        agent_doc_queue::route_dispatch::RouteInactiveQueueHead::Uncommitted(head_text) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_dispatch_uncommitted_head file={} decision=defer reason=head_not_in_committed_snapshot head={:?}",
+                    file.display(),
+                    agent_doc_secret_redact::redact(&head_text)
+                ),
+            );
+            Ok(None)
+        }
+    }
 }
 
 fn activate_existing_route_queue_head(
@@ -2777,8 +2537,8 @@ fn activate_existing_route_queue_head(
     let Some(prompt_text) = inactive_route_queue_head_in_content(file, &original)? else {
         return Ok(None);
     };
-    let mut content = frontmatter::merge_queue_state(&original, true)?;
-    content = strip_queue_component_auto_attr(&content)?;
+    let content =
+        agent_doc_queue::route_dispatch::activate_existing_route_queue_content(&original)?;
     let activated = content != original;
     if activated {
         route_write_document(file, &content, &original, "route_queue_activation")
@@ -2838,61 +2598,6 @@ fn acquire_route_queue_lock(file: &Path) -> Result<File> {
     lock.lock_exclusive()
         .with_context(|| format!("failed to acquire route queue lock {}", lock_path.display()))?;
     Ok(lock)
-}
-
-fn strip_queue_component_auto_attr(content: &str) -> Result<String> {
-    let components = agent_doc_element::element::parse(content)?;
-    let Some(queue_component) = components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
-        return Ok(content.to_string());
-    };
-    if !agent_doc_queue::document_queue::has_auto_attr(&queue_component.attrs) {
-        return Ok(content.to_string());
-    }
-    let open_tag = &content[queue_component.open_start..queue_component.open_end];
-    let new_tag = agent_doc_queue::document_queue::strip_auto_from_tag(open_tag);
-    let mut result = String::with_capacity(content.len());
-    result.push_str(&content[..queue_component.open_start]);
-    result.push_str(&new_tag);
-    result.push_str(&content[queue_component.open_end..]);
-    Ok(result)
-}
-
-fn insert_queue_component(content: &str, prompt_text: &str) -> Result<String> {
-    let body = agent_doc_queue::document_queue::render(&[
-        agent_doc_queue::document_queue::QueueEntry::Prompt(
-            agent_doc_queue::document_queue::QueuePrompt {
-                multiline: prompt_text.contains('\n'),
-                text: prompt_text.to_string(),
-            },
-        ),
-    ]);
-    let block = format!("<!-- agent:queue -->\n{}<!-- /agent:queue -->\n\n", body);
-    let components = agent_doc_element::element::parse(content)?;
-    let insert_at = components
-        .iter()
-        .find(|component| agent_doc_element::element::is_tracked_work_component(&component.name))
-        .map(|component| component.open_start)
-        .or_else(|| {
-            components
-                .iter()
-                .find(|component| component.name == "exchange")
-                .map(|component| component.close_end)
-        })
-        .unwrap_or(content.len());
-    let mut result = String::with_capacity(content.len() + block.len() + 2);
-    result.push_str(&content[..insert_at]);
-    if insert_at > 0 && !result.ends_with("\n\n") {
-        if !result.ends_with('\n') {
-            result.push('\n');
-        }
-        result.push('\n');
-    }
-    result.push_str(&block);
-    result.push_str(&content[insert_at..]);
-    Ok(result)
 }
 
 fn cleanup_failed_route_panes(
@@ -5796,11 +5501,17 @@ mod tests {
         crate::snapshot::save(&doc, committed).unwrap();
 
         assert!(
-            !route_queue_head_backed_by_committed_snapshot(&doc, "do [#fresh]"),
+            !agent_doc_queue::route_dispatch::committed_snapshot_backs_queue_head(
+                Some(committed),
+                "do [#fresh]"
+            ),
             "a head absent from the committed snapshot queue is not backed"
         );
         assert!(
-            route_queue_head_backed_by_committed_snapshot(&doc, "do [#committed]"),
+            agent_doc_queue::route_dispatch::committed_snapshot_backs_queue_head(
+                Some(committed),
+                "do [#committed]"
+            ),
             "a head present in the committed snapshot queue is backed"
         );
 
@@ -5872,7 +5583,10 @@ mod tests {
         std::fs::write(&doc, committed).unwrap();
         crate::snapshot::save(&doc, committed).unwrap();
         assert!(
-            !route_queue_head_backed_by_committed_snapshot(&doc, "do [#fresh]"),
+            !agent_doc_queue::route_dispatch::committed_snapshot_backs_queue_head(
+                Some(committed),
+                "do [#fresh]"
+            ),
             "no committed queue component → head is unbacked"
         );
     }
@@ -5886,7 +5600,10 @@ mod tests {
         let doc = dir.path().join("session.md");
         std::fs::write(&doc, "scaffold\n").unwrap();
         assert!(
-            route_queue_head_backed_by_committed_snapshot(&doc, "do [#anything]"),
+            agent_doc_queue::route_dispatch::committed_snapshot_backs_queue_head(
+                None,
+                "do [#anything]"
+            ),
             "no committed snapshot → allow (bootstrap)"
         );
     }

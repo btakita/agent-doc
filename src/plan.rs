@@ -812,8 +812,8 @@ fn pending_mutations_for_doc(
         }
     }
 
-    let auto_done =
-        agent_doc_orchestration::session_check::resolve_auto_done(file).unwrap_or(false);
+    let project_config = agent_doc_project_config_io::load_project_for_doc(file);
+    let auto_done = agent_doc_frontmatter::project_config::resolve_auto_done(&fm, &project_config);
     for id in agent_doc_orchestration::session_check::inline_done_signal_ids(
         file,
         prompt_targets,

@@ -1185,7 +1185,7 @@ fn detect_duplicate_response_patchback(file: &Path) -> Result<Option<String>> {
 }
 
 mod pending_guards;
-pub use pending_guards::*;
+pub(crate) use pending_guards::*;
 
 mod done_signals;
 pub use done_signals::*;

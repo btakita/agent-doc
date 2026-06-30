@@ -1382,7 +1382,13 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
             // early `is_recurring_imperative_head` exemption before it can fire.
             14
         }
-        ("agent-doc-orchestration/src/session_check/pending_guards.rs", "guard_") => 8,
+        // 8 -> 12: guard-mode precedence/defaulting moved to
+        // `agent-doc-frontmatter`, so this file now names the focused
+        // `project_config::resolve_*_guard_mode` functions at five adapter
+        // call sites. `resolve_review_done_guard_mode_with_context` was deleted
+        // because there was no cached-context call site to preserve, for a net
+        // +4 audited tokens.
+        ("agent-doc-orchestration/src/session_check/pending_guards.rs", "guard_") => 12,
         ("agent-doc-orchestration/src/session_check/queue_head_guards.rs", "guard_") => 2,
         ("agent-doc-orchestration/src/session_check/partial_staging.rs", "guard_") => 2,
         ("agent-doc-orchestration/src/session_check/response_guards.rs", "guard_") => 8,

@@ -24,16 +24,65 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+use crate::frontmatter::{Frontmatter, PendingCaptureGuardMode};
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GuardConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pending_capture: Option<crate::frontmatter::PendingCaptureGuardMode>,
+    pub pending_capture: Option<PendingCaptureGuardMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pending_done: Option<crate::frontmatter::PendingCaptureGuardMode>,
+    pub pending_done: Option<PendingCaptureGuardMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub review_done: Option<crate::frontmatter::PendingCaptureGuardMode>,
+    pub review_done: Option<PendingCaptureGuardMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_done: Option<bool>,
+}
+
+pub fn resolve_pending_capture_guard_mode(
+    frontmatter: &Frontmatter,
+    project_config: &ProjectConfig,
+) -> PendingCaptureGuardMode {
+    frontmatter
+        .pending_capture_guard
+        .or(project_config.guards.pending_capture)
+        .unwrap_or_default()
+}
+
+pub fn resolve_pending_done_guard_mode(
+    frontmatter: &Frontmatter,
+    project_config: &ProjectConfig,
+) -> PendingCaptureGuardMode {
+    if let Some(mode) = frontmatter.pending_done_guard {
+        return mode;
+    }
+    if let Some(mode) = project_config.guards.pending_done {
+        return mode;
+    }
+    if frontmatter
+        .session
+        .as_deref()
+        .is_some_and(|session| !session.trim().is_empty())
+    {
+        return PendingCaptureGuardMode::Strict;
+    }
+    PendingCaptureGuardMode::Warn
+}
+
+pub fn resolve_review_done_guard_mode(
+    frontmatter: &Frontmatter,
+    project_config: &ProjectConfig,
+) -> PendingCaptureGuardMode {
+    frontmatter
+        .review_done_guard
+        .or(project_config.guards.review_done)
+        .unwrap_or(PendingCaptureGuardMode::Off)
+}
+
+pub fn resolve_auto_done(frontmatter: &Frontmatter, project_config: &ProjectConfig) -> bool {
+    frontmatter
+        .auto_done
+        .or(project_config.guards.auto_done)
+        .unwrap_or(false)
 }
 
 /// Workspace-level lint configuration (`[lint]` section in
@@ -413,6 +462,104 @@ fn glob_match_segment(pattern: &str, text: &str) -> bool {
         pi += 1;
     }
     pi == pat.len()
+}
+
+#[cfg(test)]
+mod guard_resolution_tests {
+    use super::*;
+
+    fn project_guards(guards: GuardConfig) -> ProjectConfig {
+        ProjectConfig {
+            guards,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn pending_capture_frontmatter_overrides_project_then_defaults_warn() {
+        let fm = Frontmatter {
+            pending_capture_guard: Some(PendingCaptureGuardMode::Strict),
+            ..Default::default()
+        };
+        let cfg = project_guards(GuardConfig {
+            pending_capture: Some(PendingCaptureGuardMode::Off),
+            ..Default::default()
+        });
+
+        assert_eq!(
+            resolve_pending_capture_guard_mode(&fm, &cfg),
+            PendingCaptureGuardMode::Strict
+        );
+        assert_eq!(
+            resolve_pending_capture_guard_mode(&Frontmatter::default(), &ProjectConfig::default()),
+            PendingCaptureGuardMode::Warn
+        );
+    }
+
+    #[test]
+    fn pending_done_uses_project_before_session_strict_default() {
+        let cfg = project_guards(GuardConfig {
+            pending_done: Some(PendingCaptureGuardMode::Off),
+            ..Default::default()
+        });
+        let fm = Frontmatter {
+            session: Some("session-id".to_string()),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            resolve_pending_done_guard_mode(&fm, &cfg),
+            PendingCaptureGuardMode::Off
+        );
+        assert_eq!(
+            resolve_pending_done_guard_mode(&fm, &ProjectConfig::default()),
+            PendingCaptureGuardMode::Strict
+        );
+        assert_eq!(
+            resolve_pending_done_guard_mode(&Frontmatter::default(), &ProjectConfig::default()),
+            PendingCaptureGuardMode::Warn
+        );
+    }
+
+    #[test]
+    fn review_done_defaults_off_after_frontmatter_and_project() {
+        let fm = Frontmatter {
+            review_done_guard: Some(PendingCaptureGuardMode::Warn),
+            ..Default::default()
+        };
+        let cfg = project_guards(GuardConfig {
+            review_done: Some(PendingCaptureGuardMode::Strict),
+            ..Default::default()
+        });
+
+        assert_eq!(
+            resolve_review_done_guard_mode(&fm, &cfg),
+            PendingCaptureGuardMode::Warn
+        );
+        assert_eq!(
+            resolve_review_done_guard_mode(&Frontmatter::default(), &ProjectConfig::default()),
+            PendingCaptureGuardMode::Off
+        );
+    }
+
+    #[test]
+    fn auto_done_frontmatter_overrides_project_then_defaults_false() {
+        let fm = Frontmatter {
+            auto_done: Some(false),
+            ..Default::default()
+        };
+        let cfg = project_guards(GuardConfig {
+            auto_done: Some(true),
+            ..Default::default()
+        });
+
+        assert!(!resolve_auto_done(&fm, &cfg));
+        assert!(resolve_auto_done(&Frontmatter::default(), &cfg));
+        assert!(!resolve_auto_done(
+            &Frontmatter::default(),
+            &ProjectConfig::default()
+        ));
+    }
 }
 
 #[cfg(test)]

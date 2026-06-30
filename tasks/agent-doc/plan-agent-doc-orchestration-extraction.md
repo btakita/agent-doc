@@ -545,6 +545,12 @@ focused crate under the old path.
   `.txt` filename rendering. Orchestration keeps canonicalization, project-root
   lookup, saved-diagnostic deletion, and ops-log emission while importing the
   focused naming helpers directly.
+- `agent-doc-controller` now owns fleet dashboard model/render policy: admin
+  actor/finding rows, dashboard row diagnostics, deterministic model folding,
+  terminal-frame rendering, queue/projection flag formatting, and truncation.
+  Orchestration keeps actor-store/session-registry/tmux/controller inspection
+  effects, JSON output, and the live polling loop while importing the focused
+  fleet policy directly.
 - `agent-doc-turn-executor-tmux` now owns context-clear submit policy: active
   composer visibility detection for `/clear` and OpenCode `/new`, submitted
   observation/status vocabulary, Enter-resubmit gating, and clear-submit

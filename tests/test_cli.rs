@@ -4508,6 +4508,10 @@ fn test_agent_doc_work_graph_is_source_agnostic_boundary() {
         "pub fn update_schedule_node_state",
         "pub fn classify_session_review_log",
         "pub fn guard_blocker",
+        "pub struct AutoDagGraphEvidence",
+        "pub struct AutoDagGraphTargetEvidence",
+        "pub fn validate_schedule_graph_evidence",
+        "pub fn target_evidence_for_schedule",
     ] {
         assert!(
             schedule_source.contains(required),
@@ -4522,6 +4526,8 @@ fn test_agent_doc_work_graph_is_source_agnostic_boundary() {
         "pub(crate) fn classify_session_review_log",
         "fn parse_tasks(",
         "fn mark_ready_nodes(",
+        "fn validate_graph_evidence(",
+        "fn target_evidence_from_graph(",
         "pub(crate) fn guard_blocker",
     ] {
         assert!(
@@ -4532,7 +4538,9 @@ fn test_agent_doc_work_graph_is_source_agnostic_boundary() {
     assert!(
         root_auto_dag_source.contains("agent_doc_work_graph::schedule::{")
             && root_auto_dag_source.contains("build_schedule as build_auto_dag_schedule")
-            && root_auto_dag_source.contains("update_schedule_node_state"),
+            && root_auto_dag_source.contains("update_schedule_node_state")
+            && root_auto_dag_source.contains("validate_schedule_graph_evidence")
+            && root_auto_dag_source.contains("target_evidence_for_schedule"),
         "root auto_dag adapter should call the focused schedule crate directly"
     );
     let orchestration_batch = fs::read_to_string(

@@ -6,10 +6,11 @@
 //! log families before any child work is launched.
 
 use agent_doc_work_graph::schedule::{
-    AutoDagNodeState, AutoDagSchedule, AutoDagScheduleBuildInput, AutoDagScheduleSeed,
-    AutoDagTargetEvidence, SCHEDULE_CONTRACT_VERSION, SessionReviewGuardReport,
-    build_schedule as build_auto_dag_schedule, classify_session_review_log, schedule_seed,
-    update_schedule_node_state,
+    AutoDagGraphEvidence, AutoDagGraphTargetEvidence, AutoDagNodeState, AutoDagSchedule,
+    AutoDagScheduleBuildInput, AutoDagScheduleSeed, SCHEDULE_CONTRACT_VERSION,
+    SessionReviewGuardReport, build_schedule as build_auto_dag_schedule,
+    classify_session_review_log, schedule_seed, target_evidence_for_schedule,
+    update_schedule_node_state, validate_schedule_graph_evidence,
 };
 use anyhow::{Context, Result, bail};
 use std::collections::BTreeSet;
@@ -47,10 +48,12 @@ pub(crate) fn build_schedule(
 
     let parent_doc = file.display().to_string();
     let seed = schedule_seed(parent_doc.clone(), tasks)?;
-    let warnings = validate_graph_evidence(graph_evidence, &seed)?;
+    let graph_evidence = schedule_graph_evidence_from_tsift(graph_evidence);
+    let warnings = validate_schedule_graph_evidence(graph_evidence.as_ref(), &seed)?;
     let schedule_id = schedule_id(file, &seed)?;
     let graph_status = graph_evidence
-        .map(|evidence| evidence.graph_db_status.status.clone())
+        .as_ref()
+        .map(|evidence| evidence.graph_status.clone())
         .unwrap_or_else(|| "missing".to_string());
     let replay_command = format!(
         "agent-doc orchestrate {} --mode dag --resume-schedule {}",
@@ -68,7 +71,7 @@ pub(crate) fn build_schedule(
         tasks,
         warnings,
         replay_command,
-        target_evidence: target_evidence_from_graph(graph_evidence),
+        target_evidence: target_evidence_for_schedule(graph_evidence.as_ref()),
     })
 }
 
@@ -134,43 +137,45 @@ pub(crate) fn session_review_guard_for_file(file: &Path) -> Result<SessionReview
     Ok(classify_session_review_log(&contents))
 }
 
-fn validate_graph_evidence(
+fn schedule_graph_evidence_from_tsift(
     graph_evidence: Option<&crate::tsift_graph::TsiftGraphEvidencePlan>,
-    seed: &AutoDagScheduleSeed,
-) -> Result<Vec<String>> {
-    let Some(graph) = graph_evidence else {
-        return Ok(vec![
-            "graph_evidence=missing; schedule requires parent review".to_string(),
-        ]);
-    };
-    if !matches!(graph.graph_db_status.status.as_str(), "current" | "fresh") {
-        bail!(
-            "stale graph evidence: graph_db_status.status={}",
-            graph.graph_db_status.status
-        );
-    }
-    if seed.batches.iter().any(|batch| batch.len() > 1)
-        && let Some(blocker) = graph.conflict_matrix.parallel_dispatch_blocker()
-    {
-        bail!("graph conflict evidence blocked antichain dispatch: {blocker}");
-    }
-
-    for task in seed.tasks.iter().filter(|task| task.target.is_some()) {
-        let target = task.target.as_deref().unwrap();
-        let matching_handles = graph
+) -> Option<AutoDagGraphEvidence> {
+    graph_evidence.map(|graph| AutoDagGraphEvidence {
+        graph_status: graph.graph_db_status.status.clone(),
+        parallel_dispatch_blocker: graph.conflict_matrix.parallel_dispatch_blocker(),
+        targets: graph
             .prompt_target_handles
             .iter()
-            .filter(|handle| handle.target.eq_ignore_ascii_case(target))
-            .count();
-        if matching_handles == 0 {
-            bail!("missing graph evidence for auto-DAG target #{target}");
-        }
-        if matching_handles > 1 {
-            bail!("ambiguous graph evidence for auto-DAG target #{target}");
-        }
-        let mut packet_ids = BTreeSet::new();
-        for packet in graph
-            .conflict_matrix
+            .map(|handle| AutoDagGraphTargetEvidence {
+                target: handle.target.clone(),
+                replay_commands: handle.replay_commands.clone(),
+                repair_commands: handle.repair_commands.clone(),
+                ownership_packet_ids: ownership_packet_ids_for_target(graph, &handle.target),
+            })
+            .collect(),
+    })
+}
+
+fn ownership_packet_ids_for_target(
+    graph: &crate::tsift_graph::TsiftGraphEvidencePlan,
+    target: &str,
+) -> Vec<String> {
+    let mut packet_ids = BTreeSet::new();
+    for packet in graph
+        .conflict_matrix
+        .worker_prompt_packets
+        .iter()
+        .filter(|packet| packet.target.eq_ignore_ascii_case(target))
+    {
+        packet_ids.insert(
+            packet
+                .packet_id
+                .clone()
+                .unwrap_or_else(|| format!("matrix:{target}:{}", packet.rank)),
+        );
+    }
+    if let Some(trace) = &graph.dispatch_trace {
+        for packet in trace
             .worker_prompt_packets
             .iter()
             .filter(|packet| packet.target.eq_ignore_ascii_case(target))
@@ -179,45 +184,11 @@ fn validate_graph_evidence(
                 packet
                     .packet_id
                     .clone()
-                    .unwrap_or_else(|| format!("matrix:{target}:{}", packet.rank)),
+                    .unwrap_or_else(|| format!("trace:{target}:{}", packet.rank)),
             );
         }
-        if let Some(trace) = &graph.dispatch_trace {
-            for packet in trace
-                .worker_prompt_packets
-                .iter()
-                .filter(|packet| packet.target.eq_ignore_ascii_case(target))
-            {
-                packet_ids.insert(
-                    packet
-                        .packet_id
-                        .clone()
-                        .unwrap_or_else(|| format!("trace:{target}:{}", packet.rank)),
-                );
-            }
-        }
-        if packet_ids.is_empty() {
-            bail!("missing worker ownership packet for auto-DAG target #{target}");
-        }
-        if packet_ids.len() > 1 {
-            bail!("ambiguous worker ownership packets for auto-DAG target #{target}");
-        }
     }
-    Ok(Vec::new())
-}
-
-fn target_evidence_from_graph(
-    graph_evidence: Option<&crate::tsift_graph::TsiftGraphEvidencePlan>,
-) -> Vec<AutoDagTargetEvidence> {
-    graph_evidence
-        .into_iter()
-        .flat_map(|graph| graph.prompt_target_handles.iter())
-        .map(|handle| AutoDagTargetEvidence {
-            target: handle.target.clone(),
-            replay_commands: handle.replay_commands.clone(),
-            repair_commands: handle.repair_commands.clone(),
-        })
-        .collect()
+    packet_ids.into_iter().collect()
 }
 
 fn schedule_id(file: &Path, seed: &AutoDagScheduleSeed) -> Result<String> {

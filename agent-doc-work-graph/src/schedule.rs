@@ -118,6 +118,21 @@ pub struct AutoDagTargetEvidence {
     pub repair_commands: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutoDagGraphEvidence {
+    pub graph_status: String,
+    pub parallel_dispatch_blocker: Option<String>,
+    pub targets: Vec<AutoDagGraphTargetEvidence>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutoDagGraphTargetEvidence {
+    pub target: String,
+    pub replay_commands: Vec<String>,
+    pub repair_commands: Vec<String>,
+    pub ownership_packet_ids: Vec<String>,
+}
+
 pub struct AutoDagScheduleBuildInput<'a> {
     pub schedule_id: String,
     pub parent_doc: String,
@@ -203,6 +218,65 @@ pub fn build_schedule(input: AutoDagScheduleBuildInput<'_>) -> Result<AutoDagSch
     };
     mark_ready_nodes(&mut schedule);
     Ok(schedule)
+}
+
+pub fn validate_schedule_graph_evidence(
+    graph_evidence: Option<&AutoDagGraphEvidence>,
+    seed: &AutoDagScheduleSeed,
+) -> Result<Vec<String>> {
+    let Some(graph) = graph_evidence else {
+        return Ok(vec![
+            "graph_evidence=missing; schedule requires parent review".to_string(),
+        ]);
+    };
+    if !matches!(graph.graph_status.as_str(), "current" | "fresh") {
+        bail!(
+            "stale graph evidence: graph_db_status.status={}",
+            graph.graph_status
+        );
+    }
+    if seed.batches.iter().any(|batch| batch.len() > 1)
+        && let Some(blocker) = graph.parallel_dispatch_blocker.as_deref()
+    {
+        bail!("graph conflict evidence blocked antichain dispatch: {blocker}");
+    }
+
+    for task in seed.tasks.iter().filter(|task| task.target.is_some()) {
+        let target = task.target.as_deref().unwrap();
+        let matching_targets = graph
+            .targets
+            .iter()
+            .filter(|evidence| evidence.target.eq_ignore_ascii_case(target))
+            .collect::<Vec<_>>();
+        if matching_targets.is_empty() {
+            bail!("missing graph evidence for auto-DAG target #{target}");
+        }
+        if matching_targets.len() > 1 {
+            bail!("ambiguous graph evidence for auto-DAG target #{target}");
+        }
+        let packet_ids = &matching_targets[0].ownership_packet_ids;
+        if packet_ids.is_empty() {
+            bail!("missing worker ownership packet for auto-DAG target #{target}");
+        }
+        if packet_ids.len() > 1 {
+            bail!("ambiguous worker ownership packets for auto-DAG target #{target}");
+        }
+    }
+    Ok(Vec::new())
+}
+
+pub fn target_evidence_for_schedule(
+    graph_evidence: Option<&AutoDagGraphEvidence>,
+) -> Vec<AutoDagTargetEvidence> {
+    graph_evidence
+        .into_iter()
+        .flat_map(|graph| graph.targets.iter())
+        .map(|target| AutoDagTargetEvidence {
+            target: target.target.clone(),
+            replay_commands: target.replay_commands.clone(),
+            repair_commands: target.repair_commands.clone(),
+        })
+        .collect()
 }
 
 pub fn update_schedule_node_state(
@@ -793,5 +867,144 @@ mod tests {
             seed.batches,
             vec![vec!["#a".to_string()], vec!["#b".to_string()]]
         );
+    }
+
+    fn graph_evidence(targets: Vec<AutoDagGraphTargetEvidence>) -> AutoDagGraphEvidence {
+        AutoDagGraphEvidence {
+            graph_status: "current".to_string(),
+            parallel_dispatch_blocker: None,
+            targets,
+        }
+    }
+
+    fn target_evidence(target: &str, ownership_packet_ids: &[&str]) -> AutoDagGraphTargetEvidence {
+        AutoDagGraphTargetEvidence {
+            target: target.to_string(),
+            replay_commands: vec![format!("replay {target}")],
+            repair_commands: vec![format!("repair {target}")],
+            ownership_packet_ids: ownership_packet_ids
+                .iter()
+                .map(|id| (*id).to_string())
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn graph_evidence_validation_warns_when_missing() {
+        let seed = schedule_seed("session.md", &["do #a".to_string()]).unwrap();
+        assert_eq!(
+            validate_schedule_graph_evidence(None, &seed).unwrap(),
+            vec!["graph_evidence=missing; schedule requires parent review".to_string()]
+        );
+    }
+
+    #[test]
+    fn graph_evidence_validation_rejects_stale_status() {
+        let seed = schedule_seed("session.md", &["do #a".to_string()]).unwrap();
+        let evidence = AutoDagGraphEvidence {
+            graph_status: "stale".to_string(),
+            parallel_dispatch_blocker: None,
+            targets: vec![target_evidence("a", &["packet-a"])],
+        };
+        let err = validate_schedule_graph_evidence(Some(&evidence), &seed)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("stale graph evidence"), "{err}");
+    }
+
+    #[test]
+    fn graph_evidence_validation_rejects_parallel_blocker_for_antichain() {
+        let seed = schedule_seed("session.md", &["do #a #b".to_string()]).unwrap();
+        let mut evidence = graph_evidence(vec![
+            target_evidence("a", &["packet-a"]),
+            target_evidence("b", &["packet-b"]),
+        ]);
+        evidence.parallel_dispatch_blocker = Some("conflict-matrix fail_closed=true".to_string());
+        let err = validate_schedule_graph_evidence(Some(&evidence), &seed)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("graph conflict evidence blocked antichain dispatch"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn graph_evidence_validation_rejects_missing_and_duplicate_targets() {
+        let seed = schedule_seed("session.md", &["do #a".to_string()]).unwrap();
+        let err = validate_schedule_graph_evidence(Some(&graph_evidence(Vec::new())), &seed)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("missing graph evidence for auto-DAG target #a"));
+
+        let evidence = graph_evidence(vec![
+            target_evidence("a", &["packet-a"]),
+            target_evidence("A", &["packet-a2"]),
+        ]);
+        let err = validate_schedule_graph_evidence(Some(&evidence), &seed)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("ambiguous graph evidence for auto-DAG target #a"));
+    }
+
+    #[test]
+    fn graph_evidence_validation_rejects_missing_and_ambiguous_ownership_packets() {
+        let seed = schedule_seed("session.md", &["do #a".to_string()]).unwrap();
+        let err = validate_schedule_graph_evidence(
+            Some(&graph_evidence(vec![target_evidence("a", &[])])),
+            &seed,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("missing worker ownership packet for auto-DAG target #a"),
+            "{err}"
+        );
+
+        let err = validate_schedule_graph_evidence(
+            Some(&graph_evidence(vec![target_evidence(
+                "a",
+                &["packet-a", "packet-a2"],
+            )])),
+            &seed,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("ambiguous worker ownership packets for auto-DAG target #a"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn graph_evidence_validation_accepts_and_feeds_schedule_replay_metadata() {
+        let tasks = ["do #a".to_string()];
+        let seed = schedule_seed("session.md", &tasks).unwrap();
+        let evidence = graph_evidence(vec![target_evidence("a", &["packet-a"])]);
+        assert!(
+            validate_schedule_graph_evidence(Some(&evidence), &seed)
+                .unwrap()
+                .is_empty()
+        );
+
+        let schedule = build_schedule(AutoDagScheduleBuildInput {
+            schedule_id: "dag-test".to_string(),
+            parent_doc: "session.md".to_string(),
+            source_kind: "queue".to_string(),
+            created_at_unix: 1,
+            graph_status: evidence.graph_status.clone(),
+            guard: classify_session_review_log(""),
+            tasks: &tasks,
+            warnings: Vec::new(),
+            replay_command: "resume dag-test".to_string(),
+            target_evidence: target_evidence_for_schedule(Some(&evidence)),
+        })
+        .unwrap();
+
+        assert_eq!(
+            schedule.nodes[0].replay_commands,
+            vec!["resume dag-test", "replay a"]
+        );
+        assert_eq!(schedule.nodes[0].repair_commands, vec!["repair a"]);
     }
 }

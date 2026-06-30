@@ -232,11 +232,15 @@ should be deleted during extraction.
   renamed from the issue-tag `recguard_wedge` module to
   `owner_pane_wedge_counter`, and imports the focused policy directly without
   retaining the old module path or threshold wrapper.
-- `agent-doc-turn` now owns hook response projection policy: extracting prompt
-  targets from `### Re:` response headings, stripping agent-doc patch metadata
-  from captured response summaries, and bounding hook summary text. Orchestration
-  keeps hook execution, capture loading, project-root/git facts, and tsift
-  process invocation while importing the focused response-text helpers directly.
+- `agent-doc-turn` now owns response-text policy: extracting prompt targets from
+  `### Re:` response headings, stripping agent-doc patch metadata from captured
+  response summaries, bounding hook summary text, classifying imperative
+  response evidence/blockers/status-only replies, deciding imperative
+  diff/response contract outcomes, selecting the rejected trigger, and bounding
+  trigger text. Orchestration keeps hook execution, capture loading,
+  project-root/git facts, tsift process invocation, snapshot/diff gathering,
+  ops-log emission, and fail-closed error adapters while importing the focused
+  response-text helpers directly.
 - `agent-doc-turn` now owns turn-status policy vocabulary: turn-active and
   stale-supervisor marker path constants, the readable turn-active marker schema,
   marker freshness/pane matching, and pane-title composition. Orchestration keeps

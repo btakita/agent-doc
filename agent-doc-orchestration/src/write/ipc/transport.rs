@@ -9,6 +9,7 @@ use agent_doc_element_exchange::{
     extract_post_commit_normalization_targets, normalization_target_counts,
 };
 use agent_doc_ipc_protocol::FullContentIpcMode;
+use agent_doc_prompt_lines::line_looks_like_plain_response_after_prompt;
 
 fn live_editor_delivery_target(file: &Path) -> Option<String> {
     let mut file_keys = Vec::new();
@@ -1908,7 +1909,7 @@ pub(crate) fn normalize_patch_content(content: &str, prefix_lines: &[String]) ->
             .trim_end()
             .strip_prefix("\u{276f} ")
             .unwrap_or(line.trim_end());
-        if agent_doc_diff::line_looks_like_plain_response_after_prompt(bare) {
+        if line_looks_like_plain_response_after_prompt(bare) {
             result.push_str(line);
             result.push('\n');
             continue;

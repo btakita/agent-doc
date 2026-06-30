@@ -502,8 +502,8 @@ One.
 
         assertTrue(patchWatcher.contains("private fun writeAlreadyAppliedAckContent(patch: IpcPatch, source: String): Boolean"))
         assertTrue(patchWatcher.contains("currentContentForAck(patch.file)"))
-        assertTrue(patchWatcher.contains("reportAckContentSynced(patch.file, content, source)"))
-        assertTrue(patchWatcher.contains("agent_doc_document_synced_digest_content_for_editor_v2"))
+        assertTrue(patchWatcher.contains("agent_doc_write_ack_content_for_editor_v2"))
+        assertTrue(patchWatcher.contains("write_ack_content_for_editor_v2"))
 
         val socketPatch = patchWatcher
             .substringAfter("\"patch\" -> {")

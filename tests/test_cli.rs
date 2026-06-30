@@ -1039,7 +1039,7 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
     let hot_paths = [
         "agent-doc-orchestration/src/git.rs",
         "agent-doc-document-realtime/src/write_policy.rs",
-        "agent-doc-orchestration/src/git/normalize.rs",
+        "agent-doc-document/src/commit_normalization.rs",
         "agent-doc-orchestration/src/git/dirs.rs",
         "src/orchestrate.rs",
         "src/orchestrate/dag.rs",
@@ -1139,9 +1139,9 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // imports transient marker normalization from agent-doc-document instead
         // of carrying duplicate guard-marker stripping helpers.
         ("agent-doc-document-realtime/src/write_policy.rs", "guard_") => 2,
-        // 1 -> 0 (#transient-marker-document-policy): git/normalize no longer
-        // owns transient guard marker normalization.
-        ("agent-doc-orchestration/src/git/normalize.rs", "guard_") => 0,
+        // Commit normalization is now pure document policy, not an
+        // orchestration guard boundary.
+        ("agent-doc-document/src/commit_normalization.rs", "guard_") => 0,
         // `#pcwcrt`: the legacy post-commit working-tree revert tower
         // (`postcommit_worktree_lost_committed_content` / `send_postcommit_editor_refresh`
         // and their transport-tagged reconcile logs: `reason=committed_content_lost`,
@@ -11091,8 +11091,14 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
         "agent-doc-document should expose transient marker policy through its owning module"
     );
 
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/git/normalize.rs")
+            .exists(),
+        "orchestration must not keep the old git normalization facade"
+    );
+
     for relative in [
-        "agent-doc-orchestration/src/git/normalize.rs",
         "agent-doc-orchestration/src/preflight.rs",
         "agent-doc-orchestration/src/session_check.rs",
         "agent-doc-orchestration/src/session_check/detect.rs",
@@ -11122,11 +11128,12 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
         );
     }
 
-    let git_normalize =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git/normalize.rs"))
-            .unwrap();
     let git_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+    assert!(
+        !git_source.contains("mod normalize;") && !git_source.contains("pub use normalize"),
+        "git.rs must call document commit normalization directly, not keep a facade module"
+    );
     assert!(
         git_source.contains("exchange_prompt_prefix_equivalent")
             && git_source.contains("repair_stale_agent_response_collapse_doc"),
@@ -11150,7 +11157,7 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
         "fn strip_boundary_markers(",
     ] {
         assert!(
-            !git_normalize.contains(forbidden) && !realtime_write_policy.contains(forbidden),
+            !realtime_write_policy.contains(forbidden),
             "transient marker policy must not be re-owned outside agent-doc-document: {forbidden}"
         );
     }
@@ -11181,6 +11188,144 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
 }
 
 #[test]
+fn test_agent_doc_prompt_lines_owns_prompt_line_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let prompt_lines =
+        fs::read_to_string(manifest_dir.join("agent-doc-prompt-lines/src/lib.rs")).unwrap();
+    for required in [
+        "pub fn parse_slash_command_candidate",
+        "pub fn line_looks_like_slash_command",
+        "pub fn text_line_looks_like_prompt_target",
+        "pub fn normalized_prompt_preview_line",
+        "pub fn line_looks_like_fresh_prompt_after_response",
+        "pub fn line_looks_like_soft_prompt_request",
+        "pub fn line_looks_like_prompt_prefix_repair_start",
+        "pub fn line_looks_like_targeted_prompt_prefix_repair_start",
+        "pub fn line_looks_like_targeted_or_prefixed_prompt_repair_start",
+        "pub fn line_looks_like_plain_response_after_prompt",
+        "pub fn looks_like_imperative_directive",
+        "pub fn normalize_imperative_candidate",
+        "pub fn parse_markdown_list_item",
+        "pub fn line_looks_like_markdown_list_item",
+    ] {
+        assert!(
+            prompt_lines.contains(required),
+            "agent-doc-prompt-lines must own pure prompt-line policy: {required}"
+        );
+    }
+    let prompt_lines_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-prompt-lines/Cargo.toml")).unwrap();
+    assert!(
+        prompt_lines_manifest.contains("name = \"agent-doc-prompt-lines\""),
+        "prompt-line policy should live in its focused crate"
+    );
+    let document_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/lib.rs")).unwrap();
+    assert!(
+        !document_lib.contains("pub mod prompt_lines;")
+            && !manifest_dir
+                .join("agent-doc-document/src/prompt_lines.rs")
+                .exists(),
+        "agent-doc-document must not keep a prompt-line facade"
+    );
+
+    let diff_source = fs::read_to_string(manifest_dir.join("agent-doc-diff/src/lib.rs")).unwrap();
+    for forbidden in [
+        "pub fn text_line_looks_like_prompt_target",
+        "fn line_looks_like_prompt_target",
+        "fn parse_slash_command_candidate",
+        "fn normalize_imperative_candidate",
+        "fn parse_markdown_list_item",
+        "const APPROVAL_WORDS",
+    ] {
+        assert!(
+            !diff_source.contains(forbidden),
+            "agent-doc-diff must use prompt-line policy directly, not keep a facade: {forbidden}"
+        );
+    }
+
+    let exchange_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-element-exchange/src/lib.rs")).unwrap();
+    for forbidden in [
+        "pub fn starts_prompt_run_after_response",
+        "pub fn starts_targeted_prompt_repair_after_response",
+        "pub fn starts_targeted_or_prefixed_prompt_repair_after_response",
+    ] {
+        assert!(
+            !exchange_lib.contains(forbidden),
+            "exchange must not keep old prompt-line compatibility wrappers: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_document_owns_commit_normalization_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let commit_normalization =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/commit_normalization.rs"))
+            .unwrap();
+    for required in [
+        "pub fn canonicalize_answered_prompt_prefixes",
+        "pub fn normalize_committed_exchange_artifacts",
+        "pub fn normalize_component_content_for_absorb",
+        "pub fn redact_component_contents_for_absorb",
+    ] {
+        assert!(
+            commit_normalization.contains(required),
+            "agent-doc-document must own pure commit normalization policy: {required}"
+        );
+    }
+    let document_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/lib.rs")).unwrap();
+    assert!(
+        document_lib.contains("pub mod commit_normalization;"),
+        "agent-doc-document should expose commit normalization through its owning module"
+    );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/git/normalize.rs")
+            .exists(),
+        "orchestration must not retain the old git normalization module or facade"
+    );
+
+    let git_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+    for forbidden in [
+        "mod normalize;",
+        "pub use normalize",
+        "pub fn normalize_committed_exchange_artifacts",
+        "pub(crate) fn normalize_component_content_for_absorb",
+        "pub(crate) fn redact_component_contents_for_absorb",
+        "pub(crate) fn canonicalize_answered_prompt_prefixes",
+    ] {
+        assert!(
+            !git_source.contains(forbidden),
+            "git.rs must stay a git adapter, not re-own commit normalization: {forbidden}"
+        );
+    }
+    assert!(
+        git_source.contains("use agent_doc_document::commit_normalization::{"),
+        "git.rs should import focused commit normalization directly"
+    );
+
+    for relative in [
+        "agent-doc-orchestration/src/flow/closeout.rs",
+        "agent-doc-orchestration/src/session_check/closeout_guards.rs",
+        "agent-doc-orchestration/src/write/converge.rs",
+        "agent-doc-orchestration/src/repair.rs",
+        "agent-doc-document-realtime/src/write_policy.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            !source.contains("crate::git::normalize_committed_exchange_artifacts")
+                && !source.contains("crate::git::normalize_component_content_for_absorb")
+                && !source.contains("crate::git::redact_component_contents_for_absorb"),
+            "{relative} must call focused commit normalization directly, not through git"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let exchange_lib =
@@ -11204,9 +11349,6 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         "pub fn is_exchange_response_heading_for_prefix_repair",
         "pub fn is_prefixed_exchange_response_heading_for_prefix_repair",
         "pub fn normalization_target_matches_line",
-        "pub fn starts_prompt_run_after_response",
-        "pub fn starts_targeted_prompt_repair_after_response",
-        "pub fn starts_targeted_or_prefixed_prompt_repair_after_response",
         "pub fn exchange_prompt_prefix_eligible_lines",
         "pub struct PromptLineInfo",
         "pub fn exchange_prompt_reconciliation_infos",

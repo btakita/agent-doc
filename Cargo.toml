@@ -19,6 +19,7 @@ members = [
     "agent-doc-prompt-cache",
     "agent-doc-prompt-contract",
     "agent-doc-prompt-context",
+    "agent-doc-prompt-lines",
     "agent-doc-response-toc",
     "agent-doc-response-toc-io",
     "agent-doc-session-accretion",

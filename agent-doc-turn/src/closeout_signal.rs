@@ -4,6 +4,8 @@
 //! turn policy that decides whether response text completes a tracked-work id
 //! and whether prompt text carries explicit done/resolved signals.
 
+use agent_doc_prompt_lines::text_line_looks_like_prompt_target;
+
 /// Tight list of "blocked / still needs future action" phrases that, combined
 /// with a directed id gated this cycle, indicate a closeout reported more agent
 /// execution is still needed. Kept narrow so ordinary review prose does not
@@ -68,8 +70,7 @@ pub fn line_is_carry_forward_signal(line: &str) -> bool {
         return false;
     }
     let candidate = carry_forward_signal_candidate(trimmed).unwrap_or(trimmed);
-    if agent_doc_diff::text_line_looks_like_prompt_target(trimmed)
-        || agent_doc_diff::text_line_looks_like_prompt_target(candidate)
+    if text_line_looks_like_prompt_target(trimmed) || text_line_looks_like_prompt_target(candidate)
     {
         return true;
     }

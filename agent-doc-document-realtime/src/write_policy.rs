@@ -4,9 +4,11 @@
 //! module owns only pure decisions about when a visible document mutation is
 //! allowed to proceed.
 
-use agent_doc_document::transient_markers::{
-    normalize_transient_agent_doc_markers, strip_boundary_markers,
+use agent_doc_document::commit_normalization::{
+    normalize_component_content_for_absorb, redact_component_contents_for_absorb,
 };
+use agent_doc_document::transient_markers::strip_boundary_markers;
+use agent_doc_prompt_lines::text_line_looks_like_prompt_target;
 use anyhow::Result;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
@@ -749,9 +751,7 @@ fn exchange_prompt_target_lines(exchange_body: &str) -> Vec<String> {
         .lines()
         .filter_map(|line| {
             let trimmed = line.trim();
-            if trimmed.starts_with('❯')
-                || agent_doc_diff::text_line_looks_like_prompt_target(trimmed)
-            {
+            if trimmed.starts_with('❯') || text_line_looks_like_prompt_target(trimmed) {
                 Some(
                     trimmed
                         .strip_prefix('❯')
@@ -825,28 +825,6 @@ pub fn snapshot_contains_dropped_prompt(snapshot: &str, prompt: &str) -> bool {
         return true;
     }
     snapshot.replace("~~", "").contains(needle)
-}
-
-fn normalize_component_content_for_absorb(content: &str) -> String {
-    normalize_transient_agent_doc_markers(content)
-        .trim()
-        .to_string()
-}
-
-fn redact_component_contents_for_absorb(body: &str) -> Option<String> {
-    let components = agent_doc_element::element::parse(body).ok()?;
-    let mut redacted = String::with_capacity(body.len());
-    let mut last = 0usize;
-    for comp in components {
-        if comp.open_end < last {
-            continue;
-        }
-        redacted.push_str(&body[last..comp.open_end]);
-        redacted.push_str(&body[comp.close_start..comp.close_end]);
-        last = comp.close_end;
-    }
-    redacted.push_str(&body[last..]);
-    Some(redacted)
 }
 
 fn is_safe_out_of_band_exchange_growth(snapshot_content: &str, file_content: &str) -> bool {
@@ -1141,7 +1119,7 @@ fn status_mutation_introduces_prompt_work(snapshot_content: &str, file_content: 
     added.lines().any(|line| {
         let trimmed = line.trim();
         !trimmed.is_empty()
-            && (agent_doc_diff::text_line_looks_like_prompt_target(trimmed)
+            && (text_line_looks_like_prompt_target(trimmed)
                 || starts_with_prompt_preset_reference(trimmed))
     })
 }

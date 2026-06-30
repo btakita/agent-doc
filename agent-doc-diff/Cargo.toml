@@ -12,6 +12,7 @@ name = "agent_doc_diff"
 [dependencies]
 agent-doc-element = { path = "../agent-doc-element", version = "0.34.65" }
 agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.65" }
+agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.34.65" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.65" }
 agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.65" }
 serde = { version = "1", features = ["derive"] }

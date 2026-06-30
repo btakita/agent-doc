@@ -6,6 +6,12 @@ use agent_doc_element::{
     Component, ElementAuthority, ElementCompositionRole, ElementDescriptor, ElementRealtimeModel,
     ElementSchedulingRole, ElementShape, ElementSource, ElementWritePolicy,
 };
+use agent_doc_prompt_lines::{
+    line_looks_like_markdown_list_item, line_looks_like_plain_response_after_prompt,
+    line_looks_like_prompt_prefix_repair_start,
+    line_looks_like_targeted_or_prefixed_prompt_repair_start,
+    line_looks_like_targeted_prompt_prefix_repair_start,
+};
 use anyhow::Result;
 use similar::{ChangeTag, TextDiff};
 
@@ -220,24 +226,6 @@ pub fn normalization_target_matches_line(
             .is_some_and(|stripped| target_counts.contains_key(stripped))
 }
 
-pub fn starts_prompt_run_after_response(trimmed: &str, is_target: bool) -> bool {
-    agent_doc_diff::line_looks_like_prompt_prefix_repair_start(trimmed, is_target)
-}
-
-pub fn starts_targeted_prompt_repair_after_response(trimmed: &str, is_target: bool) -> bool {
-    agent_doc_diff::line_looks_like_targeted_prompt_prefix_repair_start(trimmed, is_target)
-}
-
-pub fn starts_targeted_or_prefixed_prompt_repair_after_response(
-    trimmed: &str,
-    is_target: bool,
-) -> bool {
-    starts_targeted_prompt_repair_after_response(
-        trimmed,
-        is_target || trimmed.trim_start().starts_with('❯'),
-    )
-}
-
 #[derive(Clone, Debug)]
 struct ExchangeLineSegment {
     segment: String,
@@ -338,7 +326,7 @@ fn find_response_precedes_prompt_candidate(
             let normalized = trimmed.trim_start_matches('❯').trim();
             let is_target = signature.contains(normalized);
             if saw_boundary_after_heading
-                && starts_prompt_run_after_response(trimmed, is_target)
+                && line_looks_like_prompt_prefix_repair_start(trimmed, is_target)
                 && exchange_response_block_matches_signature(
                     &segments,
                     heading_idx,
@@ -516,7 +504,7 @@ pub fn strip_prompt_prefix_from_response_body_first_lines(content: &str) -> Opti
         }
         if in_response_block && !line.trim().is_empty() {
             if !saw_unprefixed_response_body_line
-                && starts_prompt_run_after_response(trimmed_start, false)
+                && line_looks_like_prompt_prefix_repair_start(trimmed_start, false)
             {
                 in_response_block = false;
                 saw_unprefixed_response_body_line = false;
@@ -525,7 +513,7 @@ pub fn strip_prompt_prefix_from_response_body_first_lines(content: &str) -> Opti
             }
             if let Some(rest) = line.strip_prefix("❯ ") {
                 let response_shaped_tail =
-                    agent_doc_diff::line_looks_like_plain_response_after_prompt(rest.trim_start());
+                    line_looks_like_plain_response_after_prompt(rest.trim_start());
                 if !saw_unprefixed_response_body_line || response_shaped_tail {
                     stripped_any = true;
                     repaired_lines.push(rest.to_string());
@@ -603,7 +591,7 @@ pub fn exchange_prompt_prefix_eligible_lines<'a>(
                 is_prefixed_exchange_response_heading_for_prefix_repair(trimmed);
             continue;
         }
-        if agent_doc_diff::line_looks_like_markdown_list_item(trimmed) {
+        if line_looks_like_markdown_list_item(trimmed) {
             continue;
         }
 
@@ -611,12 +599,12 @@ pub fn exchange_prompt_prefix_eligible_lines<'a>(
             target_counts.is_some_and(|counts| normalization_target_matches_line(line, counts));
         if in_response_block {
             let starts_prompt = if target_counts.is_some() {
-                starts_targeted_or_prefixed_prompt_repair_after_response(
+                line_looks_like_targeted_or_prefixed_prompt_repair_start(
                     trimmed,
                     is_target && !response_heading_was_prefixed,
                 )
             } else {
-                starts_prompt_run_after_response(trimmed, false)
+                line_looks_like_prompt_prefix_repair_start(trimmed, false)
             };
             if starts_prompt {
                 in_response_block = false;
@@ -669,7 +657,7 @@ pub fn exchange_prompt_reconciliation_infos(
             } else if in_response_block {
                 let is_target = target_counts
                     .is_some_and(|counts| normalization_target_matches_line(line, counts));
-                if starts_targeted_or_prefixed_prompt_repair_after_response(
+                if line_looks_like_targeted_or_prefixed_prompt_repair_start(
                     trimmed,
                     is_target && !response_heading_was_prefixed,
                 ) {
@@ -1069,7 +1057,7 @@ pub fn normalize_exchange_prefixes_for_targets(doc: &str, prefix_lines: &[String
             let normalized = doc_line.trim_end();
             let is_target = normalization_target_matches_line(doc_line, &remaining);
             if in_response_block {
-                if starts_targeted_or_prefixed_prompt_repair_after_response(
+                if line_looks_like_targeted_or_prefixed_prompt_repair_start(
                     trimmed,
                     is_target && !response_heading_was_prefixed,
                 ) {
@@ -1080,7 +1068,7 @@ pub fn normalize_exchange_prefixes_for_targets(doc: &str, prefix_lines: &[String
                 }
             }
             if normalized.starts_with("❯ ")
-                || agent_doc_diff::line_looks_like_plain_response_after_prompt(normalized)
+                || line_looks_like_plain_response_after_prompt(normalized)
             {
                 return doc_line.to_string();
             }
@@ -1249,14 +1237,14 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
                 } else if in_agent_block && trimmed.is_empty() {
                     // Blank assistant-response lines do not prove the next line is user input.
                 } else if in_agent_block
-                    && (starts_targeted_prompt_repair_after_response(trimmed, true)
+                    && (line_looks_like_targeted_prompt_prefix_repair_start(trimmed, true)
                         || trimmed.starts_with('❯')
                         || trimmed.starts_with("<!--"))
                 {
                     in_agent_block = false;
                 }
                 if in_re_block
-                    && (starts_targeted_prompt_repair_after_response(trimmed, true)
+                    && (line_looks_like_targeted_prompt_prefix_repair_start(trimmed, true)
                         || trimmed.starts_with('❯'))
                 {
                     in_re_block = false;
@@ -1380,7 +1368,7 @@ pub fn preserve_head_exchange_prompt_prefix_state(content: &str, head: &str) -> 
             .unwrap_or_default()
             > 0;
         let eligible = if in_response_block {
-            starts_prompt_run_after_response(trimmed, is_target)
+            line_looks_like_prompt_prefix_repair_start(trimmed, is_target)
         } else {
             true
         };
@@ -1403,7 +1391,10 @@ pub fn preserve_head_exchange_prompt_prefix_state(content: &str, head: &str) -> 
         } else {
             rebuilt.push_str(line);
         }
-        if in_response_block && eligible && starts_prompt_run_after_response(trimmed, is_target) {
+        if in_response_block
+            && eligible
+            && line_looks_like_prompt_prefix_repair_start(trimmed, is_target)
+        {
             in_response_block = false;
         }
         rebuilt.push_str(newline);

@@ -1,14 +1,17 @@
-//! Extracted from `write.rs` (large-module split). See parent module for context.
+//! Pure committed-document normalization used before comparing or staging text.
 
-use super::*;
+use crate::transient_markers::normalize_transient_agent_doc_markers;
+use agent_doc_prompt_lines::{
+    line_looks_like_markdown_list_item, line_looks_like_prompt_prefix_repair_start,
+};
 
-pub(crate) fn is_response_heading_line(trimmed: &str) -> bool {
+fn is_response_heading_line(trimmed: &str) -> bool {
     trimmed.starts_with("### Re:")
         || trimmed.starts_with("#### Re:")
         || trimmed.starts_with("##### Re:")
 }
 
-pub(crate) fn fence_open(trimmed: &str) -> Option<(char, usize)> {
+fn fence_open(trimmed: &str) -> Option<(char, usize)> {
     let fc = trimmed.chars().next()?;
     if fc != '`' && fc != '~' {
         return None;
@@ -17,7 +20,7 @@ pub(crate) fn fence_open(trimmed: &str) -> Option<(char, usize)> {
     if fl >= 3 { Some((fc, fl)) } else { None }
 }
 
-pub(crate) fn fence_close(trimmed: &str, fence_char: char, fence_len: usize) -> bool {
+fn fence_close(trimmed: &str, fence_char: char, fence_len: usize) -> bool {
     let fc = trimmed.chars().next().unwrap_or('\0');
     if fc != fence_char {
         return false;
@@ -26,11 +29,9 @@ pub(crate) fn fence_close(trimmed: &str, fence_char: char, fence_len: usize) -> 
     fl >= fence_len && trimmed[fl..].trim().is_empty()
 }
 
-pub(crate) fn prefix_prompt_line(line: &str) -> Option<String> {
+fn prefix_prompt_line(line: &str) -> Option<String> {
     let trimmed = line.trim_start();
-    if trimmed.is_empty()
-        || trimmed.starts_with('❯')
-        || agent_doc_diff::line_looks_like_markdown_list_item(trimmed)
+    if trimmed.is_empty() || trimmed.starts_with('❯') || line_looks_like_markdown_list_item(trimmed)
     {
         return None;
     }
@@ -38,20 +39,20 @@ pub(crate) fn prefix_prompt_line(line: &str) -> Option<String> {
     Some(format!("{}❯ {}", &line[..indent_len], trimmed))
 }
 
-pub(crate) fn answered_prompt_prelude_start(lines: &[&str]) -> Option<usize> {
+fn answered_prompt_prelude_start(lines: &[&str]) -> Option<usize> {
     for (idx, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
-        if agent_doc_diff::line_looks_like_prompt_prefix_repair_start(trimmed, false) {
+        if line_looks_like_prompt_prefix_repair_start(trimmed, false) {
             return Some(idx);
         }
     }
     None
 }
 
-pub(crate) fn canonicalize_answered_prompt_prefixes(exchange_content: &str) -> String {
+pub fn canonicalize_answered_prompt_prefixes(exchange_content: &str) -> String {
     // When a response heading is present, the contiguous prose block
     // immediately above it is the user prelude for that turn. Canonicalize
     // that prelude back to `❯ ...` so answered prompts keep their visual
@@ -117,10 +118,8 @@ pub(crate) fn canonicalize_answered_prompt_prefixes(exchange_content: &str) -> S
         }
         // A prose block that butts directly against a preceding `### Re:`
         // heading with no blank-line / comment separator is the trailing body
-        // of that response (e.g. a duplicated response block left by a
-        // multi-retry / late-IPC reposition), not a fresh user prelude. Never
-        // canonicalize those lines into `❯ ` prompt prefixes — agent response
-        // body must never receive the user-prompt marker.
+        // of that response, not a fresh user prelude. Never canonicalize those
+        // lines into `❯ ` prompt prefixes.
         if stopped_on_response_heading {
             continue;
         }
@@ -198,19 +197,18 @@ pub fn normalize_committed_exchange_artifacts(content: &str) -> String {
     if changed { rebuilt } else { transient }
 }
 
-pub(crate) fn normalize_component_content_for_absorb(content: &str) -> String {
+pub fn normalize_component_content_for_absorb(content: &str) -> String {
     normalize_transient_agent_doc_markers(content)
         .trim()
         .to_string()
 }
 
-pub(crate) fn redact_component_contents_for_absorb(body: &str) -> Option<String> {
+pub fn redact_component_contents_for_absorb(body: &str) -> Option<String> {
     let components = agent_doc_element::element::parse(body).ok()?;
     let mut redacted = String::with_capacity(body.len());
     let mut last = 0usize;
     for comp in components {
         if comp.open_end < last {
-            // Nested inside a previously processed component — already redacted
             continue;
         }
         redacted.push_str(&body[last..comp.open_end]);
@@ -223,7 +221,6 @@ pub(crate) fn redact_component_contents_for_absorb(body: &str) -> Option<String>
 
 #[cfg(test)]
 mod tests {
-    #![allow(unused_imports)]
     use super::*;
 
     #[test]
@@ -258,13 +255,9 @@ Done.
             "soft prompt requests before a response heading should still be canonicalized:\n{normalized}"
         );
     }
+
     #[test]
     fn canonicalize_answered_prompt_prefixes_never_prefixes_duplicate_response_body() {
-        // #finalize-retry-ipc-response-duplication: a multi-retry / late-IPC
-        // reposition can leave a stale duplicate response block whose body
-        // butts directly against the canonical `### Re: … (HEAD)` heading with
-        // no blank-line separator. Those lines are agent response body, not a
-        // user prelude, and must never receive the `❯ ` prompt prefix.
         let exchange = "\
 ❯ do [#fix-thing]
 ### Re: fix thing — opus-4-8
@@ -285,13 +278,13 @@ Done.
             !normalized.contains("❯ **Commits:**"),
             "duplicate response body must not be rewritten as a prompt:\n{normalized}"
         );
-        // The only `❯` line is the genuine, already-marked user prompt.
         assert_eq!(
             normalized.matches('❯').count(),
             1,
             "exactly the existing user prompt keeps its marker:\n{normalized}"
         );
     }
+
     #[test]
     fn canonicalize_answered_prompt_prefixes_preserves_markdown_lists() {
         let exchange = "\
@@ -319,220 +312,32 @@ Done.
             "markdown list items must not receive prompt prefixes:\n{normalized}"
         );
     }
+
     #[test]
-    fn commit_adopts_manual_escaped_tail_cleanup_after_head_current_snapshot() {
-        use std::fs;
-        let dir = tempfile::TempDir::new().unwrap();
-        let root = dir.path();
-        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+    fn normalize_committed_exchange_artifacts_canonicalizes_exchange_component() {
+        let doc = "\
+---
+agent_doc_session: test
+agent_doc_format: template
+---
 
-        Command::new("git")
-            .current_dir(root)
-            .args(["init"])
-            .output()
-            .unwrap();
-        Command::new("git")
-            .current_dir(root)
-            .args(["config", "user.email", "test@example.com"])
-            .output()
-            .unwrap();
-        Command::new("git")
-            .current_dir(root)
-            .args(["config", "user.name", "Test"])
-            .output()
-            .unwrap();
+## Exchange
 
-        let readme = root.join("README.md");
-        fs::write(&readme, "# test\n").unwrap();
-        Command::new("git")
-            .current_dir(root)
-            .args(["add", "README.md"])
-            .output()
-            .unwrap();
-        Command::new("git")
-            .current_dir(root)
-            .args(["commit", "-m", "initial", "--no-verify"])
-            .output()
-            .unwrap();
+<!-- agent:exchange patch=append -->
+Please rerun the deploy check.
+### Re: deploy check — gpt-5
 
-        let doc = root.join("session.md");
-        let committed = "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n\
-            <!-- agent:exchange patch=append -->\n\
-            ### Re: older\n\
-            old body\n\
-            <!-- agent:boundary:head -->\n\
-            <!-- /agent:exchange -->\n\n\
-            The routed prompt escaped below the exchange block.\n\
-            It should be cleaned up without being treated as later drift.\n\n\
-            do #oobtaildel. spec-test-build-install-commit-push\n\n\
-            <!-- agent:backlog -->\n\
-            - [ ] keep me\n\
-            <!-- /agent:backlog -->\n";
-        fs::write(&doc, committed).unwrap();
-        crate::snapshot::save(&doc, committed).unwrap();
-        Command::new("git")
-            .current_dir(root)
-            .args(["add", "session.md"])
-            .output()
-            .unwrap();
-        Command::new("git")
-            .current_dir(root)
-            .args(["commit", "-m", "add doc", "--no-verify"])
-            .output()
-            .unwrap();
+Done.
+<!-- /agent:exchange -->
+";
 
-        let cleaned = "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n\
-            <!-- agent:exchange patch=append -->\n\
-            ### Re: older\n\
-            old body\n\
-            <!-- agent:boundary:head -->\n\
-            <!-- /agent:exchange -->\n\n\
-            <!-- agent:backlog -->\n\
-            - [ ] keep me\n\
-            <!-- /agent:backlog -->\n";
-        fs::write(&doc, cleaned).unwrap();
-        crate::snapshot::save(&doc, committed).unwrap();
+        let normalized = normalize_committed_exchange_artifacts(doc);
 
-        let did_commit = commit(&doc).expect("escaped tail cleanup should commit");
-        assert!(did_commit, "cleanup deletion should create a commit");
-
-        let head = show_head(&doc).unwrap().unwrap();
-        assert_eq!(
-            normalize_transient_agent_doc_markers(&head),
-            normalize_transient_agent_doc_markers(cleaned),
-            "HEAD should contain the cleanup deletion"
-        );
-        let snap = crate::snapshot::load(&doc).unwrap().unwrap();
-        assert_eq!(
-            normalize_transient_agent_doc_markers(&snap),
-            normalize_transient_agent_doc_markers(cleaned),
-            "snapshot should advance to the cleaned file"
-        );
-
-        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(
-            log.contains("post_commit_escaped_tail_cleanup file="),
-            "cleanup should get a specific ops-log marker:\n{log}"
-        );
-        assert!(
-            !log.contains("post_commit_local_drift file="),
-            "cleanup-only deletion must not be classified as local drift:\n{log}"
-        );
+        assert!(normalized.contains("agent_doc_session: test"));
+        assert!(normalized.contains("\n❯ Please rerun the deploy check.\n"));
+        assert!(normalized.contains("\n### Re: deploy check — gpt-5\n"));
     }
-    #[test]
-    fn commit_allows_current_snapshot_to_replace_committed_historical_patchback() {
-        use std::fs;
-        let dir = tempfile::TempDir::new().unwrap();
-        let root = dir.path();
-        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
-        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
 
-        Command::new("git")
-            .current_dir(root)
-            .args(["init"])
-            .output()
-            .unwrap();
-        Command::new("git")
-            .current_dir(root)
-            .args(["config", "user.email", "test@example.com"])
-            .output()
-            .unwrap();
-        Command::new("git")
-            .current_dir(root)
-            .args(["config", "user.name", "Test"])
-            .output()
-            .unwrap();
-
-        let doc = root.join("session.md");
-        let clean = concat!(
-            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-            "## Exchange\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "clean exchange\n",
-            "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:icebox -->\n",
-            "- [ ] [#tmv7] Release workflow\n",
-            "<!-- /agent:icebox -->\n",
-        );
-        fs::write(&doc, clean).unwrap();
-        crate::snapshot::save(&doc, clean).unwrap();
-        Command::new("git")
-            .current_dir(root)
-            .args(["add", "session.md"])
-            .output()
-            .unwrap();
-        Command::new("git")
-            .current_dir(root)
-            .args(["commit", "-m", "initial", "--no-verify"])
-            .output()
-            .unwrap();
-
-        let historical_head = concat!(
-            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-            "## Exchange\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "clean exchange\n\n",
-            "#code-review\n",
-            "### Re: code review — gpt-5\n\n",
-            "Historical patchback.\n",
-            "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:icebox -->\n",
-            "- [ ] [#tmv7] Release workflow\n",
-            "<!-- /agent:icebox -->\n",
-        );
-        fs::write(&doc, historical_head).unwrap();
-        Command::new("git")
-            .current_dir(root)
-            .args(["add", "session.md"])
-            .output()
-            .unwrap();
-        Command::new("git")
-            .current_dir(root)
-            .args(["commit", "-m", "manual patchback", "--no-verify"])
-            .output()
-            .unwrap();
-
-        let compacted = concat!(
-            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-            "## Exchange\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "### Session Summary\n\n",
-            "*Compacted.*\n\n",
-            "❯ #code-review\n",
-            "<!-- agent:boundary:test -->\n",
-            "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:icebox -->\n",
-            "- [x] [#tmv7] Release workflow\n",
-            "<!-- /agent:icebox -->\n",
-        );
-        fs::write(&doc, compacted).unwrap();
-        crate::snapshot::save(&doc, compacted).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(compacted), Some(compacted)).unwrap();
-        crate::cycle_state::mark_write_applied(
-            &doc,
-            "write_template",
-            Some(compacted),
-            Some(compacted),
-        )
-        .unwrap();
-
-        let did_commit =
-            commit(&doc).expect("current snapshot/file should replace the historical patchback");
-        assert!(did_commit, "replacement commit should be created");
-
-        let head_doc = show_head(&doc).unwrap().unwrap();
-        assert_eq!(
-            normalize_transient_agent_doc_markers(&head_doc),
-            normalize_transient_agent_doc_markers(compacted),
-            "HEAD should advance to the compacted document:\n{head_doc}"
-        );
-
-        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(
-            !log.contains("commit_blocked_committed_historical_patchback file="),
-            "historical patchback should not block replacement commit:\n{log}"
-        );
-    }
     #[test]
     fn redact_component_contents_handles_nested_components() {
         let body = r#"## Status

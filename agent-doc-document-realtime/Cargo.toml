@@ -16,6 +16,7 @@ agent-doc-element = { path = "../agent-doc-element", version = "0.34.65" }
 agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.65" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.65" }
 agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.65" }
+agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.34.65" }
 agent-doc-template = { path = "../agent-doc-template", version = "0.34.65" }
 anyhow = "1"
 lazily = "0.13.1"

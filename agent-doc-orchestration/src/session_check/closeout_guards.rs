@@ -300,8 +300,10 @@ pub(crate) fn detect_active_session_post_commit_drift(file: &Path) -> Result<Opt
     if current == snapshot {
         return Ok(None);
     }
-    if crate::git::normalize_committed_exchange_artifacts(&current)
-        == crate::git::normalize_committed_exchange_artifacts(&snapshot)
+    if agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(&current)
+        == agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(
+            &snapshot,
+        )
     {
         return Ok(None);
     }
@@ -349,8 +351,10 @@ pub(crate) fn detect_uncommitted_exchange_drift(file: &Path) -> Result<Option<St
     if current == snapshot {
         return Ok(None);
     }
-    let norm_current = crate::git::normalize_committed_exchange_artifacts(&current);
-    let norm_snapshot = crate::git::normalize_committed_exchange_artifacts(&snapshot);
+    let norm_current =
+        agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(&current);
+    let norm_snapshot =
+        agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(&snapshot);
     if norm_current == norm_snapshot {
         return Ok(None);
     }
@@ -570,7 +574,9 @@ pub fn first_unstarted_prompt_bearing_change(
         Err(_) => return Ok(None),
     };
 
-    let norm = |s: &str| crate::git::normalize_committed_exchange_artifacts(s);
+    let norm = |s: &str| {
+        agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(s)
+    };
     let snap_norm =
         norm(&agent_doc_diff::prompt_bearing_body_for_unstarted_prompt_guard(&baseline));
     let cur_norm = norm(&agent_doc_diff::prompt_bearing_body_for_unstarted_prompt_guard(&current));

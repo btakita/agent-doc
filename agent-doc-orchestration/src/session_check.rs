@@ -2177,7 +2177,7 @@ Body\n\
         fs::write(&doc, current).unwrap();
         crate::snapshot::save(&doc, snapshot).unwrap();
 
-        assert!(agent_doc_diff::text_line_looks_like_prompt_target(
+        assert!(agent_doc_prompt_lines::text_line_looks_like_prompt_target(
             "Can we run specific rubrics for fine tuning?"
         ));
         assert!(

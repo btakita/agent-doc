@@ -148,7 +148,6 @@ class PatchWatcher(private val project: Project) : Disposable {
         val content = currentContentForAck(patch.file) ?: return false
         val ok = writeAckContent(patch.patchId, content, patch.file)
         if (ok) {
-            reportAckContentSynced(patch.file, content, source)
             LOG.info("[ack-content] already_applied source=$source patch_id ${patch.patchId} content_len=${content.length}")
         }
         return ok
@@ -974,6 +973,30 @@ class PatchWatcher(private val project: Project) : Disposable {
         val lib = AgentDocLib.get() ?: run {
             LOG.warn("[ack-content] FFI unavailable, cannot write ack-content for patch_id $patchId")
             return false
+        }
+        if (filePath != null) {
+            try {
+                if (lib.agent_doc_write_ack_content_for_editor_v2(
+                    root,
+                    patchId,
+                    filePath,
+                    content,
+                    EditorIdentity.id,
+                    "jetbrains",
+                    patchWatcherPluginVersion(),
+                    operatorTextAuthorityCapability,
+                )) {
+                    recordEditorSurfaceOps(filePath, "ack_content", "write_ack_content_for_editor_v2", "write_finalize_ipc", patchId, "ok")
+                    return true
+                }
+                LOG.warn("[ack-content] FFI write_ack_content_for_editor_v2 returned false for patch_id $patchId")
+                recordEditorSurfaceOps(filePath, "ack_content", "write_ack_content_for_editor_v2", "write_finalize_ipc", patchId, "failed")
+                return false
+            } catch (_: UnsatisfiedLinkError) {
+                LOG.warn("[ack-content] FFI write_ack_content_for_editor_v2 unavailable, falling back for patch_id $patchId")
+            } catch (_: NoSuchMethodError) {
+                LOG.warn("[ack-content] FFI write_ack_content_for_editor_v2 missing, falling back for patch_id $patchId")
+            }
         }
         if (!lib.agent_doc_write_ack_content(root, patchId, content)) {
             LOG.warn("[ack-content] FFI write_ack_content returned false for patch_id $patchId")

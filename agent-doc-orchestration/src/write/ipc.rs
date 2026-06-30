@@ -487,6 +487,30 @@ pub(crate) fn ack_content_disk_write_proof(
     let content_len = content.len();
     let content_hash = agent_doc_hash::content_hash(content);
 
+    if let Some(typing_key) = live_buffer_file_keys(file).into_iter().find(|file_key| {
+        agent_doc_debounce::is_typing_via_file(file_key, ACK_CONTENT_TYPING_SETTLE_MS)
+    }) {
+        let settled = agent_doc_debounce::await_idle_via_file(
+            &typing_key,
+            ACK_CONTENT_TYPING_SETTLE_MS,
+            ACK_CONTENT_TYPING_TIMEOUT_MS,
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "ack_content_disk_write_proof_typing_settle file={} settled={} settle_ms={} timeout_ms={} key={}",
+                file.display(),
+                settled,
+                ACK_CONTENT_TYPING_SETTLE_MS,
+                ACK_CONTENT_TYPING_TIMEOUT_MS,
+                typing_key
+            ),
+        );
+        if !settled {
+            return AckContentDiskWriteProof::unproven();
+        }
+    }
+
     let Some(snapshot) = live_buffer_file_keys(file)
         .into_iter()
         .flat_map(|file_key| agent_doc_debounce::live_buffer_snapshots(&file_key))
@@ -516,6 +540,15 @@ pub(crate) fn ack_content_disk_write_proof(
         source_buffer_matches,
     }
 }
+
+#[cfg(test)]
+const ACK_CONTENT_TYPING_SETTLE_MS: u64 = 75;
+#[cfg(not(test))]
+const ACK_CONTENT_TYPING_SETTLE_MS: u64 = 500;
+#[cfg(test)]
+const ACK_CONTENT_TYPING_TIMEOUT_MS: u64 = 1_000;
+#[cfg(not(test))]
+const ACK_CONTENT_TYPING_TIMEOUT_MS: u64 = 2_000;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum IpcDiskRepairReason {
@@ -3109,6 +3142,16 @@ mod ack_content_snapshot_tests {
     use super::*;
     use tempfile::TempDir;
 
+    fn wait_until_typing_indicator_active(file: &str) {
+        for _ in 0..100 {
+            if agent_doc_debounce::is_typing_via_file(file, 2_000) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("typing indicator did not become active for {file}");
+    }
+
     #[test]
     fn test_ack_content_sidecar_read() {
         let tmp = TempDir::new().unwrap();
@@ -3123,6 +3166,61 @@ mod ack_content_snapshot_tests {
         let result = read_ack_content_sidecar(&project_root, patch_id).unwrap();
         assert_eq!(result, Some("applied content from plugin".to_string()));
         assert!(!sidecar.exists(), "sidecar should be deleted after read");
+    }
+
+    #[test]
+    fn ack_content_disk_write_proof_waits_for_typing_indicator_before_trusting_live_buffer() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".agent-doc/live-buffer")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc/typing")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        let doc = root.join("session.md");
+        std::fs::write(&doc, "before\n").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+        let editor_id = "jetbrains:test";
+        let ack_content = "before\n### Re: done\n";
+        let newer_editor_content = "before\n### Re: done\noperator typed after ack\n";
+
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+            &doc_str,
+            ack_content,
+            editor_id,
+            "jetbrains",
+            "test",
+            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+        )
+        .unwrap();
+        agent_doc_debounce::document_changed(&doc_str);
+        wait_until_typing_indicator_active(&doc_str);
+
+        let updater_doc = doc_str.clone();
+        let updater = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(25));
+            agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+                &updater_doc,
+                newer_editor_content,
+                editor_id,
+                "jetbrains",
+                "test",
+                &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+            )
+            .unwrap();
+        });
+
+        let proof = ack_content_disk_write_proof(&doc, Some(editor_id), ack_content);
+        updater.join().unwrap();
+
+        assert_eq!(proof.authority, WholeBufferAuthority::OperatorTextAuthority);
+        assert!(
+            !proof.source_buffer_matches,
+            "ACK-content must not remain authoritative after active typing publishes a newer editor buffer"
+        );
+        let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("ack_content_disk_write_proof_typing_settle"),
+            "typing-settle proof should be auditable:\n{log}"
+        );
     }
 
     // --- #dupcontent: structurally-corrupt content_ours is never adopted ---

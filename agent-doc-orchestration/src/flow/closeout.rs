@@ -1198,8 +1198,8 @@ pub fn classify_closeout_recovery_state_for_file(file: &Path) -> CloseoutRecover
 
 fn classify_snapshot_head_drift(snapshot: &str, head: &str) -> CloseoutRecoveryDrift {
     // Boundary / `(HEAD)` / answered-prompt-prefix artifacts only.
-    if crate::git::normalize_committed_exchange_artifacts(snapshot)
-        == crate::git::normalize_committed_exchange_artifacts(head)
+    if agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(snapshot)
+        == agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(head)
     {
         return CloseoutRecoveryDrift::BoundaryOnly;
     }
@@ -1226,7 +1226,8 @@ fn classify_snapshot_visible_drift(snapshot: &str, visible: &str) -> CloseoutRec
 }
 
 fn closeout_content_signature_after_artifact_normalization(doc: &str) -> String {
-    let normalized = crate::git::normalize_committed_exchange_artifacts(doc);
+    let normalized =
+        agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(doc);
     closeout_content_component_signature(&normalized)
 }
 

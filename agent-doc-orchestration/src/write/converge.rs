@@ -133,9 +133,13 @@ fn classify_stale_snapshot_visible_rebase(
         }
 
         let snap_content =
-            crate::git::normalize_component_content_for_absorb(snap_comp.content(snapshot_body));
+            agent_doc_document::commit_normalization::normalize_component_content_for_absorb(
+                snap_comp.content(snapshot_body),
+            );
         let current_content =
-            crate::git::normalize_component_content_for_absorb(current_comp.content(current_body));
+            agent_doc_document::commit_normalization::normalize_component_content_for_absorb(
+                current_comp.content(current_body),
+            );
         if snap_content == current_content {
             continue;
         }

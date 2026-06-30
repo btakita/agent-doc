@@ -5,6 +5,10 @@
 //! an unresolved user prompt, has a response heading, or ends with a
 //! prompt-only closeout tail.
 
+use agent_doc_prompt_lines::{
+    line_looks_like_plain_response_after_prompt, text_line_looks_like_prompt_target,
+};
+
 fn exchange_body(doc: &str) -> Option<String> {
     let body = agent_doc_frontmatter::frontmatter::parse(doc)
         .map(|(_, body)| body.to_string())
@@ -124,11 +128,11 @@ pub fn prompt_only_exchange_tail(doc: &str) -> Option<String> {
         if trimmed.is_empty()
             || trimmed.starts_with("<!--")
             || trimmed == "(HEAD)"
-            || agent_doc_diff::line_looks_like_plain_response_after_prompt(trimmed)
+            || line_looks_like_plain_response_after_prompt(trimmed)
         {
             continue;
         }
-        if agent_doc_diff::text_line_looks_like_prompt_target(trimmed) {
+        if text_line_looks_like_prompt_target(trimmed) {
             if in_assistant_response && !trimmed.starts_with('❯') {
                 continue;
             }

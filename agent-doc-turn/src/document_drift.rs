@@ -4,6 +4,8 @@
 //! compares document text and classifies whether drift is prompt-bearing,
 //! response-bearing, or metadata-only for turn closeout decisions.
 
+use agent_doc_prompt_lines::text_line_looks_like_prompt_target;
+
 pub fn exchange_has_new_appended_content(snapshot: &str, current: &str) -> bool {
     let Some(snapshot_exchange) = extract_normalized_exchange_body(snapshot) else {
         return false;
@@ -32,10 +34,7 @@ pub fn exchange_has_new_appended_content(snapshot: &str, current: &str) -> bool 
     {
         return true;
     }
-    if appended
-        .lines()
-        .any(agent_doc_diff::text_line_looks_like_prompt_target)
-    {
+    if appended.lines().any(text_line_looks_like_prompt_target) {
         return false;
     }
     true

@@ -1003,16 +1003,52 @@ fn live_buffer_snapshot_diverges_from_content(
     // stale comparison, not a live user edit. This is definitive (full content,
     // not the len/hash + mtime heuristics) and only suppresses when the editor
     // provably matches disk, so it can never mask a genuine unsaved edit.
-    if let Some(ref editor_text) = snapshot.content
-        && let Ok(disk) = std::fs::read_to_string(file)
-        && *editor_text == disk
-    {
-        // #f5d2/#pcp6 prove/disprove: record which suppression branch decided the
-        // editor holds no unsaved edit ahead of disk. Previously every suppression
-        // returned None silently, so a "agent-doc didn't detect my unsaved edit"
-        // bug report could not tell content-match from provenance from mtime-stale.
-        log_live_buffer_decision(file, "suppressed", "editor_content_equals_disk");
-        return false;
+    if let Some(ref editor_text) = snapshot.content {
+        match std::fs::read_to_string(file) {
+            Ok(disk) if *editor_text == disk => {
+                // #f5d2/#pcp6 prove/disprove: record which suppression branch decided the
+                // editor holds no unsaved edit ahead of disk. Previously every suppression
+                // returned None silently, so a "agent-doc didn't detect my unsaved edit"
+                // bug report could not tell content-match from provenance from mtime-stale.
+                log_live_buffer_decision_with_details(
+                    file,
+                    "suppressed",
+                    "editor_content_equals_disk",
+                    &format!(" buffer_len={} buffer_hash={}", snapshot.len, snapshot.hash),
+                );
+                return false;
+            }
+            Ok(disk) => {
+                let disk_hash = content_hash(&disk);
+                log_live_buffer_decision_with_details(
+                    file,
+                    "diverges",
+                    "editor_content_differs_from_disk",
+                    &format!(
+                        " buffer_len={} buffer_hash={} disk_len={} disk_hash={} expected_len={} expected_hash={}",
+                        snapshot.len,
+                        snapshot.hash,
+                        disk.len(),
+                        disk_hash,
+                        expected_len,
+                        expected_hash
+                    ),
+                );
+                return true;
+            }
+            Err(err) => {
+                log_live_buffer_decision_with_details(
+                    file,
+                    "diverges",
+                    "editor_content_disk_read_failed",
+                    &format!(
+                        " error={} buffer_len={} buffer_hash={} expected_len={} expected_hash={}",
+                        err, snapshot.len, snapshot.hash, expected_len, expected_hash
+                    ),
+                );
+                return true;
+            }
+        }
     }
 
     // #pcp2 write-provenance positive attribution: if agent-doc recorded a disk
@@ -1756,6 +1792,44 @@ mod tests {
         assert!(log.contains("stale_attempt=wid-stale"), "{log}");
         assert!(log.contains("buffer_timestamp_ms="), "{log}");
         assert!(log.contains("provenance_timestamp_ms="), "{log}");
+    }
+
+    #[test]
+    fn write_provenance_does_not_suppress_content_backed_operator_buffer() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc").join("live-buffer")).unwrap();
+        let doc = tmp.path().join("prov-content-backed-unsaved.md");
+        std::fs::write(&doc, "saved").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        let unsaved = "saved plus operator text";
+        record_live_buffer_digest_content_for_editor_with_capabilities(
+            &doc_str,
+            unsaved,
+            "jetbrains-test",
+            "jetbrains",
+            "test",
+            &[OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+        )
+        .unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        record_write_provenance(&doc_str, 5, &content_hash("saved"), "wid-stale", "agent").unwrap();
+
+        assert!(
+            live_buffer_diverges_from_content(&doc_str, "saved").is_some(),
+            "content-backed operator-visible buffer must remain authoritative even when older than write provenance"
+        );
+        let log = std::fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log"))
+            .expect("ops.log written");
+        assert!(
+            log.contains("reason=editor_content_differs_from_disk"),
+            "expected an auditable operator-buffer divergence decision, got: {log}"
+        );
+        assert!(
+            !log.contains("reason=write_provenance_newer_than_buffer"),
+            "write provenance must not suppress content-backed operator text: {log}"
+        );
     }
 
     /// #pcp2 complement: provenance must NOT suppress a genuine unsaved editor

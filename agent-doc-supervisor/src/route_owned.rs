@@ -7,6 +7,8 @@
 
 use std::{fmt, str::FromStr};
 
+use agent_doc_prompt_lines::text_line_looks_like_prompt_target;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RouteOwnedReapPolicy {
     Auto,
@@ -212,7 +214,7 @@ pub fn route_owned_exchange_tail_has_unresolved_prompt(body: &str) -> bool {
 
     body[tail_start..]
         .lines()
-        .any(agent_doc_diff::text_line_looks_like_prompt_target)
+        .any(text_line_looks_like_prompt_target)
 }
 
 fn route_owned_line_is_response_heading(line: &str) -> bool {

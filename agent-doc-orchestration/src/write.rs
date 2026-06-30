@@ -234,6 +234,7 @@ use agent_doc_element_exchange::{
     response_precedes_prompt_in_exchange, strip_prompt_prefix_from_response_body_first_lines,
 };
 use agent_doc_fs::find_project_root;
+use agent_doc_prompt_lines::text_line_looks_like_prompt_target;
 use agent_doc_queue::queue_prompt_drift::{
     dropped_queue_prompt_lines_after_content_ours, preserve_content_ours_over_live_queue_deletions,
     queue_prompt_deletions_between,
@@ -516,7 +517,7 @@ fn prompt_bearing_user_changes_between(
             return false;
         }
         let trimmed = added.trim();
-        trimmed.starts_with('❯') || agent_doc_diff::text_line_looks_like_prompt_target(trimmed)
+        trimmed.starts_with('❯') || text_line_looks_like_prompt_target(trimmed)
     }) {
         for line in diff_text.lines() {
             let Some(added) = line.strip_prefix('+') else {
@@ -526,9 +527,7 @@ fn prompt_bearing_user_changes_between(
                 continue;
             }
             let trimmed = added.trim();
-            if trimmed.starts_with('❯')
-                || agent_doc_diff::text_line_looks_like_prompt_target(trimmed)
-            {
+            if trimmed.starts_with('❯') || text_line_looks_like_prompt_target(trimmed) {
                 let text = trimmed
                     .strip_prefix('❯')
                     .unwrap_or(trimmed)

@@ -90,6 +90,10 @@
 //! - verify_snapshot_committed_no_head: file not tracked → `NoHead`
 //! - submodule_noop_commit_updates_stale_parent_pointer: no-op commit in submodule still updates stale parent pointer
 
+use agent_doc_document::commit_normalization::{
+    canonicalize_answered_prompt_prefixes, normalize_committed_exchange_artifacts,
+    normalize_component_content_for_absorb, redact_component_contents_for_absorb,
+};
 use agent_doc_document::transient_markers::{
     exchange_prompt_prefix_equivalent, normalize_for_replay_hash,
     normalize_post_commit_re_heading_drift, normalize_transient_agent_doc_markers,
@@ -288,9 +292,6 @@ pub fn is_in_git_repo(file: &Path) -> bool {
         .map(|o| o.status.success())
         .unwrap_or(false)
 }
-
-mod normalize;
-pub use normalize::*;
 
 #[cfg(test)]
 fn has_non_exchange_component_drift(snapshot_doc: &str, file_doc: &str) -> bool {
@@ -2024,7 +2025,9 @@ fn prompt_classifier_post_commit_drift_kind(
             .unwrap_or_else(|_| content.to_string())
     };
     let norm = |content: &str| {
-        crate::git::normalize_committed_exchange_artifacts(&prompt_bearing_body(content))
+        agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(
+            &prompt_bearing_body(content),
+        )
     };
     let diff_text =
         agent_doc_diff::unified_diff_from_contents(&norm(head_doc), &norm(current_doc))?;
@@ -2334,6 +2337,25 @@ fn ensure_no_live_editor_buffer_ahead_of_disk(
         );
         return Ok(());
     }
+    if let Some(staged) = staged_content
+        && snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY)
+        && live_buffer_insertions_are_materialized_in_file(&snapshot, staged, file_content)
+    {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "commit_live_buffer_ahead_of_disk_allowed file={} basis={} editor_id={} edit_epoch={} last_synced_epoch={} buffer_len={} disk_len={} allowance=staged_snapshot_excludes_materialized_operator_buffer",
+                file.display(),
+                basis,
+                editor_id,
+                snapshot.edit_epoch,
+                snapshot.last_synced_epoch,
+                snapshot.len,
+                file_content.len()
+            ),
+        );
+        return Ok(());
+    }
     crate::ops_log::log_op(
         file,
         &format!(
@@ -2377,6 +2399,41 @@ fn live_buffer_snapshot_matches_content(
         normalize_transient_agent_doc_markers(editor_text)
             == normalize_transient_agent_doc_markers(content)
     })
+}
+
+fn live_buffer_insertions_are_materialized_in_file(
+    snapshot: &agent_doc_debounce::LiveBufferSnapshot,
+    staged_content: &str,
+    file_content: &str,
+) -> bool {
+    let Some(editor_text) = snapshot.content.as_deref() else {
+        return false;
+    };
+
+    let normalized_file = normalize_transient_agent_doc_markers(file_content);
+    let normalized_staged = normalize_transient_agent_doc_markers(staged_content);
+    let diff = similar::TextDiff::from_lines(staged_content, editor_text);
+    let mut saw_insert = false;
+    for change in diff.iter_all_changes() {
+        if change.tag() != similar::ChangeTag::Insert {
+            continue;
+        }
+        let inserted = change.value().trim_end_matches('\n');
+        let normalized_inserted = normalize_transient_agent_doc_markers(inserted);
+        let trimmed = normalized_inserted.trim();
+        if trimmed.is_empty() || trimmed == "(HEAD)" || trimmed.starts_with("<!-- agent:boundary:")
+        {
+            continue;
+        }
+        saw_insert = true;
+        if normalized_staged.contains(trimmed) {
+            continue;
+        }
+        if !normalized_file.contains(trimmed) {
+            return false;
+        }
+    }
+    saw_insert
 }
 
 fn finalize_already_committed_noop(
@@ -3140,6 +3197,221 @@ mod tests {
             Some(&scope)
         ));
     }
+
+    #[test]
+    fn commit_adopts_manual_escaped_tail_cleanup_after_head_current_snapshot() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let readme = root.join("README.md");
+        fs::write(&readme, "# test\n").unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("session.md");
+        let committed = "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            <!-- agent:boundary:head -->\n\
+            <!-- /agent:exchange -->\n\n\
+            The routed prompt escaped below the exchange block.\n\
+            It should be cleaned up without being treated as later drift.\n\n\
+            do #oobtaildel. spec-test-build-install-commit-push\n\n\
+            <!-- agent:backlog -->\n\
+            - [ ] keep me\n\
+            <!-- /agent:backlog -->\n";
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let cleaned = "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            <!-- agent:boundary:head -->\n\
+            <!-- /agent:exchange -->\n\n\
+            <!-- agent:backlog -->\n\
+            - [ ] keep me\n\
+            <!-- /agent:backlog -->\n";
+        fs::write(&doc, cleaned).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+
+        let did_commit = commit(&doc).expect("escaped tail cleanup should commit");
+        assert!(did_commit, "cleanup deletion should create a commit");
+
+        let head = show_head(&doc).unwrap().unwrap();
+        assert_eq!(
+            normalize_transient_agent_doc_markers(&head),
+            normalize_transient_agent_doc_markers(cleaned),
+            "HEAD should contain the cleanup deletion"
+        );
+        let snap = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            normalize_transient_agent_doc_markers(&snap),
+            normalize_transient_agent_doc_markers(cleaned),
+            "snapshot should advance to the cleaned file"
+        );
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("post_commit_escaped_tail_cleanup file="),
+            "cleanup should get a specific ops-log marker:\n{log}"
+        );
+        assert!(
+            !log.contains("post_commit_local_drift file="),
+            "cleanup-only deletion must not be classified as local drift:\n{log}"
+        );
+    }
+
+    #[test]
+    fn commit_allows_current_snapshot_to_replace_committed_historical_patchback() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("session.md");
+        let clean = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "clean exchange\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:icebox -->\n",
+            "- [ ] [#tmv7] Release workflow\n",
+            "<!-- /agent:icebox -->\n",
+        );
+        fs::write(&doc, clean).unwrap();
+        crate::snapshot::save(&doc, clean).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let historical_head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "clean exchange\n\n",
+            "#code-review\n",
+            "### Re: code review — gpt-5\n\n",
+            "Historical patchback.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:icebox -->\n",
+            "- [ ] [#tmv7] Release workflow\n",
+            "<!-- /agent:icebox -->\n",
+        );
+        fs::write(&doc, historical_head).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "manual patchback", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let compacted = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "*Compacted.*\n\n",
+            "❯ #code-review\n",
+            "<!-- agent:boundary:test -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:icebox -->\n",
+            "- [x] [#tmv7] Release workflow\n",
+            "<!-- /agent:icebox -->\n",
+        );
+        fs::write(&doc, compacted).unwrap();
+        crate::snapshot::save(&doc, compacted).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(compacted), Some(compacted)).unwrap();
+        crate::cycle_state::mark_write_applied(
+            &doc,
+            "write_template",
+            Some(compacted),
+            Some(compacted),
+        )
+        .unwrap();
+
+        let did_commit =
+            commit(&doc).expect("current snapshot/file should replace the historical patchback");
+        assert!(did_commit, "replacement commit should be created");
+
+        let head_doc = show_head(&doc).unwrap().unwrap();
+        assert_eq!(
+            normalize_transient_agent_doc_markers(&head_doc),
+            normalize_transient_agent_doc_markers(compacted),
+            "HEAD should advance to the compacted document:\n{head_doc}"
+        );
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            !log.contains("commit_blocked_committed_historical_patchback file="),
+            "historical patchback should not block replacement commit:\n{log}"
+        );
+    }
+
     #[test]
     fn commit_dedupes_duplicate_response_snapshot_before_staging() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -4752,6 +5024,57 @@ Duplicate replay should stay live.
         assert!(
             !log.contains("commit_already_current file="),
             "unflushed live editor buffer must not be recorded as an already-current closeout:\n{log}"
+        );
+    }
+
+    #[test]
+    fn live_buffer_materialized_insertions_allow_force_disk_snapshot_stage() {
+        let staged = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: direct disk\n\n",
+            "Handled.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!--\n",
+            "-->\n"
+        );
+        let editor = concat!(
+            "<!-- agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n",
+            "<!--\n",
+            "operator prompt typed in editor\n",
+            "-->\n"
+        );
+        let file = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: direct disk\n\n",
+            "Handled.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!--\n",
+            "operator prompt typed in editor\n",
+            "-->\n"
+        );
+        let snapshot = agent_doc_debounce::LiveBufferSnapshot {
+            path: "session.md".to_string(),
+            len: editor.len(),
+            hash: agent_doc_hash::content_hash(editor),
+            timestamp_ms: 1,
+            edit_epoch: 1,
+            last_synced_epoch: 0,
+            state_vector_b64: None,
+            editor_id: Some("jetbrains:test".to_string()),
+            editor_kind: Some("jetbrains".to_string()),
+            editor_version: Some("test".to_string()),
+            capabilities: vec![agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY.to_string()],
+            content: Some(editor.to_string()),
+        };
+
+        assert!(
+            live_buffer_insertions_are_materialized_in_file(&snapshot, staged, file),
+            "operator insertion is present in the visible file and can be left uncommitted"
+        );
+        assert!(
+            !live_buffer_insertions_are_materialized_in_file(&snapshot, staged, staged),
+            "operator insertion missing from disk must still block"
         );
     }
 

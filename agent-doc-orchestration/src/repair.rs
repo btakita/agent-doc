@@ -915,8 +915,12 @@ fn repair_leaves_unanswered_prompt_diff(
     repaired: &str,
     known_response: Option<&str>,
 ) -> bool {
-    let norm_snapshot = crate::git::normalize_committed_exchange_artifacts(snapshot_content);
-    let norm_repaired = crate::git::normalize_committed_exchange_artifacts(repaired);
+    let norm_snapshot =
+        agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(
+            snapshot_content,
+        );
+    let norm_repaired =
+        agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(repaired);
     let Some(diff_text) =
         agent_doc_diff::unified_diff_from_contents(&norm_snapshot, &norm_repaired)
     else {

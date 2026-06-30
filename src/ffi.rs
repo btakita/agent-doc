@@ -1215,27 +1215,119 @@ pub unsafe extern "C" fn agent_doc_write_ack_content(
         Err(_) => return 0,
     };
 
-    let ack_dir = std::path::Path::new(root_str).join(".agent-doc/ack-content");
-    if let Err(e) = std::fs::create_dir_all(&ack_dir) {
-        eprintln!("[ffi] agent_doc_write_ack_content: mkdir error: {e}");
-        return 0;
-    }
-
-    let sidecar = ack_dir.join(format!("{patch_id_str}.md"));
-    match std::fs::write(&sidecar, content_str) {
-        Ok(_) => {
-            eprintln!(
-                "[ffi] ack_content written: {} bytes for patch_id {}",
-                content_str.len(),
-                &patch_id_str[..patch_id_str.len().min(8)]
-            );
-            1
-        }
+    match write_ack_content_sidecar(root_str, patch_id_str, content_str) {
+        Ok(_) => 1,
         Err(e) => {
             eprintln!("[ffi] agent_doc_write_ack_content: write error: {e}");
             0
         }
     }
+}
+
+fn write_ack_content_sidecar(
+    root_str: &str,
+    patch_id_str: &str,
+    content_str: &str,
+) -> std::io::Result<std::path::PathBuf> {
+    let ack_dir = std::path::Path::new(root_str).join(".agent-doc/ack-content");
+    std::fs::create_dir_all(&ack_dir)?;
+
+    let sidecar = ack_dir.join(format!("{patch_id_str}.md"));
+    std::fs::write(&sidecar, content_str)?;
+    eprintln!(
+        "[ffi] ack_content written: {} bytes for patch_id {}",
+        content_str.len(),
+        &patch_id_str[..patch_id_str.len().min(8)]
+    );
+    Ok(sidecar)
+}
+
+/// Write ACK-content and the matching editor-visible synced live-buffer proof
+/// through one ABI call.
+///
+/// This is the preferred editor endpoint when the content came from the live
+/// editor buffer: the sidecar and synced live-buffer epoch represent the same
+/// proof contract and must not be emitted as independently ordered facts.
+///
+/// # Safety
+///
+/// All pointers must be valid, NUL-terminated UTF-8 strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_write_ack_content_for_editor_v2(
+    project_root: *const c_char,
+    patch_id: *const c_char,
+    file_path: *const c_char,
+    content: *const c_char,
+    editor_id: *const c_char,
+    editor_kind: *const c_char,
+    editor_version: *const c_char,
+    capabilities_csv: *const c_char,
+) -> i32 {
+    let root_str = match unsafe { CStr::from_ptr(project_root) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+    let patch_id_str = match unsafe { CStr::from_ptr(patch_id) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(path) => path,
+        Err(_) => return 0,
+    };
+    let text = match unsafe { CStr::from_ptr(content) }.to_str() {
+        Ok(text) => text,
+        Err(_) => return 0,
+    };
+    let editor = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
+        Ok(editor) => editor,
+        Err(_) => return 0,
+    };
+    let kind = match unsafe { CStr::from_ptr(editor_kind) }.to_str() {
+        Ok(kind) => kind,
+        Err(_) => return 0,
+    };
+    let version = match unsafe { CStr::from_ptr(editor_version) }.to_str() {
+        Ok(version) => version,
+        Err(_) => return 0,
+    };
+    let capabilities_raw = match unsafe { CStr::from_ptr(capabilities_csv) }.to_str() {
+        Ok(capabilities) => capabilities,
+        Err(_) => return 0,
+    };
+    let capabilities: Vec<&str> = capabilities_raw
+        .split(',')
+        .map(str::trim)
+        .filter(|capability| !capability.is_empty())
+        .collect();
+
+    let sidecar = match write_ack_content_sidecar(root_str, patch_id_str, text) {
+        Ok(sidecar) => sidecar,
+        Err(err) => {
+            eprintln!("[ffi] consolidated ack-content sidecar write failed for {path}: {err}");
+            return 0;
+        }
+    };
+    if let Err(err) =
+        agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
+            path,
+            text,
+            editor,
+            kind,
+            version,
+            &capabilities,
+        )
+    {
+        let _ = std::fs::remove_file(&sidecar);
+        eprintln!("[ffi] consolidated ack-content live-buffer proof failed for {path}: {err}");
+        return 0;
+    }
+    eprintln!(
+        "[ffi] ack_content live-buffer proof written: {} bytes for patch_id {}",
+        text.len(),
+        &patch_id_str[..patch_id_str.len().min(8)]
+    );
+    1
 }
 
 /// Check if the CLI claimed this patch by writing a local-closeout sentinel.
@@ -3530,6 +3622,51 @@ mod ack_content_tests {
             sidecar
         );
         assert_eq!(std::fs::read_to_string(&sidecar).unwrap(), "hello world");
+    }
+
+    #[test]
+    fn test_write_ack_content_for_editor_v2_consolidates_ack_and_live_buffer_proof() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc/live-buffer")).unwrap();
+        let doc = tmp.path().join("session.md");
+        std::fs::write(&doc, "before\n").unwrap();
+        let project_root = CString::new(tmp.path().to_str().unwrap()).unwrap();
+        let patch_id = CString::new("test-patch-id-ack-v2").unwrap();
+        let file_path = CString::new(doc.to_string_lossy().to_string()).unwrap();
+        let content = CString::new("before\n### Re: done\n").unwrap();
+        let editor_id = CString::new("jetbrains:test").unwrap();
+        let editor_kind = CString::new("jetbrains").unwrap();
+        let editor_version = CString::new("test").unwrap();
+        let capabilities =
+            CString::new(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY).unwrap();
+
+        let result = unsafe {
+            agent_doc_write_ack_content_for_editor_v2(
+                project_root.as_ptr(),
+                patch_id.as_ptr(),
+                file_path.as_ptr(),
+                content.as_ptr(),
+                editor_id.as_ptr(),
+                editor_kind.as_ptr(),
+                editor_version.as_ptr(),
+                capabilities.as_ptr(),
+            )
+        };
+        assert_eq!(result, 1, "should return 1 on success");
+
+        let sidecar = tmp
+            .path()
+            .join(".agent-doc/ack-content/test-patch-id-ack-v2.md");
+        assert_eq!(
+            std::fs::read_to_string(&sidecar).unwrap(),
+            "before\n### Re: done\n"
+        );
+
+        let snapshot = agent_doc_debounce::live_buffer_snapshot(&doc.to_string_lossy())
+            .expect("consolidated ACK should record live-buffer proof");
+        assert_eq!(snapshot.content.as_deref(), Some("before\n### Re: done\n"));
+        assert_eq!(snapshot.edit_epoch, snapshot.last_synced_epoch);
+        assert!(snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY));
     }
 
     #[test]

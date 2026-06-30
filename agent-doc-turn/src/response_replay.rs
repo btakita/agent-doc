@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use agent_doc_frontmatter::frontmatter;
+use agent_doc_prompt_lines::text_line_looks_like_prompt_target;
 
 pub fn first_response_heading_line(response: &str) -> Option<&str> {
     response
@@ -156,7 +157,7 @@ pub fn extract_visible_response_patch_between(
                 if trimmed.starts_with("<!-- agent:boundary:")
                     || trimmed == "<!-- /agent:exchange -->"
                     || trimmed == "<!-- /patch:exchange -->"
-                    || agent_doc_diff::text_line_looks_like_prompt_target(trimmed)
+                    || text_line_looks_like_prompt_target(trimmed)
                     || crate::closeout_signal::is_exchange_response_heading(trimmed)
                 {
                     break;

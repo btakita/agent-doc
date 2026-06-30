@@ -349,6 +349,22 @@ interface AgentDocLib : Library {
     fun agent_doc_write_ack_content(project_root: String, patch_id: String, content: String): Boolean
 
     /**
+     * Preferred ACK-content endpoint when the content came from this editor's
+     * live document. It writes the ack-content sidecar and the matching synced
+     * live-buffer proof in one ABI call so the two facts cannot be reordered.
+     */
+    fun agent_doc_write_ack_content_for_editor_v2(
+        project_root: String,
+        patch_id: String,
+        file_path: String,
+        content: String,
+        editor_id: String,
+        editor_kind: String,
+        editor_version: String,
+        capabilities_csv: String,
+    ): Boolean
+
+    /**
      * Check if --force-disk claimed this patch by writing a sentinel file.
      * Checks `.agent-doc/claimed-patches/<patch_id>`. Sentinels are durable for
      * the patch id so repeated watcher passes all skip locally closed patches.

@@ -6,6 +6,15 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.34.65
 
+- **Socket `already_applied` closeout now carries ack-content proof.**
+  JetBrains patch-id dedup paths now write the current editor buffer to the
+  normal `.agent-doc/ack-content/<patch_id>.md` sidecar before returning
+  `already_applied` or deleting a stale file-IPC patch. The Rust
+  `already_applied` branch now prefers that sidecar when disk still lags the
+  editor buffer, so a retry no longer wedges with "visible editor buffer differs"
+  after the response is already present in the editor. JetBrains plugin
+  `0.2.199` includes the editor-side fix.
+
 - **Tmux input diagnostic formatting moved to `agent-doc-tmux-commands`.**
   Structured input-event field sanitization, payload hashing, byte/key naming,
   editor-route attempt-id correlation, and verbose-diagnostic gating now live in

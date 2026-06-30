@@ -3730,6 +3730,16 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "agent-doc-turn must own append response heading normalization"
     );
     for required in [
+        "pub fn response_prompt_target_from_re_heading",
+        "pub fn summarize_response_for_hook",
+        "fn truncate_response_summary",
+    ] {
+        assert!(
+            turn_response_text.contains(required),
+            "agent-doc-turn must own hook response projection policy: {required}"
+        );
+    }
+    for required in [
         "pub fn response_satisfies_imperative_contract",
         "const IMPERATIVE_STATUS_ONLY_SIGNALS",
         "const IMPERATIVE_META_REFUSAL_SIGNALS",
@@ -3756,6 +3766,24 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         !write_source.contains("pub fn strip_assistant_heading"),
         "orchestration write must not re-own append response heading normalization"
     );
+    let hooks_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/hooks.rs")).unwrap();
+    assert!(
+        hooks_source.contains("agent_doc_turn::response_text::{")
+            && hooks_source.contains("response_prompt_target_from_re_heading")
+            && hooks_source.contains("summarize_response_for_hook"),
+        "orchestration hooks should call focused response text projection directly"
+    );
+    for forbidden in [
+        "fn extract_agent_doc_prompt_target",
+        "fn summarize_agent_doc_response",
+        "fn truncate_agent_doc_summary",
+    ] {
+        assert!(
+            !hooks_source.contains(forbidden),
+            "orchestration hooks must not re-own hook response projection policy: {forbidden}"
+        );
+    }
     let write_normalize =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/normalize.rs"))
             .unwrap();

@@ -14,6 +14,9 @@
 
 use std::path::Path;
 
+use agent_doc_turn::response_text::{
+    response_prompt_target_from_re_heading, summarize_response_for_hook,
+};
 use agent_kit::hooks::{Event, HookRegistry};
 
 /// Execute document-level hooks for the given event.
@@ -236,7 +239,7 @@ fn capture_tsift_memory_closeout(file: &Path) {
     if !project_root.join(".tsift/memory.db").exists() {
         return;
     }
-    let response_summary = summarize_agent_doc_response(&capture.response_body);
+    let response_summary = summarize_response_for_hook(&capture.response_body);
     if response_summary.trim().is_empty() {
         eprintln!(
             "[hooks] tsift-memory closeout capture skipped for {}: empty response body",
@@ -244,7 +247,7 @@ fn capture_tsift_memory_closeout(file: &Path) {
         );
         return;
     }
-    let prompt_target = extract_agent_doc_prompt_target(&capture.response_body)
+    let prompt_target = response_prompt_target_from_re_heading(&capture.response_body)
         .unwrap_or_else(|| canonical.display().to_string());
     let commit_hash = git_head(&project_root).unwrap_or_else(|| "unknown".to_string());
     let output = std::process::Command::new("tsift")
@@ -598,49 +601,6 @@ fn git_head(project_root: &Path) -> Option<String> {
     (!head.is_empty()).then_some(head)
 }
 
-fn extract_agent_doc_prompt_target(response_body: &str) -> Option<String> {
-    for line in response_body.lines() {
-        let without_hashes = line.trim().trim_start_matches('#').trim_start();
-        let Some(rest) = without_hashes.strip_prefix("Re:") else {
-            continue;
-        };
-        let target = rest.split(" — ").next().unwrap_or(rest).trim();
-        if !target.is_empty() {
-            return Some(target.to_string());
-        }
-    }
-    None
-}
-
-fn summarize_agent_doc_response(response_body: &str) -> String {
-    let lines = response_body
-        .lines()
-        .filter(|line| {
-            let trimmed = line.trim();
-            trimmed != "<!-- patch:exchange -->"
-                && trimmed != "<!-- /patch:exchange -->"
-                && !(trimmed.starts_with("<!--") && trimmed.ends_with("-->"))
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    truncate_agent_doc_summary(lines.trim(), 4000)
-}
-
-fn truncate_agent_doc_summary(input: &str, max_chars: usize) -> String {
-    let mut chars = input.chars();
-    let mut output = String::new();
-    for _ in 0..max_chars {
-        let Some(ch) = chars.next() else {
-            return input.to_string();
-        };
-        output.push(ch);
-    }
-    if chars.next().is_some() {
-        output.push_str("\n[truncated]");
-    }
-    output
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -718,27 +678,6 @@ mod tests {
         assert_eq!(data["patches"].as_u64(), Some(1));
         assert!(data["capture_id"].is_string());
         assert!(data["response_sha256"].is_string());
-    }
-
-    #[test]
-    fn agent_doc_prompt_target_uses_re_heading_without_model_suffix() {
-        let response = "<!-- patch:exchange -->\n### Re: do [#tsiftmemhooks] — gpt-5\nDone.\n<!-- /patch:exchange -->\n";
-        assert_eq!(
-            extract_agent_doc_prompt_target(response).as_deref(),
-            Some("do [#tsiftmemhooks]")
-        );
-    }
-
-    #[test]
-    fn agent_doc_response_summary_removes_patch_markers_and_truncates() {
-        let body = format!(
-            "<!-- patch:exchange -->\n### Re: x\n{}\n<!-- /patch:exchange -->\n",
-            "a".repeat(4100)
-        );
-        let summary = summarize_agent_doc_response(&body);
-        assert!(!summary.contains("patch:exchange"));
-        assert!(summary.contains("[truncated]"));
-        assert!(summary.starts_with("### Re: x"));
     }
 
     #[test]

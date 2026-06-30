@@ -26,6 +26,59 @@ pub fn strip_assistant_heading(response: &str) -> String {
     result
 }
 
+/// Extract the session prompt target from the first `### Re:`-style response
+/// heading, dropping the model suffix after a dash separator.
+pub fn response_prompt_target_from_re_heading(response_body: &str) -> Option<String> {
+    for line in response_body.lines() {
+        let without_hashes = line.trim().trim_start_matches('#').trim_start();
+        let Some(rest) = without_hashes.strip_prefix("Re:") else {
+            continue;
+        };
+        let target = rest
+            .split_once(" \u{2014} ")
+            .map(|(target, _)| target)
+            .or_else(|| rest.split_once(" - ").map(|(target, _)| target))
+            .unwrap_or(rest)
+            .trim();
+        if !target.is_empty() {
+            return Some(target.to_string());
+        }
+    }
+    None
+}
+
+/// Summarize captured response text for external hook consumers. Agent-doc patch
+/// comments are metadata, not useful response content, so they are removed
+/// before the summary is bounded.
+pub fn summarize_response_for_hook(response_body: &str) -> String {
+    let lines = response_body
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            trimmed != "<!-- patch:exchange -->"
+                && trimmed != "<!-- /patch:exchange -->"
+                && !(trimmed.starts_with("<!--") && trimmed.ends_with("-->"))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    truncate_response_summary(lines.trim(), 4000)
+}
+
+fn truncate_response_summary(input: &str, max_chars: usize) -> String {
+    let mut chars = input.chars();
+    let mut output = String::new();
+    for _ in 0..max_chars {
+        let Some(ch) = chars.next() else {
+            return input.to_string();
+        };
+        output.push(ch);
+    }
+    if chars.next().is_some() {
+        output.push_str("\n[truncated]");
+    }
+    output
+}
+
 const IMPERATIVE_STATUS_ONLY_SIGNALS: &[&str] = &[
     "in progress",
     "continuing",
@@ -214,6 +267,27 @@ mod tests {
     fn leaves_plain_response_unchanged() {
         let response = "Done.\n\nDetails.";
         assert_eq!(strip_assistant_heading(response), response.to_string());
+    }
+
+    #[test]
+    fn response_prompt_target_uses_re_heading_without_model_suffix() {
+        let response = "<!-- patch:exchange -->\n### Re: do [#tsiftmemhooks] \u{2014} gpt-5\nDone.\n<!-- /patch:exchange -->\n";
+        assert_eq!(
+            response_prompt_target_from_re_heading(response).as_deref(),
+            Some("do [#tsiftmemhooks]")
+        );
+    }
+
+    #[test]
+    fn response_summary_removes_patch_markers_and_truncates() {
+        let body = format!(
+            "<!-- patch:exchange -->\n### Re: x\n{}\n<!-- /patch:exchange -->\n",
+            "a".repeat(4100)
+        );
+        let summary = summarize_response_for_hook(&body);
+        assert!(!summary.contains("patch:exchange"));
+        assert!(summary.contains("[truncated]"));
+        assert!(summary.starts_with("### Re: x"));
     }
 
     #[test]

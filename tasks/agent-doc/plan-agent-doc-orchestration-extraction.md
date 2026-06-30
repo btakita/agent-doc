@@ -282,6 +282,11 @@ focused crate under the old path.
   effect-derived facts. Preflight keeps stale-supervisor/recycle-yield detection
   and queue-state gathering while importing the focused output resolver
   directly.
+- `agent-doc-queue` now owns backlog-to-queue tombstone reconciliation policy:
+  adding operator-deleted active ids when they disappear from the live queue and
+  clearing tombstones when ids are re-added as active queue heads. Preflight
+  keeps only tombstone sidecar path/load/save effects and calls the focused
+  reconciler directly from an explicit file-backed adapter.
 - `agent-doc-element-backlog` already owned open backlog id extraction; preflight
   now calls `open_backlog_ids_in_content` directly for `do #id` closeout
   evidence instead of re-parsing backlog components locally.

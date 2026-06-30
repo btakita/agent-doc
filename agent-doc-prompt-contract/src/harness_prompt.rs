@@ -38,32 +38,40 @@ pub fn synthetic_diff_from_body(body: &str) -> String {
     agent_doc_diff::synthetic_added_lines_diff(body, "harness")
 }
 
+pub fn agent_doc_invocation_file_from_text(prompt: &str) -> Option<&str> {
+    let mut inside_code_fence = false;
+    for raw_line in prompt.lines().rev() {
+        let line = raw_line.trim();
+        if line.starts_with("```") {
+            inside_code_fence = !inside_code_fence;
+            continue;
+        }
+        if inside_code_fence || line.is_empty() {
+            continue;
+        }
+        let Some(parsed_line) = parse_agent_doc_invocation_line(line) else {
+            continue;
+        };
+        let file = parsed_line.file;
+        if file.starts_with('<') && file.ends_with('>') {
+            continue;
+        }
+        return Some(file);
+    }
+    None
+}
+
 pub fn parse_agent_doc_invocation(prompt: &str, cwd: &Path) -> Option<ParsedHarnessInvocation> {
     let mut lines = prompt.lines().enumerate();
     let (first_idx, first_line) = lines.find(|(_, line)| !line.trim().is_empty())?;
     let first_trimmed = first_line.trim();
     let tokens = first_trimmed.split_whitespace().collect::<Vec<_>>();
 
-    let (kind, file_token, consumed_tokens) = match tokens.as_slice() {
-        ["agent-doc", "claim", file, ..] | ["/agent-doc", "claim", file, ..] => {
-            (HarnessInvocationKind::Claim, *file, 3usize)
-        }
-        ["agent-doc", "compact", "exchange", file, ..]
-        | ["/agent-doc", "compact", "exchange", file, ..] => {
-            (HarnessInvocationKind::CompactExchange, *file, 4usize)
-        }
-        ["agent-doc", "compact", file, ..] | ["/agent-doc", "compact", file, ..] => {
-            (HarnessInvocationKind::Compact, *file, 3usize)
-        }
-        ["agent-doc", file, ..] | ["/agent-doc", file, ..] => {
-            (HarnessInvocationKind::Session, *file, 2usize)
-        }
-        _ => return None,
-    };
+    let parsed_line = parse_agent_doc_invocation_tokens(&tokens)?;
 
     let first_body = tokens
         .iter()
-        .skip(consumed_tokens)
+        .skip(parsed_line.consumed_tokens)
         .copied()
         .collect::<Vec<_>>()
         .join(" ");
@@ -81,7 +89,7 @@ pub fn parse_agent_doc_invocation(prompt: &str, cwd: &Path) -> Option<ParsedHarn
         (head, rest) => format!("{head}\n{rest}"),
     };
 
-    let path = PathBuf::from(file_token);
+    let path = PathBuf::from(parsed_line.file);
     let resolved = if path.is_absolute() {
         path
     } else {
@@ -89,9 +97,44 @@ pub fn parse_agent_doc_invocation(prompt: &str, cwd: &Path) -> Option<ParsedHarn
     };
 
     Some(ParsedHarnessInvocation {
-        kind,
+        kind: parsed_line.kind,
         file: resolved.canonicalize().unwrap_or(resolved),
         body: body.trim().to_string(),
+    })
+}
+
+struct AgentDocInvocationLine<'a> {
+    kind: HarnessInvocationKind,
+    file: &'a str,
+    consumed_tokens: usize,
+}
+
+fn parse_agent_doc_invocation_line(line: &str) -> Option<AgentDocInvocationLine<'_>> {
+    let tokens = line.split_whitespace().collect::<Vec<_>>();
+    parse_agent_doc_invocation_tokens(&tokens)
+}
+
+fn parse_agent_doc_invocation_tokens<'a>(tokens: &[&'a str]) -> Option<AgentDocInvocationLine<'a>> {
+    let (kind, file, consumed_tokens) = match tokens {
+        ["agent-doc", "claim", file, ..] | ["/agent-doc", "claim", file, ..] => {
+            (HarnessInvocationKind::Claim, *file, 3usize)
+        }
+        ["agent-doc", "compact", "exchange", file, ..]
+        | ["/agent-doc", "compact", "exchange", file, ..] => {
+            (HarnessInvocationKind::CompactExchange, *file, 4usize)
+        }
+        ["agent-doc", "compact", file, ..] | ["/agent-doc", "compact", file, ..] => {
+            (HarnessInvocationKind::Compact, *file, 3usize)
+        }
+        ["agent-doc", file, ..] | ["/agent-doc", file, ..] => {
+            (HarnessInvocationKind::Session, *file, 2usize)
+        }
+        _ => return None,
+    };
+    Some(AgentDocInvocationLine {
+        kind,
+        file,
+        consumed_tokens,
     })
 }
 
@@ -199,6 +242,65 @@ mod tests {
             .unwrap()
             .kind,
             HarnessInvocationKind::CompactExchange
+        );
+    }
+
+    #[test]
+    fn invocation_file_scan_prefers_real_invocation_after_instruction_preamble() {
+        let prompt = "# AGENTS.md instructions\n\
+\n\
+```\n\
+agent-doc <FILE>\n\
+agent-doc compact <FILE>\n\
+```\n\
+\n\
+Use the harness-native entrypoint below.\n\
+\n\
+agent-doc tasks/session.md\n";
+
+        assert_eq!(
+            agent_doc_invocation_file_from_text(prompt),
+            Some("tasks/session.md")
+        );
+    }
+
+    #[test]
+    fn invocation_file_scan_accepts_same_line_body_and_slash_form() {
+        assert_eq!(
+            agent_doc_invocation_file_from_text("/agent-doc tasks/session.md #agent-doc-bug"),
+            Some("tasks/session.md")
+        );
+    }
+
+    #[test]
+    fn invocation_file_scan_continues_past_trailing_prompt_body() {
+        assert_eq!(
+            agent_doc_invocation_file_from_text("agent-doc tasks/session.md\ndo #abcd"),
+            Some("tasks/session.md")
+        );
+    }
+
+    #[test]
+    fn invocation_file_scan_accepts_non_session_commands() {
+        assert_eq!(
+            agent_doc_invocation_file_from_text("agent-doc claim tasks/session.md"),
+            Some("tasks/session.md")
+        );
+        assert_eq!(
+            agent_doc_invocation_file_from_text("agent-doc compact tasks/session.md"),
+            Some("tasks/session.md")
+        );
+        assert_eq!(
+            agent_doc_invocation_file_from_text("agent-doc compact exchange tasks/session.md"),
+            Some("tasks/session.md")
+        );
+    }
+
+    #[test]
+    fn invocation_file_scan_rejects_placeholders_and_fenced_examples() {
+        assert!(agent_doc_invocation_file_from_text("agent-doc <FILE>").is_none());
+        assert!(
+            agent_doc_invocation_file_from_text("```\nagent-doc tasks/session.md\n```").is_none()
         );
     }
 }

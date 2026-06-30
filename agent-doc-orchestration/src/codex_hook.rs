@@ -1373,43 +1373,15 @@ fn read_stdin_payload() -> Result<String> {
 }
 
 fn resolve_agent_doc_path(prompt: &str, cwd: &Path) -> Option<PathBuf> {
-    let mut inside_code_fence = false;
-    for raw_line in prompt.lines().rev() {
-        let line = raw_line.trim();
-        if line.starts_with("```") {
-            inside_code_fence = !inside_code_fence;
-            continue;
-        }
-        if inside_code_fence || line.is_empty() {
-            continue;
-        }
-        let Some(file) = parse_agent_doc_invocation_line(line) else {
-            continue;
-        };
-        if file.starts_with('<') && file.ends_with('>') {
-            continue;
-        }
-        let path = PathBuf::from(file);
-        let joined = if path.is_absolute() {
-            path
-        } else {
-            cwd.join(path)
-        };
-        return Some(joined.canonicalize().unwrap_or(joined));
-    }
-    None
-}
-
-fn parse_agent_doc_invocation_line(line: &str) -> Option<&str> {
-    let tokens: Vec<&str> = line.split_whitespace().collect();
-    match tokens.as_slice() {
-        ["agent-doc", "claim", file, ..] | ["/agent-doc", "claim", file, ..] => Some(*file),
-        ["agent-doc", "compact", "exchange", file, ..]
-        | ["/agent-doc", "compact", "exchange", file, ..] => Some(*file),
-        ["agent-doc", "compact", file, ..] | ["/agent-doc", "compact", file, ..] => Some(*file),
-        ["agent-doc", file, ..] | ["/agent-doc", file, ..] => Some(*file),
-        _ => None,
-    }
+    let file =
+        agent_doc_prompt_contract::harness_prompt::agent_doc_invocation_file_from_text(prompt)?;
+    let path = PathBuf::from(file);
+    let joined = if path.is_absolute() {
+        path
+    } else {
+        cwd.join(path)
+    };
+    Some(joined.canonicalize().unwrap_or(joined))
 }
 
 #[cfg(test)]

@@ -4820,6 +4820,7 @@ fn test_agent_doc_prompt_contract_owns_prompt_contract_policy() {
         "pub struct ParsedHarnessInvocation",
         "pub fn prompt_body_from_text(",
         "pub fn synthetic_diff_from_body(",
+        "pub fn agent_doc_invocation_file_from_text(",
         "pub fn parse_agent_doc_invocation(",
     ] {
         assert!(
@@ -4892,6 +4893,15 @@ fn test_agent_doc_prompt_contract_owns_prompt_contract_policy() {
                 "fn synthetic_diff_from_body(",
                 "fn parse_agent_doc_invocation(",
                 "fn same_file(",
+            ],
+        ),
+        (
+            "agent-doc-orchestration/src/codex_hook.rs",
+            vec!["agent_doc_prompt_contract::harness_prompt::agent_doc_invocation_file_from_text"],
+            vec![
+                "fn parse_agent_doc_invocation_line(",
+                "fn agent_doc_invocation_file_from_text(",
+                "pub fn agent_doc_invocation_file_from_text(",
             ],
         ),
     ] {

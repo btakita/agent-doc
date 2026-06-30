@@ -130,6 +130,26 @@ read.
 - Tests should move with the behavior. Adapter tests remain only for real side
   effects.
 
+### Deprecated-name rename policy
+
+Extraction should also retire obsolete internal names when the product/domain
+language has moved on. A deprecated module, function, type, crate, test, or doc
+name is another compatibility surface: even if it delegates correctly, it keeps
+future work thinking in the old model.
+
+- Rename deprecated internal names to the current domain name while extracting
+  the seam. Do not leave alias modules, `pub use` aliases, or wrapper functions
+  behind.
+- Prefer the current user-facing/domain vocabulary in file names and imports:
+  backlog/tracked-work/review/icebox/queue/turn/document instead of historical
+  names such as pending/core/shim/facade.
+- Treat rename-only cleanup as valid extraction support when it removes an old
+  ownership cue. Keep it scoped and covered by static no-shim/no-alias scans.
+- `pending_cmd` is a concrete candidate: it owns user-facing backlog and
+  tracked-work subcommands, so it should be renamed to `backlog_cmd` or split
+  into a clearer tracked-work command module during the backlog/queue extraction
+  pass. The old `pending_cmd` module path should not remain as an alias.
+
 Allowed exception: exported editor/plugin FFI symbols are an ABI boundary, not a
 Rust API. The cdylib may keep `extern "C"` wrappers that preserve those symbols,
 but Rust call sites still move to focused crates directly.
@@ -154,6 +174,9 @@ focused crate under the old path.
    commit, push, and one CI check in the main integration pass.
 5. Prefer direct dependency inversion over shared catch-all utilities. A shared
    IO/base crate is tactical only when it unblocks a domain extraction.
+6. Rename deprecated internal symbols and module names to the current domain
+   vocabulary in the same pass as the related extraction; do not preserve the
+   obsolete path as a compatibility alias.
 
 ### Current extraction ledger
 

@@ -5919,6 +5919,12 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         "pub struct FinalizePendingMutation",
         "pub fn prompt_targets_from_changes",
         "pub fn prompt_targets_from_diff",
+        "pub fn compute_user_intent_prompt_changes",
+        "pub fn derive_turn_scope",
+        "pub fn exchange_node_count",
+        "pub fn resolve_driver_address",
+        "pub fn extract_target_id",
+        "pub fn component_occurrence_from_node_key",
         "pub fn classify_execution_scope",
         "pub fn finalize_command",
     ] {
@@ -6090,6 +6096,33 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         preflight_run.contains("agent_doc_workflow::session_cycle::prompt_targets_from_changes"),
         "preflight should call focused session-cycle workflow policy directly"
     );
+    assert!(
+        preflight_run.contains("use agent_doc_workflow::session_cycle::{")
+            && preflight_run.contains("compute_user_intent_prompt_changes")
+            && preflight_run.contains("derive_turn_scope"),
+        "preflight should call focused turn-scope and user-intent workflow policy directly"
+    );
+    let preflight_semantic_diff = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/preflight/semantic_diff.rs"),
+    )
+    .unwrap();
+    let preflight_mod =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    for forbidden in [
+        "pub(crate) fn compute_user_intent_prompt_changes",
+        "pub(crate) fn derive_turn_scope",
+        "pub(crate) fn exchange_node_count",
+        "pub(crate) fn resolve_driver_address",
+        "pub(crate) fn extract_target_id",
+        "pub(crate) fn component_occurrence_from_node_key",
+        "compute_user_intent_prompt_changes, derive_turn_scope",
+        "pub(crate) use semantic_diff::*",
+    ] {
+        assert!(
+            !preflight_semantic_diff.contains(forbidden) && !preflight_mod.contains(forbidden),
+            "orchestration preflight must not re-own or re-export session-cycle workflow policy: {forbidden}"
+        );
+    }
     let plan_source = fs::read_to_string(manifest_dir.join("src/plan.rs")).unwrap();
     assert!(
         plan_source.contains("use agent_doc_workflow::session_cycle::{")
@@ -6139,7 +6172,10 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         .unwrap_or_default();
     for expected in [
         "agent-doc-diff",
+        "agent-doc-element-backlog",
         "agent-doc-frontmatter",
+        "agent-doc-markdown-ast",
+        "agent-doc-turn",
         "indexmap",
         "serde",
         "serde_json",
@@ -6152,7 +6188,14 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
     assert!(
         dependencies.keys().all(|dependency| matches!(
             dependency.as_str(),
-            "agent-doc-diff" | "agent-doc-frontmatter" | "indexmap" | "serde" | "serde_json"
+            "agent-doc-diff"
+                | "agent-doc-element-backlog"
+                | "agent-doc-frontmatter"
+                | "agent-doc-markdown-ast"
+                | "agent-doc-turn"
+                | "indexmap"
+                | "serde"
+                | "serde_json"
         )),
         "agent-doc-workflow should remain pure and free of orchestration, git, editor IPC, sqlite, or tmux dependencies"
     );

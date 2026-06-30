@@ -48,6 +48,120 @@ pub fn prompt_targets_from_diff(diff_text: &str) -> Vec<String> {
     targets
 }
 
+/// Compute prompt changes that represent fresh user intent for the active turn.
+///
+/// Synthetic queue continuations and prompt-bearing changes classified as
+/// independent of the turn must not preempt an active queue drain. When no
+/// affectedness classifier ran, this falls back to filtering managed component
+/// bookkeeping only.
+pub fn compute_user_intent_prompt_changes(
+    prompt_bearing_changes: &[agent_doc_diff::PromptBearingChange],
+    diff_from_queue_head_only: bool,
+    op_affectedness: Option<&agent_doc_turn::turn_scope::CycleAffectedness>,
+) -> Vec<agent_doc_diff::PromptBearingChange> {
+    if diff_from_queue_head_only {
+        return Vec::new();
+    }
+    if op_affectedness.is_some_and(|affectedness| {
+        !affectedness.turn_affected && !affectedness.classified.is_empty()
+    }) {
+        return Vec::new();
+    }
+    prompt_bearing_changes
+        .iter()
+        .filter(|change| !agent_doc_diff::change_is_managed_state_only(change))
+        .cloned()
+        .collect()
+}
+
+/// Derive the turn-scope manifest for prompts answered by this cycle.
+///
+/// The queue driver is resolved from prompt target ids, while the exchange tail
+/// floor preserves old committed exchange bullets as independent context.
+pub fn derive_turn_scope(
+    content: &str,
+    prompt_targets: &[String],
+) -> Option<agent_doc_turn::turn_scope::TurnScope> {
+    if prompt_targets.is_empty() {
+        return None;
+    }
+    let driver = resolve_driver_address(content, prompt_targets);
+    let exchange_tail_floor = exchange_node_count(content);
+    Some(
+        agent_doc_turn::turn_scope::TurnScope::for_driver_with_exchange_tail(
+            driver,
+            exchange_tail_floor,
+        ),
+    )
+}
+
+/// Count exchange item nodes present at turn start.
+pub fn exchange_node_count(content: &str) -> Option<usize> {
+    let count = agent_doc_markdown_ast::mutations::all_item_nodes(content)
+        .iter()
+        .filter(|node| node.component == "exchange")
+        .count();
+    (count > 0).then_some(count)
+}
+
+/// Find the queue item node a prompt target refers to and address it.
+pub fn resolve_driver_address(
+    content: &str,
+    prompt_targets: &[String],
+) -> Option<agent_doc_turn::turn_scope::Address> {
+    let nodes = agent_doc_markdown_ast::mutations::all_item_nodes(content);
+    for target in prompt_targets {
+        let Some(id) = extract_target_id(target) else {
+            continue;
+        };
+        if let Some(node) = nodes
+            .iter()
+            .find(|node| node.component == "queue" && node.item.id == id)
+        {
+            let occurrence = component_occurrence_from_node_key(&node.node_key);
+            return Some(agent_doc_turn::turn_scope::Address::node(
+                "queue",
+                occurrence,
+                &node.node_key,
+            ));
+        }
+    }
+    None
+}
+
+/// Extract a backlog/queue id (`[#id]` or bare `#id`) from a prompt target.
+pub fn extract_target_id(target: &str) -> Option<String> {
+    if let Some(start) = target.find("[#") {
+        let rest = &target[start + 2..];
+        if let Some(close) = rest.find(']') {
+            let id = &rest[..close];
+            if agent_doc_element_backlog::backlog::is_valid_pending_id(id) {
+                return Some(id.to_string());
+            }
+        }
+    }
+    if let Some(start) = target.find('#') {
+        let rest = &target[start + 1..];
+        let id: String = rest
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+            .collect();
+        if !id.is_empty() && agent_doc_element_backlog::backlog::is_valid_pending_id(&id) {
+            return Some(id);
+        }
+    }
+    None
+}
+
+/// Component occurrence index encoded in a node key (`component:index:id:dup`).
+pub fn component_occurrence_from_node_key(node_key: &str) -> usize {
+    node_key
+        .split(':')
+        .nth(1)
+        .and_then(|field| field.parse().ok())
+        .unwrap_or(0)
+}
+
 pub fn classify_execution_scope(
     prompt_targets: &[String],
     added_diff_lines: &[String],
@@ -267,6 +381,24 @@ mod tests {
         }
     }
 
+    fn affectedness(turn_affected: bool) -> agent_doc_turn::turn_scope::CycleAffectedness {
+        use agent_doc_turn::turn_scope::{AffectednessClass, ClassifiedOp};
+        agent_doc_turn::turn_scope::CycleAffectedness {
+            turn_affected,
+            classified: vec![ClassifiedOp {
+                component: "queue".to_string(),
+                node_key: "queue:0:other:0".to_string(),
+                op_kind: "move".to_string(),
+                actor: agent_doc_turn::op_log::OpActor::User,
+                class: if turn_affected {
+                    AffectednessClass::InputAffecting
+                } else {
+                    AffectednessClass::Independent
+                },
+            }],
+        }
+    }
+
     #[test]
     fn prompt_targets_keep_prompt_target_order() {
         let changes = vec![prompt_change("first"), prompt_change("second")];
@@ -299,6 +431,125 @@ mod tests {
             prompt_targets_from_diff(diff),
             vec!["run benchmarks".to_string()]
         );
+    }
+
+    #[test]
+    fn derive_turn_scope_resolves_queue_driver_and_sets() {
+        let content = "<!-- agent:queue -->\n- do [#op-scoped-drift-2]\n- do [#later]\n<!-- /agent:queue -->\n";
+        let targets = vec!["do [#op-scoped-drift-2]".to_string()];
+        let scope = derive_turn_scope(content, &targets).expect("scope derived");
+        let driver = scope.driver.as_ref().expect("driver resolved");
+        assert_eq!(driver.component, "queue");
+        assert_eq!(
+            driver.node_key.as_deref(),
+            Some("queue:0:op-scoped-drift-2:0")
+        );
+        assert!(scope.read_set.contains(driver));
+        assert!(scope.write_set.contains(driver));
+        for &component in agent_doc_turn::turn_scope::MANAGED_OUTPUT_COMPONENTS {
+            assert!(
+                scope
+                    .write_set
+                    .contains(&agent_doc_turn::turn_scope::Address::component(
+                        component, 0
+                    )),
+                "turn scope write set should include managed output component {component}"
+            );
+        }
+    }
+
+    #[test]
+    fn derive_turn_scope_sets_exchange_tail_floor() {
+        let content = "\
+<!-- agent:exchange -->
+- old context bullet one
+- old context bullet two
+<!-- /agent:exchange -->
+
+<!-- agent:queue -->
+- do [#driver]
+<!-- /agent:queue -->
+";
+        let targets = vec!["do [#driver]".to_string()];
+        let scope = derive_turn_scope(content, &targets).expect("scope derived");
+
+        assert_eq!(scope.exchange_tail_floor, Some(2));
+    }
+
+    #[test]
+    fn derive_turn_scope_none_without_prompt_targets() {
+        let content = "<!-- agent:queue -->\n- do [#x]\n<!-- /agent:queue -->\n";
+        assert!(derive_turn_scope(content, &[]).is_none());
+    }
+
+    #[test]
+    fn derive_turn_scope_without_matching_queue_node_has_no_driver() {
+        let content = "<!-- agent:queue -->\n- do [#present]\n<!-- /agent:queue -->\n";
+        let targets = vec!["do [#absent]".to_string()];
+        let scope = derive_turn_scope(content, &targets).expect("scope derived");
+
+        assert!(scope.driver.is_none());
+        assert!(scope.write_set.iter().all(|a| a.component != "queue"));
+    }
+
+    #[test]
+    fn extract_target_id_handles_bracket_and_bare_forms() {
+        assert_eq!(
+            extract_target_id("do [#op-scoped-drift-2]").as_deref(),
+            Some("op-scoped-drift-2")
+        );
+        assert_eq!(extract_target_id("do #fix1").as_deref(), Some("fix1"));
+        assert_eq!(extract_target_id("no id here"), None);
+    }
+
+    #[test]
+    fn user_intent_empty_for_synthetic_queue_continuation() {
+        let changes = vec![prompt_change("do [#next]")];
+        assert!(
+            compute_user_intent_prompt_changes(&changes, true, Some(&affectedness(true)))
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn user_intent_drops_turn_independent_edits() {
+        let changes = vec![prompt_change("a stray note in the parking lot")];
+        let out = compute_user_intent_prompt_changes(&changes, false, Some(&affectedness(false)));
+
+        assert!(
+            out.is_empty(),
+            "independent edit should not preempt: {out:?}"
+        );
+    }
+
+    #[test]
+    fn user_intent_keeps_turn_affecting_prompt() {
+        let changes = vec![prompt_change("please also handle the error case")];
+        let out = compute_user_intent_prompt_changes(&changes, false, Some(&affectedness(true)));
+
+        assert_eq!(out.len(), 1, "turn-affecting prompt must preempt");
+    }
+
+    #[test]
+    fn user_intent_filters_managed_state_when_turn_affected() {
+        let changes = vec![agent_doc_diff::PromptBearingChange {
+            kind: agent_doc_diff::PromptBearingChangeKind::ContentEdit,
+            text: "- [ ] [#newitem] track a follow-up".to_string(),
+        }];
+        let out = compute_user_intent_prompt_changes(&changes, false, Some(&affectedness(true)));
+
+        assert!(
+            out.is_empty(),
+            "managed-state edit must not preempt: {out:?}"
+        );
+    }
+
+    #[test]
+    fn user_intent_conservative_without_classifier() {
+        let changes = vec![prompt_change("a real prompt with no classifier")];
+        let out = compute_user_intent_prompt_changes(&changes, false, None);
+
+        assert_eq!(out.len(), 1, "without classifier, a real change preempts");
     }
 
     #[test]

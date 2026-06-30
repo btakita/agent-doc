@@ -521,7 +521,10 @@ pub struct PreflightOutput {
 }
 
 mod semantic_diff;
-pub(crate) use semantic_diff::*;
+pub(crate) use semantic_diff::{
+    build_ops_from_semantic_diff, is_zero_usize, persist_op_log,
+    push_unique_prompt_bearing_changes, push_unique_strings, semantic_diff_summary,
+};
 
 fn relocate_out_of_exchange_prompt_before_diff(
     file: &Path,
@@ -2962,31 +2965,6 @@ mod th {
         let logs = dir.path().join(".agent-doc/logs");
         std::fs::create_dir_all(&logs).unwrap();
         std::fs::write(logs.join("ops.log"), body).unwrap();
-    }
-    pub(crate) fn user_prompt_change(text: &str) -> agent_doc_diff::PromptBearingChange {
-        agent_doc_diff::PromptBearingChange {
-            kind: agent_doc_diff::PromptBearingChangeKind::PromptTarget,
-            text: text.to_string(),
-        }
-    }
-    pub(crate) fn affectedness(
-        turn_affected: bool,
-    ) -> agent_doc_turn::turn_scope::CycleAffectedness {
-        use agent_doc_turn::turn_scope::{AffectednessClass, ClassifiedOp};
-        agent_doc_turn::turn_scope::CycleAffectedness {
-            turn_affected,
-            classified: vec![ClassifiedOp {
-                component: "queue".to_string(),
-                node_key: "queue:0:other:0".to_string(),
-                op_kind: "move".to_string(),
-                actor: agent_doc_turn::op_log::OpActor::User,
-                class: if turn_affected {
-                    AffectednessClass::InputAffecting
-                } else {
-                    AffectednessClass::Independent
-                },
-            }],
-        }
     }
     // --- Fix 5: cross-document sweep ---
     // --- #cce5: resolve_agent_model / short_model_name tests ---

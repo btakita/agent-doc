@@ -6,6 +6,7 @@ use agent_doc_queue::queue_convergence::{
     queue_body_diff_is_non_selected_future_state, realign_baseline_to_converged_queue,
 };
 use agent_doc_turn::drain_stall::{StallFacts, StallVerdict, classify_stall};
+use agent_doc_workflow::session_cycle::{compute_user_intent_prompt_changes, derive_turn_scope};
 
 /// Options controlling a `preflight` invocation.
 #[derive(Debug, Clone, Copy, Default)]

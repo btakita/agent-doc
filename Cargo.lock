@@ -711,7 +711,10 @@ name = "agent-doc-workflow"
 version = "0.34.65"
 dependencies = [
  "agent-doc-diff",
+ "agent-doc-element-backlog",
  "agent-doc-frontmatter",
+ "agent-doc-markdown-ast",
+ "agent-doc-turn",
  "indexmap",
  "serde",
  "serde_json",

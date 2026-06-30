@@ -603,6 +603,51 @@ pub fn tracked_component_item_counts(content: &str) -> BTreeMap<String, usize> {
     counts
 }
 
+pub fn completed_items(body: &str) -> Vec<PendingItem> {
+    let (_, items, _) = parse_items(body);
+    items.into_iter().filter(PendingItem::is_done).collect()
+}
+
+pub fn completed_tracked_items_in_components(
+    content: &str,
+    components: &[element::Component],
+) -> Vec<PendingItem> {
+    components
+        .iter()
+        .filter(|component| element::is_tracked_work_component(&component.name))
+        .flat_map(|component| completed_items(component.content(content)))
+        .collect()
+}
+
+pub fn completed_tracked_items_in_content(content: &str) -> Result<Vec<PendingItem>> {
+    let components = element::parse(content)?;
+    Ok(completed_tracked_items_in_components(content, &components))
+}
+
+pub fn tracked_item_ref(item: &PendingItem) -> String {
+    if item.id.is_empty() {
+        format!("<missing-id> {}", item.text)
+    } else {
+        format!("#{}", item.id)
+    }
+}
+
+pub fn tracked_item_refs(items: &[PendingItem]) -> Vec<String> {
+    items.iter().map(tracked_item_ref).collect()
+}
+
+pub fn ensure_no_completed_tracked_items(content: &str, surface: &str) -> Result<()> {
+    let completed = completed_tracked_items_in_content(content).with_context(|| {
+        format!("failed to parse {surface} components during pending reap check")
+    })?;
+    if completed.is_empty() {
+        return Ok(());
+    }
+
+    let refs = tracked_item_refs(&completed).join(", ");
+    bail!("pending maintenance left completed tracked items in the {surface}: {refs}");
+}
+
 pub fn component_matches_tracked_surface(name: &str, surface: &str) -> bool {
     if element::is_backlog_component(surface) {
         element::is_backlog_component(name)
@@ -3346,6 +3391,41 @@ mod tests {
         assert_eq!(counts.get("backlog").copied(), Some(3));
         assert_eq!(counts.get("review").copied(), Some(1));
         assert_eq!(counts.get("exchange"), None);
+    }
+
+    #[test]
+    fn completed_tracked_items_are_projected_from_tracked_components() {
+        let doc = concat!(
+            "<!-- agent:exchange -->\n",
+            "- [x] [#not-tracked] response list\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#open] open item\n",
+            "- [x] [#done] done item\n",
+            "<!-- /agent:backlog -->\n",
+            "<!-- agent:review -->\n",
+            "- [X] [#review-done] review done item\n",
+            "<!-- /agent:review -->\n",
+        );
+        let completed = completed_tracked_items_in_content(doc).unwrap();
+        assert_eq!(
+            completed
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["done", "review-done"]
+        );
+        assert_eq!(
+            tracked_item_refs(&completed),
+            vec!["#done".to_string(), "#review-done".to_string()]
+        );
+        assert!(ensure_no_completed_tracked_items(TRACKED_COMPONENT_DOC, "working tree").is_ok());
+        let err = ensure_no_completed_tracked_items(doc, "working tree")
+            .expect_err("completed tracked items should fail the guard")
+            .to_string();
+        assert!(err.contains("working tree"));
+        assert!(err.contains("#done"));
+        assert!(err.contains("#review-done"));
     }
 
     #[test]

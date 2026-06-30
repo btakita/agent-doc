@@ -224,26 +224,15 @@ pub(crate) fn check_completed_pending_reap_guard(
     // Phase 6 (#lr-content-6): cached content + parsed components.
     let content = rc.doc_content();
     let components = rc.components();
-    let completed: Vec<agent_doc_element_backlog::backlog::PendingItem> = components
-        .iter()
-        .filter(|component| is_tracked_work_component(&component.name))
-        .flat_map(|component| completed_pending_items(component.content(&content)))
-        .collect();
+    let completed = agent_doc_element_backlog::backlog::completed_tracked_items_in_components(
+        &content,
+        &components,
+    );
     if completed.is_empty() {
         return Ok(None);
     }
 
-    let refs = completed
-        .into_iter()
-        .map(|item| {
-            if item.id.is_empty() {
-                format!("<missing-id> {}", item.text)
-            } else {
-                format!("#{}", item.id)
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
+    let refs = agent_doc_element_backlog::backlog::tracked_item_refs(&completed).join(", ");
     if refs.is_empty() {
         return Ok(None);
     }
@@ -251,16 +240,6 @@ pub(crate) fn check_completed_pending_reap_guard(
         "[session-check] INTERRUPTED: document still contains completed tracked item(s) after closeout: {}. Re-run preflight/repair so the reap is persisted through the snapshot + commit boundary",
         refs
     )))
-}
-
-pub(crate) fn completed_pending_items(
-    body: &str,
-) -> Vec<agent_doc_element_backlog::backlog::PendingItem> {
-    let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(body);
-    items
-        .into_iter()
-        .filter(agent_doc_element_backlog::backlog::PendingItem::is_done)
-        .collect()
 }
 
 pub(crate) fn check_snapshot_committed_guard(

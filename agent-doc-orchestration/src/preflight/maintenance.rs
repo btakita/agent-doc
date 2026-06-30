@@ -2,8 +2,9 @@
 
 use super::*;
 use agent_doc_element_backlog::backlog::{
-    component_matches_tracked_surface, maintenance_surface_label, review_counts,
-    should_reap_already_done_mirrors, should_reap_ops_proof_completions, tracked_body_for_reorder,
+    component_matches_tracked_surface, ensure_no_completed_tracked_items,
+    maintenance_surface_label, review_counts, should_reap_already_done_mirrors,
+    should_reap_ops_proof_completions, tracked_body_for_reorder,
 };
 use agent_doc_queue::queue_response::{
     free_text_head_answered_by_response, queue_prompt_text_is_free_text,
@@ -115,7 +116,8 @@ fn run_pending_maintenance_with_options(
 
         let mut current_body = body.to_string();
         let surface_label = maintenance_surface_label(surface);
-        saw_completed_before |= !completed_pending_items(&current_body).is_empty();
+        saw_completed_before |=
+            !agent_doc_element_backlog::backlog::completed_items(&current_body).is_empty();
 
         let (after_backfill, changed) = agent_doc_element_backlog::backlog::backfill(
             &current_body,
@@ -683,43 +685,6 @@ fn run_gate_verify_with_options(
     }
 
     Ok(results)
-}
-
-pub(crate) fn ensure_no_completed_tracked_items(content: &str, surface: &str) -> Result<()> {
-    let components = agent_doc_element::element::parse(content).with_context(|| {
-        format!("failed to parse {surface} components during pending reap check")
-    })?;
-    let completed: Vec<agent_doc_element_backlog::backlog::PendingItem> = components
-        .into_iter()
-        .filter(|component| is_tracked_work_component(&component.name))
-        .flat_map(|component| completed_pending_items(component.content(content)))
-        .collect();
-    if completed.is_empty() {
-        return Ok(());
-    }
-
-    let refs = completed
-        .into_iter()
-        .map(|item| {
-            if item.id.is_empty() {
-                format!("<missing-id> {}", item.text)
-            } else {
-                format!("#{}", item.id)
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    anyhow::bail!("pending maintenance left completed tracked items in the {surface}: {refs}");
-}
-
-pub(crate) fn completed_pending_items(
-    body: &str,
-) -> Vec<agent_doc_element_backlog::backlog::PendingItem> {
-    let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(body);
-    items
-        .into_iter()
-        .filter(agent_doc_element_backlog::backlog::PendingItem::is_done)
-        .collect()
 }
 
 pub(crate) fn enforce_no_shadow_open_backlog(file: &Path) -> Result<()> {

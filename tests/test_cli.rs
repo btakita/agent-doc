@@ -9155,6 +9155,12 @@ fn test_agent_doc_element_backlog_owns_tracked_line_remove_and_prune_policy() {
         "pub fn should_reap_ops_proof_completions",
         "pub fn tracked_body_for_reorder",
         "pub fn review_counts",
+        "pub fn completed_items",
+        "pub fn completed_tracked_items_in_components",
+        "pub fn completed_tracked_items_in_content",
+        "pub fn tracked_item_ref",
+        "pub fn tracked_item_refs",
+        "pub fn ensure_no_completed_tracked_items",
         "pub fn trim_tracked_parent_prefix",
         "pub fn line_is_legacy_done_item",
         "pub fn op_remove_matching_tracked_line",
@@ -9237,18 +9243,44 @@ fn test_agent_doc_element_backlog_owns_tracked_line_remove_and_prune_policy() {
         "pub(crate) fn should_reap_ops_proof_completions",
         "pub(crate) fn tracked_body_for_reorder",
         "pub(crate) fn review_counts",
+        "pub(crate) fn ensure_no_completed_tracked_items",
+        "pub(crate) fn completed_pending_items",
+        "fn completed_pending_items",
     ] {
         assert!(
             !preflight_maintenance.contains(forbidden),
-            "preflight maintenance must stay an adapter, not re-own tracked-surface policy: {forbidden}"
+            "preflight maintenance must stay an adapter, not re-own tracked-work completion projection policy: {forbidden}"
         );
     }
     assert!(
         preflight_maintenance.contains("component_matches_tracked_surface")
             && preflight_maintenance.contains("maintenance_surface_label")
             && preflight_maintenance.contains("tracked_body_for_reorder")
-            && preflight_maintenance.contains("review_counts"),
-        "preflight maintenance should import tracked-surface policy from agent-doc-element-backlog"
+            && preflight_maintenance.contains("review_counts")
+            && preflight_maintenance.contains("ensure_no_completed_tracked_items")
+            && preflight_maintenance.contains("backlog::completed_items"),
+        "preflight maintenance should import tracked-surface/completion policy from agent-doc-element-backlog"
+    );
+
+    let response_guards = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/response_guards.rs"),
+    )
+    .unwrap();
+    for forbidden in [
+        "pub(crate) fn completed_pending_items",
+        "fn completed_pending_items",
+        "parse_items(component.content(&content))",
+        "PendingItem::is_done",
+    ] {
+        assert!(
+            !response_guards.contains(forbidden),
+            "response_guards must not re-own completed tracked-item projection policy: {forbidden}"
+        );
+    }
+    assert!(
+        response_guards.contains("backlog::completed_tracked_items_in_components")
+            && response_guards.contains("backlog::tracked_item_refs"),
+        "response_guards should call completed tracked-item projection policy from agent-doc-element-backlog"
     );
 }
 

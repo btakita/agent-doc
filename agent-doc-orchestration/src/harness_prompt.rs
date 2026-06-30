@@ -18,45 +18,36 @@
 //!   to open a cycle from the synthesized diff.
 
 use anyhow::Result;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[cfg(test)]
 pub static TEST_ENV_LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
     std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum InvocationKind {
-    Session,
-    Claim,
-    Compact,
-    CompactExchange,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ParsedInvocation {
-    kind: InvocationKind,
-    file: PathBuf,
-    body: String,
-}
-
 pub fn synthetic_diff_for_file(file: &Path) -> Result<Option<String>> {
     let Some(body) = prompt_body_for_file(file)? else {
         return Ok(None);
     };
-    Ok(Some(synthetic_diff_from_body(&body)))
+    Ok(Some(
+        agent_doc_prompt_contract::harness_prompt::synthetic_diff_from_body(&body),
+    ))
 }
 
 pub fn prompt_body_for_file(file: &Path) -> Result<Option<String>> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
 
     if let Ok(env_prompt) = std::env::var("AGENT_DOC_HARNESS_PROMPT")
-        && let Some(body) = prompt_body_from_text(&env_prompt, &canonical)
+        && let Some(body) = agent_doc_prompt_contract::harness_prompt::prompt_body_from_text(
+            &env_prompt,
+            &canonical,
+        )
     {
         return Ok(Some(body));
     }
 
     if let Some(prompt) = crate::codex_hook::load_prompt_for_current_session(&canonical)?
-        && let Some(body) = prompt_body_from_text(&prompt, &canonical)
+        && let Some(body) =
+            agent_doc_prompt_contract::harness_prompt::prompt_body_from_text(&prompt, &canonical)
     {
         return Ok(Some(body));
     }
@@ -64,96 +55,11 @@ pub fn prompt_body_for_file(file: &Path) -> Result<Option<String>> {
     Ok(None)
 }
 
-fn prompt_body_from_text(prompt: &str, file: &Path) -> Option<String> {
-    let trimmed = prompt.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    if let Some(invocation) = parse_agent_doc_invocation(prompt, file.parent().unwrap_or(file)) {
-        if invocation.kind == InvocationKind::Session
-            && same_file(&invocation.file, file)
-            && !invocation.body.is_empty()
-        {
-            return Some(invocation.body);
-        }
-        return None;
-    }
-
-    Some(trimmed.to_string())
-}
-
-fn same_file(lhs: &Path, rhs: &Path) -> bool {
-    let left = lhs.canonicalize().unwrap_or_else(|_| lhs.to_path_buf());
-    let right = rhs.canonicalize().unwrap_or_else(|_| rhs.to_path_buf());
-    left == right
-}
-
-fn synthetic_diff_from_body(body: &str) -> String {
-    agent_doc_diff::synthetic_added_lines_diff(body, "harness")
-}
-
-fn parse_agent_doc_invocation(prompt: &str, cwd: &Path) -> Option<ParsedInvocation> {
-    let mut lines = prompt.lines().enumerate();
-    let (first_idx, first_line) = lines.find(|(_, line)| !line.trim().is_empty())?;
-    let first_trimmed = first_line.trim();
-    let tokens = first_trimmed.split_whitespace().collect::<Vec<_>>();
-
-    let (kind, file_token, consumed_tokens) = match tokens.as_slice() {
-        ["agent-doc", "claim", file, ..] | ["/agent-doc", "claim", file, ..] => {
-            (InvocationKind::Claim, *file, 3usize)
-        }
-        ["agent-doc", "compact", "exchange", file, ..]
-        | ["/agent-doc", "compact", "exchange", file, ..] => {
-            (InvocationKind::CompactExchange, *file, 4usize)
-        }
-        ["agent-doc", "compact", file, ..] | ["/agent-doc", "compact", file, ..] => {
-            (InvocationKind::Compact, *file, 3usize)
-        }
-        ["agent-doc", file, ..] | ["/agent-doc", file, ..] => {
-            (InvocationKind::Session, *file, 2usize)
-        }
-        _ => return None,
-    };
-
-    let first_body = tokens
-        .iter()
-        .skip(consumed_tokens)
-        .copied()
-        .collect::<Vec<_>>()
-        .join(" ");
-    let remaining = prompt
-        .lines()
-        .enumerate()
-        .filter(|(idx, _)| *idx > first_idx)
-        .map(|(_, line)| line)
-        .collect::<Vec<_>>()
-        .join("\n");
-    let body = match (first_body.trim(), remaining.trim()) {
-        ("", "") => String::new(),
-        ("", rest) => rest.to_string(),
-        (head, "") => head.to_string(),
-        (head, rest) => format!("{head}\n{rest}"),
-    };
-
-    let path = PathBuf::from(file_token);
-    let resolved = if path.is_absolute() {
-        path
-    } else {
-        cwd.join(path)
-    };
-
-    Some(ParsedInvocation {
-        kind,
-        file: resolved.canonicalize().unwrap_or(resolved),
-        body: body.trim().to_string(),
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+    use std::path::PathBuf;
     use tempfile::TempDir;
 
     struct EnvGuard {
@@ -241,14 +147,6 @@ mod tests {
             prompt_body_for_file(&doc).unwrap(),
             Some("do #abcd. spec-test-build-install-commit-push".to_string())
         );
-    }
-
-    #[test]
-    fn synthetic_diff_wraps_prompt_body_as_added_lines() {
-        let diff = synthetic_diff_from_body("#agent-doc-bug\ndo #abcd");
-        assert!(diff.contains("+++ harness"));
-        assert!(diff.contains("+#agent-doc-bug"));
-        assert!(diff.contains("+do #abcd"));
     }
 
     #[test]

@@ -4644,6 +4644,9 @@ fn test_agent_doc_prompt_contract_owns_prompt_contract_policy() {
 
     let focused_source =
         fs::read_to_string(manifest_dir.join("agent-doc-prompt-contract/src/lib.rs")).unwrap();
+    let focused_harness_prompt_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-prompt-contract/src/harness_prompt.rs"))
+            .unwrap();
     for required_snippet in [
         "pub fn prompt_requests_plan_work(",
         "pub fn prompt_requests_backlog_work(",
@@ -4659,10 +4662,23 @@ fn test_agent_doc_prompt_contract_owns_prompt_contract_policy() {
         "fn referenced_presets_in_text(",
         "fn issue_units_in_text(",
         "agent_doc_fs::referenced_markdown_path_checked",
+        "pub mod harness_prompt;",
     ] {
         assert!(
             focused_source.contains(required_snippet),
             "agent-doc-prompt-contract must own prompt contract policy directly: {required_snippet}"
+        );
+    }
+    for required_snippet in [
+        "pub enum HarnessInvocationKind",
+        "pub struct ParsedHarnessInvocation",
+        "pub fn prompt_body_from_text(",
+        "pub fn synthetic_diff_from_body(",
+        "pub fn parse_agent_doc_invocation(",
+    ] {
+        assert!(
+            focused_harness_prompt_source.contains(required_snippet),
+            "agent-doc-prompt-contract must own harness prompt parsing policy directly: {required_snippet}"
         );
     }
 
@@ -4715,6 +4731,21 @@ fn test_agent_doc_prompt_contract_owns_prompt_contract_policy() {
                 "frontmatter::resolve_prompt_preset_key(&frontmatter_prompt_presets",
                 "let missing_prompt_presets =",
                 "prompt_presets_requested = prompt_presets_requested",
+            ],
+        ),
+        (
+            "agent-doc-orchestration/src/harness_prompt.rs",
+            vec![
+                "agent_doc_prompt_contract::harness_prompt::prompt_body_from_text",
+                "agent_doc_prompt_contract::harness_prompt::synthetic_diff_from_body",
+            ],
+            vec![
+                "enum InvocationKind",
+                "struct ParsedInvocation",
+                "fn prompt_body_from_text(",
+                "fn synthetic_diff_from_body(",
+                "fn parse_agent_doc_invocation(",
+                "fn same_file(",
             ],
         ),
     ] {

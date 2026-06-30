@@ -3,6 +3,8 @@ use indexmap::IndexMap;
 use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
+pub mod harness_prompt;
+
 const BACKLOG_SIGNALS: &[&str] = &[
     "tasks",
     "todo",

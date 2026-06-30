@@ -6,6 +6,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.34.65
 
+- **Tmux input diagnostic formatting moved to `agent-doc-tmux-commands`.**
+  Structured input-event field sanitization, payload hashing, byte/key naming,
+  editor-route attempt-id correlation, and verbose-diagnostic gating now live in
+  `agent_doc_tmux_commands::input_diag`. Orchestration keeps only the
+  stderr/ops-log emission adapter.
+
 - **Auto-DAG schedule kernel moved to `agent-doc-work-graph`.** The schedule
   model, task parser, session-review guard classifier, blocker wording, and node
   readiness/state-transition policy now live in

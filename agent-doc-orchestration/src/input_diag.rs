@@ -1,49 +1,10 @@
-//! Structured diagnostics for tmux and supervisor input delivery.
+//! Effectful diagnostics adapter for tmux and supervisor input delivery.
 //!
-//! These helpers intentionally avoid logging raw prompt text. Input payloads
-//! are represented by byte length and SHA-256 so tests and operators can prove
-//! which delivery path ran without leaking typed content into logs.
+//! Pure structured formatting policy lives in `agent-doc-tmux-commands`.
+//! This module only mirrors opted-in diagnostics to stderr and writes ops.log.
 
-use sha2::{Digest, Sha256};
+use agent_doc_tmux_commands::input_diag::{self, KeyEventMeta};
 use std::path::Path;
-
-const PREFIX: &str = "tmux_input_event";
-const EDITOR_ROUTE_ATTEMPT_ID_ENV: &str = "AGENT_DOC_EDITOR_ROUTE_ATTEMPT_ID";
-
-#[derive(Clone, Copy, Default)]
-pub struct KeyEventMeta<'a> {
-    pub harness: Option<&'a str>,
-    pub detail: Option<&'a str>,
-}
-
-fn sanitize_field(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for ch in value.chars() {
-        if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | ':' | '/' | '%' | '=') {
-            out.push(ch);
-        } else {
-            out.push('_');
-        }
-    }
-    if out.is_empty() {
-        "none".to_string()
-    } else {
-        out
-    }
-}
-
-fn editor_route_attempt_id() -> Option<String> {
-    std::env::var(EDITOR_ROUTE_ATTEMPT_ID_ENV)
-        .ok()
-        .map(|value| sanitize_field(&value))
-        .filter(|value| !value.is_empty())
-}
-
-fn bytes_hash(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    hex::encode(hasher.finalize())
-}
 
 fn emit(file: Option<&Path>, message: String) {
     // Input-delivery diagnostics are debug-level. Writing them to stderr
@@ -51,46 +12,12 @@ fn emit(file: Option<&Path>, message: String) {
     // OpenCode), interleaving with its status line. Keep the durable record in
     // ops.log always, but only surface on stderr when the operator opted into
     // verbose input diagnostics. (#opencode-stdout-bleed)
-    if verbose_enabled() {
+    if input_diag::verbose_enabled() {
         eprintln!("[agent-doc] {message}");
     }
     if let Some(file) = file {
         crate::ops_log::log_op(file, &message);
     }
-}
-
-pub fn verbose_enabled() -> bool {
-    std::env::var_os("AGENT_DOC_TMUX_INPUT_DIAG").is_some()
-        || std::env::var_os("AGENT_DOC_DEBUG_STDIN").is_some()
-}
-
-pub fn format_key_event(
-    source: &str,
-    destination: &str,
-    transform: &str,
-    key: &str,
-    bytes: usize,
-    harness: Option<&str>,
-    detail: Option<&str>,
-) -> String {
-    let mut message = format!(
-        "{PREFIX} source={} destination={} transform={} key={} bytes={}",
-        sanitize_field(source),
-        sanitize_field(destination),
-        sanitize_field(transform),
-        sanitize_field(key),
-        bytes
-    );
-    if let Some(harness) = harness {
-        message.push_str(&format!(" harness={}", sanitize_field(harness)));
-    }
-    if let Some(detail) = detail {
-        message.push_str(&format!(" detail={}", sanitize_field(detail)));
-    }
-    if let Some(attempt_id) = editor_route_attempt_id() {
-        message.push_str(&format!(" editor_attempt_id={attempt_id}"));
-    }
-    message
 }
 
 pub fn log_key_event(
@@ -104,7 +31,7 @@ pub fn log_key_event(
 ) {
     emit(
         file,
-        format_key_event(
+        input_diag::format_key_event(
             source,
             destination,
             transform,
@@ -125,29 +52,9 @@ pub fn log_key_event_verbose(
     bytes: usize,
     meta: KeyEventMeta<'_>,
 ) {
-    if verbose_enabled() {
+    if input_diag::verbose_enabled() {
         log_key_event(file, source, destination, transform, key, bytes, meta);
     }
-}
-
-pub fn format_payload_event(
-    source: &str,
-    destination: &str,
-    transform: &str,
-    key: &str,
-    bytes: &[u8],
-    harness: Option<&str>,
-) -> String {
-    let detail = format!("sha256={}", bytes_hash(bytes));
-    format_key_event(
-        source,
-        destination,
-        transform,
-        key,
-        bytes.len(),
-        harness,
-        Some(&detail),
-    )
 }
 
 pub fn log_text_submit(
@@ -161,7 +68,7 @@ pub fn log_text_submit(
 ) {
     emit(
         file,
-        format_payload_event(
+        input_diag::format_payload_event(
             source,
             destination,
             transform,
@@ -184,19 +91,6 @@ pub fn log_text_submit(
     );
 }
 
-fn key_name(byte: u8) -> &'static str {
-    match byte {
-        b'\r' | b'\n' => "Enter",
-        b'\t' => "Tab",
-        0x1b => "Escape",
-        0x03 => "Ctrl-C",
-        0x04 => "Ctrl-D",
-        0x7f => "Backspace",
-        0x20..=0x7e => "Printable",
-        _ => "Byte",
-    }
-}
-
 pub fn log_byte_events(
     file: Option<&Path>,
     source: &str,
@@ -206,18 +100,9 @@ pub fn log_byte_events(
     harness: Option<&str>,
 ) {
     for byte in bytes {
-        let detail = format!("hex={byte:02x}");
-        log_key_event(
+        emit(
             file,
-            source,
-            destination,
-            transform,
-            key_name(*byte),
-            1,
-            KeyEventMeta {
-                harness,
-                detail: Some(&detail),
-            },
+            input_diag::format_byte_event(source, destination, transform, *byte, harness),
         );
     }
 }
@@ -231,24 +116,9 @@ pub fn log_transform_event(
     after: &[u8],
     harness: Option<&str>,
 ) {
-    let detail = format!(
-        "before_len={} before_sha256={} after_len={} after_sha256={}",
-        before.len(),
-        bytes_hash(before),
-        after.len(),
-        bytes_hash(after)
-    );
-    log_key_event(
+    emit(
         file,
-        source,
-        destination,
-        transform,
-        "transform",
-        after.len(),
-        KeyEventMeta {
-            harness,
-            detail: Some(&detail),
-        },
+        input_diag::format_transform_event(source, destination, transform, before, after, harness),
     );
 }
 
@@ -260,137 +130,8 @@ pub fn log_prompt_detection(
     reason: &str,
     state: &str,
 ) {
-    log_key_event(
+    emit(
         file,
-        source,
-        destination,
-        "permission_prompt_detection",
-        "permission_prompt",
-        0,
-        KeyEventMeta {
-            harness: Some(harness),
-            detail: Some(&format!("state={state}_reason={}", sanitize_field(reason))),
-        },
+        input_diag::format_prompt_detection(source, destination, harness, reason, state),
     );
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct EnvGuard {
-        key: &'static str,
-        prior: Option<String>,
-        _lock: crate::test_support::ProcessGlobalLockGuard,
-    }
-
-    impl EnvGuard {
-        fn set(key: &'static str, value: &str) -> Self {
-            let lock = crate::test_support::env_lock();
-            let prior = std::env::var(key).ok();
-            unsafe {
-                std::env::set_var(key, value);
-            }
-            Self {
-                key,
-                prior,
-                _lock: lock,
-            }
-        }
-
-        fn remove(key: &'static str) -> Self {
-            let lock = crate::test_support::env_lock();
-            let prior = std::env::var(key).ok();
-            unsafe {
-                std::env::remove_var(key);
-            }
-            Self {
-                key,
-                prior,
-                _lock: lock,
-            }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            unsafe {
-                match &self.prior {
-                    Some(value) => std::env::set_var(self.key, value),
-                    None => std::env::remove_var(self.key),
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn key_event_format_is_structured_and_sanitized() {
-        // `format_key_event` appends `editor_attempt_id=` when the process-global
-        // `AGENT_DOC_EDITOR_ROUTE_ATTEMPT_ID` env var is set. A concurrent
-        // `input_events_include_editor_route_attempt_when_present` would otherwise
-        // race that var into this exact-match assertion (`#kbkz`: env-var pollution
-        // made `make check` non-deterministically RED). Hold the env lock and pin
-        // the var absent for this test's duration so the read is deterministic.
-        let _attempt_guard = EnvGuard::remove(EDITOR_ROUTE_ATTEMPT_ID_ENV);
-        let event = format_key_event(
-            "route direct",
-            "pane:%42",
-            "text+enter",
-            "Enter",
-            5,
-            Some("open code"),
-            Some("reason=active permission prompt"),
-        );
-
-        assert_eq!(
-            event,
-            "tmux_input_event source=route_direct destination=pane:%42 transform=text_enter key=Enter bytes=5 harness=open_code detail=reason=active_permission_prompt"
-        );
-    }
-
-    #[test]
-    fn payload_event_hashes_text_without_exposing_it() {
-        // Same `#kbkz` env-pollution guard: pin `AGENT_DOC_EDITOR_ROUTE_ATTEMPT_ID`
-        // absent so a concurrent setter cannot perturb this event's contents.
-        let _attempt_guard = EnvGuard::remove(EDITOR_ROUTE_ATTEMPT_ID_ENV);
-        let event = format_payload_event(
-            "queue_dispatch",
-            "pane:%7",
-            "tmux_submit",
-            "text",
-            b"/clear",
-            Some("codex"),
-        );
-
-        assert!(event.contains("tmux_input_event source=queue_dispatch"));
-        assert!(event.contains("bytes=6"));
-        assert!(event.contains("sha256="));
-        assert!(!event.contains("/clear"));
-    }
-
-    #[test]
-    fn input_events_include_editor_route_attempt_when_present() {
-        let _attempt_guard = EnvGuard::set(EDITOR_ROUTE_ATTEMPT_ID_ENV, "attempt 1/2");
-        let event = format_key_event(
-            "route.direct_pane_submit",
-            "pane:%42",
-            "tmux_text_enter",
-            "Enter",
-            5,
-            Some("codex"),
-            None,
-        );
-
-        assert!(event.contains("editor_attempt_id=attempt_1/2"), "{event}");
-    }
-
-    #[test]
-    fn verbose_input_diagnostics_are_opt_in() {
-        let _diag_guard = EnvGuard::remove("AGENT_DOC_TMUX_INPUT_DIAG");
-        let _stdin_guard = EnvGuard::remove("AGENT_DOC_DEBUG_STDIN");
-        assert!(!verbose_enabled());
-
-        let _diag_enabled = EnvGuard::set("AGENT_DOC_TMUX_INPUT_DIAG", "1");
-        assert!(verbose_enabled());
-    }
 }

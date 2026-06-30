@@ -460,10 +460,8 @@ const DIRECT_PANE_SUBMIT_ACCEPTANCE_POLL_INTERVAL: Duration = Duration::from_mil
 /// observations to debounce a transient prompt flicker.
 const AGENT_READY_POLL_INTERVAL: Duration = Duration::from_millis(150);
 
-const EDITOR_ROUTE_ATTEMPT_ID_ENV: &str = "AGENT_DOC_EDITOR_ROUTE_ATTEMPT_ID";
-
 fn editor_route_attempt_id() -> Option<String> {
-    std::env::var(EDITOR_ROUTE_ATTEMPT_ID_ENV)
+    std::env::var(agent_doc_tmux_commands::input_diag::EDITOR_ROUTE_ATTEMPT_ID_ENV)
         .ok()
         .map(|value| route_snapshot_field(&value))
         .filter(|value| !value.is_empty())
@@ -6821,7 +6819,10 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
 
     #[test]
     fn route_diagnostics_include_editor_attempt_id_when_present() {
-        let _attempt = EnvGuard::set(EDITOR_ROUTE_ATTEMPT_ID_ENV, "attempt 1/2");
+        let _attempt = EnvGuard::set(
+            agent_doc_tmux_commands::input_diag::EDITOR_ROUTE_ATTEMPT_ID_ENV,
+            "attempt 1/2",
+        );
         let harness = HarnessConfig::codex();
         let editor_attempt_id = editor_route_attempt_id();
         let latency = route_latency_message(RouteLatencyFacts {

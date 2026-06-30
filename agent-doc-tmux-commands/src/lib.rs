@@ -189,6 +189,354 @@ fn push_optional_target(args: &mut Vec<String>, target: Option<&str>) {
     }
 }
 
+pub mod input_diag {
+    //! Pure structured formatting policy for tmux and supervisor input delivery.
+    //!
+    //! These helpers intentionally avoid logging raw prompt text. Input payloads
+    //! are represented by byte length and SHA-256 so tests and operators can
+    //! prove which delivery path ran without leaking typed content into logs.
+
+    use sha2::{Digest, Sha256};
+
+    pub const PREFIX: &str = "tmux_input_event";
+    pub const EDITOR_ROUTE_ATTEMPT_ID_ENV: &str = "AGENT_DOC_EDITOR_ROUTE_ATTEMPT_ID";
+
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct KeyEventMeta<'a> {
+        pub harness: Option<&'a str>,
+        pub detail: Option<&'a str>,
+    }
+
+    pub fn sanitize_field(value: &str) -> String {
+        let mut out = String::with_capacity(value.len());
+        for ch in value.chars() {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | ':' | '/' | '%' | '=') {
+                out.push(ch);
+            } else {
+                out.push('_');
+            }
+        }
+        if out.is_empty() {
+            "none".to_string()
+        } else {
+            out
+        }
+    }
+
+    fn editor_route_attempt_id() -> Option<String> {
+        std::env::var(EDITOR_ROUTE_ATTEMPT_ID_ENV)
+            .ok()
+            .map(|value| sanitize_field(&value))
+            .filter(|value| !value.is_empty())
+    }
+
+    pub fn bytes_hash(bytes: &[u8]) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(bytes);
+        hex::encode(hasher.finalize())
+    }
+
+    pub fn verbose_enabled() -> bool {
+        std::env::var_os("AGENT_DOC_TMUX_INPUT_DIAG").is_some()
+            || std::env::var_os("AGENT_DOC_DEBUG_STDIN").is_some()
+    }
+
+    pub fn format_key_event(
+        source: &str,
+        destination: &str,
+        transform: &str,
+        key: &str,
+        bytes: usize,
+        harness: Option<&str>,
+        detail: Option<&str>,
+    ) -> String {
+        let mut message = format!(
+            "{PREFIX} source={} destination={} transform={} key={} bytes={}",
+            sanitize_field(source),
+            sanitize_field(destination),
+            sanitize_field(transform),
+            sanitize_field(key),
+            bytes
+        );
+        if let Some(harness) = harness {
+            message.push_str(&format!(" harness={}", sanitize_field(harness)));
+        }
+        if let Some(detail) = detail {
+            message.push_str(&format!(" detail={}", sanitize_field(detail)));
+        }
+        if let Some(attempt_id) = editor_route_attempt_id() {
+            message.push_str(&format!(" editor_attempt_id={attempt_id}"));
+        }
+        message
+    }
+
+    pub fn format_payload_event(
+        source: &str,
+        destination: &str,
+        transform: &str,
+        key: &str,
+        bytes: &[u8],
+        harness: Option<&str>,
+    ) -> String {
+        let detail = format!("sha256={}", bytes_hash(bytes));
+        format_key_event(
+            source,
+            destination,
+            transform,
+            key,
+            bytes.len(),
+            harness,
+            Some(&detail),
+        )
+    }
+
+    pub fn key_name(byte: u8) -> &'static str {
+        match byte {
+            b'\r' | b'\n' => "Enter",
+            b'\t' => "Tab",
+            0x1b => "Escape",
+            0x03 => "Ctrl-C",
+            0x04 => "Ctrl-D",
+            0x7f => "Backspace",
+            0x20..=0x7e => "Printable",
+            _ => "Byte",
+        }
+    }
+
+    pub fn format_byte_event(
+        source: &str,
+        destination: &str,
+        transform: &str,
+        byte: u8,
+        harness: Option<&str>,
+    ) -> String {
+        let detail = format!("hex={byte:02x}");
+        format_key_event(
+            source,
+            destination,
+            transform,
+            key_name(byte),
+            1,
+            harness,
+            Some(&detail),
+        )
+    }
+
+    pub fn format_transform_event(
+        source: &str,
+        destination: &str,
+        transform: &str,
+        before: &[u8],
+        after: &[u8],
+        harness: Option<&str>,
+    ) -> String {
+        let detail = format!(
+            "before_len={} before_sha256={} after_len={} after_sha256={}",
+            before.len(),
+            bytes_hash(before),
+            after.len(),
+            bytes_hash(after)
+        );
+        format_key_event(
+            source,
+            destination,
+            transform,
+            "transform",
+            after.len(),
+            harness,
+            Some(&detail),
+        )
+    }
+
+    pub fn format_prompt_detection(
+        source: &str,
+        destination: &str,
+        harness: &str,
+        reason: &str,
+        state: &str,
+    ) -> String {
+        let detail = format!("state={state}_reason={}", sanitize_field(reason));
+        format_key_event(
+            source,
+            destination,
+            "permission_prompt_detection",
+            "permission_prompt",
+            0,
+            Some(harness),
+            Some(&detail),
+        )
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use std::sync::Mutex;
+
+        static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+        struct EnvSnapshot {
+            entries: Vec<(&'static str, Option<String>)>,
+        }
+
+        impl EnvSnapshot {
+            fn capture(keys: &[&'static str]) -> Self {
+                Self {
+                    entries: keys
+                        .iter()
+                        .copied()
+                        .map(|key| (key, std::env::var(key).ok()))
+                        .collect(),
+                }
+            }
+        }
+
+        impl Drop for EnvSnapshot {
+            fn drop(&mut self) {
+                for (key, prior) in self.entries.iter().rev() {
+                    unsafe {
+                        match prior {
+                            Some(value) => std::env::set_var(key, value),
+                            None => std::env::remove_var(key),
+                        }
+                    }
+                }
+            }
+        }
+
+        fn set_env(key: &'static str, value: &str) {
+            unsafe {
+                std::env::set_var(key, value);
+            }
+        }
+
+        fn remove_env(key: &'static str) {
+            unsafe {
+                std::env::remove_var(key);
+            }
+        }
+
+        #[test]
+        fn key_event_format_is_structured_and_sanitized() {
+            let _lock = ENV_LOCK.lock().unwrap();
+            let _env = EnvSnapshot::capture(&[EDITOR_ROUTE_ATTEMPT_ID_ENV]);
+            remove_env(EDITOR_ROUTE_ATTEMPT_ID_ENV);
+
+            let event = format_key_event(
+                "route direct",
+                "pane:%42",
+                "text+enter",
+                "Enter",
+                5,
+                Some("open code"),
+                Some("reason=active permission prompt"),
+            );
+
+            assert_eq!(
+                event,
+                "tmux_input_event source=route_direct destination=pane:%42 transform=text_enter key=Enter bytes=5 harness=open_code detail=reason=active_permission_prompt"
+            );
+        }
+
+        #[test]
+        fn payload_event_hashes_text_without_exposing_it() {
+            let _lock = ENV_LOCK.lock().unwrap();
+            let _env = EnvSnapshot::capture(&[EDITOR_ROUTE_ATTEMPT_ID_ENV]);
+            remove_env(EDITOR_ROUTE_ATTEMPT_ID_ENV);
+
+            let event = format_payload_event(
+                "queue_dispatch",
+                "pane:%7",
+                "tmux_submit",
+                "text",
+                b"/clear",
+                Some("codex"),
+            );
+
+            assert!(event.contains("tmux_input_event source=queue_dispatch"));
+            assert!(event.contains("bytes=6"));
+            assert!(event.contains(
+                "sha256=ddf7839cb8fca09abdd9e9b0b2f498885f382f5bf9fec65d95db793bd0f11832"
+            ));
+            assert!(!event.contains("/clear"));
+            assert_eq!(
+                bytes_hash(b"/clear"),
+                "ddf7839cb8fca09abdd9e9b0b2f498885f382f5bf9fec65d95db793bd0f11832"
+            );
+        }
+
+        #[test]
+        fn input_events_include_editor_route_attempt_when_present() {
+            let _lock = ENV_LOCK.lock().unwrap();
+            let _env = EnvSnapshot::capture(&[EDITOR_ROUTE_ATTEMPT_ID_ENV]);
+            set_env(EDITOR_ROUTE_ATTEMPT_ID_ENV, "attempt 1/2");
+
+            let event = format_key_event(
+                "route.direct_pane_submit",
+                "pane:%42",
+                "tmux_text_enter",
+                "Enter",
+                5,
+                Some("codex"),
+                None,
+            );
+
+            assert!(event.contains("editor_attempt_id=attempt_1/2"), "{event}");
+        }
+
+        #[test]
+        fn byte_transform_and_prompt_events_share_structured_policy() {
+            let _lock = ENV_LOCK.lock().unwrap();
+            let _env = EnvSnapshot::capture(&[EDITOR_ROUTE_ATTEMPT_ID_ENV]);
+            remove_env(EDITOR_ROUTE_ATTEMPT_ID_ENV);
+
+            let byte = format_byte_event("supervisor.stdin", "child pty", "raw", 0x03, None);
+            assert_eq!(
+                byte,
+                "tmux_input_event source=supervisor.stdin destination=child_pty transform=raw key=Ctrl-C bytes=1 detail=hex=03"
+            );
+
+            let transform = format_transform_event(
+                "supervisor.stdin",
+                "child_pty",
+                "arrow_translation",
+                b"\x1b[A",
+                b"j",
+                Some("opencode"),
+            );
+            assert!(transform.contains("key=transform bytes=1 harness=opencode"));
+            assert!(transform.contains("before_len=3"));
+            assert!(transform.contains("after_len=1"));
+            assert!(transform.contains("before_sha256="));
+            assert!(transform.contains("after_sha256="));
+
+            let prompt = format_prompt_detection(
+                "supervisor.stdout",
+                "route",
+                "codex",
+                "active permission prompt",
+                "visible",
+            );
+            assert_eq!(
+                prompt,
+                "tmux_input_event source=supervisor.stdout destination=route transform=permission_prompt_detection key=permission_prompt bytes=0 harness=codex detail=state=visible_reason=active_permission_prompt"
+            );
+        }
+
+        #[test]
+        fn verbose_input_diagnostics_are_opt_in() {
+            let _lock = ENV_LOCK.lock().unwrap();
+            let _env =
+                EnvSnapshot::capture(&["AGENT_DOC_TMUX_INPUT_DIAG", "AGENT_DOC_DEBUG_STDIN"]);
+            remove_env("AGENT_DOC_TMUX_INPUT_DIAG");
+            remove_env("AGENT_DOC_DEBUG_STDIN");
+            assert!(!verbose_enabled());
+
+            set_env("AGENT_DOC_TMUX_INPUT_DIAG", "1");
+            assert!(verbose_enabled());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

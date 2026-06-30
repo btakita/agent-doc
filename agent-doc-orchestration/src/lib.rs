@@ -16,10 +16,8 @@
 //! Pulled project-root discovery and optional file reads into `agent-doc-fs`
 //! so effectful adapters no longer reach through `snapshot`.
 //! Direction A, increment 5: `input_diag` — structured tmux/supervisor input
-//! diagnostics (production-dep on `ops_log` only). Brings a self-contained
-//! `#[cfg(test)] test_support` (crate-local `TEST_ENV_LOCK`) for its
-//! env-mutating tests, since orchestration's test binary is independent of the
-//! main crate's.
+//! diagnostic emission. Pure formatting/hash/gating policy now lives in
+//! `agent-doc-tmux-commands`; orchestration keeps only stderr/ops-log adapters.
 //! Direction A, increment 6 (big-bang): the entire entangled cluster +
 //! sessions/supervisor + neighbors moved in one migration. Orchestration now
 //! depends on focused crates directly for extracted document, merge, turn, and

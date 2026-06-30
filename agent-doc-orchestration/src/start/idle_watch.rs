@@ -2865,7 +2865,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 // surface on stderr under verbose input diag so it
                                 // does not bleed in front of a full-screen harness
                                 // TUI (e.g. OpenCode). (#opencode-stdout-bleed)
-                                if crate::input_diag::verbose_enabled() {
+                                if agent_doc_tmux_commands::input_diag::verbose_enabled() {
                                     eprintln!(
                                         "[agent-doc] idle-queue watch: drained active queue head via {payload_kind}",
                                     );

@@ -196,7 +196,7 @@ impl Multiplexer for Tmux {
             "tmux_send_key",
             key,
             key.len(),
-            crate::input_diag::KeyEventMeta::default(),
+            agent_doc_tmux_commands::input_diag::KeyEventMeta::default(),
         );
         Tmux::send_key(self, pane_id, key)
     }

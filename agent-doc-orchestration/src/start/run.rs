@@ -24,7 +24,7 @@ fn start_console_status(
     message: impl AsRef<str>,
 ) {
     let message = message.as_ref();
-    let printed = !route_owned || crate::input_diag::verbose_enabled();
+    let printed = !route_owned || agent_doc_tmux_commands::input_diag::verbose_enabled();
     log_event(
         session_log,
         &format!(

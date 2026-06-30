@@ -6503,6 +6503,112 @@ fn test_agent_doc_tmux_commands_owns_submit_profile_policy() {
 }
 
 #[test]
+fn test_agent_doc_tmux_commands_owns_input_diag_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let tmux_commands_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-tmux-commands/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&tmux_commands_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+
+    let tmux_commands_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-tmux-commands/src/lib.rs")).unwrap();
+    for required in [
+        "pub mod input_diag",
+        "pub const PREFIX",
+        "pub const EDITOR_ROUTE_ATTEMPT_ID_ENV",
+        "pub struct KeyEventMeta",
+        "pub fn sanitize_field(",
+        "pub fn bytes_hash(",
+        "pub fn key_name(",
+        "pub fn verbose_enabled(",
+        "pub fn format_key_event(",
+        "pub fn format_payload_event(",
+        "pub fn format_byte_event(",
+        "pub fn format_transform_event(",
+        "pub fn format_prompt_detection(",
+    ] {
+        assert!(
+            tmux_commands_source.contains(required),
+            "agent-doc-tmux-commands must own pure input diagnostic policy: {required}"
+        );
+    }
+
+    let orchestration_input_diag =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/input_diag.rs")).unwrap();
+    for forbidden in [
+        "const PREFIX",
+        "EDITOR_ROUTE_ATTEMPT_ID_ENV",
+        "pub struct KeyEventMeta",
+        "fn sanitize_field(",
+        "fn bytes_hash(",
+        "fn key_name(",
+        "pub fn verbose_enabled(",
+        "pub fn format_key_event(",
+        "pub fn format_payload_event(",
+        "pub fn format_byte_event(",
+        "pub fn format_transform_event(",
+        "pub fn format_prompt_detection(",
+        "pub use agent_doc_tmux_commands::input_diag",
+        "use sha2::",
+    ] {
+        assert!(
+            !orchestration_input_diag.contains(forbidden),
+            "orchestration input_diag must stay an effectful adapter, not re-own pure policy: {forbidden}"
+        );
+    }
+    assert!(
+        orchestration_input_diag.contains("input_diag::format_key_event(")
+            && orchestration_input_diag.contains("input_diag::format_payload_event(")
+            && orchestration_input_diag.contains("input_diag::format_byte_event(")
+            && orchestration_input_diag.contains("input_diag::format_transform_event(")
+            && orchestration_input_diag.contains("input_diag::format_prompt_detection("),
+        "orchestration input_diag should call focused formatters directly"
+    );
+
+    for relative in [
+        "src/queue_dispatch.rs",
+        "agent-doc-orchestration/src/run.rs",
+        "agent-doc-orchestration/src/route.rs",
+        "agent-doc-orchestration/src/sessions.rs",
+        "agent-doc-orchestration/src/start/run.rs",
+        "agent-doc-orchestration/src/start.rs",
+        "agent-doc-orchestration/src/start/idle_watch.rs",
+        "agent-doc-orchestration/src/start/supervisor_io.rs",
+        "agent-doc-orchestration/src/supervisor/pty.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            !source.contains("crate::input_diag::verbose_enabled(")
+                && !source.contains("agent_doc_orchestration::input_diag::verbose_enabled(")
+                && !source.contains("crate::input_diag::KeyEventMeta")
+                && !source.contains("agent_doc_orchestration::input_diag::KeyEventMeta"),
+            "{relative} should call focused input diagnostic gates/data directly"
+        );
+    }
+    let route_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+    assert!(
+        !route_source.contains("const EDITOR_ROUTE_ATTEMPT_ID_ENV"),
+        "route diagnostics should use the focused editor route attempt-id env constant"
+    );
+
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-tmux-commands input diagnostic policy must stay free of orchestration, git, editor IPC, sqlite, or tmux-router effects"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_document_owns_status_projection_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let document_status =

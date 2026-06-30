@@ -1369,7 +1369,7 @@ fn spawn_auto_trigger_thread(
                             // Already in session_log; gate stderr so repeated
                             // drain-cycle triggers don't bleed in front of a
                             // full-screen harness TUI. (#opencode-stdout-bleed)
-                            if crate::input_diag::verbose_enabled() {
+                            if agent_doc_tmux_commands::input_diag::verbose_enabled() {
                                 eprintln!("[agent-doc] auto-triggered: {}", trigger_cmd);
                             }
                         }
@@ -1390,7 +1390,7 @@ fn spawn_auto_trigger_thread(
                                 ),
                             );
                             // Already in session_log; gate stderr (#opencode-stdout-bleed).
-                            if crate::input_diag::verbose_enabled() {
+                            if agent_doc_tmux_commands::input_diag::verbose_enabled() {
                                 eprintln!("[agent-doc] auto-trigger failed");
                             }
                         }

@@ -239,7 +239,9 @@ impl RunStderrRedirect {
 }
 
 fn run_stderr_redirect_needed() -> bool {
-    if crate::input_diag::verbose_enabled() || std::env::var_os("TMUX_PANE").is_none() {
+    if agent_doc_tmux_commands::input_diag::verbose_enabled()
+        || std::env::var_os("TMUX_PANE").is_none()
+    {
         return false;
     }
     if std::env::var_os("AGENT_DOC_FORCE_RUN_STDERR_REDIRECT").is_none()

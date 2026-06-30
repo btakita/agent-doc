@@ -560,7 +560,7 @@ pub(crate) fn spawn_writer_thread(
                         );
                     }
                     let data = maybe_translated.as_deref().unwrap_or(data);
-                    if crate::input_diag::verbose_enabled() {
+                    if agent_doc_tmux_commands::input_diag::verbose_enabled() {
                         crate::input_diag::log_byte_events(
                             None,
                             "supervisor.stdin",
@@ -651,7 +651,7 @@ pub(crate) fn spawn_writer_thread(
                                 flag.store(true, Ordering::Relaxed);
                             }
                         }
-                        if crate::input_diag::verbose_enabled() {
+                        if agent_doc_tmux_commands::input_diag::verbose_enabled() {
                             crate::input_diag::log_byte_events(
                                 None,
                                 "supervisor.stdin",

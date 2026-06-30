@@ -262,7 +262,7 @@ impl PtySession {
                     match lock.read(&mut buf) {
                         Ok(0) => break, // parent stdin closed
                         Ok(n) => {
-                            if crate::input_diag::verbose_enabled() {
+                            if agent_doc_tmux_commands::input_diag::verbose_enabled() {
                                 crate::input_diag::log_byte_events(
                                     None,
                                     "supervisor.forward_stdio",
@@ -790,7 +790,7 @@ impl PtyFilter {
                                 },
                                 key,
                                 i - start,
-                                crate::input_diag::KeyEventMeta {
+                                agent_doc_tmux_commands::input_diag::KeyEventMeta {
                                     harness: None,
                                     detail: Some(if self.preserve_kitty_keyboard {
                                         "preserve_kitty_keyboard=true"
@@ -811,7 +811,7 @@ impl PtyFilter {
                                 },
                                 "kitty_keyboard_pop",
                                 i - start,
-                                crate::input_diag::KeyEventMeta {
+                                agent_doc_tmux_commands::input_diag::KeyEventMeta {
                                     harness: None,
                                     detail: Some(if self.preserve_kitty_keyboard {
                                         "preserve_kitty_keyboard=true"

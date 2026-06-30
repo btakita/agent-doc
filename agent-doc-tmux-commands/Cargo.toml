@@ -10,4 +10,6 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_tmux_commands"
 
 [dependencies]
+hex = "0.4"
 serde = { version = "1", features = ["derive"] }
+sha2 = "0.11"

@@ -157,7 +157,7 @@ fn item_fingerprint(item: &QueueItem) -> String {
 
 fn log_dispatch_progress(ctx: &DispatchContext, event: String) {
     agent_doc_orchestration::ops_log::log_op(&ctx.file, &event);
-    if agent_doc_orchestration::input_diag::verbose_enabled() {
+    if agent_doc_tmux_commands::input_diag::verbose_enabled() {
         eprintln!("[queue_dispatch] {event}");
     }
 }
@@ -532,7 +532,7 @@ mod tests {
         let _diag_guard = EnvGuard::remove("AGENT_DOC_TMUX_INPUT_DIAG");
         let _stdin_guard = EnvGuard::remove("AGENT_DOC_DEBUG_STDIN");
         assert!(
-            !agent_doc_orchestration::input_diag::verbose_enabled(),
+            !agent_doc_tmux_commands::input_diag::verbose_enabled(),
             "non-verbose queue dispatch must not mirror progress into the foreground TUI"
         );
 

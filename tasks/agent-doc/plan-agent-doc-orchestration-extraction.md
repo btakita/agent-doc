@@ -727,6 +727,13 @@ should be deleted during extraction.
   into throttle/run decisions. Orchestration keeps stamp-file IO, clocks, logs,
   tmux command effects, and user-facing throttle output while calling the
   focused tmux policy directly.
+- `agent-doc-tmux` now owns pane foreground-process classification policy:
+  classifying `#{pane_current_command}` as agent, idle shell, foreign, or
+  transient, and folding a brief sample window into a stable process decision.
+  Resync keeps tmux sampling, sleeps, registry fixes, pane moves, and kill
+  effects while importing the focused classifier directly; the old
+  `AGENT_PROCESSES` / `IDLE_SHELLS` arrays and local `PaneProcessKind` were
+  deleted instead of preserved as wrappers.
 - `agent-doc-session-accretion` now owns context-reset policy: resolving the
   default-off queue context-reset opt-in from frontmatter/project facts,
   resolving and clamping `/clear` context thresholds, and formatting recent

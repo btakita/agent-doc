@@ -238,6 +238,7 @@ use agent_doc_queue::queue_prompt_drift::{
     dropped_queue_prompt_lines_after_content_ours, preserve_content_ours_over_live_queue_deletions,
     queue_prompt_deletions_between,
 };
+use agent_doc_turn::closeout_signal::line_is_carry_forward_signal;
 
 use crate::{
     flow::document_mutation::{TemplateStructureGuardReason, log_template_structure_guard_event},
@@ -597,75 +598,6 @@ fn added_nonblank_lines(baseline: &str, candidate: &str) -> Vec<String> {
         .filter(|l| !l.is_empty() && !base.contains(l))
         .map(|l| l.to_string())
         .collect()
-}
-
-/// True when a user-added line is a next-cycle instruction that `#fintol2` must
-/// carry forward rather than fold into the commit: a prompt target (`❯ …`,
-/// `do #…`), a markdown queue mirror (`- :pushpin: do [#…]`), a question, a
-/// `dispatch`/`fix #` directive, a `spec-test` build directive, or an inline /
-/// leading `#tag`. Mirrors the post-commit directive matcher in `git.rs` and
-/// the gate's own prompt detection, kept deliberately broad — carry-forward is
-/// the safe default, so a false positive only defers an edit to the next cycle,
-/// never commits a directive prematurely.
-pub(crate) fn line_is_carry_forward_signal(line: &str) -> bool {
-    let trimmed = line.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    let candidate = carry_forward_signal_candidate(trimmed).unwrap_or(trimmed);
-    if agent_doc_diff::text_line_looks_like_prompt_target(trimmed)
-        || agent_doc_diff::text_line_looks_like_prompt_target(candidate)
-    {
-        return true;
-    }
-    let lower = candidate.to_ascii_lowercase();
-    trimmed.starts_with('❯')
-        || candidate.ends_with('?')
-        || candidate.starts_with('#')
-        || candidate.contains(" #")
-        || lower.starts_with("[#")
-        || lower.starts_with("do #")
-        || lower.starts_with("do [#")
-        || lower.starts_with("dispatch")
-        || lower.starts_with("fix #")
-        || lower.contains("spec-test")
-        || lower.contains("spec test")
-}
-
-fn carry_forward_signal_candidate(line: &str) -> Option<&str> {
-    let mut candidate = line.trim();
-    if candidate.is_empty() {
-        return None;
-    }
-
-    candidate = candidate.trim_start_matches('❯').trim_start();
-
-    if let Some(rest) = strip_markdown_list_marker(candidate) {
-        candidate = rest.trim_start();
-    }
-    if let Some(rest) = strip_markdown_checkbox_marker(candidate) {
-        candidate = rest.trim_start();
-    }
-    if let Some(rest) = candidate.strip_prefix(":pushpin:") {
-        candidate = rest.trim_start();
-    }
-    if let Some(rest) = strip_markdown_checkbox_marker(candidate) {
-        candidate = rest.trim_start();
-    }
-
-    (!candidate.is_empty()).then_some(candidate)
-}
-
-fn strip_markdown_list_marker(line: &str) -> Option<&str> {
-    line.strip_prefix("- ")
-        .or_else(|| line.strip_prefix("* "))
-        .or_else(|| line.strip_prefix("+ "))
-}
-
-fn strip_markdown_checkbox_marker(line: &str) -> Option<&str> {
-    let rest = line.strip_prefix('[')?;
-    let rest = rest.strip_prefix(|c: char| c == ' ' || c == 'x' || c == 'X')?;
-    rest.strip_prefix("] ")
 }
 
 /// `#fintol1` — conflict-scope primitive driving the `#fintol2` finalize
@@ -4284,21 +4216,6 @@ mod tests {
             count_code_fence_openings("``````\nnot a fence open by CommonMark\n``````\n"),
             0
         );
-    }
-
-    #[test]
-    fn line_is_carry_forward_signal_detects_markdown_queue_entries() {
-        assert!(line_is_carry_forward_signal("- do [#advance-review]"));
-        assert!(line_is_carry_forward_signal(
-            "- :pushpin: do [#advance-review]"
-        ));
-        assert!(line_is_carry_forward_signal(
-            "- :pushpin: [#advance-review] Review the next item"
-        ));
-        assert!(line_is_carry_forward_signal(
-            "- [ ] [#advance-review] Review the next item"
-        ));
-        assert!(!line_is_carry_forward_signal("- ordinary note"));
     }
 
     /// 08b end state: a routed visible-document write still records write

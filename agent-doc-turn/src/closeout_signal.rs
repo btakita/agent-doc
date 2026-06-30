@@ -60,6 +60,69 @@ pub fn text_has_no_followup_justification(lower: &str) -> bool {
         .any(|phrase| lower.contains(phrase))
 }
 
+/// True when a user-added line is a next-cycle instruction that must be carried
+/// forward rather than folded into the current turn's commit.
+pub fn line_is_carry_forward_signal(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let candidate = carry_forward_signal_candidate(trimmed).unwrap_or(trimmed);
+    if agent_doc_diff::text_line_looks_like_prompt_target(trimmed)
+        || agent_doc_diff::text_line_looks_like_prompt_target(candidate)
+    {
+        return true;
+    }
+    let lower = candidate.to_ascii_lowercase();
+    trimmed.starts_with('❯')
+        || candidate.ends_with('?')
+        || candidate.starts_with('#')
+        || candidate.contains(" #")
+        || lower.starts_with("[#")
+        || lower.starts_with("do #")
+        || lower.starts_with("do [#")
+        || lower.starts_with("dispatch")
+        || lower.starts_with("fix #")
+        || lower.contains("spec-test")
+        || lower.contains("spec test")
+}
+
+fn carry_forward_signal_candidate(line: &str) -> Option<&str> {
+    let mut candidate = line.trim();
+    if candidate.is_empty() {
+        return None;
+    }
+
+    candidate = candidate.trim_start_matches('❯').trim_start();
+
+    if let Some(rest) = strip_markdown_list_marker(candidate) {
+        candidate = rest.trim_start();
+    }
+    if let Some(rest) = strip_markdown_checkbox_marker(candidate) {
+        candidate = rest.trim_start();
+    }
+    if let Some(rest) = candidate.strip_prefix(":pushpin:") {
+        candidate = rest.trim_start();
+    }
+    if let Some(rest) = strip_markdown_checkbox_marker(candidate) {
+        candidate = rest.trim_start();
+    }
+
+    (!candidate.is_empty()).then_some(candidate)
+}
+
+fn strip_markdown_list_marker(line: &str) -> Option<&str> {
+    line.strip_prefix("- ")
+        .or_else(|| line.strip_prefix("* "))
+        .or_else(|| line.strip_prefix("+ "))
+}
+
+fn strip_markdown_checkbox_marker(line: &str) -> Option<&str> {
+    let rest = line.strip_prefix('[')?;
+    let rest = rest.strip_prefix(|c: char| c == ' ' || c == 'x' || c == 'X')?;
+    rest.strip_prefix("] ")
+}
+
 /// True when a blocked / still-needed-work phrase co-occurs with `#id` inside
 /// the same paragraph of the response. Paragraph scoping keeps incidental
 /// blocked phrases about unrelated work from tying the signal to the directed id.
@@ -1737,6 +1800,21 @@ mod tests {
             "### Re: user free-text prompt"
         ));
         assert!(!is_queue_continuation_response_heading("## Assistant"));
+    }
+
+    #[test]
+    fn line_is_carry_forward_signal_detects_markdown_queue_entries() {
+        assert!(line_is_carry_forward_signal("- do [#advance-review]"));
+        assert!(line_is_carry_forward_signal(
+            "- :pushpin: do [#advance-review]"
+        ));
+        assert!(line_is_carry_forward_signal(
+            "- :pushpin: [#advance-review] Review the next item"
+        ));
+        assert!(line_is_carry_forward_signal(
+            "- [ ] [#advance-review] Review the next item"
+        ));
+        assert!(!line_is_carry_forward_signal("- ordinary note"));
     }
 
     #[test]

@@ -3221,6 +3221,29 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-turn/src/closeout_guard.rs")).unwrap();
     let recovery_source =
         fs::read_to_string(manifest_dir.join("agent-doc-turn/src/closeout_recovery.rs")).unwrap();
+    for required in ["pub fn line_is_carry_forward_signal"] {
+        assert!(
+            turn_source.contains(required),
+            "agent-doc-turn must own carry-forward closeout signal policy: {required}"
+        );
+    }
+    let write_adapter =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    for forbidden in [
+        "pub(crate) fn line_is_carry_forward_signal",
+        "fn carry_forward_signal_candidate",
+        "fn strip_markdown_list_marker",
+        "fn strip_markdown_checkbox_marker",
+    ] {
+        assert!(
+            !write_adapter.contains(forbidden),
+            "write.rs must not re-own carry-forward closeout signal policy: {forbidden}"
+        );
+    }
+    assert!(
+        write_adapter.contains("use agent_doc_turn::closeout_signal::line_is_carry_forward_signal"),
+        "write.rs should import carry-forward closeout signal policy directly"
+    );
     for required in [
         "pub enum CloseoutGuardReason",
         "pub enum CloseoutGuardOutcome",

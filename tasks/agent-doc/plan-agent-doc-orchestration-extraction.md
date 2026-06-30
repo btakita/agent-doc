@@ -285,9 +285,12 @@ focused crate under the old path.
   orchestration policy functions were deleted instead of kept as wrappers.
 - `agent-doc-ipc-protocol` now owns plugin IPC ack classification: terminal ok,
   early pending/accepted, already-applied dedupe, failed error, and malformed
-  legacy ack behavior. `ipc_socket` keeps socket connection/listener mechanics,
-  early-ack emission, and error wrapping; root simulator/tests import the
-  focused protocol crate directly instead of the old
+  legacy ack behavior. It also owns early-ack protocol vocabulary: tagging patch
+  messages with `early_ack`, detecting incoming early-ack requests, emitting the
+  canonical pending ack line, and naming the early-ack proof marker. `ipc_socket`
+  keeps socket connection/listener mechanics, timeout handling, listener-thread
+  state, and error wrapping; root simulator/tests import the focused protocol
+  crate directly instead of the old
   `agent_doc_orchestration::ipc_socket::{classify_ack,AckClassification}` path.
 
 ### Earlier closure finding

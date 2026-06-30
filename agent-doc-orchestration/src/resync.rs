@@ -333,7 +333,7 @@ fn registry_entry_session_id<'a>(key: &'a str, entry: &'a tmux_router::RegistryE
 
 fn format_associated_pane_fix_error(
     file: &Path,
-    candidates: &[crate::sync::AssociatedPaneCandidate],
+    candidates: &[agent_doc_tmux::AssociatedPaneCandidate],
     preferred_window: Option<&str>,
 ) -> String {
     let mut lines = vec![format!(
@@ -376,7 +376,7 @@ fn format_associated_pane_fix_error(
 
 fn kill_redundant_associated_stash_panes(
     tmux: &Tmux,
-    redundant: &[crate::sync::AssociatedPaneCandidate],
+    redundant: &[agent_doc_tmux::AssociatedPaneCandidate],
 ) -> usize {
     let registry = sessions::load().unwrap_or_default();
     let mut killed = 0;
@@ -474,9 +474,9 @@ fn recover_target_document_pane_in(
         target,
         crate::sync::find_associated_panes(tmux, target, &session_id),
     );
-    match crate::sync::resolve_associated_panes(candidates, preferred_window.as_deref()) {
-        crate::sync::AssociatedPaneResolution::None => Ok(TargetDocumentFixOutcome::default()),
-        crate::sync::AssociatedPaneResolution::Selected { winner, redundant } => {
+    match agent_doc_tmux::resolve_associated_panes(candidates, preferred_window.as_deref()) {
+        agent_doc_tmux::AssociatedPaneResolution::None => Ok(TargetDocumentFixOutcome::default()),
+        agent_doc_tmux::AssociatedPaneResolution::Selected { winner, redundant } => {
             let mut outcome = TargetDocumentFixOutcome::default();
             if sessions::lookup_in(base_dir, &session_id)?.as_deref()
                 != Some(winner.pane_id.as_str())
@@ -505,7 +505,7 @@ fn recover_target_document_pane_in(
             }
             Ok(outcome)
         }
-        crate::sync::AssociatedPaneResolution::Ambiguous(candidates) => {
+        agent_doc_tmux::AssociatedPaneResolution::Ambiguous(candidates) => {
             anyhow::bail!(format_associated_pane_fix_error(
                 target,
                 &candidates,

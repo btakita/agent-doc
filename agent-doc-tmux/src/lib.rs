@@ -7,7 +7,7 @@
 use lazily::{ThreadSafeContext, ThreadSafeStateMachine};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     fmt,
 };
 
@@ -224,6 +224,139 @@ pub fn pane_current_command_is_bare_shell(cmd: &str) -> bool {
         name,
         "zsh" | "bash" | "sh" | "fish" | "dash" | "ksh" | "tcsh" | "csh"
     )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum AssociatedPaneSource {
+    Registered,
+    SessionLog,
+    RegistryRebind,
+    ProcessTree,
+    SupervisorPid,
+}
+
+impl AssociatedPaneSource {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Registered => "registered",
+            Self::SessionLog => "session-log",
+            Self::RegistryRebind => "registry-rebind",
+            Self::ProcessTree => "process-tree",
+            Self::SupervisorPid => "supervisor-pid",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssociatedPaneCandidate {
+    pub pane_id: String,
+    pub pane_pid: String,
+    pub session_name: String,
+    pub window_id: String,
+    pub window_name: String,
+    pub current_command: String,
+    pub sources: BTreeSet<AssociatedPaneSource>,
+}
+
+impl AssociatedPaneCandidate {
+    pub fn is_stash(&self) -> bool {
+        self.window_name == "stash" || self.window_name.starts_with("stash-")
+    }
+
+    pub fn source_summary(&self) -> String {
+        self.sources
+            .iter()
+            .map(AssociatedPaneSource::as_str)
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AssociatedPaneResolution {
+    None,
+    Selected {
+        winner: AssociatedPaneCandidate,
+        redundant: Vec<AssociatedPaneCandidate>,
+    },
+    Ambiguous(Vec<AssociatedPaneCandidate>),
+}
+
+pub fn parse_pane_inventory_line(line: &str) -> Option<AssociatedPaneCandidate> {
+    let mut parts = line.splitn(6, '\t');
+    let pane_id = parts.next()?.trim();
+    let pane_pid = parts.next()?.trim();
+    let window_id = parts.next()?.trim();
+    let window_name = parts.next()?.trim();
+    let session_name = parts.next()?.trim();
+    let current_command = parts.next()?.trim();
+    if pane_id.is_empty() {
+        return None;
+    }
+    Some(AssociatedPaneCandidate {
+        pane_id: pane_id.to_string(),
+        pane_pid: pane_pid.to_string(),
+        session_name: session_name.to_string(),
+        window_id: window_id.to_string(),
+        window_name: window_name.to_string(),
+        current_command: current_command.to_string(),
+        sources: BTreeSet::new(),
+    })
+}
+
+pub fn resolve_associated_panes(
+    mut candidates: Vec<AssociatedPaneCandidate>,
+    preferred_window: Option<&str>,
+) -> AssociatedPaneResolution {
+    if candidates.is_empty() {
+        return AssociatedPaneResolution::None;
+    }
+    candidates.sort_by(|left, right| left.pane_id.cmp(&right.pane_id));
+    if candidates.len() == 1 {
+        return AssociatedPaneResolution::Selected {
+            winner: candidates.remove(0),
+            redundant: Vec::new(),
+        };
+    }
+
+    if let Some(window_id) = preferred_window {
+        let mut preferred_matches = candidates
+            .iter()
+            .filter(|candidate| candidate.window_id == window_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        let non_preferred = candidates
+            .iter()
+            .filter(|candidate| candidate.window_id != window_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        if preferred_matches.len() == 1
+            && non_preferred.iter().all(AssociatedPaneCandidate::is_stash)
+        {
+            let winner = preferred_matches.remove(0);
+            let redundant = candidates
+                .into_iter()
+                .filter(|candidate| candidate.pane_id != winner.pane_id)
+                .collect();
+            return AssociatedPaneResolution::Selected { winner, redundant };
+        }
+    }
+
+    let mut stash_matches = candidates
+        .iter()
+        .filter(|candidate| candidate.is_stash())
+        .cloned()
+        .collect::<Vec<_>>();
+    if stash_matches.len() == 1 && stash_matches.len() == candidates.len() {
+        let winner = stash_matches.remove(0);
+        let redundant = candidates
+            .into_iter()
+            .filter(|candidate| candidate.pane_id != winner.pane_id)
+            .collect();
+        return AssociatedPaneResolution::Selected { winner, redundant };
+    }
+
+    AssociatedPaneResolution::Ambiguous(candidates)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -538,6 +671,23 @@ mod tests {
         TmuxLayoutColumn::new(raw, agent_doc.map(str::to_string))
     }
 
+    fn associated_candidate(
+        pane_id: &str,
+        window_id: &str,
+        window_name: &str,
+        sources: &[AssociatedPaneSource],
+    ) -> AssociatedPaneCandidate {
+        AssociatedPaneCandidate {
+            pane_id: pane_id.to_string(),
+            pane_pid: "100".to_string(),
+            session_name: "14".to_string(),
+            window_id: window_id.to_string(),
+            window_name: window_name.to_string(),
+            current_command: "agent-doc".to_string(),
+            sources: sources.iter().cloned().collect(),
+        }
+    }
+
     #[test]
     fn prompt_ready_updates_pane_activity() {
         let machine = TmuxModelMachine::default_tmux();
@@ -659,6 +809,116 @@ mod tests {
                 !pane_current_command_is_bare_shell(not_shell),
                 "{not_shell:?} should NOT classify as a bare shell"
             );
+        }
+    }
+
+    #[test]
+    fn pane_inventory_parser_reads_tmux_tab_separated_fields() {
+        let candidate =
+            parse_pane_inventory_line("%419\t22401\t@3\tagent-doc\tsession-a\tcargo").unwrap();
+
+        assert_eq!(candidate.pane_id, "%419");
+        assert_eq!(candidate.pane_pid, "22401");
+        assert_eq!(candidate.window_id, "@3");
+        assert_eq!(candidate.window_name, "agent-doc");
+        assert_eq!(candidate.session_name, "session-a");
+        assert_eq!(candidate.current_command, "cargo");
+        assert!(candidate.sources.is_empty());
+    }
+
+    #[test]
+    fn pane_inventory_parser_rejects_blank_pane_id() {
+        assert!(parse_pane_inventory_line("\t22401\t@3\tagent-doc\tsession-a\tcargo").is_none());
+    }
+
+    #[test]
+    fn associated_pane_source_summary_is_stable() {
+        let candidate = associated_candidate(
+            "%419",
+            "@3",
+            "agent-doc",
+            &[
+                AssociatedPaneSource::SupervisorPid,
+                AssociatedPaneSource::Registered,
+                AssociatedPaneSource::ProcessTree,
+            ],
+        );
+
+        assert_eq!(
+            candidate.source_summary(),
+            "registered,process-tree,supervisor-pid"
+        );
+    }
+
+    #[test]
+    fn resolve_associated_panes_prefers_unique_active_window() {
+        let candidates = vec![
+            associated_candidate("%417", "@9", "stash", &[AssociatedPaneSource::ProcessTree]),
+            associated_candidate(
+                "%419",
+                "@3",
+                "agent-doc",
+                &[
+                    AssociatedPaneSource::Registered,
+                    AssociatedPaneSource::SupervisorPid,
+                ],
+            ),
+        ];
+
+        let resolution = resolve_associated_panes(candidates, Some("@3"));
+        match resolution {
+            AssociatedPaneResolution::Selected { winner, redundant } => {
+                assert_eq!(winner.pane_id, "%419");
+                assert_eq!(redundant.len(), 1);
+                assert_eq!(redundant[0].pane_id, "%417");
+            }
+            other => panic!("expected selected winner, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_associated_panes_accepts_single_stash_candidate() {
+        let candidates = vec![associated_candidate(
+            "%420",
+            "@9",
+            "stash",
+            &[AssociatedPaneSource::ProcessTree],
+        )];
+
+        let resolution = resolve_associated_panes(candidates, Some("@7"));
+        match resolution {
+            AssociatedPaneResolution::Selected { winner, redundant } => {
+                assert_eq!(winner.pane_id, "%420");
+                assert!(redundant.is_empty());
+            }
+            other => panic!("expected selected stash winner, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_associated_panes_reports_ambiguity_when_multiple_candidates_remain() {
+        let candidates = vec![
+            associated_candidate("%417", "@9", "stash", &[AssociatedPaneSource::ProcessTree]),
+            associated_candidate(
+                "%419",
+                "@3",
+                "agent-doc",
+                &[AssociatedPaneSource::Registered],
+            ),
+            associated_candidate(
+                "%420",
+                "@5",
+                "agent-doc",
+                &[AssociatedPaneSource::SupervisorPid],
+            ),
+        ];
+
+        let resolution = resolve_associated_panes(candidates, Some("@7"));
+        match resolution {
+            AssociatedPaneResolution::Ambiguous(candidates) => {
+                assert_eq!(candidates.len(), 3);
+            }
+            other => panic!("expected ambiguous resolution, got {other:?}"),
         }
     }
 

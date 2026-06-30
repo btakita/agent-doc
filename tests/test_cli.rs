@@ -2434,6 +2434,9 @@ fn test_agent_doc_prompt_cache_owns_prompt_cache_policy() {
     for forbidden in [
         "agent-doc-core",
         "agent-doc-orchestration",
+        "agent-doc-tmux-commands",
+        "agent-doc-tmux-io",
+        "anyhow",
         "git2",
         "interprocess",
         "notify",
@@ -9058,6 +9061,92 @@ fn test_agent_doc_tmux_owns_pane_position_selection() {
         assert!(
             !dependencies.contains_key(forbidden),
             "agent-doc-tmux pane position policy must stay free of orchestration, git, editor IPC, sqlite, or tmux-router effects"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_tmux_owns_associated_pane_resolution_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let tmux_manifest = fs::read_to_string(manifest_dir.join("agent-doc-tmux/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&tmux_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+
+    let tmux_source = fs::read_to_string(manifest_dir.join("agent-doc-tmux/src/lib.rs")).unwrap();
+    for required in [
+        "pub enum AssociatedPaneSource",
+        "pub struct AssociatedPaneCandidate",
+        "pub enum AssociatedPaneResolution",
+        "pub fn parse_pane_inventory_line(",
+        "pub fn resolve_associated_panes(",
+        "pub fn is_stash(&self) -> bool",
+        "pub fn source_summary(&self) -> String",
+    ] {
+        assert!(
+            tmux_source.contains(required),
+            "agent-doc-tmux must own associated pane resolution policy: {required}"
+        );
+    }
+
+    let sync_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync.rs")).unwrap();
+    for forbidden in [
+        "pub enum AssociatedPaneSource",
+        "pub struct AssociatedPaneCandidate",
+        "pub enum AssociatedPaneResolution",
+        "fn parse_pane_inventory_line(",
+        "pub fn resolve_associated_panes(",
+        "pub use agent_doc_tmux",
+        "pub(crate) use agent_doc_tmux",
+    ] {
+        assert!(
+            !sync_source.contains(forbidden),
+            "sync.rs must collect tmux evidence, not re-own or facade associated pane resolution policy: {forbidden}"
+        );
+    }
+    assert!(
+        sync_source.contains("use agent_doc_tmux::{")
+            && sync_source.contains("AssociatedPaneCandidate")
+            && sync_source.contains("AssociatedPaneResolution")
+            && sync_source.contains("AssociatedPaneSource")
+            && sync_source.contains("parse_pane_inventory_line")
+            && sync_source.contains("resolve_associated_panes"),
+        "sync.rs should call the focused associated pane API directly"
+    );
+
+    for relative_path in [
+        "agent-doc-orchestration/src/route.rs",
+        "agent-doc-orchestration/src/resync.rs",
+        "agent-doc-orchestration/src/route/pane_resolution.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
+        assert!(
+            !source.contains("crate::sync::AssociatedPane")
+                && !source.contains("crate::sync::resolve_associated_panes"),
+            "{relative_path} must import associated pane policy from agent-doc-tmux, not through sync.rs"
+        );
+        assert!(
+            source.contains("agent_doc_tmux::AssociatedPane")
+                || source.contains("agent_doc_tmux::resolve_associated_panes"),
+            "{relative_path} should call the focused associated pane API directly"
+        );
+    }
+
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "agent-doc-tmux-commands",
+        "agent-doc-tmux-io",
+        "anyhow",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-tmux associated pane policy must stay free of orchestration, git, editor IPC, sqlite, or tmux-router effects"
         );
     }
 }

@@ -133,7 +133,7 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
     };
     let preferred_active_window = tmux.active_window(target_session);
     let associated_candidates = crate::sync::find_associated_panes(tmux, file, session_id);
-    let associated_resolution = crate::sync::resolve_associated_panes(
+    let associated_resolution = agent_doc_tmux::resolve_associated_panes(
         associated_candidates.clone(),
         preferred_active_window.as_deref(),
     );
@@ -248,7 +248,8 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
     if let Some(ref registered_pane) = registered
         && tmux.pane_alive(registered_pane)
     {
-        if let crate::sync::AssociatedPaneResolution::Ambiguous(candidates) = &associated_resolution
+        if let agent_doc_tmux::AssociatedPaneResolution::Ambiguous(candidates) =
+            &associated_resolution
         {
             let error = format_associated_pane_resolution_error(
                 file,
@@ -265,7 +266,7 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
             );
             anyhow::bail!(error);
         }
-        if let crate::sync::AssociatedPaneResolution::Selected { winner, redundant } =
+        if let agent_doc_tmux::AssociatedPaneResolution::Selected { winner, redundant } =
             &associated_resolution
             && winner.pane_id != *registered_pane
         {
@@ -309,7 +310,8 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
         );
     }
 
-    if let crate::sync::AssociatedPaneResolution::Ambiguous(candidates) = &associated_resolution {
+    if let agent_doc_tmux::AssociatedPaneResolution::Ambiguous(candidates) = &associated_resolution
+    {
         let error = format_associated_pane_resolution_error(
             file,
             candidates,
@@ -326,7 +328,7 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
         anyhow::bail!(error);
     }
 
-    if let crate::sync::AssociatedPaneResolution::Selected { winner, redundant } =
+    if let agent_doc_tmux::AssociatedPaneResolution::Selected { winner, redundant } =
         &associated_resolution
     {
         crate::ops_log::log_op(
@@ -490,7 +492,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
     };
     let preferred_active_window = tmux.active_window(target_session);
     let associated_candidates = crate::sync::find_associated_panes(tmux, file, session_id);
-    let associated_resolution = crate::sync::resolve_associated_panes(
+    let associated_resolution = agent_doc_tmux::resolve_associated_panes(
         associated_candidates.clone(),
         preferred_active_window.as_deref(),
     );
@@ -648,7 +650,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
     // when the pane is in a different session — we leave it in place.
     if let Some(ref registered_pane) = registered {
         if tmux.pane_alive(registered_pane) {
-            if let crate::sync::AssociatedPaneResolution::Ambiguous(candidates) =
+            if let agent_doc_tmux::AssociatedPaneResolution::Ambiguous(candidates) =
                 &associated_resolution
             {
                 let error = format_associated_pane_resolution_error(
@@ -666,7 +668,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
                 );
                 anyhow::bail!(error);
             }
-            if let crate::sync::AssociatedPaneResolution::Selected { winner, redundant } =
+            if let agent_doc_tmux::AssociatedPaneResolution::Selected { winner, redundant } =
                 &associated_resolution
                 && winner.pane_id != *registered_pane
             {
@@ -906,7 +908,8 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
         .filter(|e| tmux.pane_alive(&e.pane))
         .map(|e| e.pane.clone())
         .collect();
-    if let crate::sync::AssociatedPaneResolution::Ambiguous(candidates) = &associated_resolution {
+    if let agent_doc_tmux::AssociatedPaneResolution::Ambiguous(candidates) = &associated_resolution
+    {
         let error = format_associated_pane_resolution_error(
             file,
             candidates,
@@ -922,7 +925,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
         );
         anyhow::bail!(error);
     }
-    if let crate::sync::AssociatedPaneResolution::Selected { winner, redundant } =
+    if let agent_doc_tmux::AssociatedPaneResolution::Selected { winner, redundant } =
         &associated_resolution
     {
         crate::ops_log::log_op(
@@ -1008,11 +1011,11 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
     // registered pane can be deregistered while a live legacy owner becomes
     // provable a little later in the turn; the normal path must still fail
     // closed instead of silently re-electing that pane via auto-start.
-    let late_associated_resolution = crate::sync::resolve_associated_panes(
+    let late_associated_resolution = agent_doc_tmux::resolve_associated_panes(
         crate::sync::find_associated_panes(tmux, file, session_id),
         tmux.active_window(target_session).as_deref(),
     );
-    if let crate::sync::AssociatedPaneResolution::Ambiguous(candidates) =
+    if let agent_doc_tmux::AssociatedPaneResolution::Ambiguous(candidates) =
         &late_associated_resolution
     {
         let error = format_associated_pane_resolution_error(
@@ -1030,7 +1033,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
         );
         anyhow::bail!(error);
     }
-    if let crate::sync::AssociatedPaneResolution::Selected { winner, redundant } =
+    if let agent_doc_tmux::AssociatedPaneResolution::Selected { winner, redundant } =
         &late_associated_resolution
     {
         crate::ops_log::log_op(
@@ -1358,11 +1361,11 @@ pub(crate) fn wait_for_busy_restart_handoff(
                 handed_off_pane = None;
             }
         }
-        match crate::sync::resolve_associated_panes(
+        match agent_doc_tmux::resolve_associated_panes(
             crate::sync::find_associated_panes(tmux, file, session_id),
             None,
         ) {
-            crate::sync::AssociatedPaneResolution::Selected { winner, .. }
+            agent_doc_tmux::AssociatedPaneResolution::Selected { winner, .. }
                 if winner.pane_id != previous_pane && !winner.is_stash() =>
             {
                 if let Err(err) =

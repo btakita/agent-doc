@@ -195,6 +195,10 @@ use tempfile::NamedTempFile;
 
 use agent_doc_controller::dispatch::is_stash_window_name;
 use agent_doc_element::element;
+use agent_doc_tmux::{
+    AssociatedPaneCandidate, AssociatedPaneResolution, AssociatedPaneSource,
+    parse_pane_inventory_line, resolve_associated_panes,
+};
 use tmux_router::{PaneMoveOp, Tmux};
 
 use agent_doc_frontmatter::frontmatter;
@@ -3665,84 +3669,6 @@ pub fn find_alive_pane_for_file(tmux: &Tmux, file_path: &str) -> Option<String> 
     find_alive_pane_for_file_inner(tmux, file_path, None, true)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum AssociatedPaneSource {
-    Registered,
-    SessionLog,
-    RegistryRebind,
-    ProcessTree,
-    SupervisorPid,
-}
-
-impl AssociatedPaneSource {
-    fn as_str(&self) -> &'static str {
-        match self {
-            Self::Registered => "registered",
-            Self::SessionLog => "session-log",
-            Self::RegistryRebind => "registry-rebind",
-            Self::ProcessTree => "process-tree",
-            Self::SupervisorPid => "supervisor-pid",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AssociatedPaneCandidate {
-    pub pane_id: String,
-    pub pane_pid: String,
-    pub session_name: String,
-    pub window_id: String,
-    pub window_name: String,
-    pub current_command: String,
-    pub sources: BTreeSet<AssociatedPaneSource>,
-}
-
-impl AssociatedPaneCandidate {
-    pub fn is_stash(&self) -> bool {
-        self.window_name == "stash" || self.window_name.starts_with("stash-")
-    }
-
-    pub fn source_summary(&self) -> String {
-        self.sources
-            .iter()
-            .map(AssociatedPaneSource::as_str)
-            .collect::<Vec<_>>()
-            .join(",")
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AssociatedPaneResolution {
-    None,
-    Selected {
-        winner: AssociatedPaneCandidate,
-        redundant: Vec<AssociatedPaneCandidate>,
-    },
-    Ambiguous(Vec<AssociatedPaneCandidate>),
-}
-
-fn parse_pane_inventory_line(line: &str) -> Option<AssociatedPaneCandidate> {
-    let mut parts = line.splitn(6, '\t');
-    let pane_id = parts.next()?.trim();
-    let pane_pid = parts.next()?.trim();
-    let window_id = parts.next()?.trim();
-    let window_name = parts.next()?.trim();
-    let session_name = parts.next()?.trim();
-    let current_command = parts.next()?.trim();
-    if pane_id.is_empty() {
-        return None;
-    }
-    Some(AssociatedPaneCandidate {
-        pane_id: pane_id.to_string(),
-        pane_pid: pane_pid.to_string(),
-        session_name: session_name.to_string(),
-        window_id: window_id.to_string(),
-        window_name: window_name.to_string(),
-        current_command: current_command.to_string(),
-        sources: BTreeSet::new(),
-    })
-}
-
 fn list_associated_pane_inventory(tmux: &Tmux) -> Vec<AssociatedPaneCandidate> {
     let output = match tmux
         .cmd()
@@ -3866,61 +3792,6 @@ pub fn filter_associated_panes_for_document(
         .into_iter()
         .filter(|candidate| !pane_runs_other_document_owner(tmux, &candidate.pane_id, file))
         .collect()
-}
-
-pub fn resolve_associated_panes(
-    mut candidates: Vec<AssociatedPaneCandidate>,
-    preferred_window: Option<&str>,
-) -> AssociatedPaneResolution {
-    if candidates.is_empty() {
-        return AssociatedPaneResolution::None;
-    }
-    candidates.sort_by(|left, right| left.pane_id.cmp(&right.pane_id));
-    if candidates.len() == 1 {
-        return AssociatedPaneResolution::Selected {
-            winner: candidates.remove(0),
-            redundant: Vec::new(),
-        };
-    }
-
-    if let Some(window_id) = preferred_window {
-        let mut preferred_matches = candidates
-            .iter()
-            .filter(|candidate| candidate.window_id == window_id)
-            .cloned()
-            .collect::<Vec<_>>();
-        let non_preferred = candidates
-            .iter()
-            .filter(|candidate| candidate.window_id != window_id)
-            .cloned()
-            .collect::<Vec<_>>();
-        if preferred_matches.len() == 1
-            && non_preferred.iter().all(AssociatedPaneCandidate::is_stash)
-        {
-            let winner = preferred_matches.remove(0);
-            let redundant = candidates
-                .into_iter()
-                .filter(|candidate| candidate.pane_id != winner.pane_id)
-                .collect();
-            return AssociatedPaneResolution::Selected { winner, redundant };
-        }
-    }
-
-    let mut stash_matches = candidates
-        .iter()
-        .filter(|candidate| candidate.is_stash())
-        .cloned()
-        .collect::<Vec<_>>();
-    if stash_matches.len() == 1 && stash_matches.len() == candidates.len() {
-        let winner = stash_matches.remove(0);
-        let redundant = candidates
-            .into_iter()
-            .filter(|candidate| candidate.pane_id != winner.pane_id)
-            .collect();
-        return AssociatedPaneResolution::Selected { winner, redundant };
-    }
-
-    AssociatedPaneResolution::Ambiguous(candidates)
 }
 
 #[cfg(test)]
@@ -4864,26 +4735,6 @@ mod th {
             })
             .collect()
     }
-    pub(crate) fn candidate(
-        pane_id: &str,
-        window_id: &str,
-        window_name: &str,
-        sources: &[AssociatedPaneSource],
-    ) -> AssociatedPaneCandidate {
-        let mut source_set = BTreeSet::new();
-        for source in sources {
-            source_set.insert(source.clone());
-        }
-        AssociatedPaneCandidate {
-            pane_id: pane_id.to_string(),
-            pane_pid: "100".to_string(),
-            session_name: "14".to_string(),
-            window_id: window_id.to_string(),
-            window_name: window_name.to_string(),
-            current_command: "agent-doc".to_string(),
-            sources: source_set,
-        }
-    }
     pub(crate) fn wait_for<F>(timeout: Duration, mut predicate: F) -> bool
     where
         F: FnMut() -> bool,
@@ -5134,76 +4985,6 @@ mod tests {
             "repair_layout must keep overflow stash windows adjacent after agent-doc"
         );
     }
-    #[test]
-    fn resolve_associated_panes_prefers_unique_active_window() {
-        let candidates = vec![
-            candidate("%417", "@9", "stash", &[AssociatedPaneSource::ProcessTree]),
-            candidate(
-                "%419",
-                "@3",
-                "agent-doc",
-                &[
-                    AssociatedPaneSource::Registered,
-                    AssociatedPaneSource::SupervisorPid,
-                ],
-            ),
-        ];
-
-        let resolution = resolve_associated_panes(candidates, Some("@3"));
-        match resolution {
-            AssociatedPaneResolution::Selected { winner, redundant } => {
-                assert_eq!(winner.pane_id, "%419");
-                assert_eq!(redundant.len(), 1);
-                assert_eq!(redundant[0].pane_id, "%417");
-            }
-            other => panic!("expected selected winner, got {other:?}"),
-        }
-    }
-    #[test]
-    fn resolve_associated_panes_accepts_single_stash_candidate() {
-        let candidates = vec![candidate(
-            "%420",
-            "@9",
-            "stash",
-            &[AssociatedPaneSource::ProcessTree],
-        )];
-
-        let resolution = resolve_associated_panes(candidates, Some("@7"));
-        match resolution {
-            AssociatedPaneResolution::Selected { winner, redundant } => {
-                assert_eq!(winner.pane_id, "%420");
-                assert!(redundant.is_empty());
-            }
-            other => panic!("expected selected stash winner, got {other:?}"),
-        }
-    }
-    #[test]
-    fn resolve_associated_panes_reports_ambiguity_when_multiple_candidates_remain() {
-        let candidates = vec![
-            candidate("%417", "@9", "stash", &[AssociatedPaneSource::ProcessTree]),
-            candidate(
-                "%419",
-                "@3",
-                "agent-doc",
-                &[AssociatedPaneSource::Registered],
-            ),
-            candidate(
-                "%420",
-                "@5",
-                "agent-doc",
-                &[AssociatedPaneSource::SupervisorPid],
-            ),
-        ];
-
-        let resolution = resolve_associated_panes(candidates, Some("@7"));
-        match resolution {
-            AssociatedPaneResolution::Ambiguous(candidates) => {
-                assert_eq!(candidates.len(), 3);
-            }
-            other => panic!("expected ambiguous resolution, got {other:?}"),
-        }
-    }
-
     #[test]
     fn sync_repair_closes_jb_cache_conflict_cancel_commit_boundary() {
         let tmp = tempfile::TempDir::new().unwrap();

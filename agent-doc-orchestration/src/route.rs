@@ -1073,7 +1073,7 @@ fn wait_for_routed_dispatch_start(
 
 fn format_associated_pane_resolution_error(
     file: &Path,
-    candidates: &[crate::sync::AssociatedPaneCandidate],
+    candidates: &[agent_doc_tmux::AssociatedPaneCandidate],
     preferred_window: Option<&str>,
 ) -> String {
     let mut lines = vec![format!(
@@ -1117,8 +1117,8 @@ fn format_associated_pane_resolution_error(
 
 fn format_associated_pane_selected_error(
     file: &Path,
-    winner: &crate::sync::AssociatedPaneCandidate,
-    redundant: &[crate::sync::AssociatedPaneCandidate],
+    winner: &agent_doc_tmux::AssociatedPaneCandidate,
+    redundant: &[agent_doc_tmux::AssociatedPaneCandidate],
 ) -> String {
     let mut lines = vec![format!(
         "route found legacy pane-association evidence for {}, but the normal path will not re-elect ownership from {}.",

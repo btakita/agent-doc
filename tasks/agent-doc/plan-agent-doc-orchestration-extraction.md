@@ -410,6 +410,19 @@ focused crate under the old path.
   Orchestration keeps only frontmatter/file-backed column classification,
   focused-column resolution, tmux queries, and ops-log emission; the old
   orchestration policy functions were deleted instead of kept as wrappers.
+- `agent-doc-tmux` now owns destructive sync-repair policy: deciding when the
+  rescue phase is already converged for target/stash state, naming the minimum
+  interval between destructive repair passes, and classifying timestamp facts
+  into throttle/run decisions. Orchestration keeps stamp-file IO, clocks, logs,
+  tmux command effects, and user-facing throttle output while calling the
+  focused tmux policy directly.
+- `agent-doc-session-accretion` now owns context-reset policy: resolving the
+  default-off queue context-reset opt-in from frontmatter/project facts,
+  resolving and clamping `/clear` context thresholds, and formatting recent
+  compaction/session-accretion reset reasons from already-collected facts.
+  Orchestration keeps document/config/log IO, startup-miss state, RunContext
+  projection, and calls the focused policy directly without re-owning the
+  decision table.
 - `agent-doc-ipc-protocol` now owns plugin IPC ack classification: terminal ok,
   early pending/accepted, already-applied dedupe, failed error, and malformed
   legacy ack behavior. It also owns early-ack protocol vocabulary: tagging patch

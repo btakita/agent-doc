@@ -99,6 +99,7 @@ that owns the domain:
 - queue syntax/scheduling/journal policy -> `agent-doc-queue`
 - workflow cross-cutting decisions -> `agent-doc-workflow`
 - Auto-DAG/work graph policy -> `agent-doc-work-graph`
+- prompt/response line classification -> `agent-doc-prompt-lines`
 - prompt/context assembly -> `agent-doc-prompt-context`
 - response TOC/rendering vocabulary -> `agent-doc-response-toc`
 - session accretion/restart-loop heuristics -> `agent-doc-session-accretion`
@@ -510,6 +511,23 @@ should be deleted during extraction.
   drift. Git, preflight, session-check, realtime policy, repair, graph, and
   write paths call the focused document crate directly while keeping file, git,
   snapshot, and ops-log adapters outside the pure policy.
+- `agent-doc-prompt-lines` now owns pure prompt/response line classification
+  below diff, document, exchange, turn, supervisor, and orchestration:
+  slash-command candidates, prompt-target detection, prompt-prefix repair
+  starts, plain-response label detection, imperative directive normalization,
+  approval words, and markdown-list parsing. This became its own focused crate
+  instead of `agent-doc-document` because document depends on the element
+  registry, and exchange elements also need these classifiers; a document-owned
+  helper would create a dependency cycle. The old diff/exchange/document helper
+  paths were deleted rather than kept as compatibility facades.
+- `agent-doc-document::commit_normalization` now owns pure committed document
+  normalization: answered-prompt prefix canonicalization, committed exchange
+  artifact normalization, component-content absorb normalization, and component
+  redaction for absorb comparison. Git, closeout/session-check, repair,
+  write-converge, and realtime write policy call the focused document helper
+  directly while keeping git/file/snapshot decisions in their adapters. The old
+  `agent-doc-orchestration/src/git/normalize.rs` module was deleted rather than
+  retained as a shim.
 - `agent-doc-template::response_materialization` now owns more template
   response-materialization policy: constructing materialization probes from raw
   template responses, stripping transient guard markers from probes, removing

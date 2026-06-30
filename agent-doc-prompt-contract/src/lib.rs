@@ -65,6 +65,54 @@ pub fn requested_prompt_presets(
     requested
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptPresetRequestResolution {
+    pub requested: Vec<String>,
+    pub missing: Vec<String>,
+}
+
+pub fn resolve_prompt_preset_requests(
+    prompt_diff: Option<&str>,
+    harness_diff: Option<&str>,
+    prompt_targets: &[String],
+    added_diff_lines: &[String],
+    prompt_presets: &IndexMap<String, String>,
+) -> PromptPresetRequestResolution {
+    let mut requested = prompt_diff
+        .map(agent_doc_diff::detect_prompt_preset_requests)
+        .unwrap_or_default();
+    if let Some(harness_diff) = harness_diff {
+        push_unique_strings(
+            &mut requested,
+            agent_doc_diff::detect_prompt_preset_requests(harness_diff),
+        );
+    }
+    push_unique_strings(
+        &mut requested,
+        requested_prompt_presets(prompt_targets, added_diff_lines, prompt_presets),
+    );
+
+    let requested = requested
+        .into_iter()
+        .map(|name| {
+            agent_doc_frontmatter::frontmatter::resolve_prompt_preset_key(prompt_presets, &name)
+                .unwrap_or(name)
+        })
+        .fold(Vec::new(), |mut acc, name| {
+            if !acc.iter().any(|existing| existing == &name) {
+                acc.push(name);
+            }
+            acc
+        });
+    let missing = requested
+        .iter()
+        .filter(|name| !prompt_presets.contains_key(name.as_str()))
+        .cloned()
+        .collect();
+
+    PromptPresetRequestResolution { requested, missing }
+}
+
 pub fn explicit_backlog_targets(
     current_file: &Path,
     prompt_targets: &[String],
@@ -245,6 +293,14 @@ pub fn collect_added_diff_lines(diff_text: &str) -> Vec<String> {
     }
 
     lines
+}
+
+fn push_unique_strings(target: &mut Vec<String>, values: impl IntoIterator<Item = String>) {
+    for value in values {
+        if !target.iter().any(|existing| existing == &value) {
+            target.push(value);
+        }
+    }
 }
 
 fn referenced_presets_in_text(
@@ -637,6 +693,66 @@ mod tests {
             )
             .is_empty()
         );
+    }
+
+    #[test]
+    fn resolve_prompt_preset_requests_canonicalizes_aliases_and_dedupes() {
+        let presets = IndexMap::from([
+            ("#spec-test".to_string(), "Run checks.".to_string()),
+            ("release-check".to_string(), "Prepare release.".to_string()),
+        ]);
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,3 @@\n ctx\n+preset spec-test\n+preset #spec-test\n";
+
+        let resolution = resolve_prompt_preset_requests(
+            Some(diff),
+            None,
+            &["Please also use #spec-test.".to_string()],
+            &[],
+            &presets,
+        );
+
+        assert_eq!(resolution.requested, vec!["#spec-test".to_string()]);
+        assert!(resolution.missing.is_empty());
+    }
+
+    #[test]
+    fn resolve_prompt_preset_requests_reports_missing_diff_request() {
+        let presets = IndexMap::new();
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+preset missing-check\n";
+
+        let resolution = resolve_prompt_preset_requests(Some(diff), None, &[], &[], &presets);
+
+        assert_eq!(resolution.requested, vec!["missing-check".to_string()]);
+        assert_eq!(resolution.missing, vec!["missing-check".to_string()]);
+    }
+
+    #[test]
+    fn resolve_prompt_preset_requests_preserves_mixed_diff_harness_prompt_order() {
+        let presets = IndexMap::from([
+            ("first".to_string(), "First preset.".to_string()),
+            ("second".to_string(), "Second preset.".to_string()),
+            ("#third".to_string(), "Third preset.".to_string()),
+        ]);
+        let prompt_diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+preset first\n";
+        let harness_diff = "--- snapshot\n+++ harness\n@@ -1 +1,2 @@\n ctx\n+presets second\n";
+
+        let resolution = resolve_prompt_preset_requests(
+            Some(prompt_diff),
+            Some(harness_diff),
+            &["Use #third after the diff-level presets.".to_string()],
+            &[],
+            &presets,
+        );
+
+        assert_eq!(
+            resolution.requested,
+            vec![
+                "first".to_string(),
+                "second".to_string(),
+                "#third".to_string()
+            ]
+        );
+        assert!(resolution.missing.is_empty());
     }
 
     #[test]

@@ -4622,6 +4622,8 @@ fn test_agent_doc_prompt_contract_owns_prompt_contract_policy() {
         "pub fn prompt_requests_plan_work(",
         "pub fn prompt_requests_backlog_work(",
         "pub fn requested_prompt_presets(",
+        "pub struct PromptPresetRequestResolution",
+        "pub fn resolve_prompt_preset_requests(",
         "pub fn explicit_backlog_targets(",
         "pub fn required_explicit_backlog_item_count(",
         "pub fn required_plan_reference_count(",
@@ -4675,13 +4677,19 @@ fn test_agent_doc_prompt_contract_owns_prompt_contract_policy() {
             "agent-doc-orchestration/src/preflight/run.rs",
             vec![
                 "agent_doc_prompt_contract::collect_added_diff_lines",
-                "agent_doc_prompt_contract::requested_prompt_presets",
+                "agent_doc_prompt_contract::resolve_prompt_preset_requests",
                 "agent_doc_prompt_contract::prompt_requests_backlog_work",
                 "agent_doc_prompt_contract::explicit_backlog_targets",
                 "agent_doc_prompt_contract::required_explicit_backlog_item_count",
                 "agent_doc_prompt_contract::required_plan_reference_count",
             ],
-            vec!["crate::prompt_contract"],
+            vec![
+                "crate::prompt_contract",
+                "diff::detect_prompt_preset_requests",
+                "frontmatter::resolve_prompt_preset_key(&frontmatter_prompt_presets",
+                "let missing_prompt_presets =",
+                "prompt_presets_requested = prompt_presets_requested",
+            ],
         ),
     ] {
         let source = fs::read_to_string(manifest_dir.join(path)).unwrap();

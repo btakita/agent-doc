@@ -1076,49 +1076,23 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         agent_doc_model_tier::component_value_to_tier(v, &harness, &global_config.model)
     });
 
-    let mut prompt_presets_requested = prompt_diff_result
-        .as_ref()
-        .map(|d| diff::detect_prompt_preset_requests(d))
-        .unwrap_or_default();
-    if raw_diff.is_some()
-        && let Some(harness_only_diff) = harness_diff.as_ref()
-    {
-        push_unique_strings(
-            &mut prompt_presets_requested,
-            diff::detect_prompt_preset_requests(harness_only_diff),
-        );
-    }
-    push_unique_strings(
-        &mut prompt_presets_requested,
-        agent_doc_prompt_contract::requested_prompt_presets(
-            &prompt_targets,
-            &added_diff_lines,
-            &frontmatter_prompt_presets,
-        ),
+    let prompt_preset_resolution = agent_doc_prompt_contract::resolve_prompt_preset_requests(
+        prompt_diff_result.as_deref(),
+        raw_diff
+            .as_ref()
+            .and(harness_diff.as_ref())
+            .map(String::as_str),
+        &prompt_targets,
+        &added_diff_lines,
+        &frontmatter_prompt_presets,
     );
-    prompt_presets_requested = prompt_presets_requested
-        .into_iter()
-        .map(|name| {
-            frontmatter::resolve_prompt_preset_key(&frontmatter_prompt_presets, &name)
-                .unwrap_or(name)
-        })
-        .fold(Vec::new(), |mut acc, name| {
-            if !acc.iter().any(|existing| existing == &name) {
-                acc.push(name);
-            }
-            acc
-        });
-    let missing_prompt_presets = prompt_presets_requested
-        .iter()
-        .filter(|name| !frontmatter_prompt_presets.contains_key(name.as_str()))
-        .cloned()
-        .collect::<Vec<_>>();
-    if !missing_prompt_presets.is_empty() {
+    if !prompt_preset_resolution.missing.is_empty() {
         anyhow::bail!(
             "document references missing prompt preset(s): {}",
-            missing_prompt_presets.join(", ")
+            prompt_preset_resolution.missing.join(", ")
         );
     }
+    let prompt_presets_requested = prompt_preset_resolution.requested;
     if let Ok(content) = std::fs::read_to_string(file) {
         if let Some(warning) =
             post_exchange_comment_prompt_preset_warning(file, &content, &frontmatter_prompt_presets)

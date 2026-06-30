@@ -286,6 +286,13 @@ focused crate under the old path.
   only callback sidecar directory discovery, request/response file IO, cleanup,
   and pending-directory scanning effects while importing the focused protocol
   directly.
+- `agent-doc-tmux` now owns associated-pane resolution policy: pane inventory
+  candidate schema, proof-source vocabulary, source-summary rendering, stash
+  classification, tmux inventory-line parsing, and deterministic winner/
+  ambiguity selection. Orchestration keeps tmux inventory collection, process
+  tree probing, registry/session-log/supervisor evidence gathering, owner
+  filtering, recovery side effects, and user-facing sync diagnostics while
+  importing the focused resolver directly.
 - `agent-doc-session-accretion` now owns recent restart-log counting policy:
   session-log timestamp parsing, blank/malformed line skips, recent-window
   filtering, restart-churn event extraction, and restart-heavy event counting.

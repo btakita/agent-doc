@@ -76,7 +76,6 @@ agent-kit = { version = "0.4.1", features = ["hooks"] }
 instruction-files = "0.3"
 tmux-router = { path = "../../tmux-router", version = "0.3.11" }
 base64 = "0.22"
-pulldown-cmark = "0.13"
 regex = "1"
 yrs = "0.27"
 interprocess = { version = "2", default-features = false }

@@ -290,8 +290,13 @@ impl RunContext {
                     return crate::git::SnapshotCommitStatus::NoHead;
                 };
                 let normalized_snapshot =
-                    crate::git::normalize_transient_agent_doc_markers(&snapshot);
-                let normalized_head = crate::git::normalize_transient_agent_doc_markers(&head);
+                    agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+                        &snapshot,
+                    );
+                let normalized_head =
+                    agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+                        &head,
+                    );
                 if normalized_snapshot == normalized_head {
                     crate::git::SnapshotCommitStatus::Committed
                 } else {

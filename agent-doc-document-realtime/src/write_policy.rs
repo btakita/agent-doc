@@ -4,8 +4,10 @@
 //! module owns only pure decisions about when a visible document mutation is
 //! allowed to proceed.
 
+use agent_doc_document::transient_markers::{
+    normalize_transient_agent_doc_markers, strip_boundary_markers,
+};
 use anyhow::Result;
-use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 
@@ -678,105 +680,6 @@ pub fn snapshot_contains_dropped_prompt(snapshot: &str, prompt: &str) -> bool {
         return true;
     }
     snapshot.replace("~~", "").contains(needle)
-}
-
-fn strip_boundary_markers(content: &str) -> String {
-    content
-        .lines()
-        .filter(|line| !line.trim().starts_with("<!-- agent:boundary:"))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn code_block_byte_ranges(content: &str) -> Vec<std::ops::Range<usize>> {
-    let parser = Parser::new_ext(content, Options::empty()).into_offset_iter();
-    let mut ranges = Vec::new();
-    let mut start: Option<usize> = None;
-    for (event, range) in parser {
-        match event {
-            Event::Start(Tag::CodeBlock(_)) => {
-                start = Some(range.start);
-            }
-            Event::End(TagEnd::CodeBlock) => {
-                if let Some(s) = start.take() {
-                    ranges.push(s..range.end);
-                }
-            }
-            _ => {}
-        }
-    }
-    ranges
-}
-
-fn is_in_code_block(ranges: &[std::ops::Range<usize>], offset: usize) -> bool {
-    ranges.iter().any(|r| r.contains(&offset))
-}
-
-fn strip_head_markers(content: &str) -> String {
-    let code_ranges = code_block_byte_ranges(content);
-    let mut result_lines: Vec<&str> = Vec::new();
-    let mut offset = 0usize;
-    for line in content.lines() {
-        let trimmed = line.trim_start();
-        if !is_in_code_block(&code_ranges, offset)
-            && let Some(stripped) = line.strip_suffix(" (HEAD)")
-        {
-            if trimmed.starts_with('#') {
-                result_lines.push(stripped);
-                offset += line.len() + 1;
-                continue;
-            }
-            let without_suffix = stripped.trim_end();
-            if trimmed.starts_with("**") && without_suffix.trim_start().ends_with("**") {
-                result_lines.push(stripped);
-                offset += line.len() + 1;
-                continue;
-            }
-        }
-        result_lines.push(line);
-        offset += line.len() + 1;
-    }
-    let result = result_lines.join("\n");
-    if content.ends_with('\n') {
-        format!("{result}\n")
-    } else {
-        result
-    }
-}
-
-fn strip_guard_markers(content: &str) -> String {
-    const MARKERS: &[&str] = &[
-        "<!-- no-pending-capture -->",
-        "<!-- no-pending-done-guard -->",
-    ];
-    let mut result_lines: Vec<String> = Vec::new();
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if MARKERS.contains(&trimmed) {
-            continue;
-        }
-        if MARKERS.iter().any(|m| line.contains(m)) {
-            let mut cleaned = line.to_string();
-            for marker in MARKERS {
-                cleaned = cleaned.replace(marker, "");
-            }
-            result_lines.push(cleaned.trim_end().to_string());
-        } else {
-            result_lines.push(line.to_string());
-        }
-    }
-    let result = result_lines.join("\n");
-    if content.ends_with('\n') {
-        format!("{result}\n")
-    } else {
-        result
-    }
-}
-
-fn normalize_transient_agent_doc_markers(content: &str) -> String {
-    agent_doc_frontmatter::frontmatter::strip_pipeline_block_lines(&strip_guard_markers(
-        &strip_head_markers(&strip_boundary_markers(content)),
-    ))
 }
 
 fn normalize_component_content_for_absorb(content: &str) -> String {

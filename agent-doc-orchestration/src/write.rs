@@ -2509,8 +2509,10 @@ fn recover_missing_committed_head_response(file: &Path) -> Result<bool> {
 }
 
 fn latest_response_block_missing_from_current(head: &str, current: &str) -> Option<String> {
-    let head_norm = crate::git::normalize_transient_agent_doc_markers(head);
-    let current_norm = crate::git::normalize_transient_agent_doc_markers(current);
+    let head_norm =
+        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(head);
+    let current_norm =
+        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(current);
     let heading = head_norm
         .lines()
         .filter_map(|line| {

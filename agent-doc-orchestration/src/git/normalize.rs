@@ -2,26 +2,6 @@
 
 use super::*;
 
-pub(crate) fn strip_boundary_markers(content: &str) -> String {
-    content
-        .lines()
-        .filter(|line| !line.trim().starts_with("<!-- agent:boundary:"))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-pub fn normalize_transient_agent_doc_markers(content: &str) -> String {
-    // #22a8: also drop the managed `agent_doc_pipeline:` frontmatter block. It is
-    // mirrored onto the document mid-cycle (after response capture, cleared at a
-    // terminal phase), so a comparison that kept it would read the managed write
-    // as a direct response patchback / closeout drift. Stripping it here keeps
-    // every doc-vs-snapshot/HEAD comparison routed through this normalizer
-    // invariant to the pipeline mirror.
-    agent_doc_frontmatter::frontmatter::strip_pipeline_block_lines(&strip_guard_markers(
-        &strip_head_markers(&strip_boundary_markers(content)),
-    ))
-}
-
 /// Replace the `agent:queue` component (opening-tag attributes + body) with a
 /// canonical empty placeholder.
 ///
@@ -271,40 +251,6 @@ pub fn normalize_committed_exchange_artifacts(content: &str) -> String {
     rebuilt.push_str(&body[last..]);
 
     if changed { rebuilt } else { transient }
-}
-
-pub(crate) fn strip_re_heading_attribution(content: &str) -> String {
-    let code_ranges = code_block_byte_ranges(content);
-    let mut result_lines: Vec<String> = Vec::new();
-    let mut offset = 0usize;
-    for line in content.lines() {
-        if !is_in_code_block(&code_ranges, offset) {
-            let trimmed = line.trim_start();
-            let hash_count = trimmed.chars().take_while(|&c| c == '#').count();
-            if (1..=6).contains(&hash_count) && trimmed.chars().nth(hash_count) == Some(' ') {
-                let after_hash = trimmed[hash_count..].trim_start();
-                if after_hash.starts_with("Re:")
-                    && let Some(pos) = line.rfind(" — ")
-                {
-                    result_lines.push(line[..pos].to_string());
-                    offset += line.len() + 1;
-                    continue;
-                }
-            }
-        }
-        result_lines.push(line.to_string());
-        offset += line.len() + 1;
-    }
-    let result = result_lines.join("\n");
-    if content.ends_with('\n') {
-        format!("{result}\n")
-    } else {
-        result
-    }
-}
-
-pub fn normalize_post_commit_re_heading_drift(content: &str) -> String {
-    strip_re_heading_attribution(&normalize_transient_agent_doc_markers(content))
 }
 
 pub(crate) fn normalize_component_content_for_absorb(content: &str) -> String {

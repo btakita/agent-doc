@@ -419,8 +419,10 @@ pub(crate) fn exchange_only_promptless_content_drift(snapshot: &str, current: &s
     let Some(current_masked) = mask_exchange_component_content(current) else {
         return false;
     };
-    crate::git::normalize_transient_agent_doc_markers(&snapshot_masked)
-        == crate::git::normalize_transient_agent_doc_markers(&current_masked)
+    agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(&snapshot_masked)
+        == agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+            &current_masked,
+        )
 }
 
 pub(crate) fn active_session_drift_is_only_exchange_or_backlog_metadata(
@@ -433,18 +435,21 @@ pub(crate) fn active_session_drift_is_only_exchange_or_backlog_metadata(
     let Some(current_masked) = mask_components_by_name(current, &["exchange", "backlog"]) else {
         return false;
     };
-    crate::git::normalize_transient_agent_doc_markers(&snapshot_masked)
-        == crate::git::normalize_transient_agent_doc_markers(&current_masked)
+    agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(&snapshot_masked)
+        == agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+            &current_masked,
+        )
 }
 
 pub(crate) fn promptless_comment_only_drift(snapshot: &str, current: &str) -> bool {
     if snapshot == current {
         return true;
     }
-    crate::git::normalize_transient_agent_doc_markers(&agent_doc_diff::strip_comments(snapshot))
-        == crate::git::normalize_transient_agent_doc_markers(&agent_doc_diff::strip_comments(
-            current,
-        ))
+    agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+        &agent_doc_diff::strip_comments(snapshot),
+    ) == agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+        &agent_doc_diff::strip_comments(current),
+    )
 }
 
 pub(crate) fn mask_exchange_component_content(doc: &str) -> Option<String> {
@@ -634,7 +639,8 @@ pub fn detect_bypassed_response_write_between(
     // boundary IDs legitimately differ between snapshot (clean) and working tree
     // (preserves HEAD). Without this, preserved (HEAD) markers cause false-positive
     // "direct response patchback" detection.
-    let norm = |s: &str| crate::git::normalize_transient_agent_doc_markers(s);
+    let norm =
+        |s: &str| agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(s);
     let snap_norm = norm(snapshot_doc);
     let cur_norm = norm(current_doc);
     if cur_norm == snap_norm {

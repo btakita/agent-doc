@@ -249,7 +249,8 @@ fn extract_visible_response_patch_between(
     current_doc: &str,
     template_mode: bool,
 ) -> Option<String> {
-    let norm = |s: &str| crate::git::normalize_transient_agent_doc_markers(s);
+    let norm =
+        |s: &str| agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(s);
     let snapshot_norm = norm(snapshot_doc);
     let current_norm = norm(current_doc);
     if current_norm == snapshot_norm
@@ -408,8 +409,10 @@ fn agent_owned_visible_response_is_adoptable(
 
 fn head_already_matches_current_doc(file: &Path, doc_content: &str) -> Result<bool> {
     Ok(crate::git::show_head(file)?.as_deref().is_some_and(|head| {
-        crate::git::normalize_transient_agent_doc_markers(head)
-            == crate::git::normalize_transient_agent_doc_markers(doc_content)
+        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(head)
+            == agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+                doc_content,
+            )
     }))
 }
 

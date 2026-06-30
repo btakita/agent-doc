@@ -1598,7 +1598,7 @@ mod tests {
     #[test]
     fn stuck_captured_cycle_ignores_committed_cycle_when_only_guard_marker_stripped() {
         // #8j86: the captured response body carries an ephemeral
-        // `<!-- no-pending-done-guard -->` guard marker that `git::strip_guard_markers`
+        // `<!-- no-pending-done-guard -->` guard marker that `agent_doc_document::transient_markers::strip_guard_markers`
         // removes from the committed blob. The materialization probe must mirror
         // that strip, otherwise stuck_captured_cycle false-alarms on a response
         // that IS in HEAD (seen live 2026-06-10 on agent-doc-bugs2.md capture
@@ -2276,8 +2276,8 @@ mod tests {
         )
         .unwrap();
         assert_ne!(
-            crate::git::normalize_transient_agent_doc_markers(&snapshot),
-            crate::git::normalize_transient_agent_doc_markers(head),
+            agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(&snapshot),
+            agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(head),
             "test precondition: transient normalization must still differ"
         );
         assert_eq!(

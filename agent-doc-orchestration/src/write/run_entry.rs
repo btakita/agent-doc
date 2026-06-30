@@ -1269,7 +1269,9 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
         serde_json::Value::String(agent_doc_hash::content_hash(&content_at_start));
     ipc_payload["baseline_normalized_hash"] =
         serde_json::Value::String(agent_doc_hash::content_hash(
-            &crate::git::normalize_transient_agent_doc_markers(&content_at_start),
+            &agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+                &content_at_start,
+            ),
         ));
     ipc_payload["patch_id"] = serde_json::Value::String(patch_id.clone());
     if let Ok(Some(ref cs)) = crate::cycle_state::load(file) {

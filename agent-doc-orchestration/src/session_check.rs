@@ -88,12 +88,14 @@ fn response_marker_committed_in_head(file: &std::path::Path, marker: &str) -> an
     let Some(head) = crate::git::show_head(file)? else {
         return Ok(false);
     };
-    let needle = crate::git::normalize_transient_agent_doc_markers(marker);
+    let needle =
+        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(marker);
     let needle = needle.trim();
     if needle.is_empty() {
         return Ok(false);
     }
-    let head_norm = crate::git::normalize_transient_agent_doc_markers(&head);
+    let head_norm =
+        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(&head);
     Ok(head_norm.lines().any(|line| line.trim() == needle))
 }
 
@@ -105,8 +107,10 @@ fn latest_committed_head_response_missing_from_working(file: &Path) -> Result<Op
         Ok(content) => content,
         Err(_) => return Ok(None),
     };
-    let head_norm = crate::git::normalize_transient_agent_doc_markers(&head);
-    let working_norm = crate::git::normalize_transient_agent_doc_markers(&working);
+    let head_norm =
+        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(&head);
+    let working_norm =
+        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(&working);
     let Some(heading) = head_norm
         .lines()
         .filter_map(|line| {
@@ -142,7 +146,8 @@ fn operator_live_buffer_contains_heading(file: &Path, heading: &str) -> bool {
         let Some(content) = snapshot.content.as_deref() else {
             continue;
         };
-        let content_norm = crate::git::normalize_transient_agent_doc_markers(content);
+        let content_norm =
+            agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(content);
         if content_norm.lines().any(|line| line.trim() == heading) {
             crate::ops_log::log_op(
                 file,

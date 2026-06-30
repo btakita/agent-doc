@@ -1865,7 +1865,7 @@ fn strip_route_queue_state_for_boundary_compare(content: &str) -> String {
             }
         }
     }
-    crate::git::normalize_transient_agent_doc_markers(&result)
+    agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(&result)
 }
 
 pub(crate) fn preflight_debounce_ms(file: &Path) -> u64 {

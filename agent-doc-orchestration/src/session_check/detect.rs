@@ -39,8 +39,8 @@ pub fn detect_jb_cache_conflict_accept_duplicate_replay_with_context(
     let Some(head) = rc.head_content() else {
         return Ok(None);
     };
-    if crate::git::normalize_transient_agent_doc_markers(&deduped)
-        != crate::git::normalize_transient_agent_doc_markers(&head)
+    if agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(&deduped)
+        != agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(&head)
     {
         return Ok(None);
     }
@@ -242,8 +242,10 @@ pub fn detect_jb_cache_conflict_cancel_recoverable_with_context(
     let Some(snapshot) = rc.snapshot_content() else {
         return Ok(false);
     };
-    let normalized_doc = crate::git::normalize_transient_agent_doc_markers(&doc);
-    let normalized_snapshot = crate::git::normalize_transient_agent_doc_markers(&snapshot);
+    let normalized_doc =
+        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(&doc);
+    let normalized_snapshot =
+        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(&snapshot);
     Ok(normalized_doc == normalized_snapshot)
 }
 

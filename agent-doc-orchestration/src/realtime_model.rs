@@ -431,7 +431,7 @@ pub fn broadcast_editor_change(
             "baseline": peer_baseline,
             "baseline_hash": agent_doc_hash::content_hash(peer_baseline),
             "baseline_normalized_hash": agent_doc_hash::content_hash(
-                &crate::git::normalize_transient_agent_doc_markers(peer_baseline),
+                &agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(peer_baseline),
             ),
             "reposition_boundary": false,
         });
@@ -534,8 +534,10 @@ fn broadcast_convergence_patches(
         };
         let before_body = before_component.content(before);
         let after_body = after_component.content(after);
-        if crate::git::normalize_transient_agent_doc_markers(before_body)
-            == crate::git::normalize_transient_agent_doc_markers(after_body)
+        if agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(before_body)
+            == agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+                after_body,
+            )
         {
             continue;
         }
@@ -830,7 +832,11 @@ mod tests {
         );
         assert_eq!(
             payload["baseline_normalized_hash"],
-            agent_doc_hash::content_hash(&crate::git::normalize_transient_agent_doc_markers(&peer))
+            agent_doc_hash::content_hash(
+                &agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+                    &peer
+                )
+            )
         );
         assert_eq!(payload["patches"][0]["component"], "backlog");
         assert_eq!(payload["patches"][0]["op"], "replace");

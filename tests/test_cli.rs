@@ -1126,13 +1126,22 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // runs the same stale-snapshot reset drift guard before classifying a
         // preserved queue addition neutralized by replay normalization. This is
         // the existing reset-drift guard call, not a new guard boundary.
-        ("agent-doc-orchestration/src/git.rs", "guard_") => 21,
+        // 21 -> 15 (#transient-marker-document-policy): strip_guard_markers and
+        // strip_head_markers policy/tests moved from git into the focused
+        // `agent-doc-document::transient_markers` module. The removed tokens are
+        // document-normalization names, not removed flow guard boundaries.
+        ("agent-doc-orchestration/src/git.rs", "guard_") => 15,
         // #safe-mutation-extract: safe out-of-band mutation classification moved
         // into the focused realtime write policy crate. The four `guard_` tokens
         // are the existing transient marker stripper name/call plus two policy
         // unit-test names, not new orchestration guard boundaries.
-        ("agent-doc-document-realtime/src/write_policy.rs", "guard_") => 4,
-        ("agent-doc-orchestration/src/git/normalize.rs", "guard_") => 1,
+        // 4 -> 2 (#transient-marker-document-policy): realtime write policy now
+        // imports transient marker normalization from agent-doc-document instead
+        // of carrying duplicate guard-marker stripping helpers.
+        ("agent-doc-document-realtime/src/write_policy.rs", "guard_") => 2,
+        // 1 -> 0 (#transient-marker-document-policy): git/normalize no longer
+        // owns transient guard marker normalization.
+        ("agent-doc-orchestration/src/git/normalize.rs", "guard_") => 0,
         // `#pcwcrt`: the legacy post-commit working-tree revert tower
         // (`postcommit_worktree_lost_committed_content` / `send_postcommit_editor_refresh`
         // and their transport-tagged reconcile logs: `reason=committed_content_lost`,
@@ -1427,13 +1436,13 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // and `guard_no_stale_snapshot_reset_drift` guards to explain the wedge
         // they recover. No new guard flow token — the recovery reuses the existing
         // commit-time `guard_no_stale_snapshot_reset_drift` boundary.
-        // +2 (#8j86) for the audited `crate::git::strip_guard_markers(&probe)` call
+        // +2 (#8j86) for the audited `agent_doc_document::transient_markers::strip_guard_markers(&probe)` call
         // in `response_materialization_probe_from_response` plus its doc-comment
         // cross-reference: the materialization probe strips the same ephemeral
         // guard markers `git::commit` strips, so a captured response body carrying
         // `<!-- no-pending-done-guard -->` still matches the committed HEAD/archive
         // blob and `stuck_captured_cycle` stops false-alarming. Reuses the existing
-        // `git::strip_guard_markers` helper — no new flow guard token.
+        // `agent_doc_document::transient_markers::strip_guard_markers` helper — no new flow guard token.
         // +1 (#sampleipcdrift) for the audited visible-write idle/current guard on
         // the socket already_applied missing-disk-response repair path. The
         // recovery writes only the visible response materialization, then keeps
@@ -1614,7 +1623,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // +1 (#detached-disk-current-file): the detached-disk convergence path
         // calls `guard_visible_write_idle_and_current` immediately before the
         // atomic write, so no editorless fallback writes over a newer file epoch.
-        ("agent-doc-orchestration/src/write/converge.rs", "guard_") => 12,
+        // +1 (#active-capture-response-preserve): the stale snapshot reset drift
+        // guard now has a regression path proving it skips visible rebase when
+        // the active captured response is present in the snapshot but missing
+        // from visible current content.
+        ("agent-doc-orchestration/src/write/converge.rs", "guard_") => 13,
         // 24 -> 26 (#operator-text-authority-refresh): a missing-authority sidecar
         // now asks the editor to republish a read-only live-buffer proof before
         // failing closed. The two `reason=publish_live_buffer_failed` diagnostics
@@ -10366,6 +10379,92 @@ fn test_agent_doc_document_owns_status_projection_policy() {
             !source.contains("status_cmd::reconcile")
                 && !source.contains("status_cmd::STALE_SUPERVISOR_STATUS_MARKER"),
             "{relative} must not route status projection through status_cmd"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_document_owns_transient_marker_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let transient_markers =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/transient_markers.rs"))
+            .unwrap();
+    for required in [
+        "pub fn strip_boundary_markers(",
+        "pub fn strip_head_markers(",
+        "pub fn strip_guard_markers(",
+        "pub fn normalize_transient_agent_doc_markers(",
+        "pub fn strip_re_heading_attribution(",
+        "pub fn normalize_post_commit_re_heading_drift(",
+    ] {
+        assert!(
+            transient_markers.contains(required),
+            "agent-doc-document must own transient marker document policy: {required}"
+        );
+    }
+    let document_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/lib.rs")).unwrap();
+    assert!(
+        document_lib.contains("pub mod transient_markers;"),
+        "agent-doc-document should expose transient marker policy through its owning module"
+    );
+
+    for relative in [
+        "agent-doc-orchestration/src/git/normalize.rs",
+        "agent-doc-orchestration/src/preflight.rs",
+        "agent-doc-orchestration/src/session_check.rs",
+        "agent-doc-orchestration/src/session_check/detect.rs",
+        "agent-doc-orchestration/src/session_check/closeout_guards.rs",
+        "agent-doc-orchestration/src/write.rs",
+        "agent-doc-orchestration/src/write/converge.rs",
+        "agent-doc-orchestration/src/write/materialize.rs",
+        "agent-doc-orchestration/src/write/run_entry.rs",
+        "agent-doc-orchestration/src/write/ipc/transport.rs",
+        "agent-doc-orchestration/src/flow/closeout.rs",
+        "agent-doc-orchestration/src/graph.rs",
+        "agent-doc-orchestration/src/realtime_model.rs",
+        "agent-doc-orchestration/src/repair.rs",
+        "agent-doc-document-realtime/src/write_policy.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            !source.contains("crate::git::normalize_transient_agent_doc_markers")
+                && !source.contains("crate::git::strip_guard_markers")
+                && !source.contains("git::normalize_transient_agent_doc_markers")
+                && !source.contains("git::strip_guard_markers"),
+            "{relative} must call focused transient marker policy directly, not through git"
+        );
+    }
+
+    let git_normalize =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git/normalize.rs"))
+            .unwrap();
+    let git_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+    let realtime_write_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime/src/write_policy.rs"))
+            .unwrap();
+    for forbidden in [
+        "pub fn normalize_transient_agent_doc_markers(",
+        "fn normalize_transient_agent_doc_markers(",
+        "pub fn normalize_post_commit_re_heading_drift(",
+        "fn normalize_post_commit_re_heading_drift(",
+        "fn strip_re_heading_attribution(",
+        "fn strip_boundary_markers(",
+    ] {
+        assert!(
+            !git_normalize.contains(forbidden) && !realtime_write_policy.contains(forbidden),
+            "transient marker policy must not be re-owned outside agent-doc-document: {forbidden}"
+        );
+    }
+    for forbidden in [
+        "fn strip_head_markers(",
+        "fn strip_guard_markers(",
+        "fn code_block_byte_ranges(",
+    ] {
+        assert!(
+            !git_source.contains(forbidden),
+            "git must not re-own transient marker stripping policy: {forbidden}"
         );
     }
 }

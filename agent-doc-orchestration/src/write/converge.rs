@@ -29,6 +29,19 @@ pub fn guard_no_stale_snapshot_reset_drift(
     };
     let snapshot_len = drift.snapshot_len;
     let current_len = drift.current_len;
+    if active_capture_response_removed(file, snapshot_doc, current_doc) {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "stale_snapshot_rebase_skipped_active_capture file={} phase={} old_snap_len={} new_snap_len={}",
+                file.display(),
+                phase,
+                snapshot_len,
+                current_len
+            ),
+        );
+        return Ok(false);
+    }
     if let Some(reason) = classify_stale_snapshot_visible_rebase(file, snapshot_doc, current_doc) {
         crate::snapshot::save(file, current_doc)?;
         let crdt = agent_doc_merge::crdt::CrdtDoc::from_text(current_doc).encode_state();
@@ -188,8 +201,8 @@ fn active_capture_response_removed(file: &Path, snapshot_doc: &str, current_doc:
         return false;
     };
     !capture.response_body.trim().is_empty()
-        && crate::repair::response_already_applied(snapshot_doc, &capture.response_body)
-        && !crate::repair::response_already_applied(current_doc, &capture.response_body)
+        && response_materialized_in_content(&capture.response_body, snapshot_doc)
+        && !response_materialized_in_content(&capture.response_body, current_doc)
 }
 
 fn frontmatter_agent_only_equivalent(
@@ -243,7 +256,9 @@ fn component_change_is_turn_independent(
 }
 
 fn normalize_visible_recovery_compare(content: &str) -> String {
-    crate::git::normalize_transient_agent_doc_markers(&strip_boundary_for_dedup(content))
+    agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+        &strip_boundary_for_dedup(content),
+    )
 }
 
 /// `#exch-intermix`: auto-recover the `live_prompt_drift_after_preflight`
@@ -514,7 +529,9 @@ fn convergence_recovered_editor_wins_outside_response(recovered: &str, snapshot:
     ) else {
         return false;
     };
-    let norm = |text: &str| crate::git::normalize_transient_agent_doc_markers(text);
+    let norm = |text: &str| {
+        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(text)
+    };
     // Require an actual out-of-response divergence (otherwise the strict
     // whole-document equality check already accepted it; this branch only handles
     // the editor-owned-component mismatch case).
@@ -562,7 +579,8 @@ pub fn reconcile_postcommit_exchange_to_head(working: &str, head: &str) -> Optio
         .find(|c| c.name == AGENT_RESPONSE_COMPONENT)?;
     let head_body = head_exchange.content(head);
     let working_body = working_exchange.content(working);
-    let norm = |t: &str| crate::git::normalize_transient_agent_doc_markers(t);
+    let norm =
+        |t: &str| agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(t);
     let head_norm = norm(head_body);
     let working_norm = norm(working_body);
     if head_norm == working_norm {
@@ -639,7 +657,8 @@ pub fn editor_buffer_preserved_head_exchange(flushed: &str, head: &str) -> bool 
     ) else {
         return false;
     };
-    let norm = |t: &str| crate::git::normalize_transient_agent_doc_markers(t);
+    let norm =
+        |t: &str| agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(t);
     let head_norm = norm(head_exchange.content(head));
     let flushed_norm = norm(flushed_exchange.content(flushed));
     let flushed_lines: HashSet<&str> = flushed_norm
@@ -802,9 +821,11 @@ pub(crate) fn try_editor_converge_live_prompt_drift(
                 );
                 return Ok(None);
             };
-            if crate::git::normalize_transient_agent_doc_markers(&recovered)
-                == crate::git::normalize_transient_agent_doc_markers(target)
-            {
+            if agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+                &recovered,
+            ) == agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+                target,
+            ) {
                 crate::ops_log::log_op(
                     file,
                     &format!(
@@ -1024,7 +1045,7 @@ fn refresh_editor_after_ack_mismatch(
     let Some(recovery) = classify_ack_mismatch_recovery(
         target,
         recovered,
-        crate::git::normalize_transient_agent_doc_markers,
+        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers,
     ) else {
         crate::ops_log::log_op(
             file,
@@ -1410,9 +1431,11 @@ pub fn try_editor_converge(
                     Some(&patch_id),
                 );
             };
-            if crate::git::normalize_transient_agent_doc_markers(&recovered)
-                == crate::git::normalize_transient_agent_doc_markers(target)
-            {
+            if agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+                &recovered,
+            ) == agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+                target,
+            ) {
                 crate::ops_log::log_op(
                     file,
                     &format!(
@@ -1645,7 +1668,10 @@ pub(crate) fn editor_convergence_payload(
         return Ok(None);
     }
 
-    let normalized_baseline = crate::git::normalize_transient_agent_doc_markers(current_content);
+    let normalized_baseline =
+        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+            current_content,
+        );
     let mut payload = serde_json::json!({
         "type": "patch",
         "file": canonical_file.to_string_lossy(),
@@ -1744,9 +1770,11 @@ pub(crate) fn live_prompt_drift_convergence_patches(
         };
         let current_body = current_component.content(file_content);
         let target_body = target_component.content(target);
-        if crate::git::normalize_transient_agent_doc_markers(current_body)
-            == crate::git::normalize_transient_agent_doc_markers(target_body)
-        {
+        if agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+            current_body,
+        ) == agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+            target_body,
+        ) {
             continue;
         }
         patches.push(serde_json::json!({
@@ -2574,9 +2602,11 @@ mod core_tests {
         assert_eq!(
             payload["baseline_normalized_hash"].as_str(),
             Some(
-                agent_doc_hash::content_hash(&crate::git::normalize_transient_agent_doc_markers(
-                    &source
-                ))
+                agent_doc_hash::content_hash(
+                    &agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+                        &source
+                    )
+                )
                 .as_str()
             ),
             "socket convergence payloads must also carry the transient-marker-normalized fence"
@@ -3842,6 +3872,52 @@ mod core_tests {
             ops_log.contains("stale_snapshot_visible_rebased")
                 && ops_log.contains("historical_exchange_trim"),
             "post-clear compaction rebase marker should explain the drift:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn stale_snapshot_reset_drift_skips_rebase_when_active_capture_response_missing_from_visible() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("test.md");
+        let current = "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n\
+## Exchange\n\n<!-- agent:exchange patch=append -->\n\
+❯ Please reply\n\
+<!-- agent:boundary:old -->\n\
+<!-- /agent:exchange -->\n";
+        let response_body = format!(
+            "### Re: Please reply — gpt-5\n\n{}\n",
+            "Captured response paragraph.\n".repeat(20)
+        );
+        let response_patch =
+            format!("<!-- patch:exchange -->\n{response_body}<!-- /patch:exchange -->\n");
+        let snapshot = current.replace(
+            "<!-- agent:boundary:old -->",
+            &format!("{response_body}<!-- agent:boundary:new -->"),
+        );
+        fs::write(&doc, current).unwrap();
+        crate::snapshot::save(&doc, current).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(current), Some(current)).unwrap();
+        crate::capture::capture_response(&doc, &response_patch).unwrap();
+        crate::snapshot::save(&doc, &snapshot).unwrap();
+
+        let rebased = guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), current, "commit")
+            .expect("active captured response must not trip stale-snapshot reset repair");
+
+        assert!(
+            !rebased,
+            "active capture should leave the response-bearing snapshot in place"
+        );
+        assert_eq!(
+            crate::snapshot::load(&doc).unwrap(),
+            Some(snapshot),
+            "prompt-only visible text must not overwrite the response snapshot"
+        );
+        let ops_log =
+            fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops_log.contains("stale_snapshot_rebase_skipped_active_capture"),
+            "skip marker should explain why the stale rebase was suppressed:\n{ops_log}"
         );
     }
 

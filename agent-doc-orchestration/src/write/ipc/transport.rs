@@ -317,7 +317,9 @@ pub fn try_ipc(
                 serde_json::Value::String(agent_doc_hash::content_hash(target_baseline));
             socket_payload["baseline_normalized_hash"] =
                 serde_json::Value::String(agent_doc_hash::content_hash(
-                    &crate::git::normalize_transient_agent_doc_markers(target_baseline),
+                    &agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+                        target_baseline,
+                    ),
                 ));
         }
         socket_payload["patch_id"] = serde_json::Value::String(patch_id.clone());
@@ -820,7 +822,9 @@ pub fn try_ipc(
             serde_json::Value::String(agent_doc_hash::content_hash(target_baseline));
         ipc_payload["baseline_normalized_hash"] =
             serde_json::Value::String(agent_doc_hash::content_hash(
-                &crate::git::normalize_transient_agent_doc_markers(target_baseline),
+                &agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+                    target_baseline,
+                ),
             ));
     }
     ipc_payload["patch_id"] = serde_json::Value::String(patch_id.clone());
@@ -2891,8 +2895,8 @@ mod submodule_patch_routing_tests {
         assert_eq!(outcome, AlreadyAppliedSnapshotOutcome::Persisted);
         assert_eq!(
             crate::snapshot::load(&doc).unwrap().as_deref(),
-            Some(content_ours),
-            "missing disk response must keep the committed snapshot at agent-owned content_ours"
+            Some(repaired_visible),
+            "missing disk response must snapshot the repaired visible document, preserving the live follow-up prompt"
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),

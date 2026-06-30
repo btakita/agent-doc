@@ -1457,6 +1457,7 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
                         agent_doc_hash::content_hash(ours)
                     ),
                 );
+                repair_decision = IpcRepairDecision::file_read(repaired_current);
             } else {
                 log_ipc_proof_failure(
                     file,
@@ -1519,6 +1520,15 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
                 repair_decision.snapshot_content = effective_snap;
             }
         }
+    } else if let Some(current) = current.as_deref() {
+        repair_decision = match current_source {
+            IpcSnapshotSource::AckContentSidecar => {
+                IpcRepairDecision::ack_content(current.to_string())
+            }
+            IpcSnapshotSource::FileRead | IpcSnapshotSource::ContentOurs => {
+                IpcRepairDecision::file_read(current.to_string())
+            }
+        };
     }
 
     if expected_response.trim().is_empty() {
@@ -1527,6 +1537,24 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
             "socket_already_applied",
             Some(patch_id),
             "already_applied_empty_response_probe",
+            "file_ipc_fallback",
+            &format!(
+                "snapshot_len={} snapshot_hash={} content_ours_len={} content_ours_hash={}",
+                repair_decision.snapshot_content.len(),
+                agent_doc_hash::content_hash(&repair_decision.snapshot_content),
+                ours.len(),
+                agent_doc_hash::content_hash(ours)
+            ),
+        );
+        return Ok(AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+    }
+
+    if repair_decision.snap_source == IpcSnapshotSource::ContentOurs {
+        log_ipc_proof_failure(
+            file,
+            "socket_already_applied",
+            Some(patch_id),
+            "already_applied_unproven_content_ours",
             "file_ipc_fallback",
             &format!(
                 "snapshot_len={} snapshot_hash={} content_ours_len={} content_ours_hash={}",

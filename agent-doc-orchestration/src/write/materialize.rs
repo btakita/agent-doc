@@ -27,7 +27,7 @@ pub fn response_materialization_probe_from_response(response: &str) -> String {
     };
     // Ephemeral per-cycle guard markers (`<!-- no-pending-done-guard -->`,
     // `<!-- no-pending-capture -->`) are stripped from committed blobs by
-    // `git::strip_guard_markers`, so a captured response body that still carries
+    // `agent_doc_document::transient_markers::strip_guard_markers`, so a captured response body that still carries
     // them would never match the committed HEAD/archive content and
     // `stuck_captured_cycle` would false-alarm on a response that is in fact
     // committed (#8j86). Strip them from the probe so the match mirrors commit.
@@ -52,7 +52,7 @@ pub fn response_materialized_in_content(response: &str, content: &str) -> bool {
 }
 
 fn strip_ephemeral_markers(content: &str) -> String {
-    crate::git::strip_guard_markers(content)
+    agent_doc_document::transient_markers::strip_guard_markers(content)
 }
 
 pub(crate) fn ipc_response_materialized_or_fallback(

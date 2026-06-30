@@ -4,6 +4,7 @@ use super::*;
 use agent_doc_element_exchange::{
     extract_post_commit_normalization_targets, normalization_target_counts,
 };
+use agent_doc_ipc_protocol::FullContentIpcMode;
 
 fn live_editor_delivery_target(file: &Path) -> Option<String> {
     let mut file_keys = Vec::new();
@@ -973,16 +974,6 @@ pub fn try_ipc(
     })
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FullContentIpcMode {
-    /// Late fallback repair for an agent response. Must not dirty an already
-    /// committed cycle.
-    ResponseFallback,
-    /// Operator-owned replacement such as Compact Exchange. This is a new
-    /// document mutation even when the previous response cycle is committed.
-    OperatorMutation,
-}
-
 /// Disabled full-document editor IPC path.
 ///
 /// This function intentionally never emits socket or file IPC payloads. It
@@ -1026,13 +1017,6 @@ pub fn try_ipc_full_content_operator_mutation_from_source(
     )
 }
 
-pub(crate) fn full_content_source_label(mode: FullContentIpcMode) -> &'static str {
-    match mode {
-        FullContentIpcMode::ResponseFallback => "response_fallback",
-        FullContentIpcMode::OperatorMutation => "compact_exchange",
-    }
-}
-
 pub(crate) fn log_full_content_ipc_disabled(
     file: &Path,
     mode: FullContentIpcMode,
@@ -1041,7 +1025,7 @@ pub(crate) fn log_full_content_ipc_disabled(
     source_content: Option<&str>,
     current_content: Option<&str>,
 ) {
-    let source = full_content_source_label(mode);
+    let source = mode.source_label();
     eprintln!(
         "[write] full-content IPC disabled for {}: falling back to guarded disk path",
         file.display()
@@ -1085,7 +1069,7 @@ pub(crate) fn full_content_ipc_scope_allows(
     };
 
     let reason = reason.as_str();
-    let source = full_content_source_label(mode);
+    let source = mode.source_label();
     eprintln!(
         "[write] full-content IPC skipped for {}: {} is not eligible for whole-document editor replacement",
         file.display(),

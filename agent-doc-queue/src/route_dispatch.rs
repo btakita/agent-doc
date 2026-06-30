@@ -82,6 +82,18 @@ pub fn operator_prioritize_route_prompt(prompt_text: String) -> String {
     }
 }
 
+pub fn dispatch_active_turn_queue_source(
+    harness_binary: &str,
+    blocker_reason: &str,
+) -> Option<&'static str> {
+    match (harness_binary, blocker_reason) {
+        ("codex", "active codex turn") => Some("dispatch_only_codex_active_turn"),
+        ("opencode", "opencode active turn") => Some("dispatch_only_opencode_active_turn"),
+        ("claude", "active claude turn") => Some("dispatch_only_claude_active_turn"),
+        _ => None,
+    }
+}
+
 pub fn prepare_route_dispatch_queue_update(
     original: &str,
     change_text: &str,
@@ -404,6 +416,32 @@ mod tests {
         assert_eq!(
             operator_prioritize_route_prompt("/clear".to_string()),
             "/clear"
+        );
+    }
+
+    #[test]
+    fn active_turn_blockers_are_queueable_for_prompt_bearing_reroutes() {
+        assert_eq!(
+            dispatch_active_turn_queue_source("codex", "active codex turn"),
+            Some("dispatch_only_codex_active_turn")
+        );
+        assert_eq!(
+            dispatch_active_turn_queue_source("opencode", "opencode active turn"),
+            Some("dispatch_only_opencode_active_turn")
+        );
+        assert_eq!(
+            dispatch_active_turn_queue_source("claude", "active claude turn"),
+            Some("dispatch_only_claude_active_turn")
+        );
+        assert_eq!(
+            dispatch_active_turn_queue_source("codex", "codex hook review prompt"),
+            None,
+            "hook review requires an explicit operator decision, not auto-queueing"
+        );
+        assert_eq!(
+            dispatch_active_turn_queue_source("codex", "queued draft in composer"),
+            None,
+            "drafted prompt input must not be overwritten by route queueing"
         );
     }
 

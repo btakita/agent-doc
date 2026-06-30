@@ -198,13 +198,33 @@ pub fn early_ack_ops_marker() -> &'static str {
     "[ipc-socket] early_ack_pending emitted before apply"
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FullContentIpcMode {
+    /// Late fallback repair for an agent response. Must not dirty an already
+    /// committed cycle.
+    ResponseFallback,
+    /// Operator-owned replacement such as Compact Exchange. This is a new
+    /// document mutation even when the previous response cycle is committed.
+    OperatorMutation,
+}
+
+impl FullContentIpcMode {
+    pub const fn source_label(self) -> &'static str {
+        match self {
+            Self::ResponseFallback => "response_fallback",
+            Self::OperatorMutation => "compact_exchange",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        AckClassification, callback_request, callback_request_is_expired, callback_response,
-        callback_response_matches_request, callback_urgency_for_elapsed, classify_ack,
-        early_ack_line, early_ack_ops_marker, early_ack_tagged_message, message_requests_early_ack,
-        pending_callback_from_request,
+        AckClassification, FullContentIpcMode, callback_request, callback_request_is_expired,
+        callback_response, callback_response_matches_request, callback_urgency_for_elapsed,
+        classify_ack, early_ack_line, early_ack_ops_marker, early_ack_tagged_message,
+        message_requests_early_ack, pending_callback_from_request,
     };
 
     #[test]
@@ -360,5 +380,17 @@ mod tests {
         assert!(callback_response_matches_request(&matching, Some(&request)));
         assert!(!callback_response_matches_request(&stale, Some(&request)));
         assert!(callback_response_matches_request(&stale, None));
+    }
+
+    #[test]
+    fn full_content_ipc_mode_source_labels_are_stable() {
+        assert_eq!(
+            FullContentIpcMode::ResponseFallback.source_label(),
+            "response_fallback"
+        );
+        assert_eq!(
+            FullContentIpcMode::OperatorMutation.source_label(),
+            "compact_exchange"
+        );
     }
 }

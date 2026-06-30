@@ -335,8 +335,10 @@ pub(crate) fn dispatch_only_send_reopen(
                 reason
             ),
         );
-        if let Some(source) = dispatch_active_turn_queue_source(harness, &reason)
-            && let Some(prompt_text) = options.queue_prompt_text
+        if let Some(source) = agent_doc_queue::route_dispatch::dispatch_active_turn_queue_source(
+            &harness.binary,
+            &reason,
+        ) && let Some(prompt_text) = options.queue_prompt_text
         {
             // #jb-run-preempt-autoloop-priority: manual Run Agent Doc into a busy
             // active turn preempts pending auto items (head-insert).
@@ -904,23 +906,6 @@ pub(crate) fn dispatch_blocker_recovery_hint(
     "restore an idle prompt and retry".to_string()
 }
 
-pub(crate) fn dispatch_active_turn_queue_source(
-    harness: &HarnessConfig,
-    reason: &str,
-) -> Option<&'static str> {
-    match (harness.binary.as_str(), reason) {
-        ("codex", "active codex turn") => Some("dispatch_only_codex_active_turn"),
-        ("opencode", "opencode active turn") => Some("dispatch_only_opencode_active_turn"),
-        // `#jb-run-agent-doc-busy-wait-deadlock`: a busy Claude pane (a session
-        // not running `/loop`) is an active turn just like Codex/OpenCode. The
-        // dispatch-only reopen path must queue the prompt to an active `agent:queue`
-        // for the idle-queue watch to drain, not bail/refuse, so JB `Run Agent
-        // Doc` on a mid-turn Claude actor enqueues instead of erroring.
-        ("claude", "active claude turn") => Some("dispatch_only_claude_active_turn"),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(unused_imports)]
@@ -1103,34 +1088,6 @@ mod tests {
             &doc,
         );
         assert_eq!(generic, "restore an idle prompt and retry");
-    }
-    #[test]
-    fn dispatch_active_turn_blockers_are_queueable_for_prompt_bearing_reroutes() {
-        assert_eq!(
-            dispatch_active_turn_queue_source(&HarnessConfig::codex(), "active codex turn"),
-            Some("dispatch_only_codex_active_turn")
-        );
-        assert_eq!(
-            dispatch_active_turn_queue_source(&HarnessConfig::opencode(), "opencode active turn"),
-            Some("dispatch_only_opencode_active_turn")
-        );
-        // #jb-run-agent-doc-busy-wait-deadlock: a busy Claude active turn is
-        // queueable just like Codex/OpenCode, so the reopen path enqueues instead of
-        // bailing.
-        assert_eq!(
-            dispatch_active_turn_queue_source(&HarnessConfig::claude(), "active claude turn"),
-            Some("dispatch_only_claude_active_turn")
-        );
-        assert_eq!(
-            dispatch_active_turn_queue_source(&HarnessConfig::codex(), "codex hook review prompt"),
-            None,
-            "hook review requires an explicit operator decision, not auto-queueing"
-        );
-        assert_eq!(
-            dispatch_active_turn_queue_source(&HarnessConfig::codex(), "queued draft in composer"),
-            None,
-            "drafted prompt input must not be overwritten by route queueing"
-        );
     }
     #[test]
     fn dispatch_only_submit_proof_gate_accepts_enter_delivery_without_codex_hooks() {

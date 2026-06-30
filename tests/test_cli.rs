@@ -10166,10 +10166,12 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "pub fn message_requests_early_ack(",
         "pub fn early_ack_line(",
         "pub fn early_ack_ops_marker(",
+        "pub enum FullContentIpcMode",
+        "pub const fn source_label(",
     ] {
         assert!(
             protocol_source.contains(required),
-            "agent-doc-ipc-protocol must own early-ack protocol policy: {required}"
+            "agent-doc-ipc-protocol must own IPC protocol policy: {required}"
         );
     }
     for required in [
@@ -10262,6 +10264,25 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
             && !sim_world_source.contains("ipc_socket::AckClassification"),
         "root callers should use the focused IPC protocol crate instead of the old orchestration path"
     );
+
+    let write_ipc_transport_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc/transport.rs"))
+            .unwrap();
+    assert!(
+        write_ipc_transport_source.contains("use agent_doc_ipc_protocol::FullContentIpcMode;"),
+        "write IPC transport should import full-content IPC mode vocabulary from the focused protocol crate"
+    );
+    for forbidden in [
+        "pub enum FullContentIpcMode",
+        "fn full_content_source_label(",
+        "pub(crate) fn full_content_source_label(",
+        "pub use agent_doc_ipc_protocol",
+    ] {
+        assert!(
+            !write_ipc_transport_source.contains(forbidden),
+            "write IPC transport must not re-own or facade full-content IPC protocol vocabulary: {forbidden}"
+        );
+    }
 
     for forbidden in [
         "agent-doc-core",
@@ -11696,6 +11717,7 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
         "pub fn active_auto_route_queue_prompt_texts(",
         "pub fn operator_prioritize_route_prompt(",
         "pub fn prepare_route_dispatch_queue_update(",
+        "pub fn dispatch_active_turn_queue_source(",
         "pub fn activate_existing_route_queue_content(",
         "pub fn inactive_route_queue_head(",
         "pub fn committed_snapshot_backs_queue_head(",
@@ -11710,6 +11732,9 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
 
     let route_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+    let route_dispatch_only =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch_only.rs"))
+            .unwrap();
     let route_cycle_ack =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/cycle_ack.rs"))
             .unwrap();
@@ -11725,9 +11750,12 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
         "document_queue::has_stop_fence_at_head(",
         "document_queue::time_gate_at_head(",
         "document_queue::marker_control(",
+        "fn dispatch_active_turn_queue_source(",
+        "pub(crate) fn dispatch_active_turn_queue_source(",
     ] {
         assert!(
             !route_source.contains(forbidden_snippet)
+                && !route_dispatch_only.contains(forbidden_snippet)
                 && !route_cycle_ack.contains(forbidden_snippet),
             "route must stay an effect adapter and not re-own route-dispatch queue policy: {forbidden_snippet}"
         );
@@ -11750,7 +11778,9 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
             && route_cycle_ack
                 .contains("agent_doc_queue::route_dispatch::route_prompt_text_for_change")
             && preflight_source
-                .contains("agent_doc_queue::route_dispatch::active_auto_route_queue_prompt_texts"),
+                .contains("agent_doc_queue::route_dispatch::active_auto_route_queue_prompt_texts")
+            && route_dispatch_only
+                .contains("agent_doc_queue::route_dispatch::dispatch_active_turn_queue_source"),
         "route/preflight should call route-dispatch queue policy through agent-doc-queue directly"
     );
 }

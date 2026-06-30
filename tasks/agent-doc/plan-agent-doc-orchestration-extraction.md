@@ -283,6 +283,13 @@ focused crate under the old path.
   file loading, fact projection, and CLI stderr rendering; the old local
   `run.rs` verdict enum/classifier was deleted rather than retained as a
   wrapper.
+- `agent-doc-turn` now owns owner-pane recursion diagnostics: the operator
+  guidance for recursive direct invocation, recursive start, unresolved prompt
+  miss, active auto-queue handoff, and repeated queue-wedge halt. Orchestration
+  keeps Codex/tmux/session ownership detection, queue state checks, auto-queue
+  halt effects, cycle abandonment, ops-log emission, and fact projection; the
+  old `run.rs` message-builder functions were deleted instead of kept as local
+  facades.
 - `agent-doc-tmux` now owns sync column-memory layout policy and safe-passive
   focus-only expansion policy: restoring remembered sibling panes, preserving
   duplicate-column layout state, returning restoration/expansion events for

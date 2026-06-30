@@ -13,6 +13,7 @@ name = "agent_doc_document"
 agent-doc-element = { path = "../agent-doc-element", version = "0.34.65" }
 agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.65" }
 agent-doc-element-registry = { path = "../agent-doc-element-registry", version = "0.34.65" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.65" }
 anyhow = "1"
 pulldown-cmark = "0.13"
 serde = { version = "1", features = ["derive"] }

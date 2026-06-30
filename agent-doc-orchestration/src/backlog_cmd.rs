@@ -148,7 +148,8 @@ fn reject_colliding_explicit_id(full_content: &str, item: &str) -> Result<()> {
     let Some(candidate) = backlog::explicit_custom_id(item) else {
         return Ok(());
     };
-    if let Some(sources) = crate::preflight::identity_collision_for_new_id(full_content, &candidate)
+    if let Some(sources) =
+        agent_doc_document::active_identity::identity_collision_for_new_id(full_content, &candidate)
     {
         anyhow::bail!(
             "pending add: refusing to add item with explicit id `#{candidate}` — that identity is already active under {sources}. Each #id must have exactly one active meaning per document so `do #id`, queue generation, and \"top backlog item\" stay unambiguous (#preset-item-id-collision-enforce). Choose a different id, or rename the existing {sources} entry first.",
@@ -185,35 +186,34 @@ pub fn icebox_add(file: &Path, item: &str) -> Result<()> {
 
 /// Add multiple new items while preserving the caller's flag order, top-down, at
 /// the beginning of the pending list: the first item lands topmost ("what you
-/// read is what you get"). Each individual add prepends to the front, so to keep
-/// flag order top-down we apply the batch in reverse (`#pendaddorder`); the last
-/// item is prepended first and the first item is prepended last, ending up on top.
+/// read is what you get").
 fn add_many_to_list(
     file: &Path,
     items: &[String],
     gated: bool,
     list: backlog::TrackedWorkList,
 ) -> Result<Vec<String>> {
-    let mut ids = Vec::with_capacity(items.len());
-    // Iterate in reverse so that prepend-each-to-front yields the caller's flag
-    // order top-down (first flag topmost). Do NOT change to forward iteration —
-    // that reverses N-flag `--pending-add` batches (`#pendaddorder`).
-    for item in items.iter().rev() {
-        let (full_content, comp) = find_tracked_list_component(file, list)?;
+    if items.is_empty() {
+        return Ok(Vec::new());
+    }
+    let (full_content, comp) = find_tracked_list_component(file, list)?;
+    for item in items {
         reject_colliding_explicit_id(&full_content, item)?;
-        let existing = &full_content[comp.open_end..comp.close_start];
-        let doc_id = agent_doc_hash::document_id_for_path(file);
-        let outcome = backlog::op_add_with_outcome(existing, item, &doc_id, gated)?;
-        let canonical = canonicalize_component_content(file, &outcome.body);
-        let new_doc = comp.replace_content(&full_content, &canonical);
-        persist_pending_write(file, &full_content, &new_doc)?;
-        if outcome.inserted {
-            ids.push(outcome.id.clone());
-        } else if let Some(key) = outcome.deduped_key.as_ref() {
-            log_symptom_dedupe(file, list.label(), &outcome.id, key);
+    }
+    let existing = &full_content[comp.open_end..comp.close_start];
+    let doc_id = agent_doc_hash::document_id_for_path(file);
+    let outcome = backlog::op_prepend_many_with_outcomes(existing, items, &doc_id, gated)?;
+    let canonical = canonicalize_component_content(file, &outcome.body);
+    let new_doc = comp.replace_content(&full_content, &canonical);
+    persist_pending_write(file, &full_content, &new_doc)?;
+    let mut ids = Vec::new();
+    for item in &outcome.outcomes {
+        if item.inserted {
+            ids.push(item.id.clone());
+        } else if let Some(key) = item.deduped_key.as_ref() {
+            log_symptom_dedupe(file, list.label(), &item.id, key);
         }
     }
-    ids.reverse();
     Ok(ids)
 }
 

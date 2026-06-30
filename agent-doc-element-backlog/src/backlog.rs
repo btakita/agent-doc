@@ -1056,6 +1056,19 @@ pub struct PendingAddOutcome {
     pub deduped_key: Option<SymptomDedupeKey>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingAddBatchItemOutcome {
+    pub id: String,
+    pub inserted: bool,
+    pub deduped_key: Option<SymptomDedupeKey>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingAddBatchOutcome {
+    pub body: String,
+    pub outcomes: Vec<PendingAddBatchItemOutcome>,
+}
+
 pub fn symptom_dedupe_key_from_text(text: &str) -> Result<Option<SymptomDedupeKey>> {
     let Some(marker_start) = text.find("[symptom-key ") else {
         return Ok(None);
@@ -2741,6 +2754,31 @@ pub fn op_add_with_outcome(
     gated: bool,
 ) -> Result<PendingAddOutcome> {
     op_add_at_with_outcome(body, text, doc_id, gated, AddPosition::First)
+}
+
+/// Prepend multiple new tracked-work items while preserving caller order.
+///
+/// Each single add prepends to the front, so the batch is applied in reverse and
+/// item outcomes are returned in the caller's original order.
+pub fn op_prepend_many_with_outcomes(
+    body: &str,
+    items: &[String],
+    doc_id: &str,
+    gated: bool,
+) -> Result<PendingAddBatchOutcome> {
+    let mut body = body.to_string();
+    let mut outcomes = Vec::with_capacity(items.len());
+    for item in items.iter().rev() {
+        let outcome = op_add_with_outcome(&body, item, doc_id, gated)?;
+        body = outcome.body;
+        outcomes.push(PendingAddBatchItemOutcome {
+            id: outcome.id,
+            inserted: outcome.inserted,
+            deduped_key: outcome.deduped_key,
+        });
+    }
+    outcomes.reverse();
+    Ok(PendingAddBatchOutcome { body, outcomes })
 }
 
 /// Position-aware variant of [`op_add`] (`#ah0s`). Assigns/validates the id and
@@ -4454,6 +4492,92 @@ mod tests {
             msg.contains("duplicate"),
             "expected duplicate error, got: {}",
             msg
+        );
+    }
+
+    #[test]
+    fn op_prepend_many_preserves_sequence_order_at_front() {
+        let body = "- [ ] [#abcd] existing item\n";
+        let outcome = op_prepend_many_with_outcomes(
+            body,
+            &["first new".to_string(), "second new".to_string()],
+            DOC_ID,
+            false,
+        )
+        .unwrap();
+        let lines: Vec<&str> = outcome.body.lines().collect();
+        assert!(lines[0].contains("first new"), "{}", outcome.body);
+        assert!(lines[1].contains("second new"), "{}", outcome.body);
+        assert!(lines[2].contains("existing item"), "{}", outcome.body);
+        assert_eq!(outcome.outcomes.len(), 2);
+        assert!(outcome.outcomes.iter().all(|item| item.inserted));
+    }
+
+    #[test]
+    fn op_prepend_many_returns_inserted_ids_in_caller_order() {
+        let outcome = op_prepend_many_with_outcomes(
+            "",
+            &[
+                "id=first01 first item".to_string(),
+                "second auto item".to_string(),
+                "[#third03] third item".to_string(),
+            ],
+            DOC_ID,
+            false,
+        )
+        .unwrap();
+        let ids: Vec<&str> = outcome
+            .outcomes
+            .iter()
+            .map(|item| item.id.as_str())
+            .collect();
+        assert_eq!(ids[0], "first01");
+        assert!(!ids[1].is_empty());
+        assert_eq!(ids[2], "third03");
+        let lines: Vec<&str> = outcome.body.lines().collect();
+        assert!(
+            lines[0].contains("[#first01] first item"),
+            "{}",
+            outcome.body
+        );
+        assert!(lines[1].contains("second auto item"), "{}", outcome.body);
+        assert!(
+            lines[2].contains("[#third03] third item"),
+            "{}",
+            outcome.body
+        );
+    }
+
+    #[test]
+    fn op_prepend_many_reports_deduped_symptom_outcomes() {
+        let key = SymptomDedupeKey::new("stale_queue_pause", "doc-abc", "queue", "sha256:feedface")
+            .unwrap();
+        let first = format!("stale queue pause {}", key.marker());
+        let first_outcome = op_add_with_outcome("", &first, DOC_ID, false).unwrap();
+        let repeat = format!("stale queue pause observed again {}", key.marker());
+        let outcome = op_prepend_many_with_outcomes(
+            &first_outcome.body,
+            &["new regular task".to_string(), repeat],
+            DOC_ID,
+            false,
+        )
+        .unwrap();
+        assert_eq!(outcome.outcomes.len(), 2);
+        assert!(outcome.outcomes[0].inserted);
+        assert!(!outcome.outcomes[1].inserted);
+        assert_eq!(outcome.outcomes[1].id, first_outcome.id);
+        assert_eq!(outcome.outcomes[1].deduped_key.as_ref(), Some(&key));
+        assert!(
+            outcome.body.contains("new regular task"),
+            "{}",
+            outcome.body
+        );
+        assert!(
+            outcome
+                .body
+                .contains("  evidence: stale queue pause observed again"),
+            "{}",
+            outcome.body
         );
     }
 

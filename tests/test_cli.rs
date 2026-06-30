@@ -7361,6 +7361,8 @@ fn test_agent_doc_element_backlog_owns_tracked_line_remove_and_prune_policy() {
         "pub fn line_is_legacy_done_item",
         "pub fn op_remove_matching_tracked_line",
         "pub fn op_prune_legacy_done_lines",
+        "pub struct PendingAddBatchOutcome",
+        "pub fn op_prepend_many_with_outcomes",
     ] {
         assert!(
             backlog_model.contains(required),
@@ -7381,10 +7383,12 @@ fn test_agent_doc_element_backlog_owns_tracked_line_remove_and_prune_policy() {
         "fn line_is_legacy_done_item",
         "let lines: Vec<&str> = existing.lines().collect();",
         ".filter(|line| !line_is_legacy_done_item(line))",
+        "for item in items.iter().rev()",
+        "ids.reverse()",
     ] {
         assert!(
             !backlog_cmd.contains(forbidden),
-            "backlog_cmd must stay a file-IO adapter, not a tracked line remove/prune facade"
+            "backlog_cmd must stay a file-IO adapter, not re-own tracked-work batch/remove/prune policy"
         );
     }
     assert!(
@@ -7399,6 +7403,10 @@ fn test_agent_doc_element_backlog_owns_tracked_line_remove_and_prune_policy() {
         backlog_cmd.contains("backlog::op_remove_matching_tracked_line")
             && backlog_cmd.contains("backlog::op_prune_legacy_done_lines"),
         "backlog_cmd should call tracked line remove/prune policy from agent-doc-element-backlog"
+    );
+    assert!(
+        backlog_cmd.contains("backlog::op_prepend_many_with_outcomes"),
+        "backlog_cmd should call tracked-work batch add policy from agent-doc-element-backlog"
     );
 
     let compact =
@@ -8182,6 +8190,62 @@ fn test_agent_doc_document_owns_status_projection_policy() {
             "{relative} must not route status projection through status_cmd"
         );
     }
+}
+
+#[test]
+fn test_agent_doc_document_owns_active_identity_projection_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let active_identity =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/active_identity.rs")).unwrap();
+    for required in [
+        "pub fn document_active_identities",
+        "pub fn detect_identity_collisions",
+        "pub fn identity_collision_for_new_id",
+    ] {
+        assert!(
+            active_identity.contains(required),
+            "agent-doc-document must own active identity projection policy: {required}"
+        );
+    }
+
+    let document_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/lib.rs")).unwrap();
+    assert!(
+        document_lib.contains("pub mod active_identity;"),
+        "agent-doc-document should expose active identity projection through its owning module"
+    );
+
+    let preflight =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    for forbidden in [
+        "pub fn document_active_identities",
+        "pub fn detect_identity_collisions",
+        "pub fn identity_collision_for_new_id",
+        "fn document_active_identities",
+        "fn detect_identity_collisions",
+        "fn identity_collision_for_new_id",
+    ] {
+        assert!(
+            !preflight.contains(forbidden),
+            "preflight must stay a warning adapter, not an active identity policy facade: {forbidden}"
+        );
+    }
+    assert!(
+        preflight.contains("agent_doc_document::active_identity::detect_identity_collisions"),
+        "preflight should call focused active identity collision detection directly"
+    );
+
+    let backlog_cmd =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/backlog_cmd.rs"))
+            .unwrap();
+    assert!(
+        backlog_cmd.contains("agent_doc_document::active_identity::identity_collision_for_new_id"),
+        "backlog_cmd should call focused active identity collision enforcement directly"
+    );
+    assert!(
+        !backlog_cmd.contains("crate::preflight::identity_collision_for_new_id"),
+        "backlog_cmd must not route active identity policy through preflight"
+    );
 }
 
 #[test]

@@ -4,62 +4,32 @@ pub(crate) fn check_partial_closeout_state_guard(file: &Path) -> Result<GuardRes
     let Some(state) = crate::cycle_state::load(file)? else {
         return Ok(GuardResult::None);
     };
-    if state.expect_done_or_gate_ids.is_empty() || state.is_open() {
-        return Ok(GuardResult::None);
-    }
     let Some(capture_id) = state.capture_id.as_deref() else {
         return Ok(GuardResult::None);
     };
     let Some(capture) = crate::capture::load_by_id(file, capture_id)? else {
         return Ok(GuardResult::None);
     };
-    if capture.state != crate::capture::CaptureState::Committed {
-        return Ok(GuardResult::None);
-    }
-    if capture
-        .response_body
-        .contains("<!-- no-partial-closeout-guard -->")
-    {
-        return Ok(GuardResult::None);
-    }
 
-    let text = agent_doc_turn::closeout_signal::response_text_for_guards(&capture.response_body);
-    let lower = text.to_ascii_lowercase();
-    if !(agent_doc_turn::closeout_signal::text_has_shipped_signal(&lower)
-        && agent_doc_turn::closeout_signal::text_has_partial_remaining_signal(&lower))
-    {
-        return Ok(GuardResult::None);
-    }
-
-    // Only directed ids that are still open in agent:backlog and not resolved
-    // (done/reaped) this cycle are candidates for next-phase narrowing.
-    let resolved: std::collections::HashSet<String> = state
-        .pending_done_ids
-        .iter()
-        .chain(state.reaped_pending_ids.iter())
-        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
-        .filter(|id| !id.is_empty())
-        .collect();
-    let open_backlog: std::collections::HashSet<String> =
-        open_backlog_ids(file)?.into_iter().collect();
-
-    let mut candidates: Vec<String> = Vec::new();
-    for id in state
-        .expect_done_or_gate_ids
-        .iter()
-        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
-        .filter(|id| !id.is_empty())
-    {
-        if resolved.contains(&id) || !open_backlog.contains(&id) {
-            continue;
+    let open_backlog_ids = open_backlog_ids(file)?;
+    let candidates = match agent_doc_turn::closeout_signal::partial_closeout_state_decision(
+        agent_doc_turn::closeout_signal::PartialCloseoutStateEvidence {
+            cycle_open: state.is_open(),
+            capture_committed: capture.state == crate::capture::CaptureState::Committed,
+            response_body: &capture.response_body,
+            directed_ids: &state.expect_done_or_gate_ids,
+            pending_done_ids: &state.pending_done_ids,
+            reaped_pending_ids: &state.reaped_pending_ids,
+            open_backlog_ids: &open_backlog_ids,
+        },
+    ) {
+        agent_doc_turn::closeout_signal::PartialCloseoutStateDecision::Pass => {
+            return Ok(GuardResult::None);
         }
-        if !candidates.iter().any(|existing| existing == &id) {
-            candidates.push(id);
+        agent_doc_turn::closeout_signal::PartialCloseoutStateDecision::Warn { candidate_ids } => {
+            candidate_ids
         }
-    }
-    if candidates.is_empty() {
-        return Ok(GuardResult::None);
-    }
+    };
 
     let ids = candidates
         .iter()
@@ -68,7 +38,7 @@ pub(crate) fn check_partial_closeout_state_guard(file: &Path) -> Result<GuardRes
         .join(", ");
     let edit_hint = candidates
         .iter()
-        .map(|id| format!("--pending-edit \"{}=<remaining next-phase scope>\"", id))
+        .map(|id| format!("--backlog-edit \"{}=<remaining next-phase scope>\"", id))
         .collect::<Vec<_>>()
         .join(" ");
 
@@ -87,8 +57,9 @@ pub(crate) fn check_partial_closeout_state_guard(file: &Path) -> Result<GuardRes
             ids
         ),
         format!(
-            "[session-check] hint: narrow the backlog item + queue head to the next phase with `{}` (or `--pending-gate <id>` if only review/external validation remains), or add `<!-- no-partial-closeout-guard -->` when it is already narrowed",
-            edit_hint
+            "[session-check] hint: narrow the backlog item + queue head to the next phase with `{}` (or `--backlog-gate <id>` if only review/external validation remains), or add `{}` when it is already narrowed",
+            edit_hint,
+            agent_doc_turn::closeout_signal::PARTIAL_CLOSEOUT_GUARD_SUPPRESS_MARKER
         ),
     ]))
 }

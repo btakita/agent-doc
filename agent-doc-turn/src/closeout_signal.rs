@@ -246,6 +246,84 @@ pub fn response_text_for_guards(response: &str) -> String {
     response.to_string()
 }
 
+pub const PARTIAL_CLOSEOUT_GUARD_SUPPRESS_MARKER: &str = "<!-- no-partial-closeout-guard -->";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PartialCloseoutStateEvidence<'a> {
+    pub cycle_open: bool,
+    pub capture_committed: bool,
+    pub response_body: &'a str,
+    pub directed_ids: &'a [String],
+    pub pending_done_ids: &'a [String],
+    pub reaped_pending_ids: &'a [String],
+    pub open_backlog_ids: &'a [String],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PartialCloseoutStateDecision {
+    Pass,
+    Warn { candidate_ids: Vec<String> },
+}
+
+pub fn partial_closeout_state_decision(
+    evidence: PartialCloseoutStateEvidence<'_>,
+) -> PartialCloseoutStateDecision {
+    if evidence.directed_ids.is_empty() || evidence.cycle_open || !evidence.capture_committed {
+        return PartialCloseoutStateDecision::Pass;
+    }
+    if evidence
+        .response_body
+        .contains(PARTIAL_CLOSEOUT_GUARD_SUPPRESS_MARKER)
+    {
+        return PartialCloseoutStateDecision::Pass;
+    }
+
+    let text = response_text_for_guards(evidence.response_body);
+    let lower = text.to_ascii_lowercase();
+    if !(text_has_shipped_signal(&lower) && text_has_partial_remaining_signal(&lower)) {
+        return PartialCloseoutStateDecision::Pass;
+    }
+
+    let resolved: std::collections::HashSet<String> = normalized_id_set(
+        evidence
+            .pending_done_ids
+            .iter()
+            .map(String::as_str)
+            .chain(evidence.reaped_pending_ids.iter().map(String::as_str)),
+    );
+    let open_backlog = normalized_id_set(evidence.open_backlog_ids.iter().map(String::as_str));
+
+    let mut candidate_ids = Vec::new();
+    for id in evidence
+        .directed_ids
+        .iter()
+        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
+        .filter(|id| !id.is_empty())
+    {
+        if resolved.contains(&id) || !open_backlog.contains(&id) {
+            continue;
+        }
+        if !candidate_ids.iter().any(|existing| existing == &id) {
+            candidate_ids.push(id);
+        }
+    }
+
+    if candidate_ids.is_empty() {
+        PartialCloseoutStateDecision::Pass
+    } else {
+        PartialCloseoutStateDecision::Warn { candidate_ids }
+    }
+}
+
+fn normalized_id_set<'a>(
+    ids: impl IntoIterator<Item = &'a str>,
+) -> std::collections::HashSet<String> {
+    ids.into_iter()
+        .map(agent_doc_element_backlog::backlog::normalize_pending_id)
+        .filter(|id| !id.is_empty())
+        .collect()
+}
+
 pub fn normalized_prompt_for_match(line: &str) -> String {
     line.trim().trim_start_matches('❯').trim().to_string()
 }
@@ -761,6 +839,87 @@ mod tests {
         assert!(!text_has_partial_remaining_signal(
             "completed the full task with no external validation left"
         ));
+    }
+
+    #[test]
+    fn partial_closeout_state_decision_warns_only_for_open_unresolved_directed_ids() {
+        let response = "### Re: do #nstep2\n\nCommitted and pushed. Live verification remains; not deployed yet.";
+        let directed_ids = vec![
+            "nstep2".to_string(),
+            "#nstep2".to_string(),
+            "done1".to_string(),
+            "reaped1".to_string(),
+            "missing1".to_string(),
+        ];
+        let pending_done_ids = vec!["done1".to_string()];
+        let reaped_pending_ids = vec!["reaped1".to_string()];
+        let open_backlog_ids = vec![
+            "nstep2".to_string(),
+            "done1".to_string(),
+            "reaped1".to_string(),
+        ];
+
+        assert_eq!(
+            partial_closeout_state_decision(PartialCloseoutStateEvidence {
+                cycle_open: false,
+                capture_committed: true,
+                response_body: response,
+                directed_ids: &directed_ids,
+                pending_done_ids: &pending_done_ids,
+                reaped_pending_ids: &reaped_pending_ids,
+                open_backlog_ids: &open_backlog_ids,
+            }),
+            PartialCloseoutStateDecision::Warn {
+                candidate_ids: vec!["nstep2".to_string()]
+            }
+        );
+    }
+
+    #[test]
+    fn partial_closeout_state_decision_passes_without_required_state_or_signal() {
+        let response = "### Re: do #nstep2\n\nCommitted and pushed. Live verification remains; not deployed yet.";
+        let suppressed = format!("{response}\n{PARTIAL_CLOSEOUT_GUARD_SUPPRESS_MARKER}");
+        let directed_ids = vec!["nstep2".to_string()];
+        let open_backlog_ids = vec!["nstep2".to_string()];
+        let empty = Vec::new();
+        let base = PartialCloseoutStateEvidence {
+            cycle_open: false,
+            capture_committed: true,
+            response_body: response,
+            directed_ids: &directed_ids,
+            pending_done_ids: &empty,
+            reaped_pending_ids: &empty,
+            open_backlog_ids: &open_backlog_ids,
+        };
+
+        assert_eq!(
+            partial_closeout_state_decision(PartialCloseoutStateEvidence {
+                cycle_open: true,
+                ..base
+            }),
+            PartialCloseoutStateDecision::Pass
+        );
+        assert_eq!(
+            partial_closeout_state_decision(PartialCloseoutStateEvidence {
+                capture_committed: false,
+                ..base
+            }),
+            PartialCloseoutStateDecision::Pass
+        );
+        assert_eq!(
+            partial_closeout_state_decision(PartialCloseoutStateEvidence {
+                response_body: "Committed locally only. Nothing remains.",
+                ..base
+            }),
+            PartialCloseoutStateDecision::Pass
+        );
+        assert_eq!(
+            partial_closeout_state_decision(PartialCloseoutStateEvidence {
+                response_body: &suppressed,
+                ..base
+            }),
+            PartialCloseoutStateDecision::Pass
+        );
     }
 
     #[test]

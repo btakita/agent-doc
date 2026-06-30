@@ -5658,7 +5658,7 @@ Body\n\
             GuardResult::Warn(lines) => {
                 let joined = lines.join("\n");
                 assert!(joined.contains("#nstep2"), "{joined}");
-                assert!(joined.contains("--pending-edit"), "{joined}");
+                assert!(joined.contains("--backlog-edit"), "{joined}");
                 assert!(
                     joined.contains("next phase") || joined.contains("next-phase"),
                     "{joined}"

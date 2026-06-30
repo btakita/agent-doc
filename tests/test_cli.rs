@@ -3227,6 +3227,10 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub fn text_has_shipped_signal",
         "pub fn text_has_partial_remaining_signal",
         "pub fn response_text_for_guards",
+        "pub const PARTIAL_CLOSEOUT_GUARD_SUPPRESS_MARKER",
+        "pub struct PartialCloseoutStateEvidence",
+        "pub enum PartialCloseoutStateDecision",
+        "pub fn partial_closeout_state_decision",
         "pub fn normalized_prompt_for_match",
         "pub fn exchange_contains_prompt_line",
         "pub fn is_exchange_response_heading",
@@ -3425,6 +3429,12 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub(crate) const PARTIAL_CLOSEOUT_REMAINING_PHRASES",
         "pub(crate) fn text_has_shipped_signal",
         "pub(crate) fn text_has_partial_remaining_signal",
+        "agent_doc_turn::closeout_signal::text_has_shipped_signal",
+        "agent_doc_turn::closeout_signal::text_has_partial_remaining_signal",
+        ".contains(\"<!-- no-partial-closeout-guard -->\")",
+        "let resolved: std::collections::HashSet<String>",
+        "let open_backlog: std::collections::HashSet<String>",
+        "agent_doc_element_backlog::backlog::normalize_pending_id",
     ] {
         assert!(
             !partial_staging.contains(forbidden),
@@ -3432,8 +3442,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         );
     }
     for required in [
-        "agent_doc_turn::closeout_signal::text_has_shipped_signal",
-        "agent_doc_turn::closeout_signal::text_has_partial_remaining_signal",
+        "agent_doc_turn::closeout_signal::partial_closeout_state_decision",
+        "agent_doc_turn::closeout_signal::PartialCloseoutStateEvidence",
+        "agent_doc_turn::closeout_signal::PartialCloseoutStateDecision",
     ] {
         assert!(
             partial_staging.contains(required),
@@ -3483,7 +3494,6 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     for relative in [
         "agent-doc-orchestration/src/session_check/pending_guards.rs",
         "agent-doc-orchestration/src/session_check/closeout_guards.rs",
-        "agent-doc-orchestration/src/session_check/partial_staging.rs",
         "agent-doc-orchestration/src/write/pending_checks.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();

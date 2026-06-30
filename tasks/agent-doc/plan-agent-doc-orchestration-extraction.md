@@ -220,6 +220,14 @@ should be deleted during extraction.
   sorted overlapping-literal finding. Orchestration keeps only git repo
   discovery, git command execution, repo-path attachment, ops-log emission, and
   warning rendering.
+- `agent-doc-diff::semantic` now owns semantic-diff summary vocabulary and
+  construction: component/frontmatter change projection, AST node event
+  projection, bounded navigation targets, prompt-change previews, and stable
+  summary ordering. Orchestration keeps only the preflight/run effect adapters
+  that gather inputs, project summaries into durable op-log records, persist
+  cycle/output state, and render JSON/warnings while importing the focused
+  builder directly. There is no preflight re-export of
+  `semantic_diff_summary`.
 - `agent-doc-prompt-contract` now owns prompt preset request resolution:
   combining diff-level and harness-diff preset directives with prompt-target
   preset references, canonicalizing bare hashtag aliases, preserving ordered
@@ -327,10 +335,10 @@ should be deleted during extraction.
   policy: prompt-target id extraction, queue-driver address resolution,
   exchange-tail floor calculation, turn-scope derivation, and prompt-preemption
   filtering for synthetic queue continuations, managed-state edits, and
-  independent turn ops. Preflight keeps semantic diff construction, durable
-  op-log persistence, cycle-state storage, and warning/output adapters while
-  importing the focused workflow helpers directly; the old preflight glob export
-  was narrowed so these helpers are not available through an orchestration path.
+  independent turn ops. Preflight keeps durable op-log persistence, cycle-state
+  storage, and warning/output adapters while importing the focused workflow
+  helpers directly; the old preflight glob export was narrowed so these helpers
+  are not available through an orchestration path.
 - `agent-doc-session-accretion` now owns recent restart-log counting policy:
   session-log timestamp parsing, blank/malformed line skips, recent-window
   filtering, restart-churn event extraction, and restart-heavy event counting.

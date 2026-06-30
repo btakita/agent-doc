@@ -1,10 +1,12 @@
 use super::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
 use agent_doc_turn::closeout_guard::CloseoutGuardReason;
 use agent_doc_turn::closeout_recovery::{
-    CloseoutRecoveryCycleInput, CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput,
-    CloseoutRecoveryDrift, CloseoutRecoveryMutationReason, CloseoutRecoveryState,
-    CloseoutRecoveryStateInput, MetadataDriftAuthority,
-    classify_closeout_recovery_state_from_input, closeout_content_component_signature,
+    CloseoutRecoveryCommandInput, CloseoutRecoveryCycleInput, CloseoutRecoveryDecision,
+    CloseoutRecoveryDecisionInput, CloseoutRecoveryDrift, CloseoutRecoveryMutationReason,
+    CloseoutRecoveryState, CloseoutRecoveryStateInput, MetadataDriftAuthority,
+    OpenCycleRecoveryCommandInput, classify_closeout_recovery_state_from_input,
+    closeout_content_component_signature,
+    closeout_recovery_command as render_closeout_recovery_command,
     closeout_recovery_decision_from_state, metadata_drift_authority,
 };
 use anyhow::{Context, Result};
@@ -571,83 +573,38 @@ fn now_millis() -> u64 {
         .unwrap_or(0)
 }
 
-/// Render the single file-specific recovery command for a classified closeout
-/// state, or `None` when the state is already clean. Policy state and action
-/// selection live in `agent-doc-turn`; orchestration owns this adapter because it
-/// needs the document path and open-cycle sidecar.
-pub fn closeout_recovery_command(file: &Path, state: CloseoutRecoveryState) -> Option<String> {
-    let f = file.display();
-    Some(match state {
-        CloseoutRecoveryState::Clean => return None,
-        CloseoutRecoveryState::OpenCycle => open_cycle_recovery_command(file),
-        CloseoutRecoveryState::MissingResponseBody => format!(
-            "pipe the final response (with `<!-- patch:exchange -->` blocks) through `agent-doc write --commit {f}`, then re-run `agent-doc session-check {f}`"
-        ),
-        CloseoutRecoveryState::DirectResponsePatchback => format!(
-            "`agent-doc write --commit {f}` to absorb the visible `### Re:` response through the snapshot/commit boundary"
-        ),
-        CloseoutRecoveryState::EscapedTemplatePatch => format!(
-            "rewrite the response with real `<!-- patch:exchange -->` blocks and rerun `agent-doc finalize {f}` — escaped component markers must not reach `agent:exchange`"
-        ),
-        CloseoutRecoveryState::BoundaryOnlyDrift => format!(
-            "`agent-doc commit {f}` (boundary / `(HEAD)` marker or answered-prompt-prefix drift only — no response body to write)"
-        ),
-        CloseoutRecoveryState::NestedParentPointerStale => {
-            format!("`agent-doc commit {f}` to update the nested parent submodule pointer")
-        }
-        CloseoutRecoveryState::OpenEmptyPreflight => format!(
-            "`agent-doc cancel {f}` — an empty diagnostic preflight cycle with no captured response; abandoning it leaves no document drift"
-        ),
-        CloseoutRecoveryState::QueueMetadataDrift => format!(
-            "`agent-doc commit {f}` (queue / `queue_active` / status metadata only — user/response content is unchanged, no response body to write)"
-        ),
-        CloseoutRecoveryState::SidecarVisibleDrift => format!(
-            "`agent-doc reset --from-current --preserve-session {f}` then `agent-doc commit {f}` to rebuild stale sidecars from the visible file (metadata-only visible drift)"
-        ),
-        CloseoutRecoveryState::UnsafeUserContentDrift => format!(
-            "preserve the user-authored content and finish through `agent-doc finalize {f}` (or `agent-doc write --commit {f}`) — do NOT `agent-doc commit`, which would commit unreviewed content drift as metadata"
-        ),
+pub fn closeout_recovery_command_for_file(
+    file: &Path,
+    state: CloseoutRecoveryState,
+) -> Option<String> {
+    render_closeout_recovery_command(CloseoutRecoveryCommandInput {
+        document: file.display().to_string(),
+        state,
+        open_cycle: open_cycle_recovery_command_input(file),
     })
 }
 
-fn open_cycle_recovery_command(file: &Path) -> String {
-    let f = file.display();
+fn open_cycle_recovery_command_input(file: &Path) -> Option<OpenCycleRecoveryCommandInput> {
     let Ok(Some(state)) = crate::cycle_state::load(file) else {
-        return format!(
-            "finish the response, then `agent-doc finalize {f}` (or `agent-doc write --commit {f}` to absorb an already-visible response)"
-        );
+        return None;
     };
-    let phase = state.phase.as_str();
-    let baseline_arg = state
-        .baseline_file
-        .as_deref()
-        .map(|path| format!(" --baseline-file {path}"))
-        .unwrap_or_default();
     let target = state
         .queue_task_id
-        .as_deref()
-        .or_else(|| state.prompt_targets.first().map(String::as_str))
-        .map(|target| format!(" target={target:?}"))
-        .unwrap_or_default();
-    let pending = if state.had_pending_mutations
+        .clone()
+        .or_else(|| state.prompt_targets.first().cloned());
+    let has_pending_mutations = state.had_pending_mutations
         || !state.pending_done_ids.is_empty()
         || !state.pending_gated_ids.is_empty()
         || !state.pending_kept_open_ids.is_empty()
-        || !state.reaped_pending_ids.is_empty()
-    {
-        " pending_mutations=true"
-    } else {
-        ""
-    };
-    let capture = state
-        .capture_id
-        .as_deref()
-        .map(|capture_id| format!(" capture_id={capture_id}"))
-        .unwrap_or_default();
-    format!(
-        "resume durable checkpoint cycle={} phase={phase}{target}{pending}{capture}; finish the response, then `agent-doc finalize {f}{baseline_arg}` (or `agent-doc write --commit {f}` to absorb an already-visible response)",
-        state.cycle_id
-    )
+        || !state.reaped_pending_ids.is_empty();
+    Some(OpenCycleRecoveryCommandInput {
+        cycle_id: state.cycle_id,
+        phase: state.phase,
+        baseline_file: state.baseline_file,
+        target,
+        has_pending_mutations,
+        capture_id: state.capture_id,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -871,7 +828,7 @@ pub fn decide_closeout_recovery(
             .as_ref()
             .and_then(CloseoutRecoveryEvidence::stale_capture_supersession_proof)
     });
-    let recovery_command = closeout_recovery_command(file, state);
+    let recovery_command = closeout_recovery_command_for_file(file, state);
     closeout_recovery_decision_from_state(
         state,
         CloseoutRecoveryDecisionInput {
@@ -951,7 +908,7 @@ pub fn apply_closeout_recovery(file: &Path) -> Result<RecoveryApplication> {
         other => Ok(RecoveryApplication::NotApplied {
             state: other,
             reason: "auto-apply withheld — recovery requires a preserved response body or open-cycle resolution, not a metadata operation".to_string(),
-            recommended: closeout_recovery_command(file, other).unwrap_or_default(),
+            recommended: closeout_recovery_command_for_file(file, other).unwrap_or_default(),
         }),
     }
 }
@@ -1087,7 +1044,7 @@ fn apply_metadata_drift_recovery(
         return Ok(RecoveryApplication::NotApplied {
             state,
             reason: "auto-apply withheld — could not load both the local and HEAD document sides to prove the authoritative direction".to_string(),
-            recommended: closeout_recovery_command(file, state).unwrap_or_default(),
+            recommended: closeout_recovery_command_for_file(file, state).unwrap_or_default(),
         });
     };
 
@@ -1142,7 +1099,7 @@ fn apply_metadata_drift_recovery(
         MetadataDriftAuthority::Ambiguous => Ok(RecoveryApplication::NotApplied {
             state,
             reason: "auto-apply withheld — both the local and HEAD sides carry distinct live queue continuation heads with no consuming response; the authoritative direction is ambiguous".to_string(),
-            recommended: closeout_recovery_command(file, state).unwrap_or_default(),
+            recommended: closeout_recovery_command_for_file(file, state).unwrap_or_default(),
         }),
     }
 }
@@ -1675,68 +1632,6 @@ mod tests {
     }
 
     #[test]
-    fn recovery_command_maps_each_state_to_one_instruction() {
-        use CloseoutRecoveryState::*;
-        let f = Path::new("tasks/doc.md");
-        assert_eq!(closeout_recovery_command(f, Clean), None);
-        for (state, name, needle) in [
-            (OpenCycle, "open_cycle", "agent-doc finalize"),
-            (
-                MissingResponseBody,
-                "missing_response_body",
-                "agent-doc write --commit",
-            ),
-            (
-                DirectResponsePatchback,
-                "direct_response_patchback",
-                "absorb the visible",
-            ),
-            (
-                EscapedTemplatePatch,
-                "escaped_template_patch",
-                "patch:exchange",
-            ),
-            (BoundaryOnlyDrift, "boundary_only_drift", "boundary"),
-            (
-                NestedParentPointerStale,
-                "nested_parent_pointer_stale",
-                "parent submodule pointer",
-            ),
-            (
-                OpenEmptyPreflight,
-                "open_empty_preflight",
-                "agent-doc cancel",
-            ),
-            (
-                QueueMetadataDrift,
-                "queue_metadata_drift",
-                "agent-doc commit",
-            ),
-            (
-                SidecarVisibleDrift,
-                "sidecar_visible_drift",
-                "reset --from-current",
-            ),
-            (
-                UnsafeUserContentDrift,
-                "unsafe_user_content_drift",
-                "do NOT `agent-doc commit`",
-            ),
-        ] {
-            assert_eq!(state.as_str(), name);
-            let cmd = closeout_recovery_command(f, state).expect("non-clean states have a command");
-            assert!(
-                cmd.contains(needle),
-                "state {name} command {cmd:?} missing {needle:?}"
-            );
-            assert!(
-                cmd.contains("tasks/doc.md"),
-                "command should name the file: {cmd:?}"
-            );
-        }
-    }
-
-    #[test]
     fn open_cycle_recovery_command_names_durable_checkpoint() {
         let base = "---\nsession: test\n---\n\nHi\n";
         let (_dir, doc) = setup_git_project_with_doc(base);
@@ -1762,7 +1657,8 @@ mod tests {
         )
         .unwrap();
 
-        let cmd = closeout_recovery_command(&doc, CloseoutRecoveryState::OpenCycle).unwrap();
+        let cmd =
+            closeout_recovery_command_for_file(&doc, CloseoutRecoveryState::OpenCycle).unwrap();
 
         assert!(cmd.contains("resume durable checkpoint"), "{cmd}");
         assert!(cmd.contains("phase=response_captured"), "{cmd}");
@@ -1932,7 +1828,8 @@ mod tests {
             CloseoutRecoveryState::OpenEmptyPreflight
         );
         let cmd =
-            closeout_recovery_command(&doc, CloseoutRecoveryState::OpenEmptyPreflight).unwrap();
+            closeout_recovery_command_for_file(&doc, CloseoutRecoveryState::OpenEmptyPreflight)
+                .unwrap();
         assert!(cmd.contains("agent-doc cancel"), "{cmd}");
     }
 
@@ -2028,8 +1925,11 @@ mod tests {
             classify_closeout_recovery_state_for_file(&doc),
             CloseoutRecoveryState::DirectResponsePatchback
         );
-        let cmd = closeout_recovery_command(&doc, CloseoutRecoveryState::DirectResponsePatchback)
-            .unwrap();
+        let cmd = closeout_recovery_command_for_file(
+            &doc,
+            CloseoutRecoveryState::DirectResponsePatchback,
+        )
+        .unwrap();
         assert!(cmd.contains("write --commit"), "{cmd}");
     }
 
@@ -2098,8 +1998,11 @@ mod tests {
             classify_closeout_recovery_state_for_file(&doc),
             CloseoutRecoveryState::NestedParentPointerStale
         );
-        let cmd = closeout_recovery_command(&doc, CloseoutRecoveryState::NestedParentPointerStale)
-            .unwrap();
+        let cmd = closeout_recovery_command_for_file(
+            &doc,
+            CloseoutRecoveryState::NestedParentPointerStale,
+        )
+        .unwrap();
         assert!(cmd.contains("agent-doc commit"), "{cmd}");
     }
 
@@ -2382,7 +2285,8 @@ mod tests {
             CloseoutRecoveryState::BoundaryOnlyDrift
         );
         let cmd =
-            closeout_recovery_command(&doc, CloseoutRecoveryState::BoundaryOnlyDrift).unwrap();
+            closeout_recovery_command_for_file(&doc, CloseoutRecoveryState::BoundaryOnlyDrift)
+                .unwrap();
         assert!(cmd.contains("agent-doc commit"), "{cmd}");
         assert!(!cmd.contains("write --commit"), "{cmd}");
     }

@@ -314,7 +314,7 @@ pub(crate) fn closeout_recovery_hint(file: &Path) -> String {
     // `#closeout-repair-churn`: render one typed recovery instruction for the
     // classified state instead of a single static "try write --commit" line.
     let state = crate::flow::closeout::classify_closeout_recovery_state_for_file(file);
-    match crate::flow::closeout::closeout_recovery_command(file, state) {
+    match crate::flow::closeout::closeout_recovery_command_for_file(file, state) {
         Some(command) => format!("Recovery [{}]: {}.", state.as_str(), command),
         None => format!(
             "Use `agent-doc write --commit {}` once the visible response body is final, then re-run `agent-doc session-check {}`.",

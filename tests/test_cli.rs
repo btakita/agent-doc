@@ -3174,6 +3174,10 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub struct CloseoutRecoveryStateInput",
         "pub fn classify_closeout_recovery_state_from_input",
         "pub fn closeout_content_component_signature",
+        "pub struct OpenCycleRecoveryCommandInput",
+        "pub struct CloseoutRecoveryCommandInput",
+        "pub fn closeout_recovery_command",
+        "pub fn open_cycle_recovery_command",
         "pub struct CloseoutRecoveryDecisionInput",
         "pub enum CloseoutRecoveryDecision",
         "pub fn closeout_recovery_decision_from_state",
@@ -3237,6 +3241,11 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub enum MetadataDriftAuthority",
         "impl CloseoutRecoveryMutationReason",
         "pub fn metadata_drift_authority",
+        "pub fn closeout_recovery_command(",
+        "fn open_cycle_recovery_command(",
+        "pipe the final response (with `<!-- patch:exchange -->` blocks)",
+        "rewrite the response with real `<!-- patch:exchange -->` blocks",
+        "preserve the user-authored content and finish through `agent-doc finalize",
         "pub fn classify_closeout_recovery_state(",
         "fn content_component_signature(",
     ] {
@@ -3253,9 +3262,13 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
             && closeout_source.contains("CloseoutRecoveryStateInput")
             && closeout_source.contains("CloseoutRecoveryMutationReason")
             && closeout_source.contains("CloseoutRecoveryState")
+            && closeout_source.contains("CloseoutRecoveryCommandInput")
+            && closeout_source.contains("OpenCycleRecoveryCommandInput")
             && closeout_source.contains("MetadataDriftAuthority")
             && closeout_source.contains("classify_closeout_recovery_state_from_input")
             && closeout_source.contains("closeout_content_component_signature")
+            && closeout_source
+                .contains("closeout_recovery_command as render_closeout_recovery_command")
             && closeout_source.contains("closeout_recovery_decision_from_state")
             && closeout_source.contains("metadata_drift_authority"),
         "orchestration closeout recovery should call focused turn policy directly"

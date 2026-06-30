@@ -304,6 +304,15 @@ focused crate under the old path.
   fact extraction, and error propagation while importing the focused
   `codex_launch` helpers directly; the old local classifier functions were
   deleted instead of retained as facades.
+- `agent-doc-turn-executor` now owns Codex resume/required-SSH transcript text
+  policy: local browser/CDP capability-drift detection, resume retry notice
+  text, SSH DNS/network/auth/config recognizers, command-execution SSH failure
+  extraction, transcript success proof, and required-SSH failure formatting.
+  Orchestration's Codex backend keeps SSH target resolution, isolated probe
+  execution, stream/process lifecycle, retry effects, and fact projection while
+  importing the focused `codex_launch` helpers directly; the old local transcript
+  helper functions and pure tests were deleted from orchestration rather than
+  kept as facades.
 - `agent-doc-tmux` now owns sync column-memory layout policy and safe-passive
   focus-only expansion policy: restoring remembered sibling panes, preserving
   duplicate-column layout state, returning restoration/expansion events for

@@ -2,6 +2,7 @@
 
 pub mod backlog;
 pub mod gate_verify;
+pub mod ops_proof;
 
 use agent_doc_element::{
     ElementAuthority, ElementCompositionRole, ElementDescriptor, ElementRealtimeModel,

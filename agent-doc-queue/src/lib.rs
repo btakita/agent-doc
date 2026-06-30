@@ -4,6 +4,7 @@
 //! supervisors, turn executors, and orchestration. It does not inspect panes,
 //! read documents, submit commands, or mutate files.
 
+pub mod backlog_sync;
 pub mod document_queue;
 pub mod queue;
 pub mod queue_command;

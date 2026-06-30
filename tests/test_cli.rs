@@ -7144,6 +7144,48 @@ fn test_agent_doc_supervisor_process_owns_resize_effects() {
 }
 
 #[test]
+fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let queue_sync =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/backlog_sync.rs")).unwrap();
+    for required in [
+        "pub struct BacklogQueueSyncRequest",
+        "pub fn collect_backlog_queue_sync",
+        "pub fn collect_backlog_priority_ranks",
+        "pub fn collect_after_deps",
+    ] {
+        assert!(
+            queue_sync.contains(required),
+            "agent-doc-queue should own backlog-to-queue sync policy: {required}"
+        );
+    }
+
+    let preflight_maintenance = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
+    )
+    .unwrap();
+    for forbidden_snippet in [
+        "pub(crate) struct BacklogQueueSyncRequest",
+        "struct BacklogQueueSyncRequest",
+        "pub(crate) fn collect_backlog_queue_sync",
+        "pub(crate) fn collect_backlog_priority_ranks",
+        "pub(crate) fn collect_after_deps",
+    ] {
+        assert!(
+            !preflight_maintenance.contains(forbidden_snippet),
+            "preflight maintenance must not re-own backlog queue sync policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        preflight_maintenance.contains("agent_doc_queue::backlog_sync::collect_backlog_queue_sync")
+            && preflight_maintenance
+                .contains("agent_doc_queue::backlog_sync::collect_backlog_priority_ranks")
+            && preflight_maintenance.contains("agent_doc_queue::backlog_sync::collect_after_deps"),
+        "preflight maintenance should call backlog queue sync policy from agent-doc-queue directly"
+    );
+}
+
+#[test]
 fn test_agent_doc_queue_owns_continuation_guidance_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let queue_policy =
@@ -7403,6 +7445,56 @@ fn test_agent_doc_element_backlog_owns_malformed_tracked_item_policy() {
                 "agent_doc_element_backlog::backlog::malformed_tracked_item_interruption_message"
             ),
         "write pending checks should call malformed tracked checklist policy directly"
+    );
+}
+
+#[test]
+fn test_agent_doc_element_backlog_owns_ops_proof_completion_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let ops_proof =
+        fs::read_to_string(manifest_dir.join("agent-doc-element-backlog/src/ops_proof.rs"))
+            .unwrap();
+    for required in [
+        "pub struct OpsProofCompletion",
+        "pub fn surface_pending_ids",
+        "pub fn ops_proof_completion_candidates",
+        "pub fn classify_ops_proof_completion",
+        "pub fn marker_is_leading_status",
+        "pub fn is_live_verify_gate",
+        "pub fn contains_successful_ci_proof",
+        "pub fn contains_commit_hash",
+    ] {
+        assert!(
+            ops_proof.contains(required),
+            "agent-doc-element-backlog must own ops-proof tracked-work completion policy: {required}"
+        );
+    }
+
+    let preflight_maintenance = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
+    )
+    .unwrap();
+    for forbidden in [
+        "pub(crate) struct OpsProofCompletion",
+        "struct OpsProofCompletion",
+        "pub(crate) fn surface_pending_ids",
+        "pub(crate) fn ops_proof_completion_candidates",
+        "pub(crate) fn classify_ops_proof_completion",
+        "pub(crate) fn marker_is_leading_status",
+        "pub(crate) fn is_live_verify_gate",
+        "pub(crate) fn contains_successful_ci_proof",
+        "pub(crate) fn contains_commit_hash",
+    ] {
+        assert!(
+            !preflight_maintenance.contains(forbidden),
+            "preflight maintenance must not re-own ops-proof tracked-work completion policy: {forbidden}"
+        );
+    }
+    assert!(
+        preflight_maintenance.contains("agent_doc_element_backlog::ops_proof::surface_pending_ids")
+            && preflight_maintenance
+                .contains("agent_doc_element_backlog::ops_proof::ops_proof_completion_candidates"),
+        "preflight maintenance should call ops-proof policy from agent-doc-element-backlog directly"
     );
 }
 

@@ -176,7 +176,9 @@ fn run_pending_maintenance_with_options(
             let snapshot_baseline = snapshot_at_start
                 .as_deref()
                 .filter(|s| !s.trim().is_empty());
-            let snapshot_ids = snapshot_baseline.map(|snap| surface_pending_ids(snap, surface));
+            let snapshot_ids = snapshot_baseline.map(|snap| {
+                agent_doc_element_backlog::ops_proof::surface_pending_ids(snap, surface)
+            });
             // `#opsproof-samecycle-add`: the snapshot baseline alone is not enough.
             // In the `write`/`finalize` path the same invocation that adds an item
             // via `--review-add` / `--pending-add*` also re-syncs the on-disk
@@ -184,16 +186,19 @@ fn run_pending_maintenance_with_options(
             // `snapshot_ids` and the snapshot test cannot exclude it. Cross-check
             // the ids cycle-state recorded as added this cycle and never reap them.
             let added_this_cycle = crate::cycle_state::pending_added_ids(file);
-            let ops_proof_completions: Vec<OpsProofCompletion> =
-                ops_proof_completion_candidates(&current_body)
-                    .into_iter()
-                    .filter(|candidate| {
-                        snapshot_ids
-                            .as_ref()
-                            .is_none_or(|ids| ids.contains(&candidate.id))
-                    })
-                    .filter(|candidate| !added_this_cycle.contains(&candidate.id))
-                    .collect();
+            let ops_proof_completions: Vec<
+                agent_doc_element_backlog::ops_proof::OpsProofCompletion,
+            > = agent_doc_element_backlog::ops_proof::ops_proof_completion_candidates(
+                &current_body,
+            )
+            .into_iter()
+            .filter(|candidate| {
+                snapshot_ids
+                    .as_ref()
+                    .is_none_or(|ids| ids.contains(&candidate.id))
+            })
+            .filter(|candidate| !added_this_cycle.contains(&candidate.id))
+            .collect();
             if !ops_proof_completions.is_empty() {
                 let evidence_by_id: HashMap<String, String> = ops_proof_completions
                     .iter()
@@ -536,224 +541,6 @@ pub(crate) fn should_reap_already_done_mirrors(surface: &str) -> bool {
 
 pub(crate) fn should_reap_ops_proof_completions(surface: &str) -> bool {
     is_backlog_component(surface) || is_review_component(surface)
-}
-
-pub(crate) struct OpsProofCompletion {
-    id: String,
-    evidence: String,
-}
-
-/// Pending item ids present in `surface` within `content`. Used to detect
-/// brand-new same-cycle adds (absent from the cycle-start snapshot) so ops-proof
-/// auto-completion never reaps an item on the cycle it first appears.
-pub(crate) fn surface_pending_ids(content: &str, surface: &str) -> HashSet<String> {
-    agent_doc_element::element::parse(content)
-        .ok()
-        .and_then(|comps| {
-            comps
-                .into_iter()
-                .find(|c| component_matches_tracked_surface(&c.name, surface))
-        })
-        .map(|comp| {
-            let (_, items, _) =
-                agent_doc_element_backlog::backlog::parse_items(comp.content(content));
-            items
-                .into_iter()
-                .map(|item| item.id)
-                .filter(|id| !id.is_empty())
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-pub(crate) fn ops_proof_completion_candidates(body: &str) -> Vec<OpsProofCompletion> {
-    let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(body);
-    items
-        .iter()
-        .filter(|item| {
-            !matches!(
-                item.state,
-                agent_doc_element_backlog::backlog::PendingState::Done
-            )
-        })
-        .filter_map(|item| {
-            classify_ops_proof_completion(item).map(|evidence| OpsProofCompletion {
-                id: item.id.clone(),
-                evidence,
-            })
-        })
-        .collect()
-}
-
-pub(crate) fn classify_ops_proof_completion(
-    item: &agent_doc_element_backlog::backlog::PendingItem,
-) -> Option<String> {
-    if item.id.is_empty() {
-        return None;
-    }
-    let text = format!("{} {}", item.text, item.continuation);
-    let upper = text.to_ascii_uppercase();
-    if !has_ops_completion_marker(&upper) || has_ops_completion_blocker(&upper) {
-        return None;
-    }
-
-    // #opsproofgate: a live-verify / operator-drive gate must NEVER be
-    // auto-completed on `evidence=commit`. A shipped commit is not proof for
-    // these items — only an anchored `^[epoch] <marker>` line in ops.log
-    // (driven live by the operator) is. The `#optverify` log-arbiter path
-    // (`run_gate_verify`) closes them on a genuine structured emission; this
-    // commit/CI prose scan must stay out of their way, or a submodule hash
-    // cited in the gate text falsely archives an UNDRIVEN gate to done.
-    if is_live_verify_gate(&upper) {
-        return None;
-    }
-
-    // #opsproof-falsepos: an open (non-gated) actionable item must NOT be reaped
-    // just because its prose cites already-landed dependency work ("the predicate
-    // already shipped in abc1234"). The completion marker must be the item's own
-    // leading status verb. Gated items were deliberately code-completed by the
-    // agent, so a proven marker anywhere in their text legitimately closes them.
-    let is_gated = matches!(
-        item.state,
-        agent_doc_element_backlog::backlog::PendingState::Gated
-    );
-    if !is_gated && !marker_is_leading_status(&upper) {
-        return None;
-    }
-
-    let has_commit = contains_commit_hash(&text);
-    let has_ci = contains_successful_ci_proof(&upper);
-    if !has_commit && !has_ci {
-        return None;
-    }
-
-    Some(
-        match (has_commit, has_ci) {
-            (true, true) => "commit+ci",
-            (true, false) => "commit",
-            (false, true) => "ci",
-            (false, false) => unreachable!(),
-        }
-        .to_string(),
-    )
-}
-
-pub(crate) fn has_ops_completion_marker(upper: &str) -> bool {
-    ["DONE", "SHIPPED", "IMPLEMENTED", "COMPLETE", "COMPLETED"]
-        .iter()
-        .any(|marker| contains_ascii_word(upper, marker))
-}
-
-/// Max number of leading words (after skipping `#hashtag` tokens) that count as
-/// the item's status prefix for ops-proof auto-completion.
-pub(crate) const LEADING_STATUS_WORDS: usize = 4;
-
-/// True when an ops-completion marker is the item's leading status verb rather
-/// than a marker buried in a cited dependency clause. The leading status segment
-/// is the prefix before the first clause break (`: ` or `. `), further capped to
-/// the first [`LEADING_STATUS_WORDS`] words after skipping leading `#hashtag`
-/// tokens. `upper` must already be ASCII-uppercased.
-pub(crate) fn marker_is_leading_status(upper: &str) -> bool {
-    has_ops_completion_marker(&leading_status_segment(upper))
-}
-
-pub(crate) fn leading_status_segment(upper: &str) -> String {
-    let mut cut = upper.len();
-    for sep in [": ", ". "] {
-        if let Some(idx) = upper.find(sep) {
-            cut = cut.min(idx);
-        }
-    }
-    upper[..cut]
-        .split_whitespace()
-        .filter(|word| !word.starts_with('#'))
-        .take(LEADING_STATUS_WORDS)
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-pub(crate) fn has_ops_completion_blocker(upper: &str) -> bool {
-    const BLOCKER_PHRASES: &[&str] = &[
-        "COULD NOT",
-        "CAN NOT",
-        "CANNOT",
-        "CAN'T",
-        "FALSE CLOSEOUT",
-        "FOLLOW-UP",
-        "FOLLOW UP",
-        "FOLLOWUPS",
-        "NOT DONE",
-        "NOT SHIPPED",
-        "NOT IMPLEMENTED",
-        "SUB-PART",
-        "SUBPART",
-    ];
-    const BLOCKER_WORDS: &[&str] = &[
-        "PARTIAL",
-        "REMAINING",
-        "REOPENED",
-        "DEFERRED",
-        "BLOCKED",
-        "BLOCKER",
-        "TODO",
-        "WIP",
-        "PARTLY",
-        "FAILING",
-        "FAILED",
-    ];
-
-    BLOCKER_PHRASES.iter().any(|phrase| upper.contains(phrase))
-        || BLOCKER_WORDS
-            .iter()
-            .any(|word| contains_ascii_word(upper, word))
-}
-
-/// True when an item is a live-verify / operator-drive gate whose only valid
-/// completion proof is an anchored structured ops.log marker driven live by the
-/// operator — never a cited commit/CI reference (`#opsproofgate`). `upper` must
-/// already be ASCII-uppercased.
-pub(crate) fn is_live_verify_gate(upper: &str) -> bool {
-    const LIVE_VERIFY_PHRASES: &[&str] = &[
-        "LIVE-VERIFY GATE",
-        "LIVE-VERIFY ONLY",
-        "LIVE VERIFY GATE",
-        "LIVE VERIFY ONLY",
-        "OPERATOR-DRIVE",
-        "OPERATOR DRIVE",
-        "OPERATOR DRIVES",
-        "OPERATOR LIVE-VERIFY",
-        "OPERATOR LIVE VERIFY",
-    ];
-    LIVE_VERIFY_PHRASES
-        .iter()
-        .any(|phrase| upper.contains(phrase))
-}
-
-pub(crate) fn contains_successful_ci_proof(upper: &str) -> bool {
-    contains_ascii_word(upper, "CI")
-        && ["GREEN", "PASSED", "PASSING", "SUCCESS", "SUCCEEDED"]
-            .iter()
-            .any(|word| contains_ascii_word(upper, word))
-}
-
-pub(crate) fn contains_commit_hash(text: &str) -> bool {
-    text.split(|c: char| !c.is_ascii_alphanumeric())
-        .any(|token| {
-            (7..=40).contains(&token.len())
-                && token.chars().all(|c| c.is_ascii_hexdigit())
-                && token.chars().any(|c| matches!(c, 'a'..='f' | 'A'..='F'))
-        })
-}
-
-pub(crate) fn contains_ascii_word(haystack: &str, needle: &str) -> bool {
-    haystack.match_indices(needle).any(|(idx, _)| {
-        let before = idx
-            .checked_sub(1)
-            .and_then(|pos| haystack.as_bytes().get(pos).copied());
-        let after = haystack.as_bytes().get(idx + needle.len()).copied();
-        before.is_none_or(|b| !b.is_ascii_alphanumeric())
-            && after.is_none_or(|b| !b.is_ascii_alphanumeric())
-    })
 }
 
 pub(crate) fn tracked_body_for_reorder(content: &str) -> Option<&str> {
@@ -1155,100 +942,6 @@ pub(crate) fn queue_entry_do_id(
         }
         _ => None,
     }
-}
-
-pub(crate) struct BacklogQueueSyncRequest {
-    pub(crate) mode: agent_doc_queue::document_queue::BacklogQueueSyncMode,
-    pub(crate) ids: Vec<String>,
-    pub(crate) enqueue_ids: Vec<String>,
-    pub(crate) priority: bool,
-}
-
-pub(crate) fn collect_backlog_queue_sync(
-    components: &[agent_doc_element::element::Component],
-    content: &str,
-) -> Option<BacklogQueueSyncRequest> {
-    let mut mode: Option<agent_doc_queue::document_queue::BacklogQueueSyncMode> = None;
-    let mut ids: Vec<String> = Vec::new();
-    let mut enqueue_ids: Vec<String> = Vec::new();
-    let mut priority = false;
-    for comp in components {
-        if !matches!(comp.name.as_str(), "backlog" | "icebox" | "pending") {
-            continue;
-        }
-        let body = &content[comp.open_end..comp.close_start];
-        enqueue_ids.extend(agent_doc_element_backlog::backlog::active_enqueue_item_ids(
-            body,
-        ));
-        if comp.name == "icebox" {
-            continue;
-        }
-        let Some(value) = comp.attrs.get("queue") else {
-            continue;
-        };
-        priority |= comp.attrs.contains_key("priority");
-        let Some(comp_mode) = agent_doc_queue::document_queue::BacklogQueueSyncMode::parse(value)
-        else {
-            continue;
-        };
-        if mode.is_none() {
-            mode = Some(comp_mode);
-        }
-        ids.extend(agent_doc_element_backlog::backlog::active_item_ids(body));
-    }
-    if mode.is_none() && !enqueue_ids.is_empty() {
-        mode = Some(agent_doc_queue::document_queue::BacklogQueueSyncMode::Append);
-    }
-    ids.extend(enqueue_ids.iter().cloned());
-    mode.map(|m| BacklogQueueSyncRequest {
-        mode: m,
-        ids,
-        enqueue_ids,
-        priority,
-    })
-}
-
-/// Build an id→priority-rank map from active `agent:backlog` / `agent:icebox`
-/// items (`#backlog-priority-attribute`) for ordering a synced `agent:queue`.
-/// First-seen rank wins on duplicate ids across components.
-pub(crate) fn collect_backlog_priority_ranks(
-    components: &[agent_doc_element::element::Component],
-    content: &str,
-) -> std::collections::HashMap<String, u8> {
-    let mut rank = std::collections::HashMap::new();
-    for comp in components {
-        if !matches!(comp.name.as_str(), "backlog" | "icebox" | "pending") {
-            continue;
-        }
-        let body = &content[comp.open_end..comp.close_start];
-        for (id, r) in agent_doc_element_backlog::backlog::active_item_priorities(body) {
-            rank.entry(id).or_insert(r);
-        }
-    }
-    rank
-}
-
-/// Build an id→`after=#id` dependency map from active `agent:backlog` /
-/// `agent:icebox` items for auto-dag queue ordering (`#queue-auto-dag-priority`).
-/// First-seen deps win on duplicate ids across components; items with no
-/// dependency tokens are omitted.
-pub(crate) fn collect_after_deps(
-    components: &[agent_doc_element::element::Component],
-    content: &str,
-) -> std::collections::HashMap<String, Vec<String>> {
-    let mut deps = std::collections::HashMap::new();
-    for comp in components {
-        if !matches!(comp.name.as_str(), "backlog" | "icebox" | "pending") {
-            continue;
-        }
-        let body = &content[comp.open_end..comp.close_start];
-        for (id, d) in agent_doc_element_backlog::backlog::active_item_after_deps(body) {
-            if !d.is_empty() {
-                deps.entry(id).or_insert(d);
-            }
-        }
-    }
-    deps
 }
 
 fn queue_prompt_projection_rows(
@@ -1801,7 +1494,7 @@ pub(crate) fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<Que
         active_queue_prompt_projection(
             &drainability_content,
             &activation.entries_after,
-            &collect_after_deps(&components, &content),
+            &agent_doc_queue::backlog_sync::collect_after_deps(&components, &content),
             in_progress_marker_retarget_requested(
                 diff,
                 &drainability_content,
@@ -1947,7 +1640,9 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // explicitly marked for enqueue. Per-item enqueue markers
     // (#queue-enqueue-action) append marked ids without requiring the component
     // attribute.
-    if let Some(sync_request) = collect_backlog_queue_sync(&components, &content) {
+    if let Some(sync_request) =
+        agent_doc_queue::backlog_sync::collect_backlog_queue_sync(&components, &content)
+    {
         let mode = sync_request.mode;
         source_queue_priority = sync_request.priority;
         let enqueue_ids: std::collections::HashSet<String> = sync_request
@@ -2209,7 +1904,8 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // (#queue-manual-priority-override) still floats to the top of the queue even
     // when no backlog item carries a `priority` attribute.
     if comp.attrs.contains_key("priority") || source_queue_priority {
-        let rank = collect_backlog_priority_ranks(&components, &content);
+        let rank =
+            agent_doc_queue::backlog_sync::collect_backlog_priority_ranks(&components, &content);
         let mut operator_authored_identities: std::collections::HashSet<String> =
             std::collections::HashSet::new();
         if let Ok(Some(snap_content)) = snapshot::load(file)
@@ -2280,7 +1976,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         // Auto-dag (#queue-auto-dag-priority): order by `after=#id` dependency
         // graph first (a blocker outranks a pin); fall back to the plain
         // pin+priority sort when there are no dependency edges.
-        let deps = collect_after_deps(&components, &content);
+        let deps = agent_doc_queue::backlog_sync::collect_after_deps(&components, &content);
         let sorted = agent_doc_queue::document_queue::sort_prompts_by_dag_with_operator_authored(
             &entries,
             &rank,
@@ -3157,7 +2853,10 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         active_queue_prompt_projection(
             &current_content,
             &activation.entries_after,
-            &collect_after_deps(&current_components, &current_content),
+            &agent_doc_queue::backlog_sync::collect_after_deps(
+                &current_components,
+                &current_content,
+            ),
             in_progress_marker_retarget_requested(
                 diff,
                 &current_content,
@@ -3560,7 +3259,9 @@ pub(crate) fn sync_same_cycle_pending_adds_into_go_queue(file: &Path) -> Result<
         return Ok(Vec::new());
     }
 
-    let Some(sync_request) = collect_backlog_queue_sync(&components, &content) else {
+    let Some(sync_request) =
+        agent_doc_queue::backlog_sync::collect_backlog_queue_sync(&components, &content)
+    else {
         return Ok(Vec::new());
     };
     let pending_norm: std::collections::HashSet<String> = added_this_cycle
@@ -7113,49 +6814,6 @@ mod tests {
         );
     }
     #[test]
-    fn collect_backlog_queue_sync_reads_mode_and_active_ids() {
-        let content = concat!(
-            "<!-- agent:queue -->\n",
-            "<!-- /agent:queue -->\n\n",
-            "<!-- agent:backlog queue=sync -->\n",
-            "- [ ] [#a] one\n",
-            "- [/] [#g] gated\n",
-            "- [ ] [#b] two\n",
-            "<!-- /agent:backlog -->\n",
-        );
-        let components = agent_doc_element::element::parse(content).unwrap();
-        let request = collect_backlog_queue_sync(&components, content)
-            .expect("backlog with queue attr should produce a sync request");
-        assert_eq!(
-            request.mode,
-            agent_doc_queue::document_queue::BacklogQueueSyncMode::Sync
-        );
-        assert_eq!(request.ids, vec!["a".to_string(), "b".to_string()]);
-        assert!(request.enqueue_ids.is_empty());
-    }
-    #[test]
-    fn collect_backlog_queue_sync_reads_enqueue_markers_without_attr() {
-        let content = concat!(
-            "<!-- agent:queue -->\n",
-            "<!-- /agent:queue -->\n\n",
-            "<!-- agent:backlog -->\n",
-            "- [ ] [#a] :inbox_tray: one\n",
-            "- [/] [#g] :inbox_tray: gated\n",
-            "- [ ] [#b] unmarked\n",
-            "- [ ] [#c] **enqueue** marked\n",
-            "<!-- /agent:backlog -->\n",
-        );
-        let components = agent_doc_element::element::parse(content).unwrap();
-        let request = collect_backlog_queue_sync(&components, content)
-            .expect("enqueue markers should produce an append request");
-        assert_eq!(
-            request.mode,
-            agent_doc_queue::document_queue::BacklogQueueSyncMode::Append
-        );
-        assert_eq!(request.ids, vec!["a".to_string(), "c".to_string()]);
-        assert_eq!(request.enqueue_ids, vec!["a".to_string(), "c".to_string()]);
-    }
-    #[test]
     fn filter_expect_done_or_gate_excludes_synced_queue_ids() {
         // #queue-sync-auto-pending-done-guard-misfire: a cycle that works one
         // directive (#worked) while the backlog→queue sync auto-populated
@@ -7186,16 +6844,6 @@ mod tests {
         let result =
             filter_expect_done_or_gate_ids(&directive_ids, &open_backlog, &synced_queue_ids);
         assert_eq!(result, vec!["open".to_string()]);
-    }
-    #[test]
-    fn collect_backlog_queue_sync_none_without_attr() {
-        let content = concat!(
-            "<!-- agent:backlog -->\n",
-            "- [ ] [#a] one\n",
-            "<!-- /agent:backlog -->\n",
-        );
-        let components = agent_doc_element::element::parse(content).unwrap();
-        assert!(collect_backlog_queue_sync(&components, content).is_none());
     }
     #[test]
     fn resolve_pipeline_state_none_without_cycle_or_frontmatter() {

@@ -224,6 +224,11 @@ focused crate under the old path.
   renamed from the issue-tag `recguard_wedge` module to
   `owner_pane_wedge_counter`, and imports the focused policy directly without
   retaining the old module path or threshold wrapper.
+- `agent-doc-turn` now owns hook response projection policy: extracting prompt
+  targets from `### Re:` response headings, stripping agent-doc patch metadata
+  from captured response summaries, and bounding hook summary text. Orchestration
+  keeps hook execution, capture loading, project-root/git facts, and tsift
+  process invocation while importing the focused response-text helpers directly.
 - `agent-doc-prompt-contract` now owns harness prompt parsing policy: stripping
   binary-owned `agent-doc <file>` invocations, classifying claim/compact
   invocations as non-session prompts, matching the invoked file, preserving

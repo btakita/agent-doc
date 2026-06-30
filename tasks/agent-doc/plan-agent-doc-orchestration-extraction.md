@@ -297,6 +297,13 @@ focused crate under the old path.
   prompt. Orchestration keeps journal path resolution, JSONL sidecar IO, fsync,
   live-buffer sidecar reads, snapshot reads, and clear/remove effects while
   calling the focused queue policy directly.
+- `agent-doc-queue` now owns drain-owner lease policy and sidecar storage for
+  queue drains: the Claude `/loop` owner tag, persisted lease schema, TTL
+  resolution, freshness filtering, loop-owner filtering, and read/write/clear
+  sidecar operations live with the queue-drain domain. Orchestration and the
+  root CLI call `agent_doc_queue::drain_owner` directly; the old
+  `agent-doc-orchestration/src/drain_owner.rs` module was deleted rather than
+  retained as a facade.
 - `agent-doc-element-backlog` already owned open backlog id extraction; preflight
   now calls `open_backlog_ids_in_content` directly for `do #id` closeout
   evidence instead of re-parsing backlog components locally.

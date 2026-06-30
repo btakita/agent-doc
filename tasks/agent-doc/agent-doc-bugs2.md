@@ -61,7 +61,7 @@ The problematic evidence is `.agent-doc/logs/ops.log:4338997`: `live_buffer_clas
 
 I attempted to file `#qftlossdelta` and mark `#qftlossproof` done through `agent-doc write --commit`, but the live editor repeatedly accepted the exchange patch and then rejected or reverted the tracked-work mutation, ending in `editor_convergence_required` / `retry_without_disk_write`. Because this document is live in the editor, I did not use `--force-disk`. `#qftlossproof` stays open until the operator either saves/closes the live editor buffer and retries, or explicitly authorizes a force-disk closeout for the backlog mutation.
 
-### Re: do [#qftlossproof] — gpt-5
+### Re: do [#qftlossproof] — gpt-5 (HEAD)
 
 I closed `#qftlossproof` as a failed proof and filed `#qftlossdelta` for the implementation fix.
 
@@ -76,7 +76,7 @@ Verification: artifact evidence proves the operator-wins invariant did not hold;
 Confidence: high.
 
 Escalation: fix `#qftlossdelta` before treating the queue-edit race invariant as proven.
-<!-- agent:boundary:eefa33ea -->
+<!-- agent:boundary:5e865b8c -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -107,7 +107,6 @@ Escalation: fix `#qftlossdelta` before treating the queue-edit race invariant as
 - :pushpin: do [#60ev]
 - do [#suprestassoc-live]
 - do [#agentsignals]
-- do [#qftlossdelta]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

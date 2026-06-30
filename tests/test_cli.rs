@@ -7814,6 +7814,77 @@ fn test_agent_doc_queue_owns_queue_head_classification_policy() {
 }
 
 #[test]
+fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let queue_heads =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_heads.rs")).unwrap();
+    for required_snippet in [
+        "pub fn active_queue_heads(",
+        "pub fn active_free_text_queue_heads(",
+        "pub fn is_do_directive(",
+        "fn leads_with_bare_id_directive(",
+    ] {
+        assert!(
+            queue_heads.contains(required_snippet),
+            "agent-doc-queue must own active queue-head projection policy: {required_snippet}"
+        );
+    }
+
+    for forbidden_snippet in [
+        "pub fn active_queue_directive_heads(",
+        "pub use active_queue_heads as active_queue_directive_heads",
+    ] {
+        assert!(
+            !queue_heads.contains(forbidden_snippet),
+            "agent-doc-queue must not keep the deprecated queue-head projection name: {forbidden_snippet}"
+        );
+    }
+
+    let cycle_state =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/cycle_state.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "pub fn active_queue_directive_heads(",
+        "pub fn active_free_text_queue_heads(",
+        "fn is_do_directive(",
+        "fn leads_with_bare_id_directive(",
+        "pub use agent_doc_queue::queue_heads",
+        "active_queue_directive_heads",
+    ] {
+        assert!(
+            !cycle_state.contains(forbidden_snippet),
+            "cycle_state must not re-own, facade, or preserve deprecated active queue-head policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        cycle_state.contains("agent_doc_queue::queue_heads::active_queue_heads"),
+        "cycle_state should call active queue-head projection through agent-doc-queue directly"
+    );
+    assert!(
+        cycle_state.contains("agent_doc_queue::queue_heads::active_free_text_queue_heads"),
+        "cycle_state should call free-text queue-head projection through agent-doc-queue directly"
+    );
+
+    let queue_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&queue_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    for forbidden_dependency in [
+        "agent-doc-orchestration",
+        "tmux-router",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "git2",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden_dependency),
+            "agent-doc-queue must keep active queue-head projection free of orchestration/effect dependencies: {forbidden_dependency}"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let realtime_write_policy =

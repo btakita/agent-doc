@@ -234,89 +234,6 @@ pub struct CycleState {
     pub blocked_closeout: Option<BlockedCloseout>,
 }
 
-/// Extract the queue prompt head texts (e.g. `do [#convqa-rerun]`) from a
-/// document's `agent:queue` component. Recorded at preflight so `session-check`
-/// can detect unproved deletion of runnable heads (`#queue-clear-unrun-items`).
-/// Freeform / non-prompt entries are skipped; id semantics are applied later by
-/// the guard via `do_directive_target_ids`.
-pub fn active_queue_directive_heads(doc: &str) -> Vec<String> {
-    let Ok(components) = agent_doc_element::element::parse(doc) else {
-        return Vec::new();
-    };
-    let Some(queue) = components.iter().find(|c| c.name == "queue") else {
-        return Vec::new();
-    };
-    let Ok(entries) = agent_doc_queue::document_queue::parse(queue.content(doc)) else {
-        return Vec::new();
-    };
-    agent_doc_queue::document_queue::prompts(&entries)
-        .into_iter()
-        .map(|prompt| prompt.text.trim().to_string())
-        .filter(|text| !text.is_empty())
-        .collect()
-}
-
-/// Extract free-text (non-`do [#id]`) queue prompt head texts from a
-/// document's `agent:queue` component. These are recorded alongside
-/// `active_queue_heads` so `session-check` can require committed-response /
-/// consume / deferral proof for free-text queue heads that have no backlog id.
-pub fn active_free_text_queue_heads(doc: &str) -> Vec<String> {
-    let Ok(components) = agent_doc_element::element::parse(doc) else {
-        return Vec::new();
-    };
-    let Some(queue) = components.iter().find(|c| c.name == "queue") else {
-        return Vec::new();
-    };
-    let Ok(entries) = agent_doc_queue::document_queue::parse(queue.content(doc)) else {
-        return Vec::new();
-    };
-    agent_doc_queue::document_queue::prompts(&entries)
-        .into_iter()
-        .map(|prompt| prompt.text.trim().to_string())
-        .filter(|text| !text.is_empty() && !is_do_directive(text))
-        .collect()
-}
-
-fn is_do_directive(text: &str) -> bool {
-    let lower = text.trim().to_ascii_lowercase();
-    lower.starts_with("do [#") || lower.starts_with("do #") || leads_with_bare_id_directive(&lower)
-}
-
-/// Optional-`do` grammar (Stage 1): a queue head that leads with a bare id token
-/// (`[#id]` or `#id`) is id-backed — the `do` verb is optional. A trailing `:`
-/// (`[#id]: note`) keeps the line inert as prose annotation rather than a
-/// directive, matching the existing bracket-id prompt-guard convention. `text`
-/// is expected to be lowercased and already stripped of list/checkbox markers
-/// (queue prompt texts arrive that way).
-fn leads_with_bare_id_directive(lower: &str) -> bool {
-    let (rest, bracketed) = if let Some(r) = lower.strip_prefix("[#") {
-        (r, true)
-    } else if let Some(r) = lower.strip_prefix('#') {
-        (r, false)
-    } else {
-        return false;
-    };
-    let id_len = rest
-        .chars()
-        .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
-        .count();
-    if id_len == 0 {
-        return false;
-    }
-    let after = &rest[id_len..];
-    if bracketed {
-        // Require a closing `]`; a trailing `:` marks prose, not a directive.
-        match after.strip_prefix(']') {
-            Some(tail) => !tail.starts_with(':'),
-            None => false,
-        }
-    } else {
-        // Bare `#id` must be a standalone leading token: end-of-line or a
-        // whitespace / `.` separator (excludes `#id:` prose and `# heading`).
-        after.is_empty() || after.starts_with([' ', '\t', '.'])
-    }
-}
-
 /// `#suprecyclespin` — seconds an open cycle may sit untouched (no IPC ack
 /// connection in flight) at a harness turn boundary before the supervisor
 /// recycle/restart defer path force-closes it as abandoned. Generous enough never
@@ -450,10 +367,10 @@ pub fn start_preflight_with_task(
         dropped_exchange_prompts: Vec::new(),
         dropped_queue_prompts: Vec::new(),
         active_queue_heads: file_content
-            .map(active_queue_directive_heads)
+            .map(agent_doc_queue::queue_heads::active_queue_heads)
             .unwrap_or_default(),
         active_free_text_queue_heads: file_content
-            .map(active_free_text_queue_heads)
+            .map(agent_doc_queue::queue_heads::active_free_text_queue_heads)
             .unwrap_or_default(),
         pending_semantic_merge_acks: carried_semantic_merge_acks,
         blocked_closeout: None,
@@ -501,7 +418,7 @@ pub fn observe_live_queue_heads(file: &Path, doc: &str) -> Result<Option<CycleSt
         return Ok(None);
     };
     let mut changed = false;
-    for head in active_queue_directive_heads(doc) {
+    for head in agent_doc_queue::queue_heads::active_queue_heads(doc) {
         let head = head.trim().to_string();
         if head.is_empty() {
             continue;
@@ -1482,26 +1399,6 @@ fn now_millis() -> u128 {
 mod tests {
     use super::*;
     use std::fs;
-
-    #[test]
-    fn is_do_directive_accepts_do_and_bare_id_forms() {
-        // Back-compat: explicit `do` forms.
-        assert!(is_do_directive("do [#opt]"));
-        assert!(is_do_directive("do #opt"));
-        assert!(is_do_directive("DO [#opt]. trailing note"));
-        // Optional-`do` Stage 1: bare id token is id-backed.
-        assert!(is_do_directive("[#opt]"));
-        assert!(is_do_directive("[#opt]. do the small fix"));
-        assert!(is_do_directive("#opt"));
-        assert!(is_do_directive("#opt do the thing"));
-        // Inert: prose annotation (`[#id]:`), references, plain prose, headings.
-        assert!(!is_do_directive("[#opt]: just a note"));
-        assert!(!is_do_directive("#opt: just a note"));
-        assert!(!is_do_directive("re [#opt]"));
-        assert!(!is_do_directive("see [#opt] for context"));
-        assert!(!is_do_directive("# heading"));
-        assert!(!is_do_directive("just a free-text prompt"));
-    }
 
     fn setup_project() -> tempfile::TempDir {
         let dir = tempfile::TempDir::new().unwrap();

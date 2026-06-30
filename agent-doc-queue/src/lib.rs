@@ -10,6 +10,7 @@ pub mod queue_command;
 pub mod queue_continuation;
 pub mod queue_directive;
 pub mod queue_edit_owner;
+pub mod queue_heads;
 pub mod queue_journal;
 pub mod queue_preemption;
 pub mod queue_response;

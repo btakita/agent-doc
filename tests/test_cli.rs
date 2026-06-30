@@ -7239,6 +7239,58 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
 }
 
 #[test]
+fn test_agent_doc_controller_owns_editor_route_error_naming_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let controller_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller/src/lib.rs")).unwrap();
+    let controller_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller/src/editor_route_error.rs"))
+            .unwrap();
+    let orchestration_adapter =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/editor_route_errors.rs"))
+            .unwrap();
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+
+    assert!(
+        controller_lib.contains("pub mod editor_route_error;"),
+        "agent-doc-controller should expose editor route-error naming policy as a focused module"
+    );
+    for required in [
+        "pub const EDITOR_ROUTE_ERROR_DIAGNOSTICS_DIR",
+        "pub fn editor_route_error_diagnostic_name(",
+        "pub fn editor_route_error_file_name(",
+    ] {
+        assert!(
+            controller_policy.contains(required),
+            "agent-doc-controller must own editor route-error naming policy: {required}"
+        );
+    }
+    for forbidden in [
+        "fn sanitized_route_error_name(",
+        "pub fn editor_route_error_diagnostic_name(",
+        "pub fn editor_route_error_file_name(",
+        "pub const EDITOR_ROUTE_ERROR_DIAGNOSTICS_DIR",
+        "pub use agent_doc_controller::editor_route_error",
+    ] {
+        assert!(
+            !orchestration_adapter.contains(forbidden),
+            "orchestration editor route-error adapter must not re-own or facade naming policy: {forbidden}"
+        );
+        assert!(
+            !orchestration_lib.contains(forbidden),
+            "orchestration lib must not facade editor route-error naming policy: {forbidden}"
+        );
+    }
+    assert!(
+        orchestration_adapter.contains("use agent_doc_controller::editor_route_error::{")
+            && orchestration_adapter.contains("EDITOR_ROUTE_ERROR_DIAGNOSTICS_DIR")
+            && orchestration_adapter.contains("editor_route_error_file_name(&relative)"),
+        "orchestration should import focused editor route-error naming policy directly"
+    );
+}
+
+#[test]
 fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();

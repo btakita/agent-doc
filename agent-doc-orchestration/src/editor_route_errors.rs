@@ -1,20 +1,8 @@
 use std::path::{Path, PathBuf};
 
-fn sanitized_route_error_name(relative_path: &str) -> String {
-    let mut sanitized = String::new();
-    for ch in relative_path.replace('\\', "/").chars() {
-        match ch {
-            '/' => sanitized.push_str("__"),
-            'A'..='Z' | 'a'..='z' | '0'..='9' | '.' | '_' | '-' => sanitized.push(ch),
-            _ => sanitized.push('_'),
-        }
-    }
-    if sanitized.is_empty() {
-        "route-error".to_string()
-    } else {
-        sanitized
-    }
-}
+use agent_doc_controller::editor_route_error::{
+    EDITOR_ROUTE_ERROR_DIAGNOSTICS_DIR, editor_route_error_file_name,
+};
 
 fn route_error_path_for_file(file: &Path) -> Option<PathBuf> {
     let canonical = file
@@ -31,8 +19,8 @@ fn route_error_path_for_file(file: &Path) -> Option<PathBuf> {
         .replace(std::path::MAIN_SEPARATOR, "/");
     Some(
         project_root
-            .join(".agent-doc/state/editor-route-errors")
-            .join(format!("{}.txt", sanitized_route_error_name(&relative))),
+            .join(EDITOR_ROUTE_ERROR_DIAGNOSTICS_DIR)
+            .join(editor_route_error_file_name(&relative)),
     )
 }
 

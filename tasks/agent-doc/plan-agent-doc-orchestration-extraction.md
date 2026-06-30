@@ -224,6 +224,12 @@ focused crate under the old path.
   renamed from the issue-tag `recguard_wedge` module to
   `owner_pane_wedge_counter`, and imports the focused policy directly without
   retaining the old module path or threshold wrapper.
+- `agent-doc-prompt-contract` now owns harness prompt parsing policy: stripping
+  binary-owned `agent-doc <file>` invocations, classifying claim/compact
+  invocations as non-session prompts, matching the invoked file, preserving
+  non-invocation prompt bodies, and rendering the synthetic harness diff.
+  Orchestration keeps only the env/Codex-hook prompt-source adapter and imports
+  the focused parser directly.
 - We are in the current seam-by-seam extraction wave after the transitional
   orchestration crate move. Practically, this is **Wave 2**: shrink
   `agent-doc-orchestration` by moving durable policy into focused domain crates,

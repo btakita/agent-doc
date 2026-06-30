@@ -6683,6 +6683,11 @@ fn test_agent_doc_element_backlog_owns_tracked_line_remove_and_prune_policy() {
     let backlog_model =
         fs::read_to_string(manifest_dir.join("agent-doc-element-backlog/src/backlog.rs")).unwrap();
     for required in [
+        "pub enum TrackedWorkList",
+        "pub fn find_tracked_work_component_in_content",
+        "pub fn find_open_tracked_work_component_in_content",
+        "pub fn open_tracked_work_component_name_in_content",
+        "pub fn content_has_resolved_tracked_work_id",
         "pub fn trim_tracked_parent_prefix",
         "pub fn line_is_legacy_done_item",
         "pub fn op_remove_matching_tracked_line",
@@ -6698,6 +6703,11 @@ fn test_agent_doc_element_backlog_owns_tracked_line_remove_and_prune_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/pending_cmd.rs"))
             .unwrap();
     for forbidden in [
+        "enum TrackedWorkList",
+        "enum TrackedList",
+        "is_icebox_component",
+        "is_tracked_work_component",
+        "is_backlog_done_component",
         "fn trim_tracked_parent_prefix",
         "fn line_is_legacy_done_item",
         "let lines: Vec<&str> = existing.lines().collect();",
@@ -6708,6 +6718,14 @@ fn test_agent_doc_element_backlog_owns_tracked_line_remove_and_prune_policy() {
             "pending_cmd must stay a file-IO adapter, not a tracked line remove/prune facade"
         );
     }
+    assert!(
+        pending_cmd.contains("backlog::find_tracked_work_component_in_content")
+            && pending_cmd.contains("backlog::find_open_tracked_work_component_in_content")
+            && pending_cmd.contains("backlog::open_tracked_work_component_name_in_content")
+            && pending_cmd.contains("backlog::content_has_resolved_tracked_work_id")
+            && pending_cmd.contains("backlog::TrackedWorkList"),
+        "pending_cmd should call tracked-work component lookup helpers from agent-doc-element-backlog"
+    );
     assert!(
         pending_cmd.contains("backlog::op_remove_matching_tracked_line")
             && pending_cmd.contains("backlog::op_prune_legacy_done_lines"),

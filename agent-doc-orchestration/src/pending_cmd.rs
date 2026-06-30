@@ -18,9 +18,7 @@ use std::path::Path;
 
 use crate::snapshot;
 use agent_doc_element::element;
-use agent_doc_element::element::{
-    is_backlog_component, is_icebox_component, is_tracked_work_component,
-};
+use agent_doc_element::element::is_backlog_component;
 use agent_doc_element_backlog::backlog;
 use agent_doc_element_review::{
     ReviewItemView, ReviewListFilter, UngateTasksReport, ensure_review_component_in_document,
@@ -68,84 +66,31 @@ fn persist_pending_write(file: &Path, current: &str, target: &str) -> Result<()>
     crate::write::converge_or_disk_write(file, current, target, "pending_write")
 }
 
-#[derive(Clone, Copy)]
-enum TrackedList {
-    Backlog,
-    Icebox,
-}
-
-impl TrackedList {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Backlog => "backlog",
-            Self::Icebox => "icebox",
-        }
-    }
-
-    fn matches(self, name: &str) -> bool {
-        match self {
-            Self::Backlog => is_backlog_component(name),
-            Self::Icebox => is_icebox_component(name),
-        }
-    }
-}
-
 fn find_tracked_list_component(
     file: &Path,
-    list: TrackedList,
+    list: backlog::TrackedWorkList,
 ) -> Result<(String, element::Component)> {
     let content = std::fs::read_to_string(file).context("failed to read document")?;
-    let components = element::parse(&content).context("failed to parse components")?;
-    let comp = components
-        .into_iter()
-        .find(|c| list.matches(&c.name))
-        .with_context(|| format!("document has no {} component", list.label()))?;
+    let comp = backlog::find_tracked_work_component_in_content(&content, list)?;
     Ok((content, comp))
 }
 
 fn find_pending_component(file: &Path) -> Result<(String, element::Component)> {
-    find_tracked_list_component(file, TrackedList::Backlog)
+    find_tracked_list_component(file, backlog::TrackedWorkList::Backlog)
 }
 
 fn find_component_containing_open_id(
     file: &Path,
     id: &str,
 ) -> Result<(String, element::Component)> {
-    let id = backlog::normalize_pending_id(id);
     let content = std::fs::read_to_string(file).context("failed to read document")?;
-    let components = element::parse(&content).context("failed to parse components")?;
-    let comp = components
-        .into_iter()
-        .find(|c| {
-            if !is_tracked_work_component(&c.name) {
-                return false;
-            }
-            let (_, items, _) = backlog::parse_items(c.content(&content));
-            items
-                .into_iter()
-                .any(|item| item.id == id && item.state != backlog::PendingState::Done)
-        })
-        .with_context(|| format!("id not found in backlog/icebox: {}", id))?;
+    let comp = backlog::find_open_tracked_work_component_in_content(&content, id)?;
     Ok((content, comp))
 }
 
 pub fn open_item_component_name(file: &Path, id: &str) -> Result<Option<String>> {
-    let id = backlog::normalize_pending_id(id);
     let content = std::fs::read_to_string(file).context("failed to read document")?;
-    let components = element::parse(&content).context("failed to parse components")?;
-    for comp in components {
-        if !is_tracked_work_component(&comp.name) {
-            continue;
-        }
-        let (_, items, _) = backlog::parse_items(comp.content(&content));
-        if items
-            .into_iter()
-            .any(|item| item.id == id && item.state != backlog::PendingState::Done)
-        {
-            return Ok(Some(comp.name));
-        }
-    }
-    Ok(None)
+    backlog::open_tracked_work_component_name_in_content(&content, id)
 }
 
 fn tracked_work_id_already_resolved(file: &Path, id: &str) -> Result<bool> {
@@ -158,28 +103,7 @@ fn tracked_work_id_already_resolved(file: &Path, id: &str) -> Result<bool> {
     }
 
     let content = std::fs::read_to_string(file).context("failed to read document")?;
-    let components = element::parse(&content).context("failed to parse components")?;
-    let archive_ref = format!("[#{}]", id);
-    for comp in components {
-        let body = comp.content(&content);
-        if agent_doc_element::element::is_backlog_done_component(&comp.name)
-            && body
-                .lines()
-                .any(|line| line.to_ascii_lowercase().contains(&archive_ref))
-        {
-            return Ok(true);
-        }
-        if is_tracked_work_component(&comp.name) {
-            let (_, items, _) = backlog::parse_items(body);
-            if items
-                .into_iter()
-                .any(|item| item.id == id && item.state == backlog::PendingState::Done)
-            {
-                return Ok(true);
-            }
-        }
-    }
-    Ok(false)
+    backlog::content_has_resolved_tracked_work_id(&content, &id)
 }
 
 /// Compute a stable document id from a file path. Uses `snapshot::doc_hash` so
@@ -195,11 +119,12 @@ fn canonicalize_component_content(file: &Path, content: &str) -> String {
     canonical
 }
 
-fn canonicalize_tracked_list_content(file: &Path, list: TrackedList, content: &str) -> String {
-    match list {
-        TrackedList::Backlog => canonicalize_component_content(file, content),
-        TrackedList::Icebox => canonicalize_component_content(file, content),
-    }
+fn canonicalize_tracked_list_content(
+    file: &Path,
+    _list: backlog::TrackedWorkList,
+    content: &str,
+) -> String {
+    canonicalize_component_content(file, content)
 }
 
 fn log_symptom_dedupe(file: &Path, surface: &str, id: &str, key: &backlog::SymptomDedupeKey) {
@@ -256,7 +181,13 @@ pub fn add(file: &Path, item: &str, gated: bool) -> Result<()> {
 }
 
 pub fn icebox_add(file: &Path, item: &str) -> Result<()> {
-    add_many_to_list(file, &[item.to_string()], false, TrackedList::Icebox).map(|_| ())
+    add_many_to_list(
+        file,
+        &[item.to_string()],
+        false,
+        backlog::TrackedWorkList::Icebox,
+    )
+    .map(|_| ())
 }
 
 /// Add multiple new items while preserving the caller's flag order, top-down, at
@@ -268,7 +199,7 @@ fn add_many_to_list(
     file: &Path,
     items: &[String],
     gated: bool,
-    list: TrackedList,
+    list: backlog::TrackedWorkList,
 ) -> Result<Vec<String>> {
     let mut ids = Vec::with_capacity(items.len());
     // Iterate in reverse so that prepend-each-to-front yields the caller's flag
@@ -294,11 +225,11 @@ fn add_many_to_list(
 }
 
 pub fn add_many(file: &Path, items: &[String], gated: bool) -> Result<Vec<String>> {
-    add_many_to_list(file, items, gated, TrackedList::Backlog)
+    add_many_to_list(file, items, gated, backlog::TrackedWorkList::Backlog)
 }
 
 pub fn icebox_add_many(file: &Path, items: &[String]) -> Result<Vec<String>> {
-    add_many_to_list(file, items, false, TrackedList::Icebox)
+    add_many_to_list(file, items, false, backlog::TrackedWorkList::Icebox)
 }
 
 /// `#ah0s`: insert a new item at an explicit position relative to the active
@@ -308,7 +239,7 @@ fn add_at_to_list(
     file: &Path,
     item: &str,
     position: backlog::AddPosition<'_>,
-    list: TrackedList,
+    list: backlog::TrackedWorkList,
 ) -> Result<String> {
     let (full_content, comp) = find_tracked_list_component(file, list)?;
     reject_colliding_explicit_id(&full_content, item)?;
@@ -325,7 +256,7 @@ fn add_at_to_list(
 }
 
 fn add_at(file: &Path, item: &str, position: backlog::AddPosition<'_>) -> Result<String> {
-    add_at_to_list(file, item, position, TrackedList::Backlog)
+    add_at_to_list(file, item, position, backlog::TrackedWorkList::Backlog)
 }
 
 /// `#ah0s`: `--pending-add-after <id> "<text>"`. Repeatable; chaining
@@ -349,7 +280,7 @@ pub fn icebox_add_after(file: &Path, anchor_id: &str, item: &str) -> Result<Stri
         file,
         item,
         backlog::AddPosition::After(anchor_id),
-        TrackedList::Icebox,
+        backlog::TrackedWorkList::Icebox,
     )
 }
 
@@ -358,12 +289,17 @@ pub fn icebox_add_before(file: &Path, anchor_id: &str, item: &str) -> Result<Str
         file,
         item,
         backlog::AddPosition::Before(anchor_id),
-        TrackedList::Icebox,
+        backlog::TrackedWorkList::Icebox,
     )
 }
 
 pub fn icebox_add_back(file: &Path, item: &str) -> Result<String> {
-    add_at_to_list(file, item, backlog::AddPosition::Last, TrackedList::Icebox)
+    add_at_to_list(
+        file,
+        item,
+        backlog::AddPosition::Last,
+        backlog::TrackedWorkList::Icebox,
+    )
 }
 
 /// Token-efficient query of gated `agent:review` items (`#review-list-query`).
@@ -390,7 +326,7 @@ pub fn add_ungate_tasks_for_review(file: &Path) -> Result<UngateTasksReport> {
 }
 
 /// Run lazy backfill over the pending component and write if changed.
-fn backfill_list(file: &Path, list: TrackedList) -> Result<()> {
+fn backfill_list(file: &Path, list: backlog::TrackedWorkList) -> Result<()> {
     let (full_content, comp) = find_tracked_list_component(file, list)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = doc_id_for(file);
@@ -406,11 +342,11 @@ fn backfill_list(file: &Path, list: TrackedList) -> Result<()> {
 
 /// Run lazy backfill over the backlog component and write if changed.
 pub fn backfill(file: &Path) -> Result<()> {
-    backfill_list(file, TrackedList::Backlog)
+    backfill_list(file, backlog::TrackedWorkList::Backlog)
 }
 
 pub fn icebox_backfill(file: &Path) -> Result<()> {
-    backfill_list(file, TrackedList::Icebox)
+    backfill_list(file, backlog::TrackedWorkList::Icebox)
 }
 
 /// Mark an item `[x]` by id.
@@ -646,7 +582,7 @@ fn gate_in_place(file: &Path, id: &str) -> Result<()> {
 }
 
 /// Edit an item's text, preserving its hash id.
-fn edit_list(file: &Path, list: TrackedList, id: &str, text: &str) -> Result<()> {
+fn edit_list(file: &Path, list: backlog::TrackedWorkList, id: &str, text: &str) -> Result<()> {
     let (full_content, comp) = find_tracked_list_component(file, list)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let new_content = backlog::op_edit(existing, id, text)?;
@@ -656,7 +592,11 @@ fn edit_list(file: &Path, list: TrackedList, id: &str, text: &str) -> Result<()>
     Ok(())
 }
 
-fn edit_many_list(file: &Path, list: TrackedList, edits: &[(String, String)]) -> Result<()> {
+fn edit_many_list(
+    file: &Path,
+    list: backlog::TrackedWorkList,
+    edits: &[(String, String)],
+) -> Result<()> {
     if edits.is_empty() {
         return Ok(());
     }
@@ -677,23 +617,23 @@ fn edit_many_list(file: &Path, list: TrackedList, edits: &[(String, String)]) ->
 
 /// Edit a backlog item's text, preserving its hash id.
 pub fn edit(file: &Path, id: &str, text: &str) -> Result<()> {
-    edit_list(file, TrackedList::Backlog, id, text)
+    edit_list(file, backlog::TrackedWorkList::Backlog, id, text)
 }
 
 /// Edit multiple backlog items in one read/modify/write transaction.
 pub fn edit_many(file: &Path, edits: &[(String, String)]) -> Result<()> {
-    edit_many_list(file, TrackedList::Backlog, edits)
+    edit_many_list(file, backlog::TrackedWorkList::Backlog, edits)
 }
 
 pub fn icebox_edit(file: &Path, id: &str, text: &str) -> Result<()> {
-    edit_list(file, TrackedList::Icebox, id, text)
+    edit_list(file, backlog::TrackedWorkList::Icebox, id, text)
 }
 
 pub fn icebox_edit_many(file: &Path, edits: &[(String, String)]) -> Result<()> {
-    edit_many_list(file, TrackedList::Icebox, edits)
+    edit_many_list(file, backlog::TrackedWorkList::Icebox, edits)
 }
 
-fn clear_list(file: &Path, list: TrackedList) -> Result<()> {
+fn clear_list(file: &Path, list: backlog::TrackedWorkList) -> Result<()> {
     let (full_content, comp) = find_tracked_list_component(file, list)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let new_content = backlog::op_clear(existing)?;
@@ -704,14 +644,14 @@ fn clear_list(file: &Path, list: TrackedList) -> Result<()> {
 
 /// Clear all items from the backlog component.
 pub fn clear(file: &Path) -> Result<()> {
-    clear_list(file, TrackedList::Backlog)
+    clear_list(file, backlog::TrackedWorkList::Backlog)
 }
 
 pub fn icebox_clear(file: &Path) -> Result<()> {
-    clear_list(file, TrackedList::Icebox)
+    clear_list(file, backlog::TrackedWorkList::Icebox)
 }
 
-fn reorder_list(file: &Path, list: TrackedList, ids: &[String]) -> Result<()> {
+fn reorder_list(file: &Path, list: backlog::TrackedWorkList, ids: &[String]) -> Result<()> {
     let (full_content, comp) = find_tracked_list_component(file, list)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let new_content = backlog::op_reorder(existing, ids)?;
@@ -723,14 +663,14 @@ fn reorder_list(file: &Path, list: TrackedList, ids: &[String]) -> Result<()> {
 
 /// Reorder backlog items by id (comma-separated). Missing ids keep their relative order.
 pub fn reorder(file: &Path, ids: &[String]) -> Result<()> {
-    reorder_list(file, TrackedList::Backlog, ids)
+    reorder_list(file, backlog::TrackedWorkList::Backlog, ids)
 }
 
 pub fn icebox_reorder(file: &Path, ids: &[String]) -> Result<()> {
-    reorder_list(file, TrackedList::Icebox, ids)
+    reorder_list(file, backlog::TrackedWorkList::Icebox, ids)
 }
 
-fn reap_list(file: &Path, list: TrackedList) -> Result<()> {
+fn reap_list(file: &Path, list: backlog::TrackedWorkList) -> Result<()> {
     let (full_content, comp) = find_tracked_list_component(file, list)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = doc_id_for(file);
@@ -754,7 +694,7 @@ fn reap_list(file: &Path, list: TrackedList) -> Result<()> {
             .context("failed to archive reaped item(s) to agent:done")?;
         new_doc = archived;
     }
-    if matches!(list, TrackedList::Backlog)
+    if matches!(list, backlog::TrackedWorkList::Backlog)
         && let Some(reconciled) =
             agent_doc_document::status_projection::reconcile_top_backlog_status_content(&new_doc)?
     {
@@ -782,14 +722,19 @@ fn reap_list(file: &Path, list: TrackedList) -> Result<()> {
 
 /// Reap `[x]` backlog items and print removed ids.
 pub fn reap(file: &Path) -> Result<()> {
-    reap_list(file, TrackedList::Backlog)
+    reap_list(file, backlog::TrackedWorkList::Backlog)
 }
 
 pub fn icebox_reap(file: &Path) -> Result<()> {
-    reap_list(file, TrackedList::Icebox)
+    reap_list(file, backlog::TrackedWorkList::Icebox)
 }
 
-fn remove_from_list(file: &Path, list: TrackedList, target: &str, contains: bool) -> Result<()> {
+fn remove_from_list(
+    file: &Path,
+    list: backlog::TrackedWorkList,
+    target: &str,
+    contains: bool,
+) -> Result<()> {
     let (full_content, comp) = find_tracked_list_component(file, list)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let (new_content, removed) =
@@ -806,11 +751,11 @@ fn remove_from_list(file: &Path, list: TrackedList, target: &str, contains: bool
 
 /// Remove a backlog item by content match.
 pub fn remove(file: &Path, target: &str, contains: bool) -> Result<()> {
-    remove_from_list(file, TrackedList::Backlog, target, contains)
+    remove_from_list(file, backlog::TrackedWorkList::Backlog, target, contains)
 }
 
 pub fn icebox_remove(file: &Path, target: &str, contains: bool) -> Result<()> {
-    remove_from_list(file, TrackedList::Icebox, target, contains)
+    remove_from_list(file, backlog::TrackedWorkList::Icebox, target, contains)
 }
 
 /// Remove completed items (lines with [x], [done], or starting with ✅).
@@ -956,7 +901,7 @@ pub fn resolve_gate_scan(gate_type: &str, scope: &Path) -> Result<usize> {
     Ok(total)
 }
 
-fn list_items(file: &Path, list: TrackedList) -> Result<()> {
+fn list_items(file: &Path, list: backlog::TrackedWorkList) -> Result<()> {
     let (full_content, comp) = find_tracked_list_component(file, list)?;
     let existing = &full_content[comp.open_end..comp.close_start];
 
@@ -976,11 +921,11 @@ fn list_items(file: &Path, list: TrackedList) -> Result<()> {
 
 /// List current backlog items.
 pub fn list(file: &Path) -> Result<()> {
-    list_items(file, TrackedList::Backlog)
+    list_items(file, backlog::TrackedWorkList::Backlog)
 }
 
 pub fn icebox_list(file: &Path) -> Result<()> {
-    list_items(file, TrackedList::Icebox)
+    list_items(file, backlog::TrackedWorkList::Icebox)
 }
 
 #[cfg(test)]

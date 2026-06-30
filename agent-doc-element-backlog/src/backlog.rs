@@ -19,6 +19,7 @@
 //! - `reap` removes `- [x]` items. `detect_reorder` diffs id order between snapshot/current.
 //! - Mutation ops (`op_add/done/edit/clear/reorder`) return a new body string, never mutate in place.
 
+use agent_doc_element::element;
 use anyhow::{Context, Result, anyhow, bail};
 use std::collections::HashSet;
 
@@ -752,6 +753,110 @@ pub fn is_valid_pending_id(s: &str) -> bool {
 
 pub fn normalize_pending_id(id: &str) -> String {
     id.trim().trim_start_matches('#').to_ascii_lowercase()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrackedWorkList {
+    Backlog,
+    Icebox,
+}
+
+impl TrackedWorkList {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Backlog => "backlog",
+            Self::Icebox => "icebox",
+        }
+    }
+
+    pub fn matches_component_name(self, name: &str) -> bool {
+        match self {
+            Self::Backlog => element::is_backlog_component(name),
+            Self::Icebox => element::is_icebox_component(name),
+        }
+    }
+}
+
+pub fn find_tracked_work_component_in_content(
+    content: &str,
+    list: TrackedWorkList,
+) -> Result<element::Component> {
+    let components = element::parse(content).context("failed to parse components")?;
+    components
+        .into_iter()
+        .find(|component| list.matches_component_name(&component.name))
+        .with_context(|| format!("document has no {} component", list.label()))
+}
+
+pub fn find_open_tracked_work_component_in_content(
+    content: &str,
+    id: &str,
+) -> Result<element::Component> {
+    let id = normalize_pending_id(id);
+    let components = element::parse(content).context("failed to parse components")?;
+    components
+        .into_iter()
+        .find(|component| {
+            if !element::is_tracked_work_component(&component.name) {
+                return false;
+            }
+            let (_, items, _) = parse_items(component.content(content));
+            items
+                .into_iter()
+                .any(|item| item.id == id && item.state != PendingState::Done)
+        })
+        .with_context(|| format!("id not found in backlog/icebox: {id}"))
+}
+
+pub fn open_tracked_work_component_name_in_content(
+    content: &str,
+    id: &str,
+) -> Result<Option<String>> {
+    let id = normalize_pending_id(id);
+    let components = element::parse(content).context("failed to parse components")?;
+    for component in components {
+        if !element::is_tracked_work_component(&component.name) {
+            continue;
+        }
+        let (_, items, _) = parse_items(component.content(content));
+        if items
+            .into_iter()
+            .any(|item| item.id == id && item.state != PendingState::Done)
+        {
+            return Ok(Some(component.name));
+        }
+    }
+    Ok(None)
+}
+
+pub fn content_has_resolved_tracked_work_id(content: &str, id: &str) -> Result<bool> {
+    let id = normalize_pending_id(id);
+    if id.is_empty() {
+        return Ok(false);
+    }
+
+    let components = element::parse(content).context("failed to parse components")?;
+    let archive_ref = format!("[#{id}]");
+    for component in components {
+        let body = component.content(content);
+        if element::is_backlog_done_component(&component.name)
+            && body
+                .lines()
+                .any(|line| line.to_ascii_lowercase().contains(&archive_ref))
+        {
+            return Ok(true);
+        }
+        if element::is_tracked_work_component(&component.name) {
+            let (_, items, _) = parse_items(body);
+            if items
+                .into_iter()
+                .any(|item| item.id == id && item.state == PendingState::Done)
+            {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
 }
 
 pub fn trim_tracked_parent_prefix(line: &str) -> &str {
@@ -5362,5 +5467,56 @@ mod tests {
 
         assert_eq!(removed, 3);
         assert_eq!(updated, "- [ ] [#open] Open");
+    }
+
+    #[test]
+    fn tracked_work_component_lookup_finds_requested_list() {
+        let content = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#live1] Live\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:icebox -->\n",
+            "- [ ] [#cold1] Parked\n",
+            "<!-- /agent:icebox -->\n"
+        );
+
+        let component =
+            find_tracked_work_component_in_content(content, TrackedWorkList::Icebox).unwrap();
+
+        assert_eq!(component.name, "icebox");
+        assert!(component.content(content).contains("[#cold1]"));
+    }
+
+    #[test]
+    fn open_tracked_work_component_name_ignores_done_items() {
+        let content = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [x] [#same1] Done in backlog\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:icebox -->\n",
+            "- [ ] [#same1] Open in icebox\n",
+            "<!-- /agent:icebox -->\n"
+        );
+
+        let component = open_tracked_work_component_name_in_content(content, "same1").unwrap();
+
+        assert_eq!(component.as_deref(), Some("icebox"));
+    }
+
+    #[test]
+    fn resolved_tracked_work_id_detects_done_component_and_checked_items() {
+        let archive_content = concat!(
+            "<!-- agent:done -->\n",
+            "- 2026-06-30 [#arch1] Archived\n",
+            "<!-- /agent:done -->\n"
+        );
+        assert!(content_has_resolved_tracked_work_id(archive_content, "ARCH1").unwrap());
+
+        let checked_content = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [x] [#done1] Done inline\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        assert!(content_has_resolved_tracked_work_id(checked_content, "done1").unwrap());
     }
 }

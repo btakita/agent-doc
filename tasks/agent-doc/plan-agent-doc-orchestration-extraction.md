@@ -323,6 +323,14 @@ should be deleted during extraction.
   editor-convergence failure lines. Orchestration keeps fact gathering, ops-log
   file reads, scan limits, warning collection, text/JSON output, and CLI
   adapters while importing the focused doctor policy directly.
+- `agent-doc-workflow` now also owns session-cycle turn-scope and user-intent
+  policy: prompt-target id extraction, queue-driver address resolution,
+  exchange-tail floor calculation, turn-scope derivation, and prompt-preemption
+  filtering for synthetic queue continuations, managed-state edits, and
+  independent turn ops. Preflight keeps semantic diff construction, durable
+  op-log persistence, cycle-state storage, and warning/output adapters while
+  importing the focused workflow helpers directly; the old preflight glob export
+  was narrowed so these helpers are not available through an orchestration path.
 - `agent-doc-session-accretion` now owns recent restart-log counting policy:
   session-log timestamp parsing, blank/malformed line skips, recent-window
   filtering, restart-churn event extraction, and restart-heavy event counting.

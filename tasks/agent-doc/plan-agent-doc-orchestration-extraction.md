@@ -448,6 +448,12 @@ focused crate under the old path.
   and agent component markers across target/source/current buffers. The IPC
   transport keeps only mode-specific logging and file/effect control while
   calling the focused realtime write-policy helper directly.
+- `agent-doc-document-realtime` now owns stale snapshot reset-drift
+  discrimination: stripping transient boundary markers, applying reset-drift
+  length thresholds, and suppressing safe agent-doc mutations before the
+  effectful guard decides whether to refresh sidecars or fail closed.
+  Orchestration keeps snapshot/CRDT sidecar writes, ops-log emission, and
+  provenance-backed visible rebase effects.
 
 ### Earlier closure finding
 

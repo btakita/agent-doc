@@ -5,11 +5,13 @@
 //! must stay in the orchestration crate.
 
 use anyhow::Result;
-use similar::{ChangeTag, TextDiff};
 use std::path::Path;
 
 use crate::snapshot;
-use agent_doc_diff::{is_stale_snapshot, strip_comments, unified_diff_from_contents};
+use agent_doc_diff::{
+    extract_last_added_line, is_stale_snapshot, looks_truncated, strip_comments, truncate_for_log,
+    unified_diff_from_contents,
+};
 
 /// Diff result plus the exact snapshot/current document content used to compute it.
 pub struct ComputeResult {
@@ -272,126 +274,6 @@ fn wait_for_stable_content_truncation(doc: &Path, previous: &str) -> Result<Stri
     Ok(current)
 }
 
-/// Extract the last added (non-empty) line from the diff.
-fn extract_last_added_line(previous_stripped: &str, current_stripped: &str) -> Option<String> {
-    let diff = TextDiff::from_lines(previous_stripped, current_stripped);
-    let mut last_insert: Option<String> = None;
-
-    for change in diff.iter_all_changes() {
-        if change.tag() == ChangeTag::Insert {
-            let val = change.value().trim();
-            if !val.is_empty() {
-                last_insert = Some(val.to_string());
-            }
-        }
-    }
-
-    last_insert
-}
-
-/// Check if a line looks truncated (user may still be typing).
-///
-/// A line looks truncated if:
-/// - It ends mid-word (no space or punctuation at end)
-/// - It's very short (< 3 chars) and doesn't look like a command
-/// - It ends with common incomplete patterns
-///
-/// A line does NOT look truncated if:
-/// - It ends with terminal punctuation (. ! ? : ;)
-/// - It's a markdown heading (starts with #)
-/// - It's a command (starts with / or `)
-/// - It ends with a closing marker (-->)
-/// - It's empty or whitespace-only
-fn looks_truncated(line: &str) -> bool {
-    let trimmed = line.trim();
-
-    // Empty or whitespace — not truncated
-    if trimmed.is_empty() {
-        return false;
-    }
-
-    // Commands, headings, code blocks — never truncated
-    if trimmed.starts_with('/')
-        || trimmed.starts_with('#')
-        || trimmed.starts_with("```")
-        || trimmed.starts_with("<!--")
-    {
-        return false;
-    }
-
-    // Single characters are treated as potentially truncated — the user may be
-    // mid-typing (e.g., "S" as the start of "Save as a draft."). The stability
-    // check (3 consecutive reads at 500ms each) will confirm if the input is
-    // complete. Previously, single alphanumeric chars were exempt (treated as
-    // choice selection like "A", "B", "y"), but this caused a bug where "S"
-    // from "Save as a draft." triggered an immediate run that sent a wrong email.
-    //
-    // The 1.5s delay on genuine single-char responses (like "y" or "A") is
-    // acceptable — the cost of acting on partial input is much higher.
-    if trimmed.len() == 1 {
-        return true;
-    }
-
-    // Single word that looks like a command/keyword (e.g., "go", "ok", "release")
-    // But NOT if the word contains a dot mid-word (could be partial URL like "crates.")
-    if !trimmed.contains(' ') && trimmed.len() >= 2 {
-        // Words ending with '.' that look like partial domains/URLs are truncated
-        if trimmed.ends_with('.') && trimmed.chars().filter(|&c| c == '.').count() >= 1 {
-            let before_dot = &trimmed[..trimmed.len() - 1];
-            // Common TLD/domain fragments: if there's a word before the dot that looks
-            // like a domain component, it's likely truncated (e.g., "crates." → "crates.io")
-            if !before_dot.is_empty() && before_dot.chars().all(|c| c.is_alphanumeric() || c == '-')
-            {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    // Check last character for terminal punctuation
-    let last_char = trimmed.chars().last().unwrap();
-
-    // Dot needs special handling: "Fixed the bug." is complete, but "linking to crates." may not be.
-    // Treat '.' as terminal UNLESS the last word before '.' looks like a domain/URL fragment
-    // (no spaces, all alphanumeric/hyphens, suggesting something like "crates." → "crates.io").
-    if last_char == '.' {
-        let before_dot = &trimmed[..trimmed.len() - 1];
-        // Find the last word (after last space)
-        let last_word = before_dot
-            .rsplit_once(' ')
-            .map(|(_, w)| w)
-            .unwrap_or(before_dot);
-        // If last word contains dots already (e.g., "www.example.") or is a known domain-like
-        // pattern, treat as potentially truncated
-        if last_word.contains('.') || last_word.ends_with("http") || last_word.ends_with("https") {
-            return true;
-        }
-        // Otherwise, '.' is terminal (normal sentence ending)
-        return false;
-    }
-
-    let terminal = matches!(
-        last_char,
-        '!' | '?' | ':' | ';' | ')' | ']' | '"' | '\'' | '`' | '*' | '-' | '>' | '|'
-    );
-
-    !terminal
-}
-
-/// Truncate a string for log display.
-fn truncate_for_log(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        // Find the last char boundary at or before `max` bytes
-        let mut truncated = max;
-        while truncated > 0 && !s.is_char_boundary(truncated) {
-            truncated -= 1;
-        }
-        format!("{}...", &s[..truncated])
-    }
-}
-
 /// This exposes the Rust truncation detection to external callers
 /// (e.g., the Claude Code skill) before they compute their own diff.
 pub fn run(file: &Path, wait: bool) -> Result<()> {
@@ -578,96 +460,6 @@ mod tests {
         let diff = compute(&doc).unwrap();
         assert!(diff.is_some(), "diff should detect user's edit");
         assert!(diff.unwrap().contains("Release agent-doc"));
-    }
-
-    // --- Truncation detection tests ---
-
-    #[test]
-    fn truncated_mid_sentence() {
-        assert!(looks_truncated(
-            "Also, when I called agent-doc run on this file...and ther"
-        ));
-    }
-
-    #[test]
-    fn not_truncated_complete_sentence() {
-        assert!(!looks_truncated("This is a complete sentence."));
-    }
-
-    #[test]
-    fn not_truncated_question() {
-        assert!(!looks_truncated("What should we do?"));
-    }
-
-    #[test]
-    fn not_truncated_command() {
-        assert!(!looks_truncated("/agent-doc compact"));
-    }
-
-    #[test]
-    fn not_truncated_single_word_command() {
-        assert!(!looks_truncated("release"));
-    }
-
-    #[test]
-    fn not_truncated_short_words() {
-        assert!(!looks_truncated("go"));
-        assert!(!looks_truncated("ok"));
-        assert!(!looks_truncated("no"));
-        assert!(!looks_truncated("yes"));
-    }
-
-    #[test]
-    fn truncated_single_chars() {
-        assert!(looks_truncated("A"));
-        assert!(looks_truncated("S"));
-        assert!(looks_truncated("1"));
-        assert!(looks_truncated("y"));
-    }
-
-    #[test]
-    fn not_truncated_heading() {
-        assert!(!looks_truncated("### Re: Fix the bug"));
-    }
-
-    #[test]
-    fn not_truncated_empty() {
-        assert!(!looks_truncated(""));
-    }
-
-    #[test]
-    fn not_truncated_ends_with_colon() {
-        assert!(!looks_truncated("Here is the issue:"));
-    }
-
-    #[test]
-    fn not_truncated_ends_with_backtick() {
-        assert!(!looks_truncated("Check `crdt.rs`"));
-    }
-
-    #[test]
-    fn truncated_ends_mid_word() {
-        assert!(looks_truncated("Please make Claim for Tmux Pan"));
-    }
-
-    #[test]
-    fn not_truncated_ends_with_period() {
-        assert!(!looks_truncated("Fixed the bug."));
-    }
-
-    #[test]
-    fn extract_last_added_finds_insert() {
-        let prev = "line1\n";
-        let curr = "line1\nnew content here\n";
-        let last = extract_last_added_line(prev, curr);
-        assert_eq!(last, Some("new content here".to_string()));
-    }
-
-    #[test]
-    fn extract_last_added_none_when_no_changes() {
-        let content = "line1\nline2\n";
-        let last = extract_last_added_line(content, content);
-        assert_eq!(last, None);
     }
 
     // --- diff --wait tests ---

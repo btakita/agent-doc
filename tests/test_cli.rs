@@ -5250,6 +5250,47 @@ fn test_agent_doc_diff_owns_partial_staging_pure_policy() {
 }
 
 #[test]
+fn test_agent_doc_diff_owns_truncation_pure_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let diff_source = fs::read_to_string(manifest_dir.join("agent-doc-diff/src/lib.rs")).unwrap();
+    for required in [
+        "pub fn extract_last_added_line(",
+        "pub fn looks_truncated(",
+        "pub fn truncate_for_log(",
+    ] {
+        assert!(
+            diff_source.contains(required),
+            "agent-doc-diff must own pure truncation policy: {required}"
+        );
+    }
+
+    let diff_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/diff_io.rs")).unwrap();
+    for forbidden in [
+        "fn extract_last_added_line(",
+        "fn looks_truncated(",
+        "fn truncate_for_log(",
+        "use similar::{ChangeTag, TextDiff};",
+    ] {
+        assert!(
+            !diff_io_source.contains(forbidden),
+            "diff_io must stay a file/editor wait adapter, not re-own pure truncation policy: {forbidden}"
+        );
+    }
+    for required in [
+        "agent_doc_diff::{",
+        "extract_last_added_line",
+        "looks_truncated",
+        "truncate_for_log",
+    ] {
+        assert!(
+            diff_io_source.contains(required),
+            "diff_io should call focused diff truncation helpers directly: {required}"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_diff_owns_unstarted_prompt_bearing_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let diff_source = fs::read_to_string(manifest_dir.join("agent-doc-diff/src/lib.rs")).unwrap();

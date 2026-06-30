@@ -244,6 +244,91 @@ pub fn strip_comments(content: &str) -> String {
     strip_pipeline_block_lines(&element::strip_comments(content))
 }
 
+/// Extract the last added non-empty line between already-stripped documents.
+pub fn extract_last_added_line(previous_stripped: &str, current_stripped: &str) -> Option<String> {
+    let diff = TextDiff::from_lines(previous_stripped, current_stripped);
+    let mut last_insert: Option<String> = None;
+
+    for change in diff.iter_all_changes() {
+        if change.tag() == ChangeTag::Insert {
+            let val = change.value().trim();
+            if !val.is_empty() {
+                last_insert = Some(val.to_string());
+            }
+        }
+    }
+
+    last_insert
+}
+
+/// Check if a line looks truncated because a user may still be typing.
+///
+/// Single characters are treated as potentially truncated; the caller's stable
+/// reread loop confirms whether they were intentional short answers.
+pub fn looks_truncated(line: &str) -> bool {
+    let trimmed = line.trim();
+
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    if trimmed.starts_with('/')
+        || trimmed.starts_with('#')
+        || trimmed.starts_with("```")
+        || trimmed.starts_with("<!--")
+    {
+        return false;
+    }
+
+    if trimmed.len() == 1 {
+        return true;
+    }
+
+    if !trimmed.contains(' ') && trimmed.len() >= 2 {
+        if trimmed.ends_with('.') && trimmed.chars().filter(|&c| c == '.').count() >= 1 {
+            let before_dot = &trimmed[..trimmed.len() - 1];
+            if !before_dot.is_empty() && before_dot.chars().all(|c| c.is_alphanumeric() || c == '-')
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    let last_char = trimmed.chars().last().unwrap();
+    if last_char == '.' {
+        let before_dot = &trimmed[..trimmed.len() - 1];
+        let last_word = before_dot
+            .rsplit_once(' ')
+            .map(|(_, w)| w)
+            .unwrap_or(before_dot);
+        if last_word.contains('.') || last_word.ends_with("http") || last_word.ends_with("https") {
+            return true;
+        }
+        return false;
+    }
+
+    let terminal = matches!(
+        last_char,
+        '!' | '?' | ':' | ';' | ')' | ']' | '"' | '\'' | '`' | '*' | '-' | '>' | '|'
+    );
+
+    !terminal
+}
+
+/// Truncate a string for bounded diagnostics while preserving UTF-8 boundaries.
+pub fn truncate_for_log(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        let mut truncated = max;
+        while truncated > 0 && !s.is_char_boundary(truncated) {
+            truncated -= 1;
+        }
+        format!("{}...", &s[..truncated])
+    }
+}
+
 /// Byte-precise removal of the managed `agent_doc_pipeline:` frontmatter block
 /// for diff comparison. Keeping this local pure helper avoids pulling the full
 /// frontmatter parser into diff classification.
@@ -4802,6 +4887,94 @@ Done.\n\
         let bare =
             first_bare_prompt_prefix_target_before_marker(later_only, "### Re: answer — gpt-5");
         assert_eq!(bare, None);
+    }
+
+    #[test]
+    fn truncated_mid_sentence() {
+        assert!(looks_truncated(
+            "Also, when I called agent-doc run on this file...and ther"
+        ));
+    }
+
+    #[test]
+    fn not_truncated_complete_sentence() {
+        assert!(!looks_truncated("This is a complete sentence."));
+    }
+
+    #[test]
+    fn not_truncated_question() {
+        assert!(!looks_truncated("What should we do?"));
+    }
+
+    #[test]
+    fn not_truncated_command() {
+        assert!(!looks_truncated("/agent-doc compact"));
+    }
+
+    #[test]
+    fn not_truncated_single_word_command() {
+        assert!(!looks_truncated("release"));
+    }
+
+    #[test]
+    fn not_truncated_short_words() {
+        assert!(!looks_truncated("go"));
+        assert!(!looks_truncated("ok"));
+        assert!(!looks_truncated("no"));
+        assert!(!looks_truncated("yes"));
+    }
+
+    #[test]
+    fn truncated_single_chars() {
+        assert!(looks_truncated("A"));
+        assert!(looks_truncated("S"));
+        assert!(looks_truncated("1"));
+        assert!(looks_truncated("y"));
+    }
+
+    #[test]
+    fn not_truncated_heading() {
+        assert!(!looks_truncated("### Re: Fix the bug"));
+    }
+
+    #[test]
+    fn not_truncated_empty() {
+        assert!(!looks_truncated(""));
+    }
+
+    #[test]
+    fn not_truncated_ends_with_colon() {
+        assert!(!looks_truncated("Here is the issue:"));
+    }
+
+    #[test]
+    fn not_truncated_ends_with_backtick() {
+        assert!(!looks_truncated("Check `crdt.rs`"));
+    }
+
+    #[test]
+    fn truncated_ends_mid_word() {
+        assert!(looks_truncated("Please make Claim for Tmux Pan"));
+    }
+
+    #[test]
+    fn not_truncated_ends_with_period() {
+        assert!(!looks_truncated("Fixed the bug."));
+    }
+
+    #[test]
+    fn extract_last_added_finds_insert() {
+        let prev = "line1\n";
+        let curr = "line1\nnew content here\n";
+        let last = extract_last_added_line(prev, curr);
+        assert_eq!(last, Some("new content here".to_string()));
+    }
+
+    #[test]
+    fn extract_last_added_none_when_no_changes() {
+        let content = "line1\nline2\n";
+        let last = extract_last_added_line(content, content);
+        assert_eq!(last, None);
     }
 
     // Plan: tasks/agent-doc/plan-claude-code-queue-auto-loop.md `#ccloopguard`.

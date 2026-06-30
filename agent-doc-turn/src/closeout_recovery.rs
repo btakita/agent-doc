@@ -4,6 +4,8 @@
 //! action-independent turn recovery decisions that can be proven from document
 //! content facts.
 
+use crate::CyclePhase;
+
 /// Which side of a metadata-only drift is authoritative for closeout recovery.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MetadataDriftAuthority {
@@ -93,6 +95,61 @@ pub enum CloseoutRecoveryState {
     UnsafeUserContentDrift,
 }
 
+/// File/effect adapters classify concrete diffs into this smaller vocabulary
+/// before asking the turn policy to pick the recovery state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloseoutRecoveryDrift {
+    /// Snapshot differs from HEAD only by agent-doc-generated exchange artifacts.
+    BoundaryOnly,
+    /// User/response and tracked-work content are byte-identical; only metadata
+    /// changed.
+    MetadataOnly,
+    /// User-authored prompt/response or tracked-work content differs.
+    Content,
+}
+
+/// Cycle-state facts relevant to closeout recovery classification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CloseoutRecoveryCycleInput {
+    pub phase: CyclePhase,
+    pub has_capture: bool,
+    pub has_response_hash: bool,
+    pub had_pending_mutations: bool,
+}
+
+impl CloseoutRecoveryCycleInput {
+    pub const fn is_empty_preflight(self) -> bool {
+        matches!(self.phase, CyclePhase::PreflightStarted)
+            && !self.has_capture
+            && !self.has_response_hash
+            && !self.had_pending_mutations
+    }
+
+    pub const fn is_committed_pending_mutation_without_response(self) -> bool {
+        matches!(self.phase, CyclePhase::Committed)
+            && !self.has_capture
+            && !self.has_response_hash
+            && self.had_pending_mutations
+    }
+
+    pub const fn needs_file_recovery_evidence(self) -> bool {
+        matches!(self.phase, CyclePhase::Committed)
+    }
+}
+
+/// Pure closeout recovery classification facts. Orchestration supplies these
+/// facts after reading cycle state, snapshots, HEAD, and visible document state.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CloseoutRecoveryStateInput {
+    pub cycle: Option<CloseoutRecoveryCycleInput>,
+    pub head_has_escaped_template_patch: bool,
+    pub missing_captured_response_body: bool,
+    pub direct_response_patchback: bool,
+    pub snapshot_head_drift: Option<CloseoutRecoveryDrift>,
+    pub snapshot_visible_drift: Option<CloseoutRecoveryDrift>,
+    pub nested_parent_pointer_stale: bool,
+}
+
 impl CloseoutRecoveryState {
     pub const ALL: [Self; 11] = [
         Self::Clean,
@@ -123,6 +180,91 @@ impl CloseoutRecoveryState {
             Self::UnsafeUserContentDrift => "unsafe_user_content_drift",
         }
     }
+}
+
+pub fn classify_closeout_recovery_state_from_input(
+    input: CloseoutRecoveryStateInput,
+) -> CloseoutRecoveryState {
+    let Some(cycle) = input.cycle else {
+        return CloseoutRecoveryState::Clean;
+    };
+
+    match cycle.phase {
+        CyclePhase::PreflightStarted if cycle.is_empty_preflight() => {
+            return CloseoutRecoveryState::OpenEmptyPreflight;
+        }
+        CyclePhase::PreflightStarted | CyclePhase::ResponseCaptured | CyclePhase::WriteApplied => {
+            return CloseoutRecoveryState::OpenCycle;
+        }
+        CyclePhase::Abandoned => return CloseoutRecoveryState::Clean,
+        CyclePhase::Committed => {}
+    }
+
+    if input.head_has_escaped_template_patch {
+        return CloseoutRecoveryState::EscapedTemplatePatch;
+    }
+    if input.missing_captured_response_body
+        || cycle.is_committed_pending_mutation_without_response()
+    {
+        return CloseoutRecoveryState::MissingResponseBody;
+    }
+    if input.direct_response_patchback {
+        return CloseoutRecoveryState::DirectResponsePatchback;
+    }
+
+    match input.snapshot_head_drift {
+        Some(CloseoutRecoveryDrift::BoundaryOnly) => {
+            return CloseoutRecoveryState::BoundaryOnlyDrift;
+        }
+        Some(CloseoutRecoveryDrift::MetadataOnly) => {
+            return CloseoutRecoveryState::QueueMetadataDrift;
+        }
+        Some(CloseoutRecoveryDrift::Content) => {
+            return CloseoutRecoveryState::UnsafeUserContentDrift;
+        }
+        None => {}
+    }
+
+    match input.snapshot_visible_drift {
+        Some(CloseoutRecoveryDrift::BoundaryOnly | CloseoutRecoveryDrift::MetadataOnly) => {
+            return CloseoutRecoveryState::SidecarVisibleDrift;
+        }
+        Some(CloseoutRecoveryDrift::Content) => {
+            return CloseoutRecoveryState::UnsafeUserContentDrift;
+        }
+        None => {}
+    }
+
+    if input.nested_parent_pointer_stale {
+        return CloseoutRecoveryState::NestedParentPointerStale;
+    }
+
+    CloseoutRecoveryState::Clean
+}
+
+/// Normalized signature of the user/response + tracked-item *content*
+/// components (`exchange`, backlog, review, icebox, done), excluding pure
+/// agent-doc metadata. Callers should pass text after any exchange-artifact
+/// normalization that is relevant to their evidence source.
+pub fn closeout_content_component_signature(normalized_doc: &str) -> String {
+    let Ok(components) = agent_doc_element::element::parse(normalized_doc) else {
+        return normalized_doc.to_string();
+    };
+    let mut sig = String::new();
+    for component in &components {
+        let is_content = component.name == "exchange"
+            || agent_doc_element::element::is_backlog_component(&component.name)
+            || agent_doc_element::element::is_review_component(&component.name)
+            || agent_doc_element::element::is_icebox_component(&component.name)
+            || agent_doc_element::element::is_backlog_done_component(&component.name);
+        if is_content {
+            sig.push_str(&component.name);
+            sig.push('\u{0}');
+            sig.push_str(component.content(normalized_doc).trim());
+            sig.push('\n');
+        }
+    }
+    sig
 }
 
 /// Input facts that are already known at a closeout recovery call site.
@@ -454,6 +596,151 @@ mod tests {
         for (state, label) in cases {
             assert_eq!(state.as_str(), label);
         }
+    }
+
+    fn committed_cycle() -> CloseoutRecoveryCycleInput {
+        CloseoutRecoveryCycleInput {
+            phase: CyclePhase::Committed,
+            has_capture: false,
+            has_response_hash: false,
+            had_pending_mutations: false,
+        }
+    }
+
+    #[test]
+    fn recovery_state_classifier_maps_cycle_facts_before_drift() {
+        assert_eq!(
+            classify_closeout_recovery_state_from_input(CloseoutRecoveryStateInput::default()),
+            CloseoutRecoveryState::Clean
+        );
+        assert_eq!(
+            classify_closeout_recovery_state_from_input(CloseoutRecoveryStateInput {
+                cycle: Some(CloseoutRecoveryCycleInput {
+                    phase: CyclePhase::PreflightStarted,
+                    has_capture: false,
+                    has_response_hash: false,
+                    had_pending_mutations: false,
+                }),
+                snapshot_head_drift: Some(CloseoutRecoveryDrift::Content),
+                ..CloseoutRecoveryStateInput::default()
+            }),
+            CloseoutRecoveryState::OpenEmptyPreflight
+        );
+        assert_eq!(
+            classify_closeout_recovery_state_from_input(CloseoutRecoveryStateInput {
+                cycle: Some(CloseoutRecoveryCycleInput {
+                    phase: CyclePhase::ResponseCaptured,
+                    has_capture: true,
+                    has_response_hash: true,
+                    had_pending_mutations: false,
+                }),
+                direct_response_patchback: true,
+                ..CloseoutRecoveryStateInput::default()
+            }),
+            CloseoutRecoveryState::OpenCycle
+        );
+    }
+
+    #[test]
+    fn recovery_state_classifier_preserves_closeout_detection_order() {
+        let cycle = committed_cycle();
+        assert_eq!(
+            classify_closeout_recovery_state_from_input(CloseoutRecoveryStateInput {
+                cycle: Some(cycle),
+                head_has_escaped_template_patch: true,
+                direct_response_patchback: true,
+                snapshot_head_drift: Some(CloseoutRecoveryDrift::Content),
+                ..CloseoutRecoveryStateInput::default()
+            }),
+            CloseoutRecoveryState::EscapedTemplatePatch
+        );
+        assert_eq!(
+            classify_closeout_recovery_state_from_input(CloseoutRecoveryStateInput {
+                cycle: Some(CloseoutRecoveryCycleInput {
+                    had_pending_mutations: true,
+                    ..cycle
+                }),
+                direct_response_patchback: true,
+                ..CloseoutRecoveryStateInput::default()
+            }),
+            CloseoutRecoveryState::MissingResponseBody
+        );
+        assert_eq!(
+            classify_closeout_recovery_state_from_input(CloseoutRecoveryStateInput {
+                cycle: Some(cycle),
+                direct_response_patchback: true,
+                snapshot_head_drift: Some(CloseoutRecoveryDrift::Content),
+                ..CloseoutRecoveryStateInput::default()
+            }),
+            CloseoutRecoveryState::DirectResponsePatchback
+        );
+    }
+
+    #[test]
+    fn recovery_state_classifier_splits_snapshot_and_visible_drift() {
+        let cycle = committed_cycle();
+        for (drift, state) in [
+            (
+                CloseoutRecoveryDrift::BoundaryOnly,
+                CloseoutRecoveryState::BoundaryOnlyDrift,
+            ),
+            (
+                CloseoutRecoveryDrift::MetadataOnly,
+                CloseoutRecoveryState::QueueMetadataDrift,
+            ),
+            (
+                CloseoutRecoveryDrift::Content,
+                CloseoutRecoveryState::UnsafeUserContentDrift,
+            ),
+        ] {
+            assert_eq!(
+                classify_closeout_recovery_state_from_input(CloseoutRecoveryStateInput {
+                    cycle: Some(cycle),
+                    snapshot_head_drift: Some(drift),
+                    ..CloseoutRecoveryStateInput::default()
+                }),
+                state,
+                "unexpected snapshot-vs-head classification for {drift:?}"
+            );
+        }
+        assert_eq!(
+            classify_closeout_recovery_state_from_input(CloseoutRecoveryStateInput {
+                cycle: Some(cycle),
+                snapshot_visible_drift: Some(CloseoutRecoveryDrift::MetadataOnly),
+                ..CloseoutRecoveryStateInput::default()
+            }),
+            CloseoutRecoveryState::SidecarVisibleDrift
+        );
+        assert_eq!(
+            classify_closeout_recovery_state_from_input(CloseoutRecoveryStateInput {
+                cycle: Some(cycle),
+                snapshot_visible_drift: Some(CloseoutRecoveryDrift::Content),
+                ..CloseoutRecoveryStateInput::default()
+            }),
+            CloseoutRecoveryState::UnsafeUserContentDrift
+        );
+    }
+
+    #[test]
+    fn content_component_signature_ignores_metadata_components() {
+        let a = concat!(
+            "---\nagent_doc_session: test\nqueue_active: true\n---\n\n",
+            "<!-- agent:status -->\nactive\n<!-- /agent:status -->\n\n",
+            "<!-- agent:exchange -->\n### Re: x\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n",
+        );
+        let b = a
+            .replace("queue_active: true", "queue_active: false")
+            .replace("- do [#a]\n", "- do [#a]\n- do [#b]\n");
+        assert_eq!(
+            closeout_content_component_signature(a),
+            closeout_content_component_signature(&b)
+        );
+        let changed = b.replace("Done.", "Different response.");
+        assert_ne!(
+            closeout_content_component_signature(a),
+            closeout_content_component_signature(&changed)
+        );
     }
 
     #[test]

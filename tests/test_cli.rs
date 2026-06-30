@@ -3114,6 +3114,11 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     );
     for required in [
         "pub enum CloseoutRecoveryState",
+        "pub enum CloseoutRecoveryDrift",
+        "pub struct CloseoutRecoveryCycleInput",
+        "pub struct CloseoutRecoveryStateInput",
+        "pub fn classify_closeout_recovery_state_from_input",
+        "pub fn closeout_content_component_signature",
         "pub struct CloseoutRecoveryDecisionInput",
         "pub enum CloseoutRecoveryDecision",
         "pub fn closeout_recovery_decision_from_state",
@@ -3177,6 +3182,8 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub enum MetadataDriftAuthority",
         "impl CloseoutRecoveryMutationReason",
         "pub fn metadata_drift_authority",
+        "pub fn classify_closeout_recovery_state(",
+        "fn content_component_signature(",
     ] {
         assert!(
             !closeout_source.contains(forbidden),
@@ -3187,9 +3194,13 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         closeout_source.contains("use agent_doc_turn::closeout_recovery::{")
             && closeout_source.contains("CloseoutRecoveryDecision")
             && closeout_source.contains("CloseoutRecoveryDecisionInput")
+            && closeout_source.contains("CloseoutRecoveryDrift")
+            && closeout_source.contains("CloseoutRecoveryStateInput")
             && closeout_source.contains("CloseoutRecoveryMutationReason")
             && closeout_source.contains("CloseoutRecoveryState")
             && closeout_source.contains("MetadataDriftAuthority")
+            && closeout_source.contains("classify_closeout_recovery_state_from_input")
+            && closeout_source.contains("closeout_content_component_signature")
             && closeout_source.contains("closeout_recovery_decision_from_state")
             && closeout_source.contains("metadata_drift_authority"),
         "orchestration closeout recovery should call focused turn policy directly"

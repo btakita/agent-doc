@@ -1,9 +1,11 @@
 use super::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
 use agent_doc_turn::closeout_guard::CloseoutGuardReason;
 use agent_doc_turn::closeout_recovery::{
-    CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput, CloseoutRecoveryMutationReason,
-    CloseoutRecoveryState, MetadataDriftAuthority, closeout_recovery_decision_from_state,
-    metadata_drift_authority,
+    CloseoutRecoveryCycleInput, CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput,
+    CloseoutRecoveryDrift, CloseoutRecoveryMutationReason, CloseoutRecoveryState,
+    CloseoutRecoveryStateInput, MetadataDriftAuthority,
+    classify_closeout_recovery_state_from_input, closeout_content_component_signature,
+    closeout_recovery_decision_from_state, metadata_drift_authority,
 };
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -862,7 +864,7 @@ pub fn decide_closeout_recovery(
     file: &Path,
     input: CloseoutRecoveryDecisionInput<'_>,
 ) -> CloseoutRecoveryDecision {
-    let state = classify_closeout_recovery_state(file);
+    let state = classify_closeout_recovery_state_for_file(file);
     let evidence = gather_closeout_recovery_evidence(file).ok();
     let stale_capture_supersession_proof = input.stale_capture_supersession_proof.or_else(|| {
         evidence
@@ -926,7 +928,7 @@ pub enum RecoveryApplication {
 /// states also fail closed because they need a preserved response, not a metadata
 /// operation.
 pub fn apply_closeout_recovery(file: &Path) -> Result<RecoveryApplication> {
-    let state = classify_closeout_recovery_state(file);
+    let state = classify_closeout_recovery_state_for_file(file);
     match state {
         CloseoutRecoveryState::Clean => Ok(RecoveryApplication::NothingToDo),
         CloseoutRecoveryState::OpenEmptyPreflight => {
@@ -1163,44 +1165,34 @@ fn rebuild_sidecars_from_content(file: &Path, content: &str) -> Result<()> {
 /// when no recovery signal is provable; `DirectResponsePatchback`,
 /// `BoundaryOnlyDrift`, and `NestedParentPointerStale` detection wiring is
 /// tracked as remaining work in the plan.
-pub fn classify_closeout_recovery_state(file: &Path) -> CloseoutRecoveryState {
+pub fn classify_closeout_recovery_state_for_file(file: &Path) -> CloseoutRecoveryState {
     let state = match crate::cycle_state::load(file) {
         Ok(Some(state)) => state,
-        _ => return CloseoutRecoveryState::Clean,
+        _ => {
+            return classify_closeout_recovery_state_from_input(
+                CloseoutRecoveryStateInput::default(),
+            );
+        }
     };
-    use agent_doc_turn::CyclePhase;
-    match state.phase {
-        // `#recursive-repair-recovery-states`: an empty `preflight_started` cycle
-        // (no capture, no captured-response hash, no pending mutation) is a
-        // diagnostic/probe preflight that nothing followed — abandonable with a
-        // single `agent-doc cancel`, distinct from a real in-progress cycle.
-        CyclePhase::PreflightStarted
-            if state.capture_id.is_none()
-                && state.response_sha256.is_none()
-                && !state.had_pending_mutations =>
-        {
-            return CloseoutRecoveryState::OpenEmptyPreflight;
-        }
-        CyclePhase::PreflightStarted | CyclePhase::ResponseCaptured | CyclePhase::WriteApplied => {
-            return CloseoutRecoveryState::OpenCycle;
-        }
-        CyclePhase::Abandoned => return CloseoutRecoveryState::Clean,
-        CyclePhase::Committed => {}
+    let cycle = CloseoutRecoveryCycleInput {
+        phase: state.phase,
+        has_capture: state.capture_id.is_some(),
+        has_response_hash: state.response_sha256.is_some(),
+        had_pending_mutations: state.had_pending_mutations,
+    };
+    let mut input = CloseoutRecoveryStateInput {
+        cycle: Some(cycle),
+        ..CloseoutRecoveryStateInput::default()
+    };
+    if !cycle.needs_file_recovery_evidence() {
+        return classify_closeout_recovery_state_from_input(input);
     }
 
-    if head_exchange_has_escaped_markers(file) {
-        return CloseoutRecoveryState::EscapedTemplatePatch;
-    }
+    input.head_has_escaped_template_patch = head_exchange_has_escaped_markers(file);
     // A captured body that never materialized in HEAD, or a committed
     // response-write turn with no capture at all, are both the missing-body
     // shape recovered by `write --commit`.
-    if stuck_captured_cycle(file).is_some() {
-        return CloseoutRecoveryState::MissingResponseBody;
-    }
-    if state.capture_id.is_none() && state.response_sha256.is_none() && state.had_pending_mutations
-    {
-        return CloseoutRecoveryState::MissingResponseBody;
-    }
+    input.missing_captured_response_body = stuck_captured_cycle(file).is_some();
     // `#closeout-recovery-state-machine`: a visible `### Re:` / `## Assistant`
     // response was patched into the working document outside the binary write
     // path. Recover by absorbing it through `write --commit`. Checked before the
@@ -1209,14 +1201,12 @@ pub fn classify_closeout_recovery_state(file: &Path) -> CloseoutRecoveryState {
     // binary write path applied the response but the commit boundary never
     // landed) is `git::commit`-recoverable, so it must NOT be misread as a direct
     // patchback — mirror `session_check::detect_uncommitted_closeout_drift`.
-    if !crate::session_check::detect_jb_cache_conflict_cancel_recoverable(file).unwrap_or(false)
-        && crate::session_check::detect_bypassed_response_write(file)
-            .ok()
-            .flatten()
-            .is_some()
-    {
-        return CloseoutRecoveryState::DirectResponsePatchback;
-    }
+    input.direct_response_patchback =
+        !crate::session_check::detect_jb_cache_conflict_cancel_recoverable(file).unwrap_or(false)
+            && crate::session_check::detect_bypassed_response_write(file)
+                .ok()
+                .flatten()
+                .is_some();
     // `#recursive-repair-state-drift` / `#recursive-repair-recovery-states`:
     // classify committed-cycle drift by *what* differs so the recovery names one
     // safe command. Order matters — narrowest/safest first, content drift last
@@ -1226,20 +1216,8 @@ pub fn classify_closeout_recovery_state(file: &Path) -> CloseoutRecoveryState {
     if let (Some(snapshot), Some(head)) = (snapshot.as_deref(), head.as_deref())
         && snapshot != head
     {
-        // Boundary / `(HEAD)` / answered-prompt-prefix artifacts only.
-        if crate::git::normalize_committed_exchange_artifacts(snapshot)
-            == crate::git::normalize_committed_exchange_artifacts(head)
-        {
-            return CloseoutRecoveryState::BoundaryOnlyDrift;
-        }
-        // User/response + tracked-item content is byte-identical → the diff is
-        // queue / `queue_active` / status metadata (e.g. a `queue` sync-attribute
-        // regeneration). Safe to `agent-doc commit`.
-        if content_component_signature(snapshot) == content_component_signature(head) {
-            return CloseoutRecoveryState::QueueMetadataDrift;
-        }
-        // Real user/response content differs from HEAD → never auto-commit.
-        return CloseoutRecoveryState::UnsafeUserContentDrift;
+        input.snapshot_head_drift = Some(classify_snapshot_head_drift(snapshot, head));
+        return classify_closeout_recovery_state_from_input(input);
     }
     // Snapshot matches HEAD but the visible/working file is stale relative to the
     // sidecars. Metadata-only visible drift → rebuild sidecars from the file;
@@ -1247,50 +1225,51 @@ pub fn classify_closeout_recovery_state(file: &Path) -> CloseoutRecoveryState {
     if let (Some(snapshot), Ok(working)) = (snapshot.as_deref(), std::fs::read_to_string(file))
         && snapshot != working
     {
-        if content_component_signature(snapshot) == content_component_signature(&working) {
-            return CloseoutRecoveryState::SidecarVisibleDrift;
-        }
-        return CloseoutRecoveryState::UnsafeUserContentDrift;
+        input.snapshot_visible_drift = Some(classify_snapshot_visible_drift(snapshot, &working));
+        return classify_closeout_recovery_state_from_input(input);
     }
     // `#closeout-recovery-state-machine`: the document itself is clean (snapshot
     // == HEAD == working) but a reaped/closed item left a nested parent submodule
     // pointer uncommitted — single safe recovery is `agent-doc commit`.
-    if crate::git::submodule_pointer_drift(file)
+    input.nested_parent_pointer_stale = crate::git::submodule_pointer_drift(file)
         .ok()
         .flatten()
-        .is_some()
-    {
-        return CloseoutRecoveryState::NestedParentPointerStale;
-    }
-    CloseoutRecoveryState::Clean
+        .is_some();
+    classify_closeout_recovery_state_from_input(input)
 }
 
-/// Normalized signature of the user/response + tracked-item *content* components
-/// (`exchange`, backlog, review, icebox, done), excluding pure agent-doc metadata
-/// (queue, status, frontmatter, boundary markers). Two documents with the same
-/// signature differ only in metadata; a differing signature means real
-/// user/response or tracked-item content changed. Used to split metadata-only
-/// drift (safe to commit) from content drift (fail closed).
-fn content_component_signature(doc: &str) -> String {
-    let normalized = crate::git::normalize_committed_exchange_artifacts(doc);
-    let Ok(components) = agent_doc_element::element::parse(&normalized) else {
-        return normalized;
-    };
-    let mut sig = String::new();
-    for c in &components {
-        let is_content = c.name == "exchange"
-            || agent_doc_element::element::is_backlog_component(&c.name)
-            || agent_doc_element::element::is_review_component(&c.name)
-            || agent_doc_element::element::is_icebox_component(&c.name)
-            || agent_doc_element::element::is_backlog_done_component(&c.name);
-        if is_content {
-            sig.push_str(&c.name);
-            sig.push('\u{0}');
-            sig.push_str(c.content(&normalized).trim());
-            sig.push('\n');
-        }
+fn classify_snapshot_head_drift(snapshot: &str, head: &str) -> CloseoutRecoveryDrift {
+    // Boundary / `(HEAD)` / answered-prompt-prefix artifacts only.
+    if crate::git::normalize_committed_exchange_artifacts(snapshot)
+        == crate::git::normalize_committed_exchange_artifacts(head)
+    {
+        return CloseoutRecoveryDrift::BoundaryOnly;
     }
-    sig
+    // User/response + tracked-item content is byte-identical → the diff is
+    // queue / `queue_active` / status metadata (e.g. a `queue` sync-attribute
+    // regeneration). Safe to `agent-doc commit`.
+    if closeout_content_signature_after_artifact_normalization(snapshot)
+        == closeout_content_signature_after_artifact_normalization(head)
+    {
+        return CloseoutRecoveryDrift::MetadataOnly;
+    }
+    // Real user/response content differs from HEAD → never auto-commit.
+    CloseoutRecoveryDrift::Content
+}
+
+fn classify_snapshot_visible_drift(snapshot: &str, visible: &str) -> CloseoutRecoveryDrift {
+    if closeout_content_signature_after_artifact_normalization(snapshot)
+        == closeout_content_signature_after_artifact_normalization(visible)
+    {
+        CloseoutRecoveryDrift::MetadataOnly
+    } else {
+        CloseoutRecoveryDrift::Content
+    }
+}
+
+fn closeout_content_signature_after_artifact_normalization(doc: &str) -> String {
+    let normalized = crate::git::normalize_committed_exchange_artifacts(doc);
+    closeout_content_component_signature(&normalized)
 }
 
 fn head_exchange_has_escaped_markers(file: &Path) -> bool {
@@ -1936,7 +1915,7 @@ mod tests {
     fn classify_recovery_clean_without_cycle_state() {
         let (_dir, doc) = setup_git_project_with_doc("---\nsession: test\n---\n\nHi\n");
         assert_eq!(
-            classify_closeout_recovery_state(&doc),
+            classify_closeout_recovery_state_for_file(&doc),
             CloseoutRecoveryState::Clean
         );
     }
@@ -1949,7 +1928,7 @@ mod tests {
         let (_dir, doc) = setup_git_project_with_doc(base);
         crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
         assert_eq!(
-            classify_closeout_recovery_state(&doc),
+            classify_closeout_recovery_state_for_file(&doc),
             CloseoutRecoveryState::OpenEmptyPreflight
         );
         let cmd =
@@ -1966,7 +1945,7 @@ mod tests {
         crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
         crate::cycle_state::mark_pending_mutations(&doc).unwrap();
         assert_eq!(
-            classify_closeout_recovery_state(&doc),
+            classify_closeout_recovery_state_for_file(&doc),
             CloseoutRecoveryState::OpenCycle
         );
     }
@@ -1993,7 +1972,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            classify_closeout_recovery_state(&doc),
+            classify_closeout_recovery_state_for_file(&doc),
             CloseoutRecoveryState::QueueMetadataDrift
         );
     }
@@ -2018,7 +1997,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            classify_closeout_recovery_state(&doc),
+            classify_closeout_recovery_state_for_file(&doc),
             CloseoutRecoveryState::UnsafeUserContentDrift
         );
     }
@@ -2046,7 +2025,7 @@ mod tests {
         );
         std::fs::write(&doc, &with_response).unwrap();
         assert_eq!(
-            classify_closeout_recovery_state(&doc),
+            classify_closeout_recovery_state_for_file(&doc),
             CloseoutRecoveryState::DirectResponsePatchback
         );
         let cmd = closeout_recovery_command(&doc, CloseoutRecoveryState::DirectResponsePatchback)
@@ -2116,7 +2095,7 @@ mod tests {
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(content), Some(content))
             .unwrap();
         assert_eq!(
-            classify_closeout_recovery_state(&doc),
+            classify_closeout_recovery_state_for_file(&doc),
             CloseoutRecoveryState::NestedParentPointerStale
         );
         let cmd = closeout_recovery_command(&doc, CloseoutRecoveryState::NestedParentPointerStale)
@@ -2148,7 +2127,7 @@ mod tests {
         }
         // The cycle is now abandoned, so re-classification is Clean.
         assert_eq!(
-            classify_closeout_recovery_state(&doc),
+            classify_closeout_recovery_state_for_file(&doc),
             CloseoutRecoveryState::Clean
         );
     }
@@ -2190,7 +2169,7 @@ mod tests {
                 .contains("- do [#b]")
         );
         assert_eq!(
-            classify_closeout_recovery_state(&doc),
+            classify_closeout_recovery_state_for_file(&doc),
             CloseoutRecoveryState::Clean
         );
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
@@ -2236,7 +2215,7 @@ mod tests {
         assert!(restored.contains("queue_active: true"), "{restored}");
         assert_eq!(crate::snapshot::load(&doc).unwrap().unwrap(), restored);
         assert_eq!(
-            classify_closeout_recovery_state(&doc),
+            classify_closeout_recovery_state_for_file(&doc),
             CloseoutRecoveryState::Clean
         );
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
@@ -2264,7 +2243,7 @@ mod tests {
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(head), Some(head)).unwrap();
         std::fs::write(&doc, &visible).unwrap();
         assert_eq!(
-            classify_closeout_recovery_state(&doc),
+            classify_closeout_recovery_state_for_file(&doc),
             CloseoutRecoveryState::SidecarVisibleDrift
         );
 
@@ -2333,7 +2312,7 @@ mod tests {
         crate::capture::capture_response(&doc, response).unwrap();
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(base), Some(base)).unwrap();
         assert_eq!(
-            classify_closeout_recovery_state(&doc),
+            classify_closeout_recovery_state_for_file(&doc),
             CloseoutRecoveryState::MissingResponseBody
         );
     }
@@ -2358,7 +2337,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            classify_closeout_recovery_state(&doc),
+            classify_closeout_recovery_state_for_file(&doc),
             CloseoutRecoveryState::Clean
         );
     }
@@ -2399,7 +2378,7 @@ mod tests {
             "test precondition: transient normalization must still differ"
         );
         assert_eq!(
-            classify_closeout_recovery_state(&doc),
+            classify_closeout_recovery_state_for_file(&doc),
             CloseoutRecoveryState::BoundaryOnlyDrift
         );
         let cmd =

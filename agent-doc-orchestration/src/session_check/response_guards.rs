@@ -313,7 +313,7 @@ pub(crate) fn check_snapshot_committed_guard(
 pub(crate) fn closeout_recovery_hint(file: &Path) -> String {
     // `#closeout-repair-churn`: render one typed recovery instruction for the
     // classified state instead of a single static "try write --commit" line.
-    let state = crate::flow::closeout::classify_closeout_recovery_state(file);
+    let state = crate::flow::closeout::classify_closeout_recovery_state_for_file(file);
     match crate::flow::closeout::closeout_recovery_command(file, state) {
         Some(command) => format!("Recovery [{}]: {}.", state.as_str(), command),
         None => format!(

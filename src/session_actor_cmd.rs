@@ -290,7 +290,9 @@ pub fn debug(file: Option<&Path>, json: bool) -> Result<()> {
             .flatten()
             .map(|s| phase_str(s.phase));
         let recovery_state =
-            agent_doc_orchestration::flow::closeout::classify_closeout_recovery_state(doc_path);
+            agent_doc_orchestration::flow::closeout::classify_closeout_recovery_state_for_file(
+                doc_path,
+            );
         let recovery_command = agent_doc_orchestration::flow::closeout::closeout_recovery_command(
             doc_path,
             recovery_state,

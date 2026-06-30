@@ -137,14 +137,15 @@ language has moved on. A deprecated module, function, type, crate, test, or doc
 name is another compatibility surface: even if it delegates correctly, it keeps
 future work thinking in the old model.
 
-- Rename deprecated internal names to the current domain name while extracting
-  the seam. Do not leave alias modules, `pub use` aliases, or wrapper functions
-  behind.
+- Rename deprecated internal names to the canonical current domain name while
+  extracting the seam. Do not leave alias modules, `pub use` aliases, or wrapper
+  functions behind.
 - Prefer the current user-facing/domain vocabulary in file names and imports:
   backlog/tracked-work/review/icebox/queue/turn/document instead of historical
   names such as pending/core/shim/facade.
-- Treat rename-only cleanup as valid extraction support when it removes an old
-  ownership cue. Keep it scoped and covered by static no-shim/no-alias scans.
+- Treat rename-only cleanup as valid extraction support when it replaces an old
+  ownership cue with the current name. Keep it scoped and covered by static
+  no-shim/no-alias scans.
 - `pending_cmd` is a concrete candidate: it owns user-facing backlog and
   tracked-work subcommands, so it should be renamed to `backlog_cmd` or split
   into a clearer tracked-work command module during the backlog/queue extraction

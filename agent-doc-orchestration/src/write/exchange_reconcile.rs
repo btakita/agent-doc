@@ -4,10 +4,10 @@ use super::*;
 #[cfg(test)]
 use agent_doc_element_exchange::normalized_prompt_counts;
 use agent_doc_element_exchange::{
-    PromptLineInfo, exchange_content, exchange_content_len, exchange_has_live_user_edit,
-    exchange_prompt_reconciliation_infos, is_code_fence_delimiter,
-    last_exchange_boundary_tail_start, normalized_prompt_text, probable_live_prompt_prefix_variant,
-    prompt_reconciliation_counts, split_line_segment,
+    dedupe_adjacent_prompt_prefix_duplicates_in_exchange,
+    dedupe_live_prompt_prefix_variants_in_exchange_tail,
+    dedupe_prompt_lines_against_before_exchange, exchange_component, exchange_content,
+    exchange_content_len, exchange_has_live_user_edit,
 };
 
 /// Guard against accidental exchange content truncation.
@@ -112,102 +112,14 @@ pub(crate) fn dedupe_live_prompt_prefix_variants_in_tail(
     content: &str,
     file: &Path,
 ) -> (String, bool) {
-    let Ok(components) = element::parse(content) else {
+    let Some(exchange) = exchange_component(content) else {
         return (content.to_string(), false);
     };
-    let Some(exchange) = components
-        .iter()
-        .find(|component| component.name == "exchange")
+    let Some(repaired_exchange) =
+        dedupe_live_prompt_prefix_variants_in_exchange_tail(exchange.content(content))
     else {
         return (content.to_string(), false);
     };
-    let exchange_content = exchange.content(content);
-    let Some(tail_start) = last_exchange_boundary_tail_start(exchange_content) else {
-        return (content.to_string(), false);
-    };
-    let tail = &exchange_content[tail_start..];
-    if tail.trim().is_empty() {
-        return (content.to_string(), false);
-    }
-
-    #[derive(Clone, Debug)]
-    struct TailLine {
-        segment: String,
-        normalized: Option<String>,
-        remove: bool,
-    }
-
-    let mut in_fence = false;
-    let mut lines = Vec::<TailLine>::new();
-    for segment in tail.split_inclusive('\n') {
-        let (line, _) = split_line_segment(segment);
-        let trimmed = line.trim();
-        let is_fence = is_code_fence_delimiter(trimmed);
-        let normalized = if !in_fence && !is_fence {
-            normalized_prompt_text(line)
-        } else {
-            None
-        };
-        lines.push(TailLine {
-            segment: segment.to_string(),
-            normalized,
-            remove: false,
-        });
-        if is_fence {
-            in_fence = !in_fence;
-        }
-    }
-    if !tail.ends_with('\n') && !tail.is_empty() {
-        let consumed: usize = lines.iter().map(|line| line.segment.len()).sum();
-        if consumed < tail.len() {
-            let rest = &tail[consumed..];
-            lines.push(TailLine {
-                segment: rest.to_string(),
-                normalized: normalized_prompt_text(rest),
-                remove: false,
-            });
-        }
-    }
-
-    let mut changed = false;
-    for idx in 0..lines.len().saturating_sub(1) {
-        if lines[idx].remove || lines[idx + 1].remove {
-            continue;
-        }
-        let Some(left) = lines[idx].normalized.as_deref() else {
-            continue;
-        };
-        let Some(right) = lines[idx + 1].normalized.as_deref() else {
-            continue;
-        };
-        let left_prefixed = lines[idx].segment.trim_start().starts_with("❯ ");
-        let right_prefixed = lines[idx + 1].segment.trim_start().starts_with("❯ ");
-        if left == right && left_prefixed != right_prefixed {
-            if left_prefixed {
-                lines[idx + 1].remove = true;
-            } else {
-                lines[idx].remove = true;
-            }
-            changed = true;
-        } else if probable_live_prompt_prefix_variant(left, right) {
-            lines[idx].remove = true;
-            changed = true;
-        } else if probable_live_prompt_prefix_variant(right, left) {
-            lines[idx + 1].remove = true;
-            changed = true;
-        }
-    }
-
-    if !changed {
-        return (content.to_string(), false);
-    }
-
-    let repaired_tail = lines
-        .into_iter()
-        .filter(|line| !line.remove)
-        .map(|line| line.segment)
-        .collect::<String>();
-    let repaired_exchange = format!("{}{}", &exchange_content[..tail_start], repaired_tail);
     let repaired = exchange.replace_content(content, &repaired_exchange);
     crate::ops_log::log_op(
         file,
@@ -223,48 +135,14 @@ pub(crate) fn dedupe_adjacent_prompt_prefix_duplicates(
     content: &str,
     file: &Path,
 ) -> (String, bool) {
-    let Ok(components) = element::parse(content) else {
+    let Some(exchange) = exchange_component(content) else {
         return (content.to_string(), false);
     };
-    let Some(exchange) = components
-        .iter()
-        .find(|component| component.name == "exchange")
+    let Some(repaired_exchange) =
+        dedupe_adjacent_prompt_prefix_duplicates_in_exchange(exchange.content(content))
     else {
         return (content.to_string(), false);
     };
-    let exchange_content = exchange.content(content);
-    let mut lines = exchange_prompt_reconciliation_infos(exchange_content, None);
-    let mut changed = false;
-
-    for idx in 0..lines.len().saturating_sub(1) {
-        if lines[idx].remove || lines[idx + 1].remove {
-            continue;
-        }
-        let Some(left) = lines[idx].normalized.as_deref() else {
-            continue;
-        };
-        let Some(right) = lines[idx + 1].normalized.as_deref() else {
-            continue;
-        };
-        if left == right && lines[idx].prefixed != lines[idx + 1].prefixed {
-            if lines[idx].prefixed {
-                lines[idx + 1].remove = true;
-            } else {
-                lines[idx].remove = true;
-            }
-            changed = true;
-        }
-    }
-
-    if !changed {
-        return (content.to_string(), false);
-    }
-
-    let repaired_exchange = lines
-        .into_iter()
-        .filter(|line| !line.remove)
-        .map(|line| line.segment)
-        .collect::<String>();
     let repaired = exchange.replace_content(content, &repaired_exchange);
     crate::ops_log::log_op(
         file,
@@ -284,77 +162,14 @@ pub(crate) fn dedupe_prompt_lines_against_before(
     let Some(before_exchange) = exchange_content(before) else {
         return (after.to_string(), false);
     };
-    let Ok(components) = element::parse(after) else {
+    let Some(after_exchange) = exchange_component(after) else {
         return (after.to_string(), false);
     };
-    let Some(after_exchange) = components
-        .iter()
-        .find(|component| component.name == "exchange")
+    let Some(repaired_exchange) =
+        dedupe_prompt_lines_against_before_exchange(before_exchange, after_exchange.content(after))
     else {
         return (after.to_string(), false);
     };
-
-    let before_counts = prompt_reconciliation_counts(before_exchange);
-    if before_counts.is_empty() {
-        return (after.to_string(), false);
-    }
-    let mut lines: Vec<PromptLineInfo> =
-        exchange_prompt_reconciliation_infos(after_exchange.content(after), Some(&before_counts));
-
-    let mut by_text: HashMap<String, Vec<usize>> = HashMap::new();
-    for (idx, line) in lines.iter().enumerate() {
-        if let Some(text) = line.normalized.as_ref() {
-            by_text.entry(text.clone()).or_default().push(idx);
-        }
-    }
-
-    let mut changed = false;
-    for (text, indexes) in by_text {
-        let allowed = before_counts.get(&text).copied().unwrap_or(0);
-        if allowed == 0 || indexes.len() <= allowed {
-            continue;
-        }
-
-        let mut excess = indexes.len() - allowed;
-        if indexes.iter().any(|idx| lines[*idx].prefixed) {
-            let unprefixed_indexes: Vec<usize> = indexes
-                .iter()
-                .copied()
-                .filter(|idx| !lines[*idx].prefixed)
-                .collect();
-            for idx in unprefixed_indexes {
-                if excess == 0 {
-                    break;
-                }
-                lines[idx].remove = true;
-                excess -= 1;
-                changed = true;
-            }
-        }
-        if excess > 0 {
-            for idx in indexes.iter().rev().copied() {
-                if excess == 0 {
-                    break;
-                }
-                if lines[idx].remove {
-                    continue;
-                }
-                lines[idx].remove = true;
-                excess -= 1;
-                changed = true;
-            }
-        }
-    }
-
-    if !changed {
-        return (after.to_string(), false);
-    }
-
-    let repaired_exchange = lines
-        .into_iter()
-        .filter(|line| !line.remove)
-        .map(|line| line.segment)
-        .collect::<String>();
     let repaired = after_exchange.replace_content(after, &repaired_exchange);
     crate::ops_log::log_op(
         file,

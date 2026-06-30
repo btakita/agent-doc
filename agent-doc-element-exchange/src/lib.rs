@@ -397,6 +397,198 @@ pub fn probable_live_prompt_prefix_variant(shorter: &str, longer: &str) -> bool 
     true
 }
 
+pub fn dedupe_live_prompt_prefix_variants_in_exchange_tail(exchange: &str) -> Option<String> {
+    let tail_start = last_exchange_boundary_tail_start(exchange)?;
+    let tail = &exchange[tail_start..];
+    if tail.trim().is_empty() {
+        return None;
+    }
+
+    #[derive(Clone, Debug)]
+    struct TailLine {
+        segment: String,
+        normalized: Option<String>,
+        remove: bool,
+    }
+
+    let mut in_fence = false;
+    let mut lines = Vec::<TailLine>::new();
+    for segment in tail.split_inclusive('\n') {
+        let (line, _) = split_line_segment(segment);
+        let trimmed = line.trim();
+        let is_fence = is_code_fence_delimiter(trimmed);
+        let normalized = if !in_fence && !is_fence {
+            normalized_prompt_text(line)
+        } else {
+            None
+        };
+        lines.push(TailLine {
+            segment: segment.to_string(),
+            normalized,
+            remove: false,
+        });
+        if is_fence {
+            in_fence = !in_fence;
+        }
+    }
+    if !tail.ends_with('\n') && !tail.is_empty() {
+        let consumed: usize = lines.iter().map(|line| line.segment.len()).sum();
+        if consumed < tail.len() {
+            let rest = &tail[consumed..];
+            lines.push(TailLine {
+                segment: rest.to_string(),
+                normalized: normalized_prompt_text(rest),
+                remove: false,
+            });
+        }
+    }
+
+    let mut changed = false;
+    for idx in 0..lines.len().saturating_sub(1) {
+        if lines[idx].remove || lines[idx + 1].remove {
+            continue;
+        }
+        let Some(left) = lines[idx].normalized.as_deref() else {
+            continue;
+        };
+        let Some(right) = lines[idx + 1].normalized.as_deref() else {
+            continue;
+        };
+        let left_prefixed = lines[idx].segment.trim_start().starts_with("❯ ");
+        let right_prefixed = lines[idx + 1].segment.trim_start().starts_with("❯ ");
+        if left == right && left_prefixed != right_prefixed {
+            if left_prefixed {
+                lines[idx + 1].remove = true;
+            } else {
+                lines[idx].remove = true;
+            }
+            changed = true;
+        } else if probable_live_prompt_prefix_variant(left, right) {
+            lines[idx].remove = true;
+            changed = true;
+        } else if probable_live_prompt_prefix_variant(right, left) {
+            lines[idx + 1].remove = true;
+            changed = true;
+        }
+    }
+
+    if !changed {
+        return None;
+    }
+
+    let repaired_tail = lines
+        .into_iter()
+        .filter(|line| !line.remove)
+        .map(|line| line.segment)
+        .collect::<String>();
+    Some(format!("{}{}", &exchange[..tail_start], repaired_tail))
+}
+
+pub fn dedupe_adjacent_prompt_prefix_duplicates_in_exchange(exchange: &str) -> Option<String> {
+    let mut lines = exchange_prompt_reconciliation_infos(exchange, None);
+    let mut changed = false;
+
+    for idx in 0..lines.len().saturating_sub(1) {
+        if lines[idx].remove || lines[idx + 1].remove {
+            continue;
+        }
+        let Some(left) = lines[idx].normalized.as_deref() else {
+            continue;
+        };
+        let Some(right) = lines[idx + 1].normalized.as_deref() else {
+            continue;
+        };
+        if left == right && lines[idx].prefixed != lines[idx + 1].prefixed {
+            if lines[idx].prefixed {
+                lines[idx + 1].remove = true;
+            } else {
+                lines[idx].remove = true;
+            }
+            changed = true;
+        }
+    }
+
+    if !changed {
+        return None;
+    }
+
+    Some(
+        lines
+            .into_iter()
+            .filter(|line| !line.remove)
+            .map(|line| line.segment)
+            .collect::<String>(),
+    )
+}
+
+pub fn dedupe_prompt_lines_against_before_exchange(
+    before_exchange: &str,
+    after_exchange: &str,
+) -> Option<String> {
+    let before_counts = prompt_reconciliation_counts(before_exchange);
+    if before_counts.is_empty() {
+        return None;
+    }
+    let mut lines = exchange_prompt_reconciliation_infos(after_exchange, Some(&before_counts));
+
+    let mut by_text: HashMap<String, Vec<usize>> = HashMap::new();
+    for (idx, line) in lines.iter().enumerate() {
+        if let Some(text) = line.normalized.as_ref() {
+            by_text.entry(text.clone()).or_default().push(idx);
+        }
+    }
+
+    let mut changed = false;
+    for (text, indexes) in by_text {
+        let allowed = before_counts.get(&text).copied().unwrap_or(0);
+        if allowed == 0 || indexes.len() <= allowed {
+            continue;
+        }
+
+        let mut excess = indexes.len() - allowed;
+        if indexes.iter().any(|idx| lines[*idx].prefixed) {
+            let unprefixed_indexes: Vec<usize> = indexes
+                .iter()
+                .copied()
+                .filter(|idx| !lines[*idx].prefixed)
+                .collect();
+            for idx in unprefixed_indexes {
+                if excess == 0 {
+                    break;
+                }
+                lines[idx].remove = true;
+                excess -= 1;
+                changed = true;
+            }
+        }
+        if excess > 0 {
+            for idx in indexes.iter().rev().copied() {
+                if excess == 0 {
+                    break;
+                }
+                if lines[idx].remove {
+                    continue;
+                }
+                lines[idx].remove = true;
+                excess -= 1;
+                changed = true;
+            }
+        }
+    }
+
+    if !changed {
+        return None;
+    }
+
+    Some(
+        lines
+            .into_iter()
+            .filter(|line| !line.remove)
+            .map(|line| line.segment)
+            .collect::<String>(),
+    )
+}
+
 /// Compare the committed/snapshot document against the working tree and return
 /// exchange user-region lines that should regain a missing `❯ ` prefix.
 pub fn extract_post_commit_normalization_targets(committed: &str, working: &str) -> Vec<String> {
@@ -774,6 +966,46 @@ ship it
             "complete sentence.",
             "complete sentence. more"
         ));
+    }
+
+    #[test]
+    fn exchange_tail_repair_dedupes_live_prefix_variants() {
+        let shorter = "agent-doc on corky running opencode, the key log shows re";
+        let longer = "agent-doc on corky running opencode, the key log shows received";
+        let exchange = format!("old\n<!-- agent:boundary:x -->\n{shorter}\n{longer}\n");
+
+        let repaired = dedupe_live_prompt_prefix_variants_in_exchange_tail(&exchange).unwrap();
+
+        assert!(!repaired.contains(&format!("\n{shorter}\n")));
+        assert!(repaired.contains(&format!("\n{longer}\n")));
+        assert!(repaired.starts_with("old\n<!-- agent:boundary:x -->\n"));
+    }
+
+    #[test]
+    fn adjacent_prompt_duplicate_repair_prefers_prefixed_line() {
+        let exchange = "❯ do #item\ndo #item\n### Re: item\nDone.\n";
+
+        let repaired = dedupe_adjacent_prompt_prefix_duplicates_in_exchange(exchange).unwrap();
+
+        assert!(repaired.contains("❯ do #item\n### Re: item"));
+        assert!(!repaired.contains("❯ do #item\ndo #item"));
+    }
+
+    #[test]
+    fn prompt_lines_against_before_repair_removes_excess_unprefixed_copy() {
+        let before = "live prompt\n";
+        let after = "❯ live prompt\nlive prompt\n### Re: response\nDone.\n";
+
+        let repaired = dedupe_prompt_lines_against_before_exchange(before, after).unwrap();
+
+        assert!(repaired.contains("❯ live prompt\n### Re: response"));
+        assert!(!repaired.contains("❯ live prompt\nlive prompt"));
+        assert_eq!(
+            response_aware_user_prompt_counts(&repaired)
+                .get("live prompt")
+                .copied(),
+            Some(1)
+        );
     }
 
     #[test]

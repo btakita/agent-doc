@@ -237,6 +237,12 @@ focused crate under the old path.
   Orchestration keeps only diff prompt-target extraction, required-SSH
   frontmatter scope rendering, and live response-TOC lookup before calling the
   focused renderer directly.
+- `agent-doc-prompt-context` now owns remote-host scope wording for prompt
+  context: rendering the no-target and declared-target guidance plus the
+  explicit warning against treating ambient SSH approvals or unrelated history
+  as project evidence. Orchestration keeps only file/project-context
+  frontmatter parsing to gather `required_ssh_targets` and calls the focused
+  renderer directly.
 - `agent-doc-supervisor` now owns supervisor child launch-argument precedence:
   resolving frontmatter/config `agent_args` plus harness-specific Claude/Codex/
   OpenCode aliases and the Claude env fallback from a focused fact struct.

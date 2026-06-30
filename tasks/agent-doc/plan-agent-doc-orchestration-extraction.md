@@ -252,10 +252,11 @@ should be deleted during extraction.
 - `agent-doc-turn::document_drift` now owns closeout/session-check document
   drift classifiers: exchange append-vs-rewrite detection, normalized exchange
   body extraction, exchange-only promptless drift, answered exchange plus
-  backlog metadata drift, comment-only drift, and component-content masking.
-  Session-check keeps active-session lookup, snapshot/file/git normalization,
-  repair attempts, and user-facing interruption messages while importing the
-  focused drift policy directly.
+  backlog metadata drift, comment-only drift, direct response-patchback
+  detection between two document bodies, bare prompt-target annotation for that
+  detector, and component-content masking. Session-check keeps active-session
+  lookup, snapshot/file/git normalization, repair attempts, and user-facing
+  interruption messages while importing the focused drift policy directly.
 - `agent-doc-turn::op_log` now owns session-check ops-log event vocabulary and
   pure event parsing: preflight-start/write-consumed/snapshot-saved/
   IPC-proof-insufficient event names, timestamp-prefix stripping, event-token

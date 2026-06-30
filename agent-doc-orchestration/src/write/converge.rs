@@ -1420,7 +1420,7 @@ pub fn try_editor_converge(
             log_ipc_dewedge_prefer_file_ipc(file, source);
             let canonical = file.canonicalize()?;
             let patch_id = uuid::Uuid::new_v4().to_string();
-            let Some(payload) =
+            let Some(mut payload) =
                 editor_convergence_payload(&canonical, target, current_content, source, &patch_id)?
             else {
                 if try_detached_disk_write(
@@ -1444,6 +1444,7 @@ pub fn try_editor_converge(
                     file.display()
                 );
             };
+            target_payload_to_live_editor(file, &mut payload, "file_ipc_convergence");
             if try_editor_converge_file_ipc(
                 file,
                 &project_root,
@@ -1492,7 +1493,7 @@ pub fn try_editor_converge(
 
     let canonical = canonical_file;
     let patch_id = uuid::Uuid::new_v4().to_string();
-    let Some(payload) =
+    let Some(mut payload) =
         editor_convergence_payload(&canonical, target, current_content, source, &patch_id)?
     else {
         if try_detached_disk_write(file, current_content, target, source, "no_component_delta")? {
@@ -1510,6 +1511,7 @@ pub fn try_editor_converge(
             file.display()
         );
     };
+    target_payload_to_live_editor(file, &mut payload, "editor_convergence");
 
     crate::ops_log::log_op(
         file,
@@ -2462,11 +2464,22 @@ mod core_tests {
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("live-buffer")).unwrap();
         let doc = dir.path().join("plan.md");
 
         let source = crate::test_support::queue_consume_convergence_source();
         let target = crate::test_support::queue_consume_convergence_target();
         fs::write(&doc, &source).unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+            &doc_str,
+            &source,
+            "jetbrains-test-editor",
+            "jetbrains",
+            "test",
+            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+        )
+        .unwrap();
 
         let listener_root = dir.path().to_path_buf();
         let _listener = std::thread::spawn(move || {
@@ -2492,6 +2505,7 @@ mod core_tests {
         let watcher_dir = agent_doc_dir.join("patches");
         let watcher_ack_dir = agent_doc_dir.join("ack-content");
         let watcher_doc = doc.clone();
+        let watcher_doc_str = doc_str.clone();
         let watcher_target = target.clone();
         let watcher = std::thread::spawn(move || {
             for _ in 0..40 {
@@ -2512,6 +2526,15 @@ mod core_tests {
                         .unwrap()
                         .to_string();
                     fs::write(&watcher_doc, &watcher_target).unwrap();
+                    agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+                        &watcher_doc_str,
+                        &watcher_target,
+                        "jetbrains-test-editor",
+                        "jetbrains",
+                        "test",
+                        &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+                    )
+                    .unwrap();
                     fs::write(
                         watcher_ack_dir.join(format!("{patch_id}.md")),
                         &watcher_target,

@@ -25,15 +25,17 @@ pub(crate) fn pending_replace_escape_hatch_enabled() -> bool {
 pub fn response_materialized_in_content(response: &str, content: &str) -> bool {
     let probe = response_materialization_probe_from_response(response);
     if probe.trim().is_empty()
-        || crate::repair::response_already_applied(content, &probe)
-        || crate::repair::response_already_applied_after_prefix_strip(content, &probe)
+        || agent_doc_turn::response_replay::response_already_applied(content, &probe)
+        || agent_doc_turn::response_replay::response_already_applied_after_prefix_strip(
+            content, &probe,
+        )
     {
         return true;
     }
     let normalized_content = agent_doc_document::transient_markers::strip_guard_markers(content);
     normalized_content != content
-        && (crate::repair::response_already_applied(&normalized_content, &probe)
-            || crate::repair::response_already_applied_after_prefix_strip(
+        && (agent_doc_turn::response_replay::response_already_applied(&normalized_content, &probe)
+            || agent_doc_turn::response_replay::response_already_applied_after_prefix_strip(
                 &normalized_content,
                 &probe,
             ))

@@ -744,8 +744,8 @@ fn closeout_response_body_evidence(
             capture_id: capture.capture_id.clone(),
         };
     }
-    if crate::repair::response_already_applied(visible, &capture.response_body)
-        || crate::repair::response_already_applied_after_prefix_strip(
+    if agent_doc_turn::response_replay::response_already_applied(visible, &capture.response_body)
+        || agent_doc_turn::response_replay::response_already_applied_after_prefix_strip(
             visible,
             &capture.response_body,
         )
@@ -754,8 +754,9 @@ fn closeout_response_body_evidence(
             capture_id: capture.capture_id.clone(),
         };
     }
-    if let Some(heading) = crate::repair::first_response_heading_line(&capture.response_body)
-        && crate::repair::live_exchange_answers_heading(visible, heading)
+    if let Some(heading) =
+        agent_doc_turn::response_replay::first_response_heading_line(&capture.response_body)
+        && agent_doc_turn::response_replay::live_exchange_answers_heading(visible, heading)
     {
         return CloseoutResponseBodyEvidence::SupersededByVisibleExchange {
             capture_id: capture.capture_id.clone(),

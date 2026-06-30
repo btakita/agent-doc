@@ -167,7 +167,9 @@ impl WholeBufferDelivery {
     const fn requires_source_buffer_match(self) -> bool {
         matches!(
             self,
-            Self::FullContentEditorIpc | Self::EditorRepairRedelivery
+            Self::FullContentEditorIpc
+                | Self::AckContentDiskWriteThrough
+                | Self::EditorRepairRedelivery
         )
     }
 
@@ -1550,6 +1552,20 @@ mod tests {
         assert_eq!(allowed.action, WholeBufferDeliveryAction::Apply);
         assert_eq!(blocked.action, WholeBufferDeliveryAction::Reject);
         assert_eq!(blocked.reason, "missing_operator_text_authority");
+    }
+
+    #[test]
+    fn whole_buffer_table_rejects_ack_write_through_stale_source() {
+        let decision = decide_whole_buffer_delivery(WholeBufferAuthorityFacts {
+            delivery: WholeBufferDelivery::AckContentDiskWriteThrough,
+            authority: WholeBufferAuthority::OperatorTextAuthority,
+            source_buffer_matches: false,
+            scope_rejection: None,
+            enabled: true,
+        });
+
+        assert_eq!(decision.action, WholeBufferDeliveryAction::Reject);
+        assert_eq!(decision.reason, "stale_source_buffer");
     }
 
     #[test]

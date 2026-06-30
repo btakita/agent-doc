@@ -461,36 +461,60 @@ fn live_buffer_file_keys(file: &Path) -> Vec<String> {
     keys
 }
 
-pub(crate) fn ack_content_disk_write_authority(
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct AckContentDiskWriteProof {
+    authority: WholeBufferAuthority,
+    source_buffer_matches: bool,
+}
+
+impl AckContentDiskWriteProof {
+    fn unproven() -> Self {
+        Self {
+            authority: WholeBufferAuthority::AckContentSidecar,
+            source_buffer_matches: false,
+        }
+    }
+}
+
+pub(crate) fn ack_content_disk_write_proof(
     file: &Path,
     editor_id: Option<&str>,
     content: &str,
-) -> WholeBufferAuthority {
+) -> AckContentDiskWriteProof {
     let Some(editor_id) = editor_id.map(str::trim).filter(|id| !id.is_empty()) else {
-        return WholeBufferAuthority::AckContentSidecar;
+        return AckContentDiskWriteProof::unproven();
     };
     let content_len = content.len();
     let content_hash = agent_doc_hash::content_hash(content);
 
-    for file_key in live_buffer_file_keys(file) {
-        for snapshot in agent_doc_debounce::live_buffer_snapshots(&file_key) {
-            let same_editor = snapshot
+    let Some(snapshot) = live_buffer_file_keys(file)
+        .into_iter()
+        .flat_map(|file_key| agent_doc_debounce::live_buffer_snapshots(&file_key))
+        .filter(|snapshot| {
+            snapshot
                 .editor_id
                 .as_deref()
-                .is_some_and(|candidate| candidate == editor_id);
-            let same_content =
-                snapshot.len == content_len && snapshot.hash.eq_ignore_ascii_case(&content_hash);
-            if same_editor
-                && same_content
-                && agent_doc_debounce::live_buffer_snapshot_editor_is_live(&snapshot)
-                && snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY)
-            {
-                return WholeBufferAuthority::OperatorTextAuthority;
-            }
-        }
-    }
+                .is_some_and(|candidate| candidate == editor_id)
+        })
+        .filter(agent_doc_debounce::live_buffer_snapshot_editor_is_live)
+        .max_by_key(|snapshot| snapshot.timestamp_ms)
+    else {
+        return AckContentDiskWriteProof::unproven();
+    };
 
-    WholeBufferAuthority::AckContentSidecar
+    let source_buffer_matches =
+        snapshot.len == content_len && snapshot.hash.eq_ignore_ascii_case(&content_hash);
+    let authority =
+        if snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY) {
+            WholeBufferAuthority::OperatorTextAuthority
+        } else {
+            WholeBufferAuthority::AckContentSidecar
+        };
+
+    AckContentDiskWriteProof {
+        authority,
+        source_buffer_matches,
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1750,22 +1774,23 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
 
     repair_ipc_decision_visible_state(file, &repair_decision, Some(patch_id))?;
     if repair_decision.snap_source.is_ack_content_proven() {
-        let authority =
-            ack_content_disk_write_authority(file, editor_id, &repair_decision.snapshot_content);
-        if authority == WholeBufferAuthority::OperatorTextAuthority {
-            mark_ack_content_live_buffer_synced(
-                file,
-                patch_id,
-                editor_id,
-                &repair_decision.snapshot_content,
-            );
-        }
-        write_ack_content_through_to_disk(
+        let proof =
+            ack_content_disk_write_proof(file, editor_id, &repair_decision.snapshot_content);
+        let disk_synced = write_ack_content_through_to_disk(
             file,
             patch_id,
             &repair_decision.snapshot_content,
-            authority,
+            proof,
         )?;
+        if !disk_synced {
+            return Ok(AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+        }
+        mark_ack_content_live_buffer_synced_after_write(
+            file,
+            patch_id,
+            editor_id,
+            &repair_decision.snapshot_content,
+        );
     }
     snapshot::save(file, &repair_decision.snapshot_content)?;
     let crdt_doc = agent_doc_merge::crdt::CrdtDoc::from_text(&repair_decision.snapshot_content);
@@ -1846,12 +1871,12 @@ pub(crate) fn write_ack_content_through_to_disk(
     file: &Path,
     patch_id: &str,
     content: &str,
-    authority: WholeBufferAuthority,
-) -> Result<()> {
+    proof: AckContentDiskWriteProof,
+) -> Result<bool> {
     let decision = decide_whole_buffer_delivery(WholeBufferAuthorityFacts {
         delivery: WholeBufferDelivery::AckContentDiskWriteThrough,
-        authority,
-        source_buffer_matches: true,
+        authority: proof.authority,
+        source_buffer_matches: proof.source_buffer_matches,
         scope_rejection: None,
         enabled: true,
     });
@@ -1859,17 +1884,20 @@ pub(crate) fn write_ack_content_through_to_disk(
         crate::ops_log::log_op(
             file,
             &format!(
-                "ack_content_disk_write_through_blocked file={} patch_id={} authority={} action={} reason={} len={} hash={}",
+                "ack_content_disk_write_through_blocked file={} patch_id={} authority={} source_buffer_matches={} action={} reason={} len={} hash={}",
                 file.display(),
                 patch_id,
-                authority.as_str(),
+                proof.authority.as_str(),
+                proof.source_buffer_matches,
                 decision.action.as_str(),
                 decision.reason,
                 content.len(),
                 agent_doc_hash::content_hash(content)
             ),
         );
-        return Ok(());
+        let stale_operator_source = proof.authority == WholeBufferAuthority::OperatorTextAuthority
+            && decision.reason == "stale_source_buffer";
+        return Ok(!stale_operator_source);
     }
 
     let before = std::fs::read_to_string(file).ok();
@@ -1880,12 +1908,12 @@ pub(crate) fn write_ack_content_through_to_disk(
                 "ack_content_disk_write_through_skipped file={} patch_id={} authority={} reason=already_current len={} hash={}",
                 file.display(),
                 patch_id,
-                authority.as_str(),
+                proof.authority.as_str(),
                 content.len(),
                 agent_doc_hash::content_hash(content)
             ),
         );
-        return Ok(());
+        return Ok(true);
     }
 
     atomic_write_pub(file, content).with_context(|| {
@@ -1900,7 +1928,7 @@ pub(crate) fn write_ack_content_through_to_disk(
             "ack_content_disk_write_through file={} patch_id={} authority={} before_len={} before_hash={} ack_len={} ack_hash={}",
             file.display(),
             patch_id,
-            authority.as_str(),
+            proof.authority.as_str(),
             before.as_deref().map(str::len).unwrap_or(0),
             before
                 .as_deref()
@@ -1910,7 +1938,32 @@ pub(crate) fn write_ack_content_through_to_disk(
             agent_doc_hash::content_hash(content)
         ),
     );
-    Ok(())
+    Ok(true)
+}
+
+pub(crate) fn mark_ack_content_live_buffer_synced_after_write(
+    file: &Path,
+    patch_id: &str,
+    editor_id: Option<&str>,
+    content: &str,
+) {
+    let proof = ack_content_disk_write_proof(file, editor_id, content);
+    if proof.authority == WholeBufferAuthority::OperatorTextAuthority && proof.source_buffer_matches
+    {
+        mark_ack_content_live_buffer_synced(file, patch_id, editor_id, content);
+        return;
+    }
+
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "ack_content_live_buffer_sync_skipped file={} patch_id={} reason=post_write_source_unproven authority={} source_buffer_matches={}",
+            file.display(),
+            patch_id,
+            proof.authority.as_str(),
+            proof.source_buffer_matches
+        ),
+    );
 }
 
 pub(crate) fn normalization_prefix_observation_counts(

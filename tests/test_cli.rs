@@ -1561,7 +1561,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // policy-table reason when the focused realtime policy rejects a
         // whole-buffer effect. These are diagnostics for the shared authority
         // decision, not ad hoc orchestration flow branches.
-        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 24,
+        // 24 -> 25 (#ack-source-buffer): ACK-content write-through now logs
+        // `reason=stale_source_buffer` when a live operator-authoritative editor
+        // buffer has moved past the ACK sidecar. This is the same realtime
+        // policy-table reason as other whole-buffer source-proof rejections.
+        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 25,
         // +1 `guard_` (#fcc0-degraded-file-ipc): `IpcPollOptions::convergence`
         // centralizes the existing committed-cycle file-IPC poll guard for
         // convergence callers; this is a constructor for the existing guard, not
@@ -1572,7 +1576,10 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // plus stale-source regression assertions. The write remains blocked
         // before socket/file delivery; the reasons are routed through the shared
         // realtime whole-buffer authority policy.
-        ("agent-doc-orchestration/src/write/ipc/transport.rs", "reason=") => 14,
+        // 14 -> 15 (#ack-source-buffer): the stale ACK-content regression asserts
+        // the same shared `reason=stale_source_buffer` table outcome so an old ACK
+        // sidecar cannot overwrite a newer live operator edit.
+        ("agent-doc-orchestration/src/write/ipc/transport.rs", "reason=") => 15,
         // +2 (#docdriftgrace): the stale-snapshot reset regression tests call the
         // existing `guard_no_stale_snapshot_reset_drift` boundary for the safe
         // visible rebase and fail-closed active-driver cases. +2 (#docdriftfinalize):
@@ -3481,19 +3488,15 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
             && !route_source.contains("fn short_recovery_command_from_recommendation("),
         "route should call focused turn recovery-command projection directly, not re-own the parser"
     );
-    for (relative, required) in [
-        (
-            "agent-doc-orchestration/src/capture.rs",
-            "use agent_doc_turn::closeout_recovery::CloseoutRecoveryMutationReason;",
-        ),
-        (
-            "agent-doc-orchestration/src/repair.rs",
-            "use agent_doc_turn::closeout_recovery::CloseoutRecoveryMutationReason;",
-        ),
+    for relative in [
+        "agent-doc-orchestration/src/capture.rs",
+        "agent-doc-orchestration/src/repair.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
-            source.contains(required),
+            source.contains("agent_doc_turn")
+                && source.contains("closeout_recovery")
+                && source.contains("CloseoutRecoveryMutationReason"),
             "{relative} should use focused closeout recovery reason directly"
         );
         assert!(
@@ -4066,12 +4069,76 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         !turn_lib.contains("pub use response_text"),
         "agent-doc-turn should not add a response_text root facade"
     );
+    let response_replay =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn/src/response_replay.rs")).unwrap();
+    for required in [
+        "pub fn response_already_applied",
+        "pub fn response_already_applied_after_prefix_strip",
+        "pub fn first_response_heading_line",
+        "pub fn live_exchange_answers_heading",
+        "pub fn has_matching_orphan_prompt_for_committed_capture",
+        "pub fn extract_visible_response_patch_between",
+        "pub fn prompt_change_is_known_response",
+        "fn normalized_response_lines",
+    ] {
+        assert!(
+            response_replay.contains(required),
+            "agent-doc-turn must own response replay/application policy: {required}"
+        );
+    }
+    assert!(
+        turn_lib.contains("pub mod response_replay;"),
+        "agent-doc-turn should expose response replay policy through its owning module"
+    );
+    assert!(
+        !turn_lib.contains("pub use response_replay"),
+        "agent-doc-turn should not add a response_replay root facade"
+    );
     let write_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
     assert!(
         !write_source.contains("pub fn strip_assistant_heading"),
         "orchestration write must not re-own append response heading normalization"
     );
+    assert!(
+        write_source.contains("agent_doc_turn::response_replay::response_already_applied"),
+        "orchestration write should call focused response replay policy directly"
+    );
+    let repair_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
+    for forbidden in [
+        "pub fn response_already_applied",
+        "pub fn response_already_applied_after_prefix_strip",
+        "pub(crate) fn first_response_heading_line",
+        "pub(crate) fn live_exchange_answers_heading",
+        "fn normalized_response_lines",
+        "fn normalize_response_line",
+        "fn strip_transient_response_head_marker",
+        "fn prompt_change_is_known_response",
+    ] {
+        assert!(
+            !repair_source.contains(forbidden),
+            "orchestration repair must not re-own response replay/application policy: {forbidden}"
+        );
+    }
+    for relative in [
+        "agent-doc-orchestration/src/capture.rs",
+        "agent-doc-orchestration/src/flow/closeout.rs",
+        "agent-doc-orchestration/src/write/materialize.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("agent_doc_turn::response_replay::"),
+            "{relative} should call focused response replay policy directly"
+        );
+        assert!(
+            !source.contains("crate::repair::response_already_applied")
+                && !source.contains("crate::repair::response_already_applied_after_prefix_strip")
+                && !source.contains("crate::repair::first_response_heading_line")
+                && !source.contains("crate::repair::live_exchange_answers_heading"),
+            "{relative} must not route response replay policy through repair"
+        );
+    }
     let hooks_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/hooks.rs")).unwrap();
     assert!(
@@ -6763,9 +6830,8 @@ fn test_project_config_io_tmux_helpers_have_no_config_facade() {
         "agent-doc-turn document drift should call the focused diff helper directly"
     );
     assert!(
-        closeout_guards.contains(
-            "agent_doc_turn::document_drift::detect_bypassed_response_write_between",
-        ),
+        closeout_guards
+            .contains("agent_doc_turn::document_drift::detect_bypassed_response_write_between",),
         "session_check closeout guards should adapt file IO into the focused document drift classifier"
     );
 }

@@ -14,6 +14,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
+const TEST_EDITOR_ID: &str = "jetbrains-test-editor";
+
 fn agent_doc() -> Command {
     cargo_bin_cmd!("agent-doc")
 }
@@ -261,6 +263,19 @@ fn head_blob(root: &Path) -> String {
 fn snapshot_path(root: &Path, doc: &Path) -> PathBuf {
     root.join(".agent-doc/snapshots")
         .join(format!("{}.md", doc_hash(doc)))
+}
+
+fn record_operator_buffer(file: &Path, content: &str) {
+    let file_key = file.to_string_lossy();
+    agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+        file_key.as_ref(),
+        content,
+        TEST_EDITOR_ID,
+        "jetbrains",
+        "test",
+        &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+    )
+    .unwrap();
 }
 
 fn patch_id(payload: &Value) -> Option<String> {
@@ -654,6 +669,7 @@ fn socket_ipc_post_block_prompt_drift_commits_ack_authority_snapshot() {
         .unwrap()
         .replace("<!--\n-->", &format!("<!--\n{live_note}\n-->"));
     fs::write(&doc, &current_with_note).unwrap();
+    record_operator_buffer(&doc, &current_with_note);
 
     let seen_payload = Arc::new(Mutex::new(None::<Value>));
     let seen_for_listener = seen_payload.clone();
@@ -678,6 +694,7 @@ fn socket_ipc_post_block_prompt_drift_commits_ack_authority_snapshot() {
                 fs::write(&doc_for_listener, &after).ok()?;
                 Some(after)
             })?;
+            record_operator_buffer(&doc_for_listener, &after_apply);
             fs::write(ack_dir.join(format!("{id}.md")), &after_apply).ok()?;
             *seen_for_listener.lock().ok()? = Some(payload);
             Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())

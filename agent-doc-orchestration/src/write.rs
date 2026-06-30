@@ -3643,7 +3643,7 @@ fn adopt_current_response_without_duplication(
     snapshot: Option<&str>,
     response: &str,
 ) -> Result<Option<String>> {
-    if !crate::repair::response_already_applied(content_current, response)
+    if !agent_doc_turn::response_replay::response_already_applied(content_current, response)
         && !response_already_in_current(base, content_ours, content_current)
     {
         return Ok(None);
@@ -6672,11 +6672,23 @@ scratch
 <!-- agent:exchange patch=append -->\n❯ {prompt}\n{unmatched}\n<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, &original).unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+        let editor_id = "jetbrains-test-editor";
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+            &doc_str,
+            &original,
+            editor_id,
+            "jetbrains",
+            "test",
+            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+        )
+        .unwrap();
 
         let seen_payload = std::sync::Arc::new(std::sync::Mutex::new(None));
         let patches_dir = agent_doc_dir.join("patches");
         let ack_dir = agent_doc_dir.join("ack-content");
         let doc_for_watcher = doc.clone();
+        let doc_str_for_watcher = doc_str.clone();
         let seen_for_watcher = seen_payload.clone();
         let after_for_watcher = after_plugin_write.clone();
         let _watcher = std::thread::spawn(move || {
@@ -6700,6 +6712,14 @@ scratch
                             *seen_for_watcher.lock().unwrap() = Some(payload);
                         }
                         let _ = fs::write(&doc_for_watcher, &after_for_watcher);
+                        let _ = agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+                            &doc_str_for_watcher,
+                            &after_for_watcher,
+                            editor_id,
+                            "jetbrains",
+                            "test",
+                            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+                        );
                         let _ = fs::remove_file(path);
                         return;
                     }
@@ -6763,11 +6783,23 @@ scratch
         );
         let normalized = original.replace(prompt, &format!("❯ {prompt}"));
         fs::write(&doc, &original).unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+        let editor_id = "jetbrains-test-editor";
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+            &doc_str,
+            &original,
+            editor_id,
+            "jetbrains",
+            "test",
+            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+        )
+        .unwrap();
 
         let seen_payload = std::sync::Arc::new(std::sync::Mutex::new(None));
         let patches_dir = agent_doc_dir.join("patches");
         let ack_dir = agent_doc_dir.join("ack-content");
         let doc_for_watcher = doc.clone();
+        let doc_str_for_watcher = doc_str.clone();
         let normalized_for_watcher = normalized.clone();
         let seen_for_watcher = seen_payload.clone();
         let watcher = std::thread::spawn(move || {
@@ -6790,6 +6822,15 @@ scratch
                         .unwrap()
                         .to_string();
                     fs::write(&doc_for_watcher, &normalized_for_watcher).unwrap();
+                    agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+                        &doc_str_for_watcher,
+                        &normalized_for_watcher,
+                        editor_id,
+                        "jetbrains",
+                        "test",
+                        &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+                    )
+                    .unwrap();
                     fs::write(
                         ack_dir.join(format!("{patch_id}.md")),
                         &normalized_for_watcher,

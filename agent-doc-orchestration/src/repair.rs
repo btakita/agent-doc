@@ -41,7 +41,7 @@
 //!   and advances the snapshot through the same binary-owned path.
 //! - `save_pending(file, response)` — writes the response to the pending store, creating parent directories as needed.
 //! - `clear_pending(file)` — removes the pending file; no-op if it does not exist.
-//! - `normalized_response_lines(response)` — extracts the response's non-empty, non-marker lines for dedup checking and normalizes transient ` (HEAD)` response-heading churn.
+//! - Response replay/application matching is owned by `agent-doc-turn::response_replay`; this module supplies file-backed repair adapters.
 //!
 //! ## Agentic Contracts
 //! - `run(file)` — returns a `RepairOutcome` describing whether nothing happened, the response was replayed, the response was already present, manual tail cleanup was respected, or a stale `preflight_started` lock was repaired. Returns `Err` on I/O failure or if the write-back itself fails.
@@ -61,7 +61,7 @@
 //! - recover_replays_capture_without_pending: durable capture with no pending file → run returns Ok(true)
 //! - recover_fails_closed_on_capture_hash_mismatch: durable capture baseline mismatch → run returns Err
 
-use agent_doc_turn::closeout_recovery::CloseoutRecoveryMutationReason;
+use agent_doc_turn::{closeout_recovery::CloseoutRecoveryMutationReason, response_replay};
 use anyhow::{Context, Result};
 use serde::Serialize;
 use std::collections::HashSet;
@@ -104,109 +104,6 @@ fn capture_is_repairable(capture: &crate::capture::CaptureRecord) -> bool {
     )
 }
 
-pub(crate) fn first_response_heading_line(response: &str) -> Option<&str> {
-    response
-        .lines()
-        .map(str::trim)
-        .find(|line| line.starts_with("### Re:"))
-}
-
-fn normalize_replay_topic(text: &str) -> String {
-    let trimmed = text.trim();
-    let trimmed = trimmed
-        .strip_prefix("❯ ")
-        .unwrap_or(trimmed)
-        .strip_prefix("### Re:")
-        .unwrap_or(trimmed)
-        .trim();
-    let trimmed = trimmed
-        .split_once(" — ")
-        .map(|(topic, _)| topic)
-        .unwrap_or(trimmed)
-        .trim();
-    let trimmed = trimmed
-        .strip_prefix("do ")
-        .unwrap_or(trimmed)
-        .trim_start_matches('#')
-        .trim();
-
-    let mut normalized = String::new();
-    let mut last_was_space = false;
-    for ch in trimmed.chars() {
-        if ch.is_ascii_alphanumeric() {
-            normalized.push(ch.to_ascii_lowercase());
-            last_was_space = false;
-        } else if !last_was_space {
-            normalized.push(' ');
-            last_was_space = true;
-        }
-    }
-    normalized.trim().to_string()
-}
-
-fn line_matches_historical_prompt(line: &str, topic: &str) -> bool {
-    let trimmed = line.trim();
-    if trimmed.is_empty()
-        || trimmed.starts_with("### Re:")
-        || trimmed.starts_with("## Assistant")
-        || trimmed.starts_with("<!--")
-    {
-        return false;
-    }
-    if !(trimmed.starts_with("❯ ")
-        || trimmed.starts_with('#')
-        || trimmed.starts_with("do #")
-        || trimmed.starts_with("preset #"))
-    {
-        return false;
-    }
-
-    let normalized_line = normalize_replay_topic(trimmed);
-    !normalized_line.is_empty()
-        && (normalized_line == topic
-            || normalized_line.contains(topic)
-            || topic.contains(&normalized_line))
-}
-
-fn has_matching_orphan_prompt_for_committed_capture(
-    doc_content: &str,
-    response_heading: &str,
-) -> bool {
-    let topic = normalize_replay_topic(response_heading);
-    if topic.is_empty() {
-        return false;
-    }
-
-    let body = frontmatter::parse(doc_content)
-        .map(|(_, body)| body)
-        .unwrap_or(doc_content);
-    let exchange = if let Ok(components) = agent_doc_element::element::parse(body) {
-        components
-            .iter()
-            .find(|component| component.name == "exchange")
-            .map(|component| component.content(body).to_string())
-            .unwrap_or_else(|| body.to_string())
-    } else {
-        body.to_string()
-    };
-
-    let mut saw_match = false;
-    for line in exchange.lines() {
-        let trimmed = line.trim();
-        if trimmed == response_heading.trim() {
-            return false;
-        }
-        if saw_match && trimmed.starts_with("### Re:") {
-            return false;
-        }
-        if line_matches_historical_prompt(trimmed, &topic) {
-            saw_match = true;
-        }
-    }
-
-    saw_match
-}
-
 fn historical_committed_capture_replay(
     file: &Path,
     doc_content: &str,
@@ -214,13 +111,18 @@ fn historical_committed_capture_replay(
     let Some(capture) = crate::capture::latest_committed(file)? else {
         return Ok(None);
     };
-    if response_already_applied(doc_content, &capture.response_body) {
+    if response_replay::response_already_applied(doc_content, &capture.response_body) {
         return Ok(None);
     }
-    let Some(response_heading) = first_response_heading_line(&capture.response_body) else {
+    let Some(response_heading) =
+        response_replay::first_response_heading_line(&capture.response_body)
+    else {
         return Ok(None);
     };
-    if !has_matching_orphan_prompt_for_committed_capture(doc_content, response_heading) {
+    if !response_replay::has_matching_orphan_prompt_for_committed_capture(
+        doc_content,
+        response_heading,
+    ) {
         return Ok(None);
     }
     crate::ops_log::log_op(
@@ -234,81 +136,6 @@ fn historical_committed_capture_replay(
     Ok(Some(capture))
 }
 
-fn wrap_template_exchange_patch(body: &str) -> String {
-    let mut patch = String::from("<!-- patch:exchange -->\n");
-    patch.push_str(body);
-    if !body.ends_with('\n') {
-        patch.push('\n');
-    }
-    patch.push_str("<!-- /patch:exchange -->\n");
-    patch
-}
-
-fn extract_visible_response_patch_between(
-    snapshot_doc: &str,
-    current_doc: &str,
-    template_mode: bool,
-) -> Option<String> {
-    let norm =
-        |s: &str| agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(s);
-    let snapshot_norm = norm(snapshot_doc);
-    let current_norm = norm(current_doc);
-    if current_norm == snapshot_norm
-        || agent_doc_turn::document_drift::detect_bypassed_response_write_between(
-            &snapshot_norm,
-            &current_norm,
-        )
-        .is_none()
-    {
-        return None;
-    }
-
-    let diff = similar::TextDiff::from_lines(&snapshot_norm, &current_norm);
-    let mut collected = String::new();
-    let mut collecting = false;
-    for change in diff.iter_all_changes() {
-        let line = change.value();
-        let trimmed = line.trim_end_matches('\n').trim();
-        match change.tag() {
-            similar::ChangeTag::Insert => {
-                if !collecting
-                    && !agent_doc_turn::closeout_signal::is_exchange_response_heading(trimmed)
-                {
-                    continue;
-                }
-                collecting = true;
-                collected.push_str(line);
-            }
-            similar::ChangeTag::Equal if collecting => {
-                if trimmed.is_empty() {
-                    collected.push_str(line);
-                    continue;
-                }
-                if trimmed.starts_with("<!-- agent:boundary:")
-                    || trimmed == "<!-- /agent:exchange -->"
-                    || trimmed == "<!-- /patch:exchange -->"
-                    || agent_doc_diff::text_line_looks_like_prompt_target(trimmed)
-                    || agent_doc_turn::closeout_signal::is_exchange_response_heading(trimmed)
-                {
-                    break;
-                }
-                break;
-            }
-            _ => {}
-        }
-    }
-
-    if collected.trim().is_empty() {
-        return None;
-    }
-
-    Some(if template_mode {
-        wrap_template_exchange_patch(&collected)
-    } else {
-        collected
-    })
-}
-
 fn visible_response_patch_from_document(file: &Path, doc_content: &str) -> Result<Option<String>> {
     let Some(snapshot_doc) = snapshot::load(file)? else {
         return Ok(None);
@@ -316,7 +143,7 @@ fn visible_response_patch_from_document(file: &Path, doc_content: &str) -> Resul
     let template_mode = frontmatter::parse(doc_content)
         .map(|(fm, _)| fm.resolve_mode().is_template())
         .unwrap_or(false);
-    Ok(extract_visible_response_patch_between(
+    Ok(response_replay::extract_visible_response_patch_between(
         &snapshot_doc,
         doc_content,
         template_mode,
@@ -1117,7 +944,9 @@ fn repair_leaves_unanswered_prompt_diff(
             || agent_doc_diff::prompt_change_is_answered_by_later_response(&changes, idx)
             || repair_prompt_target_immediately_before_existing_response(repaired, &change.text)
             || known_response
-                .map(|response| prompt_change_is_known_response(&change.text, response))
+                .map(|response| {
+                    response_replay::prompt_change_is_known_response(&change.text, response)
+                })
                 .unwrap_or(false)
         {
             skip_answered_response_run = true;
@@ -1190,22 +1019,6 @@ fn repair_prompt_target_immediately_before_existing_response(
         }
     }
     false
-}
-
-fn prompt_change_is_known_response(change_text: &str, response: &str) -> bool {
-    let response_lines: HashSet<String> = normalized_response_lines(response)
-        .into_iter()
-        .map(|line| line.trim().trim_start_matches('❯').trim().to_string())
-        .filter(|line| !line.is_empty())
-        .collect();
-    if response_lines.is_empty() {
-        return false;
-    }
-    change_text
-        .lines()
-        .map(|line| line.trim().trim_start_matches('❯').trim())
-        .filter(|line| !line.is_empty())
-        .all(|line| response_lines.contains(line))
 }
 
 fn repair_answered_stale_boundary_if_safe(
@@ -1482,10 +1295,10 @@ fn retire_superseded_captured_only_orphan_if_drifted(
     }
     // Positive superseding-turn evidence: the captured response's heading is
     // already answered in the live exchange.
-    let Some(heading) = first_response_heading_line(&capture.response_body) else {
+    let Some(heading) = response_replay::first_response_heading_line(&capture.response_body) else {
         return Ok(false);
     };
-    if !live_exchange_answers_heading(doc_content, heading) {
+    if !response_replay::live_exchange_answers_heading(doc_content, heading) {
         return Ok(false);
     }
 
@@ -1513,28 +1326,6 @@ fn retire_superseded_captured_only_orphan_if_drifted(
         file.display()
     );
     Ok(true)
-}
-
-/// True when the live document's `agent:exchange` already contains a `### Re:`
-/// response heading whose normalized topic matches `heading` — i.e. the prompt
-/// the orphan answered is already answered by a landed response.
-pub(crate) fn live_exchange_answers_heading(doc_content: &str, heading: &str) -> bool {
-    let target = normalize_replay_topic(heading);
-    if target.is_empty() {
-        return false;
-    }
-    let Ok(components) = agent_doc_element::element::parse(doc_content) else {
-        return false;
-    };
-    let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
-        return false;
-    };
-    exchange
-        .content(doc_content)
-        .lines()
-        .map(str::trim)
-        .filter(|line| line.starts_with("### Re:"))
-        .any(|line| normalize_replay_topic(line) == target)
 }
 
 fn respect_manual_exchange_tail_removal_if_safe(
@@ -1673,8 +1464,12 @@ pub(crate) fn run_with_queue_completion_ids(
     // This prevents double-apply when the pending file was left behind after a successful
     // IPC write (e.g., IPC timeout path exits with code 75 without calling clear_pending,
     // but the plugin already applied the content via the IPC patch file).
-    let response_already_present = response_already_applied(&doc_content, &response)
-        || response_already_applied_after_prefix_strip(&doc_content, &response);
+    let response_already_present =
+        response_replay::response_already_applied(&doc_content, &response)
+            || response_replay::response_already_applied_after_prefix_strip(
+                &doc_content,
+                &response,
+            );
     if response_already_present {
         if let Some(ref capture) = capture {
             crate::capture::validate_replay(&canonical, capture)?;
@@ -1689,8 +1484,11 @@ pub(crate) fn run_with_queue_completion_ids(
         let snapshot_missing_response = snapshot::load(file)?
             .as_deref()
             .map(|snapshot_doc| {
-                !response_already_applied(snapshot_doc, &response)
-                    && !response_already_applied_after_prefix_strip(snapshot_doc, &response)
+                !response_replay::response_already_applied(snapshot_doc, &response)
+                    && !response_replay::response_already_applied_after_prefix_strip(
+                        snapshot_doc,
+                        &response,
+                    )
             })
             .unwrap_or(true);
         if (state_is_open || visible_response_recovery.is_some()) && snapshot_missing_response {
@@ -2046,110 +1844,6 @@ pub fn repair(file: &Path) -> Result<RepairOutcome> {
     Ok(outcome)
 }
 
-/// Returns true if the pending response content appears to already be applied to the document.
-///
-/// Checks whether the document contains the response's normalized visible lines
-/// as one contiguous block. This tolerates blank-line separation and transient
-/// ` (HEAD)` suffixes on response headings without treating scattered matching
-/// phrases elsewhere in the document as an already-applied replay.
-pub fn response_already_applied(doc: &str, response: &str) -> bool {
-    let response_lines = normalized_response_lines(response);
-    if response_lines.is_empty() {
-        return false;
-    }
-    let doc_lines = normalized_response_lines(doc);
-    doc_lines
-        .windows(response_lines.len())
-        .any(|window| window == response_lines.as_slice())
-}
-
-/// Phase 2/3 of `#adoc-prefix-strip-uncommitted`: accepts the response as
-/// applied when the captured `response` had spurious leading `❯ ` markers
-/// (e.g. JB cache-conflict applied prompt-prefix markers to agent response
-/// body lines) that the user has since stripped from the document. Compares
-/// the response's normalized lines against the document after also stripping
-/// a single leading `❯ ` from response lines. Returns true on a strict
-/// contiguous match — non-prefixed response lines therefore behave the same
-/// as `response_already_applied`.
-pub fn response_already_applied_after_prefix_strip(doc: &str, response: &str) -> bool {
-    let response_lines: Vec<String> = response
-        .lines()
-        .filter_map(normalize_response_line)
-        .map(|line| {
-            let trimmed = line.trim_start();
-            if let Some(stripped) = trimmed.strip_prefix("❯ ") {
-                let indent_len = line.len() - trimmed.len();
-                format!("{}{}", &line[..indent_len], stripped)
-            } else {
-                line
-            }
-        })
-        .collect();
-    if response_lines.is_empty() {
-        return false;
-    }
-    let doc_lines = normalized_response_lines(doc);
-    doc_lines
-        .windows(response_lines.len())
-        .any(|window| window == response_lines.as_slice())
-}
-
-fn normalized_response_lines(content: &str) -> Vec<String> {
-    // #stuck-capture-queue-echo-false-positive: skip the binary-inserted
-    // `> **Queue prompt:**` echo blockquote (#queue-prompt-echo-in-response).
-    // The echo is decoration written between the response heading and body at
-    // queue-consume time — it is never part of the agent's captured response —
-    // so leaving it in would break the contiguous-block match in
-    // `response_already_applied` and make `response_materialized_in_content`
-    // (and therefore `stuck_captured_cycle`) report a committed response as
-    // missing from HEAD. Stripping it on both the response and document side
-    // keeps "is this response already applied" detection accurate.
-    let mut out = Vec::new();
-    let mut lines = content.lines().peekable();
-    while let Some(line) = lines.next() {
-        if line.trim() == "> **Queue prompt:**" {
-            while let Some(next) = lines.peek() {
-                if next.trim_start().starts_with('>') {
-                    lines.next();
-                } else {
-                    break;
-                }
-            }
-            continue;
-        }
-        if let Some(normalized) = normalize_response_line(line) {
-            out.push(normalized);
-        }
-    }
-    out
-}
-
-fn normalize_response_line(line: &str) -> Option<String> {
-    let raw = line.trim_end_matches('\r');
-    let trimmed = raw.trim();
-    if trimmed.is_empty()
-        || trimmed.starts_with("<!-- patch:")
-        || trimmed.starts_with("<!-- /patch:")
-        || trimmed.starts_with("<!-- agent:")
-        || trimmed.starts_with("<!-- /agent:")
-    {
-        return None;
-    }
-    Some(strip_transient_response_head_marker(raw))
-}
-
-fn strip_transient_response_head_marker(line: &str) -> String {
-    if let Some(stripped) = line.strip_suffix(" (HEAD)") {
-        let trimmed = stripped.trim_start();
-        let is_re_heading = trimmed.starts_with("### Re:");
-        let is_bold_re_heading = trimmed.starts_with("**Re:") && trimmed.ends_with("**");
-        if is_re_heading || is_bold_re_heading {
-            return stripped.to_string();
-        }
-    }
-    line.to_string()
-}
-
 /// Save a response to the pending store before attempting write-back.
 /// This makes the response durable across context compaction.
 pub fn save_pending(file: &Path, response: &str) -> Result<()> {
@@ -2296,43 +1990,6 @@ mod tests {
         // Inactive queue → nothing to strike.
         let inactive = free_text.replace("queue_active: true", "queue_active: false");
         assert!(!first_queue_head_is_free_text(&inactive));
-    }
-
-    #[test]
-    fn response_already_applied_tolerates_queue_prompt_echo_between_heading_and_body() {
-        // #stuck-capture-queue-echo-false-positive: the captured response is the
-        // raw heading+body. At queue-consume time the binary inserts a
-        // `> **Queue prompt:**` echo blockquote between the heading and the body
-        // (#queue-prompt-echo-in-response). The contiguous-block match must still
-        // recognize the response as applied, otherwise stuck_captured_cycle fires
-        // a false positive after every queue-consumed cycle.
-        let captured_response = "### Re: do [#thing] — opus-4-8\n\nShipped the fix.\n";
-        let materialized_doc = concat!(
-            "## Exchange\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "### Re: do [#thing] — opus-4-8\n\n",
-            "> **Queue prompt:**\n",
-            ">\n",
-            "> do [#thing]\n\n",
-            "Shipped the fix.\n",
-            "<!-- /agent:exchange -->\n",
-        );
-        assert!(
-            response_already_applied(materialized_doc, captured_response),
-            "queue-prompt echo between heading and body must not defeat the applied-response match"
-        );
-
-        // A genuinely absent response must still report not-applied.
-        let other_doc = concat!(
-            "## Exchange\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "### Re: do [#other] — opus-4-8\n\nUnrelated.\n",
-            "<!-- /agent:exchange -->\n",
-        );
-        assert!(
-            !response_already_applied(other_doc, captured_response),
-            "an unrelated document must not match the captured response"
-        );
     }
 
     #[test]
@@ -3480,42 +3137,6 @@ mod tests {
 
         let result = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(result, content);
-    }
-
-    #[test]
-    fn dedup_requires_contiguous_normalized_response_block() {
-        let response = concat!(
-            "<!-- patch:exchange -->\n",
-            "### Re: topic — opus-4-6\n",
-            "Implemented in `src/agent-doc`.\n",
-            "- `cargo test`\n",
-            "<!-- /patch:exchange -->\n"
-        );
-        let doc = concat!(
-            "<!-- agent:exchange -->\n",
-            "### Re: topic — opus-4-6 (HEAD)\n",
-            "Earlier answer.\n\n",
-            "Implemented in `src/agent-doc`.\n\n",
-            "Unrelated text.\n",
-            "- `cargo test`\n",
-            "<!-- /agent:exchange -->\n"
-        );
-
-        assert!(
-            !response_already_applied(doc, response),
-            "scattered matching lines should not trigger dedup"
-        );
-    }
-
-    #[test]
-    fn dedup_short_response_still_requires_contiguous_match() {
-        let response = "Implemented.\nDone.\n";
-        let doc = "Implemented.\nOther line.\nDone.\n";
-
-        assert!(
-            !response_already_applied(doc, response),
-            "short responses should not dedup from non-contiguous matches"
-        );
     }
 
     #[test]

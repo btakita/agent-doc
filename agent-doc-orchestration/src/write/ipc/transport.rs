@@ -79,7 +79,7 @@ fn live_editor_delivery_has_operator_authority(file: &Path) -> bool {
     })
 }
 
-fn target_payload_to_live_editor(
+pub(crate) fn target_payload_to_live_editor(
     file: &Path,
     payload: &mut serde_json::Value,
     transport: &str,
@@ -569,25 +569,30 @@ pub fn try_ipc(
                     }
                     repair_ipc_decision_visible_state(file, &repair_decision, Some(&patch_id))?;
                     if repair_decision.snap_source.is_ack_content_proven() {
-                        let authority = ack_content_disk_write_authority(
+                        let proof = ack_content_disk_write_proof(
                             file,
                             socket_editor_id.as_deref(),
                             &repair_decision.snapshot_content,
                         );
-                        if authority == WholeBufferAuthority::OperatorTextAuthority {
-                            mark_ack_content_live_buffer_synced(
-                                file,
-                                &patch_id,
-                                socket_editor_id.as_deref(),
-                                &repair_decision.snapshot_content,
-                            );
-                        }
-                        write_ack_content_through_to_disk(
+                        let disk_synced = write_ack_content_through_to_disk(
                             file,
                             &patch_id,
                             &repair_decision.snapshot_content,
-                            authority,
+                            proof,
                         )?;
+                        if !disk_synced {
+                            return Ok(IpcResult {
+                                success: false,
+                                patch_id,
+                                skipped_committed_cycle: false,
+                            });
+                        }
+                        mark_ack_content_live_buffer_synced_after_write(
+                            file,
+                            &patch_id,
+                            socket_editor_id.as_deref(),
+                            &repair_decision.snapshot_content,
+                        );
                     }
                     crate::ops_log::log_op(
                         file,
@@ -1759,25 +1764,26 @@ pub(crate) fn write_ipc_and_poll(
             repair_ipc_decision_visible_state(doc_file, &repair_decision, Some(patch_id))?;
             if repair_decision.snap_source.is_ack_content_proven() {
                 let editor_id = payload.get("editor_id").and_then(|value| value.as_str());
-                let authority = ack_content_disk_write_authority(
+                let proof = ack_content_disk_write_proof(
                     doc_file,
                     editor_id,
                     &repair_decision.snapshot_content,
                 );
-                if authority == WholeBufferAuthority::OperatorTextAuthority {
-                    mark_ack_content_live_buffer_synced(
-                        doc_file,
-                        patch_id,
-                        editor_id,
-                        &repair_decision.snapshot_content,
-                    );
-                }
-                write_ack_content_through_to_disk(
+                let disk_synced = write_ack_content_through_to_disk(
                     doc_file,
                     patch_id,
                     &repair_decision.snapshot_content,
-                    authority,
+                    proof,
                 )?;
+                if !disk_synced {
+                    return Ok(false);
+                }
+                mark_ack_content_live_buffer_synced_after_write(
+                    doc_file,
+                    patch_id,
+                    editor_id,
+                    &repair_decision.snapshot_content,
+                );
             }
             crate::ops_log::log_op(
                 doc_file,
@@ -3003,6 +3009,108 @@ mod submodule_patch_routing_tests {
         assert!(
             log.contains("already_applied_ack_content_stale_visible_adopted"),
             "stale ack-content adoption should be auditable:\n{log}"
+        );
+    }
+
+    #[test]
+    fn already_applied_ack_content_does_not_overwrite_unsaved_live_editor_edit() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        for subdir in [
+            "ack-content",
+            "patches",
+            "snapshots",
+            "crdt",
+            "logs",
+            "state/cycles",
+            "claimed-patches",
+        ] {
+            fs::create_dir_all(root.join(".agent-doc").join(subdir)).unwrap();
+        }
+
+        let doc = root.join("session.md");
+        let baseline = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let stale_ack_content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let unsaved_live_editor = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "Operator typed after ack-content was captured.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, baseline).unwrap();
+        crate::snapshot::save(&doc, baseline).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
+
+        let patch_id = "already-applied-unsaved-live-editor";
+        let editor_id = "jetbrains-test-editor";
+        fs::write(
+            root.join(".agent-doc/ack-content")
+                .join(format!("{patch_id}.md")),
+            stale_ack_content,
+        )
+        .unwrap();
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+            &doc.to_string_lossy(),
+            unsaved_live_editor,
+            editor_id,
+            "jetbrains",
+            "test",
+            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+        )
+        .unwrap();
+
+        let outcome = persist_already_applied_socket_content_ours_snapshot(
+            &doc,
+            patch_id,
+            Some(editor_id),
+            Some(baseline),
+            Some(stale_ack_content),
+            None,
+            "### Re: Please reply — gpt-5\n\nAnswered.\n",
+        )
+        .unwrap();
+
+        assert_eq!(outcome, AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+        assert_eq!(
+            crate::snapshot::load(&doc).unwrap().as_deref(),
+            Some(baseline),
+            "stale ack-content must not replace the snapshot when the live editor buffer has moved on"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            baseline,
+            "stale ack-content must not be written over an unsaved live editor edit"
+        );
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("ack_content_disk_write_through_blocked")
+                && log.contains("reason=stale_source_buffer")
+                && !log.contains("ipc_socket_already_applied_snapshot"),
+            "stale live-editor ACK write-through should fail closed:\n{log}"
         );
     }
 

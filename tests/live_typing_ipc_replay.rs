@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
 const LIVE_TYPING_PROMPT: &str = "Does the portal message center have admin notifications? Can the operator reply from email and have the reply appear in the portal chat? Can portal users receive an email when the operator responds?";
+const TEST_EDITOR_ID: &str = "jetbrains-test-editor";
 
 fn agent_doc() -> Command {
     cargo_bin_cmd!("agent-doc")
@@ -71,6 +72,19 @@ fn response_payload_line(topic: &str) -> String {
 fn doc_hash(doc: &Path) -> String {
     let canonical = doc.canonicalize().unwrap();
     content_hash(canonical.to_string_lossy().as_ref())
+}
+
+fn record_operator_buffer(file: &Path, content: &str) {
+    let file_key = file.to_string_lossy();
+    agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+        file_key.as_ref(),
+        content,
+        TEST_EDITOR_ID,
+        "jetbrains",
+        "test",
+        &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+    )
+    .unwrap();
 }
 
 fn init_git_repo(root: &Path, tracked: &Path) {
@@ -155,7 +169,8 @@ impl ReplayProject {
         let current = fs::read_to_string(&self.doc).unwrap();
         let updated = current.replace("<!--\n-->\n", &format!("<!--\n{LIVE_TYPING_PROMPT}\n-->\n"));
         assert_ne!(current, updated, "fixture comment shell should be present");
-        fs::write(&self.doc, updated).unwrap();
+        fs::write(&self.doc, &updated).unwrap();
+        record_operator_buffer(&self.doc, &updated);
     }
 }
 
@@ -408,6 +423,7 @@ fn socket_ipc_replays_live_typing_during_finalize() {
                 return Some(serde_json::json!({"type": "ack"}).to_string());
             };
             let after_apply = apply_payload_to_file(&payload, &doc_for_listener)?;
+            record_operator_buffer(&doc_for_listener, &after_apply);
             fs::write(ack_dir.join(format!("{id}.md")), &after_apply).ok()?;
             *seen_for_listener.lock().ok()? = Some(payload);
             Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
@@ -473,6 +489,7 @@ fn file_ipc_ack_sidecar_replays_live_typing_during_finalize() {
                     continue;
                 };
                 let after_apply = apply_payload_to_file(&payload, &doc_for_watcher).unwrap();
+                record_operator_buffer(&doc_for_watcher, &after_apply);
                 fs::write(ack_dir.join(format!("{id}.md")), &after_apply).unwrap();
                 *seen_ack_for_watcher.lock().unwrap() = Some(after_apply);
                 fs::remove_file(path).unwrap();

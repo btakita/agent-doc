@@ -560,8 +560,8 @@ pub fn validate_replay(file: &Path, capture: &CaptureRecord) -> Result<()> {
 /// present in the current document (modulo blank-line / transient marker
 /// normalization, and modulo `❯ ` prompt-prefix markers stripped by the
 /// user after a JB cache-conflict-induced prefix spill). Defers to
-/// `repair::response_already_applied` for the strict match and falls back
-/// to `repair::response_already_applied_after_prefix_strip` for the
+/// `agent_doc_turn::response_replay::response_already_applied` for the strict match and falls back
+/// to `agent_doc_turn::response_replay::response_already_applied_after_prefix_strip` for the
 /// post-strip recovery path covered by `#adoc-prefix-strip-uncommitted`.
 fn response_body_intact_in_current(
     file: &Path,
@@ -572,13 +572,15 @@ fn response_body_intact_in_current(
         return Ok(false);
     }
     let _ = file; // reserved for richer structural checks (#adoc-bdauc stretch goals)
-    if crate::repair::response_already_applied(current_file, response_body) {
+    if agent_doc_turn::response_replay::response_already_applied(current_file, response_body) {
         return Ok(true);
     }
-    Ok(crate::repair::response_already_applied_after_prefix_strip(
-        current_file,
-        response_body,
-    ))
+    Ok(
+        agent_doc_turn::response_replay::response_already_applied_after_prefix_strip(
+            current_file,
+            response_body,
+        ),
+    )
 }
 
 pub(crate) fn live_drift_is_queue_only_against_snapshot(
@@ -721,12 +723,14 @@ pub fn discard_captures_for_archived_responses(file: &Path, archived_text: &str)
         if record.state == CaptureState::Discarded || record.response_body.trim().is_empty() {
             continue;
         }
-        let response_archived =
-            crate::repair::response_already_applied(archived_text, &record.response_body)
-                || crate::repair::response_already_applied_after_prefix_strip(
-                    archived_text,
-                    &record.response_body,
-                );
+        let response_archived = agent_doc_turn::response_replay::response_already_applied(
+            archived_text,
+            &record.response_body,
+        )
+            || agent_doc_turn::response_replay::response_already_applied_after_prefix_strip(
+                archived_text,
+                &record.response_body,
+            );
         if !response_archived {
             continue;
         }

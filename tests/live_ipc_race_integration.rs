@@ -9,6 +9,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
+const TEST_EDITOR_ID: &str = "jetbrains-test-editor";
+
 fn agent_doc() -> Command {
     cargo_bin_cmd!("agent-doc")
 }
@@ -16,6 +18,19 @@ fn agent_doc() -> Command {
 fn doc_hash(doc: &Path) -> String {
     let canonical = doc.canonicalize().unwrap();
     content_hash(canonical.to_string_lossy().as_ref())
+}
+
+fn record_operator_buffer(file: &Path, content: &str) {
+    let file_key = file.to_string_lossy();
+    agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+        file_key.as_ref(),
+        content,
+        TEST_EDITOR_ID,
+        "jetbrains",
+        "test",
+        &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+    )
+    .unwrap();
 }
 
 fn session_stream_doc_content() -> String {
@@ -116,6 +131,7 @@ fn finalize_file_ipc_commits_ack_proven_live_queue_drift() {
         &format!("<!-- agent:queue -->\n{live_queue_prompt}\n<!-- /agent:queue -->"),
     );
     fs::write(&doc, &current_with_queue).unwrap();
+    record_operator_buffer(&doc, &current_with_queue);
 
     let seen_payload = Arc::new(Mutex::new(None::<Value>));
     let patches_dir = agent_doc_dir.join("patches");
@@ -172,6 +188,7 @@ fn finalize_file_ipc_commits_ack_proven_live_queue_drift() {
                     &format!("{patch_content}<!-- agent:boundary:abcd1234 -->"),
                 );
                 fs::write(&doc_for_watcher, &after_plugin_apply).unwrap();
+                record_operator_buffer(&doc_for_watcher, &after_plugin_apply);
                 fs::write(ack_dir.join(format!("{patch_id}.md")), after_plugin_apply).unwrap();
                 *seen_for_watcher.lock().unwrap() = Some(payload);
                 fs::remove_file(path).unwrap();
@@ -295,6 +312,7 @@ fn finalize_commits_ack_proven_cycle_1779845677327_scratch_directives() {
         .unwrap()
         .replace("<!--\n-->", &scratch_comment);
     fs::write(&doc, &current_with_scratch).unwrap();
+    record_operator_buffer(&doc, &current_with_scratch);
 
     let seen_payload = Arc::new(Mutex::new(None::<Value>));
     let patches_dir = agent_doc_dir.join("patches");
@@ -351,6 +369,7 @@ fn finalize_commits_ack_proven_cycle_1779845677327_scratch_directives() {
                     &format!("{patch_content}<!-- agent:boundary:17798456:cycle1779 -->"),
                 );
                 fs::write(&doc_for_watcher, &after_plugin_apply).unwrap();
+                record_operator_buffer(&doc_for_watcher, &after_plugin_apply);
                 fs::write(ack_dir.join(format!("{patch_id}.md")), after_plugin_apply).unwrap();
                 *seen_for_watcher.lock().unwrap() = Some(payload);
                 fs::remove_file(path).unwrap();

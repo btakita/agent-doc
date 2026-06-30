@@ -3235,6 +3235,12 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub struct PartialCloseoutStateEvidence",
         "pub enum PartialCloseoutStateDecision",
         "pub fn partial_closeout_state_decision",
+        "pub const PENDING_DONE_GUARD_SUPPRESS_MARKER",
+        "pub struct TrackedWorkCompletionEvidence",
+        "pub enum TrackedWorkCompletionDecision",
+        "pub fn pending_done_suppressed",
+        "pub fn tracked_work_completion_decision",
+        "pub fn tracked_work_completion_missing_done_ids",
         "pub const BLOCKED_CLOSEOUT_FOLLOWUP_GUARD_SUPPRESS_MARKER",
         "pub struct BlockedCloseoutFollowupEvidence",
         "pub enum BlockedCloseoutFollowupDecision",
@@ -3497,6 +3503,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "fn extract_bracket_ids",
         "fn contains_completion_marker",
         "agent_doc_element_backlog::backlog::extract_pending_hash_ids",
+        "agent_doc_element_backlog::backlog::parse_items(component.content(&content))",
     ] {
         assert!(
             !done_signals.contains(forbidden),
@@ -3506,6 +3513,8 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     for required in [
         "agent_doc_turn::closeout_signal::explicit_done_signal_ids",
         "agent_doc_turn::closeout_signal::plain_done_signal",
+        "agent_doc_element_backlog::backlog::open_tracked_work_ids_in_content",
+        "agent_doc_element_backlog::backlog::open_backlog_ids_in_content",
     ] {
         assert!(
             done_signals.contains(required),
@@ -3521,6 +3530,26 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         !pending_guards.contains("pub fn response_text_for_guards"),
         "pending_guards must not re-own closeout response text normalization"
     );
+    for forbidden in [
+        "pub fn detect_missing_pending_done_ids",
+        ".contains(\"<!-- no-pending-done-guard -->\")",
+        "agent_doc_turn::closeout_signal::response_clearly_completes_pending_id",
+    ] {
+        assert!(
+            !pending_guards.contains(forbidden),
+            "pending_guards must not re-own tracked-work completion policy: {forbidden}"
+        );
+    }
+    for required in [
+        "agent_doc_turn::closeout_signal::tracked_work_completion_decision",
+        "agent_doc_turn::closeout_signal::TrackedWorkCompletionEvidence",
+        "agent_doc_turn::closeout_signal::TrackedWorkCompletionDecision",
+    ] {
+        assert!(
+            pending_guards.contains(required),
+            "pending_guards should call focused tracked-work completion policy directly: {required}"
+        );
+    }
 
     for relative in [
         "agent-doc-orchestration/src/session_check/pending_guards.rs",
@@ -3537,19 +3566,43 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         );
     }
 
-    for relative in [
-        "agent-doc-orchestration/src/session_check/backlog_guards.rs",
-        "agent-doc-orchestration/src/session_check/pending_guards.rs",
+    let backlog_guards = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/backlog_guards.rs"),
+    )
+    .unwrap();
+    assert!(
+        backlog_guards
+            .contains("agent_doc_turn::closeout_signal::response_clearly_completes_pending_id"),
+        "backlog_guards should call focused closeout signal policy directly"
+    );
+    assert!(
+        !backlog_guards.contains("session_check::response_clearly_completes_pending_id"),
+        "backlog_guards must not route closeout signal policy through session_check"
+    );
+
+    let pending_checks = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/write/pending_checks.rs"),
+    )
+    .unwrap();
+    for forbidden in [
+        "crate::session_check::detect_missing_pending_done_ids",
+        ".contains(\"<!-- no-pending-done-guard -->\")",
     ] {
-        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
-            source
-                .contains("agent_doc_turn::closeout_signal::response_clearly_completes_pending_id"),
-            "{relative} should call focused closeout signal policy directly"
+            !pending_checks.contains(forbidden),
+            "write pending checks must not route tracked-work completion policy through session_check: {forbidden}"
         );
+    }
+    for required in [
+        "agent_doc_turn::closeout_signal::pending_done_suppressed",
+        "agent_doc_turn::closeout_signal::tracked_work_completion_missing_done_ids",
+        "agent_doc_turn::closeout_signal::tracked_work_completion_decision",
+        "agent_doc_turn::closeout_signal::TrackedWorkCompletionEvidence",
+        "agent_doc_turn::closeout_signal::TrackedWorkCompletionDecision",
+    ] {
         assert!(
-            !source.contains("session_check::response_clearly_completes_pending_id"),
-            "{relative} must not route closeout signal policy through session_check"
+            pending_checks.contains(required),
+            "write pending checks should call focused tracked-work completion policy directly: {required}"
         );
     }
 

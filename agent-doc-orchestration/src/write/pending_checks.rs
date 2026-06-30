@@ -649,10 +649,7 @@ pub(crate) fn precommit_pending_done_check_with_options(
     let Some(capture) = crate::capture::load_active(file)? else {
         return Ok(());
     };
-    if capture
-        .response_body
-        .contains("<!-- no-pending-done-guard -->")
-    {
+    if agent_doc_turn::closeout_signal::pending_done_suppressed(&capture.response_body) {
         return Ok(());
     }
 
@@ -673,12 +670,13 @@ pub(crate) fn precommit_pending_done_check_with_options(
             )
         );
     }
-    let missing = crate::session_check::detect_missing_pending_done_ids(
-        file,
+    let open_tracked_work_ids = crate::session_check::open_tracked_work_ids(file)?;
+    let missing = agent_doc_turn::closeout_signal::tracked_work_completion_missing_done_ids(
         &response_text,
         &state.pending_done_ids,
         &state.pending_kept_open_ids,
-    )?;
+        &open_tracked_work_ids,
+    );
     if missing.is_empty() {
         return Ok(());
     }
@@ -756,7 +754,7 @@ pub(crate) fn prewrite_pending_done_check(
         .map(|state| state.pending_kept_open_ids.clone())
         .unwrap_or_default();
     kept_open_ids.extend(flags.pending_kept_open_ids.clone());
-    if response_body.contains("<!-- no-pending-done-guard -->") {
+    if agent_doc_turn::closeout_signal::pending_done_suppressed(response_body) {
         return Ok(());
     }
 
@@ -776,12 +774,13 @@ pub(crate) fn prewrite_pending_done_check(
             )
         );
     }
-    let missing = crate::session_check::detect_missing_pending_done_ids(
-        file,
+    let open_tracked_work_ids = crate::session_check::open_tracked_work_ids(file)?;
+    let missing = agent_doc_turn::closeout_signal::tracked_work_completion_missing_done_ids(
         &response_text,
         &recorded_done_ids,
         &kept_open_ids,
-    )?;
+        &open_tracked_work_ids,
+    );
     if missing.is_empty() {
         return Ok(());
     }
@@ -834,7 +833,7 @@ pub(crate) fn auto_apply_pending_done_if_enabled(
     if !flags.strict_closeout || !crate::session_check::resolve_auto_done(file)? {
         return Ok(());
     }
-    if response_body.contains("<!-- no-pending-done-guard -->") {
+    if agent_doc_turn::closeout_signal::pending_done_suppressed(response_body) {
         return Ok(());
     }
 
@@ -850,16 +849,21 @@ pub(crate) fn auto_apply_pending_done_if_enabled(
         .unwrap_or_default();
     kept_open_ids.extend(flags.pending_kept_open_ids.clone());
 
-    let response_text = agent_doc_turn::closeout_signal::response_text_for_guards(response_body);
-    let missing = crate::session_check::detect_missing_pending_done_ids(
-        file,
-        &response_text,
-        &recorded_done_ids,
-        &kept_open_ids,
-    )?;
-    if missing.is_empty() {
+    let open_tracked_work_ids = crate::session_check::open_tracked_work_ids(file)?;
+    let missing = agent_doc_turn::closeout_signal::tracked_work_completion_decision(
+        agent_doc_turn::closeout_signal::TrackedWorkCompletionEvidence {
+            response_body,
+            recorded_done_ids: &recorded_done_ids,
+            kept_open_ids: &kept_open_ids,
+            open_tracked_work_ids: &open_tracked_work_ids,
+        },
+    );
+    let agent_doc_turn::closeout_signal::TrackedWorkCompletionDecision::MissingDone {
+        missing_ids: missing,
+    } = missing
+    else {
         return Ok(());
-    }
+    };
 
     crate::backlog_cmd::with_force_disk_pending_writes(flags.force_disk, || {
         for id in &missing {

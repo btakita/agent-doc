@@ -357,6 +357,68 @@ pub const BLOCKED_CLOSEOUT_FOLLOWUP_GUARD_SUPPRESS_MARKER: &str =
 pub const PENDING_DONE_GUARD_SUPPRESS_MARKER: &str = "<!-- no-pending-done-guard -->";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TrackedWorkCompletionEvidence<'a> {
+    pub response_body: &'a str,
+    pub recorded_done_ids: &'a [String],
+    pub kept_open_ids: &'a [String],
+    pub open_tracked_work_ids: &'a [String],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TrackedWorkCompletionDecision {
+    Pass,
+    MissingDone { missing_ids: Vec<String> },
+}
+
+pub fn pending_done_suppressed(response_body: &str) -> bool {
+    response_body.contains(PENDING_DONE_GUARD_SUPPRESS_MARKER)
+}
+
+pub fn tracked_work_completion_decision(
+    evidence: TrackedWorkCompletionEvidence<'_>,
+) -> TrackedWorkCompletionDecision {
+    if pending_done_suppressed(evidence.response_body) {
+        return TrackedWorkCompletionDecision::Pass;
+    }
+
+    let response_text = response_text_for_guards(evidence.response_body);
+    let missing_ids = tracked_work_completion_missing_done_ids(
+        &response_text,
+        evidence.recorded_done_ids,
+        evidence.kept_open_ids,
+        evidence.open_tracked_work_ids,
+    );
+    if missing_ids.is_empty() {
+        TrackedWorkCompletionDecision::Pass
+    } else {
+        TrackedWorkCompletionDecision::MissingDone { missing_ids }
+    }
+}
+
+pub fn tracked_work_completion_missing_done_ids(
+    response_text: &str,
+    recorded_done_ids: &[String],
+    kept_open_ids: &[String],
+    open_tracked_work_ids: &[String],
+) -> Vec<String> {
+    if response_text.trim().is_empty() || open_tracked_work_ids.is_empty() {
+        return Vec::new();
+    }
+
+    let recorded_done = normalized_id_set(recorded_done_ids.iter().map(String::as_str));
+    let kept_open = normalized_id_set(kept_open_ids.iter().map(String::as_str));
+
+    open_tracked_work_ids
+        .iter()
+        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
+        .filter(|id| !id.is_empty())
+        .filter(|id| !kept_open.contains(id))
+        .filter(|id| response_clearly_completes_pending_id(response_text, id))
+        .filter(|id| !recorded_done.contains(id))
+        .collect()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlockedCloseoutFollowupEvidence<'a> {
     pub cycle_open: bool,
     pub capture_committed: bool,
@@ -978,6 +1040,58 @@ mod tests {
             "### Re: do #abc\n\n#other remains blocked on approval.",
             "abc"
         ));
+    }
+
+    #[test]
+    fn tracked_work_completion_decision_reports_missing_done_ids() {
+        let response = "### Re: do [#alpha] [#beta]\n\nImplemented #alpha and #beta; tests passed.";
+        let recorded_done_ids = vec!["beta".to_string()];
+        let kept_open_ids = vec!["gamma".to_string()];
+        let open_tracked_work_ids = vec![
+            "alpha".to_string(),
+            "beta".to_string(),
+            "gamma".to_string(),
+            "delta".to_string(),
+        ];
+
+        assert_eq!(
+            tracked_work_completion_decision(TrackedWorkCompletionEvidence {
+                response_body: response,
+                recorded_done_ids: &recorded_done_ids,
+                kept_open_ids: &kept_open_ids,
+                open_tracked_work_ids: &open_tracked_work_ids,
+            }),
+            TrackedWorkCompletionDecision::MissingDone {
+                missing_ids: vec!["alpha".to_string()]
+            }
+        );
+    }
+
+    #[test]
+    fn tracked_work_completion_decision_passes_for_suppressed_or_non_completion() {
+        let response = "### Re: do [#alpha]\n\nImplemented #alpha; tests passed.";
+        let suppressed = format!("{response}\n{PENDING_DONE_GUARD_SUPPRESS_MARKER}");
+        let open_tracked_work_ids = vec!["alpha".to_string()];
+        let empty = Vec::new();
+
+        assert_eq!(
+            tracked_work_completion_decision(TrackedWorkCompletionEvidence {
+                response_body: &suppressed,
+                recorded_done_ids: &empty,
+                kept_open_ids: &empty,
+                open_tracked_work_ids: &open_tracked_work_ids,
+            }),
+            TrackedWorkCompletionDecision::Pass
+        );
+        assert_eq!(
+            tracked_work_completion_decision(TrackedWorkCompletionEvidence {
+                response_body: "Mentioned #alpha in prose without a response heading.",
+                recorded_done_ids: &empty,
+                kept_open_ids: &empty,
+                open_tracked_work_ids: &open_tracked_work_ids,
+            }),
+            TrackedWorkCompletionDecision::Pass
+        );
     }
 
     #[test]

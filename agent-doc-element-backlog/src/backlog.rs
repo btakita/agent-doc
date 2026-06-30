@@ -603,6 +603,39 @@ pub fn tracked_component_item_counts(content: &str) -> BTreeMap<String, usize> {
     counts
 }
 
+pub fn open_tracked_work_ids_in_content(content: &str) -> Vec<String> {
+    let Ok(components) = element::parse(content) else {
+        return Vec::new();
+    };
+    components
+        .into_iter()
+        .filter(|component| element::is_tracked_work_component(&component.name))
+        .flat_map(|component| {
+            let (_, items, _) = parse_items(component.content(content));
+            items
+        })
+        .filter(|item| !item.is_done())
+        .map(|item| item.id)
+        .collect()
+}
+
+pub fn open_backlog_ids_in_content(content: &str) -> Vec<String> {
+    let Ok(components) = element::parse(content) else {
+        return Vec::new();
+    };
+    components
+        .into_iter()
+        .filter(|component| element::is_backlog_component(&component.name))
+        .flat_map(|component| {
+            let (_, items, _) = parse_items(component.content(content));
+            items
+        })
+        .filter(|item| !item.is_done())
+        .map(|item| item.id)
+        .filter(|id| !id.is_empty())
+        .collect()
+}
+
 /// Return non-exchange components whose tracked checklist item count decreased.
 pub fn dropped_tracked_component_items(before: &str, after: &str) -> Vec<TrackedComponentItemDrop> {
     let before_counts = tracked_component_item_counts(before);
@@ -3228,6 +3261,55 @@ mod tests {
         assert_eq!(counts.get("backlog").copied(), Some(3));
         assert_eq!(counts.get("review").copied(), Some(1));
         assert_eq!(counts.get("exchange"), None);
+    }
+
+    #[test]
+    fn open_tracked_work_ids_in_content_lists_non_done_tracked_items() {
+        let doc = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: ignored\n\nbody\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#open] open backlog\n",
+            "- [/] [#gated] gated backlog\n",
+            "- [x] [#done] done backlog\n",
+            "<!-- /agent:backlog -->\n",
+            "<!-- agent:review -->\n",
+            "- [ ] [#review] open review\n",
+            "<!-- /agent:review -->\n",
+            "<!-- agent:icebox -->\n",
+            "- [ ] [#ice] open icebox\n",
+            "<!-- /agent:icebox -->\n",
+        );
+
+        assert_eq!(
+            open_tracked_work_ids_in_content(doc),
+            vec![
+                "open".to_string(),
+                "gated".to_string(),
+                "review".to_string(),
+                "ice".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn open_backlog_ids_in_content_lists_only_non_done_backlog_items() {
+        let doc = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#open] open backlog\n",
+            "- [/] [#gated] gated backlog\n",
+            "- [x] [#done] done backlog\n",
+            "<!-- /agent:backlog -->\n",
+            "<!-- agent:review -->\n",
+            "- [ ] [#review] open review\n",
+            "<!-- /agent:review -->\n",
+        );
+
+        assert_eq!(
+            open_backlog_ids_in_content(doc),
+            vec!["open".to_string(), "gated".to_string()]
+        );
     }
 
     #[test]

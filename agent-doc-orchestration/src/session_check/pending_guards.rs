@@ -289,24 +289,23 @@ pub(crate) fn check_pending_done_guard(
     if capture.state != crate::capture::CaptureState::Committed {
         return Ok(GuardResult::None);
     }
-    if capture
-        .response_body
-        .contains("<!-- no-pending-done-guard -->")
-    {
-        return Ok(GuardResult::None);
-    }
 
-    let response_text =
-        agent_doc_turn::closeout_signal::response_text_for_guards(&capture.response_body);
-    let missing = detect_missing_pending_done_ids(
-        file,
-        &response_text,
-        &state.pending_done_ids,
-        &state.pending_kept_open_ids,
-    )?;
-    if missing.is_empty() {
-        return Ok(GuardResult::None);
-    }
+    let open_tracked_work_ids = open_tracked_work_ids(file)?;
+    let missing = match agent_doc_turn::closeout_signal::tracked_work_completion_decision(
+        agent_doc_turn::closeout_signal::TrackedWorkCompletionEvidence {
+            response_body: &capture.response_body,
+            recorded_done_ids: &state.pending_done_ids,
+            kept_open_ids: &state.pending_kept_open_ids,
+            open_tracked_work_ids: &open_tracked_work_ids,
+        },
+    ) {
+        agent_doc_turn::closeout_signal::TrackedWorkCompletionDecision::Pass => {
+            return Ok(GuardResult::None);
+        }
+        agent_doc_turn::closeout_signal::TrackedWorkCompletionDecision::MissingDone {
+            missing_ids,
+        } => missing_ids,
+    };
 
     let ids = missing
         .iter()
@@ -347,43 +346,4 @@ pub(crate) fn check_pending_done_guard(
         }
         agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
     })
-}
-
-pub fn detect_missing_pending_done_ids(
-    file: &Path,
-    response_text: &str,
-    recorded_done_ids: &[String],
-    kept_open_ids: &[String],
-) -> Result<Vec<String>> {
-    if response_text.trim().is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let open_ids = open_tracked_work_ids(file)?;
-    if open_ids.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let recorded_done: std::collections::HashSet<String> = recorded_done_ids
-        .iter()
-        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
-        .filter(|id| !id.is_empty())
-        .collect();
-    let kept_open: std::collections::HashSet<String> = kept_open_ids
-        .iter()
-        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
-        .filter(|id| !id.is_empty())
-        .collect();
-
-    Ok(open_ids
-        .into_iter()
-        .filter(|id| !kept_open.contains(id))
-        .filter(|id| {
-            agent_doc_turn::closeout_signal::response_clearly_completes_pending_id(
-                response_text,
-                id,
-            )
-        })
-        .filter(|id| !recorded_done.contains(id))
-        .collect())
 }

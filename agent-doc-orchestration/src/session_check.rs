@@ -69,7 +69,7 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use agent_doc_element::element::{is_backlog_component, is_tracked_work_component};
+use agent_doc_element::element::is_tracked_work_component;
 
 mod response_guards;
 pub(crate) use response_guards::*;

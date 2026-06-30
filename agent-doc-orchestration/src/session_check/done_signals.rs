@@ -2,20 +2,7 @@ use super::*;
 
 pub(crate) fn open_tracked_work_ids(file: &Path) -> Result<Vec<String>> {
     let content = std::fs::read_to_string(file)?;
-    let Ok(components) = agent_doc_element::element::parse(&content) else {
-        return Ok(Vec::new());
-    };
-    Ok(components
-        .into_iter()
-        .filter(|component| is_tracked_work_component(&component.name))
-        .flat_map(|component| {
-            let (_, items, _) =
-                agent_doc_element_backlog::backlog::parse_items(component.content(&content));
-            items
-        })
-        .filter(|item| !item.is_done())
-        .map(|item| item.id)
-        .collect())
+    Ok(agent_doc_element_backlog::backlog::open_tracked_work_ids_in_content(&content))
 }
 
 pub fn inline_done_signal_ids(
@@ -68,19 +55,5 @@ pub fn inline_done_signal_ids(
 /// lifecycle outcome.
 pub(crate) fn open_backlog_ids(file: &Path) -> Result<Vec<String>> {
     let content = std::fs::read_to_string(file)?;
-    let Ok(components) = agent_doc_element::element::parse(&content) else {
-        return Ok(Vec::new());
-    };
-    Ok(components
-        .into_iter()
-        .filter(|component| is_backlog_component(&component.name))
-        .flat_map(|component| {
-            let (_, items, _) =
-                agent_doc_element_backlog::backlog::parse_items(component.content(&content));
-            items
-        })
-        .filter(|item| !item.is_done())
-        .map(|item| item.id)
-        .filter(|id| !id.is_empty())
-        .collect())
+    Ok(agent_doc_element_backlog::backlog::open_backlog_ids_in_content(&content))
 }

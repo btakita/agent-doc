@@ -26,18 +26,7 @@ pub(crate) fn check_no_response_active_queue_head(
     if !bookkeeping_evidence {
         return Ok(GuardResult::None);
     }
-    let recorded_ids =
-        agent_doc_queue::queue_directive::do_directive_target_ids(&state.active_queue_heads);
-    if recorded_ids.is_empty() {
-        return Ok(GuardResult::None);
-    }
-
     let content = rc.doc_content();
-    let current_head_ids: std::collections::HashSet<String> =
-        committed_current_queue_head_ids(&content)
-            .into_iter()
-            .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(&id))
-            .collect();
     let open_backlog: std::collections::HashSet<String> =
         open_backlog_ids(file)?.into_iter().collect();
     let mut resolved_or_deferred = crate::cycle_state::resolved_pending_ids(file)?;
@@ -48,34 +37,12 @@ pub(crate) fn check_no_response_active_queue_head(
             .chain(state.pending_kept_open_ids.iter())
             .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id)),
     );
-    // #goqueuestall/#qcontdrain: a queue head whose backlog id is DEFERRED (never
-    // agent-drainable — `[operator-verify]` only) is not a "runnable" head that a
-    // no-response reap-only closeout silently dropped. Exclude it from the live set,
-    // reusing the SAME deferred set that `queue_continuation` uses so the
-    // session-check guard and continuation logic agree. After excluding deferred
-    // heads, only genuinely drainable heads can still trip this guard.
-    let deferred: std::collections::HashSet<String> =
-        agent_doc_queue::queue_continuation::deferred_backlog_ids(&content)
-            .into_iter()
-            .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(&id))
-            .collect();
-
-    let mut live: Vec<String> = Vec::new();
-    for id in recorded_ids {
-        let norm = agent_doc_element_backlog::backlog::normalize_pending_id(&id);
-        if norm.is_empty() {
-            continue;
-        }
-        if !current_head_ids.contains(&norm) || !open_backlog.contains(&norm) {
-            continue;
-        }
-        if resolved_or_deferred.contains(&norm) || deferred.contains(&norm) {
-            continue;
-        }
-        if !live.iter().any(|existing| existing == &norm) {
-            live.push(norm);
-        }
-    }
+    let live = agent_doc_queue::queue_closeout_guard::no_response_live_queue_head_ids(
+        &state.active_queue_heads,
+        &content,
+        &open_backlog,
+        &resolved_or_deferred,
+    );
 
     if live.is_empty() {
         return Ok(GuardResult::None);

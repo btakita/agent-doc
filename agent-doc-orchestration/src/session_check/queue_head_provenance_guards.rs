@@ -122,35 +122,6 @@ pub(crate) fn check_expect_done_or_gate_guard(
     })
 }
 
-/// `do [#id]` target ids present in a committed document's `agent:queue`
-/// component. Used by `#queue-clear-unrun-items` to decide which recorded
-/// preflight heads are still queued (preserved) vs removed this cycle.
-pub(crate) fn committed_queue_head_ids(content: &str) -> Vec<String> {
-    let Ok(components) = agent_doc_element::element::parse(content) else {
-        return Vec::new();
-    };
-    let Some(queue) = components.iter().find(|c| c.name == "queue") else {
-        return Vec::new();
-    };
-    agent_doc_queue::queue_directive::do_directive_target_ids(&[queue.content(content).to_string()])
-}
-
-/// `do [#id]` target ids for the current live queue head only.
-pub(crate) fn committed_current_queue_head_ids(content: &str) -> Vec<String> {
-    let Ok(components) = agent_doc_element::element::parse(content) else {
-        return Vec::new();
-    };
-    let Some(queue) = components.iter().find(|c| c.name == "queue") else {
-        return Vec::new();
-    };
-    let entries =
-        agent_doc_queue::document_queue::parse(queue.content(content)).unwrap_or_default();
-    let Some(head) = agent_doc_queue::document_queue::first_prompt(&entries) else {
-        return Vec::new();
-    };
-    agent_doc_queue::queue_directive::do_directive_target_ids(std::slice::from_ref(&head.text))
-}
-
 /// `#queue-clear-unrun-items`: an active `agent:queue` head is executable user
 /// intent. A closeout / reset / commit may delete a runnable `do [#id]` head
 /// only with durable proof that it was consumed (this cycle's directive target,
@@ -181,11 +152,6 @@ pub(crate) fn check_queue_head_removal_guard(
     if state.is_open() {
         return Ok(GuardResult::None);
     }
-    let recorded_ids =
-        agent_doc_queue::queue_directive::do_directive_target_ids(&state.active_queue_heads);
-    if recorded_ids.is_empty() {
-        return Ok(GuardResult::None);
-    }
     // Phase 6 (#lr-content-6): cached document content.
     let content = rc.doc_content();
     // Explicit user removal already reconciled — do not second-guess it.
@@ -193,10 +159,6 @@ pub(crate) fn check_queue_head_removal_guard(
         return Ok(GuardResult::None);
     }
 
-    let still_queued: std::collections::HashSet<String> = committed_queue_head_ids(&content)
-        .into_iter()
-        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(&id))
-        .collect();
     let open_backlog: std::collections::HashSet<String> =
         open_backlog_ids(file)?.into_iter().collect();
     // Lifecycle proof: ids the cycle explicitly resolved (done/reaped/gated) or
@@ -220,56 +182,32 @@ pub(crate) fn check_queue_head_removal_guard(
         .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
         .collect();
 
-    let mut lost: Vec<String> = Vec::new();
-    let mut removal_proofs: Vec<(String, &'static str)> = Vec::new();
-    for id in recorded_ids {
-        let norm = agent_doc_element_backlog::backlog::normalize_pending_id(&id);
-        if norm.is_empty() {
-            continue;
-        }
-        if still_queued.contains(&norm) {
-            continue; // head preserved in the committed queue
-        }
-        if !open_backlog.contains(&norm) {
-            if !removal_proofs.iter().any(|(existing, _)| existing == &norm) {
-                removal_proofs.push((norm, "backlog_resolved_or_removed"));
-            }
-            continue; // backlog item resolved / removed → deletion proven
-        }
-        if resolved.contains(&norm) {
-            if !removal_proofs.iter().any(|(existing, _)| existing == &norm) {
-                removal_proofs.push((norm, "cycle_lifecycle_outcome"));
-            }
-            continue; // explicit lifecycle proof
-        }
-        if directive_targets.contains(&norm) {
-            if !removal_proofs.iter().any(|(existing, _)| existing == &norm) {
-                removal_proofs.push((norm, "current_directive_target"));
-            }
-            continue; // sibling-owned target
-        }
-        if !lost.iter().any(|existing| existing == &norm) {
-            lost.push(norm);
-        }
-    }
+    let decision = agent_doc_queue::queue_closeout_guard::queue_head_removal_decision(
+        &state.active_queue_heads,
+        &content,
+        &open_backlog,
+        &resolved,
+        &directive_targets,
+    );
 
-    for (id, proof_source) in &removal_proofs {
+    for proof in &decision.removal_proofs {
         crate::ops_log::log_op(
             file,
             &format!(
                 "queue_head_removal_guard_proof file={} removed=#{} proof_source={}",
                 file.display(),
-                id,
-                proof_source
+                proof.id,
+                proof.source.as_str()
             ),
         );
     }
 
-    if lost.is_empty() {
+    if decision.lost.is_empty() {
         return Ok(GuardResult::None);
     }
 
-    let ids = lost
+    let ids = decision
+        .lost
         .iter()
         .map(|id| format!("#{}", id))
         .collect::<Vec<_>>()
@@ -279,7 +217,7 @@ pub(crate) fn check_queue_head_removal_guard(
         &format!(
             "queue_head_removal_guard_fired file={} lost={} proof_source=missing",
             file.display(),
-            lost.join(",")
+            decision.lost.join(",")
         ),
     );
     let warn_line = format!(
@@ -370,21 +308,24 @@ pub(crate) fn check_free_text_queue_head_provenance(
         if normalized.is_empty() {
             continue;
         }
+        if agent_doc_queue::queue_heads::free_text_queue_head_is_completed_residue(
+            &content,
+            &exchange_text,
+            head,
+        ) {
+            completed_residue.push(head.clone());
+            continue;
+        }
         // `#qimpstrike`: a recurring imperative command head (`deploy`, `commit`,
         // `push`, the `#spec-test-commit-push` preset, …) is an executable
         // directive that is valid every time it is queued. A response that echoed
         // it as a `> **Queue prompt:**` quote does NOT answer/retire a standing
-        // command, so the residue guard must leave it active/drainable rather than
-        // flag it as "completed queue residue." Only genuine one-time prompts are
-        // residue candidates.
+        // command, so the provenance guard must leave it active/drainable rather
+        // than flag it as completed residue or unresolved missing-response work.
         if agent_doc_queue::queue_continuation::is_recurring_imperative_head(head) {
             continue;
         }
-        let still_queued = committed_queue_contains_active_free_text_head(&content, head);
-        if still_queued {
-            if free_text_head_answered_by_response(&exchange_text, head) {
-                completed_residue.push(head.clone());
-            }
+        if agent_doc_queue::queue_heads::committed_queue_contains_free_text_head(&content, head) {
             continue;
         }
         if free_text_head_answered_by_response(&exchange_text, head)
@@ -470,35 +411,6 @@ pub(crate) fn check_free_text_queue_head_provenance(
         }
         agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
     })
-}
-
-fn normalized_free_text_queue_head_identity(text: &str) -> String {
-    agent_doc_queue::document_queue::strip_priority_markers(text)
-        .trim()
-        .to_ascii_lowercase()
-}
-
-fn committed_queue_contains_active_free_text_head(content: &str, head: &str) -> bool {
-    let Ok(components) = agent_doc_element::element::parse(content) else {
-        return false;
-    };
-    let Some(queue) = components.iter().find(|c| c.name == "queue") else {
-        return false;
-    };
-    let Ok(entries) = agent_doc_queue::document_queue::parse(queue.content(content)) else {
-        return false;
-    };
-    let target = normalized_free_text_queue_head_identity(head);
-    if target.is_empty() {
-        return false;
-    }
-    agent_doc_queue::document_queue::prompts(&entries)
-        .into_iter()
-        .any(|prompt| {
-            let text = prompt.text.trim();
-            agent_doc_queue::queue_response::queue_prompt_text_is_free_text(content, text)
-                && normalized_free_text_queue_head_identity(text) == target
-        })
 }
 
 /// Open (`[ ]`/gated, not done) ids that currently live in a `review`/gated

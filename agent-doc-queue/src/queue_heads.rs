@@ -7,8 +7,8 @@
 use anyhow::{Context, Result};
 
 use crate::queue_response::{
-    display_queue_prompt_text, normalize_done_id, queue_prompt_done_id,
-    queue_prompt_text_is_free_text,
+    display_queue_prompt_text, free_text_head_answered_by_response, normalize_done_id,
+    queue_prompt_done_id, queue_prompt_text_is_free_text,
 };
 
 /// Extract queue prompt head texts from a document's `agent:queue` component.
@@ -129,6 +129,56 @@ pub fn queue_head_matches_done_ids(content: &str, done_ids: &[String]) -> Result
         return Ok(false);
     };
     Ok(done_ids.iter().any(|id| normalize_done_id(id) == head_id))
+}
+
+/// Normalized identity for matching free-text queue heads across queue rows and
+/// response echoes. Priority markers are cosmetic and do not affect identity.
+pub fn free_text_queue_head_identity(text: &str) -> String {
+    crate::document_queue::strip_priority_markers(text)
+        .trim()
+        .to_ascii_lowercase()
+}
+
+/// True when the supplied document content still has an active free-text queue
+/// prompt with the same identity as `head`.
+pub fn committed_queue_contains_free_text_head(content: &str, head: &str) -> bool {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return false;
+    };
+    let Some(queue) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return false;
+    };
+    let Ok(entries) = crate::document_queue::parse(queue.content(content)) else {
+        return false;
+    };
+    let target = free_text_queue_head_identity(head);
+    if target.is_empty() {
+        return false;
+    }
+    crate::document_queue::prompts(&entries)
+        .into_iter()
+        .any(|prompt| {
+            let text = prompt.text.trim();
+            queue_prompt_text_is_free_text(content, text)
+                && free_text_queue_head_identity(text) == target
+        })
+}
+
+/// True when a non-recurring free-text queue head is still queued even though
+/// committed exchange text contains a queue-prompt response echo for it.
+pub fn free_text_queue_head_is_completed_residue(
+    content: &str,
+    exchange_text: &str,
+    head: &str,
+) -> bool {
+    if crate::queue_continuation::is_recurring_imperative_head(head) {
+        return false;
+    }
+    committed_queue_contains_free_text_head(content, head)
+        && free_text_head_answered_by_response(exchange_text, head)
 }
 
 fn queue_prompt_heads(doc: &str) -> Vec<String> {
@@ -314,6 +364,85 @@ mod tests {
         assert!(queue_head_matches_done_ids(HALT_QUEUE_DOC, &[" [#Foo] ".to_string()]).unwrap());
         assert!(!queue_head_matches_done_ids(HALT_QUEUE_DOC, &["bar".to_string()]).unwrap());
         assert!(!queue_head_matches_done_ids(HALT_QUEUE_DOC, &[]).unwrap());
+    }
+
+    #[test]
+    fn committed_queue_contains_free_text_head_matches_cosmetic_markers_and_case() {
+        let doc = concat!(
+            "<!-- agent:queue -->\n",
+            "- :pushpin: Explain The Queue Churn\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        assert_eq!(
+            free_text_queue_head_identity(":pushpin: Explain The Queue Churn"),
+            "explain the queue churn"
+        );
+        assert!(committed_queue_contains_free_text_head(
+            doc,
+            "explain the queue churn"
+        ));
+        assert!(committed_queue_contains_free_text_head(
+            doc,
+            ":pushpin: explain the queue churn"
+        ));
+    }
+
+    #[test]
+    fn committed_queue_contains_free_text_head_rejects_id_backed_and_trigger_heads() {
+        let doc = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#build] build it\n",
+            "- [ ] [#bare] bare id work\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#build]\n",
+            "- [#bare]\n",
+            "- do queue\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        assert!(!committed_queue_contains_free_text_head(doc, "do [#build]"));
+        assert!(!committed_queue_contains_free_text_head(doc, "[#bare]"));
+        assert!(!committed_queue_contains_free_text_head(doc, "do queue"));
+    }
+
+    #[test]
+    fn free_text_queue_head_is_completed_residue_detects_answered_active_head() {
+        let doc = concat!(
+            "<!-- agent:queue -->\n",
+            "- explain the queue churn\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let exchange = concat!(
+            "### Re: explain the queue churn\n\n",
+            "> **Queue prompt:**\n>\n> explain the queue churn\n\n",
+            "The churn comes from stale convergence.\n",
+        );
+
+        assert!(free_text_queue_head_is_completed_residue(
+            doc,
+            exchange,
+            "explain the queue churn"
+        ));
+    }
+
+    #[test]
+    fn free_text_queue_head_is_completed_residue_exempts_recurring_imperative() {
+        let doc = concat!(
+            "<!-- agent:queue -->\n",
+            "- deploy\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let exchange = concat!(
+            "### Re: deploy\n\n",
+            "> **Queue prompt:**\n>\n> deploy\n\n",
+            "Deployment completed.\n",
+        );
+
+        assert!(!free_text_queue_head_is_completed_residue(
+            doc, exchange, "deploy"
+        ));
     }
 
     #[test]

@@ -2758,7 +2758,6 @@ fn test_agent_doc_queue_owns_do_directive_target_parsing() {
         "agent-doc-orchestration/src/preflight/run.rs",
         "agent-doc-orchestration/src/project_controller.rs",
         "agent-doc-orchestration/src/session_check/queue_head_guards.rs",
-        "agent-doc-orchestration/src/session_check/queue_head_provenance_guards.rs",
         "agent-doc-orchestration/src/session_check/response_guards.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -2771,6 +2770,23 @@ fn test_agent_doc_queue_owns_do_directive_target_parsing() {
             "{relative} must not route queue directive parsing through session_check"
         );
     }
+    let queue_closeout_guard =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_closeout_guard.rs"))
+            .unwrap();
+    assert!(
+        queue_closeout_guard.contains("queue_directive::do_directive_target_ids"),
+        "queue closeout guard policy should call focused queue directive parsing directly"
+    );
+    let queue_head_provenance_guards = fs::read_to_string(
+        manifest_dir
+            .join("agent-doc-orchestration/src/session_check/queue_head_provenance_guards.rs"),
+    )
+    .unwrap();
+    assert!(
+        !queue_head_provenance_guards
+            .contains("agent_doc_queue::queue_directive::do_directive_target_ids"),
+        "queue_head_provenance_guards should consume queue_closeout_guard policy instead of parsing queue directives directly"
+    );
 }
 
 #[test]
@@ -8961,6 +8977,9 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
         "pub fn queue_head_has_explicit_completion_signal(",
         "pub fn explicit_queue_completion_ids(",
         "pub fn queue_head_matches_done_ids(",
+        "pub fn free_text_queue_head_identity(",
+        "pub fn committed_queue_contains_free_text_head(",
+        "pub fn free_text_queue_head_is_completed_residue(",
         "pub fn is_do_directive(",
         "fn leads_with_bare_id_directive(",
     ] {
@@ -9034,6 +9053,60 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
     assert!(
         queue_response.contains("crate::queue_heads::active_queue_head_text"),
         "queue_response should share active queue-head projection through queue_heads"
+    );
+
+    let queue_closeout_guard =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_closeout_guard.rs"))
+            .unwrap();
+    for required_snippet in [
+        "pub fn committed_queue_head_ids(",
+        "pub fn committed_current_queue_head_ids(",
+        "pub fn no_response_live_queue_head_ids(",
+        "pub fn queue_head_removal_decision(",
+        "pub enum QueueHeadRemovalProofSource",
+    ] {
+        assert!(
+            queue_closeout_guard.contains(required_snippet),
+            "agent-doc-queue must own queue closeout guard policy: {required_snippet}"
+        );
+    }
+
+    let queue_head_guards = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/queue_head_guards.rs"),
+    )
+    .unwrap();
+    let provenance_guards = fs::read_to_string(
+        manifest_dir
+            .join("agent-doc-orchestration/src/session_check/queue_head_provenance_guards.rs"),
+    )
+    .unwrap();
+    for forbidden_snippet in [
+        "pub(crate) fn committed_queue_head_ids(",
+        "pub(crate) fn committed_current_queue_head_ids(",
+        "fn committed_queue_head_ids(",
+        "fn committed_current_queue_head_ids(",
+        "fn normalized_free_text_queue_head_identity(",
+        "fn committed_queue_contains_active_free_text_head(",
+        "fn no_response_live_queue_head_ids(",
+        "fn queue_head_removal_decision(",
+    ] {
+        assert!(
+            !queue_head_guards.contains(forbidden_snippet)
+                && !provenance_guards.contains(forbidden_snippet),
+            "session_check must not re-own queue closeout/provenance policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        queue_head_guards
+            .contains("agent_doc_queue::queue_closeout_guard::no_response_live_queue_head_ids",)
+            && provenance_guards
+                .contains("agent_doc_queue::queue_closeout_guard::queue_head_removal_decision",)
+            && provenance_guards
+                .contains("agent_doc_queue::queue_heads::committed_queue_contains_free_text_head")
+            && provenance_guards.contains(
+                "agent_doc_queue::queue_heads::free_text_queue_head_is_completed_residue"
+            ),
+        "session_check should call queue closeout/provenance policy through agent-doc-queue directly"
     );
 
     let queue_manifest =

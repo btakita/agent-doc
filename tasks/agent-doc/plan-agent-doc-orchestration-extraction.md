@@ -276,6 +276,13 @@ focused crate under the old path.
   drift evidence, and calls the focused classifier; the old public
   `classify_closeout_recovery_state` path was replaced with the explicit
   file-backed adapter `classify_closeout_recovery_state_for_file`.
+- `agent-doc-tmux` now owns sync column-memory layout policy and safe-passive
+  focus-only expansion policy: restoring remembered sibling panes, preserving
+  duplicate-column layout state, returning restoration/expansion events for
+  orchestration logging, and honoring exact-visible editor projections.
+  Orchestration keeps only frontmatter/file-backed column classification,
+  focused-column resolution, tmux queries, and ops-log emission; the old
+  orchestration policy functions were deleted instead of kept as wrappers.
 
 ### Earlier closure finding
 

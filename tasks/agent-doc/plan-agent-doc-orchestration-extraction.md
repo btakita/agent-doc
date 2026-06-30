@@ -401,6 +401,10 @@ focused crate under the old path.
 - `agent-doc-supervisor::config` now owns the pure agent-doc dogfood session
   path policy used by supervisor auto-install. Project-controller RPC keeps only
   canonicalization, project-root discovery, Cargo.toml validation, and file IO.
+- `agent-doc-queue::route_dispatch` now owns active auto-route queue prompt
+  extraction and prompt-text normalization used by preflight route-queue
+  commit-boundary recovery. Preflight keeps only cycle-state/snapshot/git
+  recovery orchestration.
 - `agent-doc-element-backlog` already owned open backlog id extraction; preflight
   now calls `open_backlog_ids_in_content` directly for `do #id` closeout
   evidence instead of re-parsing backlog components locally.

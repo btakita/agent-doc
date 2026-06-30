@@ -10220,6 +10220,8 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
         "pub fn active_queue_heads(",
         "pub fn active_free_text_queue_heads(",
         "pub fn active_queue_head_text(",
+        "pub enum ActiveQueueHeadKind",
+        "pub fn classify_active_queue_head(",
         "pub fn queue_skip_diagnostic_for_content(",
         "pub fn queue_head_has_explicit_completion_signal(",
         "pub fn explicit_queue_completion_ids(",
@@ -10289,6 +10291,26 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
     assert!(
         queue_consume.contains("agent_doc_queue::queue_heads::queue_skip_diagnostic_for_content"),
         "queue_consume should keep only the file-reading adapter for skip diagnostics"
+    );
+
+    let queue_cmd =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/queue_cmd.rs")).unwrap();
+    for forbidden_snippet in [
+        "enum HeadKind",
+        "fn classify_active_head(",
+        "agent_doc_queue::document_queue as queue",
+        "agent_doc_queue::queue_response::queue_head_is_free_text_prompt",
+    ] {
+        assert!(
+            !queue_cmd.contains(forbidden_snippet),
+            "queue_cmd must not re-own explicit queue-head classification policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        queue_cmd.contains("agent_doc_queue::queue_heads::{")
+            && queue_cmd.contains("ActiveQueueHeadKind")
+            && queue_cmd.contains("classify_active_queue_head"),
+        "queue_cmd should call explicit queue-head classification through agent-doc-queue directly"
     );
 
     let queue_response =

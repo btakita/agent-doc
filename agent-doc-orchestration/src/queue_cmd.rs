@@ -20,48 +20,12 @@ use crate::snapshot;
 use agent_doc_element::element;
 use agent_doc_element_backlog::backlog;
 use agent_doc_queue::backlog_sync;
-use agent_doc_queue::document_queue as queue;
-use agent_doc_queue::queue_response::queue_head_is_free_text_prompt;
+use agent_doc_queue::document_queue;
+use agent_doc_queue::queue_heads::{ActiveQueueHeadKind, classify_active_queue_head};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ConsumeOptions {
     pub force_disk: bool,
-}
-
-/// Classification of the active `agent:queue` head for `consume`.
-enum HeadKind {
-    /// No queue component, or no live prompt to strike.
-    None,
-    /// A free-text head (a plain question/instruction) — strikable here. Also
-    /// covers a bare registered `prompt_presets` token head (`#advance-review`)
-    /// that is not a tracked backlog/review id: it has no `--done` reap path, so
-    /// it strikes here like free text (#qpresetstrike).
-    FreeText,
-    /// An id-backed head (`#id`, `[#id]`, `do [#id]`, or a queue trigger) that
-    /// names a tracked backlog/review/icebox directive and must be reaped via its
-    /// id, never struck blind.
-    IdBacked,
-}
-
-/// Classify the active queue head using the canonical free-text detector
-/// (`write::queue_head_is_free_text_prompt`), which resolves bare `[#id]`,
-/// `#id`, and `#preset` heads as id-backed via `topic_resolves_to_exact_id` —
-/// the simpler `do [#` prefix check would miss a bare `[#id]` head and strike it,
-/// desyncing it from its backlog item.
-fn classify_active_head(content: &str) -> Result<HeadKind> {
-    let components = element::parse(content)?;
-    let Some(qc) = components.iter().find(|c| c.name == "queue") else {
-        return Ok(HeadKind::None);
-    };
-    let entries = queue::parse(&content[qc.open_end..qc.close_start])?;
-    if queue::prompts(&entries).is_empty() {
-        return Ok(HeadKind::None);
-    }
-    if queue_head_is_free_text_prompt(content)? {
-        Ok(HeadKind::FreeText)
-    } else {
-        Ok(HeadKind::IdBacked)
-    }
 }
 
 /// Explicitly strike the leading `count` free-text queue head(s) — the agent
@@ -95,9 +59,9 @@ pub fn consume_with_options(file: &Path, count: usize, options: ConsumeOptions) 
     for _ in 0..target {
         let content = std::fs::read_to_string(file)
             .with_context(|| format!("failed to read {}", file.display()))?;
-        match classify_active_head(&content)? {
-            HeadKind::None => break, // no queue component or no prompt left to strike
-            HeadKind::IdBacked => {
+        match classify_active_queue_head(&content)? {
+            ActiveQueueHeadKind::None => break, // no queue component or no prompt left to strike
+            ActiveQueueHeadKind::IdBacked => {
                 if struck.is_empty() {
                     bail!(
                         "{}: queue head is an id-backed directive, not a free-text prompt. \
@@ -113,7 +77,7 @@ pub fn consume_with_options(file: &Path, count: usize, options: ConsumeOptions) 
                 // the first id-backed head rather than desyncing it.
                 break;
             }
-            HeadKind::FreeText => {}
+            ActiveQueueHeadKind::FreeText => {}
         }
         let outcome = if options.force_disk {
             crate::write::consume_queue_prompt_force_disk(file)?
@@ -265,10 +229,11 @@ pub fn sync(file: &Path) -> Result<()> {
     }
 
     let body = &content[qc.open_end..qc.close_start];
-    let entries = queue::parse(body)
+    let entries = document_queue::parse(body)
         .with_context(|| format!("failed to parse queue body in {}", file.display()))?;
 
-    let Some(synced) = queue::sync_backlog_into_queue(&entries, &ids, effective_mode) else {
+    let Some(synced) = document_queue::sync_backlog_into_queue(&entries, &ids, effective_mode)
+    else {
         println!(
             "{}: queue already in sync ({} active backlog id(s), {:?} mode). No changes.",
             file.display(),
@@ -278,7 +243,7 @@ pub fn sync(file: &Path) -> Result<()> {
         return Ok(());
     };
 
-    let new_body = queue::render(&synced);
+    let new_body = document_queue::render(&synced);
     let new_content = qc.replace_content(&content, &new_body);
 
     std::fs::write(file, &new_content)

@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 
 use crate::queue_response::{
     display_queue_prompt_text, free_text_head_answered_by_response, normalize_done_id,
-    queue_prompt_done_id, queue_prompt_text_is_free_text,
+    queue_head_is_free_text_prompt, queue_prompt_done_id, queue_prompt_text_is_free_text,
 };
 
 /// Extract queue prompt head texts from a document's `agent:queue` component.
@@ -51,6 +51,47 @@ pub fn active_queue_head_text(content: &str) -> Result<Option<String>> {
     let entries = crate::document_queue::parse(queue.content(content))
         .context("queue consume guard: failed to parse document queue")?;
     Ok(crate::document_queue::first_prompt(&entries).map(|prompt| prompt.text.clone()))
+}
+
+/// Classification of the leading prompt in an `agent:queue` component for
+/// explicit operator-driven consumption.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ActiveQueueHeadKind {
+    /// No queue component, or no live prompt to strike.
+    None,
+    /// A free-text head (a plain question/instruction) that can be struck by the
+    /// explicit consume command. Also covers bare registered `prompt_presets`
+    /// token heads that have no tracked-work reap path.
+    FreeText,
+    /// An id-backed head (`#id`, `[#id]`, `do [#id]`, or a queue trigger) that
+    /// names tracked work and must be reaped or acknowledged through id-aware
+    /// paths instead of struck blindly.
+    IdBacked,
+}
+
+/// Classify the leading `agent:queue` prompt for explicit queue consumption.
+///
+/// This intentionally checks for a queue prompt before consulting the canonical
+/// free-text detector. When a document has queued prompts but the queue is not
+/// active, the free-text detector returns false, preserving the explicit
+/// consume command's historical fail-closed behavior for inactive queued text.
+pub fn classify_active_queue_head(content: &str) -> Result<ActiveQueueHeadKind> {
+    let components = agent_doc_element::element::parse(content)?;
+    let Some(queue) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return Ok(ActiveQueueHeadKind::None);
+    };
+    let entries = crate::document_queue::parse(queue.content(content))?;
+    if crate::document_queue::prompts(&entries).is_empty() {
+        return Ok(ActiveQueueHeadKind::None);
+    }
+    if queue_head_is_free_text_prompt(content)? {
+        Ok(ActiveQueueHeadKind::FreeText)
+    } else {
+        Ok(ActiveQueueHeadKind::IdBacked)
+    }
 }
 
 /// Operator-facing diagnostic explaining why active queue-head consumption was
@@ -307,6 +348,48 @@ mod tests {
         );
         let inactive = HALT_QUEUE_DOC.replace("queue_active: true", "queue_active: false");
         assert_eq!(active_queue_head_text(&inactive).unwrap(), None);
+    }
+
+    #[test]
+    fn classify_active_queue_head_distinguishes_free_text_and_id_backed() {
+        let free_text = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- answer this question\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert_eq!(
+            classify_active_queue_head(free_text).unwrap(),
+            ActiveQueueHeadKind::FreeText
+        );
+
+        let id_backed = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#admin-recover] Fix it\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- [#admin-recover]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert_eq!(
+            classify_active_queue_head(id_backed).unwrap(),
+            ActiveQueueHeadKind::IdBacked
+        );
+    }
+
+    #[test]
+    fn classify_active_queue_head_preserves_inactive_queue_fail_closed_behavior() {
+        let inactive = concat!(
+            "---\nqueue_active: false\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- answer this later\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert_eq!(
+            classify_active_queue_head(inactive).unwrap(),
+            ActiveQueueHeadKind::IdBacked
+        );
     }
 
     #[test]

@@ -216,6 +216,7 @@ dependencies = [
  "agent-doc-element",
  "agent-doc-element-boundary",
  "anyhow",
+ "similar",
 ]
 
 [[package]]

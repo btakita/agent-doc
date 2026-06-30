@@ -1690,7 +1690,7 @@ impl SimWorld {
         content_ours: &str,
         normalize_prefix_lines: &[String],
     ) {
-        if !agent_doc_orchestration::write::verify_sidecar_normalization(
+        if !agent_doc_element_exchange::verify_sidecar_normalization(
             sidecar,
             normalize_prefix_lines,
         ) {

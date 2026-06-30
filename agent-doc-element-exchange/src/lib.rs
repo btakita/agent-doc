@@ -7,6 +7,7 @@ use agent_doc_element::{
     ElementSchedulingRole, ElementShape, ElementSource, ElementWritePolicy,
 };
 use anyhow::Result;
+use similar::{ChangeTag, TextDiff};
 
 pub const DESCRIPTOR: ElementDescriptor = ElementDescriptor {
     name: "exchange",
@@ -1019,6 +1020,348 @@ pub fn normalize_exchange_prefixes_for_targets(doc: &str, prefix_lines: &[String
         .join("\n");
 
     format!("{before_exchange}{normalized_user_region}{agent_region}{after_exchange}")
+}
+
+/// Extract lines that were normalized by [`normalize_user_prompts_in_exchange`].
+///
+/// Compares the exchange content line-by-line and returns lines where `before`
+/// had plain text and `after` has `❯ <text>` at the same position. Positional
+/// comparison preserves duplicate prompt lines.
+pub fn extract_normalization_targets(before: &str, after: &str) -> Vec<String> {
+    let before_exc = exchange_content(before).unwrap_or("");
+    let after_exc = exchange_content(after).unwrap_or("");
+
+    if before_exc == after_exc {
+        return vec![];
+    }
+
+    let mut targets = Vec::new();
+    for (before_line, after_line) in before_exc.lines().zip(after_exc.lines()) {
+        if let Some(stripped) = after_line.strip_prefix("❯ ")
+            && before_line == stripped
+        {
+            targets.push(stripped.to_string());
+        }
+    }
+    targets
+}
+
+fn fence_open(trimmed: &str) -> Option<(char, usize)> {
+    let fc = trimmed.chars().next()?;
+    if fc != '`' && fc != '~' {
+        return None;
+    }
+    let fl = trimmed.chars().take_while(|&c| c == fc).count();
+    if fl >= 3 { Some((fc, fl)) } else { None }
+}
+
+fn fence_close(trimmed: &str, fence_char: char, fence_len: usize) -> bool {
+    let fc = trimmed.chars().next().unwrap_or('\0');
+    if fc != fence_char {
+        return false;
+    }
+    let fl = trimmed.chars().take_while(|&c| c == fc).count();
+    fl >= fence_len && trimmed[fl..].trim().is_empty()
+}
+
+fn heading_level(trimmed: &str) -> Option<usize> {
+    let n = trimmed.bytes().take_while(|&b| b == b'#').count();
+    if (1..=6).contains(&n) && trimmed.as_bytes().get(n) == Some(&b' ') {
+        Some(n)
+    } else {
+        None
+    }
+}
+
+fn strip_exchange_boundary_markers(content: &str) -> String {
+    let filtered: Vec<&str> = content
+        .lines()
+        .filter(|line| !line.trim().starts_with("<!-- agent:boundary:"))
+        .collect();
+    let mut out = filtered.join("\n");
+    if content.ends_with('\n') && !out.is_empty() {
+        out.push('\n');
+    }
+    out
+}
+
+/// Add `❯ ` to user-added exchange lines by comparing the current baseline to
+/// the previous snapshot. This is a pure document transformation; effectful
+/// safety rails and logging live in orchestration.
+pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapshot: &str) -> String {
+    let Ok(content_comps) = agent_doc_element::element::parse(content) else {
+        return content.to_string();
+    };
+    let baseline_comps = agent_doc_element::element::parse(baseline).unwrap_or_default();
+    let snap_comps = agent_doc_element::element::parse(snapshot).unwrap_or_default();
+
+    let Some(exchange) = content_comps.iter().find(|c| c.name == "exchange") else {
+        return content.to_string();
+    };
+
+    let baseline_exc = baseline_comps
+        .iter()
+        .find(|c| c.name == "exchange")
+        .map(|e| e.content(baseline))
+        .unwrap_or("");
+    let snap_exc = snap_comps
+        .iter()
+        .find(|c| c.name == "exchange")
+        .map(|e| e.content(snapshot))
+        .unwrap_or("");
+
+    let exc_content = exchange.content(content);
+    let content_user_region = exchange_user_region(exc_content);
+    let content_agent_region = &exc_content[content_user_region.len()..];
+
+    let baseline_stripped = strip_exchange_boundary_markers(baseline_exc);
+    let snap_stripped = strip_exchange_boundary_markers(snap_exc);
+    let diff_text = agent_doc_diff::unified_diff_from_contents(&snap_stripped, &baseline_stripped);
+    let prompt_prefix_targets = diff_text
+        .as_deref()
+        .map(agent_doc_diff::prompt_prefix_normalization_targets)
+        .unwrap_or_default();
+
+    let diff = TextDiff::from_lines(snap_stripped.as_str(), baseline_stripped.as_str());
+    let mut user_added = HashSet::<String>::new();
+    let mut agent_inserted = HashSet::<String>::new();
+    let mut in_baseline_fence = false;
+    let mut baseline_fence_char = '`';
+    let mut baseline_fence_len = 3usize;
+    let mut in_agent_block = false;
+    let mut saw_deleted_heading = false;
+    let mut in_re_block = false;
+    let mut re_block_saw_body_delete = false;
+    for change in diff.iter_all_changes() {
+        let line = change.value().trim_end_matches('\n');
+        let trimmed = line.trim();
+        let is_heading = heading_level(trimmed).is_some();
+        let was_in_fence = in_baseline_fence;
+        if change.tag() == ChangeTag::Delete {
+            saw_deleted_heading = !in_baseline_fence && is_heading;
+            if in_re_block
+                && !in_baseline_fence
+                && !is_heading
+                && !trimmed.is_empty()
+                && !trimmed.starts_with("<!--")
+                && fence_open(trimmed).is_none()
+            {
+                re_block_saw_body_delete = true;
+            }
+            continue;
+        }
+        let heading_replaces_deleted_heading =
+            change.tag() == ChangeTag::Insert && is_heading && saw_deleted_heading;
+        saw_deleted_heading = false;
+        if change.tag() != ChangeTag::Delete {
+            if !in_baseline_fence {
+                if let Some((fc, fl)) = fence_open(trimmed) {
+                    in_baseline_fence = true;
+                    baseline_fence_char = fc;
+                    baseline_fence_len = fl;
+                }
+            } else if fence_close(trimmed, baseline_fence_char, baseline_fence_len) {
+                in_baseline_fence = false;
+            }
+            if !in_baseline_fence {
+                if heading_level(trimmed).is_some() {
+                    in_agent_block =
+                        change.tag() == ChangeTag::Insert && !heading_replaces_deleted_heading;
+                    in_re_block = trimmed.starts_with("### Re:");
+                    re_block_saw_body_delete = false;
+                } else if in_agent_block && trimmed.is_empty() {
+                    // Blank assistant-response lines do not prove the next line is user input.
+                } else if in_agent_block
+                    && (starts_targeted_prompt_repair_after_response(trimmed, true)
+                        || trimmed.starts_with('❯')
+                        || trimmed.starts_with("<!--"))
+                {
+                    in_agent_block = false;
+                }
+                if in_re_block
+                    && (starts_targeted_prompt_repair_after_response(trimmed, true)
+                        || trimmed.starts_with('❯'))
+                {
+                    in_re_block = false;
+                    re_block_saw_body_delete = false;
+                }
+            }
+        }
+        let is_fence_delim = fence_open(trimmed).is_some()
+            || (was_in_fence && fence_close(trimmed, baseline_fence_char, baseline_fence_len));
+        let is_re_block_replacement = in_re_block && re_block_saw_body_delete;
+        if change.tag() == ChangeTag::Insert
+            && !in_baseline_fence
+            && !in_agent_block
+            && !is_re_block_replacement
+            && !heading_replaces_deleted_heading
+            && !trimmed.is_empty()
+            && !trimmed.starts_with('❯')
+            && !trimmed.starts_with("<!--")
+            && !is_fence_delim
+            && !agent_doc_diff::line_is_binary_authored_compact_summary(trimmed)
+        {
+            user_added.insert(line.to_string());
+        } else if change.tag() == ChangeTag::Insert && (in_agent_block || is_re_block_replacement) {
+            agent_inserted.insert(line.to_string());
+        }
+    }
+
+    for line in prompt_prefix_targets {
+        if !agent_inserted.contains(&line) {
+            user_added.insert(line);
+        }
+    }
+    if user_added.is_empty() {
+        return content.to_string();
+    }
+
+    let mut in_content_fence = false;
+    let mut content_fence_char = '`';
+    let mut content_fence_len = 3usize;
+    let mut normalized_user = String::new();
+    for line in content_user_region.lines() {
+        let trimmed = line.trim();
+        if !in_content_fence {
+            if let Some((fc, fl)) = fence_open(trimmed) {
+                in_content_fence = true;
+                content_fence_char = fc;
+                content_fence_len = fl;
+            }
+        } else if fence_close(trimmed, content_fence_char, content_fence_len) {
+            in_content_fence = false;
+        }
+        if !in_content_fence && user_added.contains(line) {
+            normalized_user.push_str("❯ ");
+        }
+        normalized_user.push_str(line);
+        normalized_user.push('\n');
+    }
+    if !content_user_region.is_empty() && !content_user_region.ends_with('\n') {
+        normalized_user.truncate(normalized_user.len() - 1);
+    }
+    if content_user_region.is_empty() {
+        normalized_user.clear();
+    }
+
+    exchange.replace_content(content, &format!("{normalized_user}{content_agent_region}"))
+}
+
+/// Preserve committed exchange prompt-prefix state after normalization repairs.
+pub fn preserve_head_exchange_prompt_prefix_state(content: &str, head: &str) -> String {
+    let Some(head_exchange) = exchange_component(head) else {
+        return content.to_string();
+    };
+    let mut head_unprefixed = HashMap::<String, usize>::new();
+    let mut head_prefixed = HashMap::<String, usize>::new();
+    for line in head_exchange.content(head).lines() {
+        let line = line.trim_end();
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('❯')
+            || trimmed.starts_with("<!--")
+            || is_exchange_response_heading_for_prefix_repair(trimmed)
+        {
+            continue;
+        }
+        *head_unprefixed.entry(line.to_string()).or_default() += 1;
+    }
+    for line in exchange_prompt_prefix_eligible_lines(head_exchange.content(head), None) {
+        let line = line.trim_end();
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("<!--") {
+            continue;
+        }
+        if let Some(stripped) = line.strip_prefix("❯ ") {
+            *head_prefixed.entry(stripped.to_string()).or_default() += 1;
+        }
+    }
+    if head_unprefixed.is_empty() && head_prefixed.is_empty() {
+        return content.to_string();
+    }
+
+    let Some(exchange) = exchange_component(content) else {
+        return content.to_string();
+    };
+    let exchange_content = exchange.content(content);
+    let mut changed = false;
+    let mut rebuilt = String::with_capacity(exchange_content.len());
+    let target_counts =
+        normalization_target_counts(&head_prefixed.keys().cloned().collect::<Vec<String>>());
+    let mut in_response_block = false;
+    for segment in exchange_content.split_inclusive('\n') {
+        let (line, newline) = split_line_segment(segment);
+        let trimmed = line.trim();
+        if trimmed.starts_with("<!-- agent:boundary:") {
+            in_response_block = false;
+        } else if is_exchange_response_heading_for_prefix_repair(trimmed) {
+            in_response_block = true;
+        }
+        let is_target = target_counts
+            .get(line.trim_end())
+            .copied()
+            .unwrap_or_default()
+            > 0;
+        let eligible = if in_response_block {
+            starts_prompt_run_after_response(trimmed, is_target)
+        } else {
+            true
+        };
+        if let Some(unprefixed) = line.strip_prefix("❯ ")
+            && let Some(remaining) = head_unprefixed.get_mut(unprefixed)
+            && *remaining > 0
+        {
+            rebuilt.push_str(unprefixed);
+            *remaining -= 1;
+            changed = true;
+        } else if eligible
+            && !line.starts_with("❯ ")
+            && let Some(remaining) = head_prefixed.get_mut(line)
+            && *remaining > 0
+        {
+            rebuilt.push_str("❯ ");
+            rebuilt.push_str(line);
+            *remaining -= 1;
+            changed = true;
+        } else {
+            rebuilt.push_str(line);
+        }
+        if in_response_block && eligible && starts_prompt_run_after_response(trimmed, is_target) {
+            in_response_block = false;
+        }
+        rebuilt.push_str(newline);
+    }
+    if !changed {
+        return content.to_string();
+    }
+    exchange.replace_content(content, &rebuilt)
+}
+
+/// Verify that sidecar content preserved every expected `❯ ` prompt prefix.
+pub fn verify_sidecar_normalization(sidecar: &str, normalize_prefix_lines: &[String]) -> bool {
+    if normalize_prefix_lines.is_empty() {
+        return true;
+    }
+
+    let sidecar_exchange = exchange_content(sidecar)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| sidecar.to_string());
+    let target_counts = normalization_target_counts(normalize_prefix_lines);
+
+    let mut prefixed_counts = HashMap::<String, usize>::new();
+    for line in exchange_prompt_prefix_eligible_lines(&sidecar_exchange, Some(&target_counts)) {
+        let trimmed = line.trim_end();
+        if let Some(stripped) = trimmed.strip_prefix("❯ ") {
+            *prefixed_counts.entry(stripped.to_string()).or_default() += 1;
+        }
+    }
+
+    for (target, required) in target_counts {
+        if prefixed_counts.get(&target).copied().unwrap_or(0) < required {
+            return false;
+        }
+    }
+    true
 }
 
 #[cfg(test)]

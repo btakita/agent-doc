@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::{frontmatter_io, template_io};
+use agent_doc_element_exchange::extract_normalization_targets;
 use agent_doc_template::response_materialization::sanitize_template_patchback_response;
 
 /// Run the write command: append assistant response to document.

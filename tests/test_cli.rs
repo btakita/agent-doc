@@ -10711,6 +10711,10 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         "pub fn repair_response_precedes_prompt_in_exchange",
         "pub fn extract_post_commit_normalization_targets",
         "pub fn normalize_exchange_prefixes_for_targets",
+        "pub fn extract_normalization_targets",
+        "pub fn normalize_user_prompts_in_exchange",
+        "pub fn preserve_head_exchange_prompt_prefix_state",
+        "pub fn verify_sidecar_normalization",
     ] {
         assert!(
             exchange_lib.contains(required),
@@ -10763,11 +10767,19 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         write_main.contains("use agent_doc_element_exchange::{"),
         "write.rs should import exchange prompt/order policy from the focused crate"
     );
+    let write_run_entry =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/run_entry.rs"))
+            .unwrap();
+    assert!(
+        write_run_entry.contains("use agent_doc_element_exchange::extract_normalization_targets;"),
+        "write run entry should import normalization target extraction from the focused crate"
+    );
 
     let orchestration_policy_sources = [
         ("write.rs", write_main),
         ("write/exchange_reconcile.rs", write_exchange_reconcile),
         ("write/normalize.rs", write_normalize),
+        ("write/run_entry.rs", write_run_entry),
         ("write/ipc.rs", write_ipc),
         ("write/ipc/transport.rs", write_ipc_transport),
     ];
@@ -10812,6 +10824,11 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         "fn exchange_contains_normalized_line_sequence",
         "pub fn extract_post_commit_normalization_targets",
         "pub fn normalize_exchange_prefixes_for_targets",
+        "pub fn extract_normalization_targets(",
+        "pub fn normalize_user_prompts_in_exchange(",
+        "pub(crate) fn preserve_head_exchange_prompt_prefix_state(",
+        "pub fn preserve_head_exchange_prompt_prefix_state(",
+        "pub fn verify_sidecar_normalization(",
         "pub(crate) fn normalization_target_counts",
     ] {
         for (path, source) in &orchestration_policy_sources {

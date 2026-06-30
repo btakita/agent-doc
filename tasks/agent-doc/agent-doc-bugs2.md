@@ -50,7 +50,18 @@ See /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-agent-doc-orchestra
 Continuing from the stop-hook recovery. The IPC ACK-content write-through fix is committed in `src/agent-doc` as `0acf0c32 extract template response policy and ack write-through`, installed as `agent-doc v0.34.65`, and verified with the focused IPC test groups plus `cargo check -p agent-doc-orchestration`.
 
 The remaining uncommitted `src/agent-doc` changes are the parallel exchange-policy extraction work, so I left them untouched.
-<!-- agent:boundary:149db94c -->
+
+### Re: do [#qftlossproof] — gpt-5
+
+I treated `#qftlossproof` as a failed proof, not a pass, but I could not safely close the backlog item in this live-editor state.
+
+The latest JetBrains live-buffer sidecar for `tasks/agent-doc/agent-doc-bugs2.md` is healthy: `.agent-doc/live-buffer/f6d9af4a09fc7ed8.jetbrains-1996528-698b0792-e4f9-4b27-b4ad-40edbd2ef430` records `operator_text_authority_v1`, `edit_epoch=89`, `last_synced_epoch=83`, `len=16669`, and hash `dc278d260b5b2a3efffeb12c428f0f81f5be1c8373fdd3ef044eee4b39adda4f`, matching disk.
+
+The problematic evidence is `.agent-doc/logs/ops.log:4338997`: `live_buffer_classify` suppressed a differing operator-capable buffer digest with `reason=write_provenance_newer_than_buffer`, `buffer_len=16676`, and `buffer_hash=83f08ab7e6be49a671f96f7c0ffbb71fe28bba858929b883c5904140cabd5192` behind agent write provenance `1700d253-b773-4070-beff-05da7a45634e` at `len=16669` / hash `dc278d260b5b2a3efffeb12c428f0f81f5be1c8373fdd3ef044eee4b39adda4f`. The provenance file exists at `.agent-doc/write-provenance/f6d9af4a09fc7ed8`; I found no durable sidecar preserving the suppressed 16676-byte buffer content.
+
+I attempted to file `#qftlossdelta` and mark `#qftlossproof` done through `agent-doc write --commit`, but the live editor repeatedly accepted the exchange patch and then rejected or reverted the tracked-work mutation, ending in `editor_convergence_required` / `retry_without_disk_write`. Because this document is live in the editor, I did not use `--force-disk`. `#qftlossproof` stays open until the operator either saves/closes the live editor buffer and retries, or explicitly authorizes a force-disk closeout for the backlog mutation.
+
+<!-- agent:boundary:8926394c -->
 <!-- /agent:exchange -->
 ## Queue
 

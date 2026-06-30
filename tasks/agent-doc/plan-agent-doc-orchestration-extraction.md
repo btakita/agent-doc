@@ -229,6 +229,11 @@ focused crate under the old path.
   from captured response summaries, and bounding hook summary text. Orchestration
   keeps hook execution, capture loading, project-root/git facts, and tsift
   process invocation while importing the focused response-text helpers directly.
+- `agent-doc-turn` now owns turn-status policy vocabulary: turn-active and
+  stale-supervisor marker path constants, the readable turn-active marker schema,
+  marker freshness/pane matching, and pane-title composition. Orchestration keeps
+  current-dir project-root resolution, marker file IO, serde JSON persistence,
+  supervisor stale marker file effects, and tmux title updates.
 - `agent-doc-prompt-contract` now owns harness prompt parsing policy: stripping
   binary-owned `agent-doc <file>` invocations, classifying claim/compact
   invocations as non-session prompts, matching the invoked file, preserving

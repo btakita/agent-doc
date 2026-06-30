@@ -10561,6 +10561,8 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         "pub fn dedupe_live_prompt_prefix_variants_in_exchange_tail",
         "pub fn dedupe_adjacent_prompt_prefix_duplicates_in_exchange",
         "pub fn dedupe_prompt_lines_against_before_exchange",
+        "pub fn response_precedes_prompt_in_exchange",
+        "pub fn repair_response_precedes_prompt_in_exchange",
         "pub fn extract_post_commit_normalization_targets",
         "pub fn normalize_exchange_prefixes_for_targets",
     ] {
@@ -10609,7 +10611,15 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         "write IPC transport should import exchange prefix policy from the focused crate"
     );
 
+    let write_main =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    assert!(
+        write_main.contains("use agent_doc_element_exchange::{"),
+        "write.rs should import exchange prompt/order policy from the focused crate"
+    );
+
     let orchestration_policy_sources = [
+        ("write.rs", write_main),
         ("write/exchange_reconcile.rs", write_exchange_reconcile),
         ("write/normalize.rs", write_normalize),
         ("write/ipc.rs", write_ipc),
@@ -10644,6 +10654,16 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         "pub(crate) fn dedupe_live_prompt_prefix_variants_in_exchange_tail",
         "pub(crate) fn dedupe_adjacent_prompt_prefix_duplicates_in_exchange",
         "pub(crate) fn dedupe_prompt_lines_against_before_exchange",
+        "struct ExchangeLineSegment",
+        "fn split_exchange_line_segments",
+        "fn line_is_exchange_boundary",
+        "fn normalized_response_signature_lines",
+        "fn exchange_response_block_matches_signature",
+        "fn find_response_precedes_prompt_candidate",
+        "fn response_precedes_prompt_in_exchange",
+        "pub fn repair_response_precedes_prompt_in_exchange",
+        "fn normalized_non_boundary_exchange_lines",
+        "fn exchange_contains_normalized_line_sequence",
         "pub fn extract_post_commit_normalization_targets",
         "pub fn normalize_exchange_prefixes_for_targets",
         "pub(crate) fn normalization_target_counts",

@@ -10,5 +10,7 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_element_exchange"
 
 [dependencies]
+agent-doc-element-boundary = { path = "../agent-doc-element-boundary", version = "0.34.65" }
 agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.65" }
 agent-doc-element = { path = "../agent-doc-element", version = "0.34.65" }
+anyhow = "1"

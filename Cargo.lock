@@ -214,6 +214,8 @@ version = "0.34.65"
 dependencies = [
  "agent-doc-diff",
  "agent-doc-element",
+ "agent-doc-element-boundary",
+ "anyhow",
 ]
 
 [[package]]

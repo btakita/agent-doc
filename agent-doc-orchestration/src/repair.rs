@@ -881,7 +881,7 @@ fn repair_template_doc_if_needed(
     let boundary_changed = boundary_repaired.is_some();
     let mut repaired = boundary_repaired.unwrap_or_else(|| tail_repaired.clone());
     let order_repaired =
-        write::repair_response_precedes_prompt_in_exchange(&repaired, known_response, file, None)?;
+        write::repair_response_prompt_order_for_file(&repaired, known_response, file, None)?;
     let order_changed = order_repaired.is_some();
     if let Some(ordered) = order_repaired {
         repaired = ordered;

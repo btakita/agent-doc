@@ -486,10 +486,14 @@ should be deleted during extraction.
   evidence instead of re-parsing backlog components locally. It also owns pure
   tracked-work target id normalization/extraction from
   backlog/review/done/icebox component bodies, including preferred-component
-  selection and fallback to active backlog or other tracked-work components.
-  Write-side pending checks and cycle-state checkpoint normalization keep file
-  IO, persisted-cycle state, baselines, and guard formatting while calling the
-  focused backlog parser directly.
+  selection and fallback to active backlog or other tracked-work components. It
+  now also owns tracked-surface maintenance policy used by preflight and
+  ops-proof: backlog/pending alias matching, surface labels, which surfaces may
+  auto-reap already-done mirrors or ops-proof completions, backlog-body reorder
+  projection, and review open/gated counts. Write-side pending checks,
+  cycle-state checkpoint normalization, preflight, and ops-proof keep file IO,
+  persisted-cycle state, baselines, snapshot reconciliation, ops-log emission,
+  and guard formatting while calling the focused backlog parser directly.
 - `agent-doc-turn` now owns committed-without-response-body closeout policy:
   detecting assistant `### Re:` response bodies in `agent:exchange` and deciding
   whether committed cycles with no visible response body pass, skip as no-op

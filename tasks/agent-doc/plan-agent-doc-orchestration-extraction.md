@@ -226,6 +226,11 @@ focused crate under the old path.
   marking entries completed by done ids, and normalizing consumed done-id bags.
   Orchestration keeps document locks, file/snapshot IO, IPC node ops,
   response-echo embedding, ops logging, and editor convergence.
+- `agent-doc-turn` now owns committed-without-response-body closeout policy:
+  detecting assistant `### Re:` response bodies in `agent:exchange` and deciding
+  whether committed cycles with no visible response body pass, skip as no-op
+  commits, or interrupt. Orchestration keeps cycle-state loading, file parsing,
+  ops-log emission, side-effect note rendering, and recovery-message formatting.
 
 ### Earlier closure finding
 

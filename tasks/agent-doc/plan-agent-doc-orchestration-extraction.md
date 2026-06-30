@@ -291,6 +291,12 @@ focused crate under the old path.
   markers, backlog/pending queue-sync attributes, icebox queue misuse, priority
   component attributes, and typo detection. Preflight keeps only
   `PreflightWarning` output shaping and file-path message prefixing.
+- `agent-doc-queue` now owns crash-durable queue-journal replay/dedupe policy:
+  extracting unique live-buffer queue prompts across editor snapshots and
+  suppressing replay when live or durable queue content already represents a
+  prompt. Orchestration keeps journal path resolution, JSONL sidecar IO, fsync,
+  live-buffer sidecar reads, snapshot reads, and clear/remove effects while
+  calling the focused queue policy directly.
 - `agent-doc-element-backlog` already owned open backlog id extraction; preflight
   now calls `open_backlog_ids_in_content` directly for `do #id` closeout
   evidence instead of re-parsing backlog components locally.

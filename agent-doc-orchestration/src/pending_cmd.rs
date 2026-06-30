@@ -19,10 +19,13 @@ use std::path::Path;
 use crate::snapshot;
 use agent_doc_element::element;
 use agent_doc_element::element::{
-    is_backlog_component, is_icebox_component, is_review_component, is_tracked_work_component,
+    is_backlog_component, is_icebox_component, is_tracked_work_component,
 };
 use agent_doc_element_backlog::backlog;
-use agent_doc_element_review::{ReviewItemView, ReviewListFilter, UngateTasksReport};
+use agent_doc_element_review::{
+    ReviewItemView, ReviewListFilter, UngateTasksReport, ensure_review_component_in_document,
+    find_review_component_in_content,
+};
 
 thread_local! {
     static FORCE_DISK_PENDING_WRITE: Cell<bool> = const { Cell::new(false) };
@@ -131,37 +134,6 @@ fn find_tracked_list_component(
 
 fn find_pending_component(file: &Path) -> Result<(String, element::Component)> {
     find_tracked_list_component(file, TrackedList::Backlog)
-}
-
-fn find_review_component_in_content(content: &str) -> Result<Option<element::Component>> {
-    let components = element::parse(content).context("failed to parse components")?;
-    Ok(components
-        .into_iter()
-        .find(|c| is_review_component(&c.name)))
-}
-
-fn insert_empty_review_after_backlog(content: &str) -> Result<String> {
-    let components = element::parse(content).context("failed to parse components")?;
-    if components.iter().any(|c| is_review_component(&c.name)) {
-        return Ok(content.to_string());
-    }
-    let backlog = components
-        .iter()
-        .find(|c| is_backlog_component(&c.name))
-        .context("document has no backlog/pending component for review insertion")?;
-    let insert = "\n## Review\n\n<!-- agent:review -->\n<!-- /agent:review -->\n";
-    let mut out = String::with_capacity(content.len() + insert.len());
-    out.push_str(&content[..backlog.close_end]);
-    out.push_str(insert);
-    out.push_str(&content[backlog.close_end..]);
-    Ok(out)
-}
-
-fn ensure_review_component(content: &str) -> Result<(String, element::Component)> {
-    let content = insert_empty_review_after_backlog(content)?;
-    let comp = find_review_component_in_content(&content)?
-        .context("document has no review component after insertion")?;
-    Ok((content, comp))
 }
 
 fn find_component_containing_open_id(
@@ -523,7 +495,7 @@ pub fn gate(file: &Path, id: &str) -> Result<()> {
         &full_content,
         &canonicalize_component_content(file, &new_backlog),
     );
-    let (content_with_review, review_comp) = ensure_review_component(&new_doc)?;
+    let (content_with_review, review_comp) = ensure_review_component_in_document(&new_doc)?;
     new_doc = content_with_review;
     let review_body = review_comp.content(&new_doc);
     let new_review = backlog::op_insert_item_first(review_body, item);
@@ -540,7 +512,7 @@ pub fn gate(file: &Path, id: &str) -> Result<()> {
 /// adds (`#opsproof-samecycle-add`).
 pub fn review_add(file: &Path, item: &str) -> Result<Option<String>> {
     let full_content = std::fs::read_to_string(file).context("failed to read document")?;
-    let (full_content, comp) = ensure_review_component(&full_content)?;
+    let (full_content, comp) = ensure_review_component_in_document(&full_content)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = doc_id_for(file);
     let outcome = backlog::op_add_with_outcome(existing, item, &doc_id, true)?;

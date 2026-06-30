@@ -6624,6 +6624,8 @@ fn test_agent_doc_element_review_owns_review_projection_and_ungate_planning() {
     for required in [
         "pub struct ReviewItemView",
         "pub struct ReviewListFilter",
+        "pub fn find_review_component_in_content",
+        "pub fn ensure_review_component_in_document",
         "pub fn review_item_views_from_content",
         "pub struct UngateTasksReport",
         "pub struct UngateTasksPlan",
@@ -6642,6 +6644,9 @@ fn test_agent_doc_element_review_owns_review_projection_and_ungate_planning() {
         "pub struct ReviewItemView",
         "pub struct ReviewListFilter",
         "pub struct UngateTasksReport",
+        "fn find_review_component_in_content",
+        "fn insert_empty_review_after_backlog",
+        "fn ensure_review_component(",
         "fn ungate_task_text",
         "fn extract_review_tags",
         "fn extract_review_next",
@@ -6651,6 +6656,11 @@ fn test_agent_doc_element_review_owns_review_projection_and_ungate_planning() {
             "pending_cmd must stay a file-IO adapter, not a review projection/planning facade"
         );
     }
+    assert!(
+        pending_cmd.contains("find_review_component_in_content")
+            && pending_cmd.contains("ensure_review_component_in_document"),
+        "pending_cmd should call review component helpers from agent-doc-element-review"
+    );
     assert!(
         pending_cmd.contains("agent_doc_element_review::review_item_views_from_content"),
         "pending_cmd should delegate review projection to agent-doc-element-review directly"

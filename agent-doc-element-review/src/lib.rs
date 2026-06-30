@@ -6,7 +6,7 @@ use agent_doc_element::{
     ElementSchedulingRole, ElementShape, ElementSource, ElementWritePolicy,
 };
 use agent_doc_element_backlog::backlog;
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 pub const DESCRIPTOR: ElementDescriptor = ElementDescriptor {
     name: "review",
@@ -23,6 +23,45 @@ pub const DESCRIPTOR: ElementDescriptor = ElementDescriptor {
 
 pub fn descriptor() -> ElementDescriptor {
     DESCRIPTOR
+}
+
+/// Find the `agent:review` component in already-read document content.
+pub fn find_review_component_in_content(content: &str) -> Result<Option<element::Component>> {
+    let components = element::parse(content).context("failed to parse components")?;
+    Ok(components
+        .into_iter()
+        .find(|c| element::is_review_component(&c.name)))
+}
+
+fn insert_empty_review_after_backlog(content: &str) -> Result<String> {
+    let components = element::parse(content).context("failed to parse components")?;
+    if components
+        .iter()
+        .any(|c| element::is_review_component(&c.name))
+    {
+        return Ok(content.to_string());
+    }
+    let backlog = components
+        .iter()
+        .find(|c| element::is_backlog_component(&c.name))
+        .context("document has no backlog/pending component for review insertion")?;
+    let insert = "\n## Review\n\n<!-- agent:review -->\n<!-- /agent:review -->\n";
+    let mut out = String::with_capacity(content.len() + insert.len());
+    out.push_str(&content[..backlog.close_end]);
+    out.push_str(insert);
+    out.push_str(&content[backlog.close_end..]);
+    Ok(out)
+}
+
+/// Ensure a document has an `agent:review` component after the backlog component.
+///
+/// Returns the possibly-updated content and the review component span in that
+/// updated content. File IO stays with callers.
+pub fn ensure_review_component_in_document(content: &str) -> Result<(String, element::Component)> {
+    let content = insert_empty_review_after_backlog(content)?;
+    let comp = find_review_component_in_content(&content)?
+        .context("document has no review component after insertion")?;
+    Ok((content, comp))
 }
 
 /// A token-efficient view of one gated `agent:review` item (`#review-list-query`).
@@ -229,6 +268,66 @@ fn bounded(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ensure_review_component_inserts_after_backlog() {
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#work] do work\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let (updated, review) = ensure_review_component_in_document(content).unwrap();
+        assert!(element::is_review_component(&review.name));
+        let backlog_end = updated.find("<!-- /agent:backlog -->").unwrap();
+        let review_start = updated.find("<!-- agent:review -->").unwrap();
+        let exchange_start = updated.find("<!-- agent:exchange -->").unwrap();
+        assert!(
+            backlog_end < review_start && review_start < exchange_start,
+            "review component should be inserted after backlog and before exchange:\n{updated}"
+        );
+        assert!(
+            updated[backlog_end..review_start].contains("## Review"),
+            "review heading should be inserted before the review component:\n{updated}"
+        );
+        assert_eq!(review.content(&updated), "");
+        assert!(updated.contains("<!-- agent:exchange -->"));
+    }
+
+    #[test]
+    fn ensure_review_component_noops_when_review_exists() {
+        let content = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#work] do work\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:review -->\n",
+            "- [/] [#review] gated\n",
+            "<!-- /agent:review -->\n",
+        );
+
+        let (updated, review) = ensure_review_component_in_document(content).unwrap();
+        assert_eq!(updated, content);
+        assert_eq!(review.content(&updated).trim(), "- [/] [#review] gated");
+        assert!(
+            find_review_component_in_content(&updated)
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn ensure_review_component_errors_without_backlog() {
+        let err = ensure_review_component_in_document("plain document").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("document has no backlog/pending component for review insertion"),
+            "unexpected error: {err}"
+        );
+    }
 
     #[test]
     fn review_item_views_extract_tags_next_and_filters() {

@@ -6812,6 +6812,15 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         "pub fn classify_child_network_probe_failure(",
         "pub fn classify_child_required_ssh_probe_failure(",
         "pub fn classify_child_writable_root_probe_failure(",
+        "pub fn looks_like_local_browser_cdp_permission_denied(",
+        "pub fn resume_capability_drift_notice(",
+        "pub fn looks_like_ssh_dns_failure(",
+        "pub fn looks_like_ssh_network_failure(",
+        "pub fn looks_like_ssh_auth_failure(",
+        "pub fn looks_like_ssh_alias_config_failure(",
+        "pub fn transcript_has_required_ssh_failure(",
+        "pub fn transcript_proves_required_ssh_success(",
+        "pub fn format_required_ssh_failure(",
     ] {
         assert!(
             executor_codex_launch.contains(required_snippet),
@@ -6921,6 +6930,15 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         "fn classify_child_network_probe_failure(",
         "fn classify_child_required_ssh_probe_failure(",
         "fn classify_child_writable_root_probe_failure(",
+        "fn looks_like_local_browser_cdp_permission_denied(",
+        "fn resume_capability_drift_notice(",
+        "fn looks_like_ssh_dns_failure(",
+        "fn looks_like_ssh_network_failure(",
+        "fn looks_like_ssh_auth_failure(",
+        "fn looks_like_ssh_alias_config_failure(",
+        "fn transcript_has_required_ssh_failure(",
+        "fn transcript_proves_required_ssh_success(",
+        "fn format_required_ssh_failure(",
     ] {
         assert!(
             !codex.contains(forbidden_snippet),
@@ -6933,7 +6951,12 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
             && codex.contains("codex_transport_403_429_diagnostic")
             && codex.contains("classify_child_network_probe_failure")
             && codex.contains("classify_child_required_ssh_probe_failure")
-            && codex.contains("classify_child_writable_root_probe_failure"),
+            && codex.contains("classify_child_writable_root_probe_failure")
+            && codex.contains("looks_like_local_browser_cdp_permission_denied")
+            && codex.contains("resume_capability_drift_notice")
+            && codex.contains("transcript_has_required_ssh_failure")
+            && codex.contains("transcript_proves_required_ssh_success")
+            && codex.contains("format_required_ssh_failure"),
         "agent::codex should call focused Codex launch/transport policy directly"
     );
     assert!(

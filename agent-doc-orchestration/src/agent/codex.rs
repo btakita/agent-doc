@@ -66,7 +66,11 @@ use agent_doc_turn_executor::agent_stream::{StreamChunk, parse_codex_line};
 use agent_doc_turn_executor::codex_launch::{
     classify_child_network_probe_failure, classify_child_required_ssh_probe_failure,
     classify_child_writable_root_probe_failure, codex_transport_403_429_diagnostic,
-    looks_like_codex_transport_403_429,
+    format_required_ssh_failure, looks_like_codex_transport_403_429,
+    looks_like_local_browser_cdp_permission_denied, looks_like_ssh_alias_config_failure,
+    looks_like_ssh_auth_failure, looks_like_ssh_dns_failure, looks_like_ssh_network_failure,
+    resume_capability_drift_notice, transcript_has_required_ssh_failure,
+    transcript_proves_required_ssh_success,
 };
 
 #[derive(Clone)]
@@ -112,21 +116,6 @@ struct StreamProcess {
 const CODEX_CHILD_NETWORK_PROBE_MARKER: &str = "AGENT_DOC_NETWORK_PROBE_OK";
 const CODEX_CHILD_WRITABLE_ROOT_PROBE_MARKER: &str = "AGENT_DOC_WRITABLE_ROOT_PROBE_OK";
 
-fn looks_like_local_browser_cdp_permission_denied(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    let local_cdp = lower.contains("127.0.0.1:9222") || lower.contains("localhost:9222");
-    let permission_denied = lower.contains("operation not permitted")
-        || lower.contains("os error 1")
-        || lower.contains("eperm");
-    local_cdp && permission_denied
-}
-
-fn resume_capability_drift_notice() -> &'static str {
-    "[agent] codex resume session hit a stale local browser/CDP capability drift \
-     (`Operation not permitted` on 127.0.0.1:9222); retrying once with a fresh \
-     `codex exec` session"
-}
-
 fn is_codex_marketplace_manifest_noise(line: &str) -> bool {
     let trimmed = line.trim();
     let is_external_plugin_manifest = trimmed.contains("/.codex/.tmp/plugins/plugins/");
@@ -170,10 +159,6 @@ fn codex_stderr_noise_report(stderr: &str) -> CodexStderrNoiseReport {
     }
 }
 
-fn lower_trimmed_lines(text: &str) -> impl Iterator<Item = &str> {
-    text.lines().map(str::trim).filter(|line| !line.is_empty())
-}
-
 fn append_isolated_ssh_probe_args(args: &mut Vec<String>) {
     args.extend(
         [
@@ -193,175 +178,6 @@ fn append_isolated_ssh_probe_args(args: &mut Vec<String>) {
         .into_iter()
         .map(str::to_string),
     );
-}
-
-fn looks_like_ssh_dns_failure(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    lower.contains("could not resolve hostname")
-        || lower.contains("name or service not known")
-        || lower.contains("temporary failure in name resolution")
-        || lower.contains("nodename nor servname provided")
-}
-
-fn looks_like_ssh_network_failure(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    lower.contains("operation not permitted")
-        || lower.contains("network is unreachable")
-        || lower.contains("no route to host")
-        || lower.contains("connection timed out")
-        || lower.contains("connection refused")
-        || lower.contains("connect to host")
-}
-
-fn looks_like_ssh_auth_failure(text: &str) -> bool {
-    text.to_ascii_lowercase().contains("permission denied")
-}
-
-fn looks_like_ssh_alias_config_failure(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    lower.contains("bad configuration option")
-        || lower.contains("terminating,")
-        || lower.contains("could not include")
-        || lower.contains("include ")
-        || lower.contains("no such file or directory")
-}
-
-fn has_required_ssh_match_term(text: &str, lowered_terms: &[String]) -> bool {
-    let lower = text.to_ascii_lowercase();
-    lowered_terms.iter().any(|term| lower.contains(term))
-}
-
-fn looks_like_ssh_command(text: &str) -> bool {
-    text.split_whitespace().any(|token| {
-        let trimmed = token.trim_matches(|c: char| matches!(c, '"' | '\'' | '`'));
-        let basename = trimmed.rsplit('/').next().unwrap_or(trimmed);
-        basename.eq_ignore_ascii_case("ssh") || basename.eq_ignore_ascii_case("ssh.exe")
-    })
-}
-
-fn first_required_ssh_failure_line<'a>(
-    text: &'a str,
-    lowered_terms: &[String],
-    require_match_term: bool,
-) -> Option<&'a str> {
-    for line in lower_trimmed_lines(text) {
-        let lower = line.to_ascii_lowercase();
-        if require_match_term && !lowered_terms.iter().any(|term| lower.contains(term)) {
-            continue;
-        }
-        if looks_like_ssh_dns_failure(&lower)
-            || looks_like_ssh_network_failure(&lower)
-            || looks_like_ssh_auth_failure(&lower)
-            || looks_like_ssh_alias_config_failure(&lower)
-        {
-            return Some(line);
-        }
-    }
-    None
-}
-
-fn line_proves_ssh_failure_context(line: &str) -> bool {
-    let lower = line.trim_start().to_ascii_lowercase();
-    lower.starts_with("ssh:")
-        || lower.starts_with("ssh.exe:")
-        || lower.starts_with("kex_exchange_identification:")
-        || lower.starts_with("connection closed by ")
-}
-
-fn format_required_ssh_command_failure(command: &str, line: &str) -> String {
-    let trimmed_command = command.trim();
-    if trimmed_command.is_empty() {
-        line.to_string()
-    } else {
-        format!("command `{trimmed_command}`: {line}")
-    }
-}
-
-fn command_execution_required_ssh_failure(
-    command: &str,
-    aggregated_output: &str,
-    lowered_terms: &[String],
-) -> Option<String> {
-    if looks_like_local_browser_cdp_permission_denied(aggregated_output) {
-        return None;
-    }
-
-    let command_proves_required_ssh =
-        looks_like_ssh_command(command) && has_required_ssh_match_term(command, lowered_terms);
-    if command_proves_required_ssh {
-        return first_required_ssh_failure_line(aggregated_output, lowered_terms, false)
-            .map(|line| format_required_ssh_command_failure(command, line));
-    }
-
-    first_required_ssh_failure_line(aggregated_output, lowered_terms, true)
-        .filter(|line| line_proves_ssh_failure_context(line))
-        .map(str::to_string)
-}
-
-fn transcript_has_required_ssh_failure(text: &str, match_terms: &[String]) -> Option<String> {
-    if match_terms.is_empty() {
-        return None;
-    }
-    let lowered_terms: Vec<String> = match_terms
-        .iter()
-        .map(|term| term.trim().to_ascii_lowercase())
-        .filter(|term| !term.is_empty())
-        .collect();
-    if let Ok(json) = serde_json::from_str::<serde_json::Value>(text) {
-        let item = json.get("item")?;
-        let item_type = item.get("type").and_then(|v| v.as_str())?;
-        if item_type != "command_execution" {
-            return None;
-        }
-
-        let command = item.get("command").and_then(|v| v.as_str()).unwrap_or("");
-        let aggregated_output = item
-            .get("aggregated_output")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-
-        return command_execution_required_ssh_failure(command, aggregated_output, &lowered_terms);
-    }
-
-    first_required_ssh_failure_line(text, &lowered_terms, true).map(str::to_string)
-}
-
-fn transcript_proves_required_ssh_success(text: &str, match_terms: &[String]) -> bool {
-    if match_terms.is_empty() {
-        return false;
-    }
-    let lowered_terms: Vec<String> = match_terms
-        .iter()
-        .map(|term| term.trim().to_ascii_lowercase())
-        .filter(|term| !term.is_empty())
-        .collect();
-    if lowered_terms.is_empty() {
-        return false;
-    }
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(text) else {
-        return false;
-    };
-    let Some(item) = json.get("item") else {
-        return false;
-    };
-    if item.get("type").and_then(|v| v.as_str()) != Some("command_execution") {
-        return false;
-    }
-
-    let command = item.get("command").and_then(|v| v.as_str()).unwrap_or("");
-    if !looks_like_ssh_command(command) || !has_required_ssh_match_term(command, &lowered_terms) {
-        return false;
-    }
-
-    item.get("exit_code").and_then(|v| v.as_i64()) == Some(0)
-}
-
-fn format_required_ssh_failure(targets: &[String], detail: &str) -> String {
-    format!(
-        "required SSH capability failed for target(s) {}: {}",
-        targets.join(", "),
-        detail.trim()
-    )
 }
 
 fn add_dirs_from_args(args: &[String]) -> Vec<PathBuf> {
@@ -1436,7 +1252,12 @@ impl Codex {
         let mut user: Option<String> = None;
         let mut port: Option<String> = None;
         let mut identity_file: Option<String> = None;
-        for line in lower_trimmed_lines(&outcome.stdout) {
+        for line in outcome
+            .stdout
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+        {
             let mut parts = line.split_whitespace();
             let key = parts.next().unwrap_or_default();
             let value = parts.collect::<Vec<_>>().join(" ");
@@ -3062,16 +2883,6 @@ printf '%s\n' '{{"type":"turn.completed","usage":{{}}}}'
     }
 
     #[test]
-    fn local_browser_cdp_permission_denied_matches_resume_capability_drift_signature() {
-        assert!(looks_like_local_browser_cdp_permission_denied(
-            "chromium-bridge check failed for 127.0.0.1:9222: Operation not permitted (os error 1)"
-        ));
-        assert!(!looks_like_local_browser_cdp_permission_denied(
-            "chromium-bridge check failed for 127.0.0.1:9222: Connection refused"
-        ));
-    }
-
-    #[test]
     fn required_ssh_capability_reports_alias_config_failure_when_direct_path_still_works() {
         let (_dir, path_dir) = write_fake_ssh_script(
             r#"#!/bin/sh
@@ -3149,52 +2960,6 @@ exit 0
             assert!(line.contains("-o ClearAllForwardings=yes"), "got: {line}");
             assert!(line.contains("-o PermitLocalCommand=no"), "got: {line}");
         }
-    }
-
-    #[test]
-    fn required_ssh_failure_detects_bare_socket_eperm_when_command_proves_ssh_context() {
-        let line = r#"{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"ssh sampleorders-server true","aggregated_output":"socket: Operation not permitted","exit_code":255,"status":"completed"}}"#;
-
-        assert_eq!(
-            transcript_has_required_ssh_failure(line, &["sampleorders-server".to_string()]),
-            Some(
-                "command `ssh sampleorders-server true`: socket: Operation not permitted"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn required_ssh_failure_ignores_bare_socket_eperm_without_ssh_command_context() {
-        let line = r#"{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"chromium-bridge list","aggregated_output":"socket: Operation not permitted","exit_code":1,"status":"completed"}}"#;
-
-        assert_eq!(
-            transcript_has_required_ssh_failure(line, &["sampleorders-server".to_string()]),
-            None
-        );
-    }
-
-    #[test]
-    fn required_ssh_failure_ignores_historical_capture_grep_output() {
-        let line = r#"{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"rg 'Operation not permitted' .agent-doc/captures","aggregated_output":".agent-doc/captures/old/cycle.json:16: \"response_body\": \"required SSH capability failed for target(s) sampleorders-server: socket: Operation not permitted\"","exit_code":0,"status":"completed"}}"#;
-
-        assert_eq!(
-            transcript_has_required_ssh_failure(line, &["sampleorders-server".to_string()]),
-            None
-        );
-    }
-
-    #[test]
-    fn required_ssh_failure_detects_direct_ssh_diagnostic_without_command_field() {
-        let line = r#"{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","aggregated_output":"ssh: connect to host 50.28.2.199 port 22: Operation not permitted","exit_code":255,"status":"completed"}}"#;
-
-        assert_eq!(
-            transcript_has_required_ssh_failure(
-                line,
-                &["sampleorders-server".to_string(), "50.28.2.199".to_string()]
-            ),
-            Some("ssh: connect to host 50.28.2.199 port 22: Operation not permitted".to_string())
-        );
     }
 
     #[test]

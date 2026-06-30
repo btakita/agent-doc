@@ -1163,43 +1163,16 @@ pub(crate) fn dogfood_agent_doc_crate_root(file: &Path) -> Option<PathBuf> {
         let cargo = candidate.join("Cargo.toml");
         if let Ok(content) = std::fs::read_to_string(&cargo)
             && content.contains("name = \"agent-doc\"")
-            && is_agent_doc_dogfood_session(&file, &project_root, &candidate)
+            && agent_doc_supervisor::config::is_agent_doc_dogfood_session(
+                &file,
+                &project_root,
+                &candidate,
+            )
         {
             return Some(candidate);
         }
     }
     None
-}
-
-fn is_agent_doc_dogfood_session(file: &Path, project_root: &Path, crate_root: &Path) -> bool {
-    if crate_root == project_root {
-        return file.starts_with(project_root);
-    }
-    if file.starts_with(crate_root) {
-        return true;
-    }
-    let Ok(relative) = file.strip_prefix(project_root) else {
-        return false;
-    };
-    let mut components = relative
-        .components()
-        .filter_map(|component| component.as_os_str().to_str());
-    let Some(first) = components.next() else {
-        return false;
-    };
-    if first != "tasks" {
-        return false;
-    }
-    let Some(second) = components.next() else {
-        return false;
-    };
-    if second == "agent-doc" {
-        return true;
-    }
-    if second.starts_with("agent-doc") && second.ends_with(".md") {
-        return true;
-    }
-    second == "software" && components.next() == Some("agent-doc.md")
 }
 
 /// `#supautoinstall` — newest mtime (unix secs) among the crate's build inputs: a bounded

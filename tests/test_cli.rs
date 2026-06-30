@@ -1149,7 +1149,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // assertion covers the same replay-neutralized queue-addition recovery
         // after stale exchange-collapse cleanup. The production reason remains
         // the existing typed recovery diagnostic.
-        ("agent-doc-orchestration/src/git.rs", "reason=") => 8,
+        // 8 -> 10 (#commit-live-buffer-staged-snapshot): the commit barrier now
+        // logs the audited allowance when the staged snapshot already matches a
+        // synced operator-authoritative live buffer. This is a proof diagnostic
+        // for the existing pre-stage guard path, not a new ad hoc flow branch.
+        ("agent-doc-orchestration/src/git.rs", "reason=") => 10,
         ("src/orchestrate.rs", "guard_") => 0,
         ("src/orchestrate/dag.rs", "guard_") => 2,
         // +1 (`reason=probe_inspection_only`): `preflight --probe` logs why it
@@ -8220,6 +8224,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub fn resolve_agent_launch_args(",
         "pub const STALE_INSTALL_GRACE_SECS",
         "pub fn classify_stale_install_artifacts",
+        "pub fn is_agent_doc_dogfood_session",
     ] {
         assert!(
             supervisor_config.contains(required_snippet),
@@ -8233,6 +8238,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub(crate) fn resolve_supervisor_auto_install",
         "pub(crate) fn auto_install_should_retry",
         "pub(crate) fn host_supervisor_is_stale",
+        "fn is_agent_doc_dogfood_session",
     ] {
         assert!(
             !rpc_source.contains(forbidden_snippet),
@@ -8242,6 +8248,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     for required_snippet in [
         "agent_doc_supervisor::config::auto_install_should_retry",
         "agent_doc_supervisor::config::host_supervisor_is_stale",
+        "agent_doc_supervisor::config::is_agent_doc_dogfood_session",
     ] {
         assert!(
             rpc_source.contains(required_snippet),

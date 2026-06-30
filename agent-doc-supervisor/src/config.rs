@@ -1,5 +1,7 @@
 //! Pure supervisor configuration precedence.
 
+use std::path::Path;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AgentLaunchArgsSources {
     pub frontmatter_agent_args: Option<String>,
@@ -81,6 +83,37 @@ pub fn resolve_supervisor_auto_install(
     project: Option<bool>,
 ) -> bool {
     resolve_default_on_bool(env, frontmatter, project)
+}
+
+pub fn is_agent_doc_dogfood_session(file: &Path, project_root: &Path, crate_root: &Path) -> bool {
+    if crate_root == project_root {
+        return file.starts_with(project_root);
+    }
+    if file.starts_with(crate_root) {
+        return true;
+    }
+    let Ok(relative) = file.strip_prefix(project_root) else {
+        return false;
+    };
+    let mut components = relative
+        .components()
+        .filter_map(|component| component.as_os_str().to_str());
+    let Some(first) = components.next() else {
+        return false;
+    };
+    if first != "tasks" {
+        return false;
+    }
+    let Some(second) = components.next() else {
+        return false;
+    };
+    if second == "agent-doc" {
+        return true;
+    }
+    if second.starts_with("agent-doc") && second.ends_with(".md") {
+        return true;
+    }
+    second == "software" && components.next() == Some("agent-doc.md")
 }
 
 pub fn source_newer_than_installed_binary(
@@ -326,6 +359,64 @@ mod tests {
             Some("off"),
             Some(true),
             Some(true)
+        ));
+    }
+
+    #[test]
+    fn dogfood_session_path_policy_accepts_agent_doc_scope_only() {
+        let project = std::path::Path::new("/workspace");
+        let crate_root = project.join("src/agent-doc");
+
+        assert!(is_agent_doc_dogfood_session(
+            &project.join("src/agent-doc/specs/supervisor.md"),
+            project,
+            &crate_root
+        ));
+        assert!(is_agent_doc_dogfood_session(
+            &project.join("tasks/agent-doc/agent-doc-bugs2.md"),
+            project,
+            &crate_root
+        ));
+        assert!(is_agent_doc_dogfood_session(
+            &project.join("tasks/agent-doc-bugs.md"),
+            project,
+            &crate_root
+        ));
+        assert!(is_agent_doc_dogfood_session(
+            &project.join("tasks/software/agent-doc.md"),
+            project,
+            &crate_root
+        ));
+        assert!(!is_agent_doc_dogfood_session(
+            &project.join("tasks/professional/sampleportal.md"),
+            project,
+            &crate_root
+        ));
+        assert!(!is_agent_doc_dogfood_session(
+            &project.join("tasks/software/lazily-rs.md"),
+            project,
+            &crate_root
+        ));
+        assert!(!is_agent_doc_dogfood_session(
+            std::path::Path::new("/other/tasks/agent-doc/agent-doc-bugs2.md"),
+            project,
+            &crate_root
+        ));
+    }
+
+    #[test]
+    fn dogfood_session_path_policy_accepts_whole_project_when_crate_is_project_root() {
+        let project = std::path::Path::new("/workspace/agent-doc");
+
+        assert!(is_agent_doc_dogfood_session(
+            &project.join("src/main.rs"),
+            project,
+            project
+        ));
+        assert!(!is_agent_doc_dogfood_session(
+            std::path::Path::new("/workspace/other/tasks/agent-doc.md"),
+            project,
+            project
         ));
     }
 

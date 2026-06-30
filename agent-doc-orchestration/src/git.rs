@@ -1064,7 +1064,12 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             snapshot_content.as_deref(),
             head_doc.as_deref(),
         )?;
-        ensure_no_live_editor_buffer_ahead_of_disk(file, &file_content, "already_current", None)?;
+        ensure_no_live_editor_buffer_ahead_of_disk(
+            file,
+            &file_content,
+            "already_current",
+            snapshot_content.as_deref().or(head_doc.as_deref()),
+        )?;
         if let Some(kind) = post_commit_local_drift {
             if kind == PostCommitLocalDriftKind::UserFollowUp {
                 eprintln!(
@@ -5182,6 +5187,75 @@ Duplicate replay should stay live.
         assert!(
             !log.contains("commit_already_current file="),
             "unflushed live editor buffer must not be recorded as an already-current closeout:\n{log}"
+        );
+    }
+
+    #[test]
+    fn commit_allows_already_current_synced_operator_buffer_while_disk_lags() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/live-buffer")).unwrap();
+        init_repo(root);
+        commit_file(root, "README.md", "# test\n", "initial");
+
+        let doc = root.join("session.md");
+        let stale_disk = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: previous\n\n",
+            "previous response\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: previous\n\n",
+            "previous response\n",
+            "### Re: current\n\n",
+            "current response\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        commit_file(root, "session.md", committed, "add committed response");
+        fs::write(&doc, stale_disk).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
+            &doc.display().to_string(),
+            committed,
+            "jetbrains:test",
+            "jetbrains",
+            "test",
+            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+        )
+        .unwrap();
+
+        let did_commit =
+            commit(&doc).expect("already-current synced editor-visible snapshot should close");
+        assert!(
+            !did_commit,
+            "HEAD-current synced snapshot should close without a duplicate commit"
+        );
+
+        let state = crate::cycle_state::load(&doc).unwrap();
+        assert!(
+            state.is_none()
+                || state
+                    .as_ref()
+                    .is_some_and(|state| state.phase == agent_doc_turn::CyclePhase::Committed),
+            "already-current closeout should not stay blocked: {state:?}"
+        );
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("commit_live_buffer_ahead_of_disk_allowed file=")
+                && log.contains("basis=already_current"),
+            "already-current synced live-buffer allowance should be logged:\n{log}"
+        );
+        assert!(
+            !log.contains("commit_blocked_live_buffer_ahead_of_disk file="),
+            "synced HEAD-equivalent live buffer must not block no-op closeout:\n{log}"
         );
     }
 

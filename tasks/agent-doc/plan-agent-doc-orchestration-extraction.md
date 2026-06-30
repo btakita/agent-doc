@@ -418,11 +418,14 @@ focused crate under the old path.
   retry/file/ops-log adapters and imports the focused template helpers directly
   instead of preserving `write::materialize` wrappers.
 - `agent-doc-element-exchange` now owns pure exchange element prompt/content
-  helpers: exchange body lookup/length, prompt-line normalization and counting,
-  line-segment splitting, markdown-heading filtering, and code-fence delimiter
-  detection. `write/exchange_reconcile` keeps duplicate-repair, shrink-guard,
-  file, and ops-log adapters while importing the focused exchange helpers
-  directly.
+  helpers and prefix-repair normalization policy: exchange body lookup/length,
+  prompt-line normalization and counting, line-segment splitting,
+  markdown-heading filtering, code-fence delimiter detection, response-heading
+  classification, normalization target counting/matching, exchange user-region
+  scanning, post-commit missing-prefix target extraction, and targeted exchange
+  prefix repair. `write/exchange_reconcile`, `write/normalize`, git closeout,
+  and IPC paths keep duplicate-repair, shrink-guard, file, git, ops-log, and
+  delivery adapters while importing the focused exchange helpers directly.
 - `agent-doc-element-backlog` already owned open backlog id extraction; preflight
   now calls `open_backlog_ids_in_content` directly for `do #id` closeout
   evidence instead of re-parsing backlog components locally.

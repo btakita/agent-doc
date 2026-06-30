@@ -5,6 +5,8 @@
 //! extraction, and the optional-`do` bare leading `#id` forms. Callers provide
 //! text; file-backed lifecycle checks stay outside this crate.
 
+use std::collections::HashSet;
+
 /// Extract the first tracked-work id named by an explicit graph-task
 /// `do [#id]` / `do #id` directive.
 ///
@@ -141,6 +143,27 @@ pub fn topic_resolves_to_only_id_directives(topic: &str) -> Option<Vec<String>> 
         ids.push(inner.to_ascii_lowercase());
     }
     Some(ids)
+}
+
+/// Narrow raw `do [#id]` directive target ids to those that must reach a
+/// `--done`/`--pending-gate` lifecycle outcome this cycle.
+///
+/// Only ids still open in the live backlog are demanded, and ids auto-populated
+/// by backlog-to-queue sync are excluded because they represent queue
+/// maintenance work rather than user directives in the same cycle.
+pub fn filter_expect_done_or_gate_ids(
+    directive_ids: &[String],
+    open_backlog_ids: &HashSet<String>,
+    synced_queue_ids: &HashSet<String>,
+) -> Vec<String> {
+    let mut seen = HashSet::new();
+    directive_ids
+        .iter()
+        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
+        .filter(|id| open_backlog_ids.contains(id))
+        .filter(|id| !synced_queue_ids.contains(id))
+        .filter(|id| seen.insert(id.clone()))
+        .collect()
 }
 
 /// Optional-`do` Stage 2: true when a normalized directive head leads with a
@@ -287,5 +310,37 @@ mod tests {
         assert_eq!(topic_resolves_to_only_id_directives("re [#id]"), None);
         assert_eq!(topic_resolves_to_only_id_directives("just prose"), None);
         assert_eq!(topic_resolves_to_only_id_directives(""), None);
+    }
+
+    #[test]
+    fn filter_expect_done_or_gate_ids_excludes_auto_synced_queue_ids() {
+        // #queue-sync-auto-pending-done-guard-misfire: a cycle that works one
+        // directive (#worked) while backlog-to-queue sync auto-populated sibling
+        // ids into the active queue must demand only the genuine worked directive.
+        let directive_ids = vec!["worked".to_string(), "a".to_string(), "b".to_string()];
+        let open_backlog: HashSet<String> =
+            ["worked", "a", "b"].iter().map(|s| s.to_string()).collect();
+        let synced_queue_ids: HashSet<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
+
+        let result =
+            filter_expect_done_or_gate_ids(&directive_ids, &open_backlog, &synced_queue_ids);
+
+        assert_eq!(result, vec!["worked".to_string()]);
+    }
+
+    #[test]
+    fn filter_expect_done_or_gate_ids_keeps_open_directives_without_sync() {
+        let directive_ids = vec![
+            "Open".to_string(),
+            "#open".to_string(),
+            "resolved".to_string(),
+        ];
+        let open_backlog: HashSet<String> = ["open"].iter().map(|s| s.to_string()).collect();
+        let synced_queue_ids = HashSet::new();
+
+        let result =
+            filter_expect_done_or_gate_ids(&directive_ids, &open_backlog, &synced_queue_ids);
+
+        assert_eq!(result, vec!["open".to_string()]);
     }
 }

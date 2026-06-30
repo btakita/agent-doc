@@ -1174,7 +1174,11 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                 .iter()
                 .cloned()
                 .collect::<std::collections::HashSet<String>>();
-            filter_expect_done_or_gate_ids(&directive_target_ids, &open_backlog, &synced_queue_ids)
+            agent_doc_queue::queue_directive::filter_expect_done_or_gate_ids(
+                &directive_target_ids,
+                &open_backlog,
+                &synced_queue_ids,
+            )
         }
     };
     if !options.probe && !no_changes {

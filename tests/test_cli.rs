@@ -2823,6 +2823,7 @@ fn test_agent_doc_queue_owns_do_directive_target_parsing() {
         "pub fn explicit_do_directive_target_ids",
         "pub fn do_directive_target_ids",
         "pub fn do_directive_target_ids_in_line",
+        "pub fn filter_expect_done_or_gate_ids",
         "fn leads_with_bare_id_token",
     ] {
         assert!(
@@ -2908,6 +2909,21 @@ fn test_agent_doc_queue_owns_do_directive_target_parsing() {
     assert!(
         queue_closeout_guard.contains("queue_directive::do_directive_target_ids"),
         "queue closeout guard policy should call focused queue directive parsing directly"
+    );
+    let preflight_maintenance = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
+    )
+    .unwrap();
+    assert!(
+        !preflight_maintenance.contains("fn filter_expect_done_or_gate_ids"),
+        "preflight maintenance must not re-own queue directive lifecycle expectation policy"
+    );
+    let preflight_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
+    assert!(
+        preflight_run.contains("agent_doc_queue::queue_directive::filter_expect_done_or_gate_ids"),
+        "preflight run should call focused queue directive lifecycle expectation policy directly"
     );
     let queue_head_guards = fs::read_to_string(
         manifest_dir.join("agent-doc-orchestration/src/session_check/queue_head_guards.rs"),

@@ -800,44 +800,8 @@ pub(crate) struct QueueState {
     pub(crate) warnings: Vec<PreflightWarning>,
 }
 
-/// Run queue component maintenance: resolve activation, consume start fences,
-/// persist `queue_active` state, and emit queue prompts for the skill.
-///
-/// Mutations (consumed start fences, `queue_active` changes) are persisted to
-/// BOTH the working tree file and the snapshot, same as pending maintenance.
-///
-/// The `diff` parameter is optional — only needed for detecting exchange-level
-/// `do queue`/`run queue` triggers. Pass `None` on the first call (before diff
-/// computation) and the exchange trigger will be resolved in a later step.
-/// Collect the backlog→queue sync request from `agent:backlog`
-/// (and the legacy `pending` alias) components carrying a `queue` attribute
-/// (`#backlog-queue-sync-attr`). Returns the effective mode (the first
-/// queue-tagged component's mode wins) and the active item ids from every
-/// queue-tagged source component, in document order. Returns `None` when no
-/// source component carries a recognized `queue` attribute. Icebox items are
-/// intentionally excluded from component-level sync so a drained backlog cannot
-/// auto-promote parked work; explicit per-item enqueue markers still work.
-/// Narrow the raw `do [#id]` directive target ids to the set that must reach a
-/// `--done`/`--pending-gate` lifecycle outcome this cycle: ids still open in the
-/// live backlog, minus any id that the backlog→queue sync auto-populated this
-/// cycle (`#queue-sync-auto-pending-done-guard-misfire`). Synced ids are agent
-/// queue maintenance, not user directives, so demanding they be resolved in the
-/// populating cycle is a false-closed misfire.
-pub(crate) fn filter_expect_done_or_gate_ids(
-    directive_ids: &[String],
-    open_backlog_ids: &std::collections::HashSet<String>,
-    synced_queue_ids: &std::collections::HashSet<String>,
-) -> Vec<String> {
-    let mut seen = std::collections::HashSet::new();
-    directive_ids
-        .iter()
-        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
-        .filter(|id| open_backlog_ids.contains(id))
-        .filter(|id| !synced_queue_ids.contains(id))
-        .filter(|id| seen.insert(id.clone()))
-        .collect()
-}
-
+/// Deduplicate queue item node keys before queue maintenance projects state
+/// from the markdown AST.
 pub(crate) fn dedup_queue_nodes_by_key(content: &str) -> Result<Option<(String, usize)>> {
     let before_nodes =
         agent_doc_markdown_ast::mutations::item_nodes(content, "queue").map_err(|err| {
@@ -4699,7 +4663,7 @@ mod tests {
             .iter()
             .cloned()
             .collect::<std::collections::HashSet<String>>();
-        let result = filter_expect_done_or_gate_ids(
+        let result = agent_doc_queue::queue_directive::filter_expect_done_or_gate_ids(
             &[
                 "worked".to_string(),
                 "alpha".to_string(),
@@ -6570,38 +6534,6 @@ mod tests {
             high < low,
             "priority=1 must sort before priority=5 in queue:\n{queue_region}"
         );
-    }
-    #[test]
-    fn filter_expect_done_or_gate_excludes_synced_queue_ids() {
-        // #queue-sync-auto-pending-done-guard-misfire: a cycle that works one
-        // directive (#worked) while the backlog→queue sync auto-populated
-        // do[#a]/do[#b]/#worked into the active queue must demand only the
-        // genuine worked directive, never the freshly-synced siblings.
-        let directive_ids = vec!["worked".to_string(), "a".to_string(), "b".to_string()];
-        let open_backlog: std::collections::HashSet<String> =
-            ["worked", "a", "b"].iter().map(|s| s.to_string()).collect();
-        let synced_queue_ids: std::collections::HashSet<String> =
-            ["a", "b"].iter().map(|s| s.to_string()).collect();
-        let result =
-            filter_expect_done_or_gate_ids(&directive_ids, &open_backlog, &synced_queue_ids);
-        assert_eq!(result, vec!["worked".to_string()]);
-    }
-    #[test]
-    fn filter_expect_done_or_gate_keeps_open_directives_without_sync() {
-        // No sync attribute → no exclusion; an open user directive stays demanded,
-        // a directive whose backlog item is already resolved drops out, and
-        // duplicates collapse.
-        let directive_ids = vec![
-            "open".to_string(),
-            "open".to_string(),
-            "resolved".to_string(),
-        ];
-        let open_backlog: std::collections::HashSet<String> =
-            ["open"].iter().map(|s| s.to_string()).collect();
-        let synced_queue_ids = std::collections::HashSet::new();
-        let result =
-            filter_expect_done_or_gate_ids(&directive_ids, &open_backlog, &synced_queue_ids);
-        assert_eq!(result, vec!["open".to_string()]);
     }
     #[test]
     fn resolve_pipeline_state_none_without_cycle_or_frontmatter() {

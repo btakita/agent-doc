@@ -390,6 +390,14 @@ focused crate under the old path.
   `go`/`start`/`stop` handling, and committed-snapshot head backing checks.
   Route keeps only file/frontmatter/snapshot adapters, queue locks, editor
   convergence, snapshot writes, and ops-log diagnostics.
+- `agent-doc-queue` also owns the active registered-preset queue-head
+  classifier used by spent-preset pause repair. Project-controller RPC now keeps
+  only the file-backed pause-repair adapter and calls the queue-owned classifier
+  directly.
+- `agent-doc-controller::dispatch` now owns dispatch diagnostic payload parsing
+  and proof-payload joining. Project-controller RPC still gathers file-backed
+  proof facts, but it no longer keeps local parser/formatter helpers for that
+  pure payload policy.
 - `agent-doc-element-backlog` already owned open backlog id extraction; preflight
   now calls `open_backlog_ids_in_content` directly for `do #id` closeout
   evidence instead of re-parsing backlog components locally.

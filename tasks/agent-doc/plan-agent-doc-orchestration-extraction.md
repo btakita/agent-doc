@@ -83,7 +83,7 @@ Unlike `#adcr` (which split a *layer* with a clean dependency direction), the or
 - The 10 cluster modules above + their orchestration-adjacent neighbors (confirm the exact set in Wave 1 by following the import graph from `route`/`sync`/`start`).
 - Heavy deps move with them: `tokio`, `reqwest`/`ureq`/`hyper`/`rustls`, `interprocess`, `notify`, `rusqlite`, git, `zstd`, `tmux-router`.
 
-## Current revision — no-shim domain extraction
+## Current modified plan — no-shim domain extraction
 
 Wave 0 (scaffold) + Wave 1a (`ipc_socket`) landed cleanly, and the later
 big-bang move created the current `agent-doc-orchestration` transitional crate.
@@ -101,7 +101,14 @@ that owns the domain:
 - Auto-DAG/work graph policy -> `agent-doc-work-graph`
 - create a new focused crate only when no current crate owns the domain
 
-### Shim policy: no Rust API shims
+### Shim policy decision: keep no Rust API shims
+
+The active policy stays **no compatibility shims for Rust APIs**. Removing that
+policy would be friendlier for short-lived migrations, but this repo is
+greenfield from the consumer perspective: there are no downstream Rust callers
+whose old paths need preservation. Keeping old paths alive would optimize for a
+consumer that does not exist while making the internal ownership graph harder to
+read.
 
 - Do **not** preserve old `agent_doc_orchestration::*` or root-crate paths as
   facade APIs for extracted policy.
@@ -119,6 +126,13 @@ that owns the domain:
 Allowed exception: exported editor/plugin FFI symbols are an ABI boundary, not a
 Rust API. The cdylib may keep `extern "C"` wrappers that preserve those symbols,
 but Rust call sites still move to focused crates directly.
+
+Allowed non-shim adapters: `agent-doc-orchestration` may keep functions that do
+real orchestration work, such as reading files, resolving frontmatter in project
+context, querying git/tmux/process/IPC/SQLite state, building response TOCs, or
+supplying gathered facts to focused policy. Those adapters are not compatibility
+facades as long as they do not preserve an obsolete policy API or re-export a
+focused crate under the old path.
 
 ### Modified execution plan
 
@@ -165,15 +179,19 @@ finish shrinking the transitional orchestration crate.
 - **Option B — domain-specific detangling (recommended).** Continue extracting
   each policy seam into the focused crate that owns the domain, creating a new
   focused crate only when no destination exists. This is cleaner long term
-  precisely because `agent-doc-orchestration` is heavily tangled: the tangle is
-  mostly effect coordination, process/session ownership, git/tmux/IPC adapters,
-  and historical cross-calls. Domain policy becomes maintainable when it is no
-  longer embedded in that knot. Moving queue policy to `agent-doc-queue`,
-  realtime/write vocabulary to `agent-doc-document-realtime`, tmux decisions to
-  `agent-doc-tmux-*`, and workflow/graph decisions to their domain crates turns
-  implicit social ownership into Rust-enforced dependency boundaries. The
-  no-shim policy is what keeps this from becoming another facade layer: call
-  sites must name the owning domain crate, so ownership stays visible.
+  because `agent-doc-orchestration` is heavily tangled, not despite that fact:
+  the tangle is mostly effect coordination, process/session ownership,
+  git/tmux/IPC adapters, and historical cross-calls. If domain policy remains in
+  that crate, every queue, realtime, workflow, graph, tmux, and session decision
+  inherits the broad orchestration dependency graph and the old cross-call
+  habits. Moving queue policy to `agent-doc-queue`, realtime/write vocabulary to
+  `agent-doc-document-realtime`, tmux decisions to `agent-doc-tmux-*`,
+  workflow/session-cycle decisions to `agent-doc-workflow`, work graph decisions
+  to `agent-doc-work-graph`, and prompt/context-pack decisions to a focused
+  prompt-context crate turns implicit social ownership into Rust-enforced
+  dependency boundaries. The no-shim policy is what keeps this from becoming
+  another facade layer: call sites must name the owning domain crate, so
+  ownership stays visible in imports, tests, and manifests.
 - **Option C — shared base layer.** Create a lower `agent-doc-base` /
   `agent-doc-io` style crate for shared file/path/log utilities. This can be
   useful tactically for IO helpers, but by itself it does not detangle domain
@@ -184,12 +202,12 @@ finish shrinking the transitional orchestration crate.
   feature or bugfix touches a seam. This reduces immediate risk, but leaves the
   objective incomplete and lets orchestration continue to accumulate policy.
 
-**Recommendation:** Option B is the target. Option A already served as the
-transitional migration that got code out of the CLI shell; keeping it as the
-final state would simply rename the God crate. Option C can support Option B
-when a truly shared IO primitive is blocking extraction, but it should not
-replace domain-specific crates. Option D is only a scheduling choice, not a
-completion strategy.
+**Recommendation:** Option B is the target with the no-shim Rust API policy
+intact. Option A already served as the transitional migration that got code out
+of the CLI shell; keeping it as the final state would simply rename the God
+crate. Option C can support Option B when a truly shared IO primitive is
+blocking extraction, but it should not replace domain-specific crates. Option D
+is only a scheduling choice, not a completion strategy.
 
 The bottom-up wave sequencing below is **superseded** by this finding and by
 the no-shim policy; it is retained only as the original reasoning.
@@ -229,7 +247,12 @@ focused crates directly.
 
 ## Risks
 
-- **Boundary blast radius.** ~100 command modules and `main.rs` reference `route`/`sync`/`start`/`git`/`sessions`. Shims absorb this during waves; the final call-site rewrite is the largest mechanical step.
+- **Boundary blast radius.** ~100 command modules and `main.rs` historically
+  referenced `route`/`sync`/`start`/`git`/`sessions` through broad paths. Current
+  extractions should not absorb that blast radius with compatibility shims.
+  Instead, keep each seam narrow, rewrite its internal call sites directly, and
+  add boundary tests that fail if orchestration re-owns or re-exports the moved
+  policy.
 - **`project_controller` / `session_actor` / `startup_miss` / `gc` coupling.** These cross-cut orchestration and may need to move together; confirm the import graph in Wave 1 before committing the module set.
 - **cdylib symbol preservation.** Mitigated by the `force_link` pattern (proven). Every wave touching FFI must re-run `nm -D libagent_doc.so`.
 - **`tmux-router` patch.** The superproject `.cargo/config.toml` `[patch.crates-io]` for `tmux-router` must follow the crate that depends on it (orchestration).

@@ -3360,6 +3360,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub struct CloseoutRecoveryDecisionInput",
         "pub enum CloseoutRecoveryDecision",
         "pub fn closeout_recovery_decision_from_state",
+        "pub fn short_recovery_command_from_recommendation",
         "pub enum CloseoutRecoveryMutationReason",
         "pub enum MetadataDriftAuthority",
         "pub const fn capture_refresh_event",
@@ -3376,6 +3377,8 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
             .unwrap();
     let flow_types_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/types.rs")).unwrap();
+    let route_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
     for forbidden in [
         "pub enum CloseoutGuardReason",
         "impl CloseoutGuardReason",
@@ -3422,6 +3425,8 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub fn metadata_drift_authority",
         "pub fn closeout_recovery_command(",
         "fn open_cycle_recovery_command(",
+        "fn extract_recovery_command(",
+        "fn short_recovery_command_from_recommendation(",
         "pipe the final response (with `<!-- patch:exchange -->` blocks)",
         "rewrite the response with real `<!-- patch:exchange -->` blocks",
         "preserve the user-authored content and finish through `agent-doc finalize",
@@ -3451,6 +3456,12 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
             && closeout_source.contains("closeout_recovery_decision_from_state")
             && closeout_source.contains("metadata_drift_authority"),
         "orchestration closeout recovery should call focused turn policy directly"
+    );
+    assert!(
+        route_source.contains("short_recovery_command_from_recommendation")
+            && !route_source.contains("fn extract_recovery_command(")
+            && !route_source.contains("fn short_recovery_command_from_recommendation("),
+        "route should call focused turn recovery-command projection directly, not re-own the parser"
     );
     for (relative, required) in [
         (

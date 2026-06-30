@@ -538,6 +538,124 @@ fn convergence_recovered_editor_wins_outside_response(recovered: &str, snapshot:
     norm(&rec_blanked) == norm(&snap_blanked) && norm(recovered) != norm(snapshot)
 }
 
+fn convergence_recovered_editor_wins_for_payload(
+    recovered: &str,
+    target: &str,
+    payload: &serde_json::Value,
+) -> bool {
+    let norm =
+        |t: &str| agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(t);
+    if norm(recovered) == norm(target) {
+        return false;
+    }
+
+    let Some(node_patches) = parse_convergence_node_patches(payload) else {
+        return false;
+    };
+    if !node_patches.is_empty()
+        && !convergence_node_patches_already_landed(recovered, &node_patches)
+    {
+        return false;
+    }
+
+    let Some(strict_components) = convergence_strict_components(payload) else {
+        return false;
+    };
+    let strict_component_refs = strict_components
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    let (Some(recovered_blanked), Some(target_blanked)) = (
+        blank_components_except(recovered, &strict_component_refs),
+        blank_components_except(target, &strict_component_refs),
+    ) else {
+        return false;
+    };
+    norm(&recovered_blanked) == norm(&target_blanked)
+}
+
+fn convergence_strict_components(payload: &serde_json::Value) -> Option<Vec<String>> {
+    let mut strict_components = vec![AGENT_RESPONSE_COMPONENT.to_string()];
+    if let Some(patches_value) = payload.get("patches") {
+        let patches = patches_value.as_array()?;
+        for patch in patches {
+            let component = patch
+                .get("component")
+                .or_else(|| patch.get("name"))
+                .and_then(|value| value.as_str())?;
+            if !strict_components
+                .iter()
+                .any(|existing| existing == component)
+            {
+                strict_components.push(component.to_string());
+            }
+        }
+    }
+    Some(strict_components)
+}
+
+fn parse_convergence_node_patches(
+    payload: &serde_json::Value,
+) -> Option<Vec<agent_doc_markdown_ast::mutations::MutationNodePatch>> {
+    let Some(node_patches_value) = payload.get("node_patches") else {
+        return Some(Vec::new());
+    };
+    let node_patches = node_patches_value.as_array()?;
+    let mut parsed = Vec::with_capacity(node_patches.len());
+    for patch in node_patches {
+        let op = match patch.get("op").and_then(|value| value.as_str())? {
+            "insert" => agent_doc_markdown_ast::mutations::MutationNodePatchOp::Insert,
+            "remove" => agent_doc_markdown_ast::mutations::MutationNodePatchOp::Remove,
+            "replace" => agent_doc_markdown_ast::mutations::MutationNodePatchOp::Replace,
+            "move" => agent_doc_markdown_ast::mutations::MutationNodePatchOp::Move,
+            "strike" => agent_doc_markdown_ast::mutations::MutationNodePatchOp::Strike,
+            "unstrike" => agent_doc_markdown_ast::mutations::MutationNodePatchOp::Unstrike,
+            _ => return None,
+        };
+        let order = match patch.get("order") {
+            Some(value) => value
+                .as_array()?
+                .iter()
+                .map(|item| item.as_str().map(str::to_string))
+                .collect::<Option<Vec<_>>>()?,
+            None => Vec::new(),
+        };
+        parsed.push(agent_doc_markdown_ast::mutations::MutationNodePatch {
+            component: patch
+                .get("component")
+                .and_then(|value| value.as_str())?
+                .to_string(),
+            node_key: patch
+                .get("node_key")
+                .and_then(|value| value.as_str())?
+                .to_string(),
+            op,
+            content: optional_payload_string(patch, "content")?,
+            expected_content: None,
+            before: optional_payload_string(patch, "before")?,
+            after: optional_payload_string(patch, "after")?,
+            order,
+        });
+    }
+    Some(parsed)
+}
+
+fn optional_payload_string(value: &serde_json::Value, key: &str) -> Option<Option<String>> {
+    match value.get(key) {
+        None | Some(serde_json::Value::Null) => Some(None),
+        Some(value) => value.as_str().map(|s| Some(s.to_string())),
+    }
+}
+
+fn convergence_node_patches_already_landed(
+    recovered: &str,
+    node_patches: &[agent_doc_markdown_ast::mutations::MutationNodePatch],
+) -> bool {
+    agent_doc_markdown_ast::mutations::apply_node_patches(recovered, node_patches)
+        .map(|after| after == recovered)
+        .unwrap_or(false)
+}
+
 /// `#pcwcwarn` — reconcile the agent-owned `exchange` component of a carry-forward
 /// superset working tree back to HEAD when the working tree's `exchange` is HEAD's
 /// PLUS only stale leftover blockquote lines. Returns the reconciled document, or
@@ -1448,6 +1566,26 @@ pub fn try_editor_converge(
                 // `#fcc0e`: a confirmed editor convergence proves the socket
                 // listener is live; clear any accrued ack-timeout votes (the
                 // degraded latch itself only clears on the liveness re-probe).
+                if let Err(e) = clear_ipc_socket_ack_timeouts(&project_root, file, source) {
+                    eprintln!(
+                        "[write] WARNING: {source} converge ack-timeout clear failed (non-fatal): {e}"
+                    );
+                }
+                Ok(true)
+            } else if convergence_recovered_editor_wins_for_payload(&recovered, target, &payload) {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "{source}_writeback file={} patch_id={} recovered_len={} target_len={} transport=editor_ipc resolution=editor_wins_outside_touched_components",
+                        file.display(),
+                        patch_id,
+                        recovered.len(),
+                        target.len()
+                    ),
+                );
+                // The ACK sidecar proves the live editor buffer contains the
+                // authored payload effects. Keep its concurrent non-strict
+                // component edits rather than forcing an exact target replay.
                 if let Err(e) = clear_ipc_socket_ack_timeouts(&project_root, file, source) {
                     eprintln!(
                         "[write] WARNING: {source} converge ack-timeout clear failed (non-fatal): {e}"
@@ -2467,6 +2605,54 @@ mod core_tests {
         assert!(
             !log.contains("transport=disk_fallback"),
             "ACK mismatch must not take the disk fallback:\n{log}"
+        );
+    }
+
+    #[test]
+    fn queue_consume_ack_accepts_node_patch_with_editor_owned_queue_addition() {
+        // `#qpcwcmerge`: queue consume owns the exact node-keyed strike, not the
+        // whole live queue component. If the editor ACK proves that strike landed
+        // while also carrying a concurrent operator queue addition, accept the
+        // ACK-visible buffer instead of replaying or rejecting it.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let source = crate::test_support::queue_consume_convergence_source();
+        let target = crate::test_support::queue_consume_convergence_target();
+        let recovered = target.replace(
+            "<!-- /agent:queue -->",
+            "- do [#qftlossdelta]\n<!-- /agent:queue -->",
+        );
+        fs::write(&doc, &source).unwrap();
+
+        let root = dir.path().to_path_buf();
+        let _listener = start_ack_mismatch_then_refresh_listener(&root, recovered.clone());
+        crate::test_support::wait_for_live_prompt_drift_listener(&root);
+        crate::test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
+
+        converge_document_or_disk(&doc, &target, &source, "queue_consume")
+            .expect("queue consume should accept proven node patch plus editor-owned queue edits");
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            recovered,
+            "the ACK-visible live buffer should remain authoritative"
+        );
+
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("queue_consume_writeback")
+                && log.contains("transport=editor_ipc")
+                && log.contains("resolution=editor_wins_outside_touched_components"),
+            "queue consume should accept the editor-owned queue addition:\n{log}"
+        );
+        assert!(
+            !log.contains("ack_mismatch")
+                && !log.contains("editor_convergence_required")
+                && !log.contains("transport=disk_fallback"),
+            "proven editor-owned queue drift must not be treated as a failed convergence:\n{log}"
         );
     }
 

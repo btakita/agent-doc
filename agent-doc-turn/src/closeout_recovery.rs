@@ -238,6 +238,48 @@ pub fn closeout_recovery_command(input: CloseoutRecoveryCommandInput) -> Option<
     })
 }
 
+/// Pull the first `agent-doc <subcommand> <FILE>` invocation out of a
+/// closeout-recovery recommendation so a surfaced recovery command stays short
+/// and copy-pasteable.
+///
+/// Markdown backticks are stripped first so a command wrapped in `` `...` `` is
+/// detected and the trailing backtick does not attach to the final path token.
+/// Returns `None` if no `agent-doc` invocation is present.
+pub fn short_recovery_command_from_recommendation(recommended: &str) -> Option<String> {
+    let cleaned = recommended.replace('`', " ");
+    let words: Vec<&str> = cleaned.split_whitespace().collect();
+    let mut start = None;
+    let mut end = 0;
+    for (i, &tok) in words.iter().enumerate() {
+        if start.is_none() {
+            if tok == "agent-doc" {
+                start = Some(i);
+            }
+            continue;
+        }
+        // Stop at the first token that is not part of an agent-doc CLI word
+        // (subcommand, file path, or a known short flag). Keep the surface
+        // tight: just the command + subcommand + file (or short flag + arg).
+        let is_cli_word = tok
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | '='));
+        if !is_cli_word {
+            break;
+        }
+        end = i + 1;
+    }
+    let start = start?;
+    if end <= start {
+        return None;
+    }
+    let command = words[start..end].join(" ");
+    if command.is_empty() {
+        None
+    } else {
+        Some(command)
+    }
+}
+
 pub fn open_cycle_recovery_command(
     document: &str,
     state: Option<&OpenCycleRecoveryCommandInput>,
@@ -786,6 +828,21 @@ mod tests {
         assert!(cmd.contains("pending_mutations=true"), "{cmd}");
         assert!(cmd.contains("capture_id=capture-123"), "{cmd}");
         assert!(cmd.contains("--baseline-file /tmp/baseline.md"), "{cmd}");
+    }
+
+    #[test]
+    fn short_recovery_command_from_recommendation_picks_first_agent_doc_invocation() {
+        let recommended = "finish the response, then `agent-doc finalize /abs/session.md` (or `agent-doc write --commit /abs/session.md` to absorb an already-visible response)";
+        assert_eq!(
+            short_recovery_command_from_recommendation(recommended).as_deref(),
+            Some("agent-doc finalize /abs/session.md")
+        );
+        assert!(short_recovery_command_from_recommendation("just finish the response").is_none());
+        let mixed = "Rebuild sidecars: `agent-doc reset --from-current --preserve-session /path/session.md`";
+        assert_eq!(
+            short_recovery_command_from_recommendation(mixed).as_deref(),
+            Some("agent-doc reset --from-current --preserve-session /path/session.md")
+        );
     }
 
     fn committed_cycle() -> CloseoutRecoveryCycleInput {

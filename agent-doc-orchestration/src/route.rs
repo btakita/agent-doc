@@ -218,7 +218,10 @@ use agent_doc_controller::dispatch::{
     startup_miss_superseded_by_later_open_start,
 };
 use agent_doc_frontmatter::frontmatter;
-use agent_doc_turn::closeout_recovery::{CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput};
+use agent_doc_turn::closeout_recovery::{
+    CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput,
+    short_recovery_command_from_recommendation,
+};
 use tmux_router::Tmux;
 
 use crate::{frontmatter_io, resync, sessions, snapshot, sync};
@@ -2320,7 +2323,8 @@ fn route_closeout_user_outcome_fields(decision: &CloseoutRecoveryDecision) -> St
     use crate::flow::outcome::UserFacingOutcomeKind;
     use agent_doc_turn::closeout_recovery::CloseoutRecoveryDecision as Decision;
     if let Decision::Blocked { recommended, .. } = decision {
-        let command = extract_recovery_command(recommended).unwrap_or_else(|| recommended.clone());
+        let command = short_recovery_command_from_recommendation(recommended)
+            .unwrap_or_else(|| recommended.clone());
         if let Ok(outcome) = crate::flow::outcome::UserFacingOutcome::with_unblocker(
             UserFacingOutcomeKind::BlockedWithExactUnblocker,
             "run_recovery_command",
@@ -2329,49 +2333,6 @@ fn route_closeout_user_outcome_fields(decision: &CloseoutRecoveryDecision) -> St
         }
     }
     user_outcome_fields(UserFacingOutcomeKind::QueuedBehindOwner)
-}
-
-/// Pull the first `agent-doc <subcommand> <FILE>` invocation out of a
-/// closeout-recovery `recommended` string so the surfaced `recovery_command`
-/// stays short and copy-pasteable. Markdown backticks are stripped first so a
-/// command wrapped in `` `...` `` is detected (the leading backtick would
-/// otherwise prevent the `agent-doc` start match). Returns `None` if no
-/// `agent-doc` invocation is present (caller falls back to the full text).
-fn extract_recovery_command(recommended: &str) -> Option<String> {
-    // Strip markdown backticks so a `\`agent-doc ...\`` command is detected and
-    // the trailing backtick does not glue onto the final path token.
-    let cleaned = recommended.replace('`', " ");
-    let words: Vec<&str> = cleaned.split_whitespace().collect();
-    let mut start = None;
-    let mut end = 0;
-    for (i, &tok) in words.iter().enumerate() {
-        if start.is_none() {
-            if tok == "agent-doc" {
-                start = Some(i);
-            }
-            continue;
-        }
-        // Stop at the first token that is not part of an agent-doc CLI word
-        // (subcommand, file path, or a known short flag). Keep the surface
-        // tight: just the command + subcommand + file (or short flag + arg).
-        let is_cli_word = tok
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | '='));
-        if !is_cli_word {
-            break;
-        }
-        end = i + 1;
-    }
-    let start = start?;
-    if end <= start {
-        return None;
-    }
-    let command = words[start..end].join(" ");
-    if command.is_empty() {
-        None
-    } else {
-        Some(command)
-    }
 }
 
 /// Enqueue a routed dispatch prompt into a document's `agent:queue`.
@@ -4734,29 +4695,6 @@ mod tests {
         assert!(
             fields.contains("next_action=wait_for_owner_turn_to_drain"),
             "genuine queue-behind must keep the live-owner-turn next_action: {fields}"
-        );
-    }
-
-    #[test]
-    fn extract_recovery_command_picks_first_agent_doc_invocation() {
-        // Recovery prose typically looks like: "finish the response, then
-        // `agent-doc finalize <FILE>` (or `agent-doc write --commit <FILE>`
-        // to absorb an already-visible response)" — pull just the first
-        // `agent-doc ...` invocation so the surfaced unblocker token stays
-        // short and copy-pasteable.
-        let recommended = "finish the response, then `agent-doc finalize /abs/session.md` (or `agent-doc write --commit /abs/session.md` to absorb an already-visible response)";
-        assert_eq!(
-            extract_recovery_command(recommended).as_deref(),
-            Some("agent-doc finalize /abs/session.md")
-        );
-        // No agent-doc in the prose → None (caller falls back to full text).
-        assert!(extract_recovery_command("just finish the response").is_none());
-        // Backticks are stripped because they aren't CLI word characters; the
-        // command still extracts cleanly across the boundary.
-        let mixed = "Rebuild sidecars: `agent-doc reset --from-current --preserve-session /path/session.md`";
-        assert_eq!(
-            extract_recovery_command(mixed).as_deref(),
-            Some("agent-doc reset --from-current --preserve-session /path/session.md")
         );
     }
 

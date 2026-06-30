@@ -466,6 +466,12 @@ should be deleted during extraction.
   whether committed cycles with no visible response body pass, skip as no-op
   commits, or interrupt. Orchestration keeps cycle-state loading, file parsing,
   ops-log emission, side-effect note rendering, and recovery-message formatting.
+- `agent-doc-turn` now owns carry-forward closeout signal policy used by write
+  conflict tolerance: detecting prompt targets, questions, `dispatch`/`fix`/`do`
+  directives, `spec-test` hints, hashtags, markdown queue mirrors, checkboxes,
+  and pinned queue entries as next-cycle instructions. Write keeps only
+  baseline/current diffing, exchange-scope checks, merge proof, and snapshot
+  persistence decisions while importing the focused classifier directly.
 - `agent-doc-turn` now owns partial `do [#id]` closeout-state policy: shipped
   response detection, suppress-marker handling, directed-id candidate filtering,
   and warn/pass decisions for open unresolved backlog ids. Orchestration keeps

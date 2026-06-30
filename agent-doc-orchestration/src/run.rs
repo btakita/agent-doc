@@ -1781,7 +1781,7 @@ fn build_prompt_volatile_suffix(
         .map(|section| format!("\n\n{}\n", section))
         .unwrap_or_default();
     let active_format_requirements =
-        crate::prompt_contract::format_active_format_requirements(content)
+        agent_doc_prompt_context::format_active_format_requirements(content)
             .map(|section| format!("\n\n{}\n", section))
             .unwrap_or_default();
     let document_section =

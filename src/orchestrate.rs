@@ -666,7 +666,7 @@ fn build_agent_prompt(
         .map(|section| format!("\n\n{}\n", section))
         .unwrap_or_default();
     let active_format_requirements =
-        agent_doc_orchestration::prompt_contract::format_active_format_requirements(doc)
+        agent_doc_prompt_context::format_active_format_requirements(doc)
             .map(|section| format!("\n\n{}\n", section))
             .unwrap_or_default();
     let document_section = agent_doc_orchestration::prompt_context::build_document_section(

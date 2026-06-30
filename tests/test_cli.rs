@@ -3855,8 +3855,10 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-prompt-context/src/lib.rs")).unwrap();
     for required_snippet in [
         "pub struct BoundedResponseContext",
+        "pub fn format_active_format_requirements(",
         "pub fn render_full_document_section(",
         "pub fn render_bounded_response_context(",
+        "fn collect_active_format_requirements(",
         "fn render_prompt_targets(",
         "fn extract_session_summary(",
         "fn render_backlog_head(",
@@ -3895,6 +3897,66 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
             && orchestration_source.contains("crate::response_toc::render_prompt_toc"),
         "orchestration prompt_context should gather project context then call focused rendering policy directly"
     );
+
+    let prompt_contract_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/prompt_contract.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "pub fn format_active_format_requirements(",
+        "fn collect_active_format_requirements(",
+        "fn maybe_push_format_requirement(",
+        "fn looks_like_format_requirement(",
+        "FORMAT_REQUIREMENT_",
+        "Active document-level formatting",
+        "pub use agent_doc_prompt_context",
+    ] {
+        assert!(
+            !prompt_contract_source.contains(forbidden_snippet),
+            "orchestration prompt_contract must not re-own or facade pure format requirement rendering policy: {forbidden_snippet}"
+        );
+    }
+
+    for (path, required_snippet, forbidden_snippets) in [
+        (
+            "src/orchestrate.rs",
+            "agent_doc_prompt_context::format_active_format_requirements",
+            [
+                "agent_doc_orchestration::prompt_contract::format_active_format_requirements",
+                "prompt_contract::format_active_format_requirements",
+                "crate::prompt_contract::format_active_format_requirements",
+            ],
+        ),
+        (
+            "agent-doc-orchestration/src/run.rs",
+            "agent_doc_prompt_context::format_active_format_requirements",
+            [
+                "agent_doc_orchestration::prompt_contract::format_active_format_requirements",
+                "prompt_contract::format_active_format_requirements",
+                "crate::prompt_contract::format_active_format_requirements",
+            ],
+        ),
+        (
+            "agent-doc-orchestration/src/stream.rs",
+            "agent_doc_prompt_context::format_active_format_requirements",
+            [
+                "agent_doc_orchestration::prompt_contract::format_active_format_requirements",
+                "prompt_contract::format_active_format_requirements",
+                "crate::prompt_contract::format_active_format_requirements",
+            ],
+        ),
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(path)).unwrap();
+        assert!(
+            source.contains(required_snippet),
+            "{path} should call focused format requirement rendering policy directly"
+        );
+        for forbidden_snippet in forbidden_snippets {
+            assert!(
+                !source.contains(forbidden_snippet),
+                "{path} must not call orchestration prompt_contract for focused format requirement rendering policy"
+            );
+        }
+    }
 
     let orchestration_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();

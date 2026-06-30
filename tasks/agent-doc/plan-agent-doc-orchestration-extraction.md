@@ -374,6 +374,12 @@ should be deleted during extraction.
   worklist facts. Preflight keeps only file/project-root lookup, state-event
   mapping, ops-log emission, and active/inactive decision placement while
   calling the focused queue helpers directly.
+- `agent-doc-queue::queue_directive` now owns preflight's directive lifecycle
+  expectation input filter: normalizing raw `do #id` target ids, intersecting
+  with open backlog ids, excluding ids auto-populated by backlog-to-queue sync,
+  and preserving first-seen order. Preflight keeps live backlog file IO,
+  queue-state collection, and cycle-state recording while calling the focused
+  helper directly.
 - `agent-doc-queue` now owns effective queue-continuation output policy:
   applying recycle-yield suppression, recycle guidance, required-continuation
   guidance, and queue-pause preamble selection after orchestration supplies

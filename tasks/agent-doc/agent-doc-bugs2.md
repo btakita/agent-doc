@@ -61,7 +61,22 @@ The problematic evidence is `.agent-doc/logs/ops.log:4338997`: `live_buffer_clas
 
 I attempted to file `#qftlossdelta` and mark `#qftlossproof` done through `agent-doc write --commit`, but the live editor repeatedly accepted the exchange patch and then rejected or reverted the tracked-work mutation, ending in `editor_convergence_required` / `retry_without_disk_write`. Because this document is live in the editor, I did not use `--force-disk`. `#qftlossproof` stays open until the operator either saves/closes the live editor buffer and retries, or explicitly authorizes a force-disk closeout for the backlog mutation.
 
-<!-- agent:boundary:8926394c -->
+### Re: do [#qftlossproof] — gpt-5
+
+I closed `#qftlossproof` as a failed proof and filed `#qftlossdelta` for the implementation fix.
+
+Evidence: `.agent-doc/logs/ops.log:4338964-4338997` shows ACK/live-buffer content at `len=16676` / hash `83f08ab7e6be49a671f96f7c0ffbb71fe28bba858929b883c5904140cabd5192`, then closeout committed `len=16669` / hash `dc278d260b5b2a3efffeb12c428f0f81f5be1c8373fdd3ef044eee4b39adda4f`. The failing marker is `live_buffer_classify decision=suppressed reason=write_provenance_newer_than_buffer`; I found no durable sidecar preserving the suppressed 16676-byte buffer content.
+
+Changed paths: `tasks/agent-doc/agent-doc-bugs2.md` only.
+
+Commands: `tsift status`; targeted `rg`/`sed` log inspection; live-buffer/provenance `wc -c` and `sha256sum`; `git status --short`; `agent-doc preflight`; `agent-doc finalize`.
+
+Verification: artifact evidence proves the operator-wins invariant did not hold; `#qftlossdelta` is now the focused follow-up. Full project tests were not run because this was document/log triage with no code changes.
+
+Confidence: high.
+
+Escalation: fix `#qftlossdelta` before treating the queue-edit race invariant as proven.
+<!-- agent:boundary:eefa33ea -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -92,6 +107,7 @@ I attempted to file `#qftlossdelta` and mark `#qftlossproof` done through `agent
 - :pushpin: do [#60ev]
 - do [#suprestassoc-live]
 - do [#agentsignals]
+- do [#qftlossdelta]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -120,7 +136,6 @@ What are #next-steps to fix bugs?
 <!-- agent:backlog priority queue -->
 - [ ] [#qftlossdelta] #agent-doc-bug focused invariant-loss follow-up from failed #qftlossproof live proof: `.agent-doc/logs/ops.log:4338964-4338997` shows ACK/live-buffer content at len 16676 hash `83f08ab7e6be49a671f96f7c0ffbb71fe28bba858929b883c5904140cabd5192`, then closeout committed len 16669 hash `dc278d260b5b2a3efffeb12c428f0f81f5be1c8373fdd3ef044eee4b39adda4f`; `live_buffer_classify` suppressed the differing operator-capable buffer with `reason=write_provenance_newer_than_buffer` and no durable sidecar preserving the 16676-byte content was found. Fix the operator-wins merge/write-provenance path so concurrent operator text is preserved end-to-end or the write fails closed with a recoverable artifact. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#tmuxsynccrashlog] [operator-verify] Replacement for #tmuxsynccrash: JB Sync Tmux Layout live repro log review. After the operator runs repeated JB Sync Tmux Layout against the repro layout, inspect idea.log, agent-doc ops.log, and tmux server pid/session evidence; close only if the server pid stays stable with repair_layout no-op/passive supersede markers, otherwise file a follow-up bug with the failing log markers. Plan: tasks/agent-doc/plan-sync-tmux-layout-crash.md
-- [x] [#qftlossproof] Replacement for #qftloss: live proof for the already-required operator-wins invariant. After the operator types unsaved queue/free-text/ordinary text during concurrent finalize, inspect .agent-doc/live-buffer journal evidence plus ops.log qdurcrash/live-buffer replay markers; close only if the operator text survives end-to-end, otherwise file a focused invariant-loss bug with artifact paths. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#midturnrecycleproof] Replacement for #midturn-recycle-resume: Phase A recycle interlock live proof. Drive a recycle in the preflight->finalize window, inspect ops.log cycle-open recycle-defer/commit markers and editor writeback proof; close only if no live_prompt_drift_after_preflight appears, otherwise file a regression. Plan: tasks/agent-doc/plan-midturn-recycle-resume-wedge.md
 - [ ] [#midturnresumeimpl] Replacement for #midturnresumeb: Phase B durable turn checkpoint resume. Implement and verify consumption of the #durablerecycle turn checkpoint on fresh supervisor boot, with ops-log markers proving interrupted-child redispatch versus surviving-child no-op and deferred-too-long escalation coverage. Plan: tasks/agent-doc/plan-midturn-recycle-resume-wedge.md
 - [ ] [#provauth3bimpl] Replacement for #provauth3b: operator-origin authority audit under the hard invariant. Replace any remaining content_ours/stale-editor resurrection heuristic that can reset operator-visible text with an operator-preserving merge or fail-closed path; add logs/tests proving operator-origin working-tree/editor edits are never reset. Do not gate the invariant on #crdtauth6. Plan: tasks/agent-doc/plan-operator-provenance-authority.md

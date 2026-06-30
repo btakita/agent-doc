@@ -150,8 +150,7 @@ use agent_doc_supervisor::crash_policy::{
 use agent_doc_supervisor::idle_reconcile::ready_busy_conflict_reconcile_decision;
 use agent_doc_supervisor::route_owned::{
     RouteOwnedLivenessReason, RouteOwnedReapDecision, RouteOwnedReapPolicy,
-    route_owned_backlog_has_live_items, route_owned_exchange_tail_has_unresolved_prompt,
-    route_owned_queue_has_prompts, route_owned_reap_decision,
+    route_owned_liveness_reason_for_content, route_owned_reap_decision,
 };
 #[cfg(unix)]
 use agent_doc_supervisor_process::ReexecState;
@@ -657,17 +656,7 @@ fn route_owned_cycle_completed_after_start(
         && current.phase == agent_doc_turn::CyclePhase::Committed
 }
 
-fn route_owned_file_dirty_after_commit(
-    content: &str,
-    state: &crate::cycle_state::CycleState,
-) -> bool {
-    state
-        .file_hash
-        .as_ref()
-        .is_some_and(|hash| agent_doc_hash::content_hash(content) != *hash)
-}
-
-fn route_owned_liveness_reason(
+fn route_owned_liveness_reason_for_file(
     file: &Path,
     state: &crate::cycle_state::CycleState,
 ) -> Option<RouteOwnedLivenessReason> {
@@ -679,54 +668,7 @@ fn route_owned_liveness_reason(
             )));
         }
     };
-    let dirty_after_commit = route_owned_file_dirty_after_commit(&content, state);
-    if dirty_after_commit && route_owned_exchange_tail_has_unresolved_prompt(&content) {
-        return Some(RouteOwnedLivenessReason::PostCommitUserFollowUp);
-    }
-
-    let components = match agent_doc_element::element::parse(&content) {
-        Ok(components) => components,
-        Err(err) => {
-            return Some(if dirty_after_commit {
-                RouteOwnedLivenessReason::DocumentDirtyAfterCommit
-            } else {
-                RouteOwnedLivenessReason::AdapterFailure(format!("component_parse_failed:{err}"))
-            });
-        }
-    };
-
-    for component in &components {
-        let body = component.content(&content);
-        if agent_doc_element::element::is_backlog_component(&component.name)
-            && route_owned_backlog_has_live_items(body)
-        {
-            return Some(RouteOwnedLivenessReason::BacklogNonEmpty);
-        }
-        if component.name == "queue" && route_owned_queue_has_prompts(body) {
-            return Some(RouteOwnedLivenessReason::QueueNonEmpty);
-        }
-        if component.name == "exchange" && route_owned_exchange_tail_has_unresolved_prompt(body) {
-            return Some(if dirty_after_commit {
-                RouteOwnedLivenessReason::PostCommitUserFollowUp
-            } else {
-                RouteOwnedLivenessReason::ExchangeTailUnresolvedPrompt
-            });
-        }
-    }
-
-    if dirty_after_commit {
-        return Some(RouteOwnedLivenessReason::DocumentDirtyAfterCommit);
-    }
-
-    None
-}
-
-fn route_owned_reap_decision_for_file(
-    file: &Path,
-    state: &crate::cycle_state::CycleState,
-    policy: RouteOwnedReapPolicy,
-) -> RouteOwnedReapDecision {
-    route_owned_reap_decision(policy, route_owned_liveness_reason(file, state))
+    route_owned_liveness_reason_for_content(&content, state.file_hash.as_deref())
 }
 
 fn route_owned_live_pane_busy_reason(
@@ -845,7 +787,10 @@ fn spawn_route_owned_completion_thread(
                             reason,
                         }
                     } else {
-                        route_owned_reap_decision_for_file(&file, &state, reap_policy)
+                        route_owned_reap_decision(
+                            reap_policy,
+                            route_owned_liveness_reason_for_file(&file, &state),
+                        )
                     };
                     let event = format!(
                         "route_owned_reap_decision policy={} decision={} reason={} cycle={} event={}",
@@ -2612,15 +2557,6 @@ mod th {
             blocked_closeout: None,
         }
     }
-    pub(crate) fn committed_state_for_doc(
-        path: &Path,
-        content: &str,
-    ) -> crate::cycle_state::CycleState {
-        let mut state = test_cycle("cycle-2", agent_doc_turn::CyclePhase::Committed, 20);
-        state.file = path.display().to_string();
-        state.file_hash = Some(agent_doc_hash::content_hash(content));
-        state
-    }
     // #jb-run-agent-doc-busy-queue-dispatch-deadlock: the supervisor idle-queue
     // watch must drain a live active-queue head on the busy→idle transition,
     // never inject mid-turn, and never hot-loop on a stuck head.
@@ -2656,7 +2592,7 @@ mod th {
 #[cfg(test)]
 pub(crate) use th::{
     FailingWriter, RecordingWriter, ScopedCurrentDir, ScopedEnvVar, build_base_args_for_test,
-    committed_state_for_doc, test_cycle, tmux_env_for_server,
+    test_cycle, tmux_env_for_server,
 };
 
 #[cfg(test)]
@@ -3044,147 +2980,21 @@ mod tests {
             "route-owned panes should stay alive for debugging until the new cycle commits"
         );
     }
+
     #[test]
-    fn route_owned_reap_policy_auto_keeps_live_backlog_alive() {
+    fn route_owned_liveness_file_adapter_maps_read_failure() {
         let tmp = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
-        let file = tmp.path().join("doc.md");
-        let content = "\
-<!-- agent:exchange -->
-### Re: prior — gpt-5
-Done.
-<!-- /agent:exchange -->
+        let state = test_cycle("cycle-1", agent_doc_turn::CyclePhase::Committed, 10);
+        let missing = tmp.path().join("missing.md");
 
-<!-- agent:backlog -->
-- [ ] [#next] Continue the session
-<!-- /agent:backlog -->
-";
-        std::fs::write(&file, content).unwrap();
-        let state = committed_state_for_doc(&file, content);
-
-        let decision =
-            route_owned_reap_decision_for_file(&file, &state, RouteOwnedReapPolicy::Auto);
-
-        assert!(!decision.reap);
-        assert_eq!(decision.reason, "backlog_non_empty");
-    }
-    #[test]
-    fn route_owned_reap_policy_auto_keeps_queue_alive() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
-        let file = tmp.path().join("doc.md");
-        let content = "\
-<!-- agent:queue -->
-- do #next
-<!-- /agent:queue -->
-";
-        std::fs::write(&file, content).unwrap();
-        let state = committed_state_for_doc(&file, content);
-
-        let decision =
-            route_owned_reap_decision_for_file(&file, &state, RouteOwnedReapPolicy::Auto);
-
-        assert!(!decision.reap);
-        assert_eq!(decision.reason, "queue_non_empty");
-    }
-    #[test]
-    fn route_owned_reap_policy_auto_names_post_commit_user_follow_up() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
-        let file = tmp.path().join("doc.md");
-        let committed =
-            "<!-- agent:exchange -->\n### Re: done — gpt-5\nDone.\n<!-- /agent:exchange -->\n";
-        let edited = format!("{committed}\nnew prompt?\n");
-        std::fs::write(&file, edited).unwrap();
-        let state = committed_state_for_doc(&file, committed);
-
-        let decision =
-            route_owned_reap_decision_for_file(&file, &state, RouteOwnedReapPolicy::Auto);
-
-        assert!(!decision.reap);
-        assert_eq!(decision.reason, "post_commit_user_follow_up");
-    }
-    #[test]
-    fn route_owned_reap_policy_auto_keeps_non_prompt_dirty_doc_alive() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
-        let file = tmp.path().join("doc.md");
-        let committed =
-            "<!-- agent:exchange -->\n### Re: done — gpt-5\nDone.\n<!-- /agent:exchange -->\n";
-        let edited = format!("{committed}\n<!-- local note -->\n");
-        std::fs::write(&file, edited).unwrap();
-        let state = committed_state_for_doc(&file, committed);
-
-        let decision =
-            route_owned_reap_decision_for_file(&file, &state, RouteOwnedReapPolicy::Auto);
-
-        assert!(!decision.reap);
-        assert_eq!(decision.reason, "document_dirty_after_commit");
-    }
-    #[test]
-    fn route_owned_reap_policy_auto_reaps_without_liveness_signals() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
-        let file = tmp.path().join("doc.md");
-        let content = "\
-<!-- agent:exchange -->
-### Re: done — gpt-5
-Done.
-<!-- /agent:exchange -->
-
-<!-- agent:backlog -->
-<!-- /agent:backlog -->
-";
-        std::fs::write(&file, content).unwrap();
-        let state = committed_state_for_doc(&file, content);
-
-        let decision =
-            route_owned_reap_decision_for_file(&file, &state, RouteOwnedReapPolicy::Auto);
-
-        assert!(decision.reap);
-        assert_eq!(decision.reason, "no_liveness_signals");
-    }
-    #[test]
-    fn route_owned_explicit_reap_overrides_live_backlog() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
-        let file = tmp.path().join("doc.md");
-        let content = "<!-- agent:backlog -->\n- [ ] [#next] Continue\n<!-- /agent:backlog -->\n";
-        std::fs::write(&file, content).unwrap();
-        let state = committed_state_for_doc(&file, content);
-
-        let decision = route_owned_reap_decision_for_file(
-            &file,
-            &state,
-            RouteOwnedReapPolicy::ReapAfterCommit,
+        let reason = route_owned_liveness_reason_for_file(&missing, &state)
+            .expect("missing file should be an adapter-failure liveness signal");
+        assert!(
+            reason.as_str().starts_with("read_failed:"),
+            "read failure should remain an orchestration adapter concern: {reason}"
         );
-
-        assert!(decision.reap);
-        assert_eq!(decision.reason, "explicit_reap_after_commit");
     }
-    #[test]
-    fn route_owned_exchange_tail_prompt_is_live() {
-        let body = "\
-### Re: done — gpt-5
-Done.
 
-do #next
-";
-
-        assert!(route_owned_exchange_tail_has_unresolved_prompt(body));
-    }
-    #[test]
-    fn route_owned_exchange_tail_ignores_prompt_text_before_latest_response() {
-        let body = "\
-### Re: earlier — gpt-5
-Do #old after this.
-
-### Re: latest — gpt-5
-Done.
-";
-
-        assert!(!route_owned_exchange_tail_has_unresolved_prompt(body));
-    }
     #[test]
     fn strip_stale_ctrl_d_before_prompt_drops_inherited_ctrl_d_bytes() {
         let filtered =

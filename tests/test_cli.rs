@@ -6771,6 +6771,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub enum RouteOwnedLivenessReason",
         "pub struct RouteOwnedReapDecision",
         "pub fn route_owned_reap_decision(",
+        "pub fn route_owned_file_dirty_after_commit(",
+        "pub fn route_owned_liveness_reason_for_content(",
         "pub fn route_owned_backlog_has_live_items(",
         "pub fn route_owned_queue_has_prompts(",
         "pub fn route_owned_exchange_tail_has_unresolved_prompt(",
@@ -6785,6 +6787,9 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub enum RouteOwnedLivenessReason",
         "struct RouteOwnedReapDecision",
         "fn route_owned_reap_decision(",
+        "fn route_owned_file_dirty_after_commit(",
+        "fn route_owned_liveness_reason_for_content(",
+        "fn route_owned_reap_decision_for_file(",
         "fn route_owned_backlog_has_live_items(",
         "fn route_owned_queue_has_prompts(",
         "fn route_owned_exchange_tail_has_unresolved_prompt(",
@@ -6796,13 +6801,13 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         );
     }
     for required_snippet in [
-        "route_owned_backlog_has_live_items",
-        "route_owned_queue_has_prompts",
-        "route_owned_exchange_tail_has_unresolved_prompt",
+        "route_owned_liveness_reason_for_content",
+        "route_owned_reap_decision(",
+        "RouteOwnedLivenessReason::AdapterFailure",
     ] {
         assert!(
             start_source.contains(required_snippet),
-            "start.rs should call focused route-owned liveness policy directly: {required_snippet}"
+            "start.rs should only adapt file reads and call focused route-owned policy directly: {required_snippet}"
         );
     }
     let cli_main = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
@@ -6972,6 +6977,18 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/Cargo.toml")).unwrap();
     let parsed: toml::Value = toml::from_str(&supervisor_manifest).unwrap();
     let dependencies = parsed["dependencies"].as_table().unwrap();
+    for required in [
+        "agent-doc-diff",
+        "agent-doc-element",
+        "agent-doc-element-backlog",
+        "agent-doc-hash",
+        "agent-doc-queue",
+    ] {
+        assert!(
+            dependencies.contains_key(required),
+            "agent-doc-supervisor route-owned liveness should depend only on focused pure domain crates: {required}"
+        );
+    }
     for forbidden in [
         "agent-doc-core",
         "agent-doc-orchestration",

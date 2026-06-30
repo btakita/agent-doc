@@ -130,6 +130,59 @@ pub fn route_owned_reap_decision(
     }
 }
 
+pub fn route_owned_file_dirty_after_commit(
+    content: &str,
+    committed_file_hash: Option<&str>,
+) -> bool {
+    committed_file_hash.is_some_and(|hash| agent_doc_hash::content_hash(content) != hash)
+}
+
+pub fn route_owned_liveness_reason_for_content(
+    content: &str,
+    committed_file_hash: Option<&str>,
+) -> Option<RouteOwnedLivenessReason> {
+    let dirty_after_commit = route_owned_file_dirty_after_commit(content, committed_file_hash);
+    if dirty_after_commit && route_owned_exchange_tail_has_unresolved_prompt(content) {
+        return Some(RouteOwnedLivenessReason::PostCommitUserFollowUp);
+    }
+
+    let components = match agent_doc_element::element::parse(content) {
+        Ok(components) => components,
+        Err(err) => {
+            return Some(if dirty_after_commit {
+                RouteOwnedLivenessReason::DocumentDirtyAfterCommit
+            } else {
+                RouteOwnedLivenessReason::AdapterFailure(format!("component_parse_failed:{err}"))
+            });
+        }
+    };
+
+    for component in &components {
+        let body = component.content(content);
+        if agent_doc_element::element::is_backlog_component(&component.name)
+            && route_owned_backlog_has_live_items(body)
+        {
+            return Some(RouteOwnedLivenessReason::BacklogNonEmpty);
+        }
+        if component.name == "queue" && route_owned_queue_has_prompts(body) {
+            return Some(RouteOwnedLivenessReason::QueueNonEmpty);
+        }
+        if component.name == "exchange" && route_owned_exchange_tail_has_unresolved_prompt(body) {
+            return Some(if dirty_after_commit {
+                RouteOwnedLivenessReason::PostCommitUserFollowUp
+            } else {
+                RouteOwnedLivenessReason::ExchangeTailUnresolvedPrompt
+            });
+        }
+    }
+
+    if dirty_after_commit {
+        return Some(RouteOwnedLivenessReason::DocumentDirtyAfterCommit);
+    }
+
+    None
+}
+
 pub fn route_owned_backlog_has_live_items(body: &str) -> bool {
     let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(body);
     items
@@ -292,5 +345,84 @@ Done.
 ";
 
         assert!(!route_owned_exchange_tail_has_unresolved_prompt(body));
+    }
+
+    fn committed_hash(content: &str) -> String {
+        agent_doc_hash::content_hash(content)
+    }
+
+    #[test]
+    fn route_owned_content_liveness_detects_live_backlog() {
+        let content = "\
+<!-- agent:exchange -->
+### Re: prior — gpt-5
+Done.
+<!-- /agent:exchange -->
+
+<!-- agent:backlog -->
+- [ ] [#next] Continue the session
+<!-- /agent:backlog -->
+";
+
+        assert_eq!(
+            route_owned_liveness_reason_for_content(content, Some(&committed_hash(content))),
+            Some(RouteOwnedLivenessReason::BacklogNonEmpty)
+        );
+    }
+
+    #[test]
+    fn route_owned_content_liveness_detects_queue_prompt() {
+        let content = "\
+<!-- agent:queue -->
+- do #next
+<!-- /agent:queue -->
+";
+
+        assert_eq!(
+            route_owned_liveness_reason_for_content(content, Some(&committed_hash(content))),
+            Some(RouteOwnedLivenessReason::QueueNonEmpty)
+        );
+    }
+
+    #[test]
+    fn route_owned_content_liveness_names_post_commit_user_follow_up() {
+        let committed =
+            "<!-- agent:exchange -->\n### Re: done — gpt-5\nDone.\n<!-- /agent:exchange -->\n";
+        let edited = format!("{committed}\nnew prompt?\n");
+
+        assert_eq!(
+            route_owned_liveness_reason_for_content(&edited, Some(&committed_hash(committed))),
+            Some(RouteOwnedLivenessReason::PostCommitUserFollowUp)
+        );
+    }
+
+    #[test]
+    fn route_owned_content_liveness_keeps_non_prompt_dirty_doc_alive() {
+        let committed =
+            "<!-- agent:exchange -->\n### Re: done — gpt-5\nDone.\n<!-- /agent:exchange -->\n";
+        let edited = format!("{committed}\n<!-- local note -->\n");
+
+        assert_eq!(
+            route_owned_liveness_reason_for_content(&edited, Some(&committed_hash(committed))),
+            Some(RouteOwnedLivenessReason::DocumentDirtyAfterCommit)
+        );
+    }
+
+    #[test]
+    fn route_owned_content_liveness_is_empty_when_no_signals() {
+        let content = "\
+<!-- agent:exchange -->
+### Re: done — gpt-5
+Done.
+<!-- /agent:exchange -->
+
+<!-- agent:backlog -->
+<!-- /agent:backlog -->
+";
+
+        assert_eq!(
+            route_owned_liveness_reason_for_content(content, Some(&committed_hash(content))),
+            None
+        );
     }
 }

@@ -619,7 +619,8 @@ fn build_prompt(
 
 /// Resolve a streaming agent backend by name.
 fn resolve_streaming(
-    name: &str, config: Option<&agent_doc_config::AgentConfig>,
+    name: &str,
+    config: Option<&agent_doc_config::AgentConfig>,
     env: Vec<(String, Option<String>)>,
     file: &Path,
     fm: &agent_doc_frontmatter::frontmatter::Frontmatter,

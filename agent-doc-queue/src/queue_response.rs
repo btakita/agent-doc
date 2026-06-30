@@ -240,6 +240,13 @@ pub fn response_topic_matches_queue_head(topic: &str, queue_head: &str) -> bool 
         .is_some_and(|head_id| crate::queue_directive::topic_resolves_to_exact_id(topic, &head_id))
 }
 
+pub fn response_explicitly_targets_queue_head(response: &str, queue_head: &str) -> bool {
+    response
+        .lines()
+        .filter_map(response_heading_topic)
+        .any(|topic| response_topic_matches_queue_head(topic, queue_head))
+}
+
 /// Collapse a string to lowercase alphanumeric words separated by single spaces.
 /// Every non-alphanumeric run (`:pushpin:`, `- `, backticks, punctuation,
 /// newlines) becomes one space, so two spellings of the same prompt compare equal
@@ -737,6 +744,26 @@ mod tests {
         assert!(!response_topic_matches_queue_head("#foo halt", "do [#foo]"));
         assert!(!response_topic_matches_queue_head(
             "#foo deferred",
+            "do [#foo]"
+        ));
+    }
+
+    #[test]
+    fn response_explicitly_targets_queue_head_matches_heading_topic_or_exact_id() {
+        assert!(response_explicitly_targets_queue_head(
+            "### Re: do [#foo]\n\nDone.",
+            "do [#foo]"
+        ));
+        assert!(response_explicitly_targets_queue_head(
+            "### Re: #foo — gpt-5\n\nDone.",
+            "do [#foo]"
+        ));
+        assert!(!response_explicitly_targets_queue_head(
+            "### Re: #foo deferred\n\nBlocked.",
+            "do [#foo]"
+        ));
+        assert!(!response_explicitly_targets_queue_head(
+            "No response heading here, just prose #foo.",
             "do [#foo]"
         ));
     }

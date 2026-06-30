@@ -19,7 +19,7 @@ use agent_doc_queue::{
         head_carries_in_progress_marker, head_id_names_tracked_directive_item, normalize_done_id,
         normalize_for_answer_match, normalize_queue_prompt_text, queue_head_is_bare_do_directive,
         queue_head_is_free_text_prompt, queue_prompt_done_id, queue_prompt_text_is_free_text,
-        queue_prompt_text_matches, response_heading_topic, response_topic_matches_queue_head,
+        queue_prompt_text_matches, response_explicitly_targets_queue_head, response_heading_topic,
     },
 };
 
@@ -682,13 +682,6 @@ pub fn response_explicitly_targets_active_queue_head(file: &Path, response: &str
         response,
         &queue_head,
     ))
-}
-
-pub(crate) fn response_explicitly_targets_queue_head(response: &str, queue_head: &str) -> bool {
-    response
-        .lines()
-        .filter_map(response_heading_topic)
-        .any(|topic| response_topic_matches_queue_head(topic, queue_head))
 }
 
 /// True when this cycle's captured response heading targets EXACTLY the active

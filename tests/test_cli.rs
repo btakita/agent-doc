@@ -2958,6 +2958,7 @@ fn test_agent_doc_queue_owns_queue_response_head_matching_policy() {
         "pub fn normalize_done_id",
         "pub fn response_heading_topic",
         "pub fn response_topic_matches_queue_head",
+        "pub fn response_explicitly_targets_queue_head",
         "pub fn normalize_queue_prompt_text",
         "pub fn queue_prompt_text_matches",
     ] {
@@ -2989,6 +2990,7 @@ fn test_agent_doc_queue_owns_queue_response_head_matching_policy() {
             "fn normalize_done_id(",
             "fn response_heading_topic(",
             "fn response_topic_matches_queue_head(",
+            "fn response_explicitly_targets_queue_head(",
             "fn topic_resolves_to_exact_id(",
             "fn topic_resolves_to_only_id_directives(",
         ] {

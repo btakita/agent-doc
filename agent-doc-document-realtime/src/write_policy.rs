@@ -1229,6 +1229,44 @@ pub fn classify_committed_historical_agent_doc_mutation(
     classify_safe_agent_doc_mutation(snapshot_doc, file_doc, true)
 }
 
+/// Length evidence for suspicious stale snapshot reset drift.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StaleSnapshotResetDrift {
+    pub snapshot_len: usize,
+    pub current_len: usize,
+}
+
+/// Minimum size delta before stale snapshot reset drift is considered dangerous.
+const STALE_SNAPSHOT_RESET_DRIFT_MIN_BYTES: usize = 100;
+
+/// Maximum current/snapshot size ratio for reset-drift detection.
+const STALE_SNAPSHOT_RESET_DRIFT_MAX_RATIO: f64 = 0.90;
+
+pub fn stale_snapshot_reset_drift(
+    snapshot_doc: &str,
+    current_doc: &str,
+) -> Option<StaleSnapshotResetDrift> {
+    let snapshot_clean = strip_boundary_markers(snapshot_doc);
+    let current_clean = strip_boundary_markers(current_doc);
+    let snapshot_len = snapshot_clean.len();
+    let current_len = current_clean.len();
+
+    if snapshot_len <= current_len + STALE_SNAPSHOT_RESET_DRIFT_MIN_BYTES {
+        return None;
+    }
+    if current_len as f64 / snapshot_len as f64 >= STALE_SNAPSHOT_RESET_DRIFT_MAX_RATIO {
+        return None;
+    }
+    if classify_safe_out_of_band_agent_doc_mutation(&snapshot_clean, &current_clean).is_some() {
+        return None;
+    }
+
+    Some(StaleSnapshotResetDrift {
+        snapshot_len,
+        current_len,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1506,6 +1544,44 @@ mod tests {
         assert!(!exchange_change_is_safe_historical_reduction(
             snapshot, current
         ));
+    }
+
+    #[test]
+    fn stale_snapshot_reset_drift_detects_unsafe_large_shrink() {
+        let stale_exchange = "duplicated response\n".repeat(20);
+        let snapshot = format!(
+            "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange patch=append -->\n{}<!-- /agent:exchange -->\n",
+            stale_exchange
+        );
+        let current = "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange patch=append -->\nclean\n<!-- /agent:exchange -->\n";
+
+        let drift = stale_snapshot_reset_drift(&snapshot, current)
+            .expect("large unsafe shrink should be classified as stale reset drift");
+
+        assert!(drift.snapshot_len > drift.current_len + 100);
+    }
+
+    #[test]
+    fn stale_snapshot_reset_drift_ignores_small_delta() {
+        assert_eq!(
+            stale_snapshot_reset_drift(&"a".repeat(1000), &"b".repeat(940)),
+            None
+        );
+    }
+
+    #[test]
+    fn stale_snapshot_reset_drift_ignores_safe_status_mutation() {
+        let snapshot = format!(
+            "---\nagent_doc_session: test\n---\n\n<!-- agent:status patch=replace -->\n{}<!-- /agent:status -->\n\n<!-- agent:exchange patch=append -->\n### Re: older\n\nold body\n<!-- /agent:exchange -->\n",
+            "Verbose status line.\n".repeat(20)
+        );
+        let current = "---\nagent_doc_session: test\n---\n\n<!-- agent:status patch=replace -->\nDone.\n<!-- /agent:status -->\n\n<!-- agent:exchange patch=append -->\n### Re: older\n\nold body\n<!-- /agent:exchange -->\n";
+
+        assert!(
+            snapshot.len() > current.len() + 100,
+            "fixture should be large enough to trip the length gate"
+        );
+        assert_eq!(stale_snapshot_reset_drift(&snapshot, current), None);
     }
 
     #[test]

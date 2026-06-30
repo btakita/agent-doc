@@ -5,31 +5,9 @@ use super::*;
 use agent_doc_document_realtime::write_policy::live_prompt_drift_auto_recovery_safe;
 use agent_doc_document_realtime::write_policy::{
     AckMismatchRecovery, classify_ack_mismatch_recovery,
-    classify_safe_out_of_band_agent_doc_mutation, exchange_change_is_safe_historical_reduction,
-    live_prompt_drift_recovery_target, snapshot_contains_dropped_prompt,
+    exchange_change_is_safe_historical_reduction, live_prompt_drift_recovery_target,
+    snapshot_contains_dropped_prompt, stale_snapshot_reset_drift,
 };
-
-pub(crate) fn stale_snapshot_reset_drift(
-    snapshot_doc: &str,
-    current_doc: &str,
-) -> Option<(usize, usize)> {
-    let snapshot_clean = strip_boundary_for_dedup(snapshot_doc);
-    let current_clean = strip_boundary_for_dedup(current_doc);
-    let snapshot_len = snapshot_clean.len();
-    let current_len = current_clean.len();
-
-    if snapshot_len <= current_len + STALE_SNAPSHOT_RESET_DRIFT_MIN_BYTES {
-        return None;
-    }
-    if current_len as f64 / snapshot_len as f64 >= STALE_SNAPSHOT_RESET_DRIFT_MAX_RATIO {
-        return None;
-    }
-    if classify_safe_out_of_band_agent_doc_mutation(&snapshot_clean, &current_clean).is_some() {
-        return None;
-    }
-
-    Some((snapshot_len, current_len))
-}
 
 pub fn guard_no_stale_snapshot_reset_drift(
     file: &Path,
@@ -46,10 +24,11 @@ pub fn guard_no_stale_snapshot_reset_drift(
     {
         return Ok(false);
     }
-    let Some((snapshot_len, current_len)) = stale_snapshot_reset_drift(snapshot_doc, current_doc)
-    else {
+    let Some(drift) = stale_snapshot_reset_drift(snapshot_doc, current_doc) else {
         return Ok(false);
     };
+    let snapshot_len = drift.snapshot_len;
+    let current_len = drift.current_len;
     if let Some(reason) = classify_stale_snapshot_visible_rebase(file, snapshot_doc, current_doc) {
         crate::snapshot::save(file, current_doc)?;
         let crdt = agent_doc_merge::crdt::CrdtDoc::from_text(current_doc).encode_state();

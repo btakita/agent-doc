@@ -10106,6 +10106,8 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         "pub fn live_prompt_drift_auto_recovery_safe",
         "pub fn live_prompt_drift_recovery_target",
         "pub fn snapshot_contains_dropped_prompt",
+        "pub struct StaleSnapshotResetDrift",
+        "pub fn stale_snapshot_reset_drift",
     ] {
         assert!(
             realtime_write_policy.contains(required_snippet),
@@ -10116,6 +10118,8 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
     let converge =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/converge.rs"))
             .unwrap();
+    let write_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
     for forbidden_snippet in [
         "pub fn live_prompt_drift_auto_recovery_safe",
         "fn live_prompt_drift_recovery_target",
@@ -10123,15 +10127,29 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         "fn snapshot_contains_dropped_prompt(",
         "fn exchange_change_is_safe_historical_reduction",
         "fn exchange_response_block_ranges",
+        "pub(crate) fn stale_snapshot_reset_drift",
+        "fn stale_snapshot_reset_drift(",
+        "STALE_SNAPSHOT_RESET_DRIFT_MIN_BYTES",
+        "STALE_SNAPSHOT_RESET_DRIFT_MAX_RATIO",
     ] {
         assert!(
             !converge.contains(forbidden_snippet),
             "write/converge.rs must not re-own realtime exchange/live-drift policy: {forbidden_snippet}"
         );
     }
+    for forbidden_snippet in [
+        "STALE_SNAPSHOT_RESET_DRIFT_MIN_BYTES",
+        "STALE_SNAPSHOT_RESET_DRIFT_MAX_RATIO",
+    ] {
+        assert!(
+            !write_source.contains(forbidden_snippet),
+            "write.rs must not keep stale snapshot reset-drift threshold policy: {forbidden_snippet}"
+        );
+    }
     assert!(
         converge.contains("agent_doc_document_realtime::write_policy::{")
-            && converge.contains("live_prompt_drift_recovery_target("),
+            && converge.contains("live_prompt_drift_recovery_target(")
+            && converge.contains("stale_snapshot_reset_drift("),
         "write/converge.rs should adapt effect gates into focused realtime recovery policy"
     );
 }

@@ -3269,12 +3269,6 @@ const SHRINK_GUARD_MIN_BYTES: usize = 100;
 /// If the new exchange content is less than this fraction of the old, refuse.
 const SHRINK_GUARD_MAX_RATIO: f64 = 0.10;
 
-/// Minimum size delta before stale snapshot reset drift is considered dangerous.
-const STALE_SNAPSHOT_RESET_DRIFT_MIN_BYTES: usize = 100;
-
-/// Maximum current/snapshot size ratio for reset-drift detection.
-const STALE_SNAPSHOT_RESET_DRIFT_MAX_RATIO: f64 = 0.90;
-
 const VISIBLE_WRITE_TYPING_DEBOUNCE_MS: u64 = 500;
 const VISIBLE_WRITE_TYPING_TIMEOUT_MS: u64 = 5_000;
 

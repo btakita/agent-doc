@@ -17,6 +17,7 @@ pub mod op_log;
 pub mod owner_pane_recursion;
 pub mod response_text;
 pub mod turn_scope;
+pub mod turn_status;
 pub mod wait_machine;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

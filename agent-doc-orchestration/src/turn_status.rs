@@ -15,51 +15,13 @@
 //! `pane-border-status` is enabled. The command is best-effort — it never fails
 //! the turn: outside tmux, or on any tmux error, it succeeds quietly.
 
+use agent_doc_turn::turn_status::{
+    STALE_SUPERVISOR_MARKER, TURN_ACTIVE_MARKER, TurnActiveMarker, pane_title_for_status,
+    turn_active_marker_is_fresh, turn_active_marker_matches_pane,
+};
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
-
-/// Pane-border title shown while a turn is in flight.
-pub const TURN_ACTIVE_PANE_TITLE: &str = "⟳ agent-doc: turn in progress";
-
-/// Leading marker prepended to the pane title when the route-owned supervisor is
-/// running a stale binary (`#suptmuxstale`). Surfaces the supervisor's already-
-/// published `binary_stale` probe on the most-visible always-present pane surface
-/// the operator named (the turn-in-progress notification), so a stale session is
-/// obvious at a glance. Read-only display of the probe — it does not recompute
-/// staleness or change recycle/install behavior.
-pub const STALE_SUPERVISOR_PANE_MARKER: &str = "⚠ STALE SUPERVISOR";
-
-/// Project-relative path of the readable stale-supervisor marker
-/// (`#suptmuxstale`). The route-owned supervisor's idle-watch writes this when its
-/// `process_binary_is_stale` probe flips true and removes it when fresh; the
-/// `turn-status` hook (a separate short-lived process in the agent pane) reads it
-/// to decorate the pane title. A plain on-disk flag is the cross-process channel
-/// because the `binary_stale` atomic lives only in the supervisor process memory.
-pub const STALE_SUPERVISOR_MARKER: &str = ".agent-doc/supervisor-stale";
-
-/// Project-relative path of the readable turn-state marker
-/// (`#claude-busy-status-during-active-turn`). Written by `turn-status active`,
-/// removed by `turn-status idle`. Lets route/supervisor *read* whether the
-/// agent is mid-turn — the bridge toward a hard busy-lease (gated on
-/// `#subagent-blocks-session`) without yet wiring a fail-closed block.
-pub const TURN_ACTIVE_MARKER: &str = ".agent-doc/turn-active.json";
-
-/// Self-expiry window. A missed `idle`/`Stop` hook must not wedge the session
-/// as perpetually busy, so a marker older than this is read as stale (idle).
-/// Sized well above any realistic single turn (including a long backgrounded
-/// build) while still self-healing within an hour.
-pub const TURN_ACTIVE_TTL_SECS: u64 = 3600;
-
-/// Readable turn-state marker contents.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TurnActiveMarker {
-    /// The tmux pane the turn is running in (`$TMUX_PANE`), best-effort.
-    pub pane: String,
-    /// Unix seconds the turn went active — used for self-expiry.
-    pub written_at: u64,
-}
 
 fn now_secs() -> u64 {
     SystemTime::now()
@@ -101,14 +63,14 @@ pub fn clear_turn_active_marker(base: &Path) -> Result<()> {
     }
 }
 
-/// Read the turn-active marker if it exists and is not expired. A marker older
-/// than [`TURN_ACTIVE_TTL_SECS`] (relative to `now`) is treated as absent so a
-/// missed `idle` hook self-heals instead of wedging the session busy.
+/// Read the turn-active marker if it exists and is not expired. An expired
+/// marker is treated as absent so a missed `idle` hook self-heals instead of
+/// wedging the session busy.
 pub fn read_turn_active_marker_at(base: &Path, now: u64) -> Option<TurnActiveMarker> {
     let path = marker_path(base);
     let content = std::fs::read_to_string(&path).ok()?;
     let marker: TurnActiveMarker = serde_json::from_str(&content).ok()?;
-    if now.saturating_sub(marker.written_at) >= TURN_ACTIVE_TTL_SECS {
+    if !turn_active_marker_is_fresh(&marker, now) {
         return None;
     }
     Some(marker)
@@ -126,31 +88,8 @@ pub fn turn_active(base: &Path) -> bool {
 
 /// True when the non-expired marker belongs to `pane`.
 pub fn turn_active_for_pane(base: &Path, pane: &str) -> bool {
-    read_turn_active_marker(base).is_some_and(|marker| marker.pane == pane)
-}
-
-/// Title to set for a turn state. `active` → the busy title; `idle` → empty, so
-/// the pane returns to its default border title.
-pub fn pane_title_for_state(active: bool) -> &'static str {
-    if active { TURN_ACTIVE_PANE_TITLE } else { "" }
-}
-
-/// Compose the pane-border title for a turn state, decorated with the stale-
-/// supervisor marker when `stale` is true (`#suptmuxstale`). Pure string
-/// composition so it is unit-testable without tmux:
-///
-/// - active + fresh  → the plain turn-in-progress title
-/// - active + stale  → `⚠ STALE SUPERVISOR ⟳ agent-doc: turn in progress`
-/// - idle   + fresh  → empty (pane returns to default title)
-/// - idle   + stale  → `⚠ STALE SUPERVISOR`, so an at-a-glance staleness warning
-///   stays visible between turns even when no turn is in flight.
-pub fn pane_title_for_status(active: bool, stale: bool) -> String {
-    let base = pane_title_for_state(active);
-    match (stale, base.is_empty()) {
-        (false, _) => base.to_string(),
-        (true, true) => STALE_SUPERVISOR_PANE_MARKER.to_string(),
-        (true, false) => format!("{STALE_SUPERVISOR_PANE_MARKER} {base}"),
-    }
+    read_turn_active_marker(base)
+        .is_some_and(|marker| turn_active_marker_matches_pane(&marker, pane))
 }
 
 fn stale_marker_path(base: &Path) -> PathBuf {
@@ -242,19 +181,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pane_title_active_names_turn_in_progress() {
-        assert_eq!(pane_title_for_state(true), TURN_ACTIVE_PANE_TITLE);
-        assert!(pane_title_for_state(true).contains("turn in progress"));
-    }
-
-    #[test]
-    fn pane_title_idle_clears_to_default() {
-        // Idle resets to empty so the pane border returns to its default title
-        // — the status must not linger after the turn ends.
-        assert_eq!(pane_title_for_state(false), "");
-    }
-
-    #[test]
     fn turn_active_marker_write_read_clear_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
         let base = dir.path();
@@ -277,64 +203,6 @@ mod tests {
         );
         // Clearing an absent marker is a no-op, not an error.
         clear_turn_active_marker(base).unwrap();
-    }
-
-    #[test]
-    fn turn_active_marker_self_expires_after_ttl() {
-        // A missed `idle`/Stop hook must not wedge the session busy forever: a
-        // marker older than the TTL reads as absent (idle).
-        let dir = tempfile::tempdir().unwrap();
-        let base = dir.path();
-        std::fs::create_dir_all(base.join(".agent-doc")).unwrap();
-
-        write_turn_active_marker_at(base, "%7", 1000).unwrap();
-        // Just inside the window → still active.
-        assert!(read_turn_active_marker_at(base, 1000 + TURN_ACTIVE_TTL_SECS - 1).is_some());
-        // At/after the window → expired, treated as idle.
-        assert!(read_turn_active_marker_at(base, 1000 + TURN_ACTIVE_TTL_SECS).is_none());
-    }
-
-    #[test]
-    fn pane_title_active_stale_leads_with_warning() {
-        // `#suptmuxstale` — an active turn on a stale supervisor must lead with the
-        // unmissable warning followed by the normal turn-in-progress title.
-        let title = pane_title_for_status(true, true);
-        assert!(
-            title.contains(STALE_SUPERVISOR_PANE_MARKER),
-            "stale active title must contain the warning: {title}"
-        );
-        assert!(
-            title.contains("turn in progress"),
-            "stale active title must keep the turn-in-progress text: {title}"
-        );
-        assert!(
-            title.starts_with(STALE_SUPERVISOR_PANE_MARKER),
-            "warning must lead the title: {title}"
-        );
-    }
-
-    #[test]
-    fn pane_title_active_fresh_has_no_warning() {
-        // A fresh supervisor must render exactly the plain turn-in-progress title.
-        let title = pane_title_for_status(true, false);
-        assert_eq!(title, TURN_ACTIVE_PANE_TITLE);
-        assert!(!title.contains(STALE_SUPERVISOR_PANE_MARKER));
-    }
-
-    #[test]
-    fn pane_title_idle_stale_still_warns() {
-        // Between turns the warning stays visible so a stale session is obvious
-        // even when no turn is in flight.
-        assert_eq!(
-            pane_title_for_status(false, true),
-            STALE_SUPERVISOR_PANE_MARKER
-        );
-    }
-
-    #[test]
-    fn pane_title_idle_fresh_clears() {
-        // Idle + fresh resets to empty so the pane returns to its default title.
-        assert_eq!(pane_title_for_status(false, false), "");
     }
 
     #[test]

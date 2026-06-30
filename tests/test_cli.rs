@@ -3886,6 +3886,72 @@ fn test_agent_doc_turn_owns_no_change_cycle_policy() {
 }
 
 #[test]
+fn test_agent_doc_turn_owns_turn_status_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let turn_status =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn/src/turn_status.rs")).unwrap();
+    for required in [
+        "pub const TURN_ACTIVE_PANE_TITLE",
+        "pub const STALE_SUPERVISOR_PANE_MARKER",
+        "pub const STALE_SUPERVISOR_MARKER",
+        "pub const TURN_ACTIVE_MARKER",
+        "pub const TURN_ACTIVE_TTL_SECS",
+        "pub struct TurnActiveMarker",
+        "pub fn turn_active_marker_is_fresh",
+        "pub fn turn_active_marker_matches_pane",
+        "pub fn pane_title_for_state",
+        "pub fn pane_title_for_status",
+    ] {
+        assert!(
+            turn_status.contains(required),
+            "agent-doc-turn must own turn-status policy vocabulary: {required}"
+        );
+    }
+
+    let turn_lib = fs::read_to_string(manifest_dir.join("agent-doc-turn/src/lib.rs")).unwrap();
+    assert!(
+        turn_lib.contains("pub mod turn_status;"),
+        "agent-doc-turn should expose turn-status policy through its owning module"
+    );
+    assert!(
+        !turn_lib.contains("pub use turn_status"),
+        "agent-doc-turn should not add a turn_status root facade"
+    );
+
+    let orchestration =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/turn_status.rs"))
+            .unwrap();
+    for forbidden in [
+        "pub const TURN_ACTIVE_PANE_TITLE",
+        "pub const STALE_SUPERVISOR_PANE_MARKER",
+        "pub const STALE_SUPERVISOR_MARKER",
+        "pub const TURN_ACTIVE_MARKER",
+        "pub const TURN_ACTIVE_TTL_SECS",
+        "pub struct TurnActiveMarker",
+        "pub fn pane_title_for_state",
+        "pub fn pane_title_for_status",
+        "pub use agent_doc_turn::turn_status",
+    ] {
+        assert!(
+            !orchestration.contains(forbidden),
+            "orchestration turn_status must stay an effect adapter, not a facade: {forbidden}"
+        );
+    }
+    for required in [
+        "agent_doc_turn::turn_status::{",
+        "TurnActiveMarker",
+        "pane_title_for_status",
+        "turn_active_marker_is_fresh",
+        "turn_active_marker_matches_pane",
+    ] {
+        assert!(
+            orchestration.contains(required),
+            "orchestration turn_status should call focused turn-status policy directly: {required}"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_turn_owns_owner_pane_recursion_diagnostics() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     assert!(

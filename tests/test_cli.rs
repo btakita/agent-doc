@@ -8635,6 +8635,104 @@ fn test_agent_doc_turn_executor_tmux_owns_prompt_parser_policy() {
 }
 
 #[test]
+fn test_agent_doc_turn_executor_tmux_owns_context_clear_submit_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let tmux_executor_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn-executor-tmux/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&tmux_executor_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+
+    let lib_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn-executor-tmux/src/lib.rs")).unwrap();
+    assert!(
+        lib_source.contains("pub mod context_clear;"),
+        "agent-doc-turn-executor-tmux must export context-clear submit policy directly"
+    );
+
+    let context_clear_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn-executor-tmux/src/context_clear.rs"))
+            .unwrap();
+    for required in [
+        "pub enum ContextClearSubmitStatus",
+        "pub struct ContextClearSubmitObservation",
+        "pub fn context_clear_command_visible_in_active_input(",
+        "pub fn context_clear_submit_needs_enter_resubmit(",
+        "pub fn context_clear_submit_observation_line(",
+        "pub fn context_clear_submit_resubmit_proof_line(",
+        "pub fn context_clear_submit_blocked_line(",
+        "pub fn context_clear_submit_blocked_message(",
+    ] {
+        assert!(
+            context_clear_source.contains(required),
+            "agent-doc-turn-executor-tmux must own context-clear submit policy: {required}"
+        );
+    }
+
+    let session_actor_source =
+        fs::read_to_string(manifest_dir.join("src/session_actor_cmd.rs")).unwrap();
+    for forbidden in [
+        "enum ClearDirectSubmitStatus",
+        "struct ClearDirectSubmitObservation",
+        "fn clear_direct_submit_needs_enter_resubmit(",
+        "fn clear_direct_submit_observation_line(",
+        "fn clear_direct_submit_resubmit_proof_line(",
+        "fn clear_direct_submit_blocked_line(",
+        "fn clear_direct_submit_blocked_message(",
+        "fn clear_command_visible_in_active_input(",
+        "fn line_shows_clear_command_input(",
+        "fn clear_command_candidate_visible(",
+        "fn line_starts_with_clear_prompt_prefix(",
+        "fn strip_clear_prompt_prefix(",
+    ] {
+        assert!(
+            !session_actor_source.contains(forbidden),
+            "session_actor_cmd.rs must keep context-clear submit effects only, not re-own pure policy: {forbidden}"
+        );
+    }
+    assert!(
+        session_actor_source.contains("use agent_doc_turn_executor_tmux::context_clear::{"),
+        "session_actor_cmd.rs should call focused context-clear policy directly"
+    );
+
+    let start_detection_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/detection.rs"))
+            .unwrap();
+    for forbidden in [
+        "pub(crate) fn context_clear_command_visible_in_active_input(",
+        "fn line_shows_context_clear_command_input(",
+        "fn context_clear_command_candidate_visible(",
+        "fn line_starts_with_context_clear_prompt_prefix(",
+        "fn strip_context_clear_prompt_prefix(",
+    ] {
+        assert!(
+            !start_detection_source.contains(forbidden),
+            "start/detection.rs must not duplicate context-clear visibility policy: {forbidden}"
+        );
+    }
+    assert!(
+        start_detection_source
+            .contains("use agent_doc_turn_executor_tmux::context_clear::context_clear_command_visible_in_active_input;"),
+        "start/detection.rs should call focused context-clear policy directly"
+    );
+
+    for forbidden in [
+        "agent-doc-orchestration",
+        "agent-doc-tmux-commands",
+        "anyhow",
+        "tmux-router",
+        "agent-doc-frontmatter",
+        "interprocess",
+        "notify",
+        "rusqlite",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-turn-executor-tmux context-clear policy must stay free of orchestration/session/tmux command effects"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_tmux_owns_layout_memory_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let tmux_manifest = fs::read_to_string(manifest_dir.join("agent-doc-tmux/Cargo.toml")).unwrap();

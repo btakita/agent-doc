@@ -4,6 +4,7 @@
 //! crate maps those tmux facts into generic turn-executor readiness. It does
 //! not execute `tmux` commands, merge document text, or commit document changes.
 
+pub mod context_clear;
 pub mod prompt;
 
 pub use agent_doc_tmux::{

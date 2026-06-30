@@ -14,43 +14,17 @@ use agent_doc_sqlite::state_store::{
     ActorRecord, ActorState, ActorTransitionStatus, SessionOperatorStatus,
 };
 use agent_doc_tmux_commands::tmux_submit_mode_for_harness;
+use agent_doc_turn_executor_tmux::context_clear::{
+    ContextClearSubmitObservation, ContextClearSubmitStatus,
+    context_clear_command_visible_in_active_input, context_clear_submit_blocked_line,
+    context_clear_submit_blocked_message, context_clear_submit_needs_enter_resubmit,
+    context_clear_submit_observation_line, context_clear_submit_resubmit_proof_line,
+};
 use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry, Tmux};
 
 const SUPERVISOR_INJECT_SUBMIT_MODE: &str = "supervisor_normalized_submit";
 const CLEAR_DIRECT_SUBMIT_ACCEPTANCE_TIMEOUT: Duration = Duration::from_secs(2);
 const CLEAR_DIRECT_SUBMIT_ACCEPTANCE_POLL_INTERVAL: Duration = Duration::from_millis(150);
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ClearDirectSubmitStatus {
-    Accepted,
-    TimedOut,
-    CaptureFailed,
-}
-
-impl ClearDirectSubmitStatus {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Accepted => "accepted",
-            Self::TimedOut => "command_still_visible",
-            Self::CaptureFailed => "capture_failed",
-        }
-    }
-
-    fn issue(self) -> Option<&'static str> {
-        match self {
-            Self::TimedOut => Some("prompt_not_submitted"),
-            Self::CaptureFailed => Some("submit_unverified_capture_failed"),
-            Self::Accepted => None,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ClearDirectSubmitObservation {
-    status: ClearDirectSubmitStatus,
-    elapsed: Duration,
-    command_visible: bool,
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DirectSubmitPaneSource {
@@ -765,7 +739,7 @@ fn verify_supervisor_clear_submit(
         );
         return Ok(());
     };
-    verify_clear_submit_after_delivery(
+    verify_context_clear_submit_after_delivery(
         tmux,
         pane,
         &ctx.canonical_file,
@@ -1887,7 +1861,7 @@ fn send_clear_to_pane(tmux: &Tmux, pane: &str, file: &Path, harness: &str) -> Re
             file.display()
         )
     })?;
-    verify_clear_submit_after_delivery(
+    verify_context_clear_submit_after_delivery(
         tmux,
         pane,
         file,
@@ -1898,7 +1872,7 @@ fn send_clear_to_pane(tmux: &Tmux, pane: &str, file: &Path, harness: &str) -> Re
     )
 }
 
-fn verify_clear_submit_after_delivery(
+fn verify_context_clear_submit_after_delivery(
     tmux: &Tmux,
     pane: &str,
     file: &Path,
@@ -1908,10 +1882,14 @@ fn verify_clear_submit_after_delivery(
     resubmit_source: &str,
 ) -> Result<()> {
     let first =
-        poll_clear_direct_submit_acceptance(tmux, pane, file, harness, command, initial_phase);
+        poll_context_clear_submit_acceptance(tmux, pane, file, harness, command, initial_phase);
     let mut final_phase = initial_phase;
     let mut final_observation = first;
-    if clear_direct_submit_needs_enter_resubmit(harness, &first) {
+    if context_clear_submit_needs_enter_resubmit(
+        &first,
+        agent_doc_tmux_commands::tmux_submit_profile_for_harness(harness)
+            .pending_draft_enter_resubmit(),
+    ) {
         let resubmit_phase = match initial_phase {
             "supervisor_ipc_acceptance" => "supervisor_ipc_resubmit_acceptance",
             _ => "direct_pane_resubmit_acceptance",
@@ -1933,27 +1911,46 @@ fn verify_clear_submit_after_delivery(
                 "[clear] warning: {harness} clear resubmit {submit_key} failed for pane {pane}: {err}"
             );
         }
-        let second =
-            poll_clear_direct_submit_acceptance(tmux, pane, file, harness, command, resubmit_phase);
+        let second = poll_context_clear_submit_acceptance(
+            tmux,
+            pane,
+            file,
+            harness,
+            command,
+            resubmit_phase,
+        );
         agent_doc_orchestration::ops_log::log_op(
             file,
-            &clear_direct_submit_resubmit_proof_line(file, pane, harness, second),
+            &context_clear_submit_resubmit_proof_line(
+                file.display(),
+                pane,
+                harness,
+                submit_key,
+                second,
+            ),
         );
         final_phase = resubmit_phase;
         final_observation = second;
     }
-    require_clear_submit_accepted(file, pane, harness, command, final_phase, final_observation)?;
+    require_context_clear_submit_accepted(
+        file,
+        pane,
+        harness,
+        command,
+        final_phase,
+        final_observation,
+    )?;
     Ok(())
 }
 
-fn poll_clear_direct_submit_acceptance(
+fn poll_context_clear_submit_acceptance(
     tmux: &Tmux,
     pane: &str,
     file: &Path,
     harness: &str,
     command: &str,
     phase: &str,
-) -> ClearDirectSubmitObservation {
+) -> ContextClearSubmitObservation {
     let harness_config = agent_doc_orchestration::harness::HarnessConfig::from_agent_name(harness);
     let start = Instant::now();
     let mut last_capture: Option<(bool, usize, String)> = None;
@@ -1962,17 +1959,19 @@ fn poll_clear_direct_submit_acceptance(
         match agent_doc_orchestration::sessions::capture_pane(tmux, pane) {
             Ok(content) => {
                 let command_visible =
-                    clear_command_visible_in_active_input(&content, command, &harness_config);
-                let capture_hash = short_clear_submit_content_hash(&content);
+                    context_clear_command_visible_in_active_input(&content, command, |line| {
+                        harness_config.is_dispatch_ready_prompt_line(line)
+                    });
+                let capture_hash = short_context_clear_submit_content_hash(&content);
                 let capture_len = content.len();
                 last_capture = Some((command_visible, capture_len, capture_hash));
                 if !command_visible {
-                    let observation = ClearDirectSubmitObservation {
-                        status: ClearDirectSubmitStatus::Accepted,
+                    let observation = ContextClearSubmitObservation {
+                        status: ContextClearSubmitStatus::Accepted,
                         elapsed: start.elapsed(),
                         command_visible: false,
                     };
-                    log_clear_direct_submit_observation(
+                    log_context_clear_submit_observation(
                         file,
                         pane,
                         harness,
@@ -1994,21 +1993,21 @@ fn poll_clear_direct_submit_acceptance(
     let elapsed = start.elapsed();
     let (status, command_visible) = if let Some((visible, _, _)) = last_capture.as_ref() {
         if *visible {
-            (ClearDirectSubmitStatus::TimedOut, true)
+            (ContextClearSubmitStatus::TimedOut, true)
         } else {
-            (ClearDirectSubmitStatus::Accepted, false)
+            (ContextClearSubmitStatus::Accepted, false)
         }
     } else if capture_failed {
-        (ClearDirectSubmitStatus::CaptureFailed, false)
+        (ContextClearSubmitStatus::CaptureFailed, false)
     } else {
-        (ClearDirectSubmitStatus::TimedOut, false)
+        (ContextClearSubmitStatus::TimedOut, false)
     };
-    let observation = ClearDirectSubmitObservation {
+    let observation = ContextClearSubmitObservation {
         status,
         elapsed,
         command_visible,
     };
-    log_clear_direct_submit_observation(
+    log_context_clear_submit_observation(
         file,
         pane,
         harness,
@@ -2020,28 +2019,19 @@ fn poll_clear_direct_submit_acceptance(
     observation
 }
 
-fn clear_direct_submit_needs_enter_resubmit(
-    harness: &str,
-    observation: &ClearDirectSubmitObservation,
-) -> bool {
-    agent_doc_tmux_commands::tmux_submit_profile_for_harness(harness).pending_draft_enter_resubmit()
-        && observation.status == ClearDirectSubmitStatus::TimedOut
-        && observation.command_visible
-}
-
-fn log_clear_direct_submit_observation(
+fn log_context_clear_submit_observation(
     file: &Path,
     pane: &str,
     harness: &str,
     phase: &str,
-    observation: ClearDirectSubmitObservation,
+    observation: ContextClearSubmitObservation,
     capture_len: Option<usize>,
     capture_hash: Option<&str>,
 ) {
     agent_doc_orchestration::ops_log::log_op(
         file,
-        &clear_direct_submit_observation_line(
-            file,
+        &context_clear_submit_observation_line(
+            file.display(),
             pane,
             harness,
             phase,
@@ -2052,179 +2042,42 @@ fn log_clear_direct_submit_observation(
     );
 }
 
-fn clear_direct_submit_observation_line(
-    file: &Path,
-    pane: &str,
-    harness: &str,
-    phase: &str,
-    observation: ClearDirectSubmitObservation,
-    capture_len: Option<usize>,
-    capture_hash: Option<&str>,
-) -> String {
-    let mut line = format!(
-        "session_clear_submit_observation file={} pane={} harness={} phase={} result={} elapsed_ms={} command_visible={}",
-        file.display(),
-        pane,
-        harness,
-        phase,
-        observation.status.as_str(),
-        observation.elapsed.as_millis(),
-        observation.command_visible
-    );
-    if let Some(capture_len) = capture_len {
-        line.push_str(&format!(" capture_len={capture_len}"));
-    }
-    if let Some(capture_hash) = capture_hash {
-        line.push_str(&format!(" capture_hash={capture_hash}"));
-    }
-    if let Some(issue) = observation.status.issue() {
-        line.push_str(&format!(" issue={issue}"));
-    }
-    line
-}
-
-fn clear_direct_submit_resubmit_proof_line(
-    file: &Path,
-    pane: &str,
-    harness: &str,
-    observation: ClearDirectSubmitObservation,
-) -> String {
-    let result = match observation.status {
-        ClearDirectSubmitStatus::Accepted => "accepted",
-        ClearDirectSubmitStatus::TimedOut => "still_visible",
-        ClearDirectSubmitStatus::CaptureFailed => "capture_failed",
-    };
-    let submit_key = agent_doc_tmux_commands::tmux_submit_key_for_harness(harness);
-    format!(
-        "session_clear_submit_resubmit file={} pane={} harness={} action=submit_key key={} result={} elapsed_ms={}",
-        file.display(),
-        pane,
-        harness,
-        submit_key,
-        result,
-        observation.elapsed.as_millis()
-    )
-}
-
-fn require_clear_submit_accepted(
+fn require_context_clear_submit_accepted(
     file: &Path,
     pane: &str,
     harness: &str,
     command: &str,
     phase: &str,
-    observation: ClearDirectSubmitObservation,
+    observation: ContextClearSubmitObservation,
 ) -> Result<()> {
-    if observation.status == ClearDirectSubmitStatus::Accepted {
+    if observation.status == ContextClearSubmitStatus::Accepted {
         return Ok(());
     }
-    let line = clear_direct_submit_blocked_line(file, pane, harness, command, phase, observation);
+    let line = context_clear_submit_blocked_line(
+        file.display(),
+        pane,
+        harness,
+        command,
+        phase,
+        observation,
+    );
     agent_doc_orchestration::ops_log::log_op(file, &line);
     anyhow::bail!(
         "{}",
-        clear_direct_submit_blocked_message(file, pane, harness, command, phase, observation)
+        context_clear_submit_blocked_message(
+            file.display(),
+            pane,
+            harness,
+            command,
+            phase,
+            observation
+        )
     );
 }
 
-fn clear_direct_submit_blocked_line(
-    file: &Path,
-    pane: &str,
-    harness: &str,
-    command: &str,
-    phase: &str,
-    observation: ClearDirectSubmitObservation,
-) -> String {
-    format!(
-        "session_clear_submit_blocked file={} pane={} harness={} phase={} command={} result={} elapsed_ms={} command_visible={} issue={} ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=restore_idle_prompt_and_retry unblocker=clear_command_not_consumed",
-        file.display(),
-        pane,
-        harness,
-        phase,
-        command,
-        observation.status.as_str(),
-        observation.elapsed.as_millis(),
-        observation.command_visible,
-        observation.status.issue().unwrap_or("submit_not_accepted")
-    )
-}
-
-fn clear_direct_submit_blocked_message(
-    file: &Path,
-    pane: &str,
-    harness: &str,
-    command: &str,
-    phase: &str,
-    observation: ClearDirectSubmitObservation,
-) -> String {
-    format!(
-        "session_clear {harness} command `{command}` for {} was not proven submitted in pane {pane} after {phase} (result={}, command_visible={}); treating Clear Session Context as not submitted. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=restore_idle_prompt_and_retry unblocker=clear_command_not_consumed. Restore an idle {harness} prompt or restart the session, then run Clear Session Context again",
-        file.display(),
-        observation.status.as_str(),
-        observation.command_visible
-    )
-}
-
-fn short_clear_submit_content_hash(content: &str) -> String {
+fn short_context_clear_submit_content_hash(content: &str) -> String {
     let hash = agent_doc_hash::content_hash(content);
     hash[..hash.len().min(12)].to_string()
-}
-
-fn clear_command_visible_in_active_input(
-    content: &str,
-    command: &str,
-    harness: &agent_doc_orchestration::harness::HarnessConfig,
-) -> bool {
-    let recent_lines: Vec<String> = content
-        .lines()
-        .rev()
-        .take(8)
-        .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
-        .collect();
-    let lines: Vec<&String> = recent_lines.iter().rev().collect();
-    for start in 0..lines.len() {
-        if !line_shows_clear_command_input(lines[start], command) {
-            continue;
-        }
-        let later_has_idle_prompt = lines.iter().skip(start + 1).any(|line| {
-            harness.is_dispatch_ready_prompt_line(line.trim())
-                || line_starts_with_clear_prompt_prefix(line)
-        });
-        if later_has_idle_prompt {
-            continue;
-        }
-        return true;
-    }
-    false
-}
-
-fn line_shows_clear_command_input(line: &str, command: &str) -> bool {
-    let trimmed = line.trim();
-    clear_command_candidate_visible(trimmed, command)
-        || clear_command_candidate_visible(strip_clear_prompt_prefix(trimmed).trim(), command)
-}
-
-fn clear_command_candidate_visible(candidate: &str, command: &str) -> bool {
-    if candidate == command {
-        return true;
-    }
-    if command == "/new" && matches!(candidate, "New session" | "session_new") {
-        return true;
-    }
-    command == "/new"
-        && candidate
-            .strip_prefix("/new")
-            .map(|rest| {
-                let label = rest.trim_start();
-                label.starts_with("New session") || label.starts_with("session_new")
-            })
-            .unwrap_or(false)
-}
-
-fn line_starts_with_clear_prompt_prefix(line: &str) -> bool {
-    matches!(line.trim_start().chars().next(), Some('>' | '›' | '❯'))
-}
-
-fn strip_clear_prompt_prefix(line: &str) -> &str {
-    line.trim_start_matches(|ch: char| matches!(ch, '>' | '›' | '❯') || ch.is_whitespace())
 }
 
 /// Ordered interrupt keys for an operator interrupt-clear / force-restart on a
@@ -5255,214 +5108,6 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         assert_eq!(harness_clear_command("claude"), "/clear");
         assert_eq!(harness_clear_command("codex"), "/clear");
         assert_eq!(harness_clear_command("unknown"), "/clear");
-    }
-
-    #[test]
-    fn clear_command_visible_detects_codex_active_composer() {
-        let harness = agent_doc_orchestration::harness::HarnessConfig::codex();
-        let content = concat!(
-            "older output\n",
-            "› /clear\n",
-            "gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used\n",
-        );
-
-        assert!(clear_command_visible_in_active_input(
-            content, "/clear", &harness
-        ));
-    }
-
-    #[test]
-    fn clear_command_visible_treats_empty_composer_as_submitted() {
-        let harness = agent_doc_orchestration::harness::HarnessConfig::codex();
-        let content = concat!(
-            "older output\n",
-            "› Ask Codex to do anything\n",
-            "gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used\n",
-        );
-
-        assert!(!clear_command_visible_in_active_input(
-            content, "/clear", &harness
-        ));
-    }
-
-    #[test]
-    fn clear_command_visible_detects_opencode_new_palette_row() {
-        let harness = agent_doc_orchestration::harness::HarnessConfig::opencode();
-        let content = concat!(
-            "older output\n",
-            "/new        New session\n",
-            "/models     Select model\n",
-            "> /new\n",
-        );
-
-        assert!(clear_command_visible_in_active_input(
-            content, "/new", &harness
-        ));
-    }
-
-    #[test]
-    fn clear_command_visible_detects_opencode_selected_new_session_command() {
-        let harness = agent_doc_orchestration::harness::HarnessConfig::opencode();
-        let content = concat!(
-            "older output\n",
-            "> New session\n",
-            "zai/glm-5 · ~/work/btakita/agent-loop · context 0% used\n",
-        );
-
-        assert!(
-            clear_command_visible_in_active_input(content, "/new", &harness),
-            "OpenCode can replace `/new` with the selected command label before the final submit Enter"
-        );
-
-        let structured = concat!(
-            "older output\n",
-            "> session_new\n",
-            "zai/glm-5 · ~/work/btakita/agent-loop · context 0% used\n",
-        );
-        assert!(
-            clear_command_visible_in_active_input(structured, "/new", &harness),
-            "OpenCode can also surface the selected command id before submission"
-        );
-    }
-
-    #[test]
-    fn clear_command_visible_ignores_stale_scrollback_before_idle_prompt() {
-        let harness = agent_doc_orchestration::harness::HarnessConfig::claude();
-        let content = concat!(
-            "✶ Generating... (3s · esc to interrupt)\n",
-            "  ❯ /clear\n",
-            "────────────────────\n",
-            "❯ Press up to edit queued messages\n",
-            "────────────────────\n",
-            "  Opus 4.8 ctx:10% ~/work/btakita/agent-loop main brian@host\n",
-            "  bypass permissions on (shift+tab to cycle)\n",
-        );
-
-        assert!(!clear_command_visible_in_active_input(
-            content, "/clear", &harness
-        ));
-    }
-
-    #[test]
-    fn clear_direct_submit_retry_is_scoped_to_visible_enter_profile_drafts() {
-        let visible_timeout = ClearDirectSubmitObservation {
-            status: ClearDirectSubmitStatus::TimedOut,
-            elapsed: Duration::from_millis(250),
-            command_visible: true,
-        };
-        let accepted = ClearDirectSubmitObservation {
-            status: ClearDirectSubmitStatus::Accepted,
-            elapsed: Duration::from_millis(20),
-            command_visible: false,
-        };
-        let stale_or_empty_timeout = ClearDirectSubmitObservation {
-            status: ClearDirectSubmitStatus::TimedOut,
-            elapsed: Duration::from_millis(250),
-            command_visible: false,
-        };
-
-        assert!(clear_direct_submit_needs_enter_resubmit(
-            "codex",
-            &visible_timeout
-        ));
-        assert!(clear_direct_submit_needs_enter_resubmit(
-            "claude",
-            &visible_timeout
-        ));
-        assert!(clear_direct_submit_needs_enter_resubmit(
-            "opencode",
-            &visible_timeout
-        ));
-        assert!(!clear_direct_submit_needs_enter_resubmit(
-            "codex", &accepted
-        ));
-        assert!(!clear_direct_submit_needs_enter_resubmit(
-            "codex",
-            &stale_or_empty_timeout
-        ));
-    }
-
-    #[test]
-    fn clear_submit_proof_lines_report_prompt_issue_and_retry_outcome() {
-        let observation = ClearDirectSubmitObservation {
-            status: ClearDirectSubmitStatus::TimedOut,
-            elapsed: Duration::from_millis(5123),
-            command_visible: true,
-        };
-        let issue = clear_direct_submit_observation_line(
-            Path::new("/tmp/doc.md"),
-            "%7",
-            "codex",
-            "direct_pane_acceptance",
-            observation,
-            Some(2048),
-            Some("abc123"),
-        );
-        assert!(
-            issue.contains("session_clear_submit_observation"),
-            "{issue}"
-        );
-        assert!(issue.contains("issue=prompt_not_submitted"), "{issue}");
-        assert!(issue.contains("command_visible=true"), "{issue}");
-
-        let retry = clear_direct_submit_resubmit_proof_line(
-            Path::new("/tmp/doc.md"),
-            "%7",
-            "codex",
-            ClearDirectSubmitObservation {
-                status: ClearDirectSubmitStatus::Accepted,
-                elapsed: Duration::from_millis(150),
-                command_visible: false,
-            },
-        );
-        assert!(retry.contains("session_clear_submit_resubmit"), "{retry}");
-        assert!(retry.contains("action=submit_key key=Enter"), "{retry}");
-        assert!(retry.contains("result=accepted"), "{retry}");
-    }
-
-    #[test]
-    fn clear_submit_blocked_lines_name_command_and_unblocker() {
-        let observation = ClearDirectSubmitObservation {
-            status: ClearDirectSubmitStatus::TimedOut,
-            elapsed: Duration::from_millis(2001),
-            command_visible: true,
-        };
-        let line = clear_direct_submit_blocked_line(
-            Path::new("/tmp/doc.md"),
-            "%12",
-            "opencode",
-            "/new",
-            "direct_pane_resubmit_acceptance",
-            observation,
-        );
-        assert!(line.contains("session_clear_submit_blocked"), "{line}");
-        assert!(line.contains("command=/new"), "{line}");
-        assert!(
-            line.contains("ui_outcome=blocked_with_exact_unblocker"),
-            "{line}"
-        );
-        assert!(
-            line.contains("unblocker=clear_command_not_consumed"),
-            "{line}"
-        );
-
-        let message = clear_direct_submit_blocked_message(
-            Path::new("/tmp/doc.md"),
-            "%12",
-            "opencode",
-            "/new",
-            "direct_pane_resubmit_acceptance",
-            observation,
-        );
-        assert!(message.contains("command `/new`"), "{message}");
-        assert!(
-            message.contains("treating Clear Session Context as not submitted"),
-            "{message}"
-        );
-        assert!(
-            message.contains("ui_outcome=blocked_with_exact_unblocker"),
-            "{message}"
-        );
     }
 
     #[test]

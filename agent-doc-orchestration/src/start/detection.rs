@@ -5,6 +5,7 @@ use agent_doc_controller::dispatch::{
     recent_lines_contain_trigger, route_trigger_visible_in_current_draft,
 };
 use agent_doc_supervisor::idle_reconcile::recoverable_ready_busy_blocker_reason;
+use agent_doc_turn_executor_tmux::context_clear::context_clear_command_visible_in_active_input;
 
 pub(crate) fn record_recent_output(shared: &SupervisorShared, bytes: &[u8]) {
     if bytes.is_empty() {
@@ -218,74 +219,14 @@ pub(crate) fn supervisor_pane_payload_pending_in_content(
     harness: &crate::harness::HarnessConfig,
 ) -> bool {
     if agent_doc_queue::queue_command::is_context_clear_command(payload) {
-        return context_clear_command_visible_in_active_input(content, payload, harness);
+        return context_clear_command_visible_in_active_input(content, payload, |line| {
+            harness.is_dispatch_ready_prompt_line(line)
+        });
     }
     recent_lines_contain_trigger(content, payload)
         || route_trigger_visible_in_current_draft(content, payload, |line| {
             harness.is_prompt_line(line)
         })
-}
-
-pub(crate) fn context_clear_command_visible_in_active_input(
-    content: &str,
-    command: &str,
-    harness: &crate::harness::HarnessConfig,
-) -> bool {
-    let recent_lines: Vec<String> = content
-        .lines()
-        .rev()
-        .take(8)
-        .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
-        .collect();
-    let lines: Vec<&String> = recent_lines.iter().rev().collect();
-    for start in 0..lines.len() {
-        if !line_shows_context_clear_command_input(lines[start], command) {
-            continue;
-        }
-        let later_has_idle_prompt = lines.iter().skip(start + 1).any(|line| {
-            harness.is_dispatch_ready_prompt_line(line.trim())
-                || line_starts_with_context_clear_prompt_prefix(line)
-        });
-        if later_has_idle_prompt {
-            continue;
-        }
-        return true;
-    }
-    false
-}
-
-fn line_shows_context_clear_command_input(line: &str, command: &str) -> bool {
-    let trimmed = line.trim();
-    context_clear_command_candidate_visible(trimmed, command)
-        || context_clear_command_candidate_visible(
-            strip_context_clear_prompt_prefix(trimmed).trim(),
-            command,
-        )
-}
-
-fn context_clear_command_candidate_visible(candidate: &str, command: &str) -> bool {
-    if candidate == command {
-        return true;
-    }
-    if command == "/new" && matches!(candidate, "New session" | "session_new") {
-        return true;
-    }
-    command == "/new"
-        && candidate
-            .strip_prefix("/new")
-            .map(|rest| {
-                let label = rest.trim_start();
-                label.starts_with("New session") || label.starts_with("session_new")
-            })
-            .unwrap_or(false)
-}
-
-fn line_starts_with_context_clear_prompt_prefix(line: &str) -> bool {
-    matches!(line.trim_start().chars().next(), Some('>' | '›' | '❯'))
-}
-
-fn strip_context_clear_prompt_prefix(line: &str) -> &str {
-    line.trim_start_matches(|ch: char| matches!(ch, '>' | '›' | '❯') || ch.is_whitespace())
 }
 
 pub(crate) fn supervisor_pane_payload_already_pending(

@@ -388,6 +388,13 @@ focused crate under the old path.
   surfacing while importing the focused `codex_launch` filter directly; the old
   local report/filter helpers and pure tests were deleted instead of retained as
   facades.
+- `agent-doc-turn-executor` now owns Codex resume argv normalization:
+  translating legacy sandbox flags to `sandbox_mode` config, stripping
+  unsupported writable-root args for resumed sessions, preserving unrelated
+  exec flags, and rejecting malformed/conflicting sandbox/config inputs.
+  Orchestration's Codex backend builds the `Command`, appends model/env
+  effects, and calls the focused argv helper directly without a local mutating
+  wrapper.
 - `agent-doc-turn-executor` now owns Codex network launch policy: resolving
   frontmatter/config network-access precedence, applying child env mutations,
   deriving effective network status from launch args and explicit parent-env

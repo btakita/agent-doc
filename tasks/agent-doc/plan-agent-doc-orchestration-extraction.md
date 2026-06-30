@@ -802,6 +802,12 @@ should be deleted during extraction.
   ops-log effects while importing the focused exchange helper directly; the
   old `write::strip_prompt_prefix_from_response_body_first_lines` path was
   deleted rather than kept as a shim.
+- `agent-doc-element-boundary` now owns document-level boundary ID lookup:
+  parsing the target component, scanning for `<!-- agent:boundary:... -->`,
+  and ignoring marker-looking text inside code ranges. Write IPC and git
+  cleanup keep patch/file/commit delivery effects while importing the focused
+  boundary helper directly; the old `write::find_boundary_id` path was deleted
+  instead of preserved as a facade.
 
 ### Earlier closure finding
 
@@ -946,6 +952,9 @@ filed by domain seam instead, for example:
   focused document-actor crate if the runtime boundary is extracted
 - remaining tmux command/input policy -> `agent-doc-tmux-*`
 - remaining controller/route decisions -> `agent-doc-controller`
+- stale controller/supervisor binary identity decisions and warning text ->
+  `agent-doc-controller::status` while orchestration keeps process/socket/file
+  evidence gathering
 
 Each seam is an independent green-to-green cycle with focused unit tests,
 static no-facade boundary tests, and `make check`.

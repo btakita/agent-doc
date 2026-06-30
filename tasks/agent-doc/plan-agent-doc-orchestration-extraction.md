@@ -410,6 +410,13 @@ focused crate under the old path.
   stripping, pipeline-frontmatter normalization, and post-commit `Re:` heading
   attribution normalization. Git, preflight, session-check, realtime policy,
   repair, graph, and write paths call the focused document crate directly.
+- `agent-doc-template::response_materialization` now owns more template
+  response-materialization policy: constructing materialization probes from raw
+  template responses, stripping transient guard markers from probes, removing
+  partial response materialization from exchange content, and sanitizing
+  patchback responses through replay-guard classification. The write layer keeps
+  retry/file/ops-log adapters and imports the focused template helpers directly
+  instead of preserving `write::materialize` wrappers.
 - `agent-doc-element-backlog` already owned open backlog id extraction; preflight
   now calls `open_backlog_ids_in_content` directly for `do #id` closeout
   evidence instead of re-parsing backlog components locally.

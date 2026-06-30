@@ -41,10 +41,16 @@ Compacted content:
 - Prior summary/context: prior compacted content: Archived 8 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); do #qeditdu...
 
 ❯ Archived 20 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); IPC proof diagnostic (interrupted-cycle recovery); recovery closeout; 17 more
-<!-- agent:boundary:a09e44ec-776a-45d9-b2d6-2ac0739cfdc3 -->
 Please note that a parallel codex 019f1131-5fa9-76c0-be8b-61c976b48177 working on extracting crates from agent-docs-orchestration. When I type in this document, my changes are reverted if I don't quickly save.
 
 See /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-agent-doc-orchestration-extraction.md for context on the extraction effort.
+
+### Re: continue — gpt-5
+
+Continuing from the stop-hook recovery. The IPC ACK-content write-through fix is committed in `src/agent-doc` as `0acf0c32 extract template response policy and ack write-through`, installed as `agent-doc v0.34.65`, and verified with the focused IPC test groups plus `cargo check -p agent-doc-orchestration`.
+
+The remaining uncommitted `src/agent-doc` changes are the parallel exchange-policy extraction work, so I left them untouched.
+<!-- agent:boundary:149db94c -->
 <!-- /agent:exchange -->
 ## Queue
 

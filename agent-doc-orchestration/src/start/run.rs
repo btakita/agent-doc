@@ -218,7 +218,8 @@ pub fn run_with_reap_policy(
             );
         }
         let missing = crate::queue_journal::replay_missing(file, &updated_content);
-        match crate::queue_journal::merge_missing_into_content(&missing, &updated_content) {
+        match agent_doc_queue::queue_journal::merge_missing_into_content(&missing, &updated_content)
+        {
             Ok(Some(merged)) => {
                 if let Err(err) = std::fs::write(file, &merged) {
                     eprintln!(

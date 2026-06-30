@@ -33,25 +33,14 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use agent_doc_queue::queue_journal as queue_journal_policy;
+use agent_doc_queue::queue_journal::QueueJournalEntry;
+use anyhow::Result;
 
 /// Directory (relative to the project root) holding per-document queue journals.
 /// Mirrors the sibling `.agent-doc/drain-owner` / `.agent-doc/live-buffer`
 /// sidecar layout.
 const QUEUE_JOURNAL_DIR: &str = ".agent-doc/queue-journal";
-
-/// One journaled operator queue prompt. `text` is the canonical prompt text as
-/// parsed by [`agent_doc_queue::document_queue::parse`] (the `- ` bullet / fence markers stripped),
-/// so it round-trips through [`agent_doc_queue::document_queue::QueuePrompt`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct QueueJournalEntry {
-    /// Canonical prompt text (matches `QueuePrompt::text`).
-    pub text: String,
-    /// Whether the prompt is a multiline (`--- … ---`) queue entry.
-    #[serde(default)]
-    pub multiline: bool,
-}
 
 /// Resolve the journal path for `file`, or `None` when the project root cannot be
 /// resolved (no `.agent-doc` ancestor). Best-effort: callers treat `None` as
@@ -61,29 +50,6 @@ fn journal_path(file: &Path) -> Option<PathBuf> {
     let root = agent_doc_fs::find_project_root(&canonical)?;
     let hash = crate::snapshot::doc_hash(&canonical).ok()?;
     Some(root.join(QUEUE_JOURNAL_DIR).join(format!("{hash}.jsonl")))
-}
-
-/// Parse the queue prompts (`Prompt` entries only — never `Completed`, presets,
-/// dispatches, fences, or freeform noise) from a document's `agent:queue`
-/// component. Returns an empty vec when there is no queue component.
-fn queue_prompts(content: &str) -> Vec<agent_doc_queue::document_queue::QueuePrompt> {
-    let Ok(components) = agent_doc_element::element::parse(content) else {
-        return Vec::new();
-    };
-    let Some(queue) = components.iter().find(|c| c.name == "queue") else {
-        return Vec::new();
-    };
-    let body = &content[queue.open_end..queue.close_start];
-    let Ok(entries) = agent_doc_queue::document_queue::parse(body) else {
-        return Vec::new();
-    };
-    entries
-        .into_iter()
-        .filter_map(|entry| match entry {
-            agent_doc_queue::document_queue::QueueEntry::Prompt(p) => Some(p),
-            _ => None,
-        })
-        .collect()
 }
 
 /// Read the journal entries for `file` (empty when absent/unreadable).
@@ -105,7 +71,7 @@ fn read_journal(path: &Path) -> Vec<QueueJournalEntry> {
 /// Called from preflight queue maintenance so an operator queue add is captured
 /// to a crash-durable store on the first cycle that observes it.
 pub fn record(file: &Path, content: &str) -> Result<()> {
-    append_prompts(file, queue_prompts(content))
+    append_prompts(file, queue_journal_policy::queue_prompts(content))
 }
 
 /// Journal operator queue prompts from the live editor buffer (`#qftloss`
@@ -143,7 +109,7 @@ pub fn record_live_buffer(file: &Path) -> Result<()> {
             // digest, so there is nothing to journal from it.
             continue;
         };
-        for prompt in queue_prompts(buffer) {
+        for prompt in queue_journal_policy::queue_prompts(buffer) {
             if !prompts.iter().any(|p| p.text == prompt.text) {
                 prompts.push(prompt);
             }
@@ -166,16 +132,9 @@ fn append_prompts(
         return Ok(());
     };
     let existing = read_journal(&path);
+    let entries = queue_journal_policy::plan_append_entries(&existing, prompts);
     let mut appended = String::new();
-    for prompt in prompts {
-        let already = existing.iter().any(|e| e.text == prompt.text);
-        if already {
-            continue;
-        }
-        let entry = QueueJournalEntry {
-            text: prompt.text.clone(),
-            multiline: prompt.multiline,
-        };
+    for entry in entries {
         match serde_json::to_string(&entry) {
             Ok(line) => {
                 appended.push_str(&line);
@@ -249,12 +208,9 @@ pub fn replay_missing(file: &Path, content: &str) -> Vec<QueueJournalEntry> {
     }
     // Present = a live prompt with the same text, OR a struck/completed entry
     // (the operator already worked/cancelled it — do NOT resurrect).
-    let mut present_texts = present_queue_texts(content);
+    let mut present_texts = queue_journal_policy::present_queue_texts(content);
     present_texts.extend(durable_queue_texts(file));
-    journal
-        .into_iter()
-        .filter(|entry| !present_texts.contains(&entry.text))
-        .collect()
+    queue_journal_policy::missing_entries(journal, &present_texts)
 }
 
 /// Queue prompt texts that have reached the binary's durable snapshot. If such a
@@ -265,82 +221,8 @@ fn durable_queue_texts(file: &Path) -> std::collections::HashSet<String> {
     crate::snapshot::load(file)
         .ok()
         .flatten()
-        .map(|content| present_queue_texts(&content))
+        .map(|content| queue_journal_policy::present_queue_texts(&content))
         .unwrap_or_default()
-}
-
-/// All queue prompt texts currently represented in `content` — live `Prompt`
-/// AND struck `Completed` — so a consumed/cancelled item is treated as present
-/// (never resurrected by replay).
-fn present_queue_texts(content: &str) -> std::collections::HashSet<String> {
-    let mut texts = std::collections::HashSet::new();
-    let Ok(components) = agent_doc_element::element::parse(content) else {
-        return texts;
-    };
-    let Some(queue) = components.iter().find(|c| c.name == "queue") else {
-        return texts;
-    };
-    let body = &content[queue.open_end..queue.close_start];
-    let Ok(entries) = agent_doc_queue::document_queue::parse(body) else {
-        return texts;
-    };
-    for entry in entries {
-        match entry {
-            agent_doc_queue::document_queue::QueueEntry::Prompt(p)
-            | agent_doc_queue::document_queue::QueueEntry::Completed(p) => {
-                texts.insert(p.text);
-            }
-            _ => {}
-        }
-    }
-    texts
-}
-
-/// Re-insert the lost operator queue prompts (from [`replay_missing`]) at the end
-/// of `content`'s `agent:queue` component, returning the rewritten content. Returns
-/// `Ok(None)` when nothing is missing or there is no queue component to merge into
-/// (conservative: never fabricate a queue component). Pure (content-only) so the
-/// merge is unit-testable without disk.
-pub fn merge_missing_into_content(
-    missing: &[QueueJournalEntry],
-    content: &str,
-) -> Result<Option<String>> {
-    if missing.is_empty() {
-        return Ok(None);
-    }
-    let components = agent_doc_element::element::parse(content)?;
-    let Some(queue) = components.iter().find(|c| c.name == "queue") else {
-        return Ok(None);
-    };
-    let body = &content[queue.open_end..queue.close_start];
-    let mut entries = agent_doc_queue::document_queue::parse(body)
-        .context("queue_journal: failed to parse queue")?;
-    let present = present_queue_texts(content);
-    let mut added = false;
-    for entry in missing {
-        if present.contains(&entry.text) {
-            continue;
-        }
-        entries.push(agent_doc_queue::document_queue::QueueEntry::Prompt(
-            agent_doc_queue::document_queue::QueuePrompt {
-                text: entry.text.clone(),
-                multiline: entry.multiline,
-            },
-        ));
-        added = true;
-    }
-    if !added {
-        return Ok(None);
-    }
-    let rendered = agent_doc_queue::document_queue::render(&entries);
-    let mut new_content = String::with_capacity(content.len() + rendered.len());
-    new_content.push_str(&content[..queue.open_end]);
-    if !rendered.is_empty() && !new_content.ends_with('\n') {
-        new_content.push('\n');
-    }
-    new_content.push_str(&rendered);
-    new_content.push_str(&content[queue.close_start..]);
-    Ok(Some(new_content))
 }
 
 /// Clear the journal for `file` (best-effort). Called on every clean
@@ -366,6 +248,7 @@ pub fn clear(file: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_doc_queue::queue_journal::merge_missing_into_content;
 
     fn doc(dir: &Path, queue_lines: &[&str]) -> PathBuf {
         std::fs::create_dir_all(dir.join(".agent-doc")).unwrap();

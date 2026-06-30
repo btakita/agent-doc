@@ -2528,6 +2528,12 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
             .exists(),
         "queue continuation drainability policy should live in the queue crate"
     );
+    assert!(
+        manifest_dir
+            .join("agent-doc-queue/src/queue_journal.rs")
+            .exists(),
+        "queue journal replay policy should live in the queue crate"
+    );
 
     let orchestration_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/queue_continuation.rs"))
@@ -2551,6 +2557,58 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
             "orchestration must not re-own pure queue continuation policy: {forbidden_snippet}"
         );
     }
+    let queue_journal_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_journal.rs")).unwrap();
+    for required_snippet in [
+        "pub struct QueueJournalEntry",
+        "pub fn queue_prompts(",
+        "pub fn present_queue_texts(",
+        "pub fn plan_append_entries(",
+        "pub fn missing_entries(",
+        "pub fn merge_missing_into_content(",
+    ] {
+        assert!(
+            queue_journal_source.contains(required_snippet),
+            "agent-doc-queue must own queue journal policy: {required_snippet}"
+        );
+    }
+    let orchestration_queue_journal =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/queue_journal.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "pub struct QueueJournalEntry",
+        "fn queue_prompts(",
+        "pub fn queue_prompts(",
+        "fn present_queue_texts(",
+        "pub fn present_queue_texts(",
+        "fn plan_append_entries(",
+        "pub fn plan_append_entries(",
+        "fn missing_entries(",
+        "pub fn missing_entries(",
+        "pub fn merge_missing_into_content(",
+        "pub use agent_doc_queue::queue_journal",
+    ] {
+        assert!(
+            !orchestration_queue_journal.contains(forbidden_snippet),
+            "orchestration must not re-own or facade queue journal policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        orchestration_queue_journal
+            .contains("agent_doc_queue::queue_journal as queue_journal_policy")
+            && orchestration_queue_journal.contains("queue_journal_policy::queue_prompts(")
+            && orchestration_queue_journal.contains("queue_journal_policy::plan_append_entries(")
+            && orchestration_queue_journal.contains("queue_journal_policy::present_queue_texts(")
+            && orchestration_queue_journal.contains("queue_journal_policy::missing_entries("),
+        "orchestration queue journal adapter should call focused queue policy directly"
+    );
+    let start_run_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/run.rs")).unwrap();
+    assert!(
+        start_run_source.contains("agent_doc_queue::queue_journal::merge_missing_into_content")
+            && !start_run_source.contains("crate::queue_journal::merge_missing_into_content"),
+        "startup replay should merge through the focused queue journal policy directly"
+    );
 
     let queue_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-queue/Cargo.toml")).unwrap();
@@ -6781,6 +6839,18 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
     );
     assert!(
         manifest_dir
+            .join("agent-doc-document-realtime/src/session_ops.rs")
+            .exists()
+    );
+    let realtime_session_ops =
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime/src/session_ops.rs"))
+            .unwrap();
+    assert!(
+        realtime_session_ops.contains("pub enum SessionOpKind"),
+        "agent-doc-document-realtime must own document session operation vocabulary"
+    );
+    assert!(
+        manifest_dir
             .join("agent-doc-document-realtime/src/crdt_authority.rs")
             .exists()
     );
@@ -6798,6 +6868,30 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         assert!(
             !orchestration_realtime.contains(forbidden_snippet),
             "orchestration must not re-own pure realtime read-authority policy: {forbidden_snippet}"
+        );
+    }
+    let orchestration_session_actor =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_actor.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "pub enum SessionOpKind",
+        "enum SessionOpKind",
+        "pub use agent_doc_document_realtime::session_ops::SessionOpKind",
+    ] {
+        assert!(
+            !orchestration_session_actor.contains(forbidden_snippet),
+            "orchestration must not re-own or facade session operation vocabulary: {forbidden_snippet}"
+        );
+    }
+    for relative in [
+        "agent-doc-orchestration/src/session_actor.rs",
+        "agent-doc-orchestration/src/write_queue.rs",
+        "agent-doc-orchestration/src/document_watcher.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("agent_doc_document_realtime::session_ops::SessionOpKind"),
+            "{relative} should import SessionOpKind from the focused realtime crate"
         );
     }
     let realtime_write_policy =

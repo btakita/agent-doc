@@ -40,7 +40,9 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::session_actor::{SessionOpKind, document_actor_in};
+use agent_doc_document_realtime::session_ops::SessionOpKind;
+
+use crate::session_actor::document_actor_in;
 
 /// Run a document write critical section on the document's session-actor owner
 /// thread. Every caller for the same canonical document funnels through one

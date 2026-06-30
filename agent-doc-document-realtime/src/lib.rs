@@ -11,6 +11,7 @@ pub mod convergence_gate;
 pub mod crdt_authority;
 pub mod ipc_corruption;
 pub mod read_authority;
+pub mod session_ops;
 pub mod watch_authority;
 pub mod write_authority;
 pub mod write_policy;

@@ -39,7 +39,9 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 
-use crate::session_actor::{SessionOpKind, document_actor_in};
+use agent_doc_document_realtime::session_ops::SessionOpKind;
+
+use crate::session_actor::document_actor_in;
 
 /// Minimal classification of a raw filesystem event, mirroring the
 /// `notify::EventKind` subset `watch.rs` reacts to.

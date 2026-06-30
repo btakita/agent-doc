@@ -572,23 +572,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
 
-/// Classification of a document-scoped op. The mailbox executes an arbitrary
-/// job closure; the kind is carried for ordering/observability and to mirror
-/// the op taxonomy `08b` §"Document write and watch authority" enumerates
-/// (write submit, closeout, queue-head selection, lifecycle transition).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SessionOpKind {
-    /// A `write`/`stream`/`finalize`/repair disk write submission (#pcpc3).
-    WriteSubmit,
-    /// Cycle closeout / commit.
-    Closeout,
-    /// Filesystem watcher event that should reconcile/submit through the actor.
-    FileWatch,
-    /// Queue-head selection / advance.
-    QueueHead,
-    /// Ownership / state lifecycle transition (the CAS ops above).
-    Lifecycle,
-}
+use agent_doc_document_realtime::session_ops::SessionOpKind;
 
 /// State the owner thread carries across the ops it serializes for one
 /// document. Jobs receive `&mut ActorContext` so #pcpc3 can thread the in-flight

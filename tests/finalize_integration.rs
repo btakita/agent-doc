@@ -493,7 +493,7 @@ fn ipc_timeout_retry_does_not_merge_from_stale_crdt_state() {
     // keeps the fail-closed retry instead of taking the editor-less disk fallback
     // (the editor-less fallback is exercised separately, gated on the absence of
     // exactly this lease).
-    agent_doc_orchestration::plugin_owner::try_acquire_plugin_owner(
+    agent_doc_plugin_owner::try_acquire_plugin_owner(
         doc.to_str().unwrap(),
         "jetbrains-test-owner",
         std::process::id(),

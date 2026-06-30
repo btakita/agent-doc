@@ -1473,7 +1473,7 @@ mod tests {
         // Make the document editor-attached (MultiReplica): a live owner lease
         // for the current test process makes `authority_for_file` take the real
         // editor-attached path.
-        crate::plugin_owner::write_plugin_owner_lease_for_test(&file_str, std::process::id());
+        crate::test_support::seed_live_plugin_owner_lease(&file_str);
         assert!(crate::crdt_authority::authority_for_file(&file_str).editor_attached());
 
         let (a_id, a_bootstrap) =

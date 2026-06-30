@@ -926,7 +926,7 @@ fn refuse_unproven_editor_delivery(
     patch_id: Option<&str>,
 ) -> Result<bool> {
     let editor_endpoint =
-        if crate::plugin_owner::disk_write_permitted_for_file(&file.to_string_lossy())
+        if agent_doc_plugin_owner::disk_write_permitted_for_file(&file.to_string_lossy())
             && !live_editor_sidecar_present(file)
         {
             "absent"
@@ -978,7 +978,7 @@ fn try_detached_disk_write(
     source: &str,
     reason: &str,
 ) -> Result<bool> {
-    if !crate::plugin_owner::disk_write_permitted_for_file(&file.to_string_lossy())
+    if !agent_doc_plugin_owner::disk_write_permitted_for_file(&file.to_string_lossy())
         || live_editor_sidecar_present(file)
     {
         return Ok(false);
@@ -2409,10 +2409,7 @@ mod core_tests {
         let root = dir.path().to_path_buf();
         let _listener = start_ack_mismatch_then_refresh_listener(&root, stale_ack);
         crate::test_support::wait_for_live_prompt_drift_listener(&root);
-        crate::plugin_owner::write_plugin_owner_lease_for_test(
-            doc.to_str().unwrap(),
-            std::process::id(),
-        );
+        crate::test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
         let err = converge_document_or_disk(&doc, &target, &source, "queue_consume")
             .unwrap_err()
@@ -2472,10 +2469,7 @@ mod core_tests {
         let root = dir.path().to_path_buf();
         let _listener = start_ack_mismatch_then_refresh_listener(&root, shorter_ack);
         crate::test_support::wait_for_live_prompt_drift_listener(&root);
-        crate::plugin_owner::write_plugin_owner_lease_for_test(
-            doc.to_str().unwrap(),
-            std::process::id(),
-        );
+        crate::test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
         converge_document_or_disk(&doc, &target, &source, "pending_write")
             .expect("safe shorter ack should replay the target response through the editor");
@@ -2526,10 +2520,7 @@ mod core_tests {
         let root = dir.path().to_path_buf();
         let _listener = start_ack_mismatch_then_refresh_listener(&root, user_ack.clone());
         crate::test_support::wait_for_live_prompt_drift_listener(&root);
-        crate::plugin_owner::write_plugin_owner_lease_for_test(
-            doc.to_str().unwrap(),
-            std::process::id(),
-        );
+        crate::test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
         let err = converge_document_or_disk(&doc, &target, &source, "queue_consume")
             .unwrap_err()
@@ -3017,10 +3008,7 @@ mod core_tests {
         // `#6b5h`: a real editor is attached — seed a live plugin-owner lease so
         // the guard fails closed (protects the buffer) rather than treating the
         // ack-without-content listener as the editor-less CLI-only case.
-        crate::plugin_owner::write_plugin_owner_lease_for_test(
-            doc.to_str().unwrap(),
-            std::process::id(),
-        );
+        crate::test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
         let err = converge_document_or_disk(&doc, &target, &source, "queue_consume")
             .unwrap_err()
@@ -3097,10 +3085,7 @@ mod core_tests {
         crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
         // `#6b5h`: a real editor is attached — seed a live plugin-owner lease so
         // the guard fails closed on unproven delivery.
-        crate::plugin_owner::write_plugin_owner_lease_for_test(
-            doc.to_str().unwrap(),
-            std::process::id(),
-        );
+        crate::test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
         let err = converge_or_disk_write(&doc, &source, &target, "pending_write")
             .unwrap_err()

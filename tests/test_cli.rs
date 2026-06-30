@@ -5041,6 +5041,7 @@ fn test_agent_doc_lease_is_freshness_boundary() {
     let package_version = workspace["package"]["version"].as_str();
     for relative_manifest in [
         "agent-doc-orchestration/Cargo.toml",
+        "agent-doc-plugin-owner/Cargo.toml",
         "agent-doc-queue/Cargo.toml",
         "agent-doc-supervisor/Cargo.toml",
     ] {
@@ -5070,7 +5071,7 @@ fn test_agent_doc_lease_is_freshness_boundary() {
             "pub fn drain_owner_lease_is_fresh(",
         ),
         (
-            "agent-doc-orchestration/src/plugin_owner.rs",
+            "agent-doc-plugin-owner/src/lib.rs",
             "pub fn plugin_owner_lease_is_fresh(",
         ),
         (
@@ -5096,6 +5097,72 @@ fn test_agent_doc_lease_is_freshness_boundary() {
             "{relative} should call the focused lease crate directly"
         );
     }
+}
+
+#[test]
+fn test_agent_doc_plugin_owner_owns_editor_lease_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-plugin-owner")),
+        "agent-doc-plugin-owner must stay a first-class workspace crate"
+    );
+
+    let package_version = workspace["package"]["version"].as_str();
+    for relative_manifest in ["Cargo.toml", "agent-doc-orchestration/Cargo.toml"] {
+        let manifest = fs::read_to_string(manifest_dir.join(relative_manifest)).unwrap();
+        let parsed: toml::Value = toml::from_str(&manifest).unwrap();
+        let dependencies = parsed["dependencies"].as_table().unwrap();
+        let dependency = dependencies["agent-doc-plugin-owner"].as_table().unwrap();
+        assert_eq!(
+            dependency.get("version").and_then(toml::Value::as_str),
+            package_version,
+            "{relative_manifest} should depend on the versioned plugin-owner crate"
+        );
+    }
+
+    let focused =
+        fs::read_to_string(manifest_dir.join("agent-doc-plugin-owner/src/lib.rs")).unwrap();
+    for required in [
+        "pub struct PluginOwnerLease",
+        "pub fn plugin_owner_ttl(",
+        "pub fn read_plugin_owner_lease(",
+        "pub fn plugin_owner_pid_is_live(",
+        "pub fn ownership_liveness_from_lease(",
+        "pub fn ownership_liveness_for_file(",
+        "pub fn disk_write_permitted_for_file(",
+        "pub fn live_editor_endpoint_attached(",
+        "pub fn live_plugin_owner_consumer_id(",
+        "pub fn live_plugin_owner_consumer_id_for_lease(",
+        "pub fn editor_endpoint_attached_for_lease(",
+        "pub fn try_acquire_plugin_owner(",
+        "pub fn release_plugin_owner(",
+        "agent_doc_lease::timestamp_is_fresh",
+        "agent_doc_merge::ownership",
+    ] {
+        assert!(
+            focused.contains(required),
+            "agent-doc-plugin-owner must own editor plugin-owner lease policy: {required}"
+        );
+    }
+
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/plugin_owner.rs")
+            .exists(),
+        "orchestration must not keep a plugin_owner module or facade"
+    );
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod plugin_owner;")
+            && !orchestration_lib.contains("pub use agent_doc_plugin_owner"),
+        "orchestration must not expose a plugin-owner facade"
+    );
 }
 
 #[test]

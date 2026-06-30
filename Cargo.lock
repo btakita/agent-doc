@@ -43,6 +43,7 @@ dependencies = [
  "agent-doc-merge",
  "agent-doc-model-tier",
  "agent-doc-orchestration",
+ "agent-doc-plugin-owner",
  "agent-doc-project-config-io",
  "agent-doc-prompt-context",
  "agent-doc-prompt-contract",
@@ -397,6 +398,7 @@ dependencies = [
  "agent-doc-markdown-ast",
  "agent-doc-merge",
  "agent-doc-model-tier",
+ "agent-doc-plugin-owner",
  "agent-doc-project-config-io",
  "agent-doc-prompt-cache",
  "agent-doc-prompt-context",
@@ -454,6 +456,18 @@ dependencies = [
  "uuid",
  "yrs",
  "zip",
+]
+
+[[package]]
+name = "agent-doc-plugin-owner"
+version = "0.34.65"
+dependencies = [
+ "agent-doc-lease",
+ "agent-doc-merge",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

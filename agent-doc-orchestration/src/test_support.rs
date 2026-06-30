@@ -80,6 +80,15 @@ impl Drop for ScopedCurrentDir {
 }
 
 #[cfg(test)]
+pub(crate) fn seed_live_plugin_owner_lease(file: &str) {
+    let pid = std::process::id();
+    assert!(
+        agent_doc_plugin_owner::try_acquire_plugin_owner(file, &format!("test-editor-{pid}"), pid),
+        "test setup should acquire a live plugin-owner lease"
+    );
+}
+
+#[cfg(test)]
 pub(crate) fn patch_with_heading(heading: &str) -> agent_doc_template::PatchBlock {
     agent_doc_template::PatchBlock::new("exchange", format!("{heading}\n\nbody line one\n"))
 }

@@ -719,7 +719,7 @@ mod tests {
 
         // Make the document editor-attached (MultiReplica): seed a live owner
         // lease for the CURRENT pid so `authority_for_file` resolves MultiReplica.
-        crate::plugin_owner::write_plugin_owner_lease_for_test(&file_str, std::process::id());
+        crate::test_support::seed_live_plugin_owner_lease(&file_str);
         assert!(
             crate::crdt_authority::authority_for_file(&file_str).editor_attached(),
             "test setup: the document must be editor-attached"

@@ -740,7 +740,7 @@ mod tests {
     fn register_replica_seeds_fresh_hub_from_current_document_text() {
         let (_dir, doc) = temp_doc("seed-register.md");
         let file_str = doc.display().to_string();
-        crate::plugin_owner::write_plugin_owner_lease_for_test(&file_str, std::process::id());
+        crate::test_support::seed_live_plugin_owner_lease(&file_str);
         let on_disk = std::fs::read_to_string(&doc).unwrap();
 
         let (client_id, bootstrap) = register_replica_for_file(&doc, "intellij:seed")

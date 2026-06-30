@@ -14,7 +14,7 @@ fn live_editor_delivery_target(file: &Path) -> Option<String> {
 
     let owner_candidate = file_keys
         .iter()
-        .find_map(|file_key| crate::plugin_owner::live_plugin_owner_consumer_id(file_key))
+        .find_map(|file_key| agent_doc_plugin_owner::live_plugin_owner_consumer_id(file_key))
         .map(
             |editor_id| agent_doc_document_realtime::LiveEditorDeliveryCandidate {
                 editor_id: Some(editor_id),
@@ -3894,7 +3894,7 @@ mod live_editor_target_tests {
         fs::write(&doc, "saved").unwrap();
         let doc_str = doc.to_string_lossy().to_string();
 
-        assert!(crate::plugin_owner::try_acquire_plugin_owner(
+        assert!(agent_doc_plugin_owner::try_acquire_plugin_owner(
             &doc_str,
             "jetbrains-owner",
             std::process::id(),

@@ -5148,10 +5148,7 @@ mod tests {
         // `#6b5h`: a real editor is attached — seed a live plugin-owner lease so the
         // non-force consume fails closed (protects the buffer) rather than taking
         // an unproven editor-delivery disk fallback.
-        crate::plugin_owner::write_plugin_owner_lease_for_test(
-            doc.to_str().unwrap(),
-            std::process::id(),
-        );
+        crate::test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
         let err = consume_queue_prompts_for_done_ids_closeout(&doc, &[], false).unwrap_err();
         let err = format!("{err:?}");
@@ -5203,10 +5200,7 @@ mod tests {
 
         let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
         crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
-        crate::plugin_owner::write_plugin_owner_lease_for_test(
-            doc.to_str().unwrap(),
-            std::process::id(),
-        );
+        crate::test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
         let err = run_closeout_pending_maintenance(&doc, CommitMode::Required, false).unwrap_err();
         let err = format!("{err:?}");
@@ -5286,10 +5280,7 @@ mod tests {
 
         let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
         crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
-        crate::plugin_owner::write_plugin_owner_lease_for_test(
-            doc.to_str().unwrap(),
-            std::process::id(),
-        );
+        crate::test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
         let err = run_closeout_pending_maintenance(&doc, CommitMode::Required, false).unwrap_err();
         let err = format!("{err:?}");
@@ -5336,10 +5327,7 @@ mod tests {
 
         let _listener = crate::test_support::start_ack_without_content_listener(dir.path());
         crate::test_support::wait_for_live_prompt_drift_listener(dir.path());
-        crate::plugin_owner::write_plugin_owner_lease_for_test(
-            doc.to_str().unwrap(),
-            std::process::id(),
-        );
+        crate::test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
         run_closeout_pending_maintenance(&doc, CommitMode::Required, false)
             .expect("status-only housekeeping should not block response closeout");

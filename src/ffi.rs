@@ -948,8 +948,7 @@ pub unsafe extern "C" fn agent_doc_plugin_owner_try_acquire(
         Ok(s) => s,
         Err(_) => return 1,
     };
-    agent_doc_orchestration::plugin_owner::try_acquire_plugin_owner(path, consumer, pid as u32)
-        as i32
+    agent_doc_plugin_owner::try_acquire_plugin_owner(path, consumer, pid as u32) as i32
 }
 
 /// `#8bfz` / `#fcconeowner`: release the plugin-owner lease for `file_path`, but
@@ -973,7 +972,7 @@ pub unsafe extern "C" fn agent_doc_plugin_owner_release(
         Ok(s) => s,
         Err(_) => return,
     };
-    agent_doc_orchestration::plugin_owner::release_plugin_owner(path, consumer);
+    agent_doc_plugin_owner::release_plugin_owner(path, consumer);
 }
 
 /// Bump the sync debounce generation. Returns the new generation number.

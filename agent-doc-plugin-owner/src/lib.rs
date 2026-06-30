@@ -11,7 +11,7 @@
 //!
 //! This module is the single-owner tie-break: exactly one live consumer per
 //! document holds the owner lease and applies/saves; non-owners defer. The
-//! election is a filesystem lease (mirrors [`agent_doc_queue::drain_owner`]) with an
+//! election is a filesystem lease (mirrors the queue drain-owner sidecar) with an
 //! atomic `create_new` (O_EXCL) claim so two instances racing for an unowned or
 //! stale lease cannot both win. Ownership is sticky while the owner keeps
 //! refreshing (it calls [`try_acquire_plugin_owner`] on every patch event), and
@@ -76,7 +76,7 @@ fn now_secs() -> u64 {
 }
 
 /// Compute the plugin-owner lease path for a document. Mirrors
-/// [`agent_doc_queue::drain_owner`]: hash the document path and land the sidecar in the
+/// the queue drain-owner sidecar: hash the document path and land the sidecar in the
 /// nearest ancestor `.agent-doc/` directory.
 fn plugin_owner_lease_path(file: &str) -> PathBuf {
     use std::hash::{Hash, Hasher};
@@ -117,8 +117,20 @@ pub fn read_plugin_owner_lease(file: &str) -> Option<PluginOwnerLease> {
 }
 
 /// Real liveness check shared with `#fccreap`'s consumer reaper.
+///
+/// On Unix, `kill(pid, 0)` returning 0 (process exists) or erroring with `EPERM`
+/// (process exists, not permitted) both mean ALIVE; only `ESRCH` (no such
+/// process) means dead. On non-Unix this conservatively reports every pid as
+/// live so nothing is reaped.
+#[cfg(unix)]
 fn pid_is_live(pid: u32) -> bool {
-    crate::hooks::pid_is_live(pid)
+    let ret = unsafe { libc::kill(pid as libc::pid_t, 0) };
+    ret == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(not(unix))]
+fn pid_is_live(_pid: u32) -> bool {
+    true
 }
 
 /// Public pid-liveness predicate — the signal behind [`live_editor_endpoint_attached`].
@@ -188,7 +200,7 @@ pub fn disk_write_permitted_for_file(file: &str) -> bool {
 /// cross-buffer-drift family). But a pure-CLI session (no JetBrains/VS Code
 /// plugin attached) can still observe a *connectable* IPC socket — the project
 /// controller hosts a listener that returns error acks with nothing behind it —
-/// so [`crate::ipc_socket::is_listener_active`] reports `true` while there is no
+/// so orchestration's IPC listener probe reports `true` while there is no
 /// editor buffer to protect. Every `finalize` then wedges on `no_ack` forever
 /// (`#6b5h`) and only `--force-disk` succeeds, because the guard cannot tell a
 /// transiently-wedged real editor apart from a CLI-only dead-end listener.
@@ -227,33 +239,6 @@ pub fn live_plugin_owner_consumer_id_for_lease(
     is_pid_live(lease.pid)
         .then_some(lease.consumer_id)
         .filter(|consumer_id| !consumer_id.trim().is_empty())
-}
-
-/// Test-only: seed a plugin-owner lease for `file` recording the given `pid`,
-/// modelling a real attached editor. Used by write/converge tests to exercise
-/// the fail-closed (live-editor) branch distinctly from the editor-less `#6b5h`
-/// branch. Pass `std::process::id()` for a guaranteed-live owner.
-#[cfg(test)]
-pub fn write_plugin_owner_lease_for_test(file: &str, pid: u32) {
-    let path = plugin_owner_lease_path(file);
-    if let Some(parent) = path.parent()
-        && let Err(e) = std::fs::create_dir_all(parent)
-    {
-        panic!(
-            "test lease seed: failed to create {}: {e}",
-            parent.display()
-        );
-    }
-    if let Err(e) = write_lease_at(
-        &path,
-        &PluginOwnerLease {
-            consumer_id: format!("test-editor-{pid}"),
-            pid,
-            heartbeat_secs: now_secs(),
-        },
-    ) {
-        panic!("test lease seed: failed to write {}: {e}", path.display());
-    }
 }
 
 /// Testable core of [`live_editor_endpoint_attached`]: a live editor is attached

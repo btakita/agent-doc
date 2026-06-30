@@ -237,6 +237,12 @@ focused crate under the old path.
   cycle/capture/backlog loading, ops-log emission, and session-check warning
   rendering, using current `--backlog-edit` / `--backlog-gate` terminology in
   the touched hint instead of legacy pending aliases.
+- `agent-doc-turn` now owns blocked-closeout follow-up policy: blocked-signal
+  response detection, no-follow-up and suppress-marker handling, gated/open/done
+  id filtering, and warn/pass decisions for directed ids whose remaining work
+  would otherwise live only in prose. Orchestration keeps guard-mode resolution,
+  cycle/capture/review loading, ops-log emission, and strict-vs-warn formatting,
+  with touched hints moved to `--backlog-edit` / `--backlog-add-after`.
 
 ### Earlier closure finding
 

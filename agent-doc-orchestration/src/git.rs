@@ -2739,10 +2739,17 @@ fn live_buffer_snapshot_matches_content(
     snapshot: &agent_doc_debounce::LiveBufferSnapshot,
     content: &str,
 ) -> bool {
-    snapshot.len == content.len()
+    if snapshot.len == content.len()
         && snapshot
             .hash
             .eq_ignore_ascii_case(&agent_doc_hash::content_hash(content))
+    {
+        return true;
+    }
+    snapshot.content.as_ref().is_some_and(|editor_text| {
+        normalize_transient_agent_doc_markers(editor_text)
+            == normalize_transient_agent_doc_markers(content)
+    })
 }
 
 fn finalize_already_committed_noop(
@@ -5218,17 +5225,21 @@ Duplicate replay should stay live.
             &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
         )
         .unwrap();
-        let pending = crate::snapshot::pending_path_for(&doc.canonicalize().unwrap()).unwrap();
-        fs::create_dir_all(pending.parent().unwrap()).unwrap();
-        fs::write(&pending, staged).unwrap();
+        let listener = start_fake_listener(root);
+        wait_for_listener(root);
 
         let did_commit = commit(&doc).expect("staged synced editor-visible snapshot should commit");
         assert!(did_commit, "snapshot ahead of HEAD should create a commit");
 
         let head = show_head(&doc).unwrap().unwrap();
         assert_eq!(
-            head, staged,
-            "commit should stage the synced editor-visible snapshot, not stale disk"
+            normalize_transient_agent_doc_markers(&head),
+            normalize_transient_agent_doc_markers(staged),
+            "commit should stage the synced editor-visible snapshot modulo transient boundary markers, not stale disk"
+        );
+        assert!(
+            head.contains("### Re: current") && head.contains("current response"),
+            "committed HEAD should contain the synced editor-visible response, not stale disk:\n{head}"
         );
 
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
@@ -5241,6 +5252,8 @@ Duplicate replay should stay live.
             !log.contains("commit_blocked_live_buffer_ahead_of_disk file="),
             "staged synced live buffer must not be blocked as stale disk:\n{log}"
         );
+        let _ = fs::remove_file(crate::ipc_socket::socket_path(root));
+        drop(listener);
     }
 
     #[test]

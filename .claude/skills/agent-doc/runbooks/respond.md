@@ -72,40 +72,40 @@ the plan file before closeout and cite every plan path. If
 `execution_scope=plan_backlog_only`, create plan/backlog items and explain the
 deferred implementation boundary instead of editing code.
 
-## Step 1b — Update pending (template mode)
+## Step 1b — Update backlog (template mode)
 
 Mutate `<!-- agent:backlog -->` (or legacy `agent:pending`) only through granular
-`agent-doc write` flags: `--pending-add`, `--done <id>`, `--pending-edit
-"id=text"`, `--pending-reorder`, `--pending-gate`, `--pending-ungate`,
+`agent-doc write` flags: `--backlog-add`, `--done <id>`, `--backlog-edit
+"id=text"`, `--backlog-reorder`, `--backlog-gate`, `--backlog-ungate`,
 `--review-add`, `--review-edit`. Full-replace via `<!-- patch:backlog -->` /
 `<!-- patch:review -->` is rejected; see [pending-ops.md](pending-ops.md). For
-`<!-- agent:icebox -->`, use `<!-- replace:icebox -->`.
+`<!-- agent:icebox -->`, use granular `--icebox-add*` flags.
 
 Completed/reaped items live under canonical `<!-- agent:done -->`; legacy
 `agent:backlog-done` and `agent:pending-done` tags require `agent-doc migrate`.
 
-**Pending capture rule:** if the response creates concrete follow-up work, add it
+**Backlog capture rule:** if the response creates concrete follow-up work, add it
 to `agent:backlog` in the same cycle. Put new items at the beginning of
-`agent:backlog`; if you are extending an ordered batch already in pending, insert
+`agent:backlog`; if you are extending an ordered batch already in backlog, insert
 the new item adjacent to its predecessor. If the item is only a recommendation,
 include `[recommended]`.
 
-**Cross-document pending rule:** if a prompt preset or user instruction names
-another backlog file, add the item to that target with `--pending-add-to
+**Cross-document backlog rule:** if a prompt preset or user instruction names
+another backlog file, add the item to that target with `--backlog-add-to
 <target-file> "<item>"` on the final `agent-doc finalize` command. Do not satisfy
-an explicit target by running `--pending-add` against the current session
+an explicit target by running `--backlog-add` against the current session
 document. If the target is missing or lacks a backlog component, stop on the
 binary error and report the blocker.
 
-**Plan-backed pending items:** create the plan file first and include that exact
-plan file path in the pending text. For multi-phase implementation work, prefer
+**Plan-backed backlog items:** create the plan file first and include that exact
+plan file path in the backlog text. For multi-phase implementation work, prefer
 one backlog ID per actionable phase (for example `#crdtrespfx1`, `#crdtrespfx2`)
-instead of one parent ID that gets repeatedly `--pending-gate`d after partial
+instead of one parent ID that gets repeatedly `--backlog-gate`d after partial
 progress; keep the parent plan file as context, but queue and close out concrete
 phase IDs.
 
-**`do #id` closeout rule:** when the user directs `do #id ...`, record the pending
-outcome before persistence: `--done <id>` if completed, `--pending-gate <id>` if
+**`do #id` closeout rule:** when the user directs `do #id ...`, record the backlog
+outcome before persistence: `--done <id>` if completed, `--backlog-gate <id>` if
 code-complete but awaiting review/external validation, or explain concretely why
 it stays open. `session-check` enforces the `pending_done_guard`; projects may opt
 into `review_done_guard` when review must precede done.

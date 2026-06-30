@@ -48,10 +48,17 @@ The body contains named components delimited by HTML comment markers:
 - `<!-- agent:input -->` — user writes prompts here (read-only for the agent).
 - `<!-- agent:output -->` — agent responds here when no other target is given.
 - `<!-- agent:exchange -->` — shared conversation surface; user and agent both write inline. Default target for unmatched patches and the canonical location for the response boundary marker.
-- `<!-- agent:backlog -->` — task tracker managed through granular pending ops (see `pending-ops.md`). Legacy alias: `<!-- agent:pending -->`.
-- `<!-- agent:review -->` — code-complete tracked work awaiting human review. `--pending-gate` moves backlog items here as `[/]`; `--pending-ungate` moves them back.
+- `<!-- agent:backlog -->` — task tracker managed through granular backlog ops (see `pending-ops.md`). Legacy alias: `<!-- agent:pending -->`.
+- `<!-- agent:review -->` — code-complete tracked work awaiting human review. `--backlog-gate` moves backlog items here as `[/]`; `--backlog-ungate` moves them back.
 - `<!-- agent:icebox -->` — project icebox for items parked outside the active backlog. Sits after `agent:backlog` in the default template.
+- `<!-- agent:signals -->` — realtime signal definitions/readings. Built-in tests, queue, supervisor, and IPC signals are expected first; custom signal plugins are deferred.
 - `<!-- agent:status -->`, `<!-- agent:log -->`, `<!-- agent:architecture -->`, ... — agent-managed via targeted patch blocks.
+
+Built-in element semantics live in the `agent-doc-element-*` crate family and
+are composed by `agent-doc-element-registry`. An unregistered `agent:*`
+component uses the `agent-doc-element-unknown` fallback: preserve
+operator-visible content and do not apply semantic mutations until a plugin or
+built-in descriptor defines that element.
 
 ### Inline component attributes
 

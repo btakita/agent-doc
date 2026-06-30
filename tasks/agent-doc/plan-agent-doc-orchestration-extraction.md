@@ -754,6 +754,15 @@ should be deleted during extraction.
   effectful guard decides whether to refresh sidecars or fail closed.
   Orchestration keeps snapshot/CRDT sidecar writes, ops-log emission, and
   provenance-backed visible rebase effects.
+- `agent-doc-document-realtime` now owns write snapshot/live-drift persistence
+  policy: choosing whether snapshots persist final content or `content_ours`,
+  classifying IPC snapshot adoption that would absorb live prompt drift,
+  detecting unowned dropped exchange prompt lines, extracting exchange content
+  for write-drift comparisons, and deciding whether a response target is
+  disjoint from a concurrent user edit. The git-backed three-way merge remains
+  an orchestration effect adapter supplied as a callback, so the focused crate
+  owns the decision table without spawning git or preserving the old
+  `agent_doc_orchestration::write::*` policy path.
 - `agent-doc-controller` now owns route-trigger current-draft visibility
   policy: matching visible trigger text, wrapped trigger captures, and
   equivalent relative/absolute `agent-doc <path>` drafts while using a caller

@@ -1339,7 +1339,7 @@ fn run_supervisor_auto_install_with_retry(
 }
 
 fn active_queue_head_is_registered_preset(content: &str, preset_id: &str) -> Result<bool> {
-    let Some(head) = crate::write::active_queue_head_text(content)? else {
+    let Some(head) = agent_doc_queue::queue_heads::active_queue_head_text(content)? else {
         return Ok(false);
     };
     let normalized = normalize_queue_prompt_text(&head);
@@ -2633,7 +2633,7 @@ fn dispatch_blocked_proof_fields(
         project_root.join(file)
     };
     if let Ok(content) = std::fs::read_to_string(&file_path)
-        && let Ok(Some(head)) = crate::write::active_queue_head_text(&content)
+        && let Ok(Some(head)) = agent_doc_queue::queue_heads::active_queue_head_text(&content)
     {
         fields.push(format!("blocked_head_bytes={}", head.len()));
         fields.push(format!(

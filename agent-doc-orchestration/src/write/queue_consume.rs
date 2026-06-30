@@ -3,8 +3,12 @@
 use super::*;
 use agent_doc_queue::{
     queue_directive::topic_resolves_to_exact_id,
+    queue_heads::{
+        active_queue_head_text, queue_head_has_explicit_completion_signal,
+        queue_head_matches_done_ids,
+    },
     queue_response::{
-        display_queue_prompt_text, embed_consumed_prompt_in_response, first_nonempty_line,
+        embed_consumed_prompt_in_response, first_nonempty_line,
         free_text_head_answered_by_response, free_text_head_match_prose,
         head_carries_in_progress_marker, head_id_names_tracked_directive_item, normalize_done_id,
         normalize_for_answer_match, normalize_queue_prompt_text, queue_head_is_bare_do_directive,
@@ -472,28 +476,7 @@ pub(crate) fn should_consume_queue_prompt_for_write(
 pub(crate) fn queue_skip_diagnostic_for_file(file: &Path) -> Result<String> {
     let content =
         std::fs::read_to_string(file).context("queue skip diagnostic: failed to read document")?;
-    queue_skip_diagnostic_for_content(&content)
-}
-
-pub(crate) fn queue_skip_diagnostic_for_content(content: &str) -> Result<String> {
-    const GENERIC: &str =
-        "[queue] skipped consumption because the active prompt did not target the queue head";
-
-    let Some(queue_head) = active_queue_head_text(content)? else {
-        return Ok(GENERIC.to_string());
-    };
-    let queue_head_display = display_queue_prompt_text(&queue_head);
-    if queue_head_is_free_text_prompt(content)? {
-        return Ok(format!(
-            "[queue] kept free-text head `{queue_head_display}` because free-text heads are consumed only when this cycle's response quotes that exact queue prompt. Add a `> **Queue prompt:**` echo for this head, or leave it queued."
-        ));
-    }
-    if let Some(id) = queue_prompt_done_id(&queue_head) {
-        return Ok(format!(
-            "[queue] kept head `{queue_head_display}` because the response did not record a completion outcome for #{id}. Reap it with `--done {id}`, gate it with `--pending-gate {id}`, resolve review with `--review-resolve {id}`, or keep/narrow it with `--pending-edit \"{id}=...\"`. (missing proof: no done/gate/review-resolve/reap recorded for #{id} this cycle)"
-        ));
-    }
-    Ok(GENERIC.to_string())
+    agent_doc_queue::queue_heads::queue_skip_diagnostic_for_content(&content)
 }
 
 pub(crate) fn should_consume_queue_prompt_for_diff_content(
@@ -632,75 +615,6 @@ pub(crate) fn cycle_answered_foreign_exchange_prompt(
     })
 }
 
-pub(crate) fn active_queue_head_text(content: &str) -> Result<Option<String>> {
-    let (fm, _) = frontmatter::parse(content)?;
-    if fm.queue_active != Some(true) {
-        return Ok(None);
-    }
-    let components = element::parse(content)?;
-    let comp = components
-        .iter()
-        .find(|component| component.name == "queue")
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "queue consume guard: queue_active is true but document has no agent:queue component"
-            )
-        })?;
-    let body = &content[comp.open_end..comp.close_start];
-    let entries = agent_doc_queue::document_queue::parse(body)
-        .context("queue consume guard: failed to parse document queue")?;
-    Ok(agent_doc_queue::document_queue::first_prompt(&entries).map(|prompt| prompt.text.clone()))
-}
-
-/// True when a closeout flag in this cycle explicitly names the active queue
-/// head's `#id` — `--done`, `--pending-gate`, `--review-resolve`, or
-/// `--pending-edit "<id>=…"`.
-///
-/// This is the explicit completion signal that authorizes queue-head consumption
-/// (#queue-strike-on-halt). A `### Re:` heading that merely mentions the head id
-/// is not a completion signal — a halt/refusal response names the head to explain
-/// why it is *not* being completed — so consumption is driven by an explicit
-/// closeout flag, never by heading text. `--pending-edit` counts because the
-/// agent rewrote the item's tracked text as part of resolving it.
-pub(crate) fn queue_head_has_explicit_completion_signal(
-    content: &str,
-    completion_ids: &[String],
-) -> Result<bool> {
-    let Some(queue_head) = active_queue_head_text(content)? else {
-        return Ok(false);
-    };
-    let Some(head_id) = queue_prompt_done_id(&queue_head) else {
-        return Ok(false);
-    };
-    // Callers usually pass normalized completion ids; tests and older helpers may
-    // still pass `"<id>=new text"`, so accept both forms.
-    let names_head = |raw: &str| {
-        let id = raw.split_once('=').map(|(id, _)| id).unwrap_or(raw);
-        normalize_done_id(id) == head_id
-    };
-    Ok(completion_ids.iter().any(|raw| names_head(raw)))
-}
-
-pub(crate) fn explicit_queue_completion_ids(
-    pending_done: &[String],
-    pending_gate: &[String],
-    pending_edit: &[String],
-    review_resolve: &[String],
-) -> Vec<String> {
-    pending_done
-        .iter()
-        .chain(pending_gate.iter())
-        .chain(pending_edit.iter())
-        .chain(review_resolve.iter())
-        .map(|raw| {
-            raw.split_once('=')
-                .map(|(id, _)| id)
-                .unwrap_or(raw.as_str())
-        })
-        .map(str::to_string)
-        .collect()
-}
-
 /// Return the id of the pre-commit queue head when this turn targeted that
 /// exact head through the prompt diff or response heading. The queue-consume
 /// planner rechecks the live head later, so this id cannot authorize striking a
@@ -750,19 +664,6 @@ pub(crate) fn queue_diff_completion_id_for_current_head(
         return Ok(Some(head_id));
     }
     Ok(None)
-}
-
-pub(crate) fn queue_head_matches_done_ids(content: &str, done_ids: &[String]) -> Result<bool> {
-    if done_ids.is_empty() {
-        return Ok(false);
-    }
-    let Some(queue_head) = active_queue_head_text(content)? else {
-        return Ok(false);
-    };
-    let Some(head_id) = queue_prompt_done_id(&queue_head) else {
-        return Ok(false);
-    };
-    Ok(done_ids.iter().any(|id| normalize_done_id(id) == head_id))
 }
 
 pub fn response_explicitly_targets_active_queue_head(file: &Path, response: &str) -> Result<bool> {
@@ -2618,76 +2519,6 @@ mod core_tests {
         );
     }
     #[test]
-    fn explicit_signal_halt_without_flag_does_not_consume() {
-        // (a) Halt response, no --done/--pending-gate/--pending-edit → no consume.
-        assert!(
-            !queue_head_has_explicit_completion_signal(crate::test_support::HALT_QUEUE_DOC, &[])
-                .unwrap()
-        );
-    }
-    #[test]
-    fn explicit_signal_done_flag_consumes() {
-        // (b) --done naming the head → consume. (c) also covers no-heading + --done.
-        assert!(
-            queue_head_has_explicit_completion_signal(
-                crate::test_support::HALT_QUEUE_DOC,
-                &["foo".to_string()],
-            )
-            .unwrap()
-        );
-    }
-    #[test]
-    fn explicit_signal_gate_and_edit_flags_consume() {
-        assert!(
-            queue_head_has_explicit_completion_signal(
-                crate::test_support::HALT_QUEUE_DOC,
-                &["foo".to_string()],
-            )
-            .unwrap(),
-            "--pending-gate naming the head is a completion signal"
-        );
-        assert!(
-            queue_head_has_explicit_completion_signal(
-                crate::test_support::HALT_QUEUE_DOC,
-                &["foo=rewritten text".to_string()],
-            )
-            .unwrap(),
-            "--pending-edit naming the head is a completion signal"
-        );
-        assert!(
-            queue_head_has_explicit_completion_signal(
-                crate::test_support::HALT_QUEUE_DOC,
-                &["foo".to_string()],
-            )
-            .unwrap(),
-            "--review-resolve naming the head is a completion signal"
-        );
-    }
-    #[test]
-    fn explicit_signal_flag_for_other_id_does_not_consume() {
-        assert!(
-            !queue_head_has_explicit_completion_signal(
-                crate::test_support::HALT_QUEUE_DOC,
-                &[
-                    "bar".to_string(),
-                    "baz".to_string(),
-                    "qux=text".to_string(),
-                    "other-review".to_string(),
-                ],
-            )
-            .unwrap(),
-            "flags for non-head ids must not consume the head"
-        );
-    }
-    #[test]
-    fn explicit_signal_none_when_queue_inactive() {
-        let inactive = crate::test_support::HALT_QUEUE_DOC
-            .replace("queue_active: true", "queue_active: false");
-        assert!(
-            !queue_head_has_explicit_completion_signal(&inactive, &["foo".to_string()]).unwrap()
-        );
-    }
-    #[test]
     fn consumed_prompt_echo_skips_stale_blockquoted_echo_variant() {
         let prompt = ":pushpin: Fix the root cause of this issue that occurred in this document.";
         let content = format!(
@@ -4162,35 +3993,6 @@ Old.
             cycle_answered_foreign_exchange_prompt(Some(baseline), &foreign, head),
             "a cycle that added a new unrelated exchange prompt answered foreign work"
         );
-    }
-    #[test]
-    fn queue_skip_diagnostic_names_head_shape_and_repair_path() {
-        let id_backed = concat!(
-            "---\nqueue_active: true\n---\n\n",
-            "<!-- agent:queue auto -->\n",
-            "- do [#foo]\n",
-            "<!-- /agent:queue -->\n",
-        );
-        let id_message = queue_skip_diagnostic_for_content(id_backed).unwrap();
-        assert!(id_message.contains("[queue] kept head `do #foo`"));
-        assert!(id_message.contains("`--done foo`"));
-        assert!(id_message.contains("`--pending-gate foo`"));
-        assert!(id_message.contains("`--review-resolve foo`"));
-        assert!(id_message.contains("`--pending-edit \"foo=...\"`"));
-        assert!(id_message.contains("missing proof"));
-
-        let free_text = concat!(
-            "---\nqueue_active: true\n---\n\n",
-            "<!-- agent:queue auto -->\n",
-            "- Review the queue diagnostics\n",
-            "<!-- /agent:queue -->\n",
-        );
-        let free_text_message = queue_skip_diagnostic_for_content(free_text).unwrap();
-        assert!(
-            free_text_message
-                .contains("[queue] kept free-text head `Review the queue diagnostics`")
-        );
-        assert!(free_text_message.contains("`> **Queue prompt:**` echo"));
     }
     #[test]
     fn bare_do_directive_detection() {

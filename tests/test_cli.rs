@@ -7821,6 +7821,11 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
     for required_snippet in [
         "pub fn active_queue_heads(",
         "pub fn active_free_text_queue_heads(",
+        "pub fn active_queue_head_text(",
+        "pub fn queue_skip_diagnostic_for_content(",
+        "pub fn queue_head_has_explicit_completion_signal(",
+        "pub fn explicit_queue_completion_ids(",
+        "pub fn queue_head_matches_done_ids(",
         "pub fn is_do_directive(",
         "fn leads_with_bare_id_directive(",
     ] {
@@ -7863,6 +7868,37 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
     assert!(
         cycle_state.contains("agent_doc_queue::queue_heads::active_free_text_queue_heads"),
         "cycle_state should call free-text queue-head projection through agent-doc-queue directly"
+    );
+
+    let queue_consume =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/queue_consume.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "pub(crate) fn active_queue_head_text(",
+        "pub(crate) fn queue_skip_diagnostic_for_content(",
+        "pub(crate) fn queue_head_has_explicit_completion_signal(",
+        "pub(crate) fn explicit_queue_completion_ids(",
+        "pub(crate) fn queue_head_matches_done_ids(",
+    ] {
+        assert!(
+            !queue_consume.contains(forbidden_snippet),
+            "queue_consume must not re-own or facade active queue-head policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        queue_consume.contains("agent_doc_queue::queue_heads::queue_skip_diagnostic_for_content"),
+        "queue_consume should keep only the file-reading adapter for skip diagnostics"
+    );
+
+    let queue_response =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_response.rs")).unwrap();
+    assert!(
+        !queue_response.contains("fn active_queue_head_text("),
+        "queue_response must not duplicate active queue-head document projection"
+    );
+    assert!(
+        queue_response.contains("crate::queue_heads::active_queue_head_text"),
+        "queue_response should share active queue-head projection through queue_heads"
     );
 
     let queue_manifest =

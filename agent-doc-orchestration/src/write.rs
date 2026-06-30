@@ -2218,7 +2218,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         let response_body = crate::capture::load_active(file)?
             .map(|capture| capture.response_body)
             .unwrap_or_default();
-        let mut queue_completion_ids = explicit_queue_completion_ids(
+        let mut queue_completion_ids = agent_doc_queue::queue_heads::explicit_queue_completion_ids(
             &options.pending_done,
             &options.pending_gate,
             &options.pending_edit,

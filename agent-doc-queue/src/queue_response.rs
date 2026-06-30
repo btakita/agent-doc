@@ -4,7 +4,7 @@
 //! already-read document/response text; file IO and lifecycle mutations stay in
 //! orchestration.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 pub fn queue_prompt_done_id(text: &str) -> Option<String> {
     let marker = text.find('#')?;
@@ -116,26 +116,6 @@ pub fn normalize_prompt_line(line: &str) -> String {
     line.trim().trim_start_matches('❯').trim().to_string()
 }
 
-fn active_queue_head_text(content: &str) -> Result<Option<String>> {
-    let (fm, _) = agent_doc_frontmatter::frontmatter::parse(content)?;
-    if fm.queue_active != Some(true) {
-        return Ok(None);
-    }
-    let components = agent_doc_element::element::parse(content)?;
-    let comp = components
-        .iter()
-        .find(|component| component.name == "queue")
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "queue consume guard: queue_active is true but document has no agent:queue component"
-            )
-        })?;
-    let body = &content[comp.open_end..comp.close_start];
-    let entries = crate::document_queue::parse(body)
-        .context("queue consume guard: failed to parse document queue")?;
-    Ok(crate::document_queue::first_prompt(&entries).map(|prompt| prompt.text.clone()))
-}
-
 /// True when `head_id` names an item tracked in `agent:backlog`, `agent:review`,
 /// or `agent:pending`.
 pub fn head_id_names_tracked_directive_item(content: &str, head_id: &str) -> bool {
@@ -216,7 +196,7 @@ pub fn queue_prompt_text_is_free_text(content: &str, text: &str) -> bool {
 /// True when the active queue head is a free-text prompt: it is neither an
 /// id-backed directive nor a queue activation trigger.
 pub fn queue_head_is_free_text_prompt(content: &str) -> Result<bool> {
-    let Some(queue_head) = active_queue_head_text(content)? else {
+    let Some(queue_head) = crate::queue_heads::active_queue_head_text(content)? else {
         return Ok(false);
     };
     Ok(queue_prompt_text_is_free_text(content, &queue_head))

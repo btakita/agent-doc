@@ -4,6 +4,13 @@
 //! document text; file IO, cycle-state persistence, and closeout guards stay in
 //! orchestration.
 
+use anyhow::{Context, Result};
+
+use crate::queue_response::{
+    display_queue_prompt_text, normalize_done_id, queue_prompt_done_id,
+    queue_prompt_text_is_free_text,
+};
+
 /// Extract queue prompt head texts from a document's `agent:queue` component.
 pub fn active_queue_heads(doc: &str) -> Vec<String> {
     queue_prompt_heads(doc)
@@ -23,6 +30,105 @@ pub fn active_free_text_queue_heads(doc: &str) -> Vec<String> {
 pub fn is_do_directive(text: &str) -> bool {
     let lower = text.trim().to_ascii_lowercase();
     lower.starts_with("do [#") || lower.starts_with("do #") || leads_with_bare_id_directive(&lower)
+}
+
+/// Return the currently active queue head text when frontmatter marks the queue
+/// active and the document has a first prompt in `agent:queue`.
+pub fn active_queue_head_text(content: &str) -> Result<Option<String>> {
+    let (fm, _) = agent_doc_frontmatter::frontmatter::parse(content)?;
+    if fm.queue_active != Some(true) {
+        return Ok(None);
+    }
+    let components = agent_doc_element::element::parse(content)?;
+    let Some(queue) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return Err(anyhow::anyhow!(
+            "queue consume guard: queue_active is true but document has no agent:queue component"
+        ));
+    };
+    let entries = crate::document_queue::parse(queue.content(content))
+        .context("queue consume guard: failed to parse document queue")?;
+    Ok(crate::document_queue::first_prompt(&entries).map(|prompt| prompt.text.clone()))
+}
+
+/// Operator-facing diagnostic explaining why active queue-head consumption was
+/// skipped for this document content.
+pub fn queue_skip_diagnostic_for_content(content: &str) -> Result<String> {
+    const GENERIC: &str =
+        "[queue] skipped consumption because the active prompt did not target the queue head";
+
+    let Some(queue_head) = active_queue_head_text(content)? else {
+        return Ok(GENERIC.to_string());
+    };
+    let queue_head_display = display_queue_prompt_text(&queue_head);
+    if queue_prompt_text_is_free_text(content, &queue_head) {
+        return Ok(format!(
+            "[queue] kept free-text head `{queue_head_display}` because free-text heads are consumed only when this cycle's response quotes that exact queue prompt. Add a `> **Queue prompt:**` echo for this head, or leave it queued."
+        ));
+    }
+    if let Some(id) = queue_prompt_done_id(&queue_head) {
+        return Ok(format!(
+            "[queue] kept head `{queue_head_display}` because the response did not record a completion outcome for #{id}. Reap it with `--done {id}`, gate it with `--pending-gate {id}`, resolve review with `--review-resolve {id}`, or keep/narrow it with `--pending-edit \"{id}=...\"`. (missing proof: no done/gate/review-resolve/reap recorded for #{id} this cycle)"
+        ));
+    }
+    Ok(GENERIC.to_string())
+}
+
+/// True when a closeout flag in this cycle explicitly names the active
+/// id-backed queue head.
+pub fn queue_head_has_explicit_completion_signal(
+    content: &str,
+    completion_ids: &[String],
+) -> Result<bool> {
+    let Some(queue_head) = active_queue_head_text(content)? else {
+        return Ok(false);
+    };
+    let Some(head_id) = queue_prompt_done_id(&queue_head) else {
+        return Ok(false);
+    };
+    let names_head = |raw: &str| {
+        let id = raw.split_once('=').map(|(id, _)| id).unwrap_or(raw);
+        normalize_done_id(id) == head_id
+    };
+    Ok(completion_ids.iter().any(|raw| names_head(raw)))
+}
+
+/// Collect every explicit closeout id spelling that can authorize queue-head
+/// completion.
+pub fn explicit_queue_completion_ids(
+    pending_done: &[String],
+    pending_gate: &[String],
+    pending_edit: &[String],
+    review_resolve: &[String],
+) -> Vec<String> {
+    pending_done
+        .iter()
+        .chain(pending_gate.iter())
+        .chain(pending_edit.iter())
+        .chain(review_resolve.iter())
+        .map(|raw| {
+            raw.split_once('=')
+                .map(|(id, _)| id)
+                .unwrap_or(raw.as_str())
+        })
+        .map(str::to_string)
+        .collect()
+}
+
+/// True when `done_ids` names the active id-backed queue head.
+pub fn queue_head_matches_done_ids(content: &str, done_ids: &[String]) -> Result<bool> {
+    if done_ids.is_empty() {
+        return Ok(false);
+    }
+    let Some(queue_head) = active_queue_head_text(content)? else {
+        return Ok(false);
+    };
+    let Some(head_id) = queue_prompt_done_id(&queue_head) else {
+        return Ok(false);
+    };
+    Ok(done_ids.iter().any(|id| normalize_done_id(id) == head_id))
 }
 
 fn queue_prompt_heads(doc: &str) -> Vec<String> {
@@ -74,6 +180,16 @@ fn leads_with_bare_id_directive(lower: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const HALT_QUEUE_DOC: &str = concat!(
+        "---\nqueue_active: true\n---\n\n",
+        "<!-- agent:exchange -->\n",
+        "### Re: #foo halt\n\nCannot complete it safely yet.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- do [#foo]\n",
+        "<!-- /agent:queue -->\n"
+    );
 
     #[test]
     fn is_do_directive_accepts_do_and_bare_id_forms() {
@@ -131,5 +247,96 @@ mod tests {
     fn active_queue_heads_tolerate_missing_or_malformed_queue() {
         assert!(active_queue_heads("plain document").is_empty());
         assert!(active_free_text_queue_heads("plain document").is_empty());
+    }
+
+    #[test]
+    fn active_queue_head_text_requires_active_queue_and_returns_first_prompt() {
+        assert_eq!(
+            active_queue_head_text(HALT_QUEUE_DOC).unwrap(),
+            Some("do [#foo]".to_string())
+        );
+        let inactive = HALT_QUEUE_DOC.replace("queue_active: true", "queue_active: false");
+        assert_eq!(active_queue_head_text(&inactive).unwrap(), None);
+    }
+
+    #[test]
+    fn explicit_completion_signal_names_active_queue_head() {
+        assert!(!queue_head_has_explicit_completion_signal(HALT_QUEUE_DOC, &[]).unwrap());
+        assert!(
+            queue_head_has_explicit_completion_signal(HALT_QUEUE_DOC, &["foo".to_string()])
+                .unwrap()
+        );
+        assert!(
+            queue_head_has_explicit_completion_signal(
+                HALT_QUEUE_DOC,
+                &["foo=rewritten text".to_string()],
+            )
+            .unwrap()
+        );
+        assert!(
+            !queue_head_has_explicit_completion_signal(
+                HALT_QUEUE_DOC,
+                &[
+                    "bar".to_string(),
+                    "baz".to_string(),
+                    "qux=text".to_string(),
+                    "other-review".to_string(),
+                ],
+            )
+            .unwrap()
+        );
+        let inactive = HALT_QUEUE_DOC.replace("queue_active: true", "queue_active: false");
+        assert!(
+            !queue_head_has_explicit_completion_signal(&inactive, &["foo".to_string()]).unwrap()
+        );
+    }
+
+    #[test]
+    fn explicit_queue_completion_ids_strip_edit_payloads() {
+        assert_eq!(
+            explicit_queue_completion_ids(
+                &["done".to_string()],
+                &["gate".to_string()],
+                &["edit=rewritten".to_string()],
+                &["review".to_string()],
+            ),
+            vec![
+                "done".to_string(),
+                "gate".to_string(),
+                "edit".to_string(),
+                "review".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn queue_head_matches_done_ids_compares_normalized_ids() {
+        assert!(queue_head_matches_done_ids(HALT_QUEUE_DOC, &[" [#Foo] ".to_string()]).unwrap());
+        assert!(!queue_head_matches_done_ids(HALT_QUEUE_DOC, &["bar".to_string()]).unwrap());
+        assert!(!queue_head_matches_done_ids(HALT_QUEUE_DOC, &[]).unwrap());
+    }
+
+    #[test]
+    fn queue_skip_diagnostic_names_head_shape_and_repair_path() {
+        let id_message = queue_skip_diagnostic_for_content(HALT_QUEUE_DOC).unwrap();
+        assert!(id_message.contains("[queue] kept head `do #foo`"));
+        assert!(id_message.contains("`--done foo`"));
+        assert!(id_message.contains("`--pending-gate foo`"));
+        assert!(id_message.contains("`--review-resolve foo`"));
+        assert!(id_message.contains("`--pending-edit \"foo=...\"`"));
+        assert!(id_message.contains("missing proof"));
+
+        let free_text = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- Review the queue diagnostics\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let free_text_message = queue_skip_diagnostic_for_content(free_text).unwrap();
+        assert!(
+            free_text_message
+                .contains("[queue] kept free-text head `Review the queue diagnostics`")
+        );
+        assert!(free_text_message.contains("`> **Queue prompt:**` echo"));
     }
 }

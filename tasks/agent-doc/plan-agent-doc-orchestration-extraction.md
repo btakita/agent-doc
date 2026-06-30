@@ -231,6 +231,12 @@ focused crate under the old path.
   whether committed cycles with no visible response body pass, skip as no-op
   commits, or interrupt. Orchestration keeps cycle-state loading, file parsing,
   ops-log emission, side-effect note rendering, and recovery-message formatting.
+- `agent-doc-turn` now owns partial `do [#id]` closeout-state policy: shipped
+  response detection, suppress-marker handling, directed-id candidate filtering,
+  and warn/pass decisions for open unresolved backlog ids. Orchestration keeps
+  cycle/capture/backlog loading, ops-log emission, and session-check warning
+  rendering, using current `--backlog-edit` / `--backlog-gate` terminology in
+  the touched hint instead of legacy pending aliases.
 
 ### Earlier closure finding
 

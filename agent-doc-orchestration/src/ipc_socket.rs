@@ -33,6 +33,7 @@
 //! refreshes it consumes `.agent-doc/patches/publish-live-buffer.signal` with the
 //! same `{type,file}` payload.
 
+use agent_doc_ipc_protocol::{AckClassification, classify_ack};
 use anyhow::{Context, Result};
 use interprocess::local_socket::{
     GenericFilePath, ListenerOptions, ToFsName,
@@ -309,58 +310,6 @@ pub fn ipc_accept_thread_ops_marker(inflight: u64) -> String {
 /// concurrent state (rather than only asserting wall-clock timing).
 pub fn inflight_connection_handlers() -> u64 {
     INFLIGHT_CONNECTION_HANDLERS.load(std::sync::atomic::Ordering::SeqCst)
-}
-
-/// Classification of a plugin-sent IPC ack line.
-///
-/// The plugin (JetBrains / VS Code) sends a JSON ack after applying a patch.
-/// `Ok` means the patch was applied normally. `AlreadyApplied` means the
-/// plugin detected the response body is already present in the live buffer
-/// and chose NOT to re-apply it — this is the signal the binary needs to
-/// skip the file-IPC fallback (which would otherwise re-write the same
-/// content and produce a duplicate response). `Failed` covers any other
-/// `status: error` ack.
-///
-/// Plan: tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
-/// Phase 2.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AckClassification {
-    Ok,
-    AlreadyApplied,
-    Failed,
-    /// Early `pending`/`accepted` ack: the listener received the patch but has
-    /// not applied it yet. Liveness only — the sender must keep waiting for a
-    /// terminal ack (`#ipc-early-ack`).
-    Pending,
-}
-
-/// Classify a plugin-sent IPC ack line. See [`AckClassification`].
-pub fn classify_ack(ack: &str) -> AckClassification {
-    let Some(value) = serde_json::from_str::<serde_json::Value>(ack).ok() else {
-        return AckClassification::Ok;
-    };
-    let status = value.get("status").and_then(|s| s.as_str());
-    // Early-ack: a `pending`/`accepted` status proves listener liveness but is
-    // not a terminal result — the sender keeps waiting for the apply ack.
-    if let Some(s) = status
-        && (s.eq_ignore_ascii_case("pending") || s.eq_ignore_ascii_case("accepted"))
-    {
-        return AckClassification::Pending;
-    }
-    let status_is_error = status
-        .map(|s| s.eq_ignore_ascii_case("error"))
-        .unwrap_or(false);
-    if !status_is_error {
-        return AckClassification::Ok;
-    }
-    let reason = value
-        .get("reason")
-        .and_then(|r| r.as_str())
-        .map(|r| r.to_ascii_lowercase());
-    match reason.as_deref() {
-        Some("already_applied") => AckClassification::AlreadyApplied,
-        _ => AckClassification::Failed,
-    }
 }
 
 /// True when a `send_message` error string indicates the plugin reported
@@ -925,16 +874,7 @@ mod tests {
     }
 
     #[test]
-    fn classify_ack_treats_pending_status_as_pending() {
-        assert_eq!(
-            classify_ack(r#"{"type":"ack","status":"pending"}"#),
-            AckClassification::Pending
-        );
-        assert_eq!(
-            classify_ack(r#"{"type":"ack","status":"accepted"}"#),
-            AckClassification::Pending
-        );
-        // The canonical early-ack line classifies as Pending.
+    fn early_ack_line_classifies_as_pending() {
         assert_eq!(classify_ack(early_ack_line()), AckClassification::Pending);
     }
 
@@ -1016,54 +956,6 @@ mod tests {
 
         let _ = std::fs::remove_file(socket_path(&root));
         drop(server);
-    }
-
-    #[test]
-    fn classify_ack_treats_ok_status_as_ok() {
-        let ack = r#"{"type":"ack","status":"ok","id":"patch-123"}"#;
-        assert_eq!(classify_ack(ack), AckClassification::Ok);
-    }
-
-    #[test]
-    fn classify_ack_treats_ack_without_status_as_ok() {
-        // Legacy ack shape: just `{"type":"ack","id":"..."}` with no status.
-        let ack = r#"{"type":"ack","id":"patch-123"}"#;
-        assert_eq!(classify_ack(ack), AckClassification::Ok);
-    }
-
-    #[test]
-    fn classify_ack_treats_already_applied_reason_as_already_applied() {
-        let ack = r#"{"type":"ack","status":"error","reason":"already_applied"}"#;
-        assert_eq!(classify_ack(ack), AckClassification::AlreadyApplied);
-    }
-
-    #[test]
-    fn classify_ack_treats_already_applied_reason_uppercase_as_already_applied() {
-        // Plugin implementations should send the canonical lowercase form,
-        // but the classifier matches case-insensitively as a forgiving
-        // protocol contract.
-        let ack = r#"{"type":"ack","status":"ERROR","reason":"Already_Applied"}"#;
-        assert_eq!(classify_ack(ack), AckClassification::AlreadyApplied);
-    }
-
-    #[test]
-    fn classify_ack_treats_other_error_reasons_as_failed() {
-        let ack = r#"{"type":"ack","status":"error","reason":"apply_failed"}"#;
-        assert_eq!(classify_ack(ack), AckClassification::Failed);
-    }
-
-    #[test]
-    fn classify_ack_treats_error_status_without_reason_as_failed() {
-        let ack = r#"{"type":"ack","status":"error"}"#;
-        assert_eq!(classify_ack(ack), AckClassification::Failed);
-    }
-
-    #[test]
-    fn classify_ack_treats_malformed_json_as_ok() {
-        // Backwards compat: unparseable acks (e.g. plain text) are not
-        // treated as error so existing plugins keep working.
-        let ack = "not json at all";
-        assert_eq!(classify_ack(ack), AckClassification::Ok);
     }
 
     #[test]

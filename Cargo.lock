@@ -38,6 +38,7 @@ dependencies = [
  "agent-doc-frontmatter",
  "agent-doc-fs",
  "agent-doc-hash",
+ "agent-doc-ipc-protocol",
  "agent-doc-markdown-ast",
  "agent-doc-merge",
  "agent-doc-model-tier",
@@ -323,6 +324,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-doc-ipc-protocol"
+version = "0.34.65"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "agent-doc-lease"
 version = "0.34.65"
 
@@ -383,6 +391,7 @@ dependencies = [
  "agent-doc-frontmatter",
  "agent-doc-fs",
  "agent-doc-hash",
+ "agent-doc-ipc-protocol",
  "agent-doc-lease",
  "agent-doc-log-time",
  "agent-doc-markdown-ast",

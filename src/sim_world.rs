@@ -5585,7 +5585,7 @@ fn finalize_with_typing_in_post_exchange_comment_and_already_applied_ack_does_no
     //   3. The plugin's retry ack is the protocol's dedupe signal:
     //      `{"type":"ack","status":"error","reason":"already_applied"}`.
     //   4. The binary recognizes that signal through
-    //      `ipc_socket::is_already_applied_error` and skips the file-IPC
+    //      `agent_doc_ipc_protocol::classify_ack` and skips the file-IPC
     //      fallback so it does not re-apply the same response on top of the
     //      live buffer (which would land a duplicate `### Re:` heading and
     //      collide with the user's in-flight typing inside the scratch
@@ -5607,8 +5607,8 @@ fn finalize_with_typing_in_post_exchange_comment_and_already_applied_ack_does_no
 
     let already_applied_ack = r#"{"type":"ack","status":"error","reason":"already_applied"}"#;
     assert_eq!(
-        agent_doc_orchestration::ipc_socket::classify_ack(already_applied_ack),
-        agent_doc_orchestration::ipc_socket::AckClassification::AlreadyApplied,
+        agent_doc_ipc_protocol::classify_ack(already_applied_ack),
+        agent_doc_ipc_protocol::AckClassification::AlreadyApplied,
         "protocol contract: status=error + reason=already_applied is the dedupe signal"
     );
     let send_err = anyhow!("IPC ack already_applied: {}", already_applied_ack);
@@ -5673,8 +5673,8 @@ fn cycle_1779845677327_scratch_directives_survive_already_applied_ipc_race() {
 
     let already_applied_ack = r#"{"type":"ack","status":"error","reason":"already_applied"}"#;
     assert_eq!(
-        agent_doc_orchestration::ipc_socket::classify_ack(already_applied_ack),
-        agent_doc_orchestration::ipc_socket::AckClassification::AlreadyApplied,
+        agent_doc_ipc_protocol::classify_ack(already_applied_ack),
+        agent_doc_ipc_protocol::AckClassification::AlreadyApplied,
         "editor plugins must use already_applied so the binary skips file IPC fallback"
     );
 

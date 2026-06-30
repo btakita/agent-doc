@@ -8345,6 +8345,83 @@ fn test_agent_doc_hash_owns_sha256_content_policy() {
 }
 
 #[test]
+fn test_agent_doc_ipc_protocol_owns_ack_classification() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let root_manifest: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let workspace_members = root_manifest["workspace"]["members"].as_array().unwrap();
+    assert!(
+        workspace_members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-ipc-protocol")),
+        "agent-doc-ipc-protocol must be a workspace member"
+    );
+    let root_dependencies = root_manifest["dependencies"].as_table().unwrap();
+    assert!(
+        root_dependencies.contains_key("agent-doc-ipc-protocol"),
+        "root crate callers should depend on agent-doc-ipc-protocol directly"
+    );
+
+    let protocol_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-ipc-protocol/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&protocol_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    let protocol_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-ipc-protocol/src/lib.rs")).unwrap();
+    assert!(
+        protocol_source.contains("pub enum AckClassification")
+            && protocol_source.contains("pub fn classify_ack("),
+        "agent-doc-ipc-protocol must own plugin IPC ack classification"
+    );
+
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration_manifest: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    let orchestration_dependencies = orchestration_manifest["dependencies"].as_table().unwrap();
+    assert!(
+        orchestration_dependencies.contains_key("agent-doc-ipc-protocol"),
+        "agent-doc-orchestration should call the focused IPC protocol crate"
+    );
+
+    let ipc_socket_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/ipc_socket.rs")).unwrap();
+    assert!(
+        ipc_socket_source
+            .contains("use agent_doc_ipc_protocol::{AckClassification, classify_ack};"),
+        "ipc_socket.rs should import the focused IPC protocol API directly"
+    );
+    for forbidden in ["pub enum AckClassification", "pub fn classify_ack("] {
+        assert!(
+            !ipc_socket_source.contains(forbidden),
+            "ipc_socket.rs must not keep the old ack classification API after extraction: {forbidden}"
+        );
+    }
+
+    let sim_world_source = fs::read_to_string(manifest_dir.join("src/sim_world.rs")).unwrap();
+    assert!(
+        sim_world_source.contains("agent_doc_ipc_protocol::classify_ack(")
+            && !sim_world_source.contains("ipc_socket::classify_ack")
+            && !sim_world_source.contains("ipc_socket::AckClassification"),
+        "root callers should use the focused IPC protocol crate instead of the old orchestration path"
+    );
+
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-ipc-protocol must stay free of orchestration, git, editor IPC, sqlite, or tmux-router effects"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_tmux_commands_owns_input_diag_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let tmux_commands_manifest =

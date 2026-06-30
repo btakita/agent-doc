@@ -13,6 +13,7 @@ members = [
     "agent-doc-topic",
     "agent-doc-fs",
     "agent-doc-model-tier",
+    "agent-doc-ipc-protocol",
     "agent-doc-project-config-io",
     "agent-doc-prompt-cache",
     "agent-doc-prompt-contract",
@@ -94,6 +95,7 @@ agent-doc-ffi = { path = "agent-doc-ffi", version = "0.34.65" }
 agent-doc-frontmatter = { path = "agent-doc-frontmatter", version = "0.34.65" }
 agent-doc-fs = { path = "agent-doc-fs", version = "0.34.65" }
 agent-doc-hash = { path = "agent-doc-hash", version = "0.34.65" }
+agent-doc-ipc-protocol = { path = "agent-doc-ipc-protocol", version = "0.34.65" }
 agent-doc-markdown-ast = { path = "agent-doc-markdown-ast", version = "0.34.65" }
 agent-doc-merge = { path = "agent-doc-merge", version = "0.34.65" }
 agent-doc-model-tier = { path = "agent-doc-model-tier", version = "0.34.65" }

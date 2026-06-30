@@ -6,6 +6,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.34.65
 
+- **Synced editor-visible snapshots can commit while disk still lags.**
+  The stale-disk commit guard now distinguishes "commit from stale disk" from
+  "stage the synced editor-visible snapshot". When an operator-authority
+  live-buffer snapshot matches the staged snapshot and its epoch is already
+  synced/proven, closeout can commit that staged content even if the working
+  tree has not caught up yet.
+
 - **Commit-barrier live-buffer publish ACKs now clear stale in-flight epochs.**
   When a closeout times out waiting for editor delivery, the recovery path asks
   the editor to publish its visible live buffer and then stamps any

@@ -1064,7 +1064,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             snapshot_content.as_deref(),
             head_doc.as_deref(),
         )?;
-        ensure_no_live_editor_buffer_ahead_of_disk(file, &file_content, "already_current")?;
+        ensure_no_live_editor_buffer_ahead_of_disk(file, &file_content, "already_current", None)?;
         if let Some(kind) = post_commit_local_drift {
             if kind == PostCommitLocalDriftKind::UserFollowUp {
                 eprintln!(
@@ -1165,7 +1165,12 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     }
     file_content = std::fs::read_to_string(file).unwrap_or_default();
     dedupe_snapshot_and_worktree_before_commit(file, &mut snapshot_content, &mut file_content)?;
-    ensure_no_live_editor_buffer_ahead_of_disk(file, &file_content, "pre_stage")?;
+    ensure_no_live_editor_buffer_ahead_of_disk(
+        file,
+        &file_content,
+        "pre_stage",
+        snapshot_content.as_deref(),
+    )?;
     ensure_active_capture_materialized_for_commit(
         file,
         snapshot_content.as_deref().or(Some(file_content.as_str())),
@@ -2673,6 +2678,7 @@ fn ensure_no_live_editor_buffer_ahead_of_disk(
     file: &Path,
     file_content: &str,
     basis: &str,
+    staged_content: Option<&str>,
 ) -> Result<()> {
     let file_str = file.display().to_string();
     let Some(snapshot) =
@@ -2681,6 +2687,26 @@ fn ensure_no_live_editor_buffer_ahead_of_disk(
         return Ok(());
     };
     let editor_id = snapshot.editor_id.as_deref().unwrap_or("unknown");
+    if let Some(staged) = staged_content
+        && live_buffer_snapshot_matches_content(&snapshot, staged)
+        && snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY)
+        && snapshot.edit_epoch <= snapshot.last_synced_epoch
+    {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "commit_live_buffer_ahead_of_disk_allowed file={} basis={} editor_id={} edit_epoch={} last_synced_epoch={} buffer_len={} disk_len={} reason=staged_snapshot_matches_synced_operator_buffer",
+                file.display(),
+                basis,
+                editor_id,
+                snapshot.edit_epoch,
+                snapshot.last_synced_epoch,
+                snapshot.len,
+                file_content.len()
+            ),
+        );
+        return Ok(());
+    }
     crate::ops_log::log_op(
         file,
         &format!(
@@ -2707,6 +2733,16 @@ fn ensure_no_live_editor_buffer_ahead_of_disk(
         snapshot.edit_epoch,
         snapshot.last_synced_epoch
     );
+}
+
+fn live_buffer_snapshot_matches_content(
+    snapshot: &agent_doc_debounce::LiveBufferSnapshot,
+    content: &str,
+) -> bool {
+    snapshot.len == content.len()
+        && snapshot
+            .hash
+            .eq_ignore_ascii_case(&agent_doc_hash::content_hash(content))
 }
 
 fn finalize_already_committed_noop(
@@ -5093,7 +5129,6 @@ Duplicate replay should stay live.
             "<!-- agent:exchange patch=append -->\n",
             "### Re: previous\n\n",
             "previous response\n",
-            "<!-- agent:boundary:head -->\n",
             "<!-- /agent:exchange -->\n"
         );
         commit_file(root, "session.md", committed, "add doc");
@@ -5140,6 +5175,71 @@ Duplicate replay should stay live.
         assert!(
             !log.contains("commit_already_current file="),
             "unflushed live editor buffer must not be recorded as an already-current closeout:\n{log}"
+        );
+    }
+
+    #[test]
+    fn commit_allows_synced_operator_buffer_that_matches_staged_snapshot_while_disk_lags() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/live-buffer")).unwrap();
+        init_repo(root);
+        commit_file(root, "README.md", "# test\n", "initial");
+
+        let doc = root.join("session.md");
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: previous\n\n",
+            "previous response\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        commit_file(root, "session.md", committed, "add doc");
+        fs::write(&doc, committed).unwrap();
+
+        let staged = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: previous\n\n",
+            "previous response\n",
+            "### Re: current\n\n",
+            "current response\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        crate::snapshot::save(&doc, staged).unwrap();
+        agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
+            &doc.display().to_string(),
+            staged,
+            "jetbrains:test",
+            "jetbrains",
+            "test",
+            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+        )
+        .unwrap();
+        let pending = crate::snapshot::pending_path_for(&doc.canonicalize().unwrap()).unwrap();
+        fs::create_dir_all(pending.parent().unwrap()).unwrap();
+        fs::write(&pending, staged).unwrap();
+
+        let did_commit = commit(&doc).expect("staged synced editor-visible snapshot should commit");
+        assert!(did_commit, "snapshot ahead of HEAD should create a commit");
+
+        let head = show_head(&doc).unwrap().unwrap();
+        assert_eq!(
+            head, staged,
+            "commit should stage the synced editor-visible snapshot, not stale disk"
+        );
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("commit_live_buffer_ahead_of_disk_allowed file=")
+                && log.contains("reason=staged_snapshot_matches_synced_operator_buffer"),
+            "synced staged live-buffer allowance should be logged:\n{log}"
+        );
+        assert!(
+            !log.contains("commit_blocked_live_buffer_ahead_of_disk file="),
+            "staged synced live buffer must not be blocked as stale disk:\n{log}"
         );
     }
 

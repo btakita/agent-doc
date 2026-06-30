@@ -240,6 +240,15 @@ focused crate under the old path.
   and diagnostics while importing the focused queue convergence helpers
   directly; the old local helper cluster and pure test were deleted from
   orchestration instead of kept as facades.
+- `agent-doc-queue` now owns effective queue-continuation output policy:
+  applying recycle-yield suppression, recycle guidance, required-continuation
+  guidance, and queue-pause preamble selection after orchestration supplies
+  effect-derived facts. Preflight keeps stale-supervisor/recycle-yield detection
+  and queue-state gathering while importing the focused output resolver
+  directly.
+- `agent-doc-element-backlog` already owned open backlog id extraction; preflight
+  now calls `open_backlog_ids_in_content` directly for `do #id` closeout
+  evidence instead of re-parsing backlog components locally.
 - `agent-doc-turn` now owns committed-without-response-body closeout policy:
   detecting assistant `### Re:` response bodies in `agent:exchange` and deciding
   whether committed cycles with no visible response body pass, skip as no-op

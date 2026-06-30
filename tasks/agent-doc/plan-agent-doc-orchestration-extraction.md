@@ -212,6 +212,12 @@ focused crate under the old path.
   remains the snapshot/file/editor wait adapter and imports the focused helpers
   directly; the local helper implementations and pure tests were removed from
   orchestration rather than kept as wrappers.
+- `agent-doc-prompt-contract` now owns prompt preset request resolution:
+  combining diff-level and harness-diff preset directives with prompt-target
+  preset references, canonicalizing bare hashtag aliases, preserving ordered
+  dedupe, and reporting missing preset names. Preflight keeps frontmatter/file
+  fact collection and the user-facing missing-preset error while importing the
+  focused resolver directly.
 - We are in the current seam-by-seam extraction wave after the transitional
   orchestration crate move. Practically, this is **Wave 2**: shrink
   `agent-doc-orchestration` by moving durable policy into focused domain crates,

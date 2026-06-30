@@ -454,6 +454,12 @@ focused crate under the old path.
   effectful guard decides whether to refresh sidecars or fail closed.
   Orchestration keeps snapshot/CRDT sidecar writes, ops-log emission, and
   provenance-backed visible rebase effects.
+- `agent-doc-controller` now owns route-trigger current-draft visibility
+  policy: matching visible trigger text, wrapped trigger captures, and
+  equivalent relative/absolute `agent-doc <path>` drafts while using a caller
+  supplied prompt-line predicate. Route/start keep pane capture, harness
+  predicates, diagnostics, and submit/resubmit effects while calling the focused
+  controller policy directly.
 
 ### Earlier closure finding
 

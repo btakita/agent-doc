@@ -3603,8 +3603,8 @@ fn log_exchange_write_diagnostic(
     patches: &[template::PatchBlock],
     unmatched: &str,
 ) {
-    let before_exchange = exchange_content(before);
-    let after_exchange = exchange_content(after);
+    let before_exchange = agent_doc_element_exchange::exchange_content(before);
+    let after_exchange = agent_doc_element_exchange::exchange_content(after);
     let touches_exchange =
         before_exchange != after_exchange || patch_touches_exchange(patches, unmatched);
     if !touches_exchange {

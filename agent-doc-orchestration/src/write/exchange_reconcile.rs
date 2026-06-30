@@ -1,6 +1,10 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use agent_doc_element_exchange::{
+    exchange_content, exchange_content_len, is_code_fence_delimiter, normalized_prompt_counts,
+    normalized_prompt_text, split_line_segment,
+};
 
 /// Guard against accidental exchange content truncation.
 ///
@@ -13,8 +17,8 @@ pub(crate) fn check_exchange_shrink_guard(
     content_ours: &str,
     file: &Path,
 ) -> Result<()> {
-    let old_exchange_len = extract_exchange_content_len(content_at_start);
-    let new_exchange_len = extract_exchange_content_len(content_ours);
+    let old_exchange_len = exchange_content_len(content_at_start);
+    let new_exchange_len = exchange_content_len(content_ours);
 
     if old_exchange_len < SHRINK_GUARD_MIN_BYTES {
         return Ok(());
@@ -43,63 +47,6 @@ pub(crate) fn check_exchange_shrink_guard(
     }
 
     Ok(())
-}
-
-/// Extract the byte length of the exchange component's content.
-/// Returns 0 if no exchange component is found.
-pub(crate) fn extract_exchange_content_len(doc: &str) -> usize {
-    if let Ok(components) = element::parse(doc) {
-        components
-            .iter()
-            .find(|c| c.name == "exchange")
-            .map(|c| c.content(doc).trim().len())
-            .unwrap_or(0)
-    } else {
-        0
-    }
-}
-
-pub(crate) fn exchange_content(doc: &str) -> Option<&str> {
-    element::parse(doc)
-        .ok()?
-        .into_iter()
-        .find(|component| component.name == "exchange")
-        .map(|component| component.content(doc))
-}
-
-pub(crate) fn normalized_prompt_text(line: &str) -> Option<String> {
-    let trimmed = line.trim();
-    if trimmed.is_empty()
-        || trimmed.starts_with("<!--")
-        || trimmed.starts_with("### Re:")
-        || trimmed.starts_with("## Assistant")
-        || trimmed.starts_with("## User")
-        || is_markdown_heading_line(trimmed)
-    {
-        return None;
-    }
-    Some(
-        trimmed
-            .strip_prefix('❯')
-            .unwrap_or(trimmed)
-            .trim()
-            .to_string(),
-    )
-}
-
-pub(crate) fn is_markdown_heading_line(trimmed: &str) -> bool {
-    let hashes = trimmed.bytes().take_while(|byte| *byte == b'#').count();
-    (1..=6).contains(&hashes) && trimmed.as_bytes().get(hashes) == Some(&b' ')
-}
-
-pub(crate) fn normalized_prompt_counts(exchange: &str) -> HashMap<String, usize> {
-    let mut counts = HashMap::new();
-    for line in exchange.lines() {
-        if let Some(text) = normalized_prompt_text(line) {
-            *counts.entry(text).or_default() += 1;
-        }
-    }
-    counts
 }
 
 pub(crate) fn response_aware_user_prompt_counts(exchange: &str) -> HashMap<String, usize> {
@@ -227,13 +174,6 @@ pub(crate) struct PromptLineInfo {
     remove: bool,
 }
 
-pub(crate) fn split_line_segment(segment: &str) -> (&str, &str) {
-    segment
-        .strip_suffix('\n')
-        .map(|line| (line, "\n"))
-        .unwrap_or((segment, ""))
-}
-
 pub(crate) fn exchange_prompt_reconciliation_infos(
     exchange: &str,
     target_counts: Option<&HashMap<String, usize>>,
@@ -247,7 +187,7 @@ pub(crate) fn exchange_prompt_reconciliation_infos(
     for segment in exchange.split_inclusive('\n') {
         let (line, _) = split_line_segment(segment);
         let trimmed = line.trim();
-        let is_fence = is_exchange_code_fence_delimiter(trimmed);
+        let is_fence = is_code_fence_delimiter(trimmed);
         let was_in_code_fence = in_code_fence;
         let mut eligible = !(was_in_code_fence || is_fence);
         if eligible {
@@ -336,16 +276,6 @@ pub(crate) fn probable_live_prompt_prefix_variant(shorter: &str, longer: &str) -
     true
 }
 
-pub(crate) fn is_exchange_code_fence_delimiter(trimmed: &str) -> bool {
-    let Some(first) = trimmed.chars().next() else {
-        return false;
-    };
-    if first != '`' && first != '~' {
-        return false;
-    }
-    trimmed.chars().take_while(|ch| *ch == first).count() >= 3
-}
-
 pub(crate) fn dedupe_live_prompt_prefix_variants_in_tail(
     content: &str,
     file: &Path,
@@ -380,7 +310,7 @@ pub(crate) fn dedupe_live_prompt_prefix_variants_in_tail(
     for segment in tail.split_inclusive('\n') {
         let (line, _) = split_line_segment(segment);
         let trimmed = line.trim();
-        let is_fence = is_exchange_code_fence_delimiter(trimmed);
+        let is_fence = is_code_fence_delimiter(trimmed);
         let normalized = if !in_fence && !is_fence {
             normalized_prompt_text(line)
         } else {
@@ -984,16 +914,5 @@ mod core_tests {
             result.is_ok(),
             "shrink guard should pass when no exchange component exists"
         );
-    }
-    #[test]
-    fn extract_exchange_content_len_works() {
-        let doc = "<!-- agent:exchange -->\nHello world\n<!-- /agent:exchange -->\n";
-        assert_eq!(extract_exchange_content_len(doc), "Hello world".len());
-
-        let empty = "<!-- agent:exchange -->\n\n<!-- /agent:exchange -->\n";
-        assert_eq!(extract_exchange_content_len(empty), 0);
-
-        let no_exchange = "Just text.";
-        assert_eq!(extract_exchange_content_len(no_exchange), 0);
     }
 }

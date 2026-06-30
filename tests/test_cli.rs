@@ -10478,6 +10478,58 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
 }
 
 #[test]
+fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let exchange_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-element-exchange/src/lib.rs")).unwrap();
+    for required in [
+        "pub fn exchange_content_len",
+        "pub fn exchange_content",
+        "pub fn exchange_component",
+        "pub fn normalized_prompt_text",
+        "pub fn is_markdown_heading_line",
+        "pub fn normalized_prompt_counts",
+        "pub fn split_line_segment",
+        "pub fn is_code_fence_delimiter",
+    ] {
+        assert!(
+            exchange_lib.contains(required),
+            "agent-doc-element-exchange must own exchange prompt/content policy: {required}"
+        );
+    }
+
+    let orchestration_cargo =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    assert!(
+        orchestration_cargo.contains("agent-doc-element-exchange"),
+        "orchestration must depend on the focused exchange element crate directly"
+    );
+
+    let write_exchange_reconcile = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/write/exchange_reconcile.rs"),
+    )
+    .unwrap();
+    assert!(
+        write_exchange_reconcile.contains("use agent_doc_element_exchange::{"),
+        "write exchange reconciliation should import exchange policy from the focused crate"
+    );
+    for forbidden in [
+        "pub(crate) fn extract_exchange_content_len",
+        "pub(crate) fn exchange_content(",
+        "pub(crate) fn normalized_prompt_text",
+        "pub(crate) fn is_markdown_heading_line",
+        "pub(crate) fn normalized_prompt_counts",
+        "pub(crate) fn split_line_segment",
+        "pub(crate) fn is_exchange_code_fence_delimiter",
+    ] {
+        assert!(
+            !write_exchange_reconcile.contains(forbidden),
+            "write/exchange_reconcile.rs must stay an adapter, not re-own or facade exchange element policy: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_document_owns_active_identity_projection_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let active_identity =

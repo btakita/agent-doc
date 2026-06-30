@@ -5042,6 +5042,7 @@ fn test_agent_doc_lease_is_freshness_boundary() {
     for relative_manifest in [
         "agent-doc-orchestration/Cargo.toml",
         "agent-doc-queue/Cargo.toml",
+        "agent-doc-supervisor/Cargo.toml",
     ] {
         let manifest = fs::read_to_string(manifest_dir.join(relative_manifest)).unwrap();
         let parsed: toml::Value = toml::from_str(&manifest).unwrap();
@@ -5073,16 +5074,16 @@ fn test_agent_doc_lease_is_freshness_boundary() {
             "pub fn plugin_owner_lease_is_fresh(",
         ),
         (
-            "agent-doc-orchestration/src/recycle_yield.rs",
+            "agent-doc-queue/src/queue_edit_owner.rs",
+            "pub fn queue_edit_owner_lease_is_fresh(",
+        ),
+        (
+            "agent-doc-supervisor/src/recycle_yield.rs",
             "pub fn recycle_yield_is_fresh(",
         ),
         (
-            "agent-doc-orchestration/src/recycle_inflight.rs",
+            "agent-doc-supervisor/src/recycle_inflight.rs",
             "pub fn recycle_inflight_is_fresh(",
-        ),
-        (
-            "agent-doc-queue/src/queue_edit_owner.rs",
-            "pub fn queue_edit_owner_lease_is_fresh(",
         ),
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -5093,6 +5094,136 @@ fn test_agent_doc_lease_is_freshness_boundary() {
         assert!(
             source.contains("agent_doc_lease::timestamp_is_fresh"),
             "{relative} should call the focused lease crate directly"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_supervisor_owns_recycle_marker_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let supervisor_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/lib.rs")).unwrap();
+    assert!(supervisor_lib.contains("pub mod recycle_yield;"));
+    assert!(supervisor_lib.contains("pub mod recycle_inflight;"));
+
+    let supervisor_yield =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/recycle_yield.rs")).unwrap();
+    for required in [
+        "pub const RECYCLE_YIELD_DIR",
+        "pub const DEFAULT_RECYCLE_YIELD_TTL_SECS",
+        "pub const RECYCLE_YIELD_TTL_SECS_ENV",
+        "pub const RECYCLE_YIELD_STALE_BINARY",
+        "pub const RECYCLE_YIELD_STATE_FLUSH",
+        "pub struct RecycleYieldRequest",
+        "pub fn recycle_yield_request(",
+        "pub fn recycle_yield_ttl(",
+        "pub fn recycle_yield_request_is_fresh(",
+        "agent_doc_lease::timestamp_is_fresh",
+    ] {
+        assert!(
+            supervisor_yield.contains(required),
+            "agent-doc-supervisor must own recycle-yield marker policy: {required}"
+        );
+    }
+
+    let supervisor_inflight =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/recycle_inflight.rs"))
+            .unwrap();
+    for required in [
+        "pub const RECYCLE_INFLIGHT_DIR",
+        "pub const RECYCLE_INFLIGHT_FILE",
+        "pub const DEFAULT_RECYCLE_INFLIGHT_TTL_SECS",
+        "pub const RECYCLE_INFLIGHT_TTL_SECS_ENV",
+        "pub const RECYCLE_INFLIGHT_AUTO_INSTALL",
+        "pub const RECYCLE_INFLIGHT_RESTART",
+        "pub const RECYCLE_SETTLE_WAIT",
+        "pub const RECYCLE_SETTLE_POLL",
+        "pub struct RecycleInflightMarker",
+        "pub fn recycle_inflight_marker(",
+        "pub fn recycle_inflight_ttl(",
+        "pub fn recycle_inflight_marker_is_fresh(",
+        "agent_doc_lease::timestamp_is_fresh",
+    ] {
+        assert!(
+            supervisor_inflight.contains(required),
+            "agent-doc-supervisor must own recycle-inflight marker policy: {required}"
+        );
+    }
+
+    for (relative, forbidden) in [
+        (
+            "agent-doc-orchestration/src/recycle_yield.rs",
+            vec![
+                "pub const RECYCLE_YIELD_",
+                "const DEFAULT_RECYCLE_YIELD",
+                "pub struct RecycleYieldRequest",
+                "pub fn recycle_yield_ttl(",
+                "agent_doc_lease::timestamp_is_fresh",
+                "pub use agent_doc_supervisor::recycle_yield",
+            ],
+        ),
+        (
+            "agent-doc-orchestration/src/recycle_inflight.rs",
+            vec![
+                "pub const RECYCLE_INFLIGHT_",
+                "const DEFAULT_RECYCLE_INFLIGHT",
+                "pub const RECYCLE_SETTLE_",
+                "const RECYCLE_SETTLE_",
+                "pub struct RecycleInflightMarker",
+                "pub fn recycle_inflight_ttl(",
+                "agent_doc_lease::timestamp_is_fresh",
+                "pub use agent_doc_supervisor::recycle_inflight",
+            ],
+        ),
+        (
+            "agent-doc-orchestration/src/route/dispatch_only.rs",
+            vec!["const RECYCLE_SETTLE_WAIT", "const RECYCLE_SETTLE_POLL"],
+        ),
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        for forbidden in forbidden {
+            assert!(
+                !source.contains(forbidden),
+                "{relative} must not re-own or facade supervisor recycle marker policy: {forbidden}"
+            );
+        }
+    }
+
+    let recycle_yield =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/recycle_yield.rs"))
+            .unwrap();
+    assert!(
+        recycle_yield.contains("use agent_doc_supervisor::recycle_yield::{")
+            && recycle_yield.contains("recycle_yield_request_is_fresh"),
+        "recycle_yield adapter should import focused supervisor marker policy directly"
+    );
+    let recycle_inflight =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/recycle_inflight.rs"))
+            .unwrap();
+    assert!(
+        recycle_inflight.contains("use agent_doc_supervisor::recycle_inflight::{")
+            && recycle_inflight.contains("recycle_inflight_marker_is_fresh"),
+        "recycle_inflight adapter should import focused supervisor marker policy directly"
+    );
+
+    for (relative, required) in [
+        (
+            "agent-doc-orchestration/src/start/idle_watch.rs",
+            "agent_doc_supervisor::recycle_yield::RECYCLE_YIELD_STALE_BINARY",
+        ),
+        (
+            "agent-doc-orchestration/src/start/idle_watch.rs",
+            "agent_doc_supervisor::recycle_inflight::RECYCLE_INFLIGHT_AUTO_INSTALL",
+        ),
+        (
+            "agent-doc-orchestration/src/route/dispatch_only.rs",
+            "agent_doc_supervisor::recycle_inflight::RECYCLE_SETTLE_WAIT",
+        ),
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains(required),
+            "{relative} should call focused supervisor recycle marker policy directly: {required}"
         );
     }
 }

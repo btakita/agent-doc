@@ -612,8 +612,8 @@ pub fn run_with_reap_policy(
                     // than spinning here.
                     if !crate::recycle_inflight::wait_for_recycle_settle(
                         &file_path_str,
-                        crate::recycle_inflight::RECYCLE_SETTLE_WAIT,
-                        crate::recycle_inflight::RECYCLE_SETTLE_POLL,
+                        agent_doc_supervisor::recycle_inflight::RECYCLE_SETTLE_WAIT,
+                        agent_doc_supervisor::recycle_inflight::RECYCLE_SETTLE_POLL,
                     ) {
                         return Err(err);
                     }

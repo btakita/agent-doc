@@ -40,45 +40,11 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use agent_doc_supervisor::recycle_inflight::{
+    RECYCLE_INFLIGHT_DIR, RECYCLE_INFLIGHT_FILE, RecycleInflightMarker, recycle_inflight_marker,
+    recycle_inflight_marker_is_fresh,
+};
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
-
-/// Directory (relative to the project root) holding the recycle-in-flight
-/// marker. Mirrors the sibling `.agent-doc/recycle-yield` sidecar layout.
-const RECYCLE_INFLIGHT_DIR: &str = ".agent-doc/recycle-inflight";
-
-/// Fixed marker filename — project-scoped, shared across all documents the
-/// supervisor hosts (unlike the per-document hash used by `recycle_yield`).
-const RECYCLE_INFLIGHT_FILE: &str = "supervisor.json";
-
-/// Default marker freshness window. Spans an `execve` recycle + fresh
-/// supervisor startup; self-expires if the recycler dies before clearing.
-const DEFAULT_RECYCLE_INFLIGHT_TTL_SECS: u64 = 15;
-const RECYCLE_INFLIGHT_TTL_SECS_ENV: &str = "AGENT_DOC_RECYCLE_INFLIGHT_TTL_SECS";
-
-/// Canonical reason for a `lib-install` auto-recycle (rebuild + `execve`).
-pub const RECYCLE_INFLIGHT_AUTO_INSTALL: &str = "auto_install_reexec";
-/// Canonical reason for an operator-requested supervisor restart reexec.
-pub const RECYCLE_INFLIGHT_RESTART: &str = "restart_reexec";
-
-/// Persisted recycle-in-flight marker body.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RecycleInflightMarker {
-    /// Why the supervisor is recycling (e.g. `auto_install_reexec`).
-    pub reason: String,
-    /// Unix seconds the marker was written/refreshed.
-    pub marked_secs: u64,
-}
-
-/// Resolve the marker TTL, honoring the `AGENT_DOC_RECYCLE_INFLIGHT_TTL_SECS`
-/// override.
-pub fn recycle_inflight_ttl() -> Duration {
-    let secs = std::env::var(RECYCLE_INFLIGHT_TTL_SECS_ENV)
-        .ok()
-        .and_then(|raw| raw.trim().parse::<u64>().ok())
-        .unwrap_or(DEFAULT_RECYCLE_INFLIGHT_TTL_SECS);
-    Duration::from_secs(secs.max(1))
-}
 
 fn now_secs() -> u64 {
     SystemTime::now()
@@ -121,10 +87,7 @@ pub fn mark_recycle_inflight(file: &str, reason: &str) -> Result<()> {
             format!("failed to create recycle-inflight dir {}", parent.display())
         })?;
     }
-    let marker = RecycleInflightMarker {
-        reason: reason.to_string(),
-        marked_secs: now_secs(),
-    };
+    let marker = recycle_inflight_marker(reason, now_secs());
     let body =
         serde_json::to_string(&marker).context("failed to serialize recycle-inflight marker")?;
     std::fs::write(&path, body)
@@ -145,8 +108,7 @@ pub fn read_recycle_inflight(file: &str) -> Option<RecycleInflightMarker> {
 /// proceed with the normal ready probe.
 pub fn fresh_recycle_inflight(file: &str, now: u64) -> Option<RecycleInflightMarker> {
     let marker = read_recycle_inflight(file)?;
-    agent_doc_lease::timestamp_is_fresh(marker.marked_secs, now, recycle_inflight_ttl())
-        .then_some(marker)
+    recycle_inflight_marker_is_fresh(&marker, now).then_some(marker)
 }
 
 /// Convenience boolean: is the project's supervisor mid-recycle right now?
@@ -154,14 +116,6 @@ pub fn fresh_recycle_inflight(file: &str, now: u64) -> Option<RecycleInflightMar
 pub fn recycle_inflight_pending(file: &str) -> bool {
     fresh_recycle_inflight(file, now_secs()).is_some()
 }
-
-/// R2/R3 (`#jbdisprecycle`): bound on how long a caller waits for an in-flight
-/// supervisor recycle to settle before giving up. Slightly under the marker TTL
-/// so a genuinely-stuck recycle surfaces as retryable rather than hanging the
-/// caller indefinitely.
-pub const RECYCLE_SETTLE_WAIT: Duration = Duration::from_secs(10);
-/// Poll cadence while waiting for a recycle to settle.
-pub const RECYCLE_SETTLE_POLL: Duration = Duration::from_millis(250);
 
 /// Block up to `timeout` (polling every `poll`) for the project's supervisor
 /// recycle to settle — the in-flight marker clearing (fresh supervisor watch
@@ -209,9 +163,16 @@ mod tests {
         std::fs::write(&file, "body").unwrap();
         let file = file.to_string_lossy().to_string();
 
-        mark_recycle_inflight(&file, RECYCLE_INFLIGHT_AUTO_INSTALL).unwrap();
+        mark_recycle_inflight(
+            &file,
+            agent_doc_supervisor::recycle_inflight::RECYCLE_INFLIGHT_AUTO_INSTALL,
+        )
+        .unwrap();
         let marker = read_recycle_inflight(&file).expect("marker present after write");
-        assert_eq!(marker.reason, RECYCLE_INFLIGHT_AUTO_INSTALL);
+        assert_eq!(
+            marker.reason,
+            agent_doc_supervisor::recycle_inflight::RECYCLE_INFLIGHT_AUTO_INSTALL
+        );
 
         // Fresh against a `now` near the mark...
         assert!(fresh_recycle_inflight(&file, marker.marked_secs).is_some());
@@ -236,7 +197,11 @@ mod tests {
         let doc_a = doc_a.to_string_lossy().to_string();
         let doc_b = doc_b.to_string_lossy().to_string();
 
-        mark_recycle_inflight(&doc_a, RECYCLE_INFLIGHT_AUTO_INSTALL).unwrap();
+        mark_recycle_inflight(
+            &doc_a,
+            agent_doc_supervisor::recycle_inflight::RECYCLE_INFLIGHT_AUTO_INSTALL,
+        )
+        .unwrap();
         assert!(
             recycle_inflight_pending(&doc_b),
             "a recycle marked via doc A must be visible to a dispatch for sibling doc B"
@@ -265,7 +230,11 @@ mod tests {
         let file = dir.path().join("plan.md");
         std::fs::write(&file, "body").unwrap();
         let file = file.to_string_lossy().to_string();
-        mark_recycle_inflight(&file, RECYCLE_INFLIGHT_AUTO_INSTALL).unwrap();
+        mark_recycle_inflight(
+            &file,
+            agent_doc_supervisor::recycle_inflight::RECYCLE_INFLIGHT_AUTO_INSTALL,
+        )
+        .unwrap();
         // A fresh marker stays pending; a sub-poll timeout must give up (false)
         // rather than block forever, so the caller can fail closed / retry.
         let settled =
@@ -283,7 +252,11 @@ mod tests {
         let file = dir.path().join("plan.md");
         std::fs::write(&file, "body").unwrap();
         let file = file.to_string_lossy().to_string();
-        mark_recycle_inflight(&file, RECYCLE_INFLIGHT_AUTO_INSTALL).unwrap();
+        mark_recycle_inflight(
+            &file,
+            agent_doc_supervisor::recycle_inflight::RECYCLE_INFLIGHT_AUTO_INSTALL,
+        )
+        .unwrap();
         clear_recycle_inflight(&file);
         assert!(read_recycle_inflight(&file).is_none());
         // Idempotent: clearing an absent marker must not panic or warn-fail.

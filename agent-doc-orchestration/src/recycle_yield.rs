@@ -26,49 +26,12 @@
 //! path, short TTL so an abandoned request self-clears.
 
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
+use agent_doc_supervisor::recycle_yield::{
+    RECYCLE_YIELD_DIR, RecycleYieldRequest, recycle_yield_request, recycle_yield_request_is_fresh,
+};
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
-
-/// Directory (relative to the project root) holding per-document recycle-yield
-/// requests. Mirrors the sibling `.agent-doc/drain-owner` sidecar layout.
-const RECYCLE_YIELD_DIR: &str = ".agent-doc/recycle-yield";
-
-/// Default request freshness window. Long enough to span the `/loop` inter-cycle
-/// re-invoke gap so the request is still live when the loop reaches its next
-/// boundary, short enough that an abandoned request (the requesting supervisor
-/// crashed before recycling) self-clears instead of stalling the loop forever.
-const DEFAULT_RECYCLE_YIELD_TTL_SECS: u64 = 120;
-const RECYCLE_YIELD_TTL_SECS_ENV: &str = "AGENT_DOC_RECYCLE_YIELD_TTL_SECS";
-
-/// Persisted recycle-yield request body.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RecycleYieldRequest {
-    /// Why the supervisor asked the loop to yield (e.g. `stale_binary_drain`).
-    pub reason: String,
-    /// Unix seconds the request was written/refreshed.
-    pub requested_secs: u64,
-}
-
-/// Canonical reason for a stale-binary self-recycle yield.
-pub const RECYCLE_YIELD_STALE_BINARY: &str = "stale_binary_drain";
-
-/// Reason for a fresh-binary state-flush self-recycle yield (`#wd40`): the
-/// installed binary already matches, but an explicit `admin recycle` wants the
-/// supervisor process restarted to flush stale in-memory state (e.g. a lagging
-/// CRDT projection driving `#rt83` phantom-pin churn).
-pub const RECYCLE_YIELD_STATE_FLUSH: &str = "state_flush_drain";
-
-/// Resolve the request TTL, honoring the `AGENT_DOC_RECYCLE_YIELD_TTL_SECS`
-/// override.
-pub fn recycle_yield_ttl() -> Duration {
-    let secs = std::env::var(RECYCLE_YIELD_TTL_SECS_ENV)
-        .ok()
-        .and_then(|raw| raw.trim().parse::<u64>().ok())
-        .unwrap_or(DEFAULT_RECYCLE_YIELD_TTL_SECS);
-    Duration::from_secs(secs.max(1))
-}
 
 fn now_secs() -> u64 {
     SystemTime::now()
@@ -114,10 +77,7 @@ pub fn request_recycle_yield(file: &str, reason: &str) -> Result<()> {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("failed to create recycle-yield dir {}", parent.display()))?;
     }
-    let request = RecycleYieldRequest {
-        reason: reason.to_string(),
-        requested_secs: now_secs(),
-    };
+    let request = recycle_yield_request(reason, now_secs());
     let body =
         serde_json::to_string(&request).context("failed to serialize recycle-yield request")?;
     std::fs::write(&path, body)
@@ -137,8 +97,7 @@ pub fn read_recycle_yield(file: &str) -> Option<RecycleYieldRequest> {
 /// `None` means the loop should drain as usual.
 pub fn fresh_recycle_yield(file: &str, now: u64) -> Option<RecycleYieldRequest> {
     let request = read_recycle_yield(file)?;
-    agent_doc_lease::timestamp_is_fresh(request.requested_secs, now, recycle_yield_ttl())
-        .then_some(request)
+    recycle_yield_request_is_fresh(&request, now).then_some(request)
 }
 
 /// Convenience boolean: is a fresh recycle-yield request pending for `file`
@@ -173,9 +132,16 @@ mod tests {
         std::fs::write(&file, "body").unwrap();
         let file = file.to_string_lossy().to_string();
 
-        request_recycle_yield(&file, RECYCLE_YIELD_STALE_BINARY).unwrap();
+        request_recycle_yield(
+            &file,
+            agent_doc_supervisor::recycle_yield::RECYCLE_YIELD_STALE_BINARY,
+        )
+        .unwrap();
         let request = read_recycle_yield(&file).expect("request present after write");
-        assert_eq!(request.reason, RECYCLE_YIELD_STALE_BINARY);
+        assert_eq!(
+            request.reason,
+            agent_doc_supervisor::recycle_yield::RECYCLE_YIELD_STALE_BINARY
+        );
 
         // Fresh against a `now` near the request...
         assert!(fresh_recycle_yield(&file, request.requested_secs).is_some());
@@ -202,7 +168,11 @@ mod tests {
         let file = dir.path().join("plan.md");
         std::fs::write(&file, "body").unwrap();
         let file = file.to_string_lossy().to_string();
-        request_recycle_yield(&file, RECYCLE_YIELD_STALE_BINARY).unwrap();
+        request_recycle_yield(
+            &file,
+            agent_doc_supervisor::recycle_yield::RECYCLE_YIELD_STALE_BINARY,
+        )
+        .unwrap();
         clear_recycle_yield(&file);
         assert!(read_recycle_yield(&file).is_none());
         // Idempotent: clearing an absent request must not panic or warn-fail.

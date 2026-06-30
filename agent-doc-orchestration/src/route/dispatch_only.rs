@@ -130,14 +130,6 @@ pub(crate) fn dispatch_only_recycle_inflight_error(
     )
 }
 
-/// `#jbdisprecycle` — bound on how long a dispatch waits for an in-flight
-/// supervisor recycle to settle before failing closed. Slightly under the
-/// recycle-inflight marker TTL so a genuinely-stuck recycle surfaces as a
-/// retryable dispatch error rather than hanging the JB action indefinitely.
-const RECYCLE_SETTLE_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
-/// Poll cadence while waiting for the recycle to settle.
-const RECYCLE_SETTLE_POLL: std::time::Duration = std::time::Duration::from_millis(250);
-
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct DispatchOnlySendReopenOptions<'a> {
     pub(crate) delivery: DispatchOnlyReopenDelivery,
@@ -178,7 +170,7 @@ pub(crate) fn dispatch_only_send_reopen(
             ),
         );
         while crate::recycle_inflight::recycle_inflight_pending(file_path) {
-            if started.elapsed() >= RECYCLE_SETTLE_WAIT {
+            if started.elapsed() >= agent_doc_supervisor::recycle_inflight::RECYCLE_SETTLE_WAIT {
                 crate::ops_log::log_op(
                     file,
                     &format!(
@@ -194,7 +186,7 @@ pub(crate) fn dispatch_only_send_reopen(
                     harness, pane, file, &reason
                 ));
             }
-            std::thread::sleep(RECYCLE_SETTLE_POLL);
+            std::thread::sleep(agent_doc_supervisor::recycle_inflight::RECYCLE_SETTLE_POLL);
         }
         crate::ops_log::log_op(
             file,

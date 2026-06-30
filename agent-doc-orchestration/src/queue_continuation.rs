@@ -1171,7 +1171,7 @@ mod tests {
         // A live recycle-yield request suppresses continuation entirely.
         crate::recycle_yield::request_recycle_yield(
             &doc_str,
-            crate::recycle_yield::RECYCLE_YIELD_STALE_BINARY,
+            agent_doc_supervisor::recycle_yield::RECYCLE_YIELD_STALE_BINARY,
         )
         .unwrap();
         assert!(

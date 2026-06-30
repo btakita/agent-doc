@@ -663,8 +663,8 @@ pub(crate) fn send_command_unchecked(
     {
         let settled = crate::recycle_inflight::wait_for_recycle_settle(
             file_path,
-            crate::recycle_inflight::RECYCLE_SETTLE_WAIT,
-            crate::recycle_inflight::RECYCLE_SETTLE_POLL,
+            agent_doc_supervisor::recycle_inflight::RECYCLE_SETTLE_WAIT,
+            agent_doc_supervisor::recycle_inflight::RECYCLE_SETTLE_POLL,
         );
         crate::ops_log::log_op(
             file,

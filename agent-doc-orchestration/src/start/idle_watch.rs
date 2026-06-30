@@ -1328,7 +1328,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             // fresh supervisor clears it on watch-loop start.
                             if let Err(err) = crate::recycle_inflight::mark_recycle_inflight(
                                 &file,
-                                crate::recycle_inflight::RECYCLE_INFLIGHT_AUTO_INSTALL,
+                                agent_doc_supervisor::recycle_inflight::RECYCLE_INFLIGHT_AUTO_INSTALL,
                             ) {
                                 eprintln!(
                                     "[agent-doc] warning: failed to mark recycle-inflight before auto-install: {err:#}"
@@ -1594,7 +1594,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         // defers across the hot-reload boundary.
                         if let Err(err) = crate::recycle_inflight::mark_recycle_inflight(
                             &file,
-                            crate::recycle_inflight::RECYCLE_INFLIGHT_RESTART,
+                            agent_doc_supervisor::recycle_inflight::RECYCLE_INFLIGHT_RESTART,
                         ) {
                             eprintln!(
                                 "[agent-doc] warning: failed to mark recycle-inflight before restart reexec: {err:#}"
@@ -1750,9 +1750,9 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         // `admin recycle` restarts the process to clear a lagging CRDT
                         // projection even when the installed binary already matches).
                         let yield_reason = if supervisor_stale {
-                            crate::recycle_yield::RECYCLE_YIELD_STALE_BINARY
+                            agent_doc_supervisor::recycle_yield::RECYCLE_YIELD_STALE_BINARY
                         } else {
-                            crate::recycle_yield::RECYCLE_YIELD_STATE_FLUSH
+                            agent_doc_supervisor::recycle_yield::RECYCLE_YIELD_STATE_FLUSH
                         };
                         if let Err(err) = crate::recycle_yield::request_recycle_yield(
                             &file,
@@ -1983,7 +1983,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         // lines seen in the live repro).
                         if let Err(err) = crate::recycle_inflight::mark_recycle_inflight(
                             &file,
-                            crate::recycle_inflight::RECYCLE_INFLIGHT_AUTO_INSTALL,
+                            agent_doc_supervisor::recycle_inflight::RECYCLE_INFLIGHT_AUTO_INSTALL,
                         ) {
                             eprintln!(
                                 "[agent-doc] warning: failed to mark recycle-inflight before self-recycle reexec: {err:#}"

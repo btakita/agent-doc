@@ -99,6 +99,10 @@ that owns the domain:
 - queue syntax/scheduling/journal policy -> `agent-doc-queue`
 - workflow cross-cutting decisions -> `agent-doc-workflow`
 - Auto-DAG/work graph policy -> `agent-doc-work-graph`
+- prompt/context assembly -> `agent-doc-prompt-context`
+- response TOC/rendering vocabulary -> `agent-doc-response-toc`
+- session accretion/restart-loop heuristics -> `agent-doc-session-accretion`
+- SHA-256 content hashing vocabulary -> `agent-doc-hash`
 - create a new focused crate only when no current crate owns the domain
 
 ### Shim policy decision: keep no Rust API shims
@@ -114,6 +118,9 @@ read.
   facade APIs for extracted policy.
 - Delete compatibility shims when extracting a seam. Internal callers must
   import the focused crate directly.
+- A shim is any Rust function, module, or `pub use` that keeps an obsolete
+  caller path alive after the policy moved. It is not enough for the old path to
+  delegate correctly; the old path itself is the coupling being removed.
 - Orchestration may keep only effectful adapters: file IO, git/tmux/process IPC,
   SQLite/socket ownership, ops-log emission, CLI formatting, and glue that
   supplies facts to focused policy.
@@ -148,6 +155,14 @@ focused crate under the old path.
 5. Prefer direct dependency inversion over shared catch-all utilities. A shared
    IO/base crate is tactical only when it unblocks a domain extraction.
 
+### Current extraction ledger
+
+- `agent-doc-hash` now owns shared SHA-256 hex content hashing. Root,
+  orchestration, debounce, and tests call it directly. The old
+  `ops_log::content_hash`, `op_capture::content_hash`, and
+  `agent_doc_debounce::content_hash` paths are intentionally deleted rather than
+  retained as compatibility shims.
+
 ### Earlier closure finding
 
 Analyzing the `sessions`/`supervisor` closure for the old Wave 1b invalidated
@@ -179,19 +194,23 @@ finish shrinking the transitional orchestration crate.
 - **Option B — domain-specific detangling (recommended).** Continue extracting
   each policy seam into the focused crate that owns the domain, creating a new
   focused crate only when no destination exists. This is cleaner long term
-  because `agent-doc-orchestration` is heavily tangled, not despite that fact:
-  the tangle is mostly effect coordination, process/session ownership,
-  git/tmux/IPC adapters, and historical cross-calls. If domain policy remains in
-  that crate, every queue, realtime, workflow, graph, tmux, and session decision
-  inherits the broad orchestration dependency graph and the old cross-call
-  habits. Moving queue policy to `agent-doc-queue`, realtime/write vocabulary to
+  because `agent-doc-orchestration` is heavily tangled, not despite that fact.
+  The tangle is mostly effect coordination, process/session ownership,
+  git/tmux/IPC adapters, and historical cross-calls. Keeping domain policy in
+  that crate treats the tangle as the API: every queue, realtime, workflow,
+  graph, tmux, session, and hashing decision inherits the broad orchestration
+  dependency graph and the old cross-call habits. Detangling into domain crates
+  treats the tangle as implementation detail: orchestration gathers facts and
+  performs effects, while policy lives where its vocabulary belongs. Moving
+  queue policy to `agent-doc-queue`, realtime/write vocabulary to
   `agent-doc-document-realtime`, tmux decisions to `agent-doc-tmux-*`,
   workflow/session-cycle decisions to `agent-doc-workflow`, work graph decisions
-  to `agent-doc-work-graph`, and prompt/context-pack decisions to a focused
-  prompt-context crate turns implicit social ownership into Rust-enforced
-  dependency boundaries. The no-shim policy is what keeps this from becoming
-  another facade layer: call sites must name the owning domain crate, so
-  ownership stays visible in imports, tests, and manifests.
+  to `agent-doc-work-graph`, prompt/context-pack decisions to
+  `agent-doc-prompt-context`, and generic content hashes to `agent-doc-hash`
+  turns implicit social ownership into Rust-enforced dependency boundaries. The
+  no-shim policy is what keeps this from becoming another facade layer: call
+  sites must name the owning domain crate, so ownership stays visible in imports,
+  tests, manifests, and future refactors.
 - **Option C — shared base layer.** Create a lower `agent-doc-base` /
   `agent-doc-io` style crate for shared file/path/log utilities. This can be
   useful tactically for IO helpers, but by itself it does not detangle domain

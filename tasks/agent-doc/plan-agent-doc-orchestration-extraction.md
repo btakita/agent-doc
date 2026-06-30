@@ -304,6 +304,11 @@ focused crate under the old path.
   root CLI call `agent_doc_queue::drain_owner` directly; the old
   `agent-doc-orchestration/src/drain_owner.rs` module was deleted rather than
   retained as a facade.
+- `agent-doc-queue` now owns context-clear in-flight marker policy for queue
+  drains: the marker TTL, stale-marker predicate, and post-clear settle tick
+  transition live beside the existing idle-queue context-clear decision table.
+  Orchestration keeps marker path/JSON IO and watcher side effects while calling
+  the focused queue policy directly.
 - `agent-doc-element-backlog` already owned open backlog id extraction; preflight
   now calls `open_backlog_ids_in_content` directly for `do #id` closeout
   evidence instead of re-parsing backlog components locally.

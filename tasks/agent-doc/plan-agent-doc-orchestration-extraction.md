@@ -767,6 +767,14 @@ should be deleted during extraction.
   placeholder text. Orchestration's harness keeps only harness-specific routing
   decisions and protected-input wording while importing the focused prompt
   parser directly.
+- `agent-doc-element-exchange` now owns response-body prompt-prefix repair for
+  leaked harness `❯ ` markers inside committed `### Re:` response bodies,
+  including leading-run stripping, late assistant proof/list stripping, and
+  preservation of inner quoted prompt-like prose. Write/repair keep only CRDT
+  merge normalization sequencing, snapshot suppression, disk writes, and
+  ops-log effects while importing the focused exchange helper directly; the
+  old `write::strip_prompt_prefix_from_response_body_first_lines` path was
+  deleted rather than kept as a shim.
 
 ### Earlier closure finding
 

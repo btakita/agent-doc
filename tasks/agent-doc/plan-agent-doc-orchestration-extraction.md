@@ -206,6 +206,12 @@ focused crate under the old path.
   `ops_log::content_hash`, `op_capture::content_hash`, and
   `agent_doc_debounce::content_hash` paths are intentionally deleted rather than
   retained as compatibility shims.
+- `agent-doc-diff` now owns diff truncation/read-stability pure policy:
+  extracting the last inserted non-empty line, deciding whether a line looks
+  mid-typing/truncated, and formatting bounded diagnostic snippets. `diff_io`
+  remains the snapshot/file/editor wait adapter and imports the focused helpers
+  directly; the local helper implementations and pure tests were removed from
+  orchestration rather than kept as wrappers.
 - We are in the current seam-by-seam extraction wave after the transitional
   orchestration crate move. Practically, this is **Wave 2**: shrink
   `agent-doc-orchestration` by moving durable policy into focused domain crates,

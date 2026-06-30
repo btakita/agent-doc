@@ -4112,6 +4112,73 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
 }
 
 #[test]
+fn test_agent_doc_turn_owns_session_check_ops_log_event_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let turn_op_log =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn/src/op_log.rs")).unwrap();
+    for required in [
+        "pub const PREFLIGHT_START_EVENT",
+        "pub const IPC_WRITE_CONSUMED_EVENT",
+        "pub const SNAPSHOT_SAVED_FILE_IPC_EVENT",
+        "pub const IPC_PROOF_INSUFFICIENT_EVENT",
+        "pub fn strip_timestamp_prefix(",
+        "pub fn is_write_completed_commit_missing_event(",
+        "pub fn event_name(",
+    ] {
+        assert!(
+            turn_op_log.contains(required),
+            "agent-doc-turn must own session-check ops-log event policy: {required}"
+        );
+    }
+    let turn_lib = fs::read_to_string(manifest_dir.join("agent-doc-turn/src/lib.rs")).unwrap();
+    assert!(
+        turn_lib.contains("pub mod op_log;"),
+        "agent-doc-turn should expose ops-log policy through its owning module"
+    );
+    assert!(
+        !turn_lib.contains("pub use op_log")
+            && !turn_lib.contains("pub use agent_doc_turn::op_log"),
+        "agent-doc-turn should not add an op_log root facade"
+    );
+
+    let session_check =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_check.rs"))
+            .unwrap();
+    let closeout_guards = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/closeout_guards.rs"),
+    )
+    .unwrap();
+    for forbidden in [
+        "pub const PREFLIGHT_START_EVENT",
+        "pub const IPC_WRITE_CONSUMED_EVENT",
+        "pub const SNAPSHOT_SAVED_FILE_IPC_EVENT",
+        "pub const IPC_PROOF_INSUFFICIENT_EVENT",
+        "pub(crate) fn strip_timestamp_prefix(",
+        "pub(crate) fn is_write_completed_commit_missing_event(",
+        "pub(crate) fn event_name(",
+    ] {
+        assert!(
+            !session_check.contains(forbidden) && !closeout_guards.contains(forbidden),
+            "session-check must not re-own ops-log event policy: {forbidden}"
+        );
+    }
+    assert!(
+        session_check.contains("use agent_doc_turn::op_log::{")
+            && session_check.contains("event_name")
+            && session_check.contains("is_write_completed_commit_missing_event")
+            && session_check.contains("PREFLIGHT_START_EVENT"),
+        "session_check should import focused ops-log policy directly"
+    );
+    assert!(
+        closeout_guards.contains("use agent_doc_turn::op_log::{")
+            && closeout_guards.contains("is_write_completed_commit_missing_event")
+            && closeout_guards.contains("strip_timestamp_prefix")
+            && closeout_guards.contains("IPC_PROOF_INSUFFICIENT_EVENT"),
+        "closeout_guards should import focused ops-log policy directly"
+    );
+}
+
+#[test]
 fn test_agent_doc_turn_owns_no_change_cycle_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     assert!(

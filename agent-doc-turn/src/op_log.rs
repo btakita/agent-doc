@@ -25,6 +25,35 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Event name prefix emitted by preflight when a cycle starts.
+pub const PREFLIGHT_START_EVENT: &str = "preflight_diff_start";
+/// Event name emitted when an IPC write was consumed and awaits commit proof.
+pub const IPC_WRITE_CONSUMED_EVENT: &str = "ipc_write_consumed";
+/// Event name emitted when file-IPC saved the snapshot and awaits commit proof.
+pub const SNAPSHOT_SAVED_FILE_IPC_EVENT: &str = "snapshot_saved_file_ipc";
+/// Event name emitted when IPC response-materialization proof is insufficient.
+pub const IPC_PROOF_INSUFFICIENT_EVENT: &str = "ipc_proof_insufficient";
+
+/// Strip a leading `[NNN] ` timestamp prefix from an ops-log line.
+pub fn strip_timestamp_prefix(line: &str) -> &str {
+    if let Some(rest) = line.strip_prefix('[')
+        && let Some(close) = rest.find("] ")
+    {
+        return &rest[close + 2..];
+    }
+    line
+}
+
+/// True when an ops-log event proves a write landed but commit proof is missing.
+pub fn is_write_completed_commit_missing_event(event: &str) -> bool {
+    event.starts_with(IPC_WRITE_CONSUMED_EVENT) || event.starts_with(SNAPSHOT_SAVED_FILE_IPC_EVENT)
+}
+
+/// Return the first whitespace-delimited event token from an ops-log event.
+pub fn event_name(event: &str) -> &str {
+    event.split_whitespace().next().unwrap_or(event)
+}
+
 /// Who produced a document operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -158,6 +187,31 @@ impl DocumentOp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ops_log_line_event_helpers_are_stable() {
+        assert_eq!(
+            strip_timestamp_prefix("[1700000000] preflight_diff_start file=/x"),
+            "preflight_diff_start file=/x"
+        );
+        assert_eq!(strip_timestamp_prefix("no bracket"), "no bracket");
+        assert!(is_write_completed_commit_missing_event(
+            "ipc_write_consumed file=x patches=1"
+        ));
+        assert!(is_write_completed_commit_missing_event(
+            "snapshot_saved_file_ipc file=x snap_len=10"
+        ));
+        assert!(!is_write_completed_commit_missing_event(
+            "preflight_diff_start file=x"
+        ));
+        assert_eq!(
+            event_name("ipc_write_consumed file=x"),
+            IPC_WRITE_CONSUMED_EVENT
+        );
+        assert_eq!(event_name(""), "");
+        assert_eq!(PREFLIGHT_START_EVENT, "preflight_diff_start");
+        assert_eq!(IPC_PROOF_INSUFFICIENT_EVENT, "ipc_proof_insufficient");
+    }
 
     #[test]
     fn classify_actor_is_source_driven() {

@@ -66,6 +66,9 @@
 //! - `session_check_snapshot_committed_guard_fails_when_snapshot_differs`
 //! - `session_check_snapshot_committed_guard_passes_when_committed`
 
+use agent_doc_turn::op_log::{
+    PREFLIGHT_START_EVENT, event_name, is_write_completed_commit_missing_event,
+};
 use anyhow::{Context, Result};
 use std::path::Path;
 
@@ -161,14 +164,6 @@ fn operator_live_buffer_contains_heading(file: &Path, heading: &str) -> bool {
     }
     false
 }
-
-/// Event name prefix emitted by `preflight::run` that indicates a cycle
-/// started but may have been abandoned. If this is the final entry in
-/// ops.log, the previous cycle did not complete.
-pub const PREFLIGHT_START_EVENT: &str = "preflight_diff_start";
-pub const IPC_WRITE_CONSUMED_EVENT: &str = "ipc_write_consumed";
-pub const SNAPSHOT_SAVED_FILE_IPC_EVENT: &str = "snapshot_saved_file_ipc";
-pub const IPC_PROOF_INSUFFICIENT_EVENT: &str = "ipc_proof_insufficient";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionCheckStatus {
@@ -3100,13 +3095,18 @@ Body\n\
     #[test]
     fn strip_timestamp_prefix_handles_well_formed_line() {
         assert_eq!(
-            strip_timestamp_prefix("[1700000000] preflight_diff_start file=/x"),
+            agent_doc_turn::op_log::strip_timestamp_prefix(
+                "[1700000000] preflight_diff_start file=/x"
+            ),
             "preflight_diff_start file=/x"
         );
     }
     #[test]
     fn strip_timestamp_prefix_passes_through_malformed() {
-        assert_eq!(strip_timestamp_prefix("no bracket"), "no bracket");
+        assert_eq!(
+            agent_doc_turn::op_log::strip_timestamp_prefix("no bracket"),
+            "no bracket"
+        );
     }
     #[test]
     fn last_ops_event_missing_log_returns_none() {

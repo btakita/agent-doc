@@ -3,6 +3,9 @@ use agent_doc_turn::document_drift::{
     active_session_drift_is_only_exchange_or_backlog_metadata, exchange_has_new_appended_content,
     exchange_only_promptless_content_drift, promptless_comment_only_drift,
 };
+use agent_doc_turn::op_log::{
+    IPC_PROOF_INSUFFICIENT_EVENT, is_write_completed_commit_missing_event, strip_timestamp_prefix,
+};
 
 pub(crate) fn check_blocked_closeout_followup_guard(
     file: &Path,
@@ -493,26 +496,8 @@ pub fn latest_ipc_proof_diagnostic_hint(file: &Path) -> Result<Option<String>> {
         .map(|event| format!("latest IPC proof diagnostic: {event}")))
 }
 
-/// Strip a leading `[NNN] ` timestamp prefix from a log line.
-pub(crate) fn strip_timestamp_prefix(line: &str) -> &str {
-    if let Some(rest) = line.strip_prefix('[')
-        && let Some(close) = rest.find("] ")
-    {
-        return &rest[close + 2..];
-    }
-    line
-}
-
 pub fn detect_write_completed_commit_missing(file: &Path) -> Result<Option<String>> {
     Ok(last_ops_event(file)?.filter(|event| is_write_completed_commit_missing_event(event)))
-}
-
-pub(crate) fn is_write_completed_commit_missing_event(event: &str) -> bool {
-    event.starts_with(IPC_WRITE_CONSUMED_EVENT) || event.starts_with(SNAPSHOT_SAVED_FILE_IPC_EVENT)
-}
-
-pub(crate) fn event_name(event: &str) -> &str {
-    event.split_whitespace().next().unwrap_or(event)
 }
 
 pub fn detect_bypassed_response_write(file: &Path) -> Result<Option<String>> {

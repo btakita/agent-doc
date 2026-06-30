@@ -226,6 +226,14 @@ focused crate under the old path.
   marking entries completed by done ids, and normalizing consumed done-id bags.
   Orchestration keeps document locks, file/snapshot IO, IPC node ops,
   response-echo embedding, ops logging, and editor convergence.
+- `agent-doc-queue` now owns preflight queue convergence policy: re-aligning a
+  pre-maintenance baseline to the post-maintenance queue component, carrying
+  in-progress-marker-only backlog/pending/icebox convergence, and classifying
+  non-selected future queue-body edits while ignoring exchange boundary churn.
+  Preflight keeps queue maintenance, snapshot loading/saving, baseline file IO,
+  and diagnostics while importing the focused queue convergence helpers
+  directly; the old local helper cluster and pure test were deleted from
+  orchestration instead of kept as facades.
 - `agent-doc-turn` now owns committed-without-response-body closeout policy:
   detecting assistant `### Re:` response bodies in `agent:exchange` and deciding
   whether committed cycles with no visible response body pass, skip as no-op

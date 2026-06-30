@@ -231,7 +231,7 @@ use agent_doc_element::element::{self, is_backlog_component};
 use agent_doc_element_exchange::{
     exchange_has_live_user_edit, exchange_prompt_prefix_count, exchange_prompt_text_duplicated,
     repair_response_precedes_prompt_in_exchange as repair_response_prompt_order_in_exchange,
-    response_precedes_prompt_in_exchange, starts_prompt_run_after_response,
+    response_precedes_prompt_in_exchange, strip_prompt_prefix_from_response_body_first_lines,
 };
 use agent_doc_fs::find_project_root;
 use agent_doc_queue::queue_prompt_drift::{
@@ -3656,92 +3656,6 @@ fn adopt_current_response_without_duplication(
     repaired =
         normalize_template_structure_or_fail_preserving(&repaired, file, Some(content_current))?;
     Ok(Some(repaired))
-}
-
-/// Strip leaked harness user-prompt markers (`❯ `) from response body lines of
-/// every `### Re: ...` response block inside `agent:exchange`.
-///
-/// Background: when finalize falls through to the CRDT merge path while the
-/// live document had a `❯ ` user input at the same column position as the
-/// incoming response body, or when repair adopts an already-visible response
-/// while the snapshot only contains the response heading, prompt normalization
-/// can leave the response paragraphs prefixed with `❯ `. `session-check` then
-/// classifies the corrupted block as a prompt-only closeout tail or the next
-/// closeout replays the same response.
-///
-/// Real response bodies do not use `❯ ` as a paragraph marker. Strip a leading
-/// run of prefixed response-body lines until the first unprefixed body line, and
-/// also strip later prefixed proof/list lines that the response classifier
-/// recognizes as assistant-owned content. Prompt-like `❯ ` text after the
-/// response body starts is preserved as quoted/user-visible prose. Returns
-/// `Some(repaired)` when any prefix was stripped, `None` when the document is
-/// clean. See `tasks/agent-doc/plan-crdt-merge-prompt-prefix-leaks-into-response-body.md`.
-pub fn strip_prompt_prefix_from_response_body_first_lines(content: &str) -> Option<String> {
-    let components = element::parse(content).ok()?;
-    let exchange = components.iter().find(|c| c.name == "exchange")?;
-    let exchange_body = exchange.content(content);
-
-    let mut repaired_lines: Vec<String> = Vec::with_capacity(exchange_body.lines().count());
-    let mut in_response_block = false;
-    let mut saw_unprefixed_response_body_line = false;
-    let mut stripped_any = false;
-    for line in exchange_body.lines() {
-        let trimmed_start = line.trim_start();
-        let is_response_heading = trimmed_start.starts_with("### Re:");
-        let is_other_heading = trimmed_start.starts_with("###") && !is_response_heading
-            || trimmed_start.starts_with("## ")
-            || trimmed_start.starts_with("# ");
-        let is_exchange_marker = trimmed_start.starts_with("<!-- agent:")
-            || trimmed_start.starts_with("<!-- /agent:")
-            || trimmed_start.starts_with("<!-- agent:boundary:");
-
-        if is_response_heading {
-            in_response_block = true;
-            saw_unprefixed_response_body_line = false;
-            repaired_lines.push(line.to_string());
-            continue;
-        }
-        if is_other_heading || is_exchange_marker {
-            in_response_block = false;
-            saw_unprefixed_response_body_line = false;
-            repaired_lines.push(line.to_string());
-            continue;
-        }
-        if in_response_block && !line.trim().is_empty() {
-            if !saw_unprefixed_response_body_line
-                && starts_prompt_run_after_response(trimmed_start, false)
-            {
-                in_response_block = false;
-                saw_unprefixed_response_body_line = false;
-                repaired_lines.push(line.to_string());
-                continue;
-            }
-            if let Some(rest) = line.strip_prefix("❯ ") {
-                let response_shaped_tail =
-                    agent_doc_diff::line_looks_like_plain_response_after_prompt(rest.trim_start());
-                if !saw_unprefixed_response_body_line || response_shaped_tail {
-                    stripped_any = true;
-                    repaired_lines.push(rest.to_string());
-                    continue;
-                }
-            }
-            if line.trim_start() == "❯" && !saw_unprefixed_response_body_line {
-                stripped_any = true;
-                repaired_lines.push(String::new());
-                continue;
-            }
-            saw_unprefixed_response_body_line = true;
-        }
-        repaired_lines.push(line.to_string());
-    }
-    if !stripped_any {
-        return None;
-    }
-    let mut repaired_body = repaired_lines.join("\n");
-    if exchange_body.ends_with('\n') && !repaired_body.ends_with('\n') {
-        repaired_body.push('\n');
-    }
-    Some(exchange.replace_content(content, &repaired_body))
 }
 
 fn normalize_final_template_content(

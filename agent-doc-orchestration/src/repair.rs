@@ -61,6 +61,7 @@
 //! - recover_replays_capture_without_pending: durable capture with no pending file → run returns Ok(true)
 //! - recover_fails_closed_on_capture_hash_mismatch: durable capture baseline mismatch → run returns Err
 
+use agent_doc_element_exchange::strip_prompt_prefix_from_response_body_first_lines;
 use agent_doc_turn::{closeout_recovery::CloseoutRecoveryMutationReason, response_replay};
 use anyhow::{Context, Result};
 use serde::Serialize;
@@ -732,8 +733,7 @@ fn repair_template_doc_if_needed(
             &snapshot_content,
             file,
         );
-        if let Some(stripped) = write::strip_prompt_prefix_from_response_body_first_lines(&repaired)
-        {
+        if let Some(stripped) = strip_prompt_prefix_from_response_body_first_lines(&repaired) {
             crate::ops_log::log_op(
                 file,
                 &format!(
@@ -854,8 +854,7 @@ fn repair_response_body_prompt_prefixes_if_needed(
         return Ok(doc_content.to_string());
     }
 
-    let Some(repaired) = write::strip_prompt_prefix_from_response_body_first_lines(doc_content)
-    else {
+    let Some(repaired) = strip_prompt_prefix_from_response_body_first_lines(doc_content) else {
         return Ok(doc_content.to_string());
     };
 

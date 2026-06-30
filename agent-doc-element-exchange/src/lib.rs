@@ -474,6 +474,83 @@ pub fn repair_response_precedes_prompt_in_exchange(
     Ok(Some(repaired))
 }
 
+/// Strip leaked harness user-prompt markers (`❯ `) from response body lines of
+/// every `### Re: ...` response block inside `agent:exchange`.
+///
+/// Response bodies do not use `❯ ` as a paragraph marker. Strip a leading run
+/// of prefixed response-body lines until the first unprefixed body line, and
+/// also strip later prefixed proof/list lines that the response classifier
+/// recognizes as assistant-owned content. Prompt-like `❯ ` text after the
+/// response body starts is preserved as quoted/user-visible prose. Returns
+/// `Some(repaired)` when any prefix was stripped, `None` when the document is
+/// clean.
+pub fn strip_prompt_prefix_from_response_body_first_lines(content: &str) -> Option<String> {
+    let exchange = exchange_component(content)?;
+    let exchange_body = exchange.content(content);
+
+    let mut repaired_lines: Vec<String> = Vec::with_capacity(exchange_body.lines().count());
+    let mut in_response_block = false;
+    let mut saw_unprefixed_response_body_line = false;
+    let mut stripped_any = false;
+    for line in exchange_body.lines() {
+        let trimmed_start = line.trim_start();
+        let is_response_heading = trimmed_start.starts_with("### Re:");
+        let is_other_heading = trimmed_start.starts_with("###") && !is_response_heading
+            || trimmed_start.starts_with("## ")
+            || trimmed_start.starts_with("# ");
+        let is_exchange_marker = trimmed_start.starts_with("<!-- agent:")
+            || trimmed_start.starts_with("<!-- /agent:")
+            || trimmed_start.starts_with("<!-- agent:boundary:");
+
+        if is_response_heading {
+            in_response_block = true;
+            saw_unprefixed_response_body_line = false;
+            repaired_lines.push(line.to_string());
+            continue;
+        }
+        if is_other_heading || is_exchange_marker {
+            in_response_block = false;
+            saw_unprefixed_response_body_line = false;
+            repaired_lines.push(line.to_string());
+            continue;
+        }
+        if in_response_block && !line.trim().is_empty() {
+            if !saw_unprefixed_response_body_line
+                && starts_prompt_run_after_response(trimmed_start, false)
+            {
+                in_response_block = false;
+                saw_unprefixed_response_body_line = false;
+                repaired_lines.push(line.to_string());
+                continue;
+            }
+            if let Some(rest) = line.strip_prefix("❯ ") {
+                let response_shaped_tail =
+                    agent_doc_diff::line_looks_like_plain_response_after_prompt(rest.trim_start());
+                if !saw_unprefixed_response_body_line || response_shaped_tail {
+                    stripped_any = true;
+                    repaired_lines.push(rest.to_string());
+                    continue;
+                }
+            }
+            if line.trim_start() == "❯" && !saw_unprefixed_response_body_line {
+                stripped_any = true;
+                repaired_lines.push(String::new());
+                continue;
+            }
+            saw_unprefixed_response_body_line = true;
+        }
+        repaired_lines.push(line.to_string());
+    }
+    if !stripped_any {
+        return None;
+    }
+    let mut repaired_body = repaired_lines.join("\n");
+    if exchange_body.ends_with('\n') && !repaired_body.ends_with('\n') {
+        repaired_body.push('\n');
+    }
+    Some(exchange.replace_content(content, &repaired_body))
+}
+
 fn normalized_non_boundary_exchange_lines(segments: &[ExchangeLineSegment]) -> Vec<String> {
     segments
         .iter()
@@ -1421,6 +1498,153 @@ mod tests {
         assert_eq!(counts.get("do next").copied(), Some(1));
         assert!(!counts.contains_key("assistant text"));
         assert!(!counts.contains_key("not a prompt"));
+    }
+
+    #[test]
+    fn strip_prompt_prefix_from_response_body_first_lines_strips_leaked_marker() {
+        let content = "\
+<!-- agent:exchange patch=append -->
+❯ do #respfx. spec-test-build-install-commit-push
+### Re: #respfx — opus-4-7
+
+❯ Landed Phase 1 only this cycle. Item stays open.
+
+#### Details
+
+`agent-doc <FILE>` now accepts `--wait-for-ready <SECONDS>`.
+<!-- /agent:exchange -->
+";
+        let repaired = strip_prompt_prefix_from_response_body_first_lines(content)
+            .expect("leaked prompt marker on response body first line must be stripped");
+        assert!(
+            repaired.contains("\nLanded Phase 1 only this cycle. Item stays open.\n"),
+            "stripped response body should start with original prose, got:\n{repaired}"
+        );
+        assert!(
+            !repaired.contains("❯ Landed"),
+            "leaked marker must be removed, got:\n{repaired}"
+        );
+        assert!(repaired.contains("❯ do #respfx. spec-test-build-install-commit-push"));
+        assert!(repaired.contains("### Re: #respfx — opus-4-7"));
+        assert!(repaired.contains("#### Details"));
+        assert!(repaired.contains("`agent-doc <FILE>` now accepts `--wait-for-ready <SECONDS>`."));
+    }
+
+    #[test]
+    fn strip_prompt_prefix_from_response_body_first_lines_strips_leading_run() {
+        let content = "\
+<!-- agent:exchange patch=append -->
+❯ do #leading-run. spec-test-build-install-commit-push
+### Re: #leading-run — gpt-5
+
+❯ First response paragraph.
+
+❯ Second response paragraph.
+❯ - Proof line.
+<!-- /agent:exchange -->
+";
+        let repaired = strip_prompt_prefix_from_response_body_first_lines(content)
+            .expect("leading response-body prompt markers must be stripped");
+
+        assert!(repaired.contains("\nFirst response paragraph.\n"));
+        assert!(repaired.contains("\nSecond response paragraph.\n- Proof line.\n"));
+        assert!(!repaired.contains("❯ First response paragraph."));
+        assert!(!repaired.contains("❯ Second response paragraph."));
+        assert!(!repaired.contains("❯ - Proof line."));
+        assert!(repaired.contains("❯ do #leading-run. spec-test-build-install-commit-push"));
+    }
+
+    #[test]
+    fn strip_prompt_prefix_from_response_body_first_lines_skips_when_clean() {
+        let content = "\
+<!-- agent:exchange patch=append -->
+❯ do #clean. spec-test-build-install-commit-push
+### Re: #clean — opus-4-7
+
+Landed cleanly.
+<!-- /agent:exchange -->
+";
+        let result = strip_prompt_prefix_from_response_body_first_lines(content);
+        assert!(
+            result.is_none(),
+            "clean document must not trigger the strip path"
+        );
+    }
+
+    #[test]
+    fn strip_prompt_prefix_from_response_body_first_lines_preserves_inner_prompt_like_lines() {
+        let content = "\
+<!-- agent:exchange patch=append -->
+❯ do #inner. spec-test-build-install-commit-push
+### Re: #inner — opus-4-7
+
+❯ first line gets stripped
+
+The user said:
+❯ this quoted line stays
+because it is not the first body line.
+<!-- /agent:exchange -->
+";
+        let repaired = strip_prompt_prefix_from_response_body_first_lines(content)
+            .expect("leaked first-line prompt marker must be stripped");
+        assert!(repaired.contains("\nfirst line gets stripped\n"));
+        assert!(!repaired.contains("❯ first line gets stripped"));
+        assert!(repaired.contains("❯ this quoted line stays"));
+    }
+
+    #[test]
+    fn strip_prompt_prefix_from_response_body_first_lines_strips_late_proof_lines() {
+        let content = "\
+<!-- agent:exchange patch=append -->
+❯ do #tail. spec-test-build-install-commit-push
+### Re: #tail — gpt-5
+
+Changed behavior:
+❯ - First proof line.
+❯ - Second proof line.
+
+Verification passed:
+❯ - `make check`
+
+The user said:
+❯ this quoted line stays
+<!-- /agent:exchange -->
+";
+        let repaired = strip_prompt_prefix_from_response_body_first_lines(content)
+            .expect("late response proof lines must be stripped");
+
+        assert!(repaired.contains("\n- First proof line.\n- Second proof line.\n"));
+        assert!(repaired.contains("\n- `make check`\n"));
+        assert!(!repaired.contains("❯ - First proof line."));
+        assert!(!repaired.contains("❯ - Second proof line."));
+        assert!(!repaired.contains("❯ - `make check`"));
+        assert!(repaired.contains("❯ this quoted line stays"));
+        assert!(repaired.contains("❯ do #tail. spec-test-build-install-commit-push"));
+    }
+
+    #[test]
+    fn strip_prompt_prefix_from_response_body_first_lines_handles_multiple_re_blocks() {
+        let content = "\
+<!-- agent:exchange patch=append -->
+❯ do #a
+### Re: #a — opus-4-7
+
+❯ first response
+
+❯ do #b
+### Re: #b — opus-4-7
+
+❯ second response
+<!-- /agent:exchange -->
+";
+        let repaired = strip_prompt_prefix_from_response_body_first_lines(content)
+            .expect("multiple leaks must be stripped");
+        assert!(repaired.contains("\nfirst response\n"));
+        assert!(repaired.contains("\nsecond response\n"));
+        assert!(!repaired.contains("❯ first response"));
+        assert!(!repaired.contains("❯ second response"));
+        assert!(repaired.contains("❯ do #a"));
+        assert!(repaired.contains("❯ do #b"));
     }
 
     #[test]

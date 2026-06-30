@@ -11218,6 +11218,7 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         "pub fn dedupe_prompt_lines_against_before_exchange",
         "pub fn response_precedes_prompt_in_exchange",
         "pub fn repair_response_precedes_prompt_in_exchange",
+        "pub fn strip_prompt_prefix_from_response_body_first_lines",
         "pub fn extract_post_commit_normalization_targets",
         "pub fn normalize_exchange_prefixes_for_targets",
         "pub fn extract_normalization_targets",
@@ -11283,6 +11284,14 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         write_run_entry.contains("use agent_doc_element_exchange::extract_normalization_targets;"),
         "write run entry should import normalization target extraction from the focused crate"
     );
+    let repair =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
+    assert!(
+        repair.contains(
+            "use agent_doc_element_exchange::strip_prompt_prefix_from_response_body_first_lines;"
+        ),
+        "repair should import response-body prompt-prefix repair from the focused crate directly"
+    );
 
     let orchestration_policy_sources = [
         ("write.rs", write_main),
@@ -11291,6 +11300,7 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         ("write/run_entry.rs", write_run_entry),
         ("write/ipc.rs", write_ipc),
         ("write/ipc/transport.rs", write_ipc_transport),
+        ("repair.rs", repair),
     ];
     for forbidden in [
         "pub(crate) fn extract_exchange_content_len",
@@ -11331,6 +11341,10 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         "pub fn repair_response_precedes_prompt_in_exchange",
         "fn normalized_non_boundary_exchange_lines",
         "fn exchange_contains_normalized_line_sequence",
+        "pub fn strip_prompt_prefix_from_response_body_first_lines(",
+        "pub(crate) fn strip_prompt_prefix_from_response_body_first_lines(",
+        "write::strip_prompt_prefix_from_response_body_first_lines",
+        "pub use strip_prompt_prefix_from_response_body_first_lines",
         "pub fn extract_post_commit_normalization_targets",
         "pub fn normalize_exchange_prefixes_for_targets",
         "pub fn extract_normalization_targets(",

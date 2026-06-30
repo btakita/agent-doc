@@ -2890,7 +2890,6 @@ fn test_agent_doc_queue_owns_do_directive_target_parsing() {
     for relative in [
         "agent-doc-orchestration/src/preflight/run.rs",
         "agent-doc-orchestration/src/project_controller.rs",
-        "agent-doc-orchestration/src/session_check/queue_head_guards.rs",
         "agent-doc-orchestration/src/session_check/response_guards.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -2909,6 +2908,14 @@ fn test_agent_doc_queue_owns_do_directive_target_parsing() {
     assert!(
         queue_closeout_guard.contains("queue_directive::do_directive_target_ids"),
         "queue closeout guard policy should call focused queue directive parsing directly"
+    );
+    let queue_head_guards = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/queue_head_guards.rs"),
+    )
+    .unwrap();
+    assert!(
+        !queue_head_guards.contains("agent_doc_queue::queue_directive::do_directive_target_ids"),
+        "queue_head_guards should consume queue_closeout_guard policy instead of parsing queue directives directly"
     );
     let queue_head_provenance_guards = fs::read_to_string(
         manifest_dir
@@ -11864,6 +11871,7 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
         "pub fn committed_queue_head_ids(",
         "pub fn committed_current_queue_head_ids(",
         "pub fn no_response_live_queue_head_ids(",
+        "pub fn reaped_queue_directive_head_ids(",
         "pub fn queue_head_removal_decision(",
         "pub struct FreeTextQueueHeadProvenanceDecision",
         "pub fn free_text_queue_head_provenance_decision(",
@@ -11892,8 +11900,10 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
         "fn normalized_free_text_queue_head_identity(",
         "fn committed_queue_contains_active_free_text_head(",
         "fn no_response_live_queue_head_ids(",
+        "fn reaped_queue_directive_head_ids(",
         "fn queue_head_removal_decision(",
         "fn free_text_queue_head_provenance_decision(",
+        "agent_doc_queue::queue_directive::do_directive_target_ids(&state.active_queue_heads)",
         "queue_heads::free_text_queue_head_is_completed_residue(",
         "queue_heads::committed_queue_contains_free_text_head(",
         "free_text_head_answered_by_response(",
@@ -11908,6 +11918,8 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
     assert!(
         queue_head_guards
             .contains("agent_doc_queue::queue_closeout_guard::no_response_live_queue_head_ids",)
+            && queue_head_guards
+                .contains("agent_doc_queue::queue_closeout_guard::reaped_queue_directive_head_ids",)
             && provenance_guards
                 .contains("agent_doc_queue::queue_closeout_guard::queue_head_removal_decision",)
             && provenance_guards.contains(

@@ -123,6 +123,38 @@ pub fn no_response_live_queue_head_ids(
     live
 }
 
+/// Reaped `do [#id]` directive heads, normalized and deterministically ordered.
+pub fn reaped_queue_directive_head_ids(
+    active_queue_heads: &[String],
+    reaped_pending_ids: &[String],
+) -> Vec<String> {
+    let directive_ids: HashSet<String> =
+        queue_directive::do_directive_target_ids(active_queue_heads)
+            .into_iter()
+            .map(|id| normalize_id(&id))
+            .filter(|id| !id.is_empty())
+            .collect();
+    if directive_ids.is_empty() {
+        return Vec::new();
+    }
+
+    let reaped: HashSet<String> = reaped_pending_ids
+        .iter()
+        .map(|id| normalize_id(id))
+        .filter(|id| !id.is_empty())
+        .collect();
+    if reaped.is_empty() {
+        return Vec::new();
+    }
+
+    let mut ordered_ids: Vec<String> = directive_ids
+        .into_iter()
+        .filter(|id| reaped.contains(id))
+        .collect();
+    ordered_ids.sort();
+    ordered_ids
+}
+
 /// Decide whether recorded queue heads were legitimately removed or silently
 /// lost while their tracked-work items remained open.
 pub fn queue_head_removal_decision(
@@ -353,6 +385,26 @@ mod tests {
         );
 
         assert!(live.is_empty());
+    }
+
+    #[test]
+    fn reaped_queue_directive_head_ids_normalizes_dedupes_and_sorts_intersection() {
+        let ids = reaped_queue_directive_head_ids(
+            &[
+                "do [#Beta]".to_string(),
+                "do [#alpha]".to_string(),
+                "plain text".to_string(),
+                "do [#beta]".to_string(),
+                "do [#missing]".to_string(),
+            ],
+            &[
+                "#beta".to_string(),
+                "ALPHA".to_string(),
+                "not-a-directive".to_string(),
+            ],
+        );
+
+        assert_eq!(ids, vec!["alpha".to_string(), "beta".to_string()]);
     }
 
     #[test]

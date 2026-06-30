@@ -220,6 +220,12 @@ focused crate under the old path.
   plausibility heuristic. Orchestration keeps guard-mode formatting,
   cycle-state loading, ops logging, and effectful response-materialization
   checks owned by `agent-doc-turn`.
+- `agent-doc-queue` now owns queue consumption entry policy used by
+  `write/queue_consume`: selecting prompt texts, counting leading done-id
+  consumes, matching prompt text with cosmetic priority markers ignored,
+  marking entries completed by done ids, and normalizing consumed done-id bags.
+  Orchestration keeps document locks, file/snapshot IO, IPC node ops,
+  response-echo embedding, ops logging, and editor convergence.
 
 ### Earlier closure finding
 

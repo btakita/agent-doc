@@ -693,6 +693,8 @@ fn settle_or_flush_editor_sync_barrier(file: &Path, reason: &str) -> bool {
         }
     }
 
+    mark_published_live_buffer_snapshots_synced(file, &file_str, reason);
+
     let after_flush = agent_doc_debounce::await_editor_sync_barrier(
         &file_str,
         EDITOR_SYNC_SETTLE_MS,
@@ -716,6 +718,74 @@ fn settle_or_flush_editor_sync_barrier(file: &Path, reason: &str) -> bool {
         ),
     );
     after_flush.kind != agent_doc_debounce::EditorSyncBarrierKind::TimedOut
+}
+
+fn mark_published_live_buffer_snapshots_synced(file: &Path, file_key: &str, reason: &str) {
+    for snapshot in agent_doc_debounce::live_buffer_snapshots(file_key) {
+        if !snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY) {
+            continue;
+        }
+        let Some(editor_id) = snapshot.editor_id.as_deref() else {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "editor_sync_barrier_live_buffer_publish_sync_skipped file={} reason={} cause=missing_editor_id len={} hash={}",
+                    file.display(),
+                    reason,
+                    snapshot.len,
+                    snapshot.hash
+                ),
+            );
+            continue;
+        };
+        let Some(content) = snapshot.content.as_deref() else {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "editor_sync_barrier_live_buffer_publish_sync_skipped file={} reason={} editor_id={} cause=missing_content len={} hash={}",
+                    file.display(),
+                    reason,
+                    editor_id,
+                    snapshot.len,
+                    snapshot.hash
+                ),
+            );
+            continue;
+        };
+        let capabilities: Vec<&str> = snapshot.capabilities.iter().map(String::as_str).collect();
+        match agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
+            file_key,
+            content,
+            editor_id,
+            snapshot.editor_kind.as_deref().unwrap_or("unknown"),
+            snapshot.editor_version.as_deref().unwrap_or("unknown"),
+            &capabilities,
+        ) {
+            Ok(()) => crate::ops_log::log_op(
+                file,
+                &format!(
+                    "editor_sync_barrier_live_buffer_publish_synced file={} reason={} editor_id={} len={} hash={}",
+                    file.display(),
+                    reason,
+                    editor_id,
+                    snapshot.len,
+                    snapshot.hash
+                ),
+            ),
+            Err(e) => crate::ops_log::log_op(
+                file,
+                &format!(
+                    "editor_sync_barrier_live_buffer_publish_sync_error file={} reason={} editor_id={} len={} hash={} error={}",
+                    file.display(),
+                    reason,
+                    editor_id,
+                    snapshot.len,
+                    snapshot.hash,
+                    e
+                ),
+            ),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -837,7 +907,7 @@ mod tests {
                 if parsed.get("type").and_then(|value| value.as_str())
                     == Some("publish_live_buffer")
                 {
-                    agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
+                    agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
                         &file_for_listener,
                         &visible_for_listener,
                         "jetbrains:publish-test",
@@ -871,6 +941,10 @@ mod tests {
         assert!(
             msg.get("patch_id").is_none(),
             "live-buffer publish is read-only and must not use save_document patch ids: {msg}"
+        );
+        assert!(
+            !agent_doc_debounce::editor_sync_statuses(&file_str)[0].in_flight,
+            "barrier should mark a successfully published authority live buffer as synced"
         );
 
         let _ = std::fs::remove_file(crate::ipc_socket::socket_path(&root));

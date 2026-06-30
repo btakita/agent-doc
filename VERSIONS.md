@@ -6,6 +6,14 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.34.65
 
+- **Commit-barrier live-buffer publish ACKs now clear stale in-flight epochs.**
+  When a closeout times out waiting for editor delivery, the recovery path asks
+  the editor to publish its visible live buffer and then stamps any
+  operator-authority live-buffer snapshot as synced/proven on ACK. This keeps
+  older JetBrains publish implementations, which report through the normal
+  document-changed path, from re-opening the in-flight barrier immediately before
+  commit.
+
 - **Historical snapshot repair no longer restores stale pre-compact HEAD over
   the visible editor document.** The `head_local_drift` repair path now runs the
   stale-snapshot reset guard against HEAD before saving it as the snapshot. Safe

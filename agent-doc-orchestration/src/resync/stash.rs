@@ -68,9 +68,9 @@ pub(crate) fn return_stashed_panes_with_registry(tmux: &Tmux, registry: &tmux_ro
             let pane_id = pane_parts[0];
             let pane_kind = classify_pane_process(tmux, pane_id);
             let pane_cmd = match &pane_kind {
-                PaneProcessKind::IdleShell(_) => continue,
-                PaneProcessKind::Agent(cmd) | PaneProcessKind::Foreign(cmd) => cmd.as_str(),
-                PaneProcessKind::UnknownTransient => pane_parts[1],
+                TmuxPaneProcessKind::IdleShell(_) => continue,
+                TmuxPaneProcessKind::Agent(cmd) | TmuxPaneProcessKind::Foreign(cmd) => cmd.as_str(),
+                TmuxPaneProcessKind::UnknownTransient => pane_parts[1],
             };
 
             // Look up registry entry for this pane
@@ -218,7 +218,12 @@ pub(crate) fn purge_stash_windows_bulk(tmux: &Tmux, windows: &WindowMeta, panes:
         let all_idle = panes
             .iter()
             .filter(|(_, (wid, _, _))| wid == window_id)
-            .all(|(_, (_, _, cmd))| IDLE_SHELLS.contains(&cmd.as_str()));
+            .all(|(_, (_, _, cmd))| {
+                matches!(
+                    pane_process_kind_from_current_command(cmd),
+                    TmuxPaneProcessKind::IdleShell(_)
+                )
+            });
 
         // Also check there ARE panes in this window
         let has_panes = panes.iter().any(|(_, (wid, _, _))| wid == window_id);
@@ -310,7 +315,8 @@ pub(crate) fn purge_unregistered_stash_panes_bulk_with_supervisors_in_mode(
             continue;
         }
         let process_kind = pane_process_kind_from_current_command(cmd);
-        if preserve_live_agent_stash_panes && matches!(process_kind, PaneProcessKind::Agent(_)) {
+        if preserve_live_agent_stash_panes && matches!(process_kind, TmuxPaneProcessKind::Agent(_))
+        {
             sync_log_safe_passive_stash_skip(pane_id);
             continue;
         }
@@ -381,14 +387,14 @@ pub(crate) fn purge_unregistered_stash_panes_bulk_with_supervisors_in_mode(
             continue;
         }
         match process_kind {
-            PaneProcessKind::IdleShell(_) | PaneProcessKind::Agent(_) => {
+            TmuxPaneProcessKind::IdleShell(_) | TmuxPaneProcessKind::Agent(_) => {
                 if let Err(e) = tmux.kill_pane(pane_id) {
                     eprintln!("resync: failed to kill stash pane {}: {}", pane_id, e);
                 } else {
                     killed_count += 1;
                 }
             }
-            PaneProcessKind::Foreign(_) | PaneProcessKind::UnknownTransient => {}
+            TmuxPaneProcessKind::Foreign(_) | TmuxPaneProcessKind::UnknownTransient => {}
         }
     }
 
@@ -526,15 +532,17 @@ pub(crate) fn return_stashed_panes_bulk(tmux: &Tmux, windows: &WindowMeta, panes
         if !stash_windows.contains(window_id.as_str()) {
             continue;
         }
-        let pane_kind = match cmd.as_str() {
-            shell if IDLE_SHELLS.contains(&shell) => PaneProcessKind::IdleShell(cmd.clone()),
-            agent if AGENT_PROCESSES.contains(&agent) => PaneProcessKind::Agent(cmd.clone()),
-            _ => classify_pane_process(tmux, pane_id),
+        let pane_kind = match pane_process_kind_from_current_command(cmd) {
+            TmuxPaneProcessKind::IdleShell(cmd) => TmuxPaneProcessKind::IdleShell(cmd),
+            TmuxPaneProcessKind::Agent(cmd) => TmuxPaneProcessKind::Agent(cmd),
+            TmuxPaneProcessKind::Foreign(_) | TmuxPaneProcessKind::UnknownTransient => {
+                classify_pane_process(tmux, pane_id)
+            }
         };
         let pane_cmd = match &pane_kind {
-            PaneProcessKind::IdleShell(_) => continue,
-            PaneProcessKind::Agent(cmd) | PaneProcessKind::Foreign(cmd) => cmd.as_str(),
-            PaneProcessKind::UnknownTransient => cmd.as_str(),
+            TmuxPaneProcessKind::IdleShell(_) => continue,
+            TmuxPaneProcessKind::Agent(cmd) | TmuxPaneProcessKind::Foreign(cmd) => cmd.as_str(),
+            TmuxPaneProcessKind::UnknownTransient => cmd.as_str(),
         };
 
         let (key, entry) = match pane_to_entry.get(pane_id.as_str()) {
@@ -550,7 +558,7 @@ pub(crate) fn return_stashed_panes_bulk(tmux: &Tmux, windows: &WindowMeta, panes
                 // Only deregister idle shells with no return target.
                 // Active processes (claude, agent-doc, etc.) must stay registered
                 // so route's rescue_from_stash() can unstash them on next claim.
-                if matches!(pane_kind, PaneProcessKind::IdleShell(_)) {
+                if matches!(pane_kind, TmuxPaneProcessKind::IdleShell(_)) {
                     eprintln!(
                         "resync: cannot return stashed pane {} ({}): no valid target found — deregistering idle shell",
                         pane_id, key
@@ -816,7 +824,10 @@ pub(crate) fn purge_orphaned_agent_panes_with_registry(
                 continue; // Registered — leave it
             }
             // Only target agent processes (not shells or user processes)
-            if AGENT_PROCESSES.contains(&cmd.as_str()) {
+            if matches!(
+                pane_process_kind_from_current_command(cmd),
+                TmuxPaneProcessKind::Agent(_)
+            ) {
                 let pane_root = pane_project_root(tmux, pane_id);
                 let registered_in_pane_root = pane_root
                     .as_ref()

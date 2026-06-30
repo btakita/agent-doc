@@ -226,6 +226,59 @@ pub fn pane_current_command_is_bare_shell(cmd: &str) -> bool {
     )
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TmuxPaneProcessKind {
+    Agent(String),
+    IdleShell(String),
+    Foreign(String),
+    UnknownTransient,
+}
+
+pub fn pane_current_command_is_agent_process(cmd: &str) -> bool {
+    matches!(cmd, "agent-doc" | "claude" | "codex" | "node")
+}
+
+pub fn pane_process_kind_from_current_command(cmd: &str) -> TmuxPaneProcessKind {
+    if pane_current_command_is_agent_process(cmd) {
+        TmuxPaneProcessKind::Agent(cmd.to_string())
+    } else if pane_current_command_is_bare_shell(cmd) {
+        TmuxPaneProcessKind::IdleShell(cmd.to_string())
+    } else if cmd.is_empty() {
+        TmuxPaneProcessKind::UnknownTransient
+    } else {
+        TmuxPaneProcessKind::Foreign(cmd.to_string())
+    }
+}
+
+pub fn pane_process_kind_from_current_command_samples<'a>(
+    samples: impl IntoIterator<Item = Option<&'a str>>,
+) -> TmuxPaneProcessKind {
+    let mut first_foreign: Option<String> = None;
+    let mut foreign_stable = true;
+
+    for sample in samples {
+        let Some(cmd) = sample else {
+            foreign_stable = false;
+            continue;
+        };
+        match pane_process_kind_from_current_command(cmd) {
+            TmuxPaneProcessKind::Agent(cmd) => return TmuxPaneProcessKind::Agent(cmd),
+            TmuxPaneProcessKind::IdleShell(cmd) => return TmuxPaneProcessKind::IdleShell(cmd),
+            TmuxPaneProcessKind::Foreign(cmd) => match &first_foreign {
+                Some(prev) if prev != &cmd => foreign_stable = false,
+                None => first_foreign = Some(cmd),
+                _ => {}
+            },
+            TmuxPaneProcessKind::UnknownTransient => foreign_stable = false,
+        }
+    }
+
+    match (first_foreign, foreign_stable) {
+        (Some(cmd), true) => TmuxPaneProcessKind::Foreign(cmd),
+        _ => TmuxPaneProcessKind::UnknownTransient,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum AssociatedPaneSource {
     Registered,
@@ -879,6 +932,62 @@ mod tests {
                 "{not_shell:?} should NOT classify as a bare shell"
             );
         }
+    }
+
+    #[test]
+    fn pane_process_kind_classifies_current_command() {
+        assert!(matches!(
+            pane_process_kind_from_current_command("zsh"),
+            TmuxPaneProcessKind::IdleShell(cmd) if cmd == "zsh"
+        ));
+        assert!(matches!(
+            pane_process_kind_from_current_command("agent-doc"),
+            TmuxPaneProcessKind::Agent(cmd) if cmd == "agent-doc"
+        ));
+        assert!(matches!(
+            pane_process_kind_from_current_command("sleep"),
+            TmuxPaneProcessKind::Foreign(cmd) if cmd == "sleep"
+        ));
+        assert!(matches!(
+            pane_process_kind_from_current_command(""),
+            TmuxPaneProcessKind::UnknownTransient
+        ));
+    }
+
+    #[test]
+    fn pane_process_kind_samples_require_stable_foreign_command() {
+        assert!(matches!(
+            pane_process_kind_from_current_command_samples([Some("vim"), Some("vim"), Some("vim")]),
+            TmuxPaneProcessKind::Foreign(cmd) if cmd == "vim"
+        ));
+    }
+
+    #[test]
+    fn pane_process_kind_samples_return_unknown_for_empty_or_changing_foreign() {
+        assert!(matches!(
+            pane_process_kind_from_current_command_samples([Some(""), Some(""), Some("")]),
+            TmuxPaneProcessKind::UnknownTransient
+        ));
+        assert!(matches!(
+            pane_process_kind_from_current_command_samples([Some("mv"), Some("sed"), Some("sed")]),
+            TmuxPaneProcessKind::UnknownTransient
+        ));
+        assert!(matches!(
+            pane_process_kind_from_current_command_samples([None, Some("vim"), Some("vim")]),
+            TmuxPaneProcessKind::UnknownTransient
+        ));
+    }
+
+    #[test]
+    fn pane_process_kind_samples_prefer_agent_or_idle_shell_immediately() {
+        assert!(matches!(
+            pane_process_kind_from_current_command_samples([Some("mv"), Some("codex")]),
+            TmuxPaneProcessKind::Agent(cmd) if cmd == "codex"
+        ));
+        assert!(matches!(
+            pane_process_kind_from_current_command_samples([Some("mv"), Some("bash")]),
+            TmuxPaneProcessKind::IdleShell(cmd) if cmd == "bash"
+        ));
     }
 
     #[test]

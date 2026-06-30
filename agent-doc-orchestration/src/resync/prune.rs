@@ -205,7 +205,12 @@ pub(crate) fn purge_stash_windows(tmux: &Tmux) {
 
         let all_idle = String::from_utf8_lossy(&pane_output.stdout)
             .lines()
-            .all(|cmd| IDLE_SHELLS.contains(&cmd));
+            .all(|cmd| {
+                matches!(
+                    pane_process_kind_from_current_command(cmd),
+                    TmuxPaneProcessKind::IdleShell(_)
+                )
+            });
 
         if all_idle {
             if let Err(e) = tmux.cmd().args(["kill-window", "-t", window_id]).output() {
@@ -355,9 +360,9 @@ pub(crate) fn purge_unregistered_stash_panes_with_registry_and_supervisors(
                 continue;
             }
             match classify_pane_process(tmux, pane_id) {
-                PaneProcessKind::IdleShell(_) => panes_to_kill.push(pane_id.clone()),
-                PaneProcessKind::Agent(_) => panes_to_kill.push(pane_id.clone()),
-                PaneProcessKind::Foreign(_) | PaneProcessKind::UnknownTransient => {}
+                TmuxPaneProcessKind::IdleShell(_) => panes_to_kill.push(pane_id.clone()),
+                TmuxPaneProcessKind::Agent(_) => panes_to_kill.push(pane_id.clone()),
+                TmuxPaneProcessKind::Foreign(_) | TmuxPaneProcessKind::UnknownTransient => {}
             }
         }
 

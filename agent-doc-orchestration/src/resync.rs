@@ -38,18 +38,18 @@
 //!   forgets them. `purge_orphaned_agent_panes` removes unregistered
 //!   agent-doc/claude/node panes from any window, but only when the window has at
 //!   least one other pane (never orphans the last pane).
-//! - Process classification: `AGENT_PROCESSES` (`agent-doc`, `claude`, `codex`, `node`) are
-//!   expected occupants of registered panes. `IDLE_SHELLS` (`zsh`, `bash`, `sh`,
-//!   `fish`) are treated as empty/unused slots. Short-lived shell startup helpers
-//!   (for example `mkdir`, `mv`, `xset`) must not be classified as `WrongProcess`
-//!   unless they remain the stable foreground command across a brief grace window.
+//! - Process classification is delegated to `agent-doc-tmux`: agent foreground
+//!   commands are expected occupants of registered panes, bare shells are treated
+//!   as empty/unused slots, and short-lived shell startup helpers (for example
+//!   `mkdir`, `mv`, `xset`) must not be classified as `WrongProcess` unless they
+//!   remain the stable foreground command across a brief grace window.
 //!
 //! ## Agentic Contracts
 //! - `prune()` never kills a registered pane that is alive and in a non-stash window;
 //!   it only removes dead entries from the registry, stash-specific garbage, and
 //!   unregistered retained-dead panes that still have sibling panes.
-//! - User-owned processes (anything not in `AGENT_PROCESSES` or `IDLE_SHELLS`) are
-//!   never killed by any automatic or fix path — they are left running.
+//! - User-owned foreground commands are never killed by any automatic or fix path
+//!   — they are left running.
 //! - Stash windows named exactly `"stash"` or matching `"stash-*"` are the only
 //!   windows whose panes may be killed automatically; non-stash windows are only
 //!   touched when purging orphaned agent panes with sibling panes present.
@@ -99,72 +99,29 @@ use std::time::{Duration, Instant};
 use crate::sessions;
 use agent_doc_controller::dispatch::is_stash_window_name;
 use agent_doc_frontmatter::frontmatter;
-use agent_doc_tmux::{PruneCleanupMode, StashTtlCandidate, stash_ttl_prune_targets};
+use agent_doc_tmux::{
+    PruneCleanupMode, StashTtlCandidate, TmuxPaneProcessKind,
+    pane_process_kind_from_current_command, pane_process_kind_from_current_command_samples,
+    stash_ttl_prune_targets,
+};
 use tmux_router::{PaneMoveOp, Tmux};
 
 use crate::frontmatter_io;
 use agent_doc_project_config_io as project_config_io;
 
-/// Valid process names for agent-doc panes.
-const AGENT_PROCESSES: &[&str] = &["agent-doc", "claude", "codex", "node"];
-
-/// Shells considered idle (not running an agent process).
-const IDLE_SHELLS: &[&str] = &["zsh", "bash", "sh", "fish"];
-
 const PROCESS_GRACE_SAMPLES: usize = 4;
 const PROCESS_GRACE_DELAY_MS: u64 = 75;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum PaneProcessKind {
-    Agent(String),
-    IdleShell(String),
-    Foreign(String),
-    UnknownTransient,
-}
-
-fn pane_process_kind_from_current_command(cmd: &str) -> PaneProcessKind {
-    if AGENT_PROCESSES.contains(&cmd) {
-        PaneProcessKind::Agent(cmd.to_string())
-    } else if IDLE_SHELLS.contains(&cmd) {
-        PaneProcessKind::IdleShell(cmd.to_string())
-    } else if cmd.is_empty() {
-        PaneProcessKind::UnknownTransient
-    } else {
-        PaneProcessKind::Foreign(cmd.to_string())
-    }
-}
-
-fn classify_pane_process(tmux: &Tmux, pane_id: &str) -> PaneProcessKind {
-    let mut first_foreign: Option<String> = None;
-    let mut foreign_stable = true;
-
+fn classify_pane_process(tmux: &Tmux, pane_id: &str) -> TmuxPaneProcessKind {
+    let mut samples = Vec::with_capacity(PROCESS_GRACE_SAMPLES);
     for sample_idx in 0..PROCESS_GRACE_SAMPLES {
-        if let Some(cmd) = pane_current_command(tmux, pane_id) {
-            if AGENT_PROCESSES.contains(&cmd.as_str()) {
-                return PaneProcessKind::Agent(cmd);
-            }
-            if IDLE_SHELLS.contains(&cmd.as_str()) {
-                return PaneProcessKind::IdleShell(cmd);
-            }
-
-            match &first_foreign {
-                Some(prev) if prev != &cmd => foreign_stable = false,
-                None => first_foreign = Some(cmd),
-                _ => {}
-            }
-        } else {
-            foreign_stable = false;
-        }
-
+        samples.push(pane_current_command(tmux, pane_id));
         if sample_idx + 1 < PROCESS_GRACE_SAMPLES {
             std::thread::sleep(std::time::Duration::from_millis(PROCESS_GRACE_DELAY_MS));
         }
     }
 
-    match (first_foreign, foreign_stable) {
-        (Some(cmd), true) => PaneProcessKind::Foreign(cmd),
-        _ => PaneProcessKind::UnknownTransient,
-    }
+    pane_process_kind_from_current_command_samples(samples.iter().map(|cmd| cmd.as_deref()))
 }
 
 /// A problem detected during resync --fix analysis.
@@ -711,7 +668,7 @@ fn detect_issues_in_registry(tmux: &Tmux, registry: &tmux_router::Registry) -> V
 
         // Check 1: Is the pane running an agent-doc/claude process?
         let pane_kind = classify_pane_process(tmux, &entry.pane);
-        if let PaneProcessKind::Foreign(cmd) = pane_kind {
+        if let TmuxPaneProcessKind::Foreign(cmd) = pane_kind {
             issues.push(Issue::WrongProcess {
                 key: key.clone(),
                 file: label.to_string(),
@@ -924,7 +881,7 @@ pub fn close_superseded_session(tmux: &Tmux, old_session: &str) -> Result<bool> 
     }
 
     for pane in tmux.list_session_panes(old_session) {
-        if let PaneProcessKind::Agent(cmd) = classify_pane_process(tmux, &pane) {
+        if let TmuxPaneProcessKind::Agent(cmd) = classify_pane_process(tmux, &pane) {
             eprintln!(
                 "[session] preserving superseded session '{}': pane {} still runs live agent '{}'",
                 old_session, pane, cmd
@@ -996,7 +953,7 @@ pub fn canonical_session_for_document(
         }
         // Only a pane running a live agent-doc supervisor is canonical.
         match classify_pane_process(tmux, &entry.pane) {
-            PaneProcessKind::Agent(_) => pane_session_name(tmux, &entry.pane),
+            TmuxPaneProcessKind::Agent(_) => pane_session_name(tmux, &entry.pane),
             _ => None,
         }
     })
@@ -1239,7 +1196,7 @@ fn apply_fixes_to_registry(
                     let pane_kind = classify_pane_process(tmux, pane);
                     let is_agent = matches!(
                         pane_kind,
-                        PaneProcessKind::Agent(_) | PaneProcessKind::UnknownTransient
+                        TmuxPaneProcessKind::Agent(_) | TmuxPaneProcessKind::UnknownTransient
                     );
 
                     if is_agent && tmux.session_alive(expected_session) {
@@ -1279,10 +1236,10 @@ fn apply_fixes_to_registry(
                             expected_session,
                             pane,
                             match &pane_kind {
-                                PaneProcessKind::Agent(cmd)
-                                | PaneProcessKind::IdleShell(cmd)
-                                | PaneProcessKind::Foreign(cmd) => cmd.as_str(),
-                                PaneProcessKind::UnknownTransient => "transient",
+                                TmuxPaneProcessKind::Agent(cmd)
+                                | TmuxPaneProcessKind::IdleShell(cmd)
+                                | TmuxPaneProcessKind::Foreign(cmd) => cmd.as_str(),
+                                TmuxPaneProcessKind::UnknownTransient => "transient",
                             }
                         );
                         registry.remove(key);
@@ -1771,7 +1728,10 @@ mod th {
         let start = std::time::Instant::now();
         loop {
             if let Some(cmd) = pane_current_command(iso, pane)
-                && IDLE_SHELLS.contains(&cmd.as_str())
+                && matches!(
+                    pane_process_kind_from_current_command(&cmd),
+                    TmuxPaneProcessKind::IdleShell(_)
+                )
             {
                 return true;
             }
@@ -1982,7 +1942,10 @@ mod th {
                 break;
             }
             if let Some(cmd) = pane_current_command(tmux, pane)
-                && IDLE_SHELLS.contains(&cmd.as_str())
+                && matches!(
+                    pane_process_kind_from_current_command(&cmd),
+                    TmuxPaneProcessKind::IdleShell(_)
+                )
             {
                 let _ = tmux.send_keys_raw(pane, "Enter");
             }
@@ -2040,25 +2003,6 @@ mod tests {
     #![allow(unused_imports)]
     use super::*;
     use tmux_router::{IsolatedTmux, Registry as SessionRegistry, RegistryEntry as SessionEntry};
-    #[test]
-    fn pane_process_kind_uses_prefetched_command_without_sampling() {
-        assert!(matches!(
-            pane_process_kind_from_current_command("zsh"),
-            PaneProcessKind::IdleShell(cmd) if cmd == "zsh"
-        ));
-        assert!(matches!(
-            pane_process_kind_from_current_command("agent-doc"),
-            PaneProcessKind::Agent(cmd) if cmd == "agent-doc"
-        ));
-        assert!(matches!(
-            pane_process_kind_from_current_command("sleep"),
-            PaneProcessKind::Foreign(cmd) if cmd == "sleep"
-        ));
-        assert!(matches!(
-            pane_process_kind_from_current_command(""),
-            PaneProcessKind::UnknownTransient
-        ));
-    }
     #[test]
     fn filter_registry_for_target_matches_only_selected_file() {
         let dir = tempfile::tempdir().unwrap();
@@ -2398,7 +2342,8 @@ mod tests {
         // may return "tmux" or a profile command instead of "zsh"/"bash")
         std::thread::sleep(std::time::Duration::from_millis(2000));
 
-        // No file path means no frontmatter check; shell is in IDLE_SHELLS
+        // No file path means no frontmatter check; focused tmux policy
+        // classifies the shell as an idle pane.
         let mut registry = SessionRegistry::new();
         registry.insert("healthy-sess".to_string(), test_entry(&pane, ""));
 

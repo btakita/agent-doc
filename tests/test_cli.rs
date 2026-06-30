@@ -9987,9 +9987,10 @@ fn test_agent_doc_tmux_owns_stash_prune_policy() {
         );
     }
     assert!(
-        resync_source.contains(
-            "use agent_doc_tmux::{PruneCleanupMode, StashTtlCandidate, stash_ttl_prune_targets};"
-        ),
+        resync_source.contains("use agent_doc_tmux::{")
+            && resync_source.contains("PruneCleanupMode")
+            && resync_source.contains("StashTtlCandidate")
+            && resync_source.contains("stash_ttl_prune_targets"),
         "resync.rs should import focused stash prune policy directly"
     );
 
@@ -10174,10 +10175,18 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
     let dependencies = parsed["dependencies"].as_table().unwrap();
 
     let tmux_source = fs::read_to_string(manifest_dir.join("agent-doc-tmux/src/lib.rs")).unwrap();
-    assert!(
-        tmux_source.contains("pub fn pane_current_command_is_bare_shell("),
-        "agent-doc-tmux must own pure pane current-command shell classification"
-    );
+    for required in [
+        "pub fn pane_current_command_is_bare_shell(",
+        "pub enum TmuxPaneProcessKind",
+        "pub fn pane_current_command_is_agent_process(",
+        "pub fn pane_process_kind_from_current_command(",
+        "pub fn pane_process_kind_from_current_command_samples",
+    ] {
+        assert!(
+            tmux_source.contains(required),
+            "agent-doc-tmux must own pure pane current-command process classification: {required}"
+        );
+    }
 
     let dispatch_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/dispatch.rs"))
@@ -10196,9 +10205,36 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
         "route dispatch should call the focused tmux bare-shell API directly"
     );
 
+    for relative in [
+        "agent-doc-orchestration/src/resync.rs",
+        "agent-doc-orchestration/src/resync/prune.rs",
+        "agent-doc-orchestration/src/resync/stash.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        for forbidden in [
+            "const AGENT_PROCESSES",
+            "const IDLE_SHELLS",
+            "enum PaneProcessKind",
+            "fn pane_process_kind_from_current_command(",
+            "fn pane_current_command_is_agent_process(",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{relative} must not re-own or facade tmux pane process policy: {forbidden}"
+            );
+        }
+    }
+    let resync_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/resync.rs")).unwrap();
+    assert!(
+        resync_source.contains("pane_process_kind_from_current_command_samples"),
+        "resync should call the focused tmux process sample classifier directly"
+    );
+
     for forbidden in [
         "agent-doc-core",
         "agent-doc-orchestration",
+        "agent-doc-tmux-io",
         "git2",
         "interprocess",
         "notify",

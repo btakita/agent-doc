@@ -7810,6 +7810,7 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
         "pub fn collect_one_shot_backlog_queue_sync",
         "pub struct BacklogQueueSyncReport",
         "pub fn backlog_queue_sync_report",
+        "pub fn reconcile_queue_tombstones",
         "pub fn format_queue_ids",
         "pub fn collect_backlog_priority_ranks",
         "pub fn collect_after_deps",
@@ -7842,6 +7843,27 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
                 .contains("agent_doc_queue::backlog_sync::collect_backlog_priority_ranks")
             && preflight_maintenance.contains("agent_doc_queue::backlog_sync::collect_after_deps"),
         "preflight maintenance should call backlog queue sync policy from agent-doc-queue directly"
+    );
+
+    let queue_tombstone = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/preflight/queue_tombstone.rs"),
+    )
+    .unwrap();
+    for forbidden_snippet in [
+        "pub(crate) fn reconcile(",
+        "fn reconcile(",
+        "snapshot_active_ids.difference(current_all_ids)",
+    ] {
+        assert!(
+            !queue_tombstone.contains(forbidden_snippet),
+            "preflight queue_tombstone must not re-own tombstone reconciliation policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        queue_tombstone.contains("use agent_doc_queue::backlog_sync::reconcile_queue_tombstones;")
+            && queue_tombstone.contains("fn reconcile_for_file(")
+            && queue_tombstone.contains("reconcile_queue_tombstones("),
+        "preflight queue_tombstone should load/save sidecars and call focused queue tombstone policy directly"
     );
 
     let queue_cmd =

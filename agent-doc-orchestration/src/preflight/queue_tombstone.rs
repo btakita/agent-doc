@@ -21,6 +21,8 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use agent_doc_queue::backlog_sync::reconcile_queue_tombstones;
+
 const TOMBSTONE_DIR: &str = ".agent-doc/queue-tombstones";
 
 /// `<project_root>/.agent-doc/queue-tombstones/<sha256_hash>.json`, mirroring the
@@ -102,24 +104,20 @@ fn save(doc: &Path, ids: &HashSet<String>) {
 /// An id active in the snapshot but entirely gone now (not merely struck) was
 /// deleted by the operator → tombstone it. An id the operator re-added (active
 /// now) clears its tombstone. The updated set is persisted and returned.
-pub(crate) fn reconcile(
+pub(crate) fn reconcile_for_file(
     doc: &Path,
     snapshot_active_ids: &HashSet<String>,
     current_all_ids: &HashSet<String>,
     current_active_ids: &HashSet<String>,
 ) -> HashSet<String> {
-    let mut tomb = load(doc);
-    let before = tomb.len();
-    // Operator deleted: was an active head in the snapshot, now fully absent
-    // (a struck/consumed item stays in `current_all_ids`, so it is NOT a delete).
-    for id in snapshot_active_ids.difference(current_all_ids) {
-        tomb.insert(id.clone());
-    }
-    // Operator re-added (or it is back as an active head): the delete is undone.
-    for id in current_active_ids {
-        tomb.remove(id);
-    }
-    if tomb.len() != before || tomb != load(doc) {
+    let previous = load(doc);
+    let tomb = reconcile_queue_tombstones(
+        &previous,
+        snapshot_active_ids,
+        current_all_ids,
+        current_active_ids,
+    );
+    if tomb != previous {
         save(doc, &tomb);
     }
     tomb
@@ -143,14 +141,14 @@ mod tests {
 
         // Snapshot had #a and #b active; live queue now lacks #a (deleted) but
         // keeps #b. #a must be tombstoned.
-        let tomb = reconcile(&doc, &set(&["a", "b"]), &set(&["b"]), &set(&["b"]));
+        let tomb = reconcile_for_file(&doc, &set(&["a", "b"]), &set(&["b"]), &set(&["b"]));
         assert!(tomb.contains("a"), "deleted active id must be tombstoned");
         assert!(!tomb.contains("b"));
         // Persisted.
         assert!(load(&doc).contains("a"));
 
         // Operator re-adds #a (active again) → tombstone clears.
-        let tomb2 = reconcile(&doc, &set(&["b"]), &set(&["a", "b"]), &set(&["a", "b"]));
+        let tomb2 = reconcile_for_file(&doc, &set(&["b"]), &set(&["a", "b"]), &set(&["a", "b"]));
         assert!(!tomb2.contains("a"), "re-added id clears its tombstone");
         assert!(!load(&doc).contains("a"));
     }
@@ -165,7 +163,7 @@ mod tests {
         // #a was active in the snapshot; now it is struck (still in
         // current_all_ids, absent from current_active_ids). Consumption, not a
         // delete — must NOT be tombstoned.
-        let tomb = reconcile(&doc, &set(&["a"]), &set(&["a"]), &set(&[]));
+        let tomb = reconcile_for_file(&doc, &set(&["a"]), &set(&["a"]), &set(&[]));
         assert!(
             !tomb.contains("a"),
             "a struck/consumed id is not an operator delete"

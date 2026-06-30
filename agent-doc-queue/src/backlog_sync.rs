@@ -159,6 +159,28 @@ pub fn backlog_queue_sync_report(
     }
 }
 
+/// Reconcile operator-delete tombstones for the backlog-to-queue mirror.
+///
+/// Inputs are normalized id sets. An id active in the committed snapshot but
+/// fully absent from the live queue was deleted by the operator, so it becomes
+/// tombstoned. An id active in the live queue clears any prior tombstone because
+/// the operator re-added it.
+pub fn reconcile_queue_tombstones(
+    existing_tombstones: &HashSet<String>,
+    snapshot_active_ids: &HashSet<String>,
+    current_all_ids: &HashSet<String>,
+    current_active_ids: &HashSet<String>,
+) -> HashSet<String> {
+    let mut tombstones = existing_tombstones.clone();
+    for id in snapshot_active_ids.difference(current_all_ids) {
+        tombstones.insert(id.clone());
+    }
+    for id in current_active_ids {
+        tombstones.remove(id);
+    }
+    tombstones
+}
+
 /// Format normalized queue ids for operator-facing CLI messages.
 pub fn format_queue_ids(ids: &[String]) -> String {
     ids.iter()
@@ -213,6 +235,10 @@ pub fn collect_after_deps(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn set(items: &[&str]) -> HashSet<String> {
+        items.iter().map(|item| item.to_string()).collect()
+    }
 
     #[test]
     fn collect_backlog_queue_sync_reads_mode_and_active_ids() {
@@ -290,6 +316,36 @@ mod tests {
             .expect("enqueue marker should create a one-shot append request");
         assert_eq!(request.mode, BacklogQueueSyncMode::Append);
         assert_eq!(request.ids, vec!["parked".to_string()]);
+    }
+
+    #[test]
+    fn reconcile_queue_tombstones_adds_deleted_active_ids_and_clears_readded_ids() {
+        let existing = set(&["old"]);
+
+        let tombstones =
+            reconcile_queue_tombstones(&existing, &set(&["a", "b"]), &set(&["b"]), &set(&["b"]));
+
+        assert!(tombstones.contains("a"));
+        assert!(tombstones.contains("old"));
+        assert!(!tombstones.contains("b"));
+
+        let cleared = reconcile_queue_tombstones(
+            &tombstones,
+            &set(&["b"]),
+            &set(&["a", "b"]),
+            &set(&["a", "b"]),
+        );
+
+        assert!(!cleared.contains("a"));
+        assert!(cleared.contains("old"));
+    }
+
+    #[test]
+    fn reconcile_queue_tombstones_does_not_treat_struck_ids_as_deleted() {
+        let tombstones =
+            reconcile_queue_tombstones(&HashSet::new(), &set(&["a"]), &set(&["a"]), &set(&[]));
+
+        assert!(!tombstones.contains("a"));
     }
 
     #[test]

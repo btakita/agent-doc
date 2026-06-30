@@ -1705,7 +1705,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 .filter(|e| matches!(e, agent_doc_queue::document_queue::QueueEntry::Prompt(_)))
                 .filter_map(queue_entry_do_id)
                 .collect();
-            let tombstones = super::queue_tombstone::reconcile(
+            let tombstones = super::queue_tombstone::reconcile_for_file(
                 file,
                 &snapshot_active_ids,
                 &current_all_ids,

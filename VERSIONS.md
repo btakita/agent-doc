@@ -6,6 +6,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.34.65
 
+- **Auto-DAG schedule kernel moved to `agent-doc-work-graph`.** The schedule
+  model, task parser, session-review guard classifier, blocker wording, and node
+  readiness/state-transition policy now live in
+  `agent_doc_work_graph::schedule`. The root `auto_dag` module keeps only
+  document/file IO, schedule-id hashing, and tsift evidence adapters.
+
 - **Executor capture-delta policy moved to `agent-doc-turn-executor`.** The
   watch daemon now calls `agent_doc_turn_executor::capture` directly for pane
   capture deltas and bounded line windows. Orchestration keeps only tmux

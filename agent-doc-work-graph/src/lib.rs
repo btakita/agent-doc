@@ -9,6 +9,8 @@ use agent_doc_element_backlog::backlog::{self, PendingState};
 use anyhow::{Context, Result};
 use serde::Serialize;
 
+pub mod schedule;
+
 /// Which completion "lane" an item belongs to: the Auto-DAG's edge classes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

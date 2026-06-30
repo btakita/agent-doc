@@ -1,6 +1,9 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use agent_doc_work_graph::schedule::{
+    AutoDagNodeState, AutoDagSchedule, guard_blocker as schedule_blocker_for,
+};
 
 pub(crate) fn run_with_dependencies(
     file: &Path,
@@ -391,7 +394,7 @@ pub(crate) fn run_auto_dag_mode(
         jobs_index.cycle_id
     );
 
-    let schedule_blocker = crate::auto_dag::guard_blocker(&schedule);
+    let schedule_blocker = schedule_blocker_for(&schedule);
     let schedule_decision = if schedule_blocker.is_some() {
         agent_doc_work_graph::AutoDagScheduleDecision::SessionReviewBlocked
     } else {
@@ -436,24 +439,21 @@ pub(crate) fn run_auto_dag_mode(
 }
 
 pub(crate) fn execution_tasks_from_schedule(
-    schedule: &crate::auto_dag::AutoDagSchedule,
+    schedule: &AutoDagSchedule,
     prompt_preset_block: Option<&str>,
 ) -> Result<Vec<ExecutionTask>> {
     let mut tasks = Vec::new();
     for node in &schedule.nodes {
         match node.state {
-            crate::auto_dag::AutoDagNodeState::Complete => continue,
-            crate::auto_dag::AutoDagNodeState::Blocked
-            | crate::auto_dag::AutoDagNodeState::Failed => {
+            AutoDagNodeState::Complete => continue,
+            AutoDagNodeState::Blocked | AutoDagNodeState::Failed => {
                 anyhow::bail!(
                     "auto-DAG schedule {} has gated/failed node {}; refusing to launch dependents",
                     schedule.schedule_id,
                     node.id
                 );
             }
-            crate::auto_dag::AutoDagNodeState::Pending
-            | crate::auto_dag::AutoDagNodeState::Ready
-            | crate::auto_dag::AutoDagNodeState::Running => {
+            AutoDagNodeState::Pending | AutoDagNodeState::Ready | AutoDagNodeState::Running => {
                 tasks.push(ExecutionTask {
                     label: node.label.clone(),
                     prompt: apply_prompt_preset_block(&node.prompt, prompt_preset_block),
@@ -466,7 +466,7 @@ pub(crate) fn execution_tasks_from_schedule(
 
 pub(crate) fn run_scheduled_dag_tasks_internal(
     file: &Path,
-    schedule: &crate::auto_dag::AutoDagSchedule,
+    schedule: &AutoDagSchedule,
     options: ScheduledDagRunOptions<'_>,
     global_config: &Config,
     lifecycle: &impl LifecycleOps,
@@ -486,13 +486,12 @@ pub(crate) fn run_scheduled_dag_tasks_internal(
             let Some(node) = schedule.nodes.iter().find(|node| &node.id == node_id) else {
                 anyhow::bail!("auto-DAG schedule references missing node `{node_id}`");
             };
-            if node.state == crate::auto_dag::AutoDagNodeState::Complete {
+            if node.state == AutoDagNodeState::Complete {
                 continue;
             }
             if matches!(
                 node.state,
-                crate::auto_dag::AutoDagNodeState::Blocked
-                    | crate::auto_dag::AutoDagNodeState::Failed
+                AutoDagNodeState::Blocked | AutoDagNodeState::Failed
             ) {
                 anyhow::bail!(
                     "auto-DAG node {} is {:?}; refusing to launch dependents",
@@ -505,7 +504,7 @@ pub(crate) fn run_scheduled_dag_tasks_internal(
                 file,
                 &schedule.schedule_id,
                 &node.id,
-                crate::auto_dag::AutoDagNodeState::Running,
+                AutoDagNodeState::Running,
             )?;
             let prompt = apply_prompt_preset_block(&node.prompt, options.prompt_preset_block);
             let item = queue_dispatch::classify(&node.label);
@@ -544,7 +543,7 @@ pub(crate) fn run_scheduled_dag_tasks_internal(
                         file,
                         &schedule.schedule_id,
                         &node.id,
-                        crate::auto_dag::AutoDagNodeState::Complete,
+                        AutoDagNodeState::Complete,
                     )?;
                     let child =
                         agent_doc_orchestration::flow::orchestration_batch::BatchChildResult {
@@ -568,7 +567,7 @@ pub(crate) fn run_scheduled_dag_tasks_internal(
                         file,
                         &schedule.schedule_id,
                         &node.id,
-                        crate::auto_dag::AutoDagNodeState::Failed,
+                        AutoDagNodeState::Failed,
                     )?;
                     let child =
                         agent_doc_orchestration::flow::orchestration_batch::BatchChildResult {

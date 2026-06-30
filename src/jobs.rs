@@ -23,6 +23,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::plan;
 use agent_doc_orchestration::snapshot;
+use agent_doc_work_graph::schedule::{AutoDagNode, AutoDagSchedule};
 
 const JOB_PACKET_CONTRACT_VERSION: &str = "agent-doc-job-packet-v1";
 const WORKER_RESULT_CONTRACT_VERSION: &str = "agent-doc-worker-result-v1";
@@ -177,7 +178,7 @@ pub(crate) fn create(file: &Path, options: CreateOptions) -> Result<()> {
 
 pub(crate) fn create_for_schedule(
     file: &Path,
-    schedule: &crate::auto_dag::AutoDagSchedule,
+    schedule: &AutoDagSchedule,
     options: CreateOptions,
 ) -> Result<JobsIndex> {
     if !file.exists() {
@@ -994,8 +995,8 @@ Save a JSON object to `{result_path}` or paste it under `## Worker Result`:
 
 struct ScheduleJobPacketRender<'a> {
     file: &'a Path,
-    schedule: &'a crate::auto_dag::AutoDagSchedule,
-    node: &'a crate::auto_dag::AutoDagNode,
+    schedule: &'a AutoDagSchedule,
+    node: &'a AutoDagNode,
     job_id: &'a str,
     target: &'a str,
     write_scope: &'a [String],
@@ -1134,7 +1135,7 @@ Save a JSON object to `{result_path}` or paste it under `## Worker Result`:
     )
 }
 
-fn schedule_write_scope(node: &crate::auto_dag::AutoDagNode) -> Vec<String> {
+fn schedule_write_scope(node: &AutoDagNode) -> Vec<String> {
     let labeled = extract_labeled_path_refs(&node.prompt);
     if !labeled.is_empty() {
         return labeled;
@@ -1392,7 +1393,7 @@ Parent review must run required verification before `agent-doc finalize`.
 fn write_schedule_operation_doc(
     root: &Path,
     file: &Path,
-    schedule: &crate::auto_dag::AutoDagSchedule,
+    schedule: &AutoDagSchedule,
     created_at: u64,
     source_snapshot: &str,
 ) -> Result<String> {
@@ -1541,6 +1542,7 @@ fn relative_to(root: &Path, path: &Path) -> String {
 mod tests {
     use super::*;
     use agent_doc_orchestration::snapshot;
+    use agent_doc_work_graph::schedule::classify_session_review_log;
     use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
     use tempfile::TempDir;
@@ -1840,7 +1842,7 @@ agent_doc_dispatch: auto
             &doc,
             &["do #prep".to_string(), "do #report after #prep".to_string()],
             None,
-            crate::auto_dag::classify_session_review_log(""),
+            classify_session_review_log(""),
             "queue",
         )
         .unwrap();

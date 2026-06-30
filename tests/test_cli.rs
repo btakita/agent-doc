@@ -3688,6 +3688,7 @@ fn test_agent_doc_work_graph_is_source_agnostic_boundary() {
     let work_graph_source =
         fs::read_to_string(manifest_dir.join("agent-doc-work-graph/src/lib.rs")).unwrap();
     for required in [
+        "pub mod schedule;",
         "pub enum AutoDagScheduleDecision",
         "pub enum BatchProgressDecision",
         "pub fn classify_batch_progress",
@@ -3698,6 +3699,43 @@ fn test_agent_doc_work_graph_is_source_agnostic_boundary() {
             "agent-doc-work-graph must own Auto-DAG scheduling policy: {required}"
         );
     }
+    let schedule_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-work-graph/src/schedule.rs")).unwrap();
+    for required in [
+        "pub struct AutoDagSchedule",
+        "pub enum AutoDagNodeState",
+        "pub fn build_schedule",
+        "pub fn schedule_seed",
+        "pub fn update_schedule_node_state",
+        "pub fn classify_session_review_log",
+        "pub fn guard_blocker",
+    ] {
+        assert!(
+            schedule_source.contains(required),
+            "agent-doc-work-graph must own the Auto-DAG schedule kernel: {required}"
+        );
+    }
+    let root_auto_dag_source = fs::read_to_string(manifest_dir.join("src/auto_dag.rs")).unwrap();
+    for forbidden in [
+        "pub(crate) struct AutoDagSchedule",
+        "pub(crate) enum AutoDagNodeState",
+        "pub(crate) struct SessionReviewGuardReport",
+        "pub(crate) fn classify_session_review_log",
+        "fn parse_tasks(",
+        "fn mark_ready_nodes(",
+        "pub(crate) fn guard_blocker",
+    ] {
+        assert!(
+            !root_auto_dag_source.contains(forbidden),
+            "root auto_dag adapter must not re-own focused schedule behavior: {forbidden}"
+        );
+    }
+    assert!(
+        root_auto_dag_source.contains("agent_doc_work_graph::schedule::{")
+            && root_auto_dag_source.contains("build_schedule as build_auto_dag_schedule")
+            && root_auto_dag_source.contains("update_schedule_node_state"),
+        "root auto_dag adapter should call the focused schedule crate directly"
+    );
     let orchestration_batch = fs::read_to_string(
         manifest_dir.join("agent-doc-orchestration/src/flow/orchestration_batch.rs"),
     )

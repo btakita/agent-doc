@@ -435,11 +435,14 @@ focused crate under the old path.
   detection, prefix counts, duplicate prompt text detection, reconciliation line
   records, boundary-tail lookup, live prompt prefix-variant classification, and
   pure exchange-content repairs for tail prefix variants, adjacent
-  prefixed/unprefixed duplicates, and before/after prompt-count excess.
-  `write/exchange_reconcile`, `write/normalize`, git closeout, and IPC paths
-  keep component replacement, duplicate-repair orchestration, shrink-guard,
-  file, git, ops-log, and delivery adapters while importing the focused
-  exchange helpers directly.
+  prefixed/unprefixed duplicates, and before/after prompt-count excess. It now
+  also owns response-before-prompt exchange order detection and log-free repair
+  planning, including response signature matching, prompt-run detection after
+  boundaries, prompt-authority checks, and boundary marker preservation or
+  regeneration. `write`, `write/exchange_reconcile`, `write/normalize`, git
+  closeout, repair, and IPC paths keep component replacement,
+  duplicate-repair orchestration, shrink-guard, file, git, ops-log, and
+  delivery adapters while importing the focused exchange helpers directly.
 - `agent-doc-element-backlog` already owned open backlog id extraction; preflight
   now calls `open_backlog_ids_in_content` directly for `do #id` closeout
   evidence instead of re-parsing backlog components locally.

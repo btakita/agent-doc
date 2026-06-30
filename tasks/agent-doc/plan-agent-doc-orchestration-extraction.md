@@ -249,6 +249,15 @@ should be deleted during extraction.
   project-root/git facts, tsift process invocation, snapshot/diff gathering,
   ops-log emission, and fail-closed error adapters while importing the focused
   response-text helpers directly.
+- `agent-doc-turn::response_replay` now owns response replay/application
+  policy: captured-response heading extraction, orphan prompt/topic matching,
+  visible response patch extraction between document bodies, live-exchange
+  answered-heading detection, known-response prompt-change filtering, and
+  contiguous response-applied matching with prompt-prefix and queue-echo
+  normalization. Repair/capture/closeout/write keep only file-backed capture,
+  snapshot, materialization, and recovery adapters while importing the focused
+  replay helpers directly; the old `repair::*` Rust API path was deleted rather
+  than retained as a facade.
 - `agent-doc-turn::document_drift` now owns closeout/session-check document
   drift classifiers: exchange append-vs-rewrite detection, normalized exchange
   body extraction, exchange-only promptless drift, answered exchange plus

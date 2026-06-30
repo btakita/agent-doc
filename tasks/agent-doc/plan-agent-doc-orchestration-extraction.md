@@ -350,6 +350,11 @@ focused crate under the old path.
   drift evidence, and calls the focused classifier; the old public
   `classify_closeout_recovery_state` path was replaced with the explicit
   file-backed adapter `classify_closeout_recovery_state_for_file`.
+- `agent-doc-turn` now owns closeout recovery command rendering: mapping typed
+  recovery states plus optional open-cycle checkpoint facts into user-facing
+  recovery instructions. Orchestration keeps only document-path formatting and
+  cycle-state sidecar loading/projection through
+  `closeout_recovery_command_for_file`, avoiding a duplicate policy facade.
 - `agent-doc-turn` now owns no-change cycle diagnostics: classifying abandoned
   or bookkeeping-only committed cycle-state facts into clean vs abnormal
   no-change verdicts, including recursive direct-invocation and no-response

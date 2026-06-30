@@ -299,6 +299,11 @@ focused crate under the old path.
   registry and supervisor evidence gathering, project config checks, ops-log
   writes, report-only diagnostics, and `kill-pane` effects while importing the
   focused prune policy directly.
+- `agent-doc-workflow` now owns workflow-doctor ops-log marker classification:
+  stable marker names for queue-pause, stale-supervisor, generation-redirect,
+  stale-generation, and editor-convergence failure lines. Orchestration keeps
+  ops-log file reads, scan limits, warning collection, and doctor fact assembly
+  while importing the focused classifier directly.
 - `agent-doc-session-accretion` now owns recent restart-log counting policy:
   session-log timestamp parsing, blank/malformed line skips, recent-window
   filtering, restart-churn event extraction, and restart-heavy event counting.

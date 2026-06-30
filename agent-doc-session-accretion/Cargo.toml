@@ -11,4 +11,5 @@ name = "agent_doc_session_accretion"
 
 [dependencies]
 agent-doc-element = { path = "../agent-doc-element", version = "0.34.65" }
+agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.34.65" }
 serde = { version = "1", features = ["derive"] }

@@ -9,37 +9,17 @@
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use agent_doc_supervisor::route_submit_inflight::{
+    ROUTE_BLOCKED_DIR, ROUTE_BLOCKED_TTL_SECS, ROUTE_DISPATCH_SUBMIT_REASON, ROUTE_IN_FLIGHT_DIR,
+    RouteSubmitBlocked, RouteSubmitInFlight, route_submit_blocked_marker,
+    route_submit_blocked_marker_is_fresh, route_submit_inflight_marker,
+    route_submit_inflight_marker_is_fresh,
+};
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
-
-const ROUTE_IN_FLIGHT_DIR: &str = ".agent-doc/route-in-flight";
-const ROUTE_IN_FLIGHT_TTL_SECS: u64 = 30;
-const ROUTE_READY_PROBE_TTL_SECS: u64 = 150;
-const ROUTE_BLOCKED_DIR: &str = ".agent-doc/route-submit-blocked";
-const ROUTE_BLOCKED_TTL_SECS: u64 = 120;
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RouteSubmitInFlight {
-    pub file: String,
-    pub pane: String,
-    pub harness: String,
-    #[serde(default)]
-    pub reason: String,
-    pub written_at: u64,
-}
 
 pub struct RouteSubmitInFlightGuard {
     path: Option<PathBuf>,
     marker: Option<RouteSubmitInFlight>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RouteSubmitBlocked {
-    pub file: String,
-    pub pane: String,
-    pub harness: String,
-    pub reason: String,
-    pub written_at: u64,
 }
 
 impl Drop for RouteSubmitInFlightGuard {
@@ -86,27 +66,6 @@ impl Drop for RouteSubmitInFlightGuard {
     }
 }
 
-impl RouteSubmitInFlight {
-    fn reason_label(&self) -> &str {
-        if self.reason.is_empty() {
-            "legacy"
-        } else {
-            &self.reason
-        }
-    }
-
-    fn ttl_secs(&self) -> u64 {
-        route_submit_ttl_secs_for_reason(self.reason_label())
-    }
-}
-
-fn route_submit_ttl_secs_for_reason(reason: &str) -> u64 {
-    match reason {
-        "dispatch_only_ready_probe" => ROUTE_READY_PROBE_TTL_SECS,
-        _ => ROUTE_IN_FLIGHT_TTL_SECS,
-    }
-}
-
 fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -135,7 +94,7 @@ pub fn begin_route_submit(
     pane: &str,
     harness: &str,
 ) -> Result<RouteSubmitInFlightGuard> {
-    begin_route_submit_with_reason(file, pane, harness, "dispatch_submit")
+    begin_route_submit_with_reason(file, pane, harness, ROUTE_DISPATCH_SUBMIT_REASON)
 }
 
 pub fn begin_route_submit_with_reason(
@@ -153,13 +112,13 @@ pub fn begin_route_submit_with_reason(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
-    let marker = RouteSubmitInFlight {
-        file: file.to_string_lossy().into_owned(),
-        pane: pane.to_string(),
-        harness: harness.to_string(),
-        reason: reason.to_string(),
-        written_at: now_secs(),
-    };
+    let marker = route_submit_inflight_marker(
+        file.to_string_lossy().into_owned(),
+        pane,
+        harness,
+        reason,
+        now_secs(),
+    );
     let json = serde_json::to_string_pretty(&marker).context("serialize route-submit marker")?;
     std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
     crate::ops_log::log_op(
@@ -202,7 +161,7 @@ fn active_in_flight_marker_at(path: &Path) -> Result<bool> {
             return Ok(false);
         }
     };
-    if now_secs().saturating_sub(marker.written_at) <= marker.ttl_secs() {
+    if route_submit_inflight_marker_is_fresh(&marker, now_secs()) {
         return Ok(true);
     }
     remove_marker_file(path, "stale_route_submit_marker");
@@ -234,13 +193,13 @@ pub fn mark_route_submit_blocked(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
-    let marker = RouteSubmitBlocked {
-        file: file.to_string_lossy().into_owned(),
-        pane: pane.to_string(),
-        harness: harness.to_string(),
-        reason: reason.to_string(),
-        written_at: now_secs(),
-    };
+    let marker = route_submit_blocked_marker(
+        file.to_string_lossy().into_owned(),
+        pane,
+        harness,
+        reason,
+        now_secs(),
+    );
     let json =
         serde_json::to_string_pretty(&marker).context("serialize route-submit blocked marker")?;
     std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
@@ -270,20 +229,24 @@ pub fn route_submit_blocked(file: &Path) -> Result<Option<RouteSubmitBlocked>> {
     let marker: RouteSubmitBlocked = match serde_json::from_str(&content) {
         Ok(marker) => marker,
         Err(_) => {
-            let _ = std::fs::remove_file(&path);
+            remove_marker_file(&path, "malformed_route_submit_blocked_marker");
             return Ok(None);
         }
     };
-    if now_secs().saturating_sub(marker.written_at) <= ROUTE_BLOCKED_TTL_SECS {
+    if route_submit_blocked_marker_is_fresh(&marker, now_secs()) {
         return Ok(Some(marker));
     }
-    let _ = std::fs::remove_file(&path);
+    remove_marker_file(&path, "stale_route_submit_blocked_marker");
     Ok(None)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_doc_supervisor::route_submit_inflight::{
+        ROUTE_DISPATCH_ONLY_READY_PROBE_REASON, ROUTE_IN_FLIGHT_TTL_SECS,
+        ROUTE_READY_PROBE_TTL_SECS,
+    };
 
     #[test]
     fn route_submit_marker_is_active_until_guard_drops() {
@@ -310,16 +273,20 @@ mod tests {
         let doc = dir.path().join("plan.md");
         std::fs::write(&doc, "body").unwrap();
 
-        let guard =
-            begin_route_submit_with_reason(&doc, "%42", "codex", "dispatch_only_ready_probe")
-                .unwrap();
+        let guard = begin_route_submit_with_reason(
+            &doc,
+            "%42",
+            "codex",
+            ROUTE_DISPATCH_ONLY_READY_PROBE_REASON,
+        )
+        .unwrap();
         assert!(route_submit_in_flight(&doc).unwrap());
         let path = marker_path(&doc).unwrap().unwrap();
         let marker: RouteSubmitInFlight =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(marker.pane, "%42");
         assert_eq!(marker.harness, "codex");
-        assert_eq!(marker.reason, "dispatch_only_ready_probe");
+        assert_eq!(marker.reason, ROUTE_DISPATCH_ONLY_READY_PROBE_REASON);
 
         drop(guard);
         assert!(!path.exists());
@@ -338,7 +305,7 @@ mod tests {
             file: doc.display().to_string(),
             pane: "%1".to_string(),
             harness: "codex".to_string(),
-            reason: "dispatch_only_ready_probe".to_string(),
+            reason: ROUTE_DISPATCH_ONLY_READY_PROBE_REASON.to_string(),
             written_at: now_secs().saturating_sub(ROUTE_IN_FLIGHT_TTL_SECS + 1),
         };
         std::fs::write(&path, serde_json::to_string(&marker).unwrap()).unwrap();

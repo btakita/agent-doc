@@ -36,7 +36,8 @@ use agent_doc_session_accretion::{
     POST_COMPACTION_NOOP_GRACE_SECS, RECENT_WINDOW_SECS, SessionAccretionInput,
     SessionAccretionReport, context_reset_reason_for_recent_compaction,
     context_reset_reason_for_report, evaluate_session_accretion, exchange_metrics,
-    is_restart_churn_event, resolve_clear_threshold, resolve_queue_context_reset_opt_in,
+    recent_restart_count_from_session_log, resolve_clear_threshold,
+    resolve_queue_context_reset_opt_in,
 };
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -294,33 +295,7 @@ fn recent_restart_metrics(file: &Path, session_id: &str, now: u64) -> Result<usi
     let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
         return Ok(0);
     };
-    let window_start = now.saturating_sub(RECENT_WINDOW_SECS);
-    let mut count = 0;
-    for raw_line in content.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let timestamp = line
-            .strip_prefix('[')
-            .and_then(|rest| rest.split_once(']'))
-            .and_then(|(ts, _)| agent_doc_log_time::parse_log_timestamp(ts));
-        let Some(timestamp) = timestamp else {
-            continue;
-        };
-        if timestamp < window_start {
-            continue;
-        }
-        let event = line
-            .split_once("] ")
-            .map(|(_, event)| event)
-            .unwrap_or(line)
-            .trim();
-        if is_restart_churn_event(event) {
-            count += 1;
-        }
-    }
-    Ok(count)
+    Ok(recent_restart_count_from_session_log(&content, now))
 }
 
 fn cycles_log_path(file: &Path) -> Result<Option<PathBuf>> {

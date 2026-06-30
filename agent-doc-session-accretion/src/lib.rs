@@ -330,6 +330,36 @@ pub fn is_restart_churn_event(event: &str) -> bool {
         || event.contains("Ctrl-D")
 }
 
+pub fn recent_restart_count_from_session_log(content: &str, now: u64) -> usize {
+    let window_start = now.saturating_sub(RECENT_WINDOW_SECS);
+    let mut count = 0;
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let timestamp = line
+            .strip_prefix('[')
+            .and_then(|rest| rest.split_once(']'))
+            .and_then(|(ts, _)| agent_doc_log_time::parse_log_timestamp(ts));
+        let Some(timestamp) = timestamp else {
+            continue;
+        };
+        if timestamp < window_start {
+            continue;
+        }
+        let event = line
+            .split_once("] ")
+            .map(|(_, event)| event)
+            .unwrap_or(line)
+            .trim();
+        if is_restart_churn_event(event) {
+            count += 1;
+        }
+    }
+    count
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -501,5 +531,24 @@ mod tests {
     #[test]
     fn restart_churn_classifier_rejects_non_churn_event() {
         assert!(!is_restart_churn_event("commit completed normally"));
+    }
+
+    #[test]
+    fn recent_restart_count_filters_session_log_by_window_and_churn_signature() {
+        let now = agent_doc_log_time::parse_log_timestamp("2026-06-30T12:30:00Z").unwrap();
+        let recent = "2026-06-30T12:29:00Z";
+        let old = "2026-06-30T11:00:00Z";
+        let content = format!(
+            "\n\
+             [{recent}] fresh_restart reason=recycle\n\
+             [{recent}] auto_trigger_timeout pane=%1\n\
+             [{recent}] route_submit_ok\n\
+             [{old}] startup_miss pane=%1\n\
+             malformed without timestamp\n\
+             [] ctrl_d\n\
+             [{recent}] received Ctrl-D from pane\n"
+        );
+
+        assert_eq!(recent_restart_count_from_session_log(&content, now), 3);
     }
 }

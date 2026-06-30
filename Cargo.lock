@@ -562,6 +562,7 @@ name = "agent-doc-session-accretion"
 version = "0.34.65"
 dependencies = [
  "agent-doc-element",
+ "agent-doc-log-time",
  "serde",
 ]
 

@@ -4352,6 +4352,7 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
         "pub fn compaction_guidance(",
         "pub fn exchange_metrics(",
         "pub fn is_restart_churn_event(",
+        "pub fn recent_restart_count_from_session_log(",
         "pub fn resolve_queue_context_reset_opt_in(",
         "pub fn resolve_clear_threshold(",
         "pub fn context_reset_reason_for_recent_compaction(",
@@ -4378,6 +4379,11 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
         "fn level_label(",
         "pub fn is_restart_churn_event(",
         "fn is_restart_churn_event(",
+        "pub fn recent_restart_count_from_session_log(",
+        "fn recent_restart_count_from_session_log(",
+        "strip_prefix('[')",
+        "split_once(']')",
+        "split_once(\"] \")",
         "pub fn resolve_queue_context_reset_opt_in(",
         "fn resolve_queue_context_reset_opt_in(",
         "pub fn resolve_clear_threshold(",
@@ -4399,6 +4405,10 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
         orchestration_source.contains("evaluate_session_accretion(session_accretion_input(")
             && orchestration_source.contains("SessionAccretionInput {"),
         "orchestration session_accretion should gather IO facts then call focused policy directly"
+    );
+    assert!(
+        orchestration_source.contains("recent_restart_count_from_session_log(&content, now)"),
+        "orchestration session_accretion should delegate session-log restart counting to the focused crate"
     );
     assert!(
         orchestration_source.contains("resolve_queue_context_reset_opt_in(")
@@ -4446,6 +4456,7 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
     let parsed: toml::Value = toml::from_str(&focused_manifest).unwrap();
     let dependencies = parsed["dependencies"].as_table().unwrap();
     assert!(dependencies.contains_key("agent-doc-element"));
+    assert!(dependencies.contains_key("agent-doc-log-time"));
     for forbidden in [
         "agent-doc-core",
         "agent-doc-orchestration",
@@ -5086,6 +5097,10 @@ fn test_agent_doc_lease_is_freshness_boundary() {
             "agent-doc-supervisor/src/recycle_inflight.rs",
             "pub fn recycle_inflight_is_fresh(",
         ),
+        (
+            "agent-doc-supervisor/src/route_submit_inflight.rs",
+            "pub fn route_submit_lease_is_fresh(",
+        ),
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -5272,7 +5287,6 @@ fn test_agent_doc_supervisor_owns_recycle_marker_policy() {
             && recycle_inflight.contains("recycle_inflight_marker_is_fresh"),
         "recycle_inflight adapter should import focused supervisor marker policy directly"
     );
-
     for (relative, required) in [
         (
             "agent-doc-orchestration/src/start/idle_watch.rs",
@@ -5293,6 +5307,66 @@ fn test_agent_doc_supervisor_owns_recycle_marker_policy() {
             "{relative} should call focused supervisor recycle marker policy directly: {required}"
         );
     }
+}
+
+#[test]
+fn test_agent_doc_supervisor_owns_route_submit_inflight_marker_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let supervisor_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/lib.rs")).unwrap();
+    assert!(supervisor_lib.contains("pub mod route_submit_inflight;"));
+
+    let supervisor_route_submit =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/route_submit_inflight.rs"))
+            .unwrap();
+    for required in [
+        "pub const ROUTE_IN_FLIGHT_DIR",
+        "pub const ROUTE_IN_FLIGHT_TTL_SECS",
+        "pub const ROUTE_READY_PROBE_TTL_SECS",
+        "pub const ROUTE_BLOCKED_DIR",
+        "pub const ROUTE_BLOCKED_TTL_SECS",
+        "pub const ROUTE_DISPATCH_SUBMIT_REASON",
+        "pub const ROUTE_DISPATCH_ONLY_READY_PROBE_REASON",
+        "pub struct RouteSubmitInFlight",
+        "pub struct RouteSubmitBlocked",
+        "pub fn route_submit_inflight_marker(",
+        "pub fn route_submit_blocked_marker(",
+        "pub fn route_submit_ttl_secs_for_reason(",
+        "pub fn route_submit_inflight_marker_is_fresh(",
+        "pub fn route_submit_blocked_marker_is_fresh(",
+        "agent_doc_lease::timestamp_is_fresh",
+    ] {
+        assert!(
+            supervisor_route_submit.contains(required),
+            "agent-doc-supervisor must own route-submit marker policy: {required}"
+        );
+    }
+
+    let route_in_flight =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route_in_flight.rs"))
+            .unwrap();
+    for forbidden in [
+        "const ROUTE_IN_FLIGHT_",
+        "const ROUTE_READY_PROBE_",
+        "const ROUTE_BLOCKED_",
+        "pub struct RouteSubmitInFlight {",
+        "pub struct RouteSubmitBlocked {",
+        "fn route_submit_ttl_secs_for_reason(",
+        "pub fn route_submit_ttl_secs_for_reason(",
+        "agent_doc_lease::timestamp_is_fresh",
+        "pub use agent_doc_supervisor::route_submit_inflight",
+    ] {
+        assert!(
+            !route_in_flight.contains(forbidden),
+            "route_in_flight must stay a marker IO adapter, not re-own or facade route-submit marker policy: {forbidden}"
+        );
+    }
+    assert!(
+        route_in_flight.contains("use agent_doc_supervisor::route_submit_inflight::{")
+            && route_in_flight.contains("route_submit_inflight_marker_is_fresh")
+            && route_in_flight.contains("route_submit_blocked_marker_is_fresh"),
+        "route_in_flight adapter should import focused supervisor marker policy directly"
+    );
 }
 
 #[test]

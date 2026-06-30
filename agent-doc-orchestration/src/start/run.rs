@@ -67,7 +67,7 @@ struct HarnessLaunchSpec {
 /// loop is behaviorally identical to the original inline code.
 fn build_harness_launch_spec(
     fm: &frontmatter::Frontmatter,
-    global_config: &config::Config,
+    global_config: &agent_doc_config::Config,
     canonical: &Path,
     session_log: &mut Option<std::fs::File>,
     route_owned: bool,
@@ -146,7 +146,7 @@ fn configure_managed_capability_proof_for_spec(
     shared: &Arc<SupervisorShared>,
     spec: &HarnessLaunchSpec,
     fm: &frontmatter::Frontmatter,
-    global_config: &config::Config,
+    global_config: &agent_doc_config::Config,
     session_log: &mut Option<std::fs::File>,
 ) -> Option<std::thread::JoinHandle<()>> {
     let proof_epoch = shared.next_capability_proof_epoch();
@@ -249,7 +249,7 @@ pub fn run_with_reap_policy(
 
     let rc = crate::graph::RunContext::new(file.to_path_buf());
     let (fm, _body) = frontmatter_io::parse_for_file_with_context(&updated_content, file, &rc)?;
-    let global_config = config::load().unwrap_or_default();
+    let global_config = agent_doc_config::load().unwrap_or_default();
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
     let project_root = agent_doc_fs::find_project_root(&canonical).unwrap_or_else(|| {
         std::env::current_dir()
@@ -1859,8 +1859,8 @@ pub fn run_with_reap_policy(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::config::Config;
     use crate::hooks::fire_doc_hooks;
+    use agent_doc_config::Config;
     use agent_doc_frontmatter::frontmatter::Frontmatter;
     use agent_doc_project_config_io as project_config_io;
     use std::collections::HashMap;

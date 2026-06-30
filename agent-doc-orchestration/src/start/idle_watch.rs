@@ -800,7 +800,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     && let Ok(content) = std::fs::read_to_string(&path)
                     && let Ok((fm, _)) = agent_doc_frontmatter::frontmatter::parse(&content)
                 {
-                    let global = crate::config::load().unwrap_or_default();
+                    let global = agent_doc_config::load().unwrap_or_default();
                     let resolved = crate::harness::HarnessConfig::from_context(&fm, &global);
                     let harness_changed = resolved.binary != launch_harness_binary;
                     if harness_changed {

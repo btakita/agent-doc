@@ -69,13 +69,9 @@ use crate::{
     parallel,
     queue_dispatch::{self, QueueItemKind},
 };
+use agent_doc_config::{AgentConfig, Config};
 use agent_doc_diff as diff;
-use agent_doc_orchestration::{
-    agent,
-    config::{AgentConfig, Config},
-    preflight::PreflightOutput,
-    snapshot, write,
-};
+use agent_doc_orchestration::{agent, preflight::PreflightOutput, snapshot, write};
 use agent_doc_turn_executor::agent_stream::StreamChunk;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

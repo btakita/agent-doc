@@ -670,7 +670,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // Step 4a: Scan diff for inline `/model <x>` command and strip the matching
     // line(s) before downstream classification. The strip prevents `/model` from
     // double-emitting in `builtin_commands`.
-    let global_config = config::load().unwrap_or_default();
+    let global_config = agent_doc_config::load().unwrap_or_default();
     let harness = rc.harness();
     let model_scan = initial_diff
         .as_ref()

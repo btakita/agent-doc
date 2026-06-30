@@ -1426,7 +1426,7 @@ fn managed_capability_proof_status(
     let rc = crate::graph::RunContext::new(file.to_path_buf());
     let fm = frontmatter_io::parse_for_file_with_context(&content, file, &rc).map(|(fm, _)| fm)?;
     #[cfg(test)]
-    let global_config = crate::config::Config::default();
+    let global_config = agent_doc_config::Config::default();
     #[cfg(not(test))]
     let global_config = rc.global_config();
     if !crate::agent::codex::managed_capability_contract_required_for_doc_and_harness(

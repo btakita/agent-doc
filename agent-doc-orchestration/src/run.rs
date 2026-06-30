@@ -124,6 +124,7 @@ use std::time::{Duration, Instant};
 
 use agent_doc_element::element;
 
+use agent_doc_config::Config;
 use agent_doc_diff as diff;
 use agent_doc_frontmatter::frontmatter;
 #[cfg(test)]
@@ -133,9 +134,7 @@ use agent_doc_prompt_cache::{
 };
 use agent_doc_template as template;
 
-use crate::{
-    agent, config::Config, diff_io, frontmatter_io, git, merge, snapshot, template_io, write,
-};
+use crate::{agent, diff_io, frontmatter_io, git, merge, snapshot, template_io, write};
 
 const AGENT_DOC_RUN_HEARTBEAT_SECS_ENV: &str = "AGENT_DOC_RUN_HEARTBEAT_SECS";
 const DEFAULT_RUN_HEARTBEAT_SECS: u64 = 30;
@@ -2056,7 +2055,7 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
+    use agent_doc_config::Config;
     use std::sync::{Arc, Barrier};
     use tempfile::TempDir;
 

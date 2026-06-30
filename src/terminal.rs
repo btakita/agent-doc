@@ -38,13 +38,12 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use std::process::Command;
 
-use agent_doc_orchestration::config;
 use tmux_router::Tmux;
 
 /// Run the terminal command: ensure tmux session exists, launch terminal if needed.
 pub fn run(file: &Path, session_name: Option<&str>) -> Result<()> {
     let tmux = Tmux::default();
-    let cfg = config::load()?;
+    let cfg = agent_doc_config::load()?;
 
     // Step 1: Resolve the target session
     let target = resolve_target_session(&tmux, file, session_name)?;
@@ -162,7 +161,7 @@ fn pane_session_name(tmux: &Tmux, pane_id: &str) -> Option<String> {
 // ---------------------------------------------------------------------------
 
 /// Build the tmux command and launch the configured terminal emulator.
-fn launch_terminal(cfg: &config::Config, session_name: &str) -> Result<()> {
+fn launch_terminal(cfg: &agent_doc_config::Config, session_name: &str) -> Result<()> {
     let tmux_command = format!("tmux new-session -A -s {}", shell_escape(session_name));
     let terminal_cmd = resolve_terminal_command(cfg, &tmux_command)?;
 
@@ -209,7 +208,7 @@ fn is_session_attached(tmux: &Tmux, session: &str) -> bool {
 /// 1. `[terminal] command` in config.toml
 /// 2. `$TERMINAL` env var (used as: `$TERMINAL -e {tmux_command}`)
 /// 3. Error with instructions
-fn resolve_terminal_command(cfg: &config::Config, tmux_command: &str) -> Result<String> {
+fn resolve_terminal_command(cfg: &agent_doc_config::Config, tmux_command: &str) -> Result<String> {
     if let Some(ref terminal) = cfg.terminal
         && let Some(ref cmd_template) = terminal.command
     {
@@ -314,8 +313,8 @@ mod tests {
 
     #[test]
     fn resolve_terminal_from_config() {
-        let cfg = config::Config {
-            terminal: Some(config::TerminalConfig {
+        let cfg = agent_doc_config::Config {
+            terminal: Some(agent_doc_config::TerminalConfig {
                 command: Some("wezterm start -- {tmux_command}".to_string()),
             }),
             ..Default::default()
@@ -326,7 +325,7 @@ mod tests {
 
     #[test]
     fn resolve_terminal_no_config_no_env() {
-        let cfg = config::Config::default();
+        let cfg = agent_doc_config::Config::default();
         let _terminal = EnvGuard::unset("TERMINAL");
         let result = resolve_terminal_command(&cfg, "tmux new-session -A -s 0");
         assert!(result.is_err());

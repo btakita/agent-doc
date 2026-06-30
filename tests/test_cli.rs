@@ -2157,6 +2157,7 @@ fn test_manifest_uses_publishable_dependency_contract() {
     );
 
     for crate_name in [
+        "agent-doc-config",
         "agent-doc-debounce",
         "agent-doc-diff",
         "agent-doc-document-realtime",
@@ -4886,19 +4887,12 @@ fn test_project_config_io_tmux_helpers_have_no_config_facade() {
         "agent-doc-project-config-io must stay a first-class workspace crate"
     );
 
-    let config_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/config.rs")).unwrap();
-    for forbidden_snippet in [
-        "pub use crate::project_config_io",
-        "project_tmux_session,",
-        "clear_project_tmux_session",
-        "update_project_tmux_session",
-    ] {
-        assert!(
-            !config_source.contains(forbidden_snippet),
-            "config.rs must not re-export project-config IO helpers: {forbidden_snippet}"
-        );
-    }
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/config.rs")
+            .exists(),
+        "orchestration must not keep global config as a module facade"
+    );
 
     let project_config_source =
         fs::read_to_string(manifest_dir.join("agent-doc-project-config-io/src/lib.rs")).unwrap();
@@ -5035,6 +5029,126 @@ fn test_project_config_io_tmux_helpers_have_no_config_facade() {
         closeout_guards.contains("agent_doc_diff::first_bare_prompt_prefix_target_before_marker"),
         "session_check closeout guards should call the focused diff helper directly"
     );
+}
+
+#[test]
+fn test_global_config_has_no_orchestration_facade() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-config")),
+        "agent-doc-config must stay a first-class workspace crate"
+    );
+
+    let config_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-config/src/lib.rs")).unwrap();
+    for required_snippet in [
+        "pub enum ExecutionMode",
+        "pub struct Config",
+        "pub struct TerminalConfig",
+        "pub struct AgentConfig",
+        "pub fn load()",
+        "fn config_path()",
+        "CodexNetworkAccess",
+        "ModelConfig",
+    ] {
+        assert!(
+            config_source.contains(required_snippet),
+            "agent-doc-config must own global config vocabulary and loading: {required_snippet}"
+        );
+    }
+
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod config"),
+        "orchestration must not expose global config as a module facade"
+    );
+
+    for relative in [
+        "src/main.rs",
+        "src/init.rs",
+        "src/orchestrate.rs",
+        "src/session_actor_cmd.rs",
+        "src/terminal.rs",
+        "agent-doc-orchestration/src/agent/mod.rs",
+        "agent-doc-orchestration/src/agent/codex.rs",
+        "agent-doc-orchestration/src/graph.rs",
+        "agent-doc-orchestration/src/harness.rs",
+        "agent-doc-orchestration/src/run.rs",
+        "agent-doc-orchestration/src/start.rs",
+        "agent-doc-orchestration/src/start/run.rs",
+        "agent-doc-orchestration/src/start/idle_watch.rs",
+        "agent-doc-orchestration/src/stream.rs",
+        "agent-doc-orchestration/src/watch.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("agent_doc_config"),
+            "{relative} should call global config through agent-doc-config directly"
+        );
+        for forbidden_snippet in [
+            "agent_doc_orchestration::config",
+            "crate::config::",
+            "use crate::config",
+            "use crate::{config",
+            "pub use agent_doc_config",
+        ] {
+            assert!(
+                !source.contains(forbidden_snippet),
+                "{relative} must not route global config through orchestration: {forbidden_snippet}"
+            );
+        }
+    }
+
+    let root_manifest: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let root_dependencies = root_manifest["dependencies"].as_table().unwrap();
+    assert!(
+        root_dependencies.contains_key("agent-doc-config"),
+        "the CLI crate must depend on the focused global config crate directly"
+    );
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
+    assert!(
+        orchestration_dependencies.contains_key("agent-doc-config"),
+        "orchestration must depend on the focused global config crate directly"
+    );
+
+    let focused_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-config/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&focused_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    for required in [
+        "agent-doc-frontmatter",
+        "agent-doc-model-tier",
+        "serde",
+        "toml",
+    ] {
+        assert!(
+            dependencies.contains_key(required),
+            "agent-doc-config should depend on {required} for global config parsing"
+        );
+    }
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-config must stay free of core, orchestration, git, editor IPC, sqlite, and tmux-router dependencies"
+        );
+    }
 }
 
 #[test]

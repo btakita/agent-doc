@@ -111,7 +111,7 @@ use agent_doc_frontmatter::frontmatter;
 use agent_doc_session_accretion::SessionAccretionLevel;
 use agent_doc_session_accretion::SessionAccretionReport;
 
-use crate::{config, diff_io, frontmatter_io, git, repair, resync, sessions, snapshot, sync};
+use crate::{diff_io, frontmatter_io, git, repair, resync, sessions, snapshot, sync};
 use agent_doc_element::element::{
     is_backlog_component, is_review_component, is_tracked_work_component,
 };

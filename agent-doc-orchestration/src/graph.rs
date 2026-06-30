@@ -31,7 +31,7 @@ use agent_doc_frontmatter::project_config::ProjectConfig;
 use lazily::{CellHandle, Context, SlotHandle};
 
 use crate::cycle_state::CycleState;
-use crate::{config, sessions};
+use crate::sessions;
 use agent_doc_project_config_io as project_config_io;
 
 pub type FilePathCell = CellHandle<PathBuf>;
@@ -64,7 +64,7 @@ pub type HarnessSlot = SlotHandle<String>;
 /// Phase 10 (#lr-actor-10): cached global user configuration. For CLI runs this
 /// is process-static; for long-lived actors it is invalidated by config-change
 /// events before the next read.
-pub type GlobalConfigSlot = SlotHandle<Arc<config::Config>>;
+pub type GlobalConfigSlot = SlotHandle<Arc<agent_doc_config::Config>>;
 /// Phase 10 (#lr-actor-10): cached session registry for the current document's
 /// project root. Read-modify-write callers still load under `RegistryLock`.
 pub type SessionRegistrySlot = SlotHandle<Arc<tmux_router::Registry>>;
@@ -305,12 +305,12 @@ impl RunContext {
 
         let harness = ctx.slot(|_ctx: &Context| agent_doc_model_tier::detect_harness());
 
-        let global_config = ctx.slot(|_ctx: &Context| -> Arc<config::Config> {
-            Arc::new(match config::load() {
+        let global_config = ctx.slot(|_ctx: &Context| -> Arc<agent_doc_config::Config> {
+            Arc::new(match agent_doc_config::load() {
                 Ok(config) => config,
                 Err(e) => {
                     eprintln!("[graph] global config load failed: {e}");
-                    config::Config::default()
+                    agent_doc_config::Config::default()
                 }
             })
         });
@@ -450,7 +450,7 @@ impl RunContext {
     }
 
     /// Phase 10 (#lr-actor-10): cached global user configuration.
-    pub fn global_config(&self) -> Arc<config::Config> {
+    pub fn global_config(&self) -> Arc<agent_doc_config::Config> {
         self.ctx.get(&self.global_config)
     }
 

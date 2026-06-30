@@ -3732,9 +3732,9 @@ fn capability_proof_status(ctx: &SessionContext) -> String {
         Err(err) => return format!("unknown (failed to parse frontmatter: {err})"),
     };
     #[cfg(test)]
-    let global_config = agent_doc_orchestration::config::Config::default();
+    let global_config = agent_doc_config::Config::default();
     #[cfg(not(test))]
-    let global_config = agent_doc_orchestration::config::load().unwrap_or_default();
+    let global_config = agent_doc_config::load().unwrap_or_default();
     if !agent_doc_orchestration::agent::codex::managed_capability_contract_required_for_doc_and_harness(
         &ctx.canonical_file,
         &fm,

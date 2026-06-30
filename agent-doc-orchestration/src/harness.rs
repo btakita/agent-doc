@@ -17,7 +17,7 @@
 //! - `restart_args` returns the full arg list for a restart iteration.
 //! - `trigger_command` substitutes the file path into the template.
 
-use crate::config::Config;
+use agent_doc_config::Config;
 use agent_doc_frontmatter::frontmatter::Frontmatter;
 use agent_doc_turn_executor::codex_launch::codex_resume_restart_args;
 use anyhow::Result;

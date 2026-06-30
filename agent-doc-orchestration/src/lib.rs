@@ -11,8 +11,8 @@
 //! Wave 0 (scaffold) + Wave 1a: `ipc_socket` (the one dependency-free leaf).
 //! Direction A, increment 2: `env`, `secret_redact` — two more
 //! zero-dependency foundation leaves (no `crate::` refs).
-//! Direction A, increment 3: `config`. Project config file I/O now lives in
-//! `agent-doc-project-config-io`.
+//! Direction A, increment 3: global config now lives in `agent-doc-config`.
+//! Project config file I/O lives in `agent-doc-project-config-io`.
 //! Direction A, increment 4: `ops_log` — best-effort operational logging.
 //! Pulled project-root discovery and optional file reads into `agent-doc-fs`
 //! so effectful adapters no longer reach through `snapshot`.
@@ -35,7 +35,6 @@
 //! split into narrower crates.
 
 // Foundation utilities (increments 1–5).
-pub mod config;
 pub mod env;
 pub mod input_diag;
 pub mod ipc_socket;

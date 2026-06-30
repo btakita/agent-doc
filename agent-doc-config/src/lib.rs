@@ -1,4 +1,4 @@
-//! # Module: config
+//! # Crate: agent-doc-config
 //!
 //! ## Spec
 //! - Defines `Config`: global user configuration loaded from `~/.config/agent-doc/config.toml`

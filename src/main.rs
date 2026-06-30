@@ -6,7 +6,7 @@
 //! - `AgentDocMode` enum (`Append`, `Template`, `Stream`) is a `ValueEnum` used by `Convert`
 //!   and `Mode` subcommands; `Append` maps to inline format, `Template`/`Stream` to CRDT.
 //! - On startup, calls `upgrade::warn_if_outdated()` for all subcommands except `Upgrade`.
-//! - Loads global config via `agent_doc_orchestration::config::load()` before dispatching; config is threaded into
+//! - Loads global config via `agent_doc_config::load()` before dispatching; config is threaded into
 //!   subcommands that accept an agent backend (`Run`, `Stream`, `Watch`, `Init`).
 //! - Each subcommand delegates immediately to its own module (`agent_doc_orchestration::run::run`, `agent_doc_orchestration::diff_io::run`, etc.);
 //!   `main` contains no business logic beyond argument destructuring and dispatch.
@@ -2322,7 +2322,7 @@ fn main() -> anyhow::Result<()> {
         );
     }
 
-    let config = agent_doc_orchestration::config::load()?;
+    let config = agent_doc_config::load()?;
 
     match cli.command {
         Commands::Run {

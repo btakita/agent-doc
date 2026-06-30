@@ -37,7 +37,7 @@ use std::process::{Child, Output};
 use std::time::{Duration, Instant};
 
 use self::streaming::StreamingAgent;
-use crate::config::{AgentConfig, Config};
+use agent_doc_config::{AgentConfig, Config};
 use agent_doc_frontmatter::frontmatter::{CodexNetworkAccess, Frontmatter};
 
 /// Response from an agent backend.

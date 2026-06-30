@@ -76,6 +76,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::agent::streaming::StreamingAgent;
+use agent_doc_config::Config;
 use agent_doc_diff as diff;
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_merge::crdt;
@@ -85,7 +86,7 @@ use agent_doc_session_accretion::SessionAccretionReport;
 use agent_doc_template as template;
 use agent_doc_turn_executor::agent_stream::StreamChunk;
 
-use crate::{agent, config::Config, diff_io, git, repair, snapshot, template_io};
+use crate::{agent, diff_io, git, repair, snapshot, template_io};
 
 /// Run the stream command: stream agent output to document in real-time.
 ///
@@ -618,8 +619,7 @@ fn build_prompt(
 
 /// Resolve a streaming agent backend by name.
 fn resolve_streaming(
-    name: &str,
-    config: Option<&crate::config::AgentConfig>,
+    name: &str, config: Option<&agent_doc_config::AgentConfig>,
     env: Vec<(String, Option<String>)>,
     file: &Path,
     fm: &agent_doc_frontmatter::frontmatter::Frontmatter,

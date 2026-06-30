@@ -396,8 +396,8 @@ pub(crate) fn is_help_screen_visible(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::config::Config;
     use crate::hooks::fire_doc_hooks;
+    use agent_doc_config::Config;
     use agent_doc_frontmatter::frontmatter::Frontmatter;
     use agent_doc_project_config_io as project_config_io;
     use std::collections::HashMap;

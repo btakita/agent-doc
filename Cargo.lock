@@ -23,6 +23,7 @@ dependencies = [
 name = "agent-doc"
 version = "0.34.65"
 dependencies = [
+ "agent-doc-config",
  "agent-doc-controller",
  "agent-doc-debounce",
  "agent-doc-diff",
@@ -84,6 +85,17 @@ dependencies = [
  "uuid",
  "windows-sys 0.61.2",
  "zip",
+]
+
+[[package]]
+name = "agent-doc-config"
+version = "0.34.65"
+dependencies = [
+ "agent-doc-frontmatter",
+ "agent-doc-model-tier",
+ "anyhow",
+ "serde",
+ "toml 1.1.2+spec-1.1.0",
 ]
 
 [[package]]
@@ -353,6 +365,7 @@ dependencies = [
 name = "agent-doc-orchestration"
 version = "0.34.65"
 dependencies = [
+ "agent-doc-config",
  "agent-doc-controller",
  "agent-doc-debounce",
  "agent-doc-diff",

@@ -409,7 +409,7 @@ fn add_dirs_from_args(args: &[String]) -> Vec<PathBuf> {
 
 fn resolved_codex_agent_args_for_contract(
     fm: &Frontmatter,
-    global_config: &crate::config::Config,
+    global_config: &agent_doc_config::Config,
 ) -> Option<String> {
     fm.agent_args
         .clone()
@@ -438,7 +438,7 @@ pub fn writable_root_contract_id(roots: &[PathBuf]) -> Option<String> {
 pub fn managed_writable_roots_for_doc(
     file: &Path,
     fm: &Frontmatter,
-    global_config: &crate::config::Config,
+    global_config: &agent_doc_config::Config,
 ) -> Vec<PathBuf> {
     let mut args = Vec::new();
     if let Some(raw_args) = resolved_codex_agent_args_for_contract(fm, global_config) {
@@ -451,7 +451,7 @@ pub fn managed_writable_roots_for_doc(
 pub fn managed_writable_root_contract_id_for_doc(
     file: &Path,
     fm: &Frontmatter,
-    global_config: &crate::config::Config,
+    global_config: &agent_doc_config::Config,
 ) -> Option<String> {
     writable_root_contract_id(&managed_writable_roots_for_doc(file, fm, global_config))
 }
@@ -1222,7 +1222,7 @@ fn prove_writable_root(path: &Path) -> Result<()> {
 pub fn managed_capability_contract_required_for_doc_and_harness(
     file: &Path,
     fm: &Frontmatter,
-    global_config: &crate::config::Config,
+    global_config: &agent_doc_config::Config,
     harness: &str,
 ) -> bool {
     if harness == "opencode" {
@@ -1256,7 +1256,7 @@ fn args_contain_add_dir(args: &str) -> bool {
 pub fn managed_capability_contract_required(
     args: &[String],
     fm: &Frontmatter,
-    global_config: &crate::config::Config,
+    global_config: &agent_doc_config::Config,
     harness: &str,
 ) -> bool {
     if harness == "opencode" {
@@ -1277,7 +1277,7 @@ pub fn prove_managed_session_capabilities(
     args: &[String],
     env: &std::collections::HashMap<String, String>,
     fm: &Frontmatter,
-    global_config: &crate::config::Config,
+    global_config: &agent_doc_config::Config,
     harness: &str,
     probe_timeout: Duration,
 ) -> Result<Option<String>> {
@@ -2673,7 +2673,7 @@ real stderr
 
     #[test]
     fn managed_capability_contract_requires_network_ssh_or_writable_roots() {
-        let config = crate::config::Config::default();
+        let config = agent_doc_config::Config::default();
         let mut fm = Frontmatter::default();
         assert!(!managed_capability_contract_required(
             &[],
@@ -2890,7 +2890,7 @@ printf '%s\n' '{{"type":"message","text":"{}\n"}}'
             ],
             &env,
             &fm,
-            &crate::config::Config::default(),
+            &agent_doc_config::Config::default(),
             "opencode",
             agent_doc_turn_executor::capability_proof::DEFAULT_MANAGED_PROOF_PROBE_TIMEOUT,
         )
@@ -2928,7 +2928,7 @@ printf '%s\n' '{{"type":"turn.completed","usage":{{}}}}'
             &args,
             &env,
             &fm,
-            &crate::config::Config::default(),
+            &agent_doc_config::Config::default(),
             "codex",
             agent_doc_turn_executor::capability_proof::DEFAULT_MANAGED_PROOF_PROBE_TIMEOUT,
         )
@@ -2970,7 +2970,7 @@ printf '%s\n' '{{"type":"turn.completed","usage":{{}}}}'
             &args,
             &env,
             &fm,
-            &crate::config::Config::default(),
+            &agent_doc_config::Config::default(),
             "codex",
             agent_doc_turn_executor::capability_proof::DEFAULT_MANAGED_PROOF_PROBE_TIMEOUT,
         )
@@ -3088,7 +3088,7 @@ printf '%s\n' '{"type":"item.completed","item":{"id":"msg-2","type":"agent_messa
         assert!(managed_capability_contract_required_for_doc_and_harness(
             &doc,
             &fm,
-            &crate::config::Config::default(),
+            &agent_doc_config::Config::default(),
             "codex"
         ));
     }

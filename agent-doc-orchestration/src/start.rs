@@ -161,7 +161,7 @@ use agent_doc_turn_executor::auto_trigger::{
 };
 use agent_doc_turn_executor::capability_proof::managed_capability_proof_status_message;
 
-use crate::{config, sessions};
+use crate::sessions;
 use agent_doc_project_config_io as project_config_io;
 
 struct RouteOwnedCompletionConfig {
@@ -1662,7 +1662,7 @@ struct ManagedCapabilityProofTask {
     args: Vec<String>,
     env: std::collections::HashMap<String, String>,
     frontmatter: frontmatter::Frontmatter,
-    global_config: config::Config,
+    global_config: agent_doc_config::Config,
     session_log: Option<std::fs::File>,
 }
 
@@ -2372,7 +2372,7 @@ pub use run::*;
 
 fn resolve_agent_args(
     fm: &frontmatter::Frontmatter,
-    global_config: &config::Config,
+    global_config: &agent_doc_config::Config,
     harness: &crate::harness::HarnessConfig,
 ) -> Option<String> {
     match harness.binary.as_str() {
@@ -2478,7 +2478,7 @@ fn rebind_project_tmux_session_if_expected_dead(
 #[cfg(test)]
 mod th {
     use super::*;
-    use crate::config::Config;
+    use agent_doc_config::Config;
     use agent_doc_frontmatter::frontmatter::Frontmatter;
     use tmux_router::IsolatedTmux;
     pub(crate) struct ScopedCurrentDir {
@@ -2663,8 +2663,8 @@ pub(crate) use th::{
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::config::Config;
     use crate::hooks::fire_doc_hooks;
+    use agent_doc_config::Config;
     use agent_doc_frontmatter::frontmatter::Frontmatter;
     use agent_doc_project_config_io as project_config_io;
     use std::collections::HashMap;

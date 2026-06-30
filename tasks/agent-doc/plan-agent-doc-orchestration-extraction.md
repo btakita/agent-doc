@@ -279,6 +279,13 @@ focused crate under the old path.
   write/IPC/CRDT call sites and test setup; the old
   `agent-doc-orchestration/src/plugin_owner.rs` module was deleted rather than
   retained as a facade.
+- `agent-doc-ipc-protocol` now owns callback wire protocol policy: request,
+  response, patch, and pending-callback JSON schemas; callback request
+  construction; response construction; request expiry; pending urgency buckets;
+  pending projection; and stale response/request matching. Orchestration keeps
+  only callback sidecar directory discovery, request/response file IO, cleanup,
+  and pending-directory scanning effects while importing the focused protocol
+  directly.
 - `agent-doc-session-accretion` now owns recent restart-log counting policy:
   session-log timestamp parsing, blank/malformed line skips, recent-window
   filtering, restart-churn event extraction, and restart-heavy event counting.

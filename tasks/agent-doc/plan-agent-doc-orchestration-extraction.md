@@ -256,6 +256,12 @@ should be deleted during extraction.
   Session-check keeps active-session lookup, snapshot/file/git normalization,
   repair attempts, and user-facing interruption messages while importing the
   focused drift policy directly.
+- `agent-doc-turn::op_log` now owns session-check ops-log event vocabulary and
+  pure event parsing: preflight-start/write-consumed/snapshot-saved/
+  IPC-proof-insufficient event names, timestamp-prefix stripping, event-token
+  extraction, and missing-commit write-event classification. Session-check keeps
+  only project-root/log-file lookup, log scanning, recovery attempts, and
+  user-facing diagnostics while importing the focused ops-log policy directly.
 - `agent-doc-turn` now owns turn-status policy vocabulary: turn-active and
   stale-supervisor marker path constants, the readable turn-active marker schema,
   marker freshness/pane matching, and pane-title composition. Orchestration keeps

@@ -7127,6 +7127,8 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         .unwrap();
     for forbidden_snippet in [
         "fn looks_like_codex_transport_403_429(",
+        "fn append_resume_args(",
+        "fn codex_resume_restart_args(",
         "fn format_transport_403_429_diagnostic(",
         "fn codex_transport_403_429_diagnostic(",
         "struct CodexStderrNoiseReport",
@@ -7159,6 +7161,7 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
             && codex.contains("classify_child_network_probe_failure")
             && codex.contains("classify_child_required_ssh_probe_failure")
             && codex.contains("classify_child_writable_root_probe_failure")
+            && codex.contains("codex_resume_restart_args")
             && codex.contains("looks_like_local_browser_cdp_permission_denied")
             && codex.contains("resolve_codex_network_access")
             && codex.contains("resume_capability_drift_notice")

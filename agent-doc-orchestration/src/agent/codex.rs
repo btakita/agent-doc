@@ -65,11 +65,11 @@ use agent_doc_frontmatter::frontmatter::{CodexNetworkAccess, Frontmatter};
 use agent_doc_turn_executor::agent_stream::{StreamChunk, parse_codex_line};
 use agent_doc_turn_executor::codex_launch::{
     classify_child_network_probe_failure, classify_child_required_ssh_probe_failure,
-    classify_child_writable_root_probe_failure, codex_transport_403_429_diagnostic,
-    filter_codex_stderr_noise, format_required_ssh_failure, looks_like_codex_transport_403_429,
-    looks_like_local_browser_cdp_permission_denied, looks_like_ssh_alias_config_failure,
-    looks_like_ssh_auth_failure, looks_like_ssh_dns_failure, looks_like_ssh_network_failure,
-    resolve_codex_network_access, resume_capability_drift_notice,
+    classify_child_writable_root_probe_failure, codex_resume_restart_args,
+    codex_transport_403_429_diagnostic, filter_codex_stderr_noise, format_required_ssh_failure,
+    looks_like_codex_transport_403_429, looks_like_local_browser_cdp_permission_denied,
+    looks_like_ssh_alias_config_failure, looks_like_ssh_auth_failure, looks_like_ssh_dns_failure,
+    looks_like_ssh_network_failure, resolve_codex_network_access, resume_capability_drift_notice,
     transcript_has_required_ssh_failure, transcript_proves_required_ssh_success,
 };
 
@@ -572,7 +572,7 @@ fn prove_codex_child_network_access(
     let probe_args = codex_exec_args_for_probe(launch_args);
     let codex =
         Codex::new(Some(command.to_string()), Some(probe_args)).with_env(env_map_as_overrides(env));
-    let mut cmd = codex.build_command(None, false, None);
+    let mut cmd = codex.build_command(None, false, None)?;
     cmd.stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
@@ -815,7 +815,7 @@ fn prove_codex_child_writable_roots(
     let probe_args = codex_exec_args_for_probe(launch_args);
     let codex =
         Codex::new(Some(command.to_string()), Some(probe_args)).with_env(env_map_as_overrides(env));
-    let mut cmd = codex.build_command(None, false, None);
+    let mut cmd = codex.build_command(None, false, None)?;
     cmd.stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
@@ -1108,37 +1108,6 @@ impl Codex {
         }
     }
 
-    fn append_resume_args(cmd: &mut Command, base_args: &[String]) {
-        let mut args = base_args.iter().peekable();
-        while let Some(arg) = args.next() {
-            match arg.as_str() {
-                "exec" | "--json" => {}
-                "-s" | "--sandbox" => {
-                    if let Some(mode) = args.next() {
-                        cmd.arg("-c").arg(format!("sandbox_mode={mode:?}"));
-                    } else {
-                        cmd.arg(arg);
-                    }
-                }
-                "--add-dir" => {
-                    // `codex exec resume` does not accept --add-dir; the resumed
-                    // session inherits writable roots from the original exec.
-                    let _ = args.next();
-                }
-                _ if arg.starts_with("--sandbox=") => {
-                    let mode = &arg["--sandbox=".len()..];
-                    cmd.arg("-c").arg(format!("sandbox_mode={mode:?}"));
-                }
-                _ if arg.starts_with("--add-dir=") => {
-                    // Same as --add-dir <DIR> above — strip for resume.
-                }
-                _ => {
-                    cmd.arg(arg);
-                }
-            }
-        }
-    }
-
     fn write_prompt_to_child(
         stdin: &mut std::process::ChildStdin,
         prompt: &str,
@@ -1155,13 +1124,22 @@ impl Codex {
         }
     }
 
-    fn build_command(&self, session_id: Option<&str>, _fork: bool, model: Option<&str>) -> Command {
+    fn build_command(
+        &self,
+        session_id: Option<&str>,
+        _fork: bool,
+        model: Option<&str>,
+    ) -> Result<Command> {
         let mut cmd = Command::new(&self.command);
 
         if let Some(sid) = session_id {
-            // codex exec resume <id> --json -c sandbox_mode="workspace-write"
-            cmd.arg("exec").arg("resume").arg(sid).arg("--json");
-            Self::append_resume_args(&mut cmd, &self.base_args);
+            let prefix = vec![
+                "exec".to_string(),
+                "resume".to_string(),
+                sid.to_string(),
+                "--json".to_string(),
+            ];
+            cmd.args(codex_resume_restart_args(&prefix, &self.base_args)?);
         } else {
             // Fresh exec is also the fallback for `fork=true`: Codex has no
             // non-interactive "fork latest session" equivalent.
@@ -1174,7 +1152,7 @@ impl Codex {
 
         self.apply_env_overrides(&mut cmd);
 
-        cmd
+        Ok(cmd)
     }
 
     fn should_fresh_start_resume_for_writable_roots(&self, session_id: Option<&str>) -> bool {
@@ -1363,7 +1341,7 @@ impl Codex {
         model: Option<&str>,
         required_ssh_match_terms: &[String],
     ) -> Result<ParsedCodexResponse> {
-        let mut cmd = self.build_command(session_id, false, model);
+        let mut cmd = self.build_command(session_id, false, model)?;
         cmd.stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
@@ -1460,7 +1438,7 @@ impl Codex {
         session_id: Option<&str>,
         model: Option<&str>,
     ) -> Result<StreamProcess> {
-        let mut cmd = self.build_command(session_id, false, model);
+        let mut cmd = self.build_command(session_id, false, model)?;
         cmd.stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
@@ -2124,7 +2102,7 @@ mod tests {
     #[test]
     fn build_command_exec_preserves_default_sandbox_flag() {
         let codex = Codex::new(None, None);
-        let cmd = codex.build_command(None, false, None);
+        let cmd = codex.build_command(None, false, None).unwrap();
 
         assert_eq!(
             command_args(&cmd),
@@ -2144,7 +2122,9 @@ mod tests {
                 "--skip-git-repo-check".into(),
             ]),
         );
-        let cmd = codex.build_command(Some("thread-123"), false, None);
+        let cmd = codex
+            .build_command(Some("thread-123"), false, None)
+            .unwrap();
 
         assert_eq!(
             command_args(&cmd),
@@ -2171,7 +2151,7 @@ mod tests {
                 "--ignore-user-config".into(),
             ]),
         );
-        let cmd = codex.build_command(None, true, Some("gpt-5.4"));
+        let cmd = codex.build_command(None, true, Some("gpt-5.4")).unwrap();
 
         assert_eq!(
             command_args(&cmd),
@@ -2199,7 +2179,7 @@ mod tests {
                 "/home/user/.git/modules/sub".into(),
             ]),
         );
-        let cmd = codex.build_command(None, false, None);
+        let cmd = codex.build_command(None, false, None).unwrap();
 
         assert_eq!(
             command_args(&cmd),
@@ -2228,7 +2208,9 @@ mod tests {
                 "--skip-git-repo-check".into(),
             ]),
         );
-        let cmd = codex.build_command(Some("thread-456"), false, None);
+        let cmd = codex
+            .build_command(Some("thread-456"), false, None)
+            .unwrap();
 
         assert_eq!(
             command_args(&cmd),
@@ -2256,7 +2238,9 @@ mod tests {
                 "--add-dir=/home/user/.git".into(),
             ]),
         );
-        let cmd = codex.build_command(Some("thread-789"), false, None);
+        let cmd = codex
+            .build_command(Some("thread-789"), false, None)
+            .unwrap();
 
         assert_eq!(
             command_args(&cmd),
@@ -2286,7 +2270,9 @@ mod tests {
                 "/home/user/.git".into(),
             ]),
         );
-        let cmd = codex.build_command(Some("thread-abc"), false, None);
+        let cmd = codex
+            .build_command(Some("thread-abc"), false, None)
+            .unwrap();
 
         assert_eq!(
             command_args(&cmd),

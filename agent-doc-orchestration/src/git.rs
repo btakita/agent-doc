@@ -3647,7 +3647,10 @@ Duplicate replay should stay live.
             <!-- /agent:exchange -->\n";
 
         assert!(
-            !crate::write::is_stale_baseline(baseline_with_user_edits, snapshot),
+            !agent_doc_template::stale_baseline::is_stale_baseline(
+                baseline_with_user_edits,
+                snapshot
+            ),
             "baseline with user edits should NOT be stale (it contains snapshot content)"
         );
     }
@@ -3667,7 +3670,7 @@ Duplicate replay should stay live.
             <!-- /agent:exchange -->\n";
 
         assert!(
-            crate::write::is_stale_baseline(old_baseline, current_snapshot),
+            agent_doc_template::stale_baseline::is_stale_baseline(old_baseline, current_snapshot),
             "baseline missing committed response should be stale"
         );
     }
@@ -7894,7 +7897,7 @@ Compacted content:\n\
         let baseline = "<!-- agent:status patch=replace -->\nUser changed\n<!-- /agent:status -->\n\
             <!-- agent:exchange patch=append -->\nResponse.\nUser question\n<!-- /agent:exchange -->\n";
         assert!(
-            !crate::write::is_stale_baseline(baseline, snapshot),
+            !agent_doc_template::stale_baseline::is_stale_baseline(baseline, snapshot),
             "user edits in replace + append components should NOT be stale"
         );
     }

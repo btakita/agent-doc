@@ -11326,6 +11326,57 @@ fn test_agent_doc_template_owns_response_materialization_policy() {
 }
 
 #[test]
+fn test_agent_doc_template_owns_stale_baseline_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let template_stale_baseline =
+        fs::read_to_string(manifest_dir.join("agent-doc-template/src/stale_baseline.rs")).unwrap();
+    for required_snippet in [
+        "pub fn is_append_mode_component",
+        "pub fn is_stale_baseline",
+        "agent_doc_document::transient_markers::strip_boundary_markers",
+    ] {
+        assert!(
+            template_stale_baseline.contains(required_snippet),
+            "agent-doc-template must own stale-baseline template policy: {required_snippet}"
+        );
+    }
+
+    let template_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-template/src/lib.rs")).unwrap();
+    assert!(
+        template_lib.contains("pub mod stale_baseline;"),
+        "agent-doc-template should expose stale-baseline policy through its owning module"
+    );
+    assert!(
+        !template_lib.contains("pub use stale_baseline"),
+        "agent-doc-template should not add a stale-baseline root facade"
+    );
+
+    let write =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    for forbidden_snippet in [
+        "fn is_append_mode_component(",
+        "pub fn is_stale_baseline(",
+        "fn is_stale_baseline(",
+    ] {
+        assert!(
+            !write.contains(forbidden_snippet),
+            "write.rs must not re-own or facade stale-baseline policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        write.contains("use agent_doc_template::stale_baseline::{"),
+        "write.rs should import focused stale-baseline policy directly"
+    );
+
+    let git = fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+    assert!(
+        git.contains("agent_doc_template::stale_baseline::is_stale_baseline"),
+        "git write-path tests should call focused stale-baseline policy directly"
+    );
+}
+
+#[test]
 fn test_agent_doc_template_owns_strict_response_heading_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let template_response_materialization =

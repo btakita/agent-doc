@@ -247,6 +247,7 @@ use agent_doc_frontmatter::frontmatter;
 use agent_doc_template as template;
 
 use crate::{merge, repair, sessions, snapshot};
+use agent_doc_template::stale_baseline::{is_append_mode_component, is_stale_baseline};
 
 thread_local! {
     static RESPONSE_STDIN_OVERRIDE: RefCell<Option<String>> = const { RefCell::new(None) };
@@ -2657,11 +2658,6 @@ pub fn find_boundary_id(doc: &str, component_name: &str) -> Option<String> {
     None
 }
 
-/// Check if a component is append-mode (needs boundary markers).
-fn is_append_mode_component(name: &str) -> bool {
-    matches!(name, "exchange" | "findings")
-}
-
 mod normalize;
 pub use normalize::*;
 
@@ -3043,61 +3039,6 @@ pub fn normalize_template_structure_or_fail_preserving(
         Err(err) => Err(err)
             .with_context(|| format!("template structure guard failed for {}", file.display())),
     }
-}
-
-/// Detect whether a baseline is stale relative to the current snapshot.
-///
-/// Only checks **append-mode** components (exchange, findings, etc.) — these grow
-/// monotonically and must contain the snapshot's committed content. Replace-mode
-/// components (status, pending) are freely user-editable and are skipped.
-///
-/// Returns `true` if the baseline is stale (missing committed snapshot content).
-pub fn is_stale_baseline(baseline: &str, snapshot: &str) -> bool {
-    let base_clean = strip_boundary_for_dedup(baseline);
-    let snap_clean = strip_boundary_for_dedup(snapshot);
-
-    // Fast path: identical content
-    if base_clean == snap_clean {
-        return false;
-    }
-
-    // Try structural comparison via components
-    if let (Ok(snap_components), Ok(base_components)) =
-        (element::parse(snapshot), element::parse(baseline))
-        && !snap_components.is_empty()
-    {
-        // Only check append-mode components — these grow monotonically and must
-        // contain the snapshot's committed content. Replace-mode components
-        // (status, pending) are user-editable and should be skipped.
-        for snap_comp in &snap_components {
-            let is_append = snap_comp
-                .patch_mode()
-                .map(|m| m == "append")
-                .unwrap_or(is_append_mode_component(&snap_comp.name));
-            if !is_append {
-                continue;
-            }
-            let snap_content = strip_boundary_for_dedup(snap_comp.content(snapshot).trim());
-            if snap_content.is_empty() {
-                continue;
-            }
-            // Find matching component in baseline by name
-            if let Some(base_comp) = base_components.iter().find(|c| c.name == snap_comp.name) {
-                let base_content = strip_boundary_for_dedup(base_comp.content(baseline).trim());
-                // Baseline's append component must contain the snapshot's content
-                if !base_content.contains(&snap_content) {
-                    return true;
-                }
-            } else {
-                // Snapshot has an append component that baseline lacks entirely
-                return true;
-            }
-        }
-        return false;
-    }
-
-    // Fallback for non-template docs: prefix check (original behavior)
-    !base_clean.starts_with(&snap_clean)
 }
 
 /// Strip boundary markers for dedup comparison.
@@ -6533,20 +6474,6 @@ scratch
             "JSON should contain raw UTF-8 em dash"
         );
     }
-    // --- is_append_mode_component tests ---
-    #[test]
-    fn append_mode_component_exchange() {
-        assert!(is_append_mode_component("exchange"));
-        assert!(is_append_mode_component("findings"));
-    }
-    #[test]
-    fn replace_mode_components_not_append() {
-        assert!(!is_append_mode_component("pending"));
-        assert!(!is_append_mode_component("backlog"));
-        assert!(!is_append_mode_component("status"));
-        assert!(!is_append_mode_component("output"));
-        assert!(!is_append_mode_component("todo"));
-    }
     #[test]
     fn find_boundary_id_skips_code_blocks() {
         // Boundary-looking text inside a fenced code block must not be returned
@@ -6644,101 +6571,6 @@ scratch
         assert!(
             !stale_clean.starts_with(&snap_clean),
             "stale baseline should not start with snapshot content"
-        );
-    }
-    // --- is_stale_baseline tests ---
-    #[test]
-    fn stale_baseline_identical_content_not_stale() {
-        let doc = "<!-- agent:exchange patch=append -->\nResponse.\n<!-- /agent:exchange -->\n";
-        assert!(!is_stale_baseline(doc, doc));
-    }
-    #[test]
-    fn stale_baseline_user_appended_text_not_stale() {
-        let snapshot =
-            "<!-- agent:exchange patch=append -->\nResponse.\n<!-- /agent:exchange -->\n";
-        let baseline = "<!-- agent:exchange patch=append -->\nResponse.\nUser question\n<!-- /agent:exchange -->\n";
-        assert!(!is_stale_baseline(baseline, snapshot));
-    }
-    #[test]
-    fn stale_baseline_user_edited_replace_component_not_stale() {
-        // User edits replace-mode component (status) — should NOT trigger stale guard
-        let snapshot = "<!-- agent:status patch=replace -->\nOld status\n<!-- /agent:status -->\n\
-                         <!-- agent:exchange patch=append -->\nResponse.\n<!-- /agent:exchange -->\n";
-        let baseline = "<!-- agent:status patch=replace -->\nEdited status by user\n<!-- /agent:status -->\n\
-                         <!-- agent:exchange patch=append -->\nResponse.\nNew question\n<!-- /agent:exchange -->\n";
-        assert!(
-            !is_stale_baseline(baseline, snapshot),
-            "user editing replace-mode status component should NOT trigger stale guard"
-        );
-    }
-    #[test]
-    fn stale_baseline_missing_committed_content_is_stale() {
-        let snapshot = "<!-- agent:exchange patch=append -->\nCommitted response from agent.\n<!-- /agent:exchange -->\n";
-        let baseline =
-            "<!-- agent:exchange patch=append -->\nOld content only.\n<!-- /agent:exchange -->\n";
-        assert!(
-            is_stale_baseline(baseline, snapshot),
-            "baseline missing committed content should be stale"
-        );
-    }
-    #[test]
-    fn stale_baseline_missing_append_component_is_stale() {
-        // Missing an append-mode component = stale
-        let snapshot =
-            "<!-- agent:exchange patch=append -->\nResponse.\n<!-- /agent:exchange -->\n";
-        let baseline = "<!-- agent:other patch=append -->\nDifferent.\n<!-- /agent:other -->\n";
-        assert!(
-            is_stale_baseline(baseline, snapshot),
-            "baseline missing an append-mode component should be stale"
-        );
-    }
-    #[test]
-    fn stale_baseline_missing_replace_component_not_stale() {
-        // Missing a replace-mode component is fine — user can delete it
-        let snapshot = "<!-- agent:status patch=replace -->\nActive\n<!-- /agent:status -->\n\
-                         <!-- agent:exchange patch=append -->\nResponse.\n<!-- /agent:exchange -->\n";
-        let baseline =
-            "<!-- agent:exchange patch=append -->\nResponse.\n<!-- /agent:exchange -->\n";
-        assert!(
-            !is_stale_baseline(baseline, snapshot),
-            "missing replace-mode component should NOT trigger stale guard"
-        );
-    }
-    #[test]
-    fn stale_baseline_boundary_markers_ignored() {
-        let snapshot = "<!-- agent:exchange patch=append -->\nResponse.\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
-        let baseline = "<!-- agent:exchange patch=append -->\nResponse.\n<!-- agent:boundary:xyz -->\nUser edit\n<!-- /agent:exchange -->\n";
-        assert!(
-            !is_stale_baseline(baseline, snapshot),
-            "different boundary marker IDs should not cause false stale detection"
-        );
-    }
-    #[test]
-    fn stale_baseline_non_template_fallback_to_prefix() {
-        // Non-template (no components) falls back to prefix check
-        let snapshot = "## Exchange\nResponse.\n";
-        let baseline = "## Exchange\nResponse.\nNew question\n";
-        assert!(!is_stale_baseline(baseline, snapshot));
-
-        let stale = "## Exchange\nDifferent content.\n";
-        assert!(is_stale_baseline(stale, snapshot));
-    }
-    #[test]
-    fn stale_baseline_empty_snapshot_component_skipped() {
-        // Empty append components in snapshot should not cause false positives
-        let snapshot = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
-        let baseline =
-            "<!-- agent:exchange patch=append -->\nUser added content\n<!-- /agent:exchange -->\n";
-        assert!(!is_stale_baseline(baseline, snapshot));
-    }
-    #[test]
-    fn stale_baseline_default_exchange_is_append() {
-        // exchange without explicit patch attr defaults to append via is_append_mode_component
-        let snapshot = "<!-- agent:exchange -->\nResponse.\n<!-- /agent:exchange -->\n";
-        let baseline = "<!-- agent:exchange -->\nOld stuff.\n<!-- /agent:exchange -->\n";
-        assert!(
-            is_stale_baseline(baseline, snapshot),
-            "exchange without patch attr should default to append-mode check"
         );
     }
     #[test]

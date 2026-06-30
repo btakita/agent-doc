@@ -11,8 +11,10 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   "stage the synced editor-visible snapshot". When an operator-authority
   live-buffer snapshot matches the staged snapshot and its epoch is already
   synced/proven, closeout can commit that staged content even if the working
-  tree has not caught up yet. The match is tolerant of transient boundary-marker
-  churn that can happen between the editor proof and commit staging.
+  tree has not caught up yet; the same proof also allows already-current
+  closeout when HEAD/snapshot have the response and only disk lags. The match is
+  tolerant of transient boundary-marker churn that can happen between the editor
+  proof and commit staging.
 
 - **Commit-barrier live-buffer publish ACKs now clear stale in-flight epochs.**
   When a closeout times out waiting for editor delivery, the recovery path asks

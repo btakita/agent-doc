@@ -337,6 +337,13 @@ focused crate under the old path.
   marking entries completed by done ids, and normalizing consumed done-id bags.
   Orchestration keeps document locks, file/snapshot IO, IPC node ops,
   response-echo embedding, ops logging, and editor convergence.
+- `agent-doc-queue` now owns queue prompt drift/drop accounting used by
+  `write` and IPC adoption guards: queue component extraction, active prompt
+  text extraction, consumed/struck prompt coverage, baseline-vs-live deletion
+  detection, dropped candidate prompt detection, and content-ours preservation
+  over unproven live queue deletions. Orchestration keeps response merge
+  decisions, snapshot/file/editor adapters, repair redelivery, and ops logging
+  while importing the focused queue policy directly.
 - `agent-doc-queue` now owns preflight queue convergence policy: re-aligning a
   pre-maintenance baseline to the post-maintenance queue component, carrying
   in-progress-marker-only backlog/pending/icebox convergence, and classifying

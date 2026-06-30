@@ -3241,6 +3241,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub fn pending_done_suppressed",
         "pub fn tracked_work_completion_decision",
         "pub fn tracked_work_completion_missing_done_ids",
+        "pub struct ExpectDoneOrGateEvidence",
+        "pub enum ExpectDoneOrGateDecision",
+        "pub fn expect_done_or_gate_decision",
         "pub const BLOCKED_CLOSEOUT_FOLLOWUP_GUARD_SUPPRESS_MARKER",
         "pub struct BlockedCloseoutFollowupEvidence",
         "pub enum BlockedCloseoutFollowupDecision",
@@ -3445,10 +3448,22 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub(crate) const PARTIAL_CLOSEOUT_REMAINING_PHRASES",
         "pub(crate) fn text_has_shipped_signal",
         "pub(crate) fn text_has_partial_remaining_signal",
+        ".contains(\"<!-- no-pending-done-guard -->\")",
+        "let resolved: std::collections::HashSet<String>",
     ] {
         assert!(
             !provenance_guards.contains(forbidden),
             "queue_head_provenance_guards must not re-own closeout signal policy: {forbidden}"
+        );
+    }
+    for required in [
+        "agent_doc_turn::closeout_signal::expect_done_or_gate_decision",
+        "agent_doc_turn::closeout_signal::ExpectDoneOrGateEvidence",
+        "agent_doc_turn::closeout_signal::ExpectDoneOrGateDecision",
+    ] {
+        assert!(
+            provenance_guards.contains(required),
+            "queue_head_provenance_guards should call focused expect-done-or-gate policy directly: {required}"
         );
     }
     assert!(

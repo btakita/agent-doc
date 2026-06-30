@@ -16,60 +16,33 @@ pub(crate) fn check_expect_done_or_gate_guard(
     if state.expect_done_or_gate_ids.is_empty() {
         return Ok(GuardResult::None);
     }
-    // Only enforce once the cycle has closed with a committed response. An open
-    // cycle is still mid-flight; a no-response commit never sets `capture_id`.
-    if state.is_open() {
-        return Ok(GuardResult::None);
-    }
     let Some(capture_id) = state.capture_id.as_deref() else {
         return Ok(GuardResult::None);
     };
     let Some(capture) = crate::capture::load_by_id(file, capture_id)? else {
         return Ok(GuardResult::None);
     };
-    if capture.state != crate::capture::CaptureState::Committed {
-        return Ok(GuardResult::None);
-    }
-    if capture
-        .response_body
-        .contains("<!-- no-pending-done-guard -->")
-    {
-        return Ok(GuardResult::None);
-    }
 
-    let resolved: std::collections::HashSet<String> = state
-        .pending_done_ids
-        .iter()
-        .chain(state.pending_kept_open_ids.iter())
-        .chain(state.reaped_pending_ids.iter())
-        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
-        .filter(|id| !id.is_empty())
-        .collect();
-
-    let open_backlog: std::collections::HashSet<String> =
-        open_backlog_ids(file)?.into_iter().collect();
-
-    let mut unresolved: Vec<String> = Vec::new();
-    for id in state
-        .expect_done_or_gate_ids
-        .iter()
-        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
-        .filter(|id| !id.is_empty())
-    {
-        if resolved.contains(&id) {
-            continue;
+    let open_backlog_ids = open_backlog_ids(file)?;
+    let unresolved = match agent_doc_turn::closeout_signal::expect_done_or_gate_decision(
+        agent_doc_turn::closeout_signal::ExpectDoneOrGateEvidence {
+            cycle_open: state.is_open(),
+            capture_committed: capture.state == crate::capture::CaptureState::Committed,
+            response_body: &capture.response_body,
+            directed_ids: &state.expect_done_or_gate_ids,
+            pending_done_ids: &state.pending_done_ids,
+            pending_kept_open_ids: &state.pending_kept_open_ids,
+            reaped_pending_ids: &state.reaped_pending_ids,
+            open_backlog_ids: &open_backlog_ids,
+        },
+    ) {
+        agent_doc_turn::closeout_signal::ExpectDoneOrGateDecision::Pass => {
+            return Ok(GuardResult::None);
         }
-        if !open_backlog.contains(&id) {
-            continue;
+        agent_doc_turn::closeout_signal::ExpectDoneOrGateDecision::Warn { unresolved_ids } => {
+            unresolved_ids
         }
-        if !unresolved.iter().any(|existing| existing == &id) {
-            unresolved.push(id);
-        }
-    }
-
-    if unresolved.is_empty() {
-        return Ok(GuardResult::None);
-    }
+    };
 
     let ids = unresolved
         .iter()

@@ -419,6 +419,67 @@ pub fn tracked_work_completion_missing_done_ids(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExpectDoneOrGateEvidence<'a> {
+    pub cycle_open: bool,
+    pub capture_committed: bool,
+    pub response_body: &'a str,
+    pub directed_ids: &'a [String],
+    pub pending_done_ids: &'a [String],
+    pub pending_kept_open_ids: &'a [String],
+    pub reaped_pending_ids: &'a [String],
+    pub open_backlog_ids: &'a [String],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExpectDoneOrGateDecision {
+    Pass,
+    Warn { unresolved_ids: Vec<String> },
+}
+
+pub fn expect_done_or_gate_decision(
+    evidence: ExpectDoneOrGateEvidence<'_>,
+) -> ExpectDoneOrGateDecision {
+    if evidence.directed_ids.is_empty()
+        || evidence.cycle_open
+        || !evidence.capture_committed
+        || pending_done_suppressed(evidence.response_body)
+    {
+        return ExpectDoneOrGateDecision::Pass;
+    }
+
+    let resolved = normalized_id_set(
+        evidence
+            .pending_done_ids
+            .iter()
+            .map(String::as_str)
+            .chain(evidence.pending_kept_open_ids.iter().map(String::as_str))
+            .chain(evidence.reaped_pending_ids.iter().map(String::as_str)),
+    );
+    let open_backlog = normalized_id_set(evidence.open_backlog_ids.iter().map(String::as_str));
+
+    let mut unresolved_ids = Vec::new();
+    for id in evidence
+        .directed_ids
+        .iter()
+        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
+        .filter(|id| !id.is_empty())
+    {
+        if resolved.contains(&id) || !open_backlog.contains(&id) {
+            continue;
+        }
+        if !unresolved_ids.iter().any(|existing| existing == &id) {
+            unresolved_ids.push(id);
+        }
+    }
+
+    if unresolved_ids.is_empty() {
+        ExpectDoneOrGateDecision::Pass
+    } else {
+        ExpectDoneOrGateDecision::Warn { unresolved_ids }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlockedCloseoutFollowupEvidence<'a> {
     pub cycle_open: bool,
     pub capture_committed: bool,
@@ -1091,6 +1152,106 @@ mod tests {
                 open_tracked_work_ids: &open_tracked_work_ids,
             }),
             TrackedWorkCompletionDecision::Pass
+        );
+    }
+
+    #[test]
+    fn expect_done_or_gate_decision_warns_for_unresolved_open_directed_ids() {
+        let response = "### Re: do #nstep2 — gpt-5\n\nShipped the repo/API/deploy work.";
+        let directed_ids = vec![
+            "nstep2".to_string(),
+            "#nstep2".to_string(),
+            "done1".to_string(),
+            "kept1".to_string(),
+            "reaped1".to_string(),
+            "removed1".to_string(),
+        ];
+        let pending_done_ids = vec!["done1".to_string()];
+        let pending_kept_open_ids = vec!["kept1".to_string()];
+        let reaped_pending_ids = vec!["reaped1".to_string()];
+        let open_backlog_ids = vec![
+            "nstep2".to_string(),
+            "done1".to_string(),
+            "kept1".to_string(),
+            "reaped1".to_string(),
+        ];
+
+        assert_eq!(
+            expect_done_or_gate_decision(ExpectDoneOrGateEvidence {
+                cycle_open: false,
+                capture_committed: true,
+                response_body: response,
+                directed_ids: &directed_ids,
+                pending_done_ids: &pending_done_ids,
+                pending_kept_open_ids: &pending_kept_open_ids,
+                reaped_pending_ids: &reaped_pending_ids,
+                open_backlog_ids: &open_backlog_ids,
+            }),
+            ExpectDoneOrGateDecision::Warn {
+                unresolved_ids: vec!["nstep2".to_string()]
+            }
+        );
+    }
+
+    #[test]
+    fn expect_done_or_gate_decision_passes_without_required_state_or_signal() {
+        let response = "### Re: do #nstep2 — gpt-5\n\nCompleted.";
+        let suppressed = format!("{response}\n{PENDING_DONE_GUARD_SUPPRESS_MARKER}");
+        let directed_ids = vec!["nstep2".to_string()];
+        let open_backlog_ids = vec!["nstep2".to_string()];
+        let empty = Vec::new();
+        let base = ExpectDoneOrGateEvidence {
+            cycle_open: false,
+            capture_committed: true,
+            response_body: response,
+            directed_ids: &directed_ids,
+            pending_done_ids: &empty,
+            pending_kept_open_ids: &empty,
+            reaped_pending_ids: &empty,
+            open_backlog_ids: &open_backlog_ids,
+        };
+
+        assert_eq!(
+            expect_done_or_gate_decision(ExpectDoneOrGateEvidence {
+                cycle_open: true,
+                ..base
+            }),
+            ExpectDoneOrGateDecision::Pass
+        );
+        assert_eq!(
+            expect_done_or_gate_decision(ExpectDoneOrGateEvidence {
+                capture_committed: false,
+                ..base
+            }),
+            ExpectDoneOrGateDecision::Pass
+        );
+        assert_eq!(
+            expect_done_or_gate_decision(ExpectDoneOrGateEvidence {
+                response_body: &suppressed,
+                ..base
+            }),
+            ExpectDoneOrGateDecision::Pass
+        );
+        assert_eq!(
+            expect_done_or_gate_decision(ExpectDoneOrGateEvidence {
+                directed_ids: &empty,
+                ..base
+            }),
+            ExpectDoneOrGateDecision::Pass
+        );
+        assert_eq!(
+            expect_done_or_gate_decision(ExpectDoneOrGateEvidence {
+                pending_done_ids: &directed_ids,
+                ..base
+            }),
+            ExpectDoneOrGateDecision::Pass
+        );
+        assert_eq!(
+            expect_done_or_gate_decision(ExpectDoneOrGateEvidence {
+                open_backlog_ids: &empty,
+                ..base
+            }),
+            ExpectDoneOrGateDecision::Pass
         );
     }
 

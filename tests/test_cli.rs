@@ -3223,6 +3223,10 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub const QUEUE_AUDIT_SUBSTEP_COMPLETE_PHRASES",
         "pub fn queue_audit_collapses_partial_completion",
         "pub fn queue_audit_has_none_complete_claim",
+        "pub const QUEUE_AUDIT_GUARD_SUPPRESS_MARKER",
+        "pub struct QueueAuditPartialCompletionEvidence",
+        "pub enum QueueAuditPartialCompletionDecision",
+        "pub fn queue_audit_partial_completion_decision",
         "pub const PARTIAL_CLOSEOUT_REMAINING_PHRASES",
         "pub fn text_has_shipped_signal",
         "pub fn text_has_partial_remaining_signal",
@@ -3320,6 +3324,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub(crate) const QUEUE_AUDIT_SUBSTEP_COMPLETE_PHRASES",
         "pub(crate) fn queue_audit_collapses_partial_completion",
         "pub(crate) fn queue_audit_has_none_complete_claim",
+        "agent_doc_turn::closeout_signal::queue_audit_collapses_partial_completion",
+        ".contains(\"<!-- no-queue-audit-guard -->\")",
+        "agent_doc_turn::closeout_signal::response_text_for_guards",
         "agent_doc_turn::closeout_signal::text_has_blocked_future_action_signal",
         "agent_doc_turn::closeout_signal::text_has_no_followup_justification",
         "agent_doc_turn::closeout_signal::blocked_signal_tied_to_id",
@@ -3345,7 +3352,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "agent_doc_turn::closeout_signal::GatedPhaseSplitEvidence",
         "agent_doc_turn::closeout_signal::GatedPhaseSplitItemEvidence",
         "agent_doc_turn::closeout_signal::GatedPhaseSplitDecision",
-        "agent_doc_turn::closeout_signal::queue_audit_collapses_partial_completion",
+        "agent_doc_turn::closeout_signal::queue_audit_partial_completion_decision",
+        "agent_doc_turn::closeout_signal::QueueAuditPartialCompletionEvidence",
+        "agent_doc_turn::closeout_signal::QueueAuditPartialCompletionDecision",
         "agent_doc_turn::closeout_signal::is_exchange_response_heading",
         "agent_doc_turn::closeout_signal::is_direct_response_patchback_heading",
         "agent_doc_turn::closeout_signal::has_new_response_heading_marker",
@@ -3515,7 +3524,6 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
 
     for relative in [
         "agent-doc-orchestration/src/session_check/pending_guards.rs",
-        "agent-doc-orchestration/src/session_check/closeout_guards.rs",
         "agent-doc-orchestration/src/write/pending_checks.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();

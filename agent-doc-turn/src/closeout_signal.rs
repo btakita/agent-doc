@@ -173,6 +173,43 @@ pub fn queue_audit_has_none_complete_claim(lower: &str) -> bool {
     NONE_COMPLETE.is_match(lower)
 }
 
+pub const QUEUE_AUDIT_GUARD_SUPPRESS_MARKER: &str = "<!-- no-queue-audit-guard -->";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QueueAuditPartialCompletionEvidence<'a> {
+    pub cycle_open: bool,
+    pub capture_committed: bool,
+    pub response_body: &'a str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueueAuditPartialCompletionDecision {
+    Pass,
+    Warn,
+}
+
+pub fn queue_audit_partial_completion_decision(
+    evidence: QueueAuditPartialCompletionEvidence<'_>,
+) -> QueueAuditPartialCompletionDecision {
+    if evidence.cycle_open || !evidence.capture_committed {
+        return QueueAuditPartialCompletionDecision::Pass;
+    }
+    if evidence
+        .response_body
+        .contains(QUEUE_AUDIT_GUARD_SUPPRESS_MARKER)
+    {
+        return QueueAuditPartialCompletionDecision::Pass;
+    }
+
+    let text = response_text_for_guards(evidence.response_body);
+    let lower = text.to_ascii_lowercase();
+    if queue_audit_collapses_partial_completion(&lower) {
+        QueueAuditPartialCompletionDecision::Warn
+    } else {
+        QueueAuditPartialCompletionDecision::Pass
+    }
+}
+
 /// Tight list of "deferred live work" phrases that, combined with a shipped
 /// signal, indicate a `do [#id]` turn shipped a repo phase but left live
 /// deploy / sync / verification / approval work for a later phase
@@ -1194,6 +1231,59 @@ mod tests {
         assert!(!queue_audit_collapses_partial_completion(
             "none of the queue items are complete yet; every row is still blocked on input."
         ));
+    }
+
+    #[test]
+    fn queue_audit_partial_completion_decision_warns_on_clear_collapse() {
+        let response = "### Re: which queue items are complete?\n\nNone of the six queue items are complete. Same-day QA is complete and the URL validate-only check was clean, but each row still has at least one remaining action.";
+
+        assert_eq!(
+            queue_audit_partial_completion_decision(QueueAuditPartialCompletionEvidence {
+                cycle_open: false,
+                capture_committed: true,
+                response_body: response,
+            }),
+            QueueAuditPartialCompletionDecision::Warn
+        );
+    }
+
+    #[test]
+    fn queue_audit_partial_completion_decision_passes_without_required_state_or_signal() {
+        let response = "### Re: which queue items are complete?\n\nNone of the six queue items are complete. Same-day QA is complete and the URL validate-only check was clean.";
+        let suppressed = format!("{response}\n{QUEUE_AUDIT_GUARD_SUPPRESS_MARKER}");
+
+        assert_eq!(
+            queue_audit_partial_completion_decision(QueueAuditPartialCompletionEvidence {
+                cycle_open: true,
+                capture_committed: true,
+                response_body: response,
+            }),
+            QueueAuditPartialCompletionDecision::Pass
+        );
+        assert_eq!(
+            queue_audit_partial_completion_decision(QueueAuditPartialCompletionEvidence {
+                cycle_open: false,
+                capture_committed: false,
+                response_body: response,
+            }),
+            QueueAuditPartialCompletionDecision::Pass
+        );
+        assert_eq!(
+            queue_audit_partial_completion_decision(QueueAuditPartialCompletionEvidence {
+                cycle_open: false,
+                capture_committed: true,
+                response_body: "None of the migration steps are complete. The backup was clean.",
+            }),
+            QueueAuditPartialCompletionDecision::Pass
+        );
+        assert_eq!(
+            queue_audit_partial_completion_decision(QueueAuditPartialCompletionEvidence {
+                cycle_open: false,
+                capture_committed: true,
+                response_body: &suppressed,
+            }),
+            QueueAuditPartialCompletionDecision::Pass
+        );
     }
 
     #[test]

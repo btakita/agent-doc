@@ -220,29 +220,23 @@ pub(crate) fn check_queue_audit_partial_completion_guard(file: &Path) -> Result<
     let Some(state) = crate::cycle_state::load(file)? else {
         return Ok(GuardResult::None);
     };
-    if state.is_open() {
-        return Ok(GuardResult::None);
-    }
     let Some(capture_id) = state.capture_id.as_deref() else {
         return Ok(GuardResult::None);
     };
     let Some(capture) = crate::capture::load_by_id(file, capture_id)? else {
         return Ok(GuardResult::None);
     };
-    if capture.state != crate::capture::CaptureState::Committed {
-        return Ok(GuardResult::None);
-    }
-    if capture
-        .response_body
-        .contains("<!-- no-queue-audit-guard -->")
-    {
-        return Ok(GuardResult::None);
-    }
-
-    let text = agent_doc_turn::closeout_signal::response_text_for_guards(&capture.response_body);
-    let lower = text.to_ascii_lowercase();
-    if !agent_doc_turn::closeout_signal::queue_audit_collapses_partial_completion(&lower) {
-        return Ok(GuardResult::None);
+    match agent_doc_turn::closeout_signal::queue_audit_partial_completion_decision(
+        agent_doc_turn::closeout_signal::QueueAuditPartialCompletionEvidence {
+            cycle_open: state.is_open(),
+            capture_committed: capture.state == crate::capture::CaptureState::Committed,
+            response_body: &capture.response_body,
+        },
+    ) {
+        agent_doc_turn::closeout_signal::QueueAuditPartialCompletionDecision::Pass => {
+            return Ok(GuardResult::None);
+        }
+        agent_doc_turn::closeout_signal::QueueAuditPartialCompletionDecision::Warn => {}
     }
 
     crate::ops_log::log_op(
@@ -255,7 +249,10 @@ pub(crate) fn check_queue_audit_partial_completion_guard(file: &Path) -> Result<
 
     Ok(GuardResult::Warn(vec![
         "[session-check] warn: this queue-completion audit reports the queue as not complete while also citing several completed substeps, but never classifies any row as partially complete — meaningful partial progress is collapsed into \"none complete\"".to_string(),
-        "[session-check] hint: classify each queue row as complete / partially complete / not-started, naming the completed substeps and the exact remaining condition for partial rows; recommend splitting a row with multiple gateable phases. Add `<!-- no-queue-audit-guard -->` if the all-or-none framing is intentional.".to_string(),
+        format!(
+            "[session-check] hint: classify each queue row as complete / partially complete / not-started, naming the completed substeps and the exact remaining condition for partial rows; recommend splitting a row with multiple gateable phases. Add `{}` if the all-or-none framing is intentional.",
+            agent_doc_turn::closeout_signal::QUEUE_AUDIT_GUARD_SUPPRESS_MARKER
+        ),
     ]))
 }
 

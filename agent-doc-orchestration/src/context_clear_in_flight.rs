@@ -8,11 +8,13 @@
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use agent_doc_queue::queue::{
+    CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS, context_clear_in_flight_marker_active,
+};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 const CONTEXT_CLEAR_IN_FLIGHT_DIR: &str = ".agent-doc/context-clear-in-flight";
-const CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS: u64 = 60;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContextClearInFlight {
@@ -86,7 +88,11 @@ pub fn context_clear_in_flight(file: &Path) -> Result<Option<ContextClearInFligh
             return Ok(None);
         }
     };
-    if now_secs().saturating_sub(marker.written_at) <= CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS {
+    if context_clear_in_flight_marker_active(
+        marker.written_at,
+        now_secs(),
+        CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS,
+    ) {
         return Ok(Some(marker));
     }
     let _ = std::fs::remove_file(&path);

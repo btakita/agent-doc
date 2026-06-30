@@ -5071,6 +5071,63 @@ fn test_agent_doc_queue_owns_drain_owner_lease_policy() {
 }
 
 #[test]
+fn test_agent_doc_queue_owns_context_clear_in_flight_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+
+    let queue_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue.rs")).unwrap();
+    for required in [
+        "pub const CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS",
+        "pub struct IdleQueueContextClearInFlightSettleFacts",
+        "pub struct IdleQueueContextClearInFlightSettle",
+        "pub fn context_clear_in_flight_marker_active(",
+        "pub fn idle_queue_context_clear_in_flight_settle_ticks(",
+    ] {
+        assert!(
+            queue_source.contains(required),
+            "agent-doc-queue must own context-clear in-flight policy: {required}"
+        );
+    }
+
+    let context_clear_adapter = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/context_clear_in_flight.rs"),
+    )
+    .unwrap();
+    for forbidden in [
+        "const CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS",
+        "saturating_sub(marker.written_at)",
+    ] {
+        assert!(
+            !context_clear_adapter.contains(forbidden),
+            "context_clear_in_flight.rs must stay marker storage, not re-own stale-marker policy: {forbidden}"
+        );
+    }
+    assert!(
+        context_clear_adapter.contains("agent_doc_queue::queue::{")
+            && context_clear_adapter.contains("context_clear_in_flight_marker_active"),
+        "context_clear_in_flight.rs should call queue-owned marker policy directly"
+    );
+
+    let idle_watch =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
+            .unwrap();
+    for forbidden in [
+        "clear_settle_idle_ticks = clear_settle_idle_ticks.saturating_add",
+        "let clear_settled_now =",
+    ] {
+        assert!(
+            !idle_watch.contains(forbidden),
+            "idle_watch.rs must not re-own context-clear settle tick policy: {forbidden}"
+        );
+    }
+    assert!(
+        idle_watch.contains("idle_queue_context_clear_in_flight_settle_ticks")
+            && idle_watch.contains("IdleQueueContextClearInFlightSettleFacts"),
+        "idle_watch.rs should call queue-owned context-clear settle policy directly"
+    );
+}
+
+#[test]
 fn test_agent_doc_work_graph_is_source_agnostic_boundary() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();

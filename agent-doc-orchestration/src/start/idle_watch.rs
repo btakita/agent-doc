@@ -8,11 +8,11 @@
 use super::*;
 use agent_doc_queue::queue::{
     CLEAR_COOLDOWN_RESUME_IDLE_TICKS, IdleQueueContextClearInFlightDecision,
-    IdleQueueContextClearInFlightFacts, IdleQueueContextResetDecision, IdleQueueDrainDecision,
-    IdleQueueDrainDecisionFacts, between_turn_enqueue_plan,
-    clean_session_head_forces_context_reset, clear_cooldown_resume_ready,
-    drain_blocked_awaiting_clear_settle, drain_dispatch_dedup_skip,
-    idle_queue_context_clear_in_flight_decision,
+    IdleQueueContextClearInFlightFacts, IdleQueueContextClearInFlightSettleFacts,
+    IdleQueueContextResetDecision, IdleQueueDrainDecision, IdleQueueDrainDecisionFacts,
+    between_turn_enqueue_plan, clean_session_head_forces_context_reset,
+    clear_cooldown_resume_ready, drain_blocked_awaiting_clear_settle, drain_dispatch_dedup_skip,
+    idle_queue_context_clear_in_flight_decision, idle_queue_context_clear_in_flight_settle_ticks,
     idle_queue_context_reset_decision_with_editor_typing,
     idle_queue_drain_decision_with_editor_typing, stale_drain_recycle_yield_requested,
 };
@@ -1015,18 +1015,18 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // so the next drain trigger is never injected into an in-flight
             // `/clear`. Once the cleared pane has settled, drop the gate so
             // the normal drain dispatches the head.
-                if awaiting_clear_settle
-                && prompt_visible
-                && !turn_active
-                && !route_submit_in_flight
-                && !drain_dispatch_dedup_skip(context_clear_pending)
-            {
-                clear_settle_idle_ticks = clear_settle_idle_ticks.saturating_add(1);
-            } else {
-                clear_settle_idle_ticks = 0;
-            }
-            let clear_settled_now =
-                awaiting_clear_settle && clear_settle_idle_ticks >= CLEAR_COOLDOWN_RESUME_IDLE_TICKS;
+            let clear_settle = idle_queue_context_clear_in_flight_settle_ticks(
+                IdleQueueContextClearInFlightSettleFacts {
+                    awaiting_clear_settle,
+                    prompt_visible,
+                    turn_active,
+                    route_submit_in_flight,
+                    clear_already_pending: context_clear_pending,
+                    settled_idle_ticks: clear_settle_idle_ticks,
+                    settle_threshold: CLEAR_COOLDOWN_RESUME_IDLE_TICKS,
+                },
+            );
+            clear_settle_idle_ticks = clear_settle.settled_idle_ticks;
             if let Some(marker) = context_clear_marker.as_ref() {
                 let marker_key = marker
                     .head_sha256
@@ -1121,7 +1121,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     IdleQueueContextClearInFlightDecision::Ignore => {}
                 }
             }
-            if clear_settled_now {
+            if clear_settle.settled_now {
                 awaiting_clear_settle = false;
                 clear_settle_idle_ticks = 0;
                 log_event(

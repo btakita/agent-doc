@@ -5,6 +5,7 @@
 //! submit commands; callers provide the observed executor/document facts.
 
 pub const CLEAR_COOLDOWN_RESUME_IDLE_TICKS: u32 = 4;
+pub const CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS: u64 = 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IdleQueueDrainDecision {
@@ -51,6 +52,23 @@ pub struct IdleQueueContextClearInFlightFacts {
     pub already_resubmitted: bool,
     pub settled_idle_ticks: u32,
     pub settle_threshold: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IdleQueueContextClearInFlightSettleFacts {
+    pub awaiting_clear_settle: bool,
+    pub prompt_visible: bool,
+    pub turn_active: bool,
+    pub route_submit_in_flight: bool,
+    pub clear_already_pending: Option<bool>,
+    pub settled_idle_ticks: u32,
+    pub settle_threshold: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IdleQueueContextClearInFlightSettle {
+    pub settled_idle_ticks: u32,
+    pub settled_now: bool,
 }
 
 pub fn clean_session_head_forces_context_reset(
@@ -219,6 +237,33 @@ pub fn idle_queue_context_clear_in_flight_decision(
         IdleQueueContextClearInFlightDecision::Settled
     } else {
         IdleQueueContextClearInFlightDecision::AwaitSettle
+    }
+}
+
+pub fn context_clear_in_flight_marker_active(
+    written_at: u64,
+    now_secs: u64,
+    ttl_secs: u64,
+) -> bool {
+    now_secs.saturating_sub(written_at) <= ttl_secs
+}
+
+pub fn idle_queue_context_clear_in_flight_settle_ticks(
+    facts: IdleQueueContextClearInFlightSettleFacts,
+) -> IdleQueueContextClearInFlightSettle {
+    let settled_idle_ticks = if facts.awaiting_clear_settle
+        && facts.prompt_visible
+        && !facts.turn_active
+        && !facts.route_submit_in_flight
+        && !drain_dispatch_dedup_skip(facts.clear_already_pending)
+    {
+        facts.settled_idle_ticks.saturating_add(1)
+    } else {
+        0
+    };
+    IdleQueueContextClearInFlightSettle {
+        settled_idle_ticks,
+        settled_now: facts.awaiting_clear_settle && settled_idle_ticks >= facts.settle_threshold,
     }
 }
 
@@ -460,6 +505,74 @@ mod tests {
             }),
             Settled
         );
+    }
+
+    #[test]
+    fn context_clear_in_flight_marker_freshness_uses_saturating_age() {
+        assert!(context_clear_in_flight_marker_active(
+            100,
+            100 + CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS,
+            CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS,
+        ));
+        assert!(!context_clear_in_flight_marker_active(
+            100,
+            100 + CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS + 1,
+            CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS,
+        ));
+        assert!(
+            context_clear_in_flight_marker_active(200, 100, CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS,),
+            "clock skew must not underflow into a stale marker"
+        );
+    }
+
+    #[test]
+    fn context_clear_settle_ticks_require_consecutive_idle_without_pending_clear() {
+        let base = IdleQueueContextClearInFlightSettleFacts {
+            awaiting_clear_settle: true,
+            prompt_visible: true,
+            turn_active: false,
+            route_submit_in_flight: false,
+            clear_already_pending: Some(false),
+            settled_idle_ticks: CLEAR_COOLDOWN_RESUME_IDLE_TICKS - 1,
+            settle_threshold: CLEAR_COOLDOWN_RESUME_IDLE_TICKS,
+        };
+        assert_eq!(
+            idle_queue_context_clear_in_flight_settle_ticks(base),
+            IdleQueueContextClearInFlightSettle {
+                settled_idle_ticks: CLEAR_COOLDOWN_RESUME_IDLE_TICKS,
+                settled_now: true,
+            }
+        );
+        for reset_case in [
+            IdleQueueContextClearInFlightSettleFacts {
+                prompt_visible: false,
+                ..base
+            },
+            IdleQueueContextClearInFlightSettleFacts {
+                turn_active: true,
+                ..base
+            },
+            IdleQueueContextClearInFlightSettleFacts {
+                route_submit_in_flight: true,
+                ..base
+            },
+            IdleQueueContextClearInFlightSettleFacts {
+                clear_already_pending: Some(true),
+                ..base
+            },
+            IdleQueueContextClearInFlightSettleFacts {
+                awaiting_clear_settle: false,
+                ..base
+            },
+        ] {
+            assert_eq!(
+                idle_queue_context_clear_in_flight_settle_ticks(reset_case),
+                IdleQueueContextClearInFlightSettle {
+                    settled_idle_ticks: 0,
+                    settled_now: false,
+                }
+            );
+        }
     }
 
     #[test]

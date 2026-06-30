@@ -337,9 +337,10 @@ should be deleted during extraction.
   keeps only file IO, rendering, snapshot persistence, and CLI output.
 - `agent-doc-queue` now owns id-backed queue-head closeout/removal decisions and
   free-text queue-head provenance decisions used by `session_check`, including
-  committed queue presence, completed-residue detection, response-proof
-  classification, suppression-marker residue, and the response-heading
-  plausibility heuristic. Orchestration keeps guard-mode formatting,
+  committed queue presence, completed-residue detection, normalized/sorted
+  reaped directive-head id intersection, response-proof classification,
+  suppression-marker residue, and the response-heading plausibility heuristic.
+  Orchestration keeps guard-mode formatting,
   cycle-state loading, ops logging, and effectful response-materialization
   checks owned by `agent-doc-turn`.
 - `agent-doc-queue` now owns queue consumption entry policy used by

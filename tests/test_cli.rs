@@ -3275,6 +3275,12 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
             .exists(),
         "exchange-tail prompt/response policy should live in the focused turn crate"
     );
+    assert!(
+        manifest_dir
+            .join("agent-doc-turn/src/document_drift.rs")
+            .exists(),
+        "closeout document-drift policy should live in the focused turn crate"
+    );
 
     let turn_source =
         fs::read_to_string(manifest_dir.join("agent-doc-turn/src/closeout_signal.rs")).unwrap();
@@ -3282,6 +3288,8 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-element-backlog/src/backlog.rs")).unwrap();
     let exchange_tail_source =
         fs::read_to_string(manifest_dir.join("agent-doc-turn/src/exchange_tail.rs")).unwrap();
+    let document_drift_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn/src/document_drift.rs")).unwrap();
     let guard_source =
         fs::read_to_string(manifest_dir.join("agent-doc-turn/src/closeout_guard.rs")).unwrap();
     let recovery_source =
@@ -3560,6 +3568,34 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
             "agent-doc-turn must own exchange-tail prompt/response policy: {required}"
         );
     }
+    for required in [
+        "pub fn exchange_has_new_appended_content",
+        "pub fn extract_normalized_exchange_body",
+        "pub fn exchange_only_promptless_content_drift",
+        "pub fn active_session_drift_is_only_exchange_or_backlog_metadata",
+        "pub fn promptless_comment_only_drift",
+        "pub fn mask_exchange_component_content",
+        "pub fn mask_components_by_name",
+    ] {
+        assert!(
+            document_drift_source.contains(required),
+            "agent-doc-turn must own closeout document-drift policy: {required}"
+        );
+    }
+    let turn_lib = fs::read_to_string(manifest_dir.join("agent-doc-turn/src/lib.rs")).unwrap();
+    assert!(
+        turn_lib.contains("pub mod document_drift;"),
+        "agent-doc-turn should expose document-drift policy through its owning module"
+    );
+    assert!(
+        !turn_lib.contains("pub use document_drift")
+            && !turn_lib.contains("pub use agent_doc_turn::document_drift"),
+        "agent-doc-turn should not add a document_drift root facade"
+    );
+    assert!(
+        document_drift_source.contains("crate::closeout_signal::is_exchange_response_heading"),
+        "document-drift policy should reuse focused closeout response-heading classification"
+    );
 
     let detect_source = fs::read_to_string(
         manifest_dir.join("agent-doc-orchestration/src/session_check/detect.rs"),
@@ -3639,7 +3675,6 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "agent_doc_turn::closeout_signal::queue_audit_partial_completion_decision",
         "agent_doc_turn::closeout_signal::QueueAuditPartialCompletionEvidence",
         "agent_doc_turn::closeout_signal::QueueAuditPartialCompletionDecision",
-        "agent_doc_turn::closeout_signal::is_exchange_response_heading",
         "agent_doc_turn::closeout_signal::is_direct_response_patchback_heading",
         "agent_doc_turn::closeout_signal::has_new_response_heading_marker",
         "agent_doc_turn::closeout_signal::is_binary_authored_recovery_diagnostic_heading",
@@ -3662,6 +3697,13 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     for forbidden in [
         "pub(crate) fn unresolved_exchange_prompt_in_content",
         "pub(crate) fn prompt_only_exchange_tail",
+        "pub(crate) fn exchange_has_new_appended_content",
+        "pub(crate) fn extract_normalized_exchange_body",
+        "pub(crate) fn exchange_only_promptless_content_drift",
+        "pub(crate) fn active_session_drift_is_only_exchange_or_backlog_metadata",
+        "pub(crate) fn promptless_comment_only_drift",
+        "pub(crate) fn mask_exchange_component_content",
+        "pub(crate) fn mask_components_by_name",
     ] {
         assert!(
             !closeout_guards.contains(forbidden),
@@ -3675,6 +3717,18 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
                 .contains("agent_doc_turn::exchange_tail::exchange_tail_has_response_heading"),
         "closeout_guards should keep only file adapters over focused exchange-tail policy"
     );
+    for required in [
+        "agent_doc_turn::document_drift::{",
+        "active_session_drift_is_only_exchange_or_backlog_metadata",
+        "exchange_has_new_appended_content",
+        "exchange_only_promptless_content_drift",
+        "promptless_comment_only_drift",
+    ] {
+        assert!(
+            closeout_guards.contains(required),
+            "closeout_guards should call focused document-drift policy directly: {required}"
+        );
+    }
     assert!(
         detect_source.contains("agent_doc_turn::exchange_tail::prompt_only_exchange_tail"),
         "session_check::detect should call focused prompt-only exchange-tail policy directly"

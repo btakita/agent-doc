@@ -3852,7 +3852,7 @@ Body\n\
             "<!-- /agent:backlog -->\n",
         );
 
-        assert!(active_session_drift_is_only_exchange_or_backlog_metadata(
+        assert!(agent_doc_turn::document_drift::active_session_drift_is_only_exchange_or_backlog_metadata(
             snapshot, current
         ));
     }

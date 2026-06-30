@@ -1,4 +1,8 @@
 use super::*;
+use agent_doc_turn::document_drift::{
+    active_session_drift_is_only_exchange_or_backlog_metadata, exchange_has_new_appended_content,
+    exchange_only_promptless_content_drift, promptless_comment_only_drift,
+};
 
 pub(crate) fn check_blocked_closeout_followup_guard(
     file: &Path,
@@ -359,115 +363,6 @@ pub(crate) fn detect_uncommitted_exchange_drift(file: &Path) -> Result<Option<St
         None => "uncommitted working tree drift beyond snapshot with exchange changes".to_string(),
     };
     Ok(Some(detail))
-}
-
-pub(crate) fn exchange_has_new_appended_content(snapshot: &str, current: &str) -> bool {
-    let Some(snapshot_exchange) = extract_normalized_exchange_body(snapshot) else {
-        return false;
-    };
-    let Some(current_exchange) = extract_normalized_exchange_body(current) else {
-        return false;
-    };
-    if current_exchange == snapshot_exchange {
-        return false;
-    }
-    let snapshot_lines: Vec<&str> = snapshot_exchange.lines().collect();
-    let current_lines: Vec<&str> = current_exchange.lines().collect();
-    if current_lines.len() <= snapshot_lines.len() {
-        return false;
-    }
-    for (i, line) in snapshot_lines.iter().enumerate() {
-        if current_lines.get(i) != Some(line) {
-            return false;
-        }
-    }
-    let appended: String = current_lines[snapshot_lines.len()..].join("\n");
-    if appended
-        .lines()
-        .map(str::trim)
-        .any(agent_doc_turn::closeout_signal::is_exchange_response_heading)
-    {
-        return true;
-    }
-    if appended
-        .lines()
-        .any(agent_doc_diff::text_line_looks_like_prompt_target)
-    {
-        return false;
-    }
-    true
-}
-
-pub(crate) fn extract_normalized_exchange_body(doc: &str) -> Option<String> {
-    let (_, body) = agent_doc_frontmatter::frontmatter::parse(doc).ok()?;
-    let components = agent_doc_element::element::parse(body).ok()?;
-    for component in &components {
-        if component.name == "exchange" {
-            return Some(component.content(body).to_string());
-        }
-    }
-    None
-}
-
-pub(crate) fn exchange_only_promptless_content_drift(snapshot: &str, current: &str) -> bool {
-    if snapshot == current {
-        return true;
-    }
-    let Some(snapshot_masked) = mask_exchange_component_content(snapshot) else {
-        return false;
-    };
-    let Some(current_masked) = mask_exchange_component_content(current) else {
-        return false;
-    };
-    agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(&snapshot_masked)
-        == agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
-            &current_masked,
-        )
-}
-
-pub(crate) fn active_session_drift_is_only_exchange_or_backlog_metadata(
-    snapshot: &str,
-    current: &str,
-) -> bool {
-    let Some(snapshot_masked) = mask_components_by_name(snapshot, &["exchange", "backlog"]) else {
-        return false;
-    };
-    let Some(current_masked) = mask_components_by_name(current, &["exchange", "backlog"]) else {
-        return false;
-    };
-    agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(&snapshot_masked)
-        == agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
-            &current_masked,
-        )
-}
-
-pub(crate) fn promptless_comment_only_drift(snapshot: &str, current: &str) -> bool {
-    if snapshot == current {
-        return true;
-    }
-    agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
-        &agent_doc_diff::strip_comments(snapshot),
-    ) == agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
-        &agent_doc_diff::strip_comments(current),
-    )
-}
-
-pub(crate) fn mask_exchange_component_content(doc: &str) -> Option<String> {
-    mask_components_by_name(doc, &["exchange"])
-}
-
-pub(crate) fn mask_components_by_name(doc: &str, names: &[&str]) -> Option<String> {
-    let components = agent_doc_element::element::parse(doc).ok()?;
-    let mut masked = doc.to_string();
-    let mut saw_target = false;
-    for component in components.iter().rev() {
-        if !names.contains(&component.name.as_str()) {
-            continue;
-        }
-        saw_target = true;
-        masked.replace_range(component.open_end..component.close_start, "\n");
-    }
-    saw_target.then_some(masked)
 }
 
 pub(crate) fn open_cycle_message(

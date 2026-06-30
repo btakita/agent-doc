@@ -41,6 +41,7 @@
 //! - `mark_committed_closes_cycle`
 //! - `mark_write_applied_creates_synthetic_cycle_when_missing`
 
+use agent_doc_element_backlog::backlog::normalize_pending_id;
 use agent_doc_turn::{CycleEvent, CyclePhase, CyclePhaseMachine};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -1353,10 +1354,6 @@ fn normalized_content_hash(content: &str) -> String {
     // queue-maintenance churn (#adoc-queue-ipc-buffer-divergence #4). Must match
     // repair.rs's compare-side normalization exactly.
     agent_doc_hash::content_hash(&crate::git::normalize_for_replay_hash(content))
-}
-
-fn normalize_pending_id(id: &str) -> String {
-    id.trim().trim_start_matches('#').to_ascii_lowercase()
 }
 
 fn normalize_checkpoint_task_id(id: &str) -> String {

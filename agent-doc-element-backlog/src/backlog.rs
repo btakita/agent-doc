@@ -636,6 +636,38 @@ pub fn open_backlog_ids_in_content(content: &str) -> Vec<String> {
         .collect()
 }
 
+pub fn tracked_work_ids_from_component_body(body: &str) -> HashSet<String> {
+    let (_, items, _) = parse_items(body);
+    items
+        .into_iter()
+        .filter(|item| !item.is_done())
+        .map(|item| normalize_pending_id(&item.id))
+        .filter(|id| !id.is_empty())
+        .collect()
+}
+
+pub fn tracked_work_ids_for_target(
+    content: &str,
+    preferred_component: Option<&str>,
+) -> Result<HashSet<String>> {
+    let components = element::parse(content)?;
+    let component = preferred_component
+        .and_then(|name| components.iter().find(|component| component.name == name))
+        .or_else(|| {
+            components
+                .iter()
+                .find(|component| element::is_backlog_component(&component.name))
+        })
+        .or_else(|| {
+            components
+                .iter()
+                .find(|component| element::is_tracked_work_component(&component.name))
+        });
+    Ok(component
+        .map(|component| tracked_work_ids_from_component_body(component.content(content)))
+        .unwrap_or_default())
+}
+
 /// Return non-exchange components whose tracked checklist item count decreased.
 pub fn dropped_tracked_component_items(before: &str, after: &str) -> Vec<TrackedComponentItemDrop> {
     let before_counts = tracked_component_item_counts(before);
@@ -3309,6 +3341,44 @@ mod tests {
         assert_eq!(
             open_backlog_ids_in_content(doc),
             vec!["open".to_string(), "gated".to_string()]
+        );
+    }
+
+    #[test]
+    fn tracked_work_ids_from_component_body_lists_normalized_non_done_items() {
+        let ids = tracked_work_ids_from_component_body(concat!(
+            "- [ ] [#OPEN] open item\n",
+            "- [/] [#Gated] gated item\n",
+            "- [x] [#done] done item\n",
+        ));
+
+        assert_eq!(
+            ids,
+            ["open", "gated"].into_iter().map(str::to_string).collect()
+        );
+    }
+
+    #[test]
+    fn tracked_work_ids_for_target_prefers_requested_component_then_backlog() {
+        let doc = concat!(
+            "<!-- agent:review -->\n",
+            "- [ ] [#review] review item\n",
+            "<!-- /agent:review -->\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#backlog] backlog item\n",
+            "<!-- /agent:backlog -->\n",
+            "<!-- agent:icebox -->\n",
+            "- [ ] [#ice] icebox item\n",
+            "<!-- /agent:icebox -->\n",
+        );
+
+        assert_eq!(
+            tracked_work_ids_for_target(doc, Some("review")).unwrap(),
+            ["review"].into_iter().map(str::to_string).collect()
+        );
+        assert_eq!(
+            tracked_work_ids_for_target(doc, None).unwrap(),
+            ["backlog"].into_iter().map(str::to_string).collect()
         );
     }
 

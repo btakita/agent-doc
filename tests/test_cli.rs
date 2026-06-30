@@ -3215,6 +3215,8 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
 
     let turn_source =
         fs::read_to_string(manifest_dir.join("agent-doc-turn/src/closeout_signal.rs")).unwrap();
+    let backlog_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-element-backlog/src/backlog.rs")).unwrap();
     let exchange_tail_source =
         fs::read_to_string(manifest_dir.join("agent-doc-turn/src/exchange_tail.rs")).unwrap();
     let guard_source =
@@ -3815,6 +3817,39 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         manifest_dir.join("agent-doc-orchestration/src/write/pending_checks.rs"),
     )
     .unwrap();
+    let cycle_state =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/cycle_state.rs"))
+            .unwrap();
+    for required in [
+        "pub fn tracked_work_ids_from_component_body",
+        "pub fn tracked_work_ids_for_target",
+    ] {
+        assert!(
+            backlog_source.contains(required),
+            "agent-doc-element-backlog must own tracked-work target id parsing: {required}"
+        );
+    }
+    for forbidden in [
+        "pub(crate) fn normalize_pending_id",
+        "fn normalize_pending_id(",
+        "pub(crate) fn tracked_work_ids_from_component_body",
+        "fn tracked_work_ids_from_component_body(",
+        "pub(crate) fn tracked_work_ids_for_target",
+        "fn tracked_work_ids_for_target(",
+    ] {
+        assert!(
+            !pending_checks.contains(forbidden),
+            "write pending checks must not re-own tracked-work target id parsing: {forbidden}"
+        );
+    }
+    assert!(
+        !cycle_state.contains("fn normalize_pending_id("),
+        "cycle_state must reuse the focused backlog id normalizer instead of re-owning it"
+    );
+    assert!(
+        cycle_state.contains("agent_doc_element_backlog::backlog::normalize_pending_id"),
+        "cycle_state should import the focused backlog id normalizer directly"
+    );
     for forbidden in [
         "crate::session_check::detect_missing_pending_done_ids",
         ".contains(\"<!-- no-pending-done-guard -->\")",
@@ -3825,6 +3860,8 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         );
     }
     for required in [
+        "agent_doc_element_backlog::backlog::normalize_pending_id",
+        "agent_doc_element_backlog::backlog::tracked_work_ids_for_target",
         "agent_doc_turn::closeout_signal::pending_done_suppressed",
         "agent_doc_turn::closeout_signal::tracked_work_completion_missing_done_ids",
         "agent_doc_turn::closeout_signal::tracked_work_completion_decision",

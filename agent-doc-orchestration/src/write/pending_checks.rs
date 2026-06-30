@@ -52,42 +52,6 @@ pub fn unresolved_backlog_capture_targets(
         .collect()
 }
 
-pub(crate) fn normalize_pending_id(id: &str) -> String {
-    id.trim().trim_start_matches('#').to_ascii_lowercase()
-}
-
-pub(crate) fn tracked_work_ids_from_component_body(body: &str) -> HashSet<String> {
-    let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(body);
-    items
-        .into_iter()
-        .filter(|item| !item.is_done())
-        .map(|item| normalize_pending_id(&item.id))
-        .filter(|id| !id.is_empty())
-        .collect()
-}
-
-pub(crate) fn tracked_work_ids_for_target(
-    content: &str,
-    preferred_component: Option<&str>,
-) -> Result<HashSet<String>> {
-    let components = agent_doc_element::element::parse(content)?;
-    let component = preferred_component
-        .and_then(|name| components.iter().find(|component| component.name == name))
-        .or_else(|| {
-            components
-                .iter()
-                .find(|component| agent_doc_element::element::is_backlog_component(&component.name))
-        })
-        .or_else(|| {
-            components.iter().find(|component| {
-                agent_doc_element::element::is_tracked_work_component(&component.name)
-            })
-        });
-    Ok(component
-        .map(|component| tracked_work_ids_from_component_body(component.content(content)))
-        .unwrap_or_default())
-}
-
 pub(crate) fn promised_backlog_item_ids_from_response(
     response_text: &str,
     state: &crate::cycle_state::CycleState,
@@ -96,12 +60,12 @@ pub(crate) fn promised_backlog_item_ids_from_response(
         .required_backlog_targets
         .iter()
         .flat_map(|target| target.baseline_item_ids.iter())
-        .map(|id| normalize_pending_id(id))
+        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
         .collect();
     let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(response_text);
     let mut promised = Vec::new();
     for item in items.into_iter().filter(|item| !item.is_done()) {
-        let id = normalize_pending_id(&item.id);
+        let id = agent_doc_element_backlog::backlog::normalize_pending_id(&item.id);
         if id.is_empty()
             || baseline_ids.contains(&id)
             || promised.iter().any(|existing| existing == &id)
@@ -213,7 +177,10 @@ pub fn unresolved_promised_backlog_item_ids(
                 Err(_) => continue,
             }
         };
-        let Ok(ids) = tracked_work_ids_for_target(&content, target.component.as_deref()) else {
+        let Ok(ids) = agent_doc_element_backlog::backlog::tracked_work_ids_for_target(
+            &content,
+            target.component.as_deref(),
+        ) else {
             continue;
         };
         current_target_ids.extend(ids);

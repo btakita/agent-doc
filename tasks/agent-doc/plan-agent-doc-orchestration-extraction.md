@@ -808,6 +808,14 @@ should be deleted during extraction.
   cleanup keep patch/file/commit delivery effects while importing the focused
   boundary helper directly; the old `write::find_boundary_id` path was deleted
   instead of preserved as a facade.
+- `agent-doc-document-realtime` now owns response-delta already-applied
+  detection for IPC/CRDT retry paths: normalizing exchange component content,
+  computing actionable inserted response hunks from `base -> content_ours`, and
+  requiring those hunks to already appear contiguously in the current visible
+  document before adopting it. Write and IPC modules keep timeout, sidecar,
+  snapshot, and normalization effects while importing the focused detector
+  directly; the old `write.rs` helper cluster was deleted instead of preserved
+  as a facade.
 
 ### Earlier closure finding
 

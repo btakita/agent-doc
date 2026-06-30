@@ -40,67 +40,43 @@ pub(crate) fn check_malformed_tracked_item_guard(
     // Phase 6 (#lr-content-6): cached content + parsed components.
     let content = rc.doc_content();
     let components = rc.components();
-    let refs = malformed_tracked_item_refs_in(&content, &components, None);
+    let refs = malformed_tracked_item_reference_strings(
+        agent_doc_element_backlog::backlog::malformed_tracked_item_refs_in_components(
+            &content,
+            &components,
+        ),
+        None,
+    );
     if refs.is_empty() {
         return Ok(GuardResult::None);
     }
 
-    Ok(GuardResult::Error(malformed_tracked_item_message(&refs)))
-}
-
-pub fn malformed_tracked_item_refs(
-    file: &Path,
-    completed_by_response: Option<&str>,
-) -> Result<Vec<String>> {
-    let content = std::fs::read_to_string(file)?;
-    let Ok(components) = agent_doc_element::element::parse(&content) else {
-        return Ok(Vec::new());
-    };
-    Ok(malformed_tracked_item_refs_in(
-        &content,
-        &components,
-        completed_by_response,
+    Ok(GuardResult::Error(
+        agent_doc_element_backlog::backlog::malformed_tracked_item_interruption_message(&refs),
     ))
 }
 
-/// Shared malformed-item detection over already-read content + parsed
-/// components. Phase 6 (#lr-content-6) lets `inspect`'s guard read these from
-/// the cached graph slots while external callers still pass a freshly read
-/// document.
-pub(crate) fn malformed_tracked_item_refs_in(
-    content: &str,
-    components: &[agent_doc_element::element::Component],
+/// Session-check adapter over focused malformed tracked-work syntax policy.
+/// Phase 6 (#lr-content-6) lets `inspect`'s guard read content and components
+/// from cached graph slots; the response filter is closeout-specific turn
+/// context and intentionally stays outside the backlog element crate.
+fn malformed_tracked_item_reference_strings(
+    refs: impl IntoIterator<Item = agent_doc_element_backlog::backlog::MalformedTrackedItemRef>,
     completed_by_response: Option<&str>,
 ) -> Vec<String> {
-    components
-        .iter()
-        .filter(|component| is_tracked_work_component(&component.name))
-        .flat_map(|component| {
-            let name = component.name.clone();
-            agent_doc_element_backlog::backlog::detect_malformed_item_lines(
-                component.content(content),
-            )
-            .into_iter()
-            .map(move |item| (name.clone(), item))
-        })
-        .filter(|(_, item)| {
+    refs.into_iter()
+        .filter(|item| {
             completed_by_response
                 .map(|response| {
                     agent_doc_turn::closeout_signal::response_clearly_completes_pending_id(
-                        response, &item.id,
+                        response,
+                        &item.item.id,
                     )
                 })
                 .unwrap_or(true)
         })
-        .map(|(name, item)| format!("{} {}", name, item.reference()))
+        .map(|item| item.reference())
         .collect::<Vec<_>>()
-}
-
-pub fn malformed_tracked_item_message(refs: &[String]) -> String {
-    format!(
-        "[session-check] INTERRUPTED: malformed tracked checklist item(s) in live backlog/icebox: {}. Repair the checklist prefix before closeout so pending guards can prove the item state",
-        refs.join("; ")
-    )
 }
 
 pub(crate) fn check_backlog_replay_guard(

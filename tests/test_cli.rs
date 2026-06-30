@@ -7325,6 +7325,63 @@ fn test_agent_doc_element_backlog_owns_tracked_line_remove_and_prune_policy() {
 }
 
 #[test]
+fn test_agent_doc_element_backlog_owns_malformed_tracked_item_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let backlog_model =
+        fs::read_to_string(manifest_dir.join("agent-doc-element-backlog/src/backlog.rs")).unwrap();
+    for required in [
+        "pub struct MalformedPendingItemLine",
+        "pub struct MalformedTrackedItemRef",
+        "pub fn detect_malformed_item_lines",
+        "pub fn malformed_tracked_item_refs_in_components",
+        "pub fn malformed_tracked_item_refs",
+        "pub fn malformed_tracked_item_interruption_message",
+    ] {
+        assert!(
+            backlog_model.contains(required),
+            "agent-doc-element-backlog must own malformed tracked checklist policy: {required}"
+        );
+    }
+
+    let backlog_guards = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/backlog_guards.rs"),
+    )
+    .unwrap();
+    for forbidden in [
+        "pub fn malformed_tracked_item_refs",
+        "pub(crate) fn malformed_tracked_item_refs_in",
+        "pub fn malformed_tracked_item_message",
+        "detect_malformed_item_lines(",
+    ] {
+        assert!(
+            !backlog_guards.contains(forbidden),
+            "session_check backlog guards must not re-own malformed tracked checklist policy: {forbidden}"
+        );
+    }
+    assert!(
+        backlog_guards.contains("malformed_tracked_item_refs_in_components")
+            && backlog_guards.contains("malformed_tracked_item_interruption_message"),
+        "session_check backlog guards should call malformed tracked checklist policy from agent-doc-element-backlog"
+    );
+
+    let pending_checks = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/write/pending_checks.rs"),
+    )
+    .unwrap();
+    assert!(
+        !pending_checks.contains("crate::session_check::malformed_tracked_item"),
+        "write pending checks must not route malformed tracked checklist policy through session_check"
+    );
+    assert!(
+        pending_checks.contains("agent_doc_element_backlog::backlog::malformed_tracked_item_refs")
+            && pending_checks.contains(
+                "agent_doc_element_backlog::backlog::malformed_tracked_item_interruption_message"
+            ),
+        "write pending checks should call malformed tracked checklist policy directly"
+    );
+}
+
+#[test]
 fn test_focus_no_stash_promote_compatibility_shim_is_removed() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     for relative in [

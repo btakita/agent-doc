@@ -609,6 +609,25 @@ pub(crate) struct PendingDoneCheckOptions {
     pub force_disk: bool,
 }
 
+fn malformed_tracked_item_refs_completed_by_response(
+    file: &Path,
+    response_text: &str,
+) -> Result<Vec<String>> {
+    let content = std::fs::read_to_string(file)?;
+    Ok(
+        agent_doc_element_backlog::backlog::malformed_tracked_item_refs(&content)
+            .into_iter()
+            .filter(|item| {
+                agent_doc_turn::closeout_signal::response_clearly_completes_pending_id(
+                    response_text,
+                    &item.item.id,
+                )
+            })
+            .map(|item| item.reference())
+            .collect(),
+    )
+}
+
 #[cfg(test)]
 pub(crate) fn precommit_pending_done_check(file: &Path) -> Result<()> {
     precommit_pending_done_check_with_options(file, PendingDoneCheckOptions::default())
@@ -639,7 +658,7 @@ pub(crate) fn precommit_pending_done_check_with_options(
 
     let response_text =
         agent_doc_turn::closeout_signal::response_text_for_guards(&capture.response_body);
-    let malformed = crate::session_check::malformed_tracked_item_refs(file, Some(&response_text))?;
+    let malformed = malformed_tracked_item_refs_completed_by_response(file, &response_text)?;
     if !malformed.is_empty() {
         log_closeout_guard(
             file,
@@ -649,7 +668,9 @@ pub(crate) fn precommit_pending_done_check_with_options(
         );
         anyhow::bail!(
             "[finalize] pre-commit gate: {}",
-            crate::session_check::malformed_tracked_item_message(&malformed)
+            agent_doc_element_backlog::backlog::malformed_tracked_item_interruption_message(
+                &malformed
+            )
         );
     }
     let missing = crate::session_check::detect_missing_pending_done_ids(
@@ -740,7 +761,7 @@ pub(crate) fn prewrite_pending_done_check(
     }
 
     let response_text = agent_doc_turn::closeout_signal::response_text_for_guards(response_body);
-    let malformed = crate::session_check::malformed_tracked_item_refs(file, Some(&response_text))?;
+    let malformed = malformed_tracked_item_refs_completed_by_response(file, &response_text)?;
     if !malformed.is_empty() {
         log_closeout_guard(
             file,
@@ -750,7 +771,9 @@ pub(crate) fn prewrite_pending_done_check(
         );
         anyhow::bail!(
             "[finalize] pre-write gate: {}",
-            crate::session_check::malformed_tracked_item_message(&malformed)
+            agent_doc_element_backlog::backlog::malformed_tracked_item_interruption_message(
+                &malformed
+            )
         );
     }
     let missing = crate::session_check::detect_missing_pending_done_ids(

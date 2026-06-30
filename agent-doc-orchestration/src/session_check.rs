@@ -696,7 +696,7 @@ mod queue_head_guards;
 pub(crate) use queue_head_guards::*;
 
 mod backlog_guards;
-pub use backlog_guards::*;
+pub(crate) use backlog_guards::*;
 ///
 /// Kept out of the read-only `inspect*` path on purpose: only the mutating
 /// command entrypoints (`enforce_clean_closeout` on the finalize boundary,

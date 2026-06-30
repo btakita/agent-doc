@@ -433,6 +433,18 @@ impl MalformedPendingItemLine {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MalformedTrackedItemRef {
+    pub component: String,
+    pub item: MalformedPendingItemLine,
+}
+
+impl MalformedTrackedItemRef {
+    pub fn reference(&self) -> String {
+        format!("{} {}", self.component, self.item.reference())
+    }
+}
+
 /// Find lines that look like tracked checklist items but are not parseable as
 /// live pending items. These lines are dangerous during closeout because guards
 /// that operate on parsed items would otherwise treat the matching id as absent.
@@ -456,6 +468,39 @@ pub fn detect_malformed_item_lines(body: &str) -> Vec<MalformedPendingItemLine> 
             })
         })
         .collect()
+}
+
+pub fn malformed_tracked_item_refs_in_components(
+    content: &str,
+    components: &[element::Component],
+) -> Vec<MalformedTrackedItemRef> {
+    components
+        .iter()
+        .filter(|component| element::is_tracked_work_component(&component.name))
+        .flat_map(|component| {
+            let component_name = component.name.clone();
+            detect_malformed_item_lines(component.content(content))
+                .into_iter()
+                .map(move |item| MalformedTrackedItemRef {
+                    component: component_name.clone(),
+                    item,
+                })
+        })
+        .collect()
+}
+
+pub fn malformed_tracked_item_refs(content: &str) -> Vec<MalformedTrackedItemRef> {
+    let Ok(components) = element::parse(content) else {
+        return Vec::new();
+    };
+    malformed_tracked_item_refs_in_components(content, &components)
+}
+
+pub fn malformed_tracked_item_interruption_message(refs: &[String]) -> String {
+    format!(
+        "[session-check] INTERRUPTED: malformed tracked checklist item(s) in live backlog/icebox: {}. Repair the checklist prefix before closeout so pending guards can prove the item state",
+        refs.join("; ")
+    )
 }
 
 fn find_valid_hash_id(line: &str) -> Option<(&str, usize)> {
@@ -3604,6 +3649,44 @@ mod tests {
         assert_eq!(malformed[0].id, "pcops");
         assert_eq!(malformed[0].line, 1);
         assert!(malformed[0].text.contains("damaged prefix"));
+    }
+
+    #[test]
+    fn malformed_tracked_item_refs_scan_tracked_components() {
+        let doc = concat!(
+            "<!-- agent:backlog -->\n",
+            "_- [ ] [#backlog1] damaged backlog\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:review -->\n",
+            "_- [ ] [#review1] damaged review\n",
+            "<!-- /agent:review -->\n\n",
+            "<!-- agent:exchange -->\n",
+            "_- [ ] [#exchange1] ignored exchange\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let refs = malformed_tracked_item_refs(doc);
+
+        assert_eq!(refs.len(), 2);
+        assert_eq!(refs[0].component, "backlog");
+        assert_eq!(refs[0].item.id, "backlog1");
+        assert_eq!(
+            refs[0].reference(),
+            "backlog #backlog1 (line 1): _- [ ] [#backlog1] damaged backlog"
+        );
+        assert_eq!(refs[1].component, "review");
+        assert_eq!(refs[1].item.id, "review1");
+    }
+
+    #[test]
+    fn malformed_tracked_item_interruption_message_formats_refs() {
+        let message = malformed_tracked_item_interruption_message(&[
+            "backlog #a1 (line 1): _- [ ] [#a1] damaged".to_string(),
+        ]);
+
+        assert!(message.contains("malformed tracked checklist item"));
+        assert!(message.contains("backlog #a1 (line 1)"));
+        assert!(message.contains("pending guards can prove the item state"));
     }
 
     #[test]

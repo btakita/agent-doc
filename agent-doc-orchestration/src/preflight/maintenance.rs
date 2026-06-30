@@ -1895,52 +1895,59 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // `project_root` / `done_ids` were computed once before the backlog→queue
     // sync (above) and reused here — `agent:done` is untouched by queue
     // maintenance, so the set is still current.
-    let gated_ids = collect_agent_review_gated_ids(&current_content);
+    let gated_ids = agent_doc_element_review::collect_gated_review_ids(&current_content);
     let mut eligible_ids: std::collections::HashSet<String> = done_ids.clone();
     for id in &gated_ids {
         eligible_ids.insert(id.clone());
     }
+    let mut eligible_id_list: Vec<String> = eligible_ids.iter().cloned().collect();
+    eligible_id_list.sort();
     // `activation.entries_after` already reflects start-fence consumption and
     // the duplicate-prompt collapse above, so it is the authoritative current
     // entry set for the strike pass in every branch.
     let entries_for_strike = activation.entries_after.clone();
-    if !eligible_ids.is_empty()
-        && let Some((new_entries, struck)) =
-            strike_done_queue_head_prompts(&entries_for_strike, &eligible_ids)
-    {
-        let new_body = agent_doc_queue::document_queue::render(&new_entries);
-        current_content = {
-            let comps = agent_doc_element::element::parse(&current_content)?;
-            let q = comps.iter().find(|c| c.name == "queue").unwrap();
-            q.replace_content(&current_content, &new_body)
-        };
-        mutated = true;
-        for prompt in &struck {
-            let source = match agent_doc_queue::queue_response::queue_prompt_done_id(&prompt.text) {
-                Some(id) if done_ids.contains(&id) => "done",
-                Some(id) if gated_ids.contains(&id) => "review_gated",
-                _ => "unknown",
-            };
-            eprintln!(
-                "[preflight] queue: auto-struck already-resolved head prompt {:?} source={}",
-                prompt.text, source
+    if !eligible_id_list.is_empty() {
+        let (new_entries, struck) =
+            agent_doc_queue::queue_consume::mark_entries_completed_by_done_ids(
+                &entries_for_strike,
+                &eligible_id_list,
             );
-        }
-        // Recompute activation against the rewritten entry list so subsequent
-        // halt / step / dispatch maintenance phases see the post-strike head.
-        activation.entries_after = new_entries;
-        // If the strike consumed the entire live head set, the queue is now
-        // drained residue — every queued `do [#id]` was resolved via
-        // `agent:done` / review-gate. `resolve_activation` ran on the
-        // pre-strike entries (live prompts present) so `active` is stale-true;
-        // flip it false here so the drain-cleanup path below clears
-        // `queue_active`, strips `auto`, and empties the body. Without this the
-        // stale `active: true` either trips the `item_modified` halt (the
-        // post-strike head is `None` vs a still-live snapshot head) or leaves
-        // the queue reported active with an empty prompt set. (#drained-done-queue-clear)
-        if agent_doc_queue::document_queue::prompts(&activation.entries_after).is_empty() {
-            activation.active = false;
-            activation.trigger = None;
+        if !struck.is_empty() {
+            let new_body = agent_doc_queue::document_queue::render(&new_entries);
+            current_content = {
+                let comps = agent_doc_element::element::parse(&current_content)?;
+                let q = comps.iter().find(|c| c.name == "queue").unwrap();
+                q.replace_content(&current_content, &new_body)
+            };
+            mutated = true;
+            for prompt_text in &struck {
+                let source =
+                    match agent_doc_queue::queue_response::queue_prompt_done_id(prompt_text) {
+                        Some(id) if done_ids.contains(&id) => "done",
+                        Some(id) if gated_ids.contains(&id) => "review_gated",
+                        _ => "unknown",
+                    };
+                eprintln!(
+                    "[preflight] queue: auto-struck already-resolved head prompt {:?} source={}",
+                    prompt_text, source
+                );
+            }
+            // Recompute activation against the rewritten entry list so subsequent
+            // halt / step / dispatch maintenance phases see the post-strike head.
+            activation.entries_after = new_entries;
+            // If the strike consumed the entire live head set, the queue is now
+            // drained residue — every queued `do [#id]` was resolved via
+            // `agent:done` / review-gate. `resolve_activation` ran on the
+            // pre-strike entries (live prompts present) so `active` is stale-true;
+            // flip it false here so the drain-cleanup path below clears
+            // `queue_active`, strips `auto`, and empties the body. Without this the
+            // stale `active: true` either trips the `item_modified` halt (the
+            // post-strike head is `None` vs a still-live snapshot head) or leaves
+            // the queue reported active with an empty prompt set. (#drained-done-queue-clear)
+            if agent_doc_queue::document_queue::prompts(&activation.entries_after).is_empty() {
+                activation.active = false;
+                activation.trigger = None;
+            }
         }
     }
 
@@ -2353,12 +2360,19 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                     // live head behind drained residue. Striking both sides
                     // leaves only genuine operator head edits visible.
                     // (#drained-done-queue-clear)
-                    let snap_entries_struck = if eligible_ids.is_empty() {
+                    let snap_entries_struck = if eligible_id_list.is_empty() {
                         snap_entries
                     } else {
-                        strike_done_queue_head_prompts(&snap_entries, &eligible_ids)
-                            .map(|(entries, _)| entries)
-                            .unwrap_or(snap_entries)
+                        let (entries, struck) =
+                            agent_doc_queue::queue_consume::mark_entries_completed_by_done_ids(
+                                &snap_entries,
+                                &eligible_id_list,
+                            );
+                        if struck.is_empty() {
+                            snap_entries
+                        } else {
+                            entries
+                        }
                     };
                     agent_doc_queue::document_queue::detect_head_prompt_modified(
                         &snap_entries_struck,

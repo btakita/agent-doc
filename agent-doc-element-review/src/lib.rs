@@ -1,5 +1,7 @@
 //! Review element descriptor and pure review item projection.
 
+use std::collections::HashSet;
+
 use agent_doc_element::element;
 use agent_doc_element::{
     ElementAuthority, ElementCompositionRole, ElementDescriptor, ElementRealtimeModel,
@@ -232,6 +234,47 @@ pub fn plan_ungate_tasks_for_review(content: &str) -> Result<UngateTasksPlan> {
     }
 
     Ok(UngateTasksPlan { report, task_texts })
+}
+
+/// Collect `#id` values from `agent:review` items marked `- [/]`.
+///
+/// These are pending-gate review items: code-complete, awaiting an external
+/// gate. Queue maintenance treats matching `do [#id]` prompts as resolved so a
+/// multi-phase plan can advance without forcing the item into `agent:done`.
+pub fn collect_gated_review_ids(content: &str) -> HashSet<String> {
+    let mut ids = HashSet::new();
+    let Ok(components) = element::parse(content) else {
+        return ids;
+    };
+    for comp in &components {
+        if !element::is_review_component(&comp.name) {
+            continue;
+        }
+        for line in comp.content(content).lines() {
+            if let Some(id) = gated_review_id_from_line(line) {
+                ids.insert(id);
+            }
+        }
+    }
+    ids
+}
+
+fn gated_review_id_from_line(line: &str) -> Option<String> {
+    let trimmed = line.trim_start();
+    let after_status = trimmed.strip_prefix("- [/]")?;
+    let start = after_status.find("[#")?;
+    let after = &after_status[start + 2..];
+    let end = after.find(']')?;
+    let id = &after[..end];
+    if !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+    {
+        Some(id.to_ascii_lowercase())
+    } else {
+        None
+    }
 }
 
 /// Token-efficient projection of gated `agent:review` items.
@@ -491,6 +534,70 @@ mod tests {
         assert_eq!(plan.report.skipped, vec!["rev1", "rev2"]);
         assert_eq!(plan.report.added, vec!["rev3"]);
         assert_eq!(plan.task_texts, vec![ungate_task_text("rev3")]);
+    }
+
+    #[test]
+    fn collect_gated_review_ids_extracts_only_gated_marker() {
+        let content = "\
+<!-- agent:review -->
+- [/] [#alpha] First gated item with a plan reference.
+- [x] [#beta] Already-done item in review (legacy).
+- [ ] [#charlie] Open item in review -- not gated.
+- [/] [#delta_case] [partial] Another gated item.
+- [/] no id here.
+<!-- /agent:review -->
+";
+        let ids = collect_gated_review_ids(content);
+        assert!(
+            ids.contains("alpha"),
+            "expected gated [/] item to be collected, got {:?}",
+            ids
+        );
+        assert!(
+            ids.contains("delta_case"),
+            "expected second gated [/] item to be collected, got {:?}",
+            ids
+        );
+        assert!(
+            !ids.contains("beta"),
+            "[x] marker is not gated, must not be collected"
+        );
+        assert!(
+            !ids.contains("charlie"),
+            "[ ] marker is not gated, must not be collected"
+        );
+        assert_eq!(
+            ids.len(),
+            2,
+            "only [/] items should be collected: {:?}",
+            ids
+        );
+    }
+
+    #[test]
+    fn collect_gated_review_ids_returns_empty_when_no_review_component() {
+        let content =
+            "<!-- agent:backlog -->\n- [ ] [#alpha] backlog only\n<!-- /agent:backlog -->\n";
+        let ids = collect_gated_review_ids(content);
+        assert!(ids.is_empty(), "no review component -> empty: {:?}", ids);
+    }
+
+    #[test]
+    fn collect_gated_review_ids_ignores_backlog_open_items() {
+        let content = "\
+<!-- agent:backlog -->
+- [ ] [#openbk] open in backlog
+<!-- /agent:backlog -->
+<!-- agent:review -->
+- [/] [#gatedrv] gated in review
+<!-- /agent:review -->
+";
+        let ids = collect_gated_review_ids(content);
+        assert!(ids.contains("gatedrv"));
+        assert!(
+            !ids.contains("openbk"),
+            "backlog open items must NOT be collected as gated"
+        );
     }
 
     #[test]

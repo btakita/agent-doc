@@ -286,6 +286,45 @@ mod tests {
     }
 
     #[test]
+    fn mark_entries_completed_by_done_ids_marks_all_sibling_lines_for_one_resolved_id() {
+        let entries = entries(concat!(
+            "- [#8667]\n",
+            "- do [#liveone]\n",
+            "- do [#8667] follow-up\n",
+        ));
+
+        let (updated, marked) = mark_entries_completed_by_done_ids(&entries, &["8667".into()]);
+
+        assert_eq!(
+            marked,
+            vec!["[#8667]".to_string(), "do [#8667] follow-up".to_string()],
+            "every live queue prompt referencing the resolved id should be marked"
+        );
+        assert_eq!(
+            document_queue::render(&updated),
+            concat!(
+                "- ~~[#8667]~~\n",
+                "- do [#liveone]\n",
+                "- ~~do [#8667] follow-up~~\n",
+            )
+        );
+    }
+
+    #[test]
+    fn mark_entries_completed_by_done_ids_marks_review_gated_items() {
+        let entries = entries("- do [#gatedphase]\n- do [#stillopen]\n");
+
+        let (updated, marked) =
+            mark_entries_completed_by_done_ids(&entries, &["gatedphase".into()]);
+
+        assert_eq!(marked, vec!["do [#gatedphase]".to_string()]);
+        assert_eq!(
+            document_queue::render(&updated),
+            "- ~~do [#gatedphase]~~\n- do [#stillopen]\n"
+        );
+    }
+
+    #[test]
     fn mark_entries_completed_by_done_ids_ignores_already_completed_prompt() {
         let entries = entries(concat!(
             "- do [#head]\n",

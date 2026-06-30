@@ -776,7 +776,7 @@ fn free_text_head_present_in_baseline(baseline: &str, head_text: &str) -> bool {
 ///    (operator: "the binary should do this automatically...not the agent").
 /// 2. **Prose/blockquote answer-match (`#ftstrike`).** A non-marker free-text head
 ///    is struck when `response_body` quotes it, mirroring how
-///    `strike_done_queue_head_prompts` strikes id-backed heads regardless of
+///    `mark_entries_completed_by_done_ids` marks id-backed heads regardless of
 ///    position, but keyed to the answering response instead of a tracked id.
 ///
 /// `baseline` is the stable pre-turn document (the preflight baseline). When

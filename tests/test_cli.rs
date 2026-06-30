@@ -3051,6 +3051,12 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
     let orchestration_queue_consume =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/queue_consume.rs"))
             .unwrap();
+    let orchestration_preflight =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let orchestration_preflight_maintenance = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
+    )
+    .unwrap();
     for forbidden in [
         "pub(crate) fn first_n_queue_prompt_texts",
         "pub(crate) fn queue_consume_count_for_done_ids",
@@ -3069,9 +3075,18 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
         );
     }
     assert!(
+        !orchestration_preflight.contains("fn strike_done_queue_head_prompts"),
+        "preflight.rs must not re-own resolved-id queue strike policy"
+    );
+    assert!(
         orchestration_queue_consume.contains("queue_consume::{")
             && orchestration_queue_consume.contains("annotate_newly_struck_free_text_heads"),
         "write/queue_consume.rs should call queue consumption entry policy through agent-doc-queue directly"
+    );
+    assert!(
+        orchestration_preflight_maintenance
+            .contains("agent_doc_queue::queue_consume::mark_entries_completed_by_done_ids"),
+        "preflight maintenance should call resolved-id queue strike policy through agent-doc-queue directly"
     );
 }
 
@@ -9466,6 +9481,7 @@ fn test_agent_doc_element_review_owns_review_projection_and_ungate_planning() {
         "pub struct UngateTasksReport",
         "pub struct UngateTasksPlan",
         "pub fn plan_ungate_tasks_for_review",
+        "pub fn collect_gated_review_ids",
     ] {
         assert!(
             review_model.contains(required),
@@ -9476,6 +9492,12 @@ fn test_agent_doc_element_review_owns_review_projection_and_ungate_planning() {
     let backlog_cmd =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/backlog_cmd.rs"))
             .unwrap();
+    let preflight =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let preflight_maintenance = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
+    )
+    .unwrap();
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
     assert!(
@@ -9500,6 +9522,8 @@ fn test_agent_doc_element_review_owns_review_projection_and_ungate_planning() {
         "fn ungate_task_text",
         "fn extract_review_tags",
         "fn extract_review_next",
+        "fn collect_agent_review_gated_ids",
+        "fn collect_gated_review_ids",
         "backlog::op_take_all_by_id(existing, id)",
         "item.state = backlog::PendingState::Done",
     ] {
@@ -9525,6 +9549,15 @@ fn test_agent_doc_element_review_owns_review_projection_and_ungate_planning() {
     assert!(
         backlog_cmd.contains("agent_doc_element_review::plan_ungate_tasks_for_review"),
         "backlog_cmd should delegate review ungate planning to agent-doc-element-review directly"
+    );
+    assert!(
+        !preflight.contains("fn collect_agent_review_gated_ids")
+            && !preflight.contains("fn collect_gated_review_ids"),
+        "preflight.rs must not re-own gated review id extraction"
+    );
+    assert!(
+        preflight_maintenance.contains("agent_doc_element_review::collect_gated_review_ids"),
+        "preflight maintenance should call gated review id extraction through agent-doc-element-review directly"
     );
 
     let cli = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();

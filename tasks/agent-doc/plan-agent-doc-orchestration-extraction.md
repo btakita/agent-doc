@@ -460,6 +460,14 @@ focused crate under the old path.
   supplied prompt-line predicate. Route/start keep pane capture, harness
   predicates, diagnostics, and submit/resubmit effects while calling the focused
   controller policy directly.
+- `agent-doc-turn-executor-tmux` now owns context-clear submit policy: active
+  composer visibility detection for `/clear` and OpenCode `/new`, submitted
+  observation/status vocabulary, Enter-resubmit gating, and clear-submit
+  observation/resubmit/blocked line rendering. The root CLI keeps pane capture,
+  retry delivery, ops-log writes, and error raising; start detection keeps
+  supervisor payload decisions and harness predicates. Both callers import the
+  focused policy directly with no local shim or `clear_direct_*` compatibility
+  names.
 
 ### Earlier closure finding
 

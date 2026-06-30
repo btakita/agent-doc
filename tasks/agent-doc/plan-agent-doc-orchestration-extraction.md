@@ -294,6 +294,11 @@ should be deleted during extraction.
   only callback sidecar directory discovery, request/response file IO, cleanup,
   and pending-directory scanning effects while importing the focused protocol
   directly.
+- `agent-doc-ipc-protocol` now also owns full-content IPC mode vocabulary and
+  stable source labels for response fallback vs operator-owned replacement.
+  Write IPC transport keeps file reads, socket/file delivery decisions, scope
+  checks, and ops-log diagnostics while importing the focused mode type
+  directly.
 - `agent-doc-tmux` now owns associated-pane resolution policy: pane inventory
   candidate schema, proof-source vocabulary, source-summary rendering, stash
   classification, tmux inventory-line parsing, and deterministic winner/
@@ -396,9 +401,10 @@ should be deleted during extraction.
   prompt-text extraction from routed changes, operator-priority pinning,
   preemptive queue insertion/single-auto supersession, queue component creation,
   route activation content transforms, inactive queue-head selection, marker
-  `go`/`start`/`stop` handling, and committed-snapshot head backing checks.
+  `go`/`start`/`stop` handling, committed-snapshot head backing checks, and
+  active-turn blocker source classification for queued dispatch-only reroutes.
   Route keeps only file/frontmatter/snapshot adapters, queue locks, editor
-  convergence, snapshot writes, and ops-log diagnostics.
+  convergence, snapshot writes, pane inspection, and ops-log diagnostics.
 - `agent-doc-queue` also owns the active registered-preset queue-head
   classifier used by spent-preset pause repair. Project-controller RPC now keeps
   only the file-backed pause-repair adapter and calls the queue-owned classifier

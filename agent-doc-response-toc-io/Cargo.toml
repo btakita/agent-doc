@@ -1,0 +1,20 @@
+[package]
+name = "agent-doc-response-toc-io"
+version = "0.34.65"
+edition = "2024"
+description = "File and archive adapters for agent-doc response TOC commands"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_response_toc_io"
+
+[dependencies]
+agent-doc-response-toc = { path = "../agent-doc-response-toc", version = "0.34.65" }
+agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.34.65" }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"

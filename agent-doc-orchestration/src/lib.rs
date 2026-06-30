@@ -100,7 +100,6 @@ pub mod recguard_wedge;
 pub mod recycle_inflight;
 pub mod recycle_yield;
 pub mod repair;
-pub mod response_toc;
 pub mod resync;
 pub mod route;
 pub mod route_in_flight;

@@ -2169,6 +2169,7 @@ fn test_manifest_uses_publishable_dependency_contract() {
         "agent-doc-orchestration",
         "agent-doc-prompt-contract",
         "agent-doc-queue",
+        "agent-doc-response-toc-io",
         "agent-doc-template",
         "agent-doc-turn",
         "agent-doc-workflow",
@@ -3889,7 +3890,7 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
             && orchestration_source
                 .contains("render_bounded_response_context(BoundedResponseContext")
             && orchestration_source.contains("frontmatter_io::parse_for_file_with_context")
-            && orchestration_source.contains("crate::response_toc::render_prompt_toc"),
+            && orchestration_source.contains("agent_doc_response_toc_io::render_prompt_toc"),
         "orchestration prompt_context should gather project context then call focused rendering policy directly"
     );
 
@@ -3997,6 +3998,12 @@ fn test_agent_doc_response_toc_owns_live_toc_policy() {
             .any(|member| member.as_str() == Some("agent-doc-response-toc")),
         "agent-doc-response-toc must stay a first-class workspace crate"
     );
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-response-toc-io")),
+        "agent-doc-response-toc-io must stay a first-class workspace crate for file/archive adapters"
+    );
 
     let focused_source =
         fs::read_to_string(manifest_dir.join("agent-doc-response-toc/src/lib.rs")).unwrap();
@@ -4019,31 +4026,53 @@ fn test_agent_doc_response_toc_owns_live_toc_policy() {
         );
     }
 
-    let orchestration_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/response_toc.rs"))
-            .unwrap();
-    for forbidden_snippet in [
-        "struct LiveSection",
-        "struct PromptFilters",
-        "fn live_entries(",
-        "fn live_sections(",
-        "fn collect_live_sections(",
-        "fn extract_backlog_ids(",
-        "fn preview_text(",
-        "fn normalize_text(",
-        "fn normalize_backlog_id(",
-        "pub use agent_doc_response_toc",
+    let io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-response-toc-io/src/lib.rs")).unwrap();
+    for required_snippet in [
+        "pub fn run_toc(",
+        "pub fn run_fetch(",
+        "pub fn render_prompt_toc(",
+        "fn build_toc_entries(",
+        "fn archive_entries(",
+        "fn fetch_sections(",
+        "agent_doc_response_toc::live_toc_entries",
+        "agent_doc_sqlite::archive_index",
     ] {
         assert!(
-            !orchestration_source.contains(forbidden_snippet),
-            "orchestration must not re-own or facade live response TOC policy: {forbidden_snippet}"
+            io_source.contains(required_snippet),
+            "agent-doc-response-toc-io must own response TOC file/archive adapter policy: {required_snippet}"
         );
     }
+
     assert!(
-        orchestration_source.contains("agent_doc_response_toc::live_toc_entries")
-            && orchestration_source.contains("live_section_window(")
-            && orchestration_source.contains("agent_doc_sqlite::archive_index"),
-        "orchestration response_toc should combine focused live TOC policy with archive/file adapters"
+        !manifest_dir
+            .join("agent-doc-orchestration/src/response_toc.rs")
+            .exists(),
+        "orchestration must not keep response_toc as an adapter module or facade"
+    );
+
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod response_toc"),
+        "orchestration must not expose response_toc as a module facade"
+    );
+
+    let prompt_context =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/prompt_context.rs"))
+            .unwrap();
+    assert!(
+        prompt_context.contains("agent_doc_response_toc_io::render_prompt_toc")
+            && !prompt_context.contains("crate::response_toc::render_prompt_toc"),
+        "orchestration prompt_context should call response TOC IO directly"
+    );
+
+    let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
+    assert!(
+        main_source.contains("agent_doc_response_toc_io::run_toc")
+            && main_source.contains("agent_doc_response_toc_io::run_fetch")
+            && !main_source.contains("agent_doc_orchestration::response_toc"),
+        "CLI response TOC commands should call response TOC IO directly"
     );
 
     let orchestration_manifest =
@@ -4051,8 +4080,12 @@ fn test_agent_doc_response_toc_owns_live_toc_policy() {
     let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
     let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
     assert!(
-        orchestration_dependencies.contains_key("agent-doc-response-toc"),
-        "orchestration must depend on the focused response-TOC crate directly"
+        orchestration_dependencies.contains_key("agent-doc-response-toc-io"),
+        "orchestration must depend on the focused response-TOC IO crate directly"
+    );
+    assert!(
+        !orchestration_dependencies.contains_key("agent-doc-response-toc"),
+        "orchestration should depend on response TOC through the IO adapter, not the pure live-TOC crate"
     );
 
     let focused_manifest =
@@ -4074,6 +4107,30 @@ fn test_agent_doc_response_toc_owns_live_toc_policy() {
         assert!(
             !dependencies.contains_key(forbidden),
             "agent-doc-response-toc must stay free of orchestration and archive/effect dependencies"
+        );
+    }
+
+    let io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-response-toc-io/Cargo.toml")).unwrap();
+    let io_parsed: toml::Value = toml::from_str(&io_manifest).unwrap();
+    let io_dependencies = io_parsed["dependencies"].as_table().unwrap();
+    for required in ["agent-doc-response-toc", "agent-doc-sqlite", "serde_json"] {
+        assert!(
+            io_dependencies.contains_key(required),
+            "agent-doc-response-toc-io should depend on {required} for response TOC adapters"
+        );
+    }
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "tmux-router",
+    ] {
+        assert!(
+            !io_dependencies.contains_key(forbidden),
+            "agent-doc-response-toc-io must stay free of core, orchestration, git, editor IPC, notify, and tmux-router dependencies"
         );
     }
 }

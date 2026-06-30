@@ -2977,7 +2977,7 @@ fn main() -> anyhow::Result<()> {
             query,
             limit,
             json,
-        } => agent_doc_orchestration::response_toc::run_toc(
+        } => agent_doc_response_toc_io::run_toc(
             &file,
             backlog_id.as_deref(),
             query.as_deref(),
@@ -2990,7 +2990,7 @@ fn main() -> anyhow::Result<()> {
             before,
             after,
             json,
-        } => agent_doc_orchestration::response_toc::run_fetch(&file, &locator, before, after, json),
+        } => agent_doc_response_toc_io::run_fetch(&file, &locator, before, after, json),
         Commands::ArchiveIndex { file, rebuild } => {
             agent_doc_sqlite::archive_index::run_index(&file, rebuild)
         }

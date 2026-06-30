@@ -30,7 +30,7 @@ pub fn build_document_section(
         return render_full_document_section(doc, &remote_host_scope);
     };
 
-    let response_toc = crate::response_toc::render_prompt_toc(file, doc, &prompt_targets)
+    let response_toc = agent_doc_response_toc_io::render_prompt_toc(file, doc, &prompt_targets)
         .unwrap_or_else(|| {
             "No live or archived response TOC entries are available yet.".to_string()
         });

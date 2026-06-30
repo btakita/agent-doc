@@ -405,6 +405,11 @@ focused crate under the old path.
   extraction and prompt-text normalization used by preflight route-queue
   commit-boundary recovery. Preflight keeps only cycle-state/snapshot/git
   recovery orchestration.
+- `agent-doc-document::transient_markers` now owns transient document marker
+  normalization: boundary stripping, `(HEAD)` heading cleanup, guard-marker
+  stripping, pipeline-frontmatter normalization, and post-commit `Re:` heading
+  attribution normalization. Git, preflight, session-check, realtime policy,
+  repair, graph, and write paths call the focused document crate directly.
 - `agent-doc-element-backlog` already owned open backlog id extraction; preflight
   now calls `open_backlog_ids_in_content` directly for `do #id` closeout
   evidence instead of re-parsing backlog components locally.

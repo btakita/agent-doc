@@ -2538,7 +2538,10 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_continuation.rs")).unwrap();
     for required_snippet in [
         "pub struct QueueContinuation",
+        "pub struct BacklogDrainSkip",
         "pub fn required_continuation",
+        "pub fn collect_backlog_execution_contexts",
+        "pub fn partition_drainable_backlog_ids",
         "pub fn drainable_head_prompt_for_scope",
     ] {
         assert!(
@@ -2577,6 +2580,28 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
     assert!(
         orchestration_source.contains("queue_policy::required_continuation"),
         "orchestration queue_continuation should read file/snapshot and call agent-doc-queue directly"
+    );
+    let preflight_maintenance = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
+    )
+    .unwrap();
+    for forbidden_snippet in [
+        "pub(crate) struct UndrainableSkip",
+        "struct UndrainableSkip",
+        "pub(crate) fn partition_drainable_backlog_ids",
+        "pub(crate) fn collect_backlog_execution_contexts",
+    ] {
+        assert!(
+            !preflight_maintenance.contains(forbidden_snippet),
+            "preflight maintenance must not re-own queue backlog drain policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        preflight_maintenance
+            .contains("agent_doc_queue::queue_continuation::collect_backlog_execution_contexts")
+            && preflight_maintenance
+                .contains("agent_doc_queue::queue_continuation::partition_drainable_backlog_ids"),
+        "preflight maintenance should call queue backlog drain policy from agent-doc-queue directly"
     );
     let queue_journal_source =
         fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_journal.rs")).unwrap();

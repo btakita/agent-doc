@@ -1310,73 +1310,6 @@ fn in_progress_marker_retarget_requested(
     agent_doc_document::queue_projection::in_progress_marker_retarget_requested(diff, &rows)
 }
 
-/// Why a backlog id was skipped from the auto-drain queue (`#goqueuestall`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct UndrainableSkip {
-    pub(crate) id: String,
-    /// `clean_session` or `operator_verify`.
-    pub(crate) reason: &'static str,
-}
-
-/// Partition the to-be-synced backlog ids into the drainable set (kept, in
-/// order) and the skipped set (deferred), per the go-mode undrainable rules
-/// (`#goqueuestall`):
-/// - `[operator-verify]` items are ALWAYS skipped from the auto-drain queue
-///   (they need a human); they belong on the gated review surface.
-/// - `[clean-session]` items are kept (`#qcontdrain`): the in-session `/loop`
-///   drains them in place, so live editor-IPC state no longer gates them.
-///
-/// Ids absent from `ctxs` (plain backlog items) are always kept. Pure + testable.
-pub(crate) fn partition_drainable_backlog_ids(
-    backlog_ids: &[String],
-    ctxs: &std::collections::HashMap<String, agent_doc_element_backlog::backlog::ExecutionContext>,
-) -> (Vec<String>, Vec<UndrainableSkip>) {
-    let mut drainable = Vec::new();
-    let mut skipped = Vec::new();
-    for id in backlog_ids {
-        let key = id.trim().to_ascii_lowercase();
-        let ctx = ctxs.get(&key).copied().unwrap_or_default();
-        // `#qcontdrain` + `#qstallguard` Layer A: the undrainable set is exactly the
-        // typed tags `[operator-verify]` (needs a human) and `[focused-cycle]`
-        // (operator-declared dedicated cycle). `[clean-session]` drains in-loop.
-        // Drainability is tag-owned — never inferred from item prose.
-        if ctx.loop_undrainable() {
-            skipped.push(UndrainableSkip {
-                id: key,
-                reason: if ctx.operator_verify_required {
-                    "operator_verify"
-                } else {
-                    "focused_cycle"
-                },
-            });
-        } else {
-            drainable.push(id.clone());
-        }
-    }
-    (drainable, skipped)
-}
-
-/// Build an id→execution-context map from active `agent:backlog` / `agent:icebox`
-/// items (`#goqueuestall`) so the go-mode backlog→queue sync can skip heads that
-/// are not agent-drainable in the current session type. First-seen context wins
-/// on duplicate ids across components.
-pub(crate) fn collect_backlog_execution_contexts(
-    components: &[agent_doc_element::element::Component],
-    content: &str,
-) -> std::collections::HashMap<String, agent_doc_element_backlog::backlog::ExecutionContext> {
-    let mut ctxs = std::collections::HashMap::new();
-    for comp in components {
-        if !matches!(comp.name.as_str(), "backlog" | "icebox" | "pending") {
-            continue;
-        }
-        let body = &content[comp.open_end..comp.close_start];
-        for (id, ctx) in agent_doc_element_backlog::backlog::active_item_execution_contexts(body) {
-            ctxs.entry(id.to_ascii_lowercase()).or_insert(ctx);
-        }
-    }
-    ctxs
-}
-
 pub(crate) fn dedup_queue_nodes_by_key(content: &str) -> Result<Option<(String, usize)>> {
     let before_nodes =
         agent_doc_markdown_ast::mutations::item_nodes(content, "queue").map_err(|err| {
@@ -2110,14 +2043,20 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         // while a live editor-IPC listener is active (running them live risks
         // closeout corruption — a clean session re-queues them next cycle).
         {
-            let exec_ctxs = collect_backlog_execution_contexts(&components, &content);
+            let exec_ctxs = agent_doc_queue::queue_continuation::collect_backlog_execution_contexts(
+                &components,
+                &content,
+            );
             if exec_ctxs.values().any(|c| c.is_deferred()) {
                 let live_ipc = project_root
                     .as_deref()
                     .map(crate::ipc_socket::is_listener_active)
                     .unwrap_or(false);
                 let (_drainable, skipped) =
-                    partition_drainable_backlog_ids(&backlog_ids, &exec_ctxs);
+                    agent_doc_queue::queue_continuation::partition_drainable_backlog_ids(
+                        &backlog_ids,
+                        &exec_ctxs,
+                    );
                 if !skipped.is_empty() {
                     let session_label = if live_ipc { "live_ipc" } else { "clean" };
                     for skip in &skipped {
@@ -3652,9 +3591,16 @@ pub(crate) fn sync_same_cycle_pending_adds_into_go_queue(file: &Path) -> Result<
         backlog_ids.retain(|id| !done_ids.contains(&id.to_ascii_lowercase()));
     }
 
-    let exec_ctxs = collect_backlog_execution_contexts(&components, &content);
+    let exec_ctxs = agent_doc_queue::queue_continuation::collect_backlog_execution_contexts(
+        &components,
+        &content,
+    );
     if exec_ctxs.values().any(|ctx| ctx.is_deferred()) {
-        let (drainable, skipped) = partition_drainable_backlog_ids(&backlog_ids, &exec_ctxs);
+        let (drainable, skipped) =
+            agent_doc_queue::queue_continuation::partition_drainable_backlog_ids(
+                &backlog_ids,
+                &exec_ctxs,
+            );
         for skip in skipped {
             crate::ops_log::log_op(
                 file,
@@ -7300,66 +7246,6 @@ mod tests {
         assert_eq!(p.step.as_deref(), Some("preflight_started"));
         assert_eq!(p.turn_id.as_deref(), Some("#fmrunid-wire"));
         assert_ne!(p.run_id.as_deref(), Some("stale-mirror"));
-    }
-
-    #[test]
-    fn partition_drainable_backlog_ids_skips_only_operator_verify() {
-        // #qcontdrain: `[clean-session]` is now always drainable (added to the
-        // go-mode queue and drained in-loop); only `[operator-verify]` is skipped, and
-        // live editor-IPC state no longer changes the partition. Plain ids stay
-        // drainable.
-        use std::collections::HashMap;
-        let mut ctxs: HashMap<String, agent_doc_element_backlog::backlog::ExecutionContext> =
-            HashMap::new();
-        ctxs.insert(
-            "fcc0".into(),
-            agent_doc_element_backlog::backlog::ExecutionContext {
-                clean_session_required: true,
-                operator_verify_required: false,
-                focused_cycle_required: false,
-            },
-        );
-        ctxs.insert(
-            "qflood2".into(),
-            agent_doc_element_backlog::backlog::ExecutionContext {
-                clean_session_required: false,
-                operator_verify_required: true,
-                focused_cycle_required: false,
-            },
-        );
-        let ids = vec![
-            "fcc0".to_string(),
-            "qflood2".to_string(),
-            "splitmodswrite".to_string(),
-        ];
-
-        // clean-session drains, only operator-verify is skipped (#qcontdrain).
-        let (drainable, skipped) = partition_drainable_backlog_ids(&ids, &ctxs);
-        assert_eq!(
-            drainable,
-            vec!["fcc0".to_string(), "splitmodswrite".to_string()],
-            "clean-session + plain drain (#qcontdrain)"
-        );
-        assert_eq!(skipped.len(), 1);
-        assert_eq!(skipped[0].id, "qflood2");
-        assert_eq!(skipped[0].reason, "operator_verify");
-    }
-
-    #[test]
-    fn collect_backlog_execution_contexts_reads_tags() {
-        // #goqueuestall: the collector surfaces the parsed deferral booleans per id.
-        let content = concat!(
-            "<!-- agent:backlog queue=sync -->\n",
-            "- [ ] [#a] [clean-session] needs a quiet session\n",
-            "- [ ] [#b] [operator-verify] live drive\n",
-            "- [ ] [#c] plain drainable\n",
-            "<!-- /agent:backlog -->\n",
-        );
-        let components = agent_doc_element::element::parse(content).unwrap();
-        let ctxs = collect_backlog_execution_contexts(&components, content);
-        assert!(ctxs.get("a").unwrap().clean_session_required);
-        assert!(ctxs.get("b").unwrap().operator_verify_required);
-        assert!(!ctxs.get("c").unwrap().is_deferred());
     }
 
     #[test]

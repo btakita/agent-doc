@@ -5,7 +5,7 @@
 //! noise classification. Callers own file IO, snapshots, controller state,
 //! sidecars, and marker persistence.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use agent_doc_element::element;
 use agent_doc_element_backlog::backlog;
@@ -171,6 +171,62 @@ pub enum DrainScope {
     InSessionLoop,
     /// Supervisor clear-and-continue: defers `[operator-verify]` only.
     Supervisor,
+}
+
+/// Why a backlog id was skipped from an auto-drain queue.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BacklogDrainSkip {
+    pub id: String,
+    /// `operator_verify` or `focused_cycle`.
+    pub reason: &'static str,
+}
+
+/// Partition backlog ids into in-session-loop drainable and skipped sets.
+///
+/// Missing ids in `contexts` are plain backlog items and remain drainable.
+/// `[clean-session]` drains in-loop; `[operator-verify]` and `[focused-cycle]`
+/// are deferred because they require human validation or a dedicated cycle.
+pub fn partition_drainable_backlog_ids(
+    backlog_ids: &[String],
+    contexts: &HashMap<String, backlog::ExecutionContext>,
+) -> (Vec<String>, Vec<BacklogDrainSkip>) {
+    let mut drainable = Vec::new();
+    let mut skipped = Vec::new();
+    for id in backlog_ids {
+        let key = id.trim().to_ascii_lowercase();
+        let ctx = contexts.get(&key).copied().unwrap_or_default();
+        if ctx.loop_undrainable() {
+            skipped.push(BacklogDrainSkip {
+                id: key,
+                reason: if ctx.operator_verify_required {
+                    "operator_verify"
+                } else {
+                    "focused_cycle"
+                },
+            });
+        } else {
+            drainable.push(id.clone());
+        }
+    }
+    (drainable, skipped)
+}
+
+/// Build an id→execution-context map from active backlog-like tracked work
+/// components. First-seen context wins on duplicate ids.
+pub fn collect_backlog_execution_contexts(
+    components: &[element::Component],
+    content: &str,
+) -> HashMap<String, backlog::ExecutionContext> {
+    let mut contexts = HashMap::new();
+    for component in components {
+        if !matches!(component.name.as_str(), "backlog" | "icebox" | "pending") {
+            continue;
+        }
+        for (id, ctx) in backlog::active_item_execution_contexts(component.content(content)) {
+            contexts.entry(id.to_ascii_lowercase()).or_insert(ctx);
+        }
+    }
+    contexts
 }
 
 /// Active backlog ids, lowercased, that are not drainable by the in-session loop.
@@ -908,6 +964,79 @@ mod tests {
         assert!(!deferred.contains("a"));
         assert!(deferred.contains("b"));
         assert!(!deferred.contains("c"));
+    }
+
+    #[test]
+    fn partition_drainable_backlog_ids_skips_operator_verify_and_focused_cycle() {
+        let content = doc_with_backlog(
+            &[],
+            &[
+                "- [ ] [#clean] [clean-session] quiet",
+                "- [ ] [#verify] [operator-verify] live drive",
+                "- [ ] [#focused] [focused-cycle] dedicated turn",
+                "- [ ] [#plain] plain drainable",
+            ],
+        );
+        let components = element::parse(&content).unwrap();
+        let contexts = collect_backlog_execution_contexts(&components, &content);
+        let ids = vec![
+            "clean".to_string(),
+            "verify".to_string(),
+            "focused".to_string(),
+            "plain".to_string(),
+            "missing".to_string(),
+        ];
+
+        let (drainable, skipped) = partition_drainable_backlog_ids(&ids, &contexts);
+
+        assert_eq!(
+            drainable,
+            vec![
+                "clean".to_string(),
+                "plain".to_string(),
+                "missing".to_string()
+            ],
+            "clean-session, plain, and context-missing ids drain in-loop"
+        );
+        assert_eq!(
+            skipped,
+            vec![
+                BacklogDrainSkip {
+                    id: "verify".to_string(),
+                    reason: "operator_verify",
+                },
+                BacklogDrainSkip {
+                    id: "focused".to_string(),
+                    reason: "focused_cycle",
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn collect_backlog_execution_contexts_reads_tracked_work_components() {
+        let content = concat!(
+            "<!-- agent:backlog queue=sync -->\n",
+            "- [ ] [#a] [clean-session] needs a quiet session\n",
+            "<!-- /agent:backlog -->\n",
+            "<!-- agent:pending -->\n",
+            "- [ ] [#b] [operator-verify] live drive\n",
+            "<!-- /agent:pending -->\n",
+            "<!-- agent:icebox -->\n",
+            "- [ ] [#c] [focused-cycle] later\n",
+            "<!-- /agent:icebox -->\n",
+            "<!-- agent:exchange -->\n",
+            "- [ ] [#d] [operator-verify] ignored\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let components = element::parse(content).unwrap();
+
+        let contexts = collect_backlog_execution_contexts(&components, content);
+
+        assert!(contexts.get("a").unwrap().clean_session_required);
+        assert!(contexts.get("b").unwrap().operator_verify_required);
+        assert!(contexts.get("c").unwrap().focused_cycle_required);
+        assert!(!contexts.contains_key("d"));
     }
 
     #[test]

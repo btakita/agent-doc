@@ -2,22 +2,18 @@
 //!
 //! When the Claude Code `/loop` auto-loop drives an `agent:queue` drain, it
 //! re-invokes `agent-doc <FILE>` from the harness itself. The supervisor's
-//! `idle_queue_watch_drain` (see [`crate::start`]) *also* injects an
-//! `agent-doc <FILE>` trigger on the busy→idle transition. With two drain
-//! owners the triggers pile up in the live Claude Code input queue and the
-//! operator has to delete them by hand.
+//! idle-queue watcher can also inject an `agent-doc <FILE>` trigger on the
+//! busy->idle transition. With two drain owners the triggers pile up in the
+//! live Claude Code input queue and the operator has to delete them by hand.
 //!
-//! Spec `specs/07-session-tmux-commands.md` states the supervisor idle-queue
-//! watch owns the drain payload, but it must *defer* when a self-driving
-//! harness loop is the active owner. This module is that single-owner tie-break:
-//! the `/loop` path refreshes a short-TTL lease (`agent-doc drain-claim <FILE>`,
-//! written just before invoking `/loop`); the supervisor reads it and defers
-//! while it is fresh. A stale or absent lease hands ownership back to the
-//! supervisor, so non-`/loop` harnesses (e.g. the Codex `Stop`-hook loop, which
-//! never writes a lease) keep getting supervisor drive exactly as before.
+//! This module is the single-owner tie-break: the `/loop` path refreshes a
+//! short-TTL lease (`agent-doc drain-claim <FILE>`, written just before invoking
+//! `/loop`); the supervisor reads it and defers while it is fresh. A stale or
+//! absent lease hands ownership back to the supervisor, so non-`/loop` harnesses
+//! keep getting supervisor drive exactly as before.
 //!
-//! The lease deliberately keys on the *document* path (one drain owner per doc),
-//! and the TTL is short so a crashed loop returns ownership quickly.
+//! The lease deliberately keys on the document path, and the TTL is short so a
+//! crashed loop returns ownership quickly.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -26,12 +22,11 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 /// Directory (relative to the project root) holding per-document drain-owner
-/// leases. Mirrors the sibling `.agent-doc/live-buffer` sidecar layout.
+/// leases. Mirrors the sibling `.agent-doc/queue-edit-owner` sidecar layout.
 const DRAIN_OWNER_DIR: &str = ".agent-doc/drain-owner";
 
 /// Default lease freshness window. Long enough to span the `/loop` inter-cycle
-/// re-invoke gap (the only window in which the supervisor would otherwise
-/// double-drive), short enough that a crashed loop hands ownership back fast.
+/// re-invoke gap, short enough that a crashed loop hands ownership back fast.
 const DEFAULT_DRAIN_OWNER_TTL_SECS: u64 = 90;
 const DRAIN_OWNER_TTL_SECS_ENV: &str = "AGENT_DOC_DRAIN_OWNER_TTL_SECS";
 
@@ -41,7 +36,7 @@ pub const DRAIN_OWNER_CLAUDE_LOOP: &str = "claude_loop";
 /// Persisted drain-owner lease body.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DrainOwnerLease {
-    /// Who owns the drain (e.g. [`DRAIN_OWNER_CLAUDE_LOOP`]).
+    /// Who owns the drain, for example [`DRAIN_OWNER_CLAUDE_LOOP`].
     pub owner: String,
     /// Unix seconds of the last heartbeat / claim.
     pub heartbeat_secs: u64,
@@ -63,9 +58,8 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
-/// Compute the drain-owner lease path for a document. Mirrors
-/// `live_buffer_snapshot_path`: hash the document path and land the sidecar in
-/// the nearest ancestor `.agent-doc/` directory.
+/// Compute the drain-owner lease path for a document. Hash the document path
+/// and land the sidecar in the nearest ancestor `.agent-doc/` directory.
 fn drain_owner_lease_path(file: &str) -> PathBuf {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -106,16 +100,15 @@ pub fn refresh_drain_owner_lease(file: &str, owner: &str) -> Result<()> {
     Ok(())
 }
 
-/// Read the raw drain-owner lease for `file` (regardless of freshness).
+/// Read the raw drain-owner lease for `file` regardless of freshness.
 pub fn read_drain_owner_lease(file: &str) -> Option<DrainOwnerLease> {
     let path = drain_owner_lease_path(file);
     let content = std::fs::read_to_string(&path).ok()?;
     serde_json::from_str(&content).ok()
 }
 
-/// Return the drain-owner lease iff a self-driving loop *currently* owns the
-/// drain (the lease exists and is fresh against `now`). `None` means the
-/// supervisor should drain as usual.
+/// Return the drain-owner lease iff a self-driving loop currently owns the
+/// drain. `None` means the supervisor should drain as usual.
 pub fn fresh_drain_owner_lease(file: &str, now: u64) -> Option<DrainOwnerLease> {
     let lease = read_drain_owner_lease(file)?;
     agent_doc_lease::timestamp_is_fresh(lease.heartbeat_secs, now, drain_owner_ttl())
@@ -129,7 +122,8 @@ pub fn fresh_loop_drain_owner_lease(file: &str, now: u64) -> Option<DrainOwnerLe
     fresh_drain_owner_lease(file, now).filter(|lease| lease.owner == DRAIN_OWNER_CLAUDE_LOOP)
 }
 
-/// Best-effort release of the drain-owner lease (e.g. when the loop terminates).
+/// Best-effort release of the drain-owner lease, for example when the loop
+/// terminates.
 pub fn clear_drain_owner_lease(file: &str) {
     let path = drain_owner_lease_path(file);
     if let Err(err) = std::fs::remove_file(&path)
@@ -158,9 +152,7 @@ mod tests {
         let lease = read_drain_owner_lease(&file).expect("lease present after refresh");
         assert_eq!(lease.owner, DRAIN_OWNER_CLAUDE_LOOP);
 
-        // Fresh against a `now` near the heartbeat...
         assert!(fresh_drain_owner_lease(&file, lease.heartbeat_secs).is_some());
-        // ...stale against a `now` far past the TTL.
         assert!(
             fresh_drain_owner_lease(&file, lease.heartbeat_secs + 10_000).is_none(),
             "an old heartbeat must hand ownership back to the supervisor"
@@ -206,7 +198,6 @@ mod tests {
         refresh_drain_owner_lease(&file, DRAIN_OWNER_CLAUDE_LOOP).unwrap();
         clear_drain_owner_lease(&file);
         assert!(read_drain_owner_lease(&file).is_none());
-        // Idempotent: clearing an absent lease must not panic or warn-fail.
         clear_drain_owner_lease(&file);
     }
 }

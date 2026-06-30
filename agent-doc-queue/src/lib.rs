@@ -7,6 +7,7 @@
 pub mod backlog_sync;
 pub mod component_attrs;
 pub mod document_queue;
+pub mod drain_owner;
 pub mod queue;
 pub mod queue_closeout_guard;
 pub mod queue_command;

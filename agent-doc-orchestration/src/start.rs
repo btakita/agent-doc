@@ -2918,15 +2918,15 @@ mod tests {
         std::fs::write(&doc, "body").unwrap();
         let file = doc.to_string_lossy().to_string();
 
-        crate::drain_owner::refresh_drain_owner_lease(
+        agent_doc_queue::drain_owner::refresh_drain_owner_lease(
             &file,
-            crate::drain_owner::DRAIN_OWNER_CLAUDE_LOOP,
+            agent_doc_queue::drain_owner::DRAIN_OWNER_CLAUDE_LOOP,
         )
         .unwrap();
 
         // Fresh lease: the supervisor (idle, fresh head) must defer.
         let now = current_epoch_secs();
-        let fresh = crate::drain_owner::fresh_loop_drain_owner_lease(&file, now);
+        let fresh = agent_doc_queue::drain_owner::fresh_loop_drain_owner_lease(&file, now);
         assert!(fresh.is_some(), "just-claimed lease must read fresh");
         assert_eq!(
             idle_queue_drain_decision(
@@ -2942,7 +2942,8 @@ mod tests {
         );
 
         // Expired heartbeat (far past the TTL): ownership returns to the supervisor.
-        let expired = crate::drain_owner::fresh_loop_drain_owner_lease(&file, now + 100_000);
+        let expired =
+            agent_doc_queue::drain_owner::fresh_loop_drain_owner_lease(&file, now + 100_000);
         assert!(
             expired.is_none(),
             "an expired heartbeat must not read fresh"

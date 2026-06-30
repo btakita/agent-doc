@@ -6994,19 +6994,16 @@ fn integrated_editor_edit_routes_drains_under_drain_owner_gate_and_broadcasts_ba
 
     // 3. Drain-owner gate (#kp5z): a self-driving loop owns the drain (fresh
     //    lease), so the supervisor must NOT double-inject (SkipSelfDrivingLoopOwner).
-    agent_doc_orchestration::drain_owner::refresh_drain_owner_lease(
+    agent_doc_queue::drain_owner::refresh_drain_owner_lease(
         &doc_key,
-        agent_doc_orchestration::drain_owner::DRAIN_OWNER_CLAUDE_LOOP,
+        agent_doc_queue::drain_owner::DRAIN_OWNER_CLAUDE_LOOP,
     )
     .unwrap();
-    let lease = agent_doc_orchestration::drain_owner::read_drain_owner_lease(&doc_key)
+    let lease = agent_doc_queue::drain_owner::read_drain_owner_lease(&doc_key)
         .expect("drain-owner lease present after refresh");
     assert!(
-        agent_doc_orchestration::drain_owner::fresh_drain_owner_lease(
-            &doc_key,
-            lease.heartbeat_secs
-        )
-        .is_some(),
+        agent_doc_queue::drain_owner::fresh_drain_owner_lease(&doc_key, lease.heartbeat_secs)
+            .is_some(),
         "a fresh drain-owner lease must gate the supervisor drain to the loop owner"
     );
 
@@ -7053,9 +7050,9 @@ fn integrated_editor_edit_routes_drains_under_drain_owner_gate_and_broadcasts_ba
     );
 
     // The loop terminates: release the drain-owner lease back to the supervisor.
-    agent_doc_orchestration::drain_owner::clear_drain_owner_lease(&doc_key);
+    agent_doc_queue::drain_owner::clear_drain_owner_lease(&doc_key);
     assert!(
-        agent_doc_orchestration::drain_owner::read_drain_owner_lease(&doc_key).is_none(),
+        agent_doc_queue::drain_owner::read_drain_owner_lease(&doc_key).is_none(),
         "clearing the lease hands the drain back to the supervisor"
     );
     drop(dir);

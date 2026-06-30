@@ -1703,7 +1703,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // recycle fire on its own. After the recycle the fresh supervisor
                 // (no longer stale) clears the request and the drain resumes.
                 {
-                    let drain_owner_active = crate::drain_owner::fresh_loop_drain_owner_lease(
+                    let drain_owner_active = agent_doc_queue::drain_owner::fresh_loop_drain_owner_lease(
                         &file,
                         current_epoch_secs(),
                     )
@@ -2478,7 +2478,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // a competing owner; treating it as one stranded paused queues behind
                 // the lease TTL after a clean closeout (#qstallguard Layer D).
                 let drain_owner_lease =
-                    crate::drain_owner::fresh_loop_drain_owner_lease(&file, current_epoch_secs());
+                    agent_doc_queue::drain_owner::fresh_loop_drain_owner_lease(&file, current_epoch_secs());
 
                 let mut paused_failsafe_active = false;
                 if active_head.is_some()

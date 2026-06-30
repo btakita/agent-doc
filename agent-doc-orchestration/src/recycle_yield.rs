@@ -22,7 +22,7 @@
 //! cycle CRDT / write-queue / IPC state, rebuilt fresh after re-exec): the yield
 //! is exactly what produces a clean boundary without a mid-write swap.
 //!
-//! Mirrors the [`crate::drain_owner`] sidecar layout: keyed on the *document*
+//! Mirrors the [`agent_doc_queue::drain_owner`] sidecar layout: keyed on the *document*
 //! path, short TTL so an abandoned request self-clears.
 
 use std::path::{Path, PathBuf};
@@ -78,7 +78,7 @@ fn now_secs() -> u64 {
 }
 
 /// Compute the recycle-yield request path for a document. Mirrors
-/// [`crate::drain_owner`]: hash the document path and land the sidecar in the
+/// [`agent_doc_queue::drain_owner`]: hash the document path and land the sidecar in the
 /// nearest ancestor `.agent-doc/` directory.
 fn recycle_yield_path(file: &str) -> PathBuf {
     use std::hash::{Hash, Hasher};

@@ -11,7 +11,7 @@
 //!
 //! This module is the single-owner tie-break: exactly one live consumer per
 //! document holds the owner lease and applies/saves; non-owners defer. The
-//! election is a filesystem lease (mirrors [`crate::drain_owner`]) with an
+//! election is a filesystem lease (mirrors [`agent_doc_queue::drain_owner`]) with an
 //! atomic `create_new` (O_EXCL) claim so two instances racing for an unowned or
 //! stale lease cannot both win. Ownership is sticky while the owner keeps
 //! refreshing (it calls [`try_acquire_plugin_owner`] on every patch event), and
@@ -76,7 +76,7 @@ fn now_secs() -> u64 {
 }
 
 /// Compute the plugin-owner lease path for a document. Mirrors
-/// [`crate::drain_owner`]: hash the document path and land the sidecar in the
+/// [`agent_doc_queue::drain_owner`]: hash the document path and land the sidecar in the
 /// nearest ancestor `.agent-doc/` directory.
 fn plugin_owner_lease_path(file: &str) -> PathBuf {
     use std::hash::{Hash, Hasher};

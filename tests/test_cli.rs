@@ -4961,7 +4961,7 @@ fn test_agent_doc_lease_is_freshness_boundary() {
 
     for (relative, forbidden) in [
         (
-            "agent-doc-orchestration/src/drain_owner.rs",
+            "agent-doc-queue/src/drain_owner.rs",
             "pub fn drain_owner_lease_is_fresh(",
         ),
         (
@@ -4989,6 +4989,83 @@ fn test_agent_doc_lease_is_freshness_boundary() {
         assert!(
             source.contains("agent_doc_lease::timestamp_is_fresh"),
             "{relative} should call the focused lease crate directly"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_queue_owns_drain_owner_lease_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+
+    let queue_lib = fs::read_to_string(manifest_dir.join("agent-doc-queue/src/lib.rs")).unwrap();
+    assert!(
+        queue_lib.contains("pub mod drain_owner;"),
+        "agent-doc-queue should expose drain-owner lease policy"
+    );
+
+    let drain_owner_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/drain_owner.rs")).unwrap();
+    for required in [
+        "pub const DRAIN_OWNER_CLAUDE_LOOP",
+        "pub struct DrainOwnerLease",
+        "pub fn drain_owner_ttl(",
+        "pub fn refresh_drain_owner_lease(",
+        "pub fn read_drain_owner_lease(",
+        "pub fn fresh_drain_owner_lease(",
+        "pub fn fresh_loop_drain_owner_lease(",
+        "pub fn clear_drain_owner_lease(",
+    ] {
+        assert!(
+            drain_owner_source.contains(required),
+            "agent-doc-queue must own drain-owner lease policy: {required}"
+        );
+    }
+
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod drain_owner;"),
+        "agent-doc-orchestration must not re-export drain-owner lease policy"
+    );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/drain_owner.rs")
+            .exists(),
+        "agent-doc-orchestration must not keep a drain_owner compatibility module"
+    );
+
+    for relative_path in [
+        "src/main.rs",
+        "src/sim_world.rs",
+        "agent-doc-orchestration/src/start.rs",
+        "agent-doc-orchestration/src/start/idle_watch.rs",
+        "agent-doc-orchestration/src/preflight/run.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
+        assert!(
+            source.contains("agent_doc_queue::drain_owner::"),
+            "{relative_path} should call drain-owner lease policy through agent-doc-queue directly"
+        );
+        assert!(
+            !source.contains("agent_doc_orchestration::drain_owner")
+                && !source.contains("crate::drain_owner"),
+            "{relative_path} must not call drain-owner lease policy through orchestration"
+        );
+    }
+
+    let queue_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&queue_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    for forbidden_dependency in [
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden_dependency),
+            "agent-doc-queue drain-owner lease policy must stay free of orchestration and route effects: {forbidden_dependency}"
         );
     }
 }

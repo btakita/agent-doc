@@ -706,7 +706,7 @@ enum Commands {
         /// Path to the session document
         file: PathBuf,
         /// Owner tag for the lease (default: claude_loop)
-        #[arg(long, default_value = agent_doc_orchestration::drain_owner::DRAIN_OWNER_CLAUDE_LOOP)]
+        #[arg(long, default_value = agent_doc_queue::drain_owner::DRAIN_OWNER_CLAUDE_LOOP)]
         owner: String,
         /// Release the lease instead of claiming/refreshing it
         #[arg(long)]
@@ -2537,10 +2537,10 @@ fn main() -> anyhow::Result<()> {
         } => {
             let file_str = file.to_string_lossy();
             if release {
-                agent_doc_orchestration::drain_owner::clear_drain_owner_lease(&file_str);
+                agent_doc_queue::drain_owner::clear_drain_owner_lease(&file_str);
                 println!("released drain-owner lease for {}", file.display());
             } else {
-                agent_doc_orchestration::drain_owner::refresh_drain_owner_lease(&file_str, &owner)?;
+                agent_doc_queue::drain_owner::refresh_drain_owner_lease(&file_str, &owner)?;
                 println!(
                     "claimed drain-owner lease owner={owner} for {}",
                     file.display()

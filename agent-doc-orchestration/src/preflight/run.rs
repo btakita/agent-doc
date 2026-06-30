@@ -1378,7 +1378,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                 user_prompt_preempts: !user_intent_prompt_changes.is_empty(),
                 queue_stopped: queue_state.queue_active != Some(true)
                     || queue_state.queue_halted.is_some(),
-                loop_is_continuing: crate::drain_owner::fresh_loop_drain_owner_lease(
+                loop_is_continuing: agent_doc_queue::drain_owner::fresh_loop_drain_owner_lease(
                     &file_str, now,
                 )
                 .is_some(),

@@ -168,6 +168,85 @@ pub fn codex_transport_403_429_diagnostic(stderr: &str) -> String {
     )
 }
 
+pub fn classify_child_network_probe_failure(
+    detail: &str,
+    harness: &str,
+    usage_output: bool,
+) -> String {
+    let lower = detail.to_ascii_lowercase();
+    if usage_output {
+        format!("{harness} child probe printed CLI usage/help instead of running")
+    } else if lower.contains("could not resolve")
+        || lower.contains("temporary failure in name resolution")
+        || lower.contains("name or service not known")
+        || lower.contains("nodename nor servname provided")
+        || lower.contains("getaddrinfo")
+    {
+        format!("DNS resolution failed inside the {harness} child")
+    } else if lower.contains("operation not permitted")
+        || lower.contains("network is unreachable")
+        || lower.contains("permission denied")
+        || lower.contains("eperm")
+        || lower.contains("sandbox")
+        || lower.contains("network disabled")
+    {
+        format!("{harness} sandbox/network capability denied outbound access")
+    } else if lower.contains("connection refused") {
+        format!("remote network service refused the {harness} child connection")
+    } else if lower.contains("timed out") || lower.contains("timeout") {
+        format!("{harness} child network probe timed out")
+    } else {
+        format!("{harness} child network probe failed")
+    }
+}
+
+pub fn classify_child_required_ssh_probe_failure(
+    detail: &str,
+    harness: &str,
+    usage_output: bool,
+) -> String {
+    let lower = detail.to_ascii_lowercase();
+    if usage_output {
+        format!("{harness} child SSH probe printed CLI usage/help instead of running")
+    } else if lower.contains("operation not permitted")
+        || lower.contains("socket:")
+        || lower.contains("eperm")
+        || lower.contains("permission denied")
+        || lower.contains("network is unreachable")
+        || lower.contains("sandbox")
+    {
+        format!("SSH unavailable inside managed {harness} pane")
+    } else if lower.contains("could not resolve")
+        || lower.contains("temporary failure in name resolution")
+        || lower.contains("name or service not known")
+        || lower.contains("getaddrinfo")
+    {
+        format!("SSH target resolution failed inside managed {harness} pane")
+    } else if lower.contains("timed out") || lower.contains("timeout") {
+        format!("SSH probe timed out inside managed {harness} pane")
+    } else {
+        format!("SSH capability failed inside managed {harness} pane")
+    }
+}
+
+pub fn classify_child_writable_root_probe_failure(detail: &str, harness: &str) -> String {
+    let lower = detail.to_ascii_lowercase();
+    if lower.contains("read-only file system")
+        || lower.contains("operation not permitted")
+        || lower.contains("permission denied")
+        || lower.contains("eperm")
+        || lower.contains("sandbox")
+    {
+        format!("{harness} sandbox/write capability denied git metadata access")
+    } else if lower.contains("index.lock") || lower.contains("file exists") {
+        format!("{harness} child could not create required git metadata lock")
+    } else if lower.contains("not a directory") || lower.contains("no such file or directory") {
+        format!("{harness} writable-root probe target is missing")
+    } else {
+        format!("{harness} child writable-root probe failed")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -306,5 +385,73 @@ mod tests {
         assert!(msg.contains("403 Forbidden on WebSocket"));
         assert!(msg.contains("429 Too Many Requests"));
         assert!(msg.contains("restart the codex session"));
+    }
+
+    #[test]
+    fn child_network_probe_failure_classifies_known_failures() {
+        assert_eq!(
+            classify_child_network_probe_failure("Could not resolve host", "Codex", false),
+            "DNS resolution failed inside the Codex child"
+        );
+        assert_eq!(
+            classify_child_network_probe_failure("Operation not permitted", "Codex", false),
+            "Codex sandbox/network capability denied outbound access"
+        );
+        assert_eq!(
+            classify_child_network_probe_failure("connection refused", "Codex", false),
+            "remote network service refused the Codex child connection"
+        );
+        assert_eq!(
+            classify_child_network_probe_failure("timed out", "Codex", false),
+            "Codex child network probe timed out"
+        );
+        assert_eq!(
+            classify_child_network_probe_failure("opencode usage", "OpenCode", true),
+            "OpenCode child probe printed CLI usage/help instead of running"
+        );
+    }
+
+    #[test]
+    fn child_required_ssh_probe_failure_classifies_known_failures() {
+        assert_eq!(
+            classify_child_required_ssh_probe_failure(
+                "socket: Operation not permitted",
+                "OpenCode",
+                false
+            ),
+            "SSH unavailable inside managed OpenCode pane"
+        );
+        assert_eq!(
+            classify_child_required_ssh_probe_failure(
+                "name or service not known",
+                "OpenCode",
+                false
+            ),
+            "SSH target resolution failed inside managed OpenCode pane"
+        );
+        assert_eq!(
+            classify_child_required_ssh_probe_failure("timeout", "OpenCode", false),
+            "SSH probe timed out inside managed OpenCode pane"
+        );
+        assert_eq!(
+            classify_child_required_ssh_probe_failure("opencode usage", "OpenCode", true),
+            "OpenCode child SSH probe printed CLI usage/help instead of running"
+        );
+    }
+
+    #[test]
+    fn child_writable_root_probe_failure_classifies_known_failures() {
+        assert_eq!(
+            classify_child_writable_root_probe_failure("read-only file system", "Codex"),
+            "Codex sandbox/write capability denied git metadata access"
+        );
+        assert_eq!(
+            classify_child_writable_root_probe_failure("index.lock exists", "Codex"),
+            "Codex child could not create required git metadata lock"
+        );
+        assert_eq!(
+            classify_child_writable_root_probe_failure("no such file or directory", "Codex"),
+            "Codex writable-root probe target is missing"
+        );
     }
 }

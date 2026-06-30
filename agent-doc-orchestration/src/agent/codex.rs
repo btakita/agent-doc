@@ -64,7 +64,9 @@ use super::{Agent, AgentResponse};
 use agent_doc_frontmatter::frontmatter::{CodexNetworkAccess, Frontmatter};
 use agent_doc_turn_executor::agent_stream::{StreamChunk, parse_codex_line};
 use agent_doc_turn_executor::codex_launch::{
-    codex_transport_403_429_diagnostic, looks_like_codex_transport_403_429,
+    classify_child_network_probe_failure, classify_child_required_ssh_probe_failure,
+    classify_child_writable_root_probe_failure, codex_transport_403_429_diagnostic,
+    looks_like_codex_transport_403_429,
 };
 
 #[derive(Clone)]
@@ -603,34 +605,6 @@ fn opencode_child_network_probe_prompt() -> String {
         .to_string()
 }
 
-fn classify_child_network_probe_failure(detail: &str, harness: &str) -> String {
-    let lower = detail.to_ascii_lowercase();
-    if looks_like_opencode_usage_output(detail) {
-        format!("{harness} child probe printed CLI usage/help instead of running")
-    } else if lower.contains("could not resolve")
-        || lower.contains("temporary failure in name resolution")
-        || lower.contains("name or service not known")
-        || lower.contains("nodename nor servname provided")
-        || lower.contains("getaddrinfo")
-    {
-        format!("DNS resolution failed inside the {harness} child")
-    } else if lower.contains("operation not permitted")
-        || lower.contains("network is unreachable")
-        || lower.contains("permission denied")
-        || lower.contains("eperm")
-        || lower.contains("sandbox")
-        || lower.contains("network disabled")
-    {
-        format!("{harness} sandbox/network capability denied outbound access")
-    } else if lower.contains("connection refused") {
-        format!("remote network service refused the {harness} child connection")
-    } else if lower.contains("timed out") || lower.contains("timeout") {
-        format!("{harness} child network probe timed out")
-    } else {
-        format!("{harness} child network probe failed")
-    }
-}
-
 fn looks_like_opencode_usage_output(output: &str) -> bool {
     let lower = agent_doc_turn_executor_tmux::prompt::strip_ansi(output).to_ascii_lowercase();
     (lower.contains("opencode run [message..]")
@@ -749,7 +723,7 @@ fn validate_codex_child_network_probe_output(
             )
         }
     });
-    let classification = classify_child_network_probe_failure(&detail, harness);
+    let classification = classify_child_network_probe_failure(&detail, harness, false);
     anyhow::bail!("{classification}: {detail}");
 }
 
@@ -808,9 +782,9 @@ fn validate_opencode_child_probe_marker_output(
         extracted.join("\n")
     };
     let classification = if probe_name == "network" {
-        classify_child_network_probe_failure(&detail, harness)
+        classify_child_network_probe_failure(&detail, harness, false)
     } else {
-        classify_child_required_ssh_probe_failure(&detail, harness)
+        classify_child_required_ssh_probe_failure(&detail, harness, false)
     };
     anyhow::bail!("{classification}: {detail}");
 }
@@ -839,7 +813,7 @@ fn prove_codex_child_network_access(
     let output = wait_with_timeout(child, probe_timeout, "network", harness)?;
     if !output.status.success() {
         let detail = String::from_utf8_lossy(&output.stderr);
-        let classification = classify_child_network_probe_failure(&detail, harness);
+        let classification = classify_child_network_probe_failure(&detail, harness, false);
         anyhow::bail!(
             "{classification}: {harness} child probe command exited nonzero: {}",
             detail.trim()
@@ -882,7 +856,7 @@ fn prove_opencode_child_network_access(
             String::from_utf8_lossy(&output.stdout).trim(),
             String::from_utf8_lossy(&output.stderr).trim()
         );
-        let classification = classify_child_network_probe_failure(&detail, harness);
+        let classification = classify_child_network_probe_failure(&detail, harness, false);
         anyhow::bail!("{classification}: {harness} child probe command exited nonzero: {detail}");
     }
     validate_opencode_child_probe_marker_output(
@@ -915,31 +889,6 @@ fn opencode_child_required_ssh_probe_prompt(targets: &[String]) -> String {
          printf \"%s%s\\n\" AGENT_DOC_OPENCODE_SSH _PROBE_OK' sh {}",
         targets
     )
-}
-
-fn classify_child_required_ssh_probe_failure(detail: &str, harness: &str) -> String {
-    let lower = detail.to_ascii_lowercase();
-    if looks_like_opencode_usage_output(detail) {
-        format!("{harness} child SSH probe printed CLI usage/help instead of running")
-    } else if lower.contains("operation not permitted")
-        || lower.contains("socket:")
-        || lower.contains("eperm")
-        || lower.contains("permission denied")
-        || lower.contains("network is unreachable")
-        || lower.contains("sandbox")
-    {
-        format!("SSH unavailable inside managed {harness} pane")
-    } else if lower.contains("could not resolve")
-        || lower.contains("temporary failure in name resolution")
-        || lower.contains("name or service not known")
-        || lower.contains("getaddrinfo")
-    {
-        format!("SSH target resolution failed inside managed {harness} pane")
-    } else if lower.contains("timed out") || lower.contains("timeout") {
-        format!("SSH probe timed out inside managed {harness} pane")
-    } else {
-        format!("SSH capability failed inside managed {harness} pane")
-    }
 }
 
 fn prove_opencode_child_required_ssh(
@@ -976,7 +925,11 @@ fn prove_opencode_child_required_ssh(
             String::from_utf8_lossy(&output.stdout).trim(),
             String::from_utf8_lossy(&output.stderr).trim()
         );
-        let classification = classify_child_required_ssh_probe_failure(&detail, harness);
+        let classification = classify_child_required_ssh_probe_failure(
+            &detail,
+            harness,
+            looks_like_opencode_usage_output(&detail),
+        );
         anyhow::bail!(
             "{classification}: {harness} child SSH probe command exited nonzero: {detail}"
         );
@@ -1013,24 +966,6 @@ fn codex_child_writable_roots_probe_prompt(roots: &[PathBuf]) -> String {
          printf \"{}\\n\"' sh {roots}",
         CODEX_CHILD_WRITABLE_ROOT_PROBE_MARKER
     )
-}
-
-fn classify_child_writable_root_probe_failure(detail: &str, harness: &str) -> String {
-    let lower = detail.to_ascii_lowercase();
-    if lower.contains("read-only file system")
-        || lower.contains("operation not permitted")
-        || lower.contains("permission denied")
-        || lower.contains("eperm")
-        || lower.contains("sandbox")
-    {
-        format!("{harness} sandbox/write capability denied git metadata access")
-    } else if lower.contains("index.lock") || lower.contains("file exists") {
-        format!("{harness} child could not create required git metadata lock")
-    } else if lower.contains("not a directory") || lower.contains("no such file or directory") {
-        format!("{harness} writable-root probe target is missing")
-    } else {
-        format!("{harness} child writable-root probe failed")
-    }
 }
 
 fn validate_codex_child_writable_root_probe_output(

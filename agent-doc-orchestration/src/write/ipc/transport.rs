@@ -2605,6 +2605,110 @@ mod submodule_patch_routing_tests {
     }
 
     #[test]
+    fn try_ipc_already_applied_socket_adopts_ack_content_when_disk_lags() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        for subdir in [
+            "ack-content",
+            "patches",
+            "snapshots",
+            "crdt",
+            "logs",
+            "state/cycles",
+            "claimed-patches",
+        ] {
+            fs::create_dir_all(root.join(".agent-doc").join(subdir)).unwrap();
+        }
+
+        let doc = root.join("session.md");
+        let baseline = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let content_ours = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let editor_ack_content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "User typed the next prompt while finalize was running.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, baseline).unwrap();
+        crate::snapshot::save(&doc, baseline).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
+
+        let patch_id = "already-applied-ack-content";
+        fs::write(
+            root.join(".agent-doc/ack-content")
+                .join(format!("{patch_id}.md")),
+            editor_ack_content,
+        )
+        .unwrap();
+
+        let _listener = start_already_applied_listener(&root);
+        wait_for_listener(&root);
+
+        let patch = agent_doc_template::PatchBlock::new(
+            "exchange",
+            "### Re: Please reply — gpt-5\n\nAnswered.",
+        );
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(baseline),
+            Some(content_ours),
+            None,
+            Some(patch_id),
+        )
+        .unwrap();
+
+        assert!(
+            result.success,
+            "already_applied socket ack with ack-content is a proven editor write"
+        );
+        assert_eq!(
+            crate::snapshot::load(&doc).unwrap().as_deref(),
+            Some(editor_ack_content),
+            "already_applied must adopt fresh editor ack-content when disk still lags"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            baseline,
+            "try_ipc should not directly overwrite disk while adopting editor proof"
+        );
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("ipc_socket_already_applied_skip_file_fallback")
+                && log.contains("ipc_socket_already_applied_snapshot")
+                && log.contains("snap_source=ack_content_sidecar"),
+            "already_applied ack-content adoption should be auditable:\n{log}"
+        );
+    }
+
+    #[test]
     fn try_ipc_already_applied_socket_dedupes_duplicate_response_before_snapshot() {
         let dir = TempDir::new().unwrap();
         let root = dir.path().canonicalize().unwrap();

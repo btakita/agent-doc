@@ -6376,6 +6376,74 @@ fn test_global_config_has_no_orchestration_facade() {
 }
 
 #[test]
+fn test_agent_doc_frontmatter_owns_cross_document_security_review_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let frontmatter_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-frontmatter/src/lib.rs")).unwrap();
+    let security_review =
+        fs::read_to_string(manifest_dir.join("agent-doc-frontmatter/src/security_review.rs"))
+            .unwrap();
+
+    assert!(
+        frontmatter_lib.contains("pub mod security_review;"),
+        "agent-doc-frontmatter should expose focused security-review policy"
+    );
+    for required in [
+        "pub enum SecurityReviewSubject",
+        "pub struct CrossDocumentSecurityReviewDecision",
+        "pub fn cross_document_security_review_decision(",
+        "CollaborationMode::Shared",
+        "has_security_review()",
+    ] {
+        assert!(
+            security_review.contains(required),
+            "agent-doc-frontmatter must own cross-document security-review policy: {required}"
+        );
+    }
+
+    let orchestration_security =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/security.rs")).unwrap();
+    for forbidden in [
+        "CollaborationMode::Shared",
+        "has_security_review()",
+        "pub fn cross_document_security_review_decision(",
+        "pub enum SecurityReviewSubject",
+        "pub struct CrossDocumentSecurityReviewDecision",
+        "pub use agent_doc_frontmatter::security_review",
+        "pub(crate) use agent_doc_frontmatter::security_review",
+    ] {
+        assert!(
+            !orchestration_security.contains(forbidden),
+            "orchestration security must adapt paths/errors, not re-own or facade frontmatter security-review policy: {forbidden}"
+        );
+    }
+    assert!(
+        orchestration_security.contains("use agent_doc_frontmatter::security_review::{")
+            && orchestration_security.contains("cross_document_security_review_decision"),
+        "orchestration security should call focused frontmatter security-review policy directly"
+    );
+
+    let frontmatter_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-frontmatter/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&frontmatter_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-frontmatter security-review policy must stay free of core, orchestration, git, editor IPC, sqlite, or tmux crates"
+        );
+    }
+}
+
+#[test]
 fn test_snapshot_has_no_find_project_root_facade() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let snapshot_source =

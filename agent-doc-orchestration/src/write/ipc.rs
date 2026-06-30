@@ -1355,7 +1355,27 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
         return Ok(AlreadyAppliedSnapshotOutcome::Persisted);
     };
 
-    let current = std::fs::read_to_string(file).ok();
+    let ack_content = if !patch_id.is_empty() {
+        file.canonicalize().ok().and_then(|canonical| {
+            let project_root = super::resolve_ipc_project_root_pub(&canonical);
+            poll_ack_content_sidecar(
+                &project_root,
+                patch_id,
+                std::time::Duration::from_millis(500),
+                std::time::Duration::from_millis(25),
+            )
+            .ok()
+            .flatten()
+        })
+    } else {
+        None
+    };
+    let current_source = if ack_content.is_some() {
+        IpcSnapshotSource::AckContentSidecar
+    } else {
+        IpcSnapshotSource::FileRead
+    };
+    let current = ack_content.or_else(|| std::fs::read_to_string(file).ok());
     let mut repair_decision = IpcRepairDecision::content_ours(ours.to_string());
     if let Some(current) = current.as_deref()
         && strip_boundary_for_dedup(current) != strip_boundary_for_dedup(ours)
@@ -1453,7 +1473,14 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
                 return Ok(AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
             }
         } else {
-            repair_decision = IpcRepairDecision::file_read(current.to_string());
+            repair_decision = match current_source {
+                IpcSnapshotSource::AckContentSidecar => {
+                    IpcRepairDecision::ack_content(current.to_string())
+                }
+                IpcSnapshotSource::FileRead | IpcSnapshotSource::ContentOurs => {
+                    IpcRepairDecision::file_read(current.to_string())
+                }
+            };
             if let Some(lines) = normalize_prefix_lines
                 && !lines.is_empty()
             {

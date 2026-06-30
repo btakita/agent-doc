@@ -6,5 +6,6 @@
 
 pub mod frontmatter;
 pub mod project_config;
+pub mod security_review;
 
 pub use frontmatter::*;

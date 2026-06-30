@@ -121,6 +121,37 @@ class PatchWatcher(private val project: Project) : Disposable {
         return true
     }
 
+    private fun currentContentForAck(filePath: String): String? {
+        var targetFile = LocalFileSystem.getInstance().findFileByPath(filePath)
+        if (targetFile == null) {
+            LocalFileSystem.getInstance().refresh(false)
+            targetFile = LocalFileSystem.getInstance().findFileByPath(filePath)
+        }
+        if (targetFile == null) {
+            LOG.warn("[ack-content] already_applied target file not found: $filePath")
+            return null
+        }
+        val document = FileDocumentManager.getInstance().getDocument(targetFile)
+        if (document != null) {
+            return document.text
+        }
+        return try {
+            String(targetFile.contentsToByteArray(), targetFile.charset)
+        } catch (e: Exception) {
+            LOG.warn("[ack-content] failed to read already_applied VFS content for $filePath", e)
+            null
+        }
+    }
+
+    private fun writeAlreadyAppliedAckContent(patch: IpcPatch, source: String): Boolean {
+        val content = currentContentForAck(patch.file) ?: return false
+        val ok = writeAckContent(patch.patchId, content, patch.file)
+        if (ok) {
+            LOG.info("[ack-content] already_applied source=$source patch_id ${patch.patchId} content_len=${content.length}")
+        }
+        return ok
+    }
+
     fun start() {
         if (running) return
         running = true
@@ -426,11 +457,11 @@ class PatchWatcher(private val project: Project) : Disposable {
                 }
                 if (isClaimedByForceDisk(patch.patchId, patch.file)) {
                     LOG.info("[socket] dedup: sentinel exists for patch_id ${patch.patchId} — emitting already_applied")
-                    return APPLY_ALREADY_APPLIED
+                    return if (writeAlreadyAppliedAckContent(patch, "socket_force_disk_claim")) APPLY_ALREADY_APPLIED else APPLY_FAILED
                 }
                 if (isAlreadyApplied(patch.patchId)) {
                     LOG.info("[socket] dedup: patch_id ${patch.patchId} already applied — emitting already_applied")
-                    return APPLY_ALREADY_APPLIED
+                    return if (writeAlreadyAppliedAckContent(patch, "socket_precheck")) APPLY_ALREADY_APPLIED else APPLY_FAILED
                 }
                 // #8bfz / #fcconeowner: socket IPC is also an editor apply path, so
                 // it must publish the same live-owner lease as file IPC before it
@@ -467,7 +498,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                     // Re-check under EDT to avoid TOCTOU race with file watcher
                     if (isAlreadyApplied(patch.patchId)) {
                         LOG.info("[socket] dedup (EDT): patch_id ${patch.patchId} already applied — emitting already_applied")
-                        wasNoOp = true
+                        wasNoOp = writeAlreadyAppliedAckContent(patch, "socket_edt_recheck")
                         return@invokeAndWait
                     }
                     lastApplyWasNoOp = false
@@ -787,7 +818,11 @@ class PatchWatcher(private val project: Project) : Disposable {
             // patch_id dedup: if socket IPC already applied this logical write, skip.
             if (isAlreadyApplied(patch.patchId)) {
                 LOG.info("[patch-watcher] dedup: patch_id ${patch.patchId} already applied via socket — deleting: ${patchFile.name}")
-                patchFile.delete()
+                if (writeAlreadyAppliedAckContent(patch, "file_precheck")) {
+                    patchFile.delete()
+                } else {
+                    schedulePatchRetry(patchFile, "already_applied ack-content failed")
+                }
                 return
             }
 
@@ -846,7 +881,11 @@ class PatchWatcher(private val project: Project) : Disposable {
                 // Re-check patch_id dedup under EDT (socket handler may have applied between queue and EDT dispatch)
                 if (isAlreadyApplied(patch.patchId)) {
                     LOG.info("[patch-watcher] dedup (EDT): patch_id ${patch.patchId} already applied — deleting: ${patchFile.name}")
-                    patchFile.delete()
+                    if (writeAlreadyAppliedAckContent(patch, "file_edt_recheck")) {
+                        patchFile.delete()
+                    } else {
+                        schedulePatchRetry(patchFile, "already_applied ack-content failed")
+                    }
                     return@invokeLater
                 }
                 val applyStart = System.nanoTime()

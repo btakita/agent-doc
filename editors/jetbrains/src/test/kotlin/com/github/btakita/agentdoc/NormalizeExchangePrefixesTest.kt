@@ -493,6 +493,31 @@ One.
     }
 
     @Test
+    fun `already applied dedup publishes ack content before ack or delete`() {
+        val patchWatcherPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+        ).first { Files.exists(it) }
+        val patchWatcher = Files.readString(patchWatcherPath)
+
+        assertTrue(patchWatcher.contains("private fun writeAlreadyAppliedAckContent(patch: IpcPatch, source: String): Boolean"))
+        assertTrue(patchWatcher.contains("currentContentForAck(patch.file)"))
+
+        val socketPatch = patchWatcher
+            .substringAfter("\"patch\" -> {")
+            .substringBefore("\"reposition\" -> {")
+        val socketPrecheck = socketPatch.indexOf("isAlreadyApplied(patch.patchId)")
+        val socketAckContent = socketPatch.indexOf("writeAlreadyAppliedAckContent(patch, \"socket_precheck\")")
+        val socketAlreadyApplied = socketPatch.indexOf("APPLY_ALREADY_APPLIED", socketAckContent)
+        assertTrue("socket dedup must publish ack-content before already_applied", socketPrecheck >= 0 && socketPrecheck < socketAckContent && socketAckContent < socketAlreadyApplied)
+
+        val filePrecheck = patchWatcher.indexOf("// patch_id dedup: if socket IPC already applied")
+        val fileAckContent = patchWatcher.indexOf("writeAlreadyAppliedAckContent(patch, \"file_precheck\")", filePrecheck)
+        val fileDelete = patchWatcher.indexOf("patchFile.delete()", fileAckContent)
+        assertTrue("file watcher dedup must publish ack-content before deleting the patch", filePrecheck >= 0 && filePrecheck < fileAckContent && fileAckContent < fileDelete)
+    }
+
+    @Test
     fun `socket patch publishes plugin owner before editor ack`() {
         val patchWatcherPath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),

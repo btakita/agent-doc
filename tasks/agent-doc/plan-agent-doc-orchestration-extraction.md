@@ -243,6 +243,11 @@ focused crate under the old path.
   would otherwise live only in prose. Orchestration keeps guard-mode resolution,
   cycle/capture/review loading, ops-log emission, and strict-vs-warn formatting,
   with touched hints moved to `--backlog-edit` / `--backlog-add-after`.
+- `agent-doc-turn` now owns gated-phase split advisory policy: suppress-marker
+  handling, kept-open/directed-id filtering, multi-phase body detection, child-id
+  breakout recognition, and warn/pass decisions for kept-open tracked items.
+  Orchestration keeps cycle/capture loading, cached component parsing,
+  tracked-item evidence projection, ops-log emission, and warning rendering.
 
 ### Earlier closure finding
 

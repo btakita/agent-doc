@@ -278,6 +278,175 @@ pub fn inactive_prompt() -> PromptInfo {
     }
 }
 
+pub fn is_codex_idle_placeholder_prompt(trimmed: &str) -> bool {
+    codex_idle_placeholder_prompt(trimmed).is_some()
+}
+
+pub fn codex_idle_placeholder_prompt(trimmed: &str) -> Option<String> {
+    let body = trimmed.strip_prefix('›')?.trim();
+    if body.is_empty()
+        || body
+            .chars()
+            .any(|c| matches!(c, ':' | ';' | '"' | '\'' | '`' | '\\' | '|' | '&'))
+        || matches!(body.chars().last(), Some('.' | '!' | '?' | ',' | ':' | ';'))
+    {
+        return None;
+    }
+
+    let normalized = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized == "Ask Codex to do anything" || normalized == "Explain this codebase" {
+        return Some(format!("› {}", normalized));
+    }
+
+    let words = normalized.split_whitespace().collect::<Vec<_>>();
+    if words.len() < 4 || words.len() > 8 {
+        return None;
+    }
+
+    let first = words[0];
+    if !first
+        .chars()
+        .next()
+        .is_some_and(|ch| ch.is_ascii_uppercase())
+    {
+        return None;
+    }
+
+    if !words
+        .iter()
+        .all(|word| is_safe_codex_placeholder_token(word))
+    {
+        return None;
+    }
+
+    let has_placeholder_target = normalized.ends_with("in @filename")
+        || normalized.ends_with("for @filename")
+        || normalized.ends_with("on my current changes");
+    if !has_placeholder_target {
+        return None;
+    }
+
+    Some(format!("› {}", normalized))
+}
+
+pub fn codex_idle_placeholder_candidate(output: &str) -> Option<String> {
+    let recent = output
+        .lines()
+        .rev()
+        .take(8)
+        .map(strip_ansi)
+        .collect::<Vec<_>>();
+    if recent.is_empty() {
+        return None;
+    }
+    let normalized = recent
+        .iter()
+        .rev()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty() && !line.contains("· Context "))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let normalized = normalized.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    if let Some(index) = normalized.rfind('›') {
+        let candidate = normalized[index..].trim();
+        if candidate == "›" {
+            return Some(candidate.to_string());
+        }
+        return codex_idle_placeholder_prompt(candidate);
+    }
+
+    None
+}
+
+pub fn codex_prompt_candidate_is_dim_placeholder(output: &str, candidate: &str) -> bool {
+    let Some(raw_line) = output.lines().rev().find(|line| {
+        let stripped = strip_ansi(line);
+        stripped.trim() == candidate
+    }) else {
+        return false;
+    };
+    codex_prompt_line_body_starts_dim(raw_line)
+}
+
+fn is_safe_codex_placeholder_token(word: &str) -> bool {
+    if word == "@filename" {
+        return true;
+    }
+
+    if let Some(command) = word.strip_prefix('/') {
+        return !command.is_empty()
+            && command
+                .chars()
+                .all(|ch| ch.is_ascii_lowercase() || ch == '-' || ch == '_');
+    }
+
+    word.chars().all(|ch| ch.is_ascii_alphabetic() || ch == '-')
+}
+
+fn codex_prompt_line_body_starts_dim(raw_line: &str) -> bool {
+    let mut faint = false;
+    let mut after_prompt = false;
+    let mut chars = raw_line.char_indices().peekable();
+    while let Some((_, ch)) = chars.next() {
+        if ch == '\x1b' && chars.peek().is_some_and(|(_, next)| *next == '[') {
+            let _ = chars.next();
+            let mut sequence = String::new();
+            for (_, seq_ch) in chars.by_ref() {
+                if seq_ch.is_ascii_alphabetic() {
+                    if seq_ch == 'm' {
+                        apply_sgr_sequence(&sequence, &mut faint);
+                    }
+                    break;
+                }
+                sequence.push(seq_ch);
+            }
+            continue;
+        }
+
+        if !after_prompt {
+            if matches!(ch, '>' | '›' | '❯') {
+                after_prompt = true;
+            }
+            continue;
+        }
+
+        if ch.is_whitespace() {
+            continue;
+        }
+        return faint;
+    }
+    false
+}
+
+fn apply_sgr_sequence(sequence: &str, faint: &mut bool) {
+    if sequence.is_empty() {
+        *faint = false;
+        return;
+    }
+    let codes = sequence
+        .split(';')
+        .filter_map(|code| code.parse::<u16>().ok())
+        .collect::<Vec<_>>();
+    let mut index = 0;
+    while index < codes.len() {
+        match codes[index] {
+            0 => *faint = false,
+            2 => *faint = true,
+            22 => *faint = false,
+            38 | 48 => {
+                if codes.get(index + 1) == Some(&2) {
+                    index += 4;
+                } else if codes.get(index + 1) == Some(&5) {
+                    index += 2;
+                }
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -511,6 +680,54 @@ printf '\\033[48;2;245;167;66mAllow once\\033[0m Allow always Reject ⇆ select 
         let info = parse_prompt(content);
         assert!(info.active);
         assert_eq!(info.selected, Some(1));
+    }
+
+    #[test]
+    fn codex_idle_placeholder_candidate_recovers_wrapped_placeholder() {
+        let content = "\
+gpt-5.4 medium · ~/work/btakita/agent-loop · Context 0% used
+› Explain this module
+in @filename
+";
+
+        assert_eq!(
+            codex_idle_placeholder_candidate(content).as_deref(),
+            Some("› Explain this module in @filename")
+        );
+        assert!(is_codex_idle_placeholder_prompt(
+            "› Explain this module in @filename"
+        ));
+    }
+
+    #[test]
+    fn codex_idle_placeholder_rejects_drafted_prose() {
+        assert_eq!(
+            codex_idle_placeholder_prompt("› investigate this issue"),
+            None
+        );
+        assert_eq!(
+            codex_idle_placeholder_prompt("› Investigate this issue quickly."),
+            None
+        );
+        assert_eq!(
+            codex_idle_placeholder_candidate("› investigate this issue"),
+            None
+        );
+    }
+
+    #[test]
+    fn codex_dim_placeholder_detection_ignores_rgb_color() {
+        let dim = "\x1b[1m›\x1b[0m \x1b[2mAsk Codex to do anything\x1b[0m\n";
+        assert!(codex_prompt_candidate_is_dim_placeholder(
+            dim,
+            "› Ask Codex to do anything"
+        ));
+
+        let rgb = "\x1b[1m›\x1b[0m \x1b[38;2;128;128;128mAsk Codex to do anything\x1b[0m\n";
+        assert!(!codex_prompt_candidate_is_dim_placeholder(
+            rgb,
+            "› Ask Codex to do anything"
+        ));
     }
 
     #[test]

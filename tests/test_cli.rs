@@ -9522,6 +9522,10 @@ fn test_agent_doc_turn_executor_tmux_owns_prompt_parser_policy() {
         "pub fn navigation_axis_for_prompt(",
         "pub fn navigation_keys_for_prompt(",
         "pub fn opencode_option_requires_confirmation(",
+        "pub fn is_codex_idle_placeholder_prompt(",
+        "pub fn codex_idle_placeholder_prompt(",
+        "pub fn codex_idle_placeholder_candidate(",
+        "pub fn codex_prompt_candidate_is_dim_placeholder(",
     ] {
         assert!(
             prompt_source.contains(required),
@@ -9553,6 +9557,25 @@ fn test_agent_doc_turn_executor_tmux_owns_prompt_parser_policy() {
 
     let harness_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/harness.rs")).unwrap();
+    for forbidden in [
+        "fn codex_idle_placeholder_prompt(",
+        "fn codex_idle_placeholder_candidate(",
+        "fn codex_prompt_candidate_is_dim_placeholder(",
+        "fn codex_prompt_line_body_starts_dim(",
+        "fn apply_sgr_sequence(",
+        "fn is_safe_codex_placeholder_token(",
+    ] {
+        assert!(
+            !harness_source.contains(forbidden),
+            "harness.rs must not re-own Codex prompt placeholder parsing policy: {forbidden}"
+        );
+    }
+    assert!(
+        harness_source.contains("codex_idle_placeholder_candidate")
+            && harness_source.contains("codex_prompt_candidate_is_dim_placeholder")
+            && harness_source.contains("is_codex_idle_placeholder_prompt"),
+        "harness.rs should call focused Codex prompt placeholder policy directly"
+    );
     let start_detection_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/detection.rs"))
             .unwrap();

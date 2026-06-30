@@ -260,6 +260,12 @@ focused crate under the old path.
   OpenCode aliases and the Claude env fallback from a focused fact struct.
   Orchestration keeps only frontmatter/config/env fact projection and calls the
   focused resolver directly from start/run assembly.
+- `agent-doc-supervisor` now owns recycle-yield and recycle-in-flight marker
+  policy: sidecar directory/file vocabulary, persisted marker schemas, canonical
+  reasons, TTL env/default resolution, freshness checks, and recycle settle
+  timing constants. Orchestration keeps only marker path resolution, JSON
+  sidecar reads/writes/clears, sleep/poll loops, and user-facing diagnostics
+  while importing the focused marker contracts directly.
 - We are in the current seam-by-seam extraction wave after the transitional
   orchestration crate move. Practically, this is **Wave 2**: shrink
   `agent-doc-orchestration` by moving durable policy into focused domain crates,

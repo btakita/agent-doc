@@ -4344,6 +4344,9 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-prompt-context/src/lib.rs")).unwrap();
     for required_snippet in [
         "pub struct BoundedResponseContext",
+        "pub struct DocumentSectionContext",
+        "pub fn document_section_needs_response_toc(",
+        "pub fn render_document_section(",
         "pub fn format_active_format_requirements(",
         "pub fn render_full_document_section(",
         "pub fn render_bounded_response_context(",
@@ -4354,6 +4357,7 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
         "fn render_recent_exchange_turns(",
         "fn collect_recent_exchange_turn_sections(",
         "fn render_available_components(",
+        "fn should_render_bounded_document_section(",
     ] {
         assert!(
             focused_source.contains(required_snippet),
@@ -4371,6 +4375,8 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
         "fn render_recent_exchange_turns(",
         "fn collect_recent_exchange_turn_sections(",
         "fn render_available_components(",
+        "render_bounded_response_context(BoundedResponseContext",
+        "element::parse(doc)",
         "pub use agent_doc_prompt_context",
     ] {
         assert!(
@@ -4380,8 +4386,8 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
     }
     assert!(
         orchestration_source.contains("agent_doc_prompt_context::{")
-            && orchestration_source
-                .contains("render_bounded_response_context(BoundedResponseContext")
+            && orchestration_source.contains("render_document_section(DocumentSectionContext")
+            && orchestration_source.contains("document_section_needs_response_toc(")
             && orchestration_source.contains("frontmatter_io::parse_for_file_with_context")
             && orchestration_source.contains("agent_doc_response_toc_io::render_prompt_toc"),
         "orchestration prompt_context should gather project context then call focused rendering policy directly"
@@ -6980,7 +6986,14 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         );
     }
     for required_snippet in [
+        "pub const CODEX_SANDBOX_NETWORK_DISABLED_ENV",
         "pub enum CodexResumeRestartArgsError",
+        "pub struct CodexNetworkPolicyStatus",
+        "pub fn resolve_codex_network_access(",
+        "pub fn apply_codex_network_access_env_map(",
+        "pub fn apply_codex_network_access_env_overrides(",
+        "pub fn codex_network_status_from_env_map(",
+        "pub fn codex_network_status_from_overrides(",
         "pub fn codex_resume_restart_args(",
         "pub fn looks_like_codex_transport_403_429(",
         "pub fn codex_transport_403_429_diagnostic(",
@@ -7051,10 +7064,17 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         "pub fn proof_retry_decision(",
         "DEFAULT_MANAGED_PROOF",
         "MAX_MANAGED_PROOF",
+        "pub const CODEX_SANDBOX_NETWORK_DISABLED_ENV",
+        "pub struct CodexNetworkPolicyStatus",
+        "pub fn resolve_codex_network_access(",
+        "pub fn apply_codex_network_access_env_map(",
+        "pub fn apply_codex_network_access_env_overrides(",
+        "pub fn codex_network_status_from_env_map(",
+        "pub fn codex_network_status_from_overrides(",
     ] {
         assert!(
             !agent_mod.contains(forbidden_snippet),
-            "agent::mod must not re-own capability-proof policy: {forbidden_snippet}"
+            "agent::mod must not re-own capability-proof or Codex network launch policy: {forbidden_snippet}"
         );
     }
 
@@ -7136,11 +7156,16 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
             && codex.contains("classify_child_required_ssh_probe_failure")
             && codex.contains("classify_child_writable_root_probe_failure")
             && codex.contains("looks_like_local_browser_cdp_permission_denied")
+            && codex.contains("resolve_codex_network_access")
             && codex.contains("resume_capability_drift_notice")
             && codex.contains("transcript_has_required_ssh_failure")
             && codex.contains("transcript_proves_required_ssh_success")
             && codex.contains("format_required_ssh_failure"),
         "agent::codex should call focused Codex launch/transport policy directly"
+    );
+    assert!(
+        !codex.contains("super::resolve_codex_network_access("),
+        "agent::codex must not call obsolete orchestration Codex network policy"
     );
     assert!(
         codex.contains(

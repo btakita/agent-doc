@@ -658,6 +658,7 @@ dependencies = [
 name = "agent-doc-turn-executor"
 version = "0.34.65"
 dependencies = [
+ "agent-doc-frontmatter",
  "anyhow",
  "serde",
  "serde_json",

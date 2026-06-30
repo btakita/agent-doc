@@ -4,8 +4,12 @@
 //! the harness-specific argument transformation for `codex resume`, which has a
 //! narrower CLI surface than the original `codex exec` launch.
 
+use agent_doc_frontmatter::frontmatter::CodexNetworkAccess;
+use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
+
+pub const CODEX_SANDBOX_NETWORK_DISABLED_ENV: &str = "CODEX_SANDBOX_NETWORK_DISABLED";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CodexResumeRestartArgsError {
@@ -42,6 +46,155 @@ impl fmt::Display for CodexResumeRestartArgsError {
 
 impl Error for CodexResumeRestartArgsError {}
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodexNetworkPolicyStatus {
+    pub access: CodexNetworkAccess,
+    pub parent_disabled: bool,
+    pub effective_disabled: bool,
+    pub sandbox_mode: Option<String>,
+}
+
+impl CodexNetworkPolicyStatus {
+    pub fn summary(&self) -> String {
+        let effective = if self.effective_disabled {
+            "disabled"
+        } else {
+            "enabled"
+        };
+        let requested = match self.access {
+            CodexNetworkAccess::Inherit => "inherit",
+            CodexNetworkAccess::Enabled => "enabled",
+            CodexNetworkAccess::Disabled => "disabled",
+        };
+        let detail = match self.access {
+            CodexNetworkAccess::Inherit if self.parent_disabled => {
+                "inherited CODEX_SANDBOX_NETWORK_DISABLED=1".to_string()
+            }
+            CodexNetworkAccess::Inherit => {
+                "no inherited CODEX_SANDBOX_NETWORK_DISABLED override".to_string()
+            }
+            CodexNetworkAccess::Enabled if self.parent_disabled => {
+                "agent-doc removed inherited CODEX_SANDBOX_NETWORK_DISABLED=1".to_string()
+            }
+            CodexNetworkAccess::Enabled => {
+                "agent-doc forced CODEX_SANDBOX_NETWORK_DISABLED off".to_string()
+            }
+            CodexNetworkAccess::Disabled => {
+                "agent-doc forced CODEX_SANDBOX_NETWORK_DISABLED=1".to_string()
+            }
+        };
+        match self.sandbox_mode.as_deref() {
+            Some(mode) => format!("{effective} (policy: {requested}, sandbox: {mode}; {detail})"),
+            None => format!("{effective} (policy: {requested}; {detail})"),
+        }
+    }
+
+    pub fn mismatch_error(&self) -> Option<String> {
+        match self.access {
+            CodexNetworkAccess::Enabled if self.effective_disabled => Some(format!(
+                "Codex launch policy mismatch: `codex_network_access: enabled` should remove \
+                 `{}`, but the effective child env is still network-disabled.",
+                CODEX_SANDBOX_NETWORK_DISABLED_ENV
+            )),
+            CodexNetworkAccess::Disabled if !self.effective_disabled => Some(format!(
+                "Codex launch policy mismatch: `codex_network_access: disabled` should set \
+                 `{}` to `1`, but the effective child env is still network-enabled.",
+                CODEX_SANDBOX_NETWORK_DISABLED_ENV
+            )),
+            CodexNetworkAccess::Inherit
+                if self.effective_disabled
+                    && self.sandbox_mode.as_deref() == Some("danger-full-access") =>
+            {
+                Some(format!(
+                    "Codex launch policy mismatch: sandbox is `danger-full-access`, but network \
+                     is still disabled by inherited {}=1. Set `codex_network_access: enabled` \
+                     (or `codex_network_access = \"enabled\"` in config) so agent-doc removes \
+                     that launcher override, or remove the env var before starting the session.",
+                    CODEX_SANDBOX_NETWORK_DISABLED_ENV
+                ))
+            }
+            _ => None,
+        }
+    }
+}
+
+pub fn resolve_codex_network_access(
+    frontmatter_access: Option<CodexNetworkAccess>,
+    config_access: Option<CodexNetworkAccess>,
+) -> CodexNetworkAccess {
+    frontmatter_access.or(config_access).unwrap_or_default()
+}
+
+pub fn apply_codex_network_access_env_map(
+    env: &mut HashMap<String, String>,
+    access: CodexNetworkAccess,
+) {
+    match access {
+        CodexNetworkAccess::Inherit => {}
+        CodexNetworkAccess::Enabled => {
+            env.remove(CODEX_SANDBOX_NETWORK_DISABLED_ENV);
+        }
+        CodexNetworkAccess::Disabled => {
+            env.insert(
+                CODEX_SANDBOX_NETWORK_DISABLED_ENV.to_string(),
+                "1".to_string(),
+            );
+        }
+    }
+}
+
+pub fn apply_codex_network_access_env_overrides(
+    env: &mut Vec<(String, Option<String>)>,
+    access: CodexNetworkAccess,
+) {
+    match access {
+        CodexNetworkAccess::Inherit => {}
+        CodexNetworkAccess::Enabled => {
+            env.push((CODEX_SANDBOX_NETWORK_DISABLED_ENV.to_string(), None))
+        }
+        CodexNetworkAccess::Disabled => env.push((
+            CODEX_SANDBOX_NETWORK_DISABLED_ENV.to_string(),
+            Some("1".to_string()),
+        )),
+    }
+}
+
+pub fn codex_network_status_from_env_map(
+    args: &[String],
+    access: CodexNetworkAccess,
+    parent_disabled: bool,
+    env: &HashMap<String, String>,
+) -> CodexNetworkPolicyStatus {
+    CodexNetworkPolicyStatus {
+        access,
+        parent_disabled,
+        effective_disabled: env
+            .get(CODEX_SANDBOX_NETWORK_DISABLED_ENV)
+            .is_some_and(|value| value == "1"),
+        sandbox_mode: codex_sandbox_mode_from_args(args),
+    }
+}
+
+pub fn codex_network_status_from_overrides(
+    args: &[String],
+    access: CodexNetworkAccess,
+    parent_disabled: bool,
+    overrides: &[(String, Option<String>)],
+) -> CodexNetworkPolicyStatus {
+    let mut effective_disabled = parent_disabled;
+    for (key, value) in overrides {
+        if key == CODEX_SANDBOX_NETWORK_DISABLED_ENV {
+            effective_disabled = value.as_deref() == Some("1");
+        }
+    }
+    CodexNetworkPolicyStatus {
+        access,
+        parent_disabled,
+        effective_disabled,
+        sandbox_mode: codex_sandbox_mode_from_args(args),
+    }
+}
+
 fn parse_sandbox_mode_config(value: &str) -> Option<String> {
     let raw = value.trim();
     let mode = raw.strip_prefix("sandbox_mode=")?;
@@ -51,6 +204,37 @@ fn parse_sandbox_mode_config(value: &str) -> Option<String> {
     } else {
         Some(mode.to_string())
     }
+}
+
+fn codex_sandbox_mode_from_args(args: &[String]) -> Option<String> {
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "-s" | "--sandbox" => {
+                if let Some(mode) = iter.next() {
+                    return Some(mode.clone());
+                }
+            }
+            "-c" | "--config" => {
+                if let Some(value) = iter.next()
+                    && let Some(mode) = parse_sandbox_mode_config(value)
+                {
+                    return Some(mode);
+                }
+            }
+            _ => {
+                if let Some(mode) = arg.strip_prefix("--sandbox=") {
+                    return Some(mode.to_string());
+                }
+                if let Some(value) = arg.strip_prefix("--config=")
+                    && let Some(mode) = parse_sandbox_mode_config(value)
+                {
+                    return Some(mode);
+                }
+            }
+        }
+    }
+    None
 }
 
 fn record_codex_resume_sandbox_mode(
@@ -481,9 +665,91 @@ pub fn classify_child_writable_root_probe_failure(detail: &str, harness: &str) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_doc_frontmatter::frontmatter::CodexNetworkAccess;
 
     fn strings(items: &[&str]) -> Vec<String> {
         items.iter().map(|item| item.to_string()).collect()
+    }
+
+    #[test]
+    fn resolve_codex_network_access_prefers_frontmatter_over_config() {
+        assert_eq!(
+            resolve_codex_network_access(
+                Some(CodexNetworkAccess::Enabled),
+                Some(CodexNetworkAccess::Disabled),
+            ),
+            CodexNetworkAccess::Enabled
+        );
+    }
+
+    #[test]
+    fn codex_network_status_detects_inherited_disable_mismatch() {
+        let args = vec!["-s".to_string(), "danger-full-access".to_string()];
+        let status = codex_network_status_from_overrides(
+            &args,
+            CodexNetworkAccess::Inherit,
+            true,
+            &Vec::new(),
+        );
+        assert!(status.effective_disabled);
+        assert!(status.mismatch_error().is_some());
+    }
+
+    #[test]
+    fn codex_network_status_reads_config_sandbox_mode() {
+        let args = vec![
+            "-c".to_string(),
+            "sandbox_mode=\"danger-full-access\"".to_string(),
+        ];
+        let status = codex_network_status_from_overrides(
+            &args,
+            CodexNetworkAccess::Inherit,
+            true,
+            &Vec::new(),
+        );
+        assert_eq!(status.sandbox_mode.as_deref(), Some("danger-full-access"));
+        assert!(status.mismatch_error().is_some());
+    }
+
+    #[test]
+    fn codex_network_status_clears_inherited_disable_when_enabled() {
+        let args = vec!["-s".to_string(), "danger-full-access".to_string()];
+        let mut overrides = Vec::new();
+        apply_codex_network_access_env_overrides(&mut overrides, CodexNetworkAccess::Enabled);
+        let status = codex_network_status_from_overrides(
+            &args,
+            CodexNetworkAccess::Enabled,
+            true,
+            &overrides,
+        );
+        assert!(!status.effective_disabled);
+        assert!(status.mismatch_error().is_none());
+    }
+
+    #[test]
+    fn codex_network_status_env_map_matches_override_policy() {
+        let args = vec!["--sandbox=danger-full-access".to_string()];
+        let mut env_map = HashMap::new();
+        env_map.insert(
+            CODEX_SANDBOX_NETWORK_DISABLED_ENV.to_string(),
+            "1".to_string(),
+        );
+        apply_codex_network_access_env_map(&mut env_map, CodexNetworkAccess::Enabled);
+
+        let mut overrides = Vec::new();
+        apply_codex_network_access_env_overrides(&mut overrides, CodexNetworkAccess::Enabled);
+
+        let map_status =
+            codex_network_status_from_env_map(&args, CodexNetworkAccess::Enabled, true, &env_map);
+        let override_status = codex_network_status_from_overrides(
+            &args,
+            CodexNetworkAccess::Enabled,
+            true,
+            &overrides,
+        );
+
+        assert_eq!(map_status, override_status);
+        assert!(!map_status.effective_disabled);
     }
 
     #[test]

@@ -1521,7 +1521,7 @@ exit 2
         let envs = agent.envs.borrow();
         assert_eq!(envs.len(), 1);
         assert!(envs[0].iter().any(|(key, value)| {
-            key == agent_doc_orchestration::agent::CODEX_SANDBOX_NETWORK_DISABLED_ENV
+            key == agent_doc_turn_executor::codex_launch::CODEX_SANDBOX_NETWORK_DISABLED_ENV
                 && value.is_none()
         }));
     }

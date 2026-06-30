@@ -11,6 +11,10 @@ use agent_doc_supervisor::{
 use agent_doc_supervisor_process::{
     REEXEC_CHILD_PID_ENV, REEXEC_MASTER_FD_ENV, ReexecState, resize,
 };
+use agent_doc_turn_executor::codex_launch::{
+    CODEX_SANDBOX_NETWORK_DISABLED_ENV, apply_codex_network_access_env_map,
+    codex_network_status_from_env_map, resolve_codex_network_access,
+};
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
 
@@ -108,11 +112,15 @@ fn build_harness_launch_spec(
         base_args.push("--no-mcp".into());
     }
     if harness.binary == "codex" {
-        let codex_network_access = crate::agent::resolve_codex_network_access(fm, global_config);
-        crate::agent::apply_codex_network_access_env_map(&mut resolved_env, codex_network_access);
-        let status = crate::agent::codex_network_status_from_env_map(
+        let codex_network_access = resolve_codex_network_access(
+            fm.codex_network_access,
+            global_config.codex_network_access,
+        );
+        apply_codex_network_access_env_map(&mut resolved_env, codex_network_access);
+        let status = codex_network_status_from_env_map(
             &base_args,
             codex_network_access,
+            parent_codex_network_disabled(),
             &resolved_env,
         );
         start_console_status(
@@ -143,6 +151,13 @@ fn build_harness_launch_spec(
         resolved_env,
         capability_proof_required,
     })
+}
+
+fn parent_codex_network_disabled() -> bool {
+    std::env::var(CODEX_SANDBOX_NETWORK_DISABLED_ENV)
+        .ok()
+        .as_deref()
+        == Some("1")
 }
 
 fn configure_managed_capability_proof_for_spec(

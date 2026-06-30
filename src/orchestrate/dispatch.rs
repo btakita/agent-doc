@@ -1,6 +1,17 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use agent_doc_turn_executor::codex_launch::{
+    CODEX_SANDBOX_NETWORK_DISABLED_ENV, apply_codex_network_access_env_overrides,
+    codex_network_status_from_overrides, resolve_codex_network_access,
+};
+
+fn parent_codex_network_disabled() -> bool {
+    std::env::var(CODEX_SANDBOX_NETWORK_DISABLED_ENV)
+        .ok()
+        .as_deref()
+        == Some("1")
+}
 
 /// Build a dispatch context for command dispatch from a document file.
 pub(crate) fn build_dispatch_context(file: &Path) -> queue_dispatch::DispatchContext {
@@ -131,18 +142,18 @@ pub(crate) fn run_ordered_task_step(
         .or_else(|| global_config.agents.get(agent_name));
     let mut launch_env = expanded_env;
     if agent_name == "codex" {
-        let codex_network_access =
-            agent_doc_orchestration::agent::resolve_codex_network_access(&fm, global_config);
-        agent_doc_orchestration::agent::apply_codex_network_access_env_overrides(
-            &mut launch_env,
-            codex_network_access,
+        let codex_network_access = resolve_codex_network_access(
+            fm.codex_network_access,
+            global_config.codex_network_access,
         );
+        apply_codex_network_access_env_overrides(&mut launch_env, codex_network_access);
         let sandbox_args = agent_config
             .map(|cfg| cfg.args.clone())
             .unwrap_or_else(agent::codex::default_base_args);
-        let status = agent_doc_orchestration::agent::codex_network_status_from_overrides(
+        let status = codex_network_status_from_overrides(
             &sandbox_args,
             codex_network_access,
+            parent_codex_network_disabled(),
             &launch_env,
         );
         eprintln!("[orchestrate] codex network access: {}", status.summary());

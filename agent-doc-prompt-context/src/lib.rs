@@ -41,11 +41,52 @@ pub struct BoundedResponseContext<'a> {
     pub remote_host_scope: &'a str,
 }
 
+pub struct DocumentSectionContext<'a> {
+    pub doc: &'a str,
+    pub report: Option<&'a SessionAccretionReport>,
+    pub prompt_targets: &'a [String],
+    pub response_toc: Option<&'a str>,
+    pub remote_host_scope: &'a str,
+}
+
 pub fn render_full_document_section(doc: &str, remote_host_scope: &str) -> String {
     format!(
         "{}The full document is now:\n\n<document>\n{}\n</document>\n\n",
         remote_host_scope, doc
     )
+}
+
+pub fn document_section_needs_response_toc(
+    doc: &str,
+    report: Option<&SessionAccretionReport>,
+    prompt_targets: &[String],
+) -> bool {
+    should_render_bounded_document_section(report, prompt_targets) && element::parse(doc).is_ok()
+}
+
+pub fn render_document_section(input: DocumentSectionContext<'_>) -> String {
+    if !should_render_bounded_document_section(input.report, input.prompt_targets) {
+        return render_full_document_section(input.doc, input.remote_host_scope);
+    }
+
+    let Ok(components) = element::parse(input.doc) else {
+        return render_full_document_section(input.doc, input.remote_host_scope);
+    };
+
+    let response_toc = input
+        .response_toc
+        .unwrap_or("No live or archived response TOC entries are available yet.");
+    let report = input
+        .report
+        .expect("bounded document section requires an accretion report");
+    render_bounded_response_context(BoundedResponseContext {
+        components: &components,
+        doc: input.doc,
+        report,
+        prompt_targets: input.prompt_targets,
+        response_toc,
+        remote_host_scope: input.remote_host_scope,
+    })
 }
 
 pub fn format_active_format_requirements(content: &str) -> Option<String> {
@@ -116,6 +157,16 @@ pub fn render_bounded_response_context(input: BoundedResponseContext<'_>) -> Str
         );
     }
     rendered
+}
+
+fn should_render_bounded_document_section(
+    report: Option<&SessionAccretionReport>,
+    prompt_targets: &[String],
+) -> bool {
+    let Some(report) = report else {
+        return false;
+    };
+    !prompt_targets.is_empty() && !report.is_healthy()
 }
 
 fn collect_active_format_requirements(content: &str) -> Vec<String> {
@@ -441,6 +492,26 @@ mod tests {
         element::parse(doc).expect("test document should parse")
     }
 
+    fn context_doc() -> &'static str {
+        concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "Compacted earlier turns.\n\n",
+            "### Re: current topic - gpt-5\n\n",
+            "Older response body.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#ctxpack] Add bounded context pack\n",
+            "- [ ] [#noopcap] Collapse noop churn\n",
+            "- [ ] [#chkptcap] Capture checkpoints\n",
+            "- [ ] [#later] Fourth item\n",
+            "<!-- /agent:backlog -->\n",
+        )
+    }
+
     #[test]
     fn format_active_format_requirements_surfaces_prior_backlog_shape_directive() {
         let doc = concat!(
@@ -481,23 +552,7 @@ mod tests {
 
     #[test]
     fn render_bounded_response_context_includes_pure_context_sections() {
-        let doc = concat!(
-            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-            "## Exchange\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "### Session Summary\n\n",
-            "Compacted earlier turns.\n\n",
-            "### Re: current topic - gpt-5\n\n",
-            "Older response body.\n",
-            "<!-- /agent:exchange -->\n\n",
-            "## Pending / Not Built\n\n",
-            "<!-- agent:backlog -->\n",
-            "- [ ] [#ctxpack] Add bounded context pack\n",
-            "- [ ] [#noopcap] Collapse noop churn\n",
-            "- [ ] [#chkptcap] Capture checkpoints\n",
-            "- [ ] [#later] Fourth item\n",
-            "<!-- /agent:backlog -->\n",
-        );
+        let doc = context_doc();
         let components = parse_components(doc);
         let prompt_targets = vec!["do [#ctxpack]. spec-test-build-install-commit-push".to_string()];
         let section = render_bounded_response_context(BoundedResponseContext {
@@ -522,6 +577,72 @@ mod tests {
         assert!(section.contains("Older response body."));
         assert!(section.contains("ask for more previous turns"));
         assert!(section.contains("available_components"));
+        assert!(section.contains("<remote_host_scope>"));
+    }
+
+    #[test]
+    fn render_document_section_falls_back_to_full_document_when_healthy() {
+        let prompt_targets = vec!["do [#ctxpack]. spec-test-build-install-commit-push".to_string()];
+        let section = render_document_section(DocumentSectionContext {
+            doc: "doc body",
+            report: Some(&SessionAccretionReport::default()),
+            prompt_targets: &prompt_targets,
+            response_toc: Some("- current topic"),
+            remote_host_scope: "<remote_host_scope>\nNo targets.\n</remote_host_scope>\n\n",
+        });
+
+        assert!(section.contains("The full document is now:"));
+        assert!(section.contains("<document>\ndoc body\n</document>"));
+        assert!(section.contains("<remote_host_scope>"));
+        assert!(!section.contains("<response_context"));
+        assert!(!document_section_needs_response_toc(
+            "doc body",
+            Some(&SessionAccretionReport::default()),
+            &prompt_targets
+        ));
+    }
+
+    #[test]
+    fn render_document_section_falls_back_to_full_document_without_prompt_targets() {
+        let section = render_document_section(DocumentSectionContext {
+            doc: "doc body",
+            report: Some(&warn_report()),
+            prompt_targets: &[],
+            response_toc: None,
+            remote_host_scope: "",
+        });
+
+        assert!(section.contains("The full document is now:"));
+        assert!(!section.contains("<response_context"));
+        assert!(!document_section_needs_response_toc(
+            "doc body",
+            Some(&warn_report()),
+            &[]
+        ));
+    }
+
+    #[test]
+    fn render_document_section_uses_bounded_context_for_warn_prompt_targets() {
+        let prompt_targets = vec!["do [#ctxpack]. spec-test-build-install-commit-push".to_string()];
+        let section = render_document_section(DocumentSectionContext {
+            doc: context_doc(),
+            report: Some(&warn_report()),
+            prompt_targets: &prompt_targets,
+            response_toc: None,
+            remote_host_scope: "<remote_host_scope>\nNo targets.\n</remote_host_scope>\n\n",
+        });
+
+        assert!(document_section_needs_response_toc(
+            context_doc(),
+            Some(&warn_report()),
+            &prompt_targets
+        ));
+        assert!(section.contains("warn-level context accretion"));
+        assert!(section.contains("<response_context level=\"warn\">"));
+        assert!(section.contains("do [#ctxpack]. spec-test-build-install-commit-push"));
+        assert!(section.contains("### Session Summary\n\nCompacted earlier turns."));
+        assert!(section.contains("- [ ] [#ctxpack] Add bounded context pack"));
+        assert!(section.contains("No live or archived response TOC entries are available yet."));
         assert!(section.contains("<remote_host_scope>"));
     }
 

@@ -69,8 +69,8 @@ use agent_doc_turn_executor::codex_launch::{
     filter_codex_stderr_noise, format_required_ssh_failure, looks_like_codex_transport_403_429,
     looks_like_local_browser_cdp_permission_denied, looks_like_ssh_alias_config_failure,
     looks_like_ssh_auth_failure, looks_like_ssh_dns_failure, looks_like_ssh_network_failure,
-    resume_capability_drift_notice, transcript_has_required_ssh_failure,
-    transcript_proves_required_ssh_success,
+    resolve_codex_network_access, resume_capability_drift_notice,
+    transcript_has_required_ssh_failure, transcript_proves_required_ssh_success,
 };
 
 #[derive(Clone)]
@@ -906,14 +906,17 @@ pub fn managed_capability_contract_required_for_doc_and_harness(
     harness: &str,
 ) -> bool {
     if harness == "opencode" {
-        return super::resolve_codex_network_access(fm, global_config)
-            == CodexNetworkAccess::Enabled
+        return resolve_codex_network_access(
+            fm.codex_network_access,
+            global_config.codex_network_access,
+        ) == CodexNetworkAccess::Enabled
             || !fm.required_ssh_targets.is_empty();
     }
     if harness != "codex" {
         return false;
     }
-    super::resolve_codex_network_access(fm, global_config) == CodexNetworkAccess::Enabled
+    resolve_codex_network_access(fm.codex_network_access, global_config.codex_network_access)
+        == CodexNetworkAccess::Enabled
         || !fm.required_ssh_targets.is_empty()
         || !crate::git::workspace_access_dirs_for_doc(file).is_empty()
         || fm.agent_args.as_deref().is_some_and(args_contain_add_dir)
@@ -940,14 +943,17 @@ pub fn managed_capability_contract_required(
     harness: &str,
 ) -> bool {
     if harness == "opencode" {
-        return super::resolve_codex_network_access(fm, global_config)
-            == CodexNetworkAccess::Enabled
+        return resolve_codex_network_access(
+            fm.codex_network_access,
+            global_config.codex_network_access,
+        ) == CodexNetworkAccess::Enabled
             || !fm.required_ssh_targets.is_empty();
     }
     if harness != "codex" {
         return false;
     }
-    super::resolve_codex_network_access(fm, global_config) == CodexNetworkAccess::Enabled
+    resolve_codex_network_access(fm.codex_network_access, global_config.codex_network_access)
+        == CodexNetworkAccess::Enabled
         || !fm.required_ssh_targets.is_empty()
         || !add_dirs_from_args(args).is_empty()
 }
@@ -968,7 +974,8 @@ pub fn prove_managed_session_capabilities(
     let total_start = Instant::now();
     let mut timings = ManagedCapabilityProofTimings::default();
     let network_required =
-        super::resolve_codex_network_access(fm, global_config) == CodexNetworkAccess::Enabled;
+        resolve_codex_network_access(fm.codex_network_access, global_config.codex_network_access)
+            == CodexNetworkAccess::Enabled;
     let mut network_probe = "not_required";
     if network_required {
         let phase_start = Instant::now();

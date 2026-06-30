@@ -91,7 +91,8 @@
 //! - submodule_noop_commit_updates_stale_parent_pointer: no-op commit in submodule still updates stale parent pointer
 
 use agent_doc_document::transient_markers::{
-    normalize_post_commit_re_heading_drift, normalize_transient_agent_doc_markers,
+    exchange_prompt_prefix_equivalent, normalize_post_commit_re_heading_drift,
+    normalize_transient_agent_doc_markers, repair_stale_agent_response_collapse_doc,
     strip_guard_markers, strip_head_markers,
 };
 use anyhow::{Context, Result};
@@ -1462,60 +1463,6 @@ fn vcs_refresh_signal_path(file: &Path) -> Option<PathBuf> {
     Some(signal_file)
 }
 
-fn strip_exchange_prompt_prefixes_for_compare(content: &str) -> String {
-    fn strip_line(line: &str) -> String {
-        let trimmed = line.trim_start();
-        let indent_len = line.len().saturating_sub(trimmed.len());
-        if let Some(rest) = trimmed.strip_prefix("❯ ") {
-            format!("{}{}", &line[..indent_len], rest)
-        } else {
-            line.to_string()
-        }
-    }
-
-    fn strip_lines(content: &str) -> String {
-        let mut stripped = String::with_capacity(content.len());
-        for segment in content.split_inclusive('\n') {
-            let (line, newline) = segment
-                .strip_suffix('\n')
-                .map(|line| (line, "\n"))
-                .unwrap_or((segment, ""));
-            stripped.push_str(&strip_line(line));
-            stripped.push_str(newline);
-        }
-        if !content.ends_with('\n') && content.is_empty() {
-            stripped.clear();
-        }
-        stripped
-    }
-
-    let Ok(components) = agent_doc_element::element::parse(content) else {
-        return strip_lines(content);
-    };
-    let mut rebuilt = String::with_capacity(content.len());
-    let mut last = 0usize;
-    for comp in components {
-        if comp.open_end < last {
-            continue;
-        }
-        rebuilt.push_str(&content[last..comp.open_end]);
-        if comp.name == "exchange" {
-            rebuilt.push_str(&strip_lines(comp.content(content)));
-        } else {
-            rebuilt.push_str(comp.content(content));
-        }
-        rebuilt.push_str(&content[comp.close_start..comp.close_end]);
-        last = comp.close_end;
-    }
-    rebuilt.push_str(&content[last..]);
-    rebuilt
-}
-
-fn exchange_prompt_prefix_equivalent(left: &str, right: &str) -> bool {
-    strip_exchange_prompt_prefixes_for_compare(left)
-        == strip_exchange_prompt_prefixes_for_compare(right)
-}
-
 fn dedupe_snapshot_and_worktree_before_commit(
     file: &Path,
     snapshot_content: &mut Option<String>,
@@ -2267,134 +2214,6 @@ fn preserved_queue_additions_neutralized_by_replay(
     }
 
     (added_prompts > 0).then_some(added_prompts)
-}
-
-fn exchange_component(doc: &str) -> Option<agent_doc_element::element::Component> {
-    agent_doc_element::element::parse(doc)
-        .ok()?
-        .into_iter()
-        .find(|component| component.name == "exchange")
-}
-
-fn first_hash_id(text: &str) -> Option<String> {
-    let mut chars = text.char_indices().peekable();
-    while let Some((_, ch)) = chars.next() {
-        if ch != '#' {
-            continue;
-        }
-        let mut id = String::new();
-        while let Some((_, next)) = chars.peek().copied() {
-            if next.is_ascii_alphanumeric() || next == '-' || next == '_' {
-                id.push(next);
-                chars.next();
-            } else {
-                break;
-            }
-        }
-        if !id.is_empty() {
-            return Some(id);
-        }
-    }
-    None
-}
-
-fn normalized_response_heading_key(line: &str) -> Option<String> {
-    let normalized = normalize_post_commit_re_heading_drift(line);
-    let trimmed = normalized.trim();
-    if trimmed.starts_with("### Re:")
-        || trimmed.starts_with("#### Re:")
-        || trimmed.starts_with("##### Re:")
-        || trimmed.starts_with("###### Re:")
-    {
-        Some(trimmed.to_string())
-    } else {
-        None
-    }
-}
-
-fn normalized_exchange_inventory_line(line: &str) -> Option<String> {
-    let normalized = normalize_post_commit_re_heading_drift(line);
-    let trimmed = normalized.trim();
-    if trimmed.is_empty() || trimmed.starts_with("<!-- agent:boundary:") {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
-}
-
-fn exchange_line_counts(exchange: &str) -> HashMap<String, usize> {
-    let mut counts = HashMap::new();
-    for line in exchange
-        .lines()
-        .filter_map(normalized_exchange_inventory_line)
-    {
-        *counts.entry(line).or_insert(0) += 1;
-    }
-    counts
-}
-
-fn current_exchange_is_committed_line_subset(head_exchange: &str, current_exchange: &str) -> bool {
-    let head_counts = exchange_line_counts(head_exchange);
-    let current_counts = exchange_line_counts(current_exchange);
-    if current_counts.is_empty() {
-        return false;
-    }
-    current_counts
-        .into_iter()
-        .all(|(line, count)| head_counts.get(&line).copied().unwrap_or(0) >= count)
-}
-
-fn exchange_has_blockquoted_prompt_for_id(exchange: &str, id: &str) -> bool {
-    let bracketed = format!("[#{id}]");
-    let bare = format!("#{id}");
-    exchange.lines().any(|line| {
-        let trimmed = line.trim_start();
-        trimmed
-            .strip_prefix('>')
-            .is_some_and(|rest| rest.contains(&bracketed) || rest.contains(&bare))
-    })
-}
-
-fn stale_agent_response_collapse_exchange(head_exchange: &str, current_exchange: &str) -> bool {
-    if normalize_post_commit_re_heading_drift(current_exchange)
-        == normalize_post_commit_re_heading_drift(head_exchange)
-    {
-        return false;
-    }
-    if !current_exchange_is_committed_line_subset(head_exchange, current_exchange) {
-        return false;
-    }
-
-    let head_headings: Vec<String> = head_exchange
-        .lines()
-        .filter_map(normalized_response_heading_key)
-        .collect();
-    let current_headings: HashSet<String> = current_exchange
-        .lines()
-        .filter_map(normalized_response_heading_key)
-        .collect();
-
-    head_headings.into_iter().any(|heading| {
-        !current_headings.contains(&heading)
-            && first_hash_id(&heading)
-                .as_deref()
-                .is_some_and(|id| exchange_has_blockquoted_prompt_for_id(current_exchange, id))
-    })
-}
-
-fn repair_stale_agent_response_collapse_doc(head_doc: &str, current_doc: &str) -> Option<String> {
-    if head_doc == current_doc {
-        return None;
-    }
-    let head_exchange = exchange_component(head_doc)?;
-    let current_exchange = exchange_component(current_doc)?;
-    if !stale_agent_response_collapse_exchange(
-        head_exchange.content(head_doc),
-        current_exchange.content(current_doc),
-    ) {
-        return None;
-    }
-    Some(current_exchange.replace_content(current_doc, head_exchange.content(head_doc)))
 }
 
 fn repair_stale_agent_response_collapse_worktree(

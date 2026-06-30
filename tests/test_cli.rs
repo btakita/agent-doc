@@ -10533,6 +10533,10 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
         "pub fn normalize_transient_agent_doc_markers(",
         "pub fn strip_re_heading_attribution(",
         "pub fn normalize_post_commit_re_heading_drift(",
+        "pub fn strip_exchange_prompt_prefixes_for_compare",
+        "pub fn exchange_prompt_prefix_equivalent",
+        "pub fn stale_agent_response_collapse_exchange",
+        "pub fn repair_stale_agent_response_collapse_doc",
     ] {
         assert!(
             transient_markers.contains(required),
@@ -10578,6 +10582,11 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
             .unwrap();
     let git_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+    assert!(
+        git_source.contains("exchange_prompt_prefix_equivalent")
+            && git_source.contains("repair_stale_agent_response_collapse_doc"),
+        "git.rs should keep only commit/worktree adapters over focused transient-marker repair policy"
+    );
     let realtime_write_policy =
         fs::read_to_string(manifest_dir.join("agent-doc-document-realtime/src/write_policy.rs"))
             .unwrap();
@@ -10598,6 +10607,17 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
         "fn strip_head_markers(",
         "fn strip_guard_markers(",
         "fn code_block_byte_ranges(",
+        "fn strip_exchange_prompt_prefixes_for_compare(",
+        "fn exchange_prompt_prefix_equivalent(",
+        "fn exchange_component(doc: &str)",
+        "fn first_hash_id(",
+        "fn normalized_response_heading_key(",
+        "fn normalized_exchange_inventory_line(",
+        "fn exchange_line_counts(",
+        "fn current_exchange_is_committed_line_subset(",
+        "fn exchange_has_blockquoted_prompt_for_id(",
+        "fn stale_agent_response_collapse_exchange(",
+        "fn repair_stale_agent_response_collapse_doc(",
     ] {
         assert!(
             !git_source.contains(forbidden),

@@ -585,6 +585,11 @@ should be deleted during extraction.
   recovery instructions. Orchestration keeps only document-path formatting and
   cycle-state sidecar loading/projection through
   `closeout_recovery_command_for_file`, avoiding a duplicate policy facade.
+- `agent-doc-turn` now also owns closeout recovery recommendation projection:
+  extracting the short copy-pasteable `agent-doc ...` command from a longer
+  recovery recommendation. Route keeps only blocked-outcome field formatting
+  and imports the focused parser directly; the route-local helper and test were
+  deleted rather than left as a shim.
 - `agent-doc-turn` now owns no-change cycle diagnostics: classifying abandoned
   or bookkeeping-only committed cycle-state facts into clean vs abnormal
   no-change verdicts, including recursive direct-invocation and no-response

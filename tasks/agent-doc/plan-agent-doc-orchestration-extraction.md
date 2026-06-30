@@ -287,6 +287,10 @@ focused crate under the old path.
   clearing tombstones when ids are re-added as active queue heads. Preflight
   keeps only tombstone sidecar path/load/save effects and calls the focused
   reconciler directly from an explicit file-backed adapter.
+- `agent-doc-queue` now owns component-attribute warning policy for queue-only
+  markers, backlog/pending queue-sync attributes, icebox queue misuse, priority
+  component attributes, and typo detection. Preflight keeps only
+  `PreflightWarning` output shaping and file-path message prefixing.
 - `agent-doc-element-backlog` already owned open backlog id extraction; preflight
   now calls `open_backlog_ids_in_content` directly for `do #id` closeout
   evidence instead of re-parsing backlog components locally.

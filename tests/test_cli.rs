@@ -3072,14 +3072,40 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     for required in [
         "pub enum CloseoutGuardReason",
         "pub enum CloseoutGuardOutcome",
+        "pub struct CommittedWithoutResponseBodyEvidence",
+        "pub enum CommittedWithoutResponseBodyDecision",
         "pub fn closeout_cycle_phase_from_str",
         "pub const fn closeout_terminal_guard_outcome",
+        "pub fn exchange_has_assistant_response_body",
+        "pub fn committed_without_response_body_decision",
     ] {
         assert!(
             guard_source.contains(required),
             "agent-doc-turn must own closeout guard policy: {required}"
         );
     }
+    let response_guards = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/response_guards.rs"),
+    )
+    .unwrap();
+    for forbidden in [
+        "if !matches!(state.phase, agent_doc_turn::CyclePhase::Committed)",
+        "if state.capture_id.is_some() || state.response_sha256.is_some()",
+        "if !state.had_pending_mutations",
+        "if crate::cycle_state::is_noop_commit_event(&state.last_event)",
+    ] {
+        assert!(
+            !response_guards.contains(forbidden),
+            "response_guards must not re-own committed-without-response-body policy: {forbidden}"
+        );
+    }
+    assert!(
+        response_guards
+            .contains("agent_doc_turn::closeout_guard::committed_without_response_body_decision")
+            && response_guards
+                .contains("agent_doc_turn::closeout_guard::exchange_has_assistant_response_body"),
+        "response_guards should call focused turn committed-response guard policy directly"
+    );
     for required in [
         "pub enum CloseoutRecoveryState",
         "pub struct CloseoutRecoveryDecisionInput",

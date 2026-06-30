@@ -2,6 +2,24 @@
 
 use crate::CyclePhase;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CommittedWithoutResponseBodyEvidence<'a> {
+    pub phase: CyclePhase,
+    pub exchange_has_response_body: bool,
+    pub capture_recorded: bool,
+    pub response_hash_recorded: bool,
+    pub queue_turn: bool,
+    pub had_pending_mutations: bool,
+    pub last_event: &'a str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommittedWithoutResponseBodyDecision {
+    Pass,
+    SkipNoopCommit,
+    Interrupt,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CloseoutGuardReason {
     MissingCycleState,
@@ -89,6 +107,45 @@ pub const fn closeout_terminal_guard_outcome(phase: CyclePhase) -> CloseoutGuard
             CloseoutGuardOutcome::Blocked
         }
     }
+}
+
+/// True when committed document content contains at least one assistant
+/// `### Re:` response heading in `agent:exchange`.
+pub fn exchange_has_assistant_response_body(content: &str) -> bool {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return false;
+    };
+    let Some(exchange) = components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return false;
+    };
+    exchange
+        .content(content)
+        .lines()
+        .any(|line| line.trim_start().starts_with("### Re:"))
+}
+
+pub fn committed_without_response_body_decision(
+    evidence: CommittedWithoutResponseBodyEvidence<'_>,
+) -> CommittedWithoutResponseBodyDecision {
+    if !matches!(evidence.phase, CyclePhase::Committed) {
+        return CommittedWithoutResponseBodyDecision::Pass;
+    }
+    if evidence.exchange_has_response_body {
+        return CommittedWithoutResponseBodyDecision::Pass;
+    }
+    if (evidence.capture_recorded || evidence.response_hash_recorded) && !evidence.queue_turn {
+        return CommittedWithoutResponseBodyDecision::Pass;
+    }
+    if !evidence.had_pending_mutations {
+        return CommittedWithoutResponseBodyDecision::Pass;
+    }
+    if evidence.last_event == "commit_already_current" {
+        return CommittedWithoutResponseBodyDecision::SkipNoopCommit;
+    }
+    CommittedWithoutResponseBodyDecision::Interrupt
 }
 
 #[cfg(test)]
@@ -223,5 +280,92 @@ mod tests {
             Some(CyclePhase::Abandoned)
         );
         assert_eq!(closeout_cycle_phase_from_str("unknown"), None);
+    }
+
+    #[test]
+    fn exchange_has_assistant_response_body_requires_re_heading_in_exchange() {
+        let with_response = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Session Summary\n\nCompacted.\n\n",
+            "### Re: do [#task]\n\nDone.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let summary_only = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Session Summary\n\nCompacted.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let outside_exchange = concat!(
+            "### Re: do [#task]\n\nDone.\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Session Summary\n\nCompacted.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert!(exchange_has_assistant_response_body(with_response));
+        assert!(!exchange_has_assistant_response_body(summary_only));
+        assert!(!exchange_has_assistant_response_body(outside_exchange));
+        assert!(!exchange_has_assistant_response_body("not <!-- closed"));
+    }
+
+    #[test]
+    fn committed_without_response_body_decision_interrupts_only_missing_response_writes() {
+        let base = CommittedWithoutResponseBodyEvidence {
+            phase: CyclePhase::Committed,
+            exchange_has_response_body: false,
+            capture_recorded: false,
+            response_hash_recorded: false,
+            queue_turn: false,
+            had_pending_mutations: true,
+            last_event: "commit_success",
+        };
+
+        assert_eq!(
+            committed_without_response_body_decision(base),
+            CommittedWithoutResponseBodyDecision::Interrupt
+        );
+        assert_eq!(
+            committed_without_response_body_decision(CommittedWithoutResponseBodyEvidence {
+                phase: CyclePhase::WriteApplied,
+                ..base
+            }),
+            CommittedWithoutResponseBodyDecision::Pass
+        );
+        assert_eq!(
+            committed_without_response_body_decision(CommittedWithoutResponseBodyEvidence {
+                exchange_has_response_body: true,
+                ..base
+            }),
+            CommittedWithoutResponseBodyDecision::Pass
+        );
+        assert_eq!(
+            committed_without_response_body_decision(CommittedWithoutResponseBodyEvidence {
+                capture_recorded: true,
+                ..base
+            }),
+            CommittedWithoutResponseBodyDecision::Pass
+        );
+        assert_eq!(
+            committed_without_response_body_decision(CommittedWithoutResponseBodyEvidence {
+                capture_recorded: true,
+                queue_turn: true,
+                ..base
+            }),
+            CommittedWithoutResponseBodyDecision::Interrupt
+        );
+        assert_eq!(
+            committed_without_response_body_decision(CommittedWithoutResponseBodyEvidence {
+                had_pending_mutations: false,
+                ..base
+            }),
+            CommittedWithoutResponseBodyDecision::Pass
+        );
+        assert_eq!(
+            committed_without_response_body_decision(CommittedWithoutResponseBodyEvidence {
+                last_event: "commit_already_current",
+                ..base
+            }),
+            CommittedWithoutResponseBodyDecision::SkipNoopCommit
+        );
     }
 }

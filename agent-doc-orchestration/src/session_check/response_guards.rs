@@ -351,75 +351,45 @@ pub(crate) fn closeout_recovery_hint(file: &Path) -> String {
 /// returns false.
 pub(crate) fn committed_exchange_has_response_body(file: &Path) -> Result<bool> {
     let content = std::fs::read_to_string(file)?;
-    let components = agent_doc_element::element::parse(&content)?;
-    let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
-        return Ok(false);
-    };
-    let body = &content[exchange.open_end..exchange.close_start];
-    Ok(body
-        .lines()
-        .any(|line| line.trim_start().starts_with("### Re:")))
+    agent_doc_element::element::parse(&content)?;
+    Ok(agent_doc_turn::closeout_guard::exchange_has_assistant_response_body(&content))
 }
 
 pub(crate) fn check_committed_without_response_body_guard(file: &Path) -> Result<GuardResult> {
     let Some(state) = crate::cycle_state::load(file)? else {
         return Ok(GuardResult::None);
     };
-    if !matches!(state.phase, agent_doc_turn::CyclePhase::Committed) {
-        return Ok(GuardResult::None);
-    }
     let committed_exchange_has_body = committed_exchange_has_response_body(file)?;
-    if committed_exchange_has_body {
-        return Ok(GuardResult::None);
-    }
-    // A captured response (capture_id/response_sha256) normally means the
-    // close-out body landed through the binary write path — not the
-    // missing-response shape. EXCEPTION (#codex-queue-drain-no-response-body):
-    // the systematic Codex queue-drain bug sets the capture record yet commits
-    // only status/queue/backlog, leaving `agent:exchange` with zero `### Re:`
-    // blocks. So for a queue-drain turn, capture metadata alone is not proof —
-    // require the committed exchange to actually contain a response body before
-    // trusting it. Non-queue turns keep trusting the capture record (no behavior
-    // change); only a queue turn whose committed exchange has no `### Re:` body
-    // falls through to fire.
-    if state.capture_id.is_some() || state.response_sha256.is_some() {
-        let is_queue_turn = state.queue_task_id.is_some() || !state.active_queue_heads.is_empty();
-        if !is_queue_turn {
+    let decision = agent_doc_turn::closeout_guard::committed_without_response_body_decision(
+        agent_doc_turn::closeout_guard::CommittedWithoutResponseBodyEvidence {
+            phase: state.phase,
+            exchange_has_response_body: committed_exchange_has_body,
+            capture_recorded: state.capture_id.is_some(),
+            response_hash_recorded: state.response_sha256.is_some(),
+            queue_turn: state.queue_task_id.is_some() || !state.active_queue_heads.is_empty(),
+            had_pending_mutations: state.had_pending_mutations,
+            last_event: &state.last_event,
+        },
+    );
+    match decision {
+        agent_doc_turn::closeout_guard::CommittedWithoutResponseBodyDecision::Pass => {
             return Ok(GuardResult::None);
         }
-    }
-    // Only fire when this cycle ran a response-write turn. `had_pending_mutations`
-    // is set exclusively by the `write`/`finalize` response path
-    // (`write.rs` → `cycle_state::mark_pending_mutations`), so it proves a real
-    // response cycle processed mutations this turn. Bookkeeping-only commits stay
-    // OK: a bare sweep re-commit never touches it, and `repair`'s completed-backlog
-    // reap records `reaped_pending_ids` via `record_reaped_pending_ids` WITHOUT
-    // `mark_pending_mutations` — a legitimate no-response commit that must not fire.
-    if !state.had_pending_mutations {
-        return Ok(GuardResult::None);
-    }
-    // A no-op commit (`commit_already_current`) committed NO new binary-owned work
-    // this turn: the snapshot already equalled `HEAD`, so the pending mutation (a
-    // reap / `--done` of an item already reflected in `HEAD`) left the document
-    // byte-identical and there is nothing a paired response would accompany. Firing
-    // here deadlocks the cycle — the recommended `write --commit` recovery is itself
-    // a no-op (no response body to write, nothing to commit), so a re-running
-    // closeout poller re-interrupts every pass forever. A real
-    // `#codex-final-response-not-written` miss commits actual side-effect content
-    // (`last_event` `commit_success` / `commit`), so it still fires.
-    if crate::cycle_state::is_noop_commit_event(&state.last_event) {
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "committed_without_response_body_guard_skipped_noop_commit file={} cycle_id={} last_event={} pending_done={} reaped={}",
-                file.display(),
-                state.cycle_id,
-                state.last_event,
-                state.pending_done_ids.len(),
-                state.reaped_pending_ids.len(),
-            ),
-        );
-        return Ok(GuardResult::None);
+        agent_doc_turn::closeout_guard::CommittedWithoutResponseBodyDecision::SkipNoopCommit => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "committed_without_response_body_guard_skipped_noop_commit file={} cycle_id={} last_event={} pending_done={} reaped={}",
+                    file.display(),
+                    state.cycle_id,
+                    state.last_event,
+                    state.pending_done_ids.len(),
+                    state.reaped_pending_ids.len(),
+                ),
+            );
+            return Ok(GuardResult::None);
+        }
+        agent_doc_turn::closeout_guard::CommittedWithoutResponseBodyDecision::Interrupt => {}
     }
     let side_effects = tracked_side_effect_note(file)?;
     let msg = format!(

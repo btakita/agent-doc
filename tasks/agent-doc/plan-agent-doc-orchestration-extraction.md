@@ -314,6 +314,11 @@ focused crate under the old path.
   transition live beside the existing idle-queue context-clear decision table.
   Orchestration keeps marker path/JSON IO and watcher side effects while calling
   the focused queue policy directly.
+- `agent-doc-queue` now owns explicit queue-head classification for
+  `agent-doc queue consume`: no-head, free-text, and id-backed head decisions
+  live with active queue-head projection. Orchestration keeps file reading,
+  queue-edit lease ownership, write-layer strike calls, and CLI diagnostics while
+  calling the focused classifier directly.
 - `agent-doc-element-backlog` already owned open backlog id extraction; preflight
   now calls `open_backlog_ids_in_content` directly for `do #id` closeout
   evidence instead of re-parsing backlog components locally.

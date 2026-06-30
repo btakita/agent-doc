@@ -445,6 +445,19 @@ pub fn try_ipc(
                     } else {
                         repair_decision.snapshot_content = effective_snap;
                     }
+                    let expected_response =
+                        agent_doc_template::response_materialization::response_materialization_probe(
+                            patches, unmatched,
+                        );
+                    prefer_visible_content_over_stale_ack_content(
+                        file,
+                        "socket_ack_content",
+                        Some(&patch_id),
+                        baseline,
+                        content_ours,
+                        &expected_response,
+                        &mut repair_decision,
+                    );
                     // Capture the live editor buffer before the guards replace it,
                     // so the #ipcfullprompt forensic detector sees the candidate.
                     let ipcfullprompt_candidate = repair_decision.snapshot_content.clone();
@@ -480,10 +493,6 @@ pub fn try_ipc(
                         &ipcfullprompt_candidate,
                     );
 
-                    let expected_response =
-                        agent_doc_template::response_materialization::response_materialization_probe(
-                            patches, unmatched,
-                        );
                     if !ipc_response_materialized_or_fallback(
                         file,
                         "socket_ack_content",
@@ -1404,7 +1413,8 @@ pub(crate) fn write_ipc_and_poll(
                 .get("patch_id")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let (current_on_disk, mut repair_decision, ack_content_proven) = if !patch_id.is_empty()
+            let (mut current_on_disk, mut repair_decision, ack_content_proven) = if !patch_id
+                .is_empty()
             {
                 match poll_ack_content_sidecar(
                     options.project_root,
@@ -1514,6 +1524,20 @@ pub(crate) fn write_ipc_and_poll(
                 }
             }
             let expected_response = response_materialization_probe_from_ipc_payload(payload);
+            if prefer_visible_content_over_stale_ack_content(
+                doc_file,
+                "file_ipc",
+                Some(patch_id),
+                payload
+                    .get("baseline")
+                    .and_then(|value| value.as_str())
+                    .filter(|value| !value.is_empty()),
+                options.content_ours,
+                &expected_response,
+                &mut repair_decision,
+            ) {
+                current_on_disk = repair_decision.snapshot_content.clone();
+            }
             if !ipc_response_materialized_or_fallback(
                 doc_file,
                 "file_ipc",
@@ -2758,6 +2782,97 @@ mod submodule_patch_routing_tests {
                 && log.contains("ack_content_live_buffer_synced")
                 && log.contains("ack_content_disk_write_through"),
             "already_applied ack-content adoption should be auditable:\n{log}"
+        );
+    }
+
+    #[test]
+    fn already_applied_ack_content_does_not_overwrite_newer_visible_operator_edit() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        for subdir in [
+            "ack-content",
+            "patches",
+            "snapshots",
+            "crdt",
+            "logs",
+            "state/cycles",
+            "claimed-patches",
+        ] {
+            fs::create_dir_all(root.join(".agent-doc").join(subdir)).unwrap();
+        }
+
+        let doc = root.join("session.md");
+        let baseline = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let content_ours = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let newer_visible = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "Operator typed after ack-content was captured.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, baseline).unwrap();
+        crate::snapshot::save(&doc, baseline).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
+
+        let patch_id = "already-applied-stale-ack-content";
+        fs::write(
+            root.join(".agent-doc/ack-content")
+                .join(format!("{patch_id}.md")),
+            content_ours,
+        )
+        .unwrap();
+        fs::write(&doc, newer_visible).unwrap();
+
+        let outcome = persist_already_applied_socket_content_ours_snapshot(
+            &doc,
+            patch_id,
+            Some("jetbrains-test-editor"),
+            Some(baseline),
+            Some(content_ours),
+            None,
+            "### Re: Please reply — gpt-5\n\nAnswered.\n",
+        )
+        .unwrap();
+
+        assert_eq!(outcome, AlreadyAppliedSnapshotOutcome::Persisted);
+        assert_eq!(
+            crate::snapshot::load(&doc).unwrap().as_deref(),
+            Some(newer_visible),
+            "newer visible operator text must be the saved snapshot authority"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            newer_visible,
+            "stale ack-content must not be written over a newer visible editor edit"
+        );
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("already_applied_ack_content_stale_visible_adopted"),
+            "stale ack-content adoption should be auditable:\n{log}"
         );
     }
 

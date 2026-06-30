@@ -1343,6 +1343,97 @@ pub fn materialize_response_in_current_exchange(
     Some(exchange.replace_content(current, &exchange_body))
 }
 
+struct StaleAckContentContext<'a> {
+    file: &'a Path,
+    source: &'a str,
+    patch_id: Option<&'a str>,
+    baseline: Option<&'a str>,
+    content_ours: Option<&'a str>,
+    expected_response: &'a str,
+}
+
+fn visible_content_supersedes_ack_content(
+    context: &StaleAckContentContext<'_>,
+    ack_content: &str,
+    visible_content: &str,
+) -> bool {
+    if strip_boundary_for_dedup(ack_content) == strip_boundary_for_dedup(visible_content) {
+        return false;
+    }
+    if context.expected_response.trim().is_empty() {
+        return false;
+    }
+    let response_present =
+        response_materialized_in_content(context.expected_response, visible_content)
+            || match (context.baseline, context.content_ours) {
+                (Some(base), Some(ours)) => {
+                    response_already_in_current(base, ours, visible_content)
+                }
+                _ => false,
+            };
+    if !response_present {
+        return false;
+    }
+    let prompt_drift = match (context.baseline, context.content_ours) {
+        (Some(base), Some(ours)) => {
+            ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(base, visible_content, ours)
+        }
+        _ => false,
+    };
+    crate::ops_log::log_op(
+        context.file,
+        &format!(
+            "{source}_ack_content_stale_visible_adopted file={} patch_id={} visible_len={} visible_hash={} ack_len={} ack_hash={} response_present=true prompt_drift={}",
+            context.file.display(),
+            context.patch_id.unwrap_or("-"),
+            visible_content.len(),
+            agent_doc_hash::content_hash(visible_content),
+            ack_content.len(),
+            agent_doc_hash::content_hash(ack_content),
+            prompt_drift,
+            source = context.source
+        ),
+    );
+    true
+}
+
+pub(crate) fn prefer_visible_content_over_stale_ack_content(
+    file: &Path,
+    source: &str,
+    patch_id: Option<&str>,
+    baseline: Option<&str>,
+    content_ours: Option<&str>,
+    expected_response: &str,
+    decision: &mut IpcRepairDecision,
+) -> bool {
+    if decision.snap_source != IpcSnapshotSource::AckContentSidecar {
+        return false;
+    }
+    if decision.disk_repair_reason.is_some() {
+        return false;
+    }
+    let Ok(visible_content) = std::fs::read_to_string(file) else {
+        return false;
+    };
+    let context = StaleAckContentContext {
+        file,
+        source,
+        patch_id,
+        baseline,
+        content_ours,
+        expected_response,
+    };
+    if !visible_content_supersedes_ack_content(
+        &context,
+        &decision.snapshot_content,
+        &visible_content,
+    ) {
+        return false;
+    }
+    *decision = IpcRepairDecision::file_read(visible_content);
+    true
+}
+
 pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
     file: &Path,
     patch_id: &str,
@@ -1538,6 +1629,16 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
             }
         };
     }
+
+    prefer_visible_content_over_stale_ack_content(
+        file,
+        "already_applied",
+        Some(patch_id),
+        baseline,
+        Some(ours),
+        expected_response,
+        &mut repair_decision,
+    );
 
     if expected_response.trim().is_empty() {
         log_ipc_proof_failure(

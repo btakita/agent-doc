@@ -91,10 +91,6 @@ pub(crate) fn first_agent_doc_in_col(col: &str) -> Option<String> {
     })
 }
 
-pub(crate) fn column_has_agent_doc(col: &str) -> bool {
-    first_agent_doc_in_col(col).is_some()
-}
-
 pub(crate) fn build_tmux_router_sync_registry(
     tmux: &Tmux,
     col_args: &[String],

@@ -2,98 +2,12 @@
 
 use super::*;
 
-pub(crate) fn apply_column_memory(col_args: &[String], saved_layout: &[String]) -> Vec<String> {
-    let visible_docs: HashSet<String> = col_args
-        .iter()
-        .filter_map(|col| first_agent_doc_in_col(col))
-        .collect();
-    let mut reserved_docs = visible_docs.clone();
+pub(crate) fn classify_sync_layout_columns(
+    col_args: &[String],
+) -> Vec<agent_doc_tmux::TmuxLayoutColumn> {
     col_args
         .iter()
-        .enumerate()
-        .map(|(i, col)| {
-            if column_has_agent_doc(col) {
-                col.trim().to_string()
-            } else if let Some(remembered) = saved_layout.get(i) {
-                let remembered = remembered.trim();
-                if !remembered.is_empty() && !reserved_docs.contains(remembered) {
-                    sync_log(&format!(
-                        "column {} has no agent doc, substituting remembered: {}",
-                        i, remembered
-                    ));
-                    reserved_docs.insert(remembered.to_string());
-                    remembered.to_string()
-                } else {
-                    col.trim().to_string()
-                }
-            } else {
-                col.trim().to_string()
-            }
-        })
-        .collect()
-}
-
-pub(crate) fn build_layout_state(col_args: &[String], saved_layout: &[String]) -> Vec<String> {
-    let current_docs: Vec<Option<String>> = col_args
-        .iter()
-        .map(|col| first_agent_doc_in_col(col))
-        .collect();
-    let mut current_counts = HashMap::new();
-    for doc in current_docs.iter().flatten() {
-        *current_counts.entry(doc.clone()).or_insert(0usize) += 1;
-    }
-    let mut duplicate_keepers = HashMap::new();
-    for (i, current_doc) in current_docs.iter().enumerate() {
-        let Some(current_doc) = current_doc else {
-            continue;
-        };
-        if current_counts.get(current_doc).copied().unwrap_or_default() <= 1 {
-            duplicate_keepers.entry(current_doc.clone()).or_insert(i);
-            continue;
-        }
-        if saved_layout
-            .get(i)
-            .map(|saved| saved.trim() == current_doc)
-            .unwrap_or(false)
-        {
-            duplicate_keepers.entry(current_doc.clone()).or_insert(i);
-        }
-    }
-    for (i, current_doc) in current_docs.iter().enumerate() {
-        if let Some(current_doc) = current_doc {
-            duplicate_keepers.entry(current_doc.clone()).or_insert(i);
-        }
-    }
-    let mut reserved_docs = HashSet::new();
-    current_docs
-        .iter()
-        .enumerate()
-        .map(|(i, current_doc)| {
-            if let Some(current_doc) = current_doc {
-                let keep_current = duplicate_keepers
-                    .get(current_doc)
-                    .copied()
-                    .is_some_and(|keeper| keeper == i);
-                if keep_current && reserved_docs.insert(current_doc.clone()) {
-                    return current_doc.clone();
-                }
-            }
-            if let Some(remembered) = saved_layout.get(i) {
-                let remembered = remembered.trim();
-                if !remembered.is_empty()
-                    && column_has_agent_doc(remembered)
-                    && reserved_docs.insert(remembered.to_string())
-                {
-                    return remembered.to_string();
-                }
-            }
-            if let Some(current_doc) = current_doc
-                && reserved_docs.insert(current_doc.clone())
-            {
-                return current_doc.clone();
-            }
-            String::new()
-        })
+        .map(|col| agent_doc_tmux::TmuxLayoutColumn::new(col.clone(), first_agent_doc_in_col(col)))
         .collect()
 }
 
@@ -171,68 +85,6 @@ pub(crate) fn focused_column_index(
             .map(str::trim)
             .any(|candidate| same_sync_file(candidate, focus))
     })
-}
-
-pub(crate) fn expand_focus_only_columns_for_editor_switch(
-    col_args: &[String],
-    remembered_layout: &[String],
-    active_column_index: Option<usize>,
-    auto_start_mode: AutoStartMode,
-) -> Vec<String> {
-    if !matches!(auto_start_mode, AutoStartMode::SafePassive)
-        || col_args.len() != 1
-        || remembered_layout.len() < 2
-    {
-        return col_args.to_vec();
-    }
-    let Some(active_column_index) =
-        active_column_index.filter(|index| *index < remembered_layout.len())
-    else {
-        return col_args.to_vec();
-    };
-    let focused_column = col_args[0].trim();
-    if focused_column.is_empty() {
-        return col_args.to_vec();
-    }
-
-    let mut expanded: Vec<String> = remembered_layout
-        .iter()
-        .map(|col| col.trim().to_string())
-        .collect();
-    expanded[active_column_index] = focused_column.to_string();
-    for (index, col) in expanded.iter_mut().enumerate() {
-        if index != active_column_index && col == focused_column {
-            col.clear();
-        }
-    }
-    sync_log(&format!(
-        "safe_passive_focus_only_editor_switch_expanded active_column={} columns={:?}",
-        active_column_index, expanded
-    ));
-    expanded
-}
-
-pub(crate) fn apply_focus_only_expansion_policy(
-    col_args: &[String],
-    remembered_layout: &[String],
-    active_column_index: Option<usize>,
-    auto_start_mode: AutoStartMode,
-    exact_visible_projection: bool,
-) -> Vec<String> {
-    if exact_visible_projection {
-        sync_log(&format!(
-            "safe_passive_exact_visible_projection columns={:?}",
-            col_args
-        ));
-        col_args.to_vec()
-    } else {
-        expand_focus_only_columns_for_editor_switch(
-            col_args,
-            remembered_layout,
-            active_column_index,
-            auto_start_mode,
-        )
-    }
 }
 
 pub(crate) fn lookup_registry_entry_for_file_session(
@@ -504,201 +356,31 @@ mod tests {
         assert_eq!(entry.supervisor_instance_id, "instance-preserved");
     }
     #[test]
-    fn column_memory_restores_empty_placeholder_columns() {
+    fn classify_sync_layout_columns_marks_only_agent_docs() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let left = tmp.path().join("left.md");
-        let right = tmp.path().join("right.md");
-        std::fs::write(&left, "---\nagent_doc_session: left\n---\n").unwrap();
-        std::fs::write(&right, "---\nagent_doc_session: right\n---\n").unwrap();
+        let agent_doc = tmp.path().join("agent.md");
+        let plain_doc = tmp.path().join("plain.md");
+        std::fs::write(&agent_doc, "---\nagent_doc_session: left\n---\n").unwrap();
+        std::fs::write(&plain_doc, "# plain markdown\n").unwrap();
 
-        let remembered = vec![
-            left.canonicalize().unwrap().to_string_lossy().to_string(),
-            String::new(),
-        ];
-        let cols = vec![
-            String::new(),
-            right.canonicalize().unwrap().to_string_lossy().to_string(),
-        ];
-
-        assert_eq!(
-            apply_column_memory(&cols, &remembered),
-            vec![
-                left.canonicalize().unwrap().to_string_lossy().to_string(),
-                right.canonicalize().unwrap().to_string_lossy().to_string(),
-            ],
-            "blank editor columns should keep their position long enough to restore remembered panes"
-        );
-    }
-    #[test]
-    fn column_memory_skips_duplicate_remembered_doc_already_visible_elsewhere() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let right = tmp.path().join("right.md");
-        std::fs::write(&right, "---\nagent_doc_session: right\n---\n").unwrap();
-
-        let remembered = vec![
-            right.canonicalize().unwrap().to_string_lossy().to_string(),
-            String::new(),
-        ];
-        let cols = vec![
-            String::new(),
-            right.canonicalize().unwrap().to_string_lossy().to_string(),
-        ];
-
-        assert_eq!(
-            apply_column_memory(&cols, &remembered),
-            cols,
-            "a remembered doc should not be duplicated into an empty sibling column when it is already visible"
-        );
-    }
-    #[test]
-    fn build_layout_state_preserves_prior_distinct_doc_when_current_cols_duplicate() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let left = tmp.path().join("left.md");
-        let right = tmp.path().join("right.md");
-        std::fs::write(&left, "---\nagent_doc_session: left\n---\n").unwrap();
-        std::fs::write(&right, "---\nagent_doc_session: right\n---\n").unwrap();
-
-        let saved_layout = vec![
-            left.canonicalize().unwrap().to_string_lossy().to_string(),
-            right.canonicalize().unwrap().to_string_lossy().to_string(),
-        ];
-        let duplicate_cols = vec![
-            right.canonicalize().unwrap().to_string_lossy().to_string(),
-            right.canonicalize().unwrap().to_string_lossy().to_string(),
-        ];
-
-        assert_eq!(
-            build_layout_state(&duplicate_cols, &saved_layout),
-            saved_layout,
-            "duplicate current columns should not overwrite a previously distinct remembered layout"
-        );
-    }
-    #[test]
-    fn column_memory_round_trip_persists_and_restores_across_cycles() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let left = tmp.path().join("left.md");
-        let right = tmp.path().join("right.md");
-        std::fs::write(&left, "---\nagent_doc_session: left-sess\n---\n").unwrap();
-        std::fs::write(&right, "---\nagent_doc_session: right-sess\n---\n").unwrap();
-
-        let left_path = left.canonicalize().unwrap().to_string_lossy().to_string();
-        let right_path = right.canonicalize().unwrap().to_string_lossy().to_string();
-
-        // Cycle 1: both columns filled → build_layout_state records them
-        let cols_filled = vec![left_path.clone(), right_path.clone()];
-        let no_prior = vec![];
-        let state_1 = build_layout_state(&cols_filled, &no_prior);
-        assert_eq!(state_1, vec![left_path.clone(), right_path.clone()]);
-
-        // Cycle 2: left column goes empty (user opens non-markdown file) → apply_column_memory restores it
-        let cols_empty_left = vec![String::new(), right_path.clone()];
-        let restored = apply_column_memory(&cols_empty_left, &state_1);
-        assert_eq!(
-            restored,
-            vec![left_path.clone(), right_path.clone()],
-            "round-trip: empty left column should be restored from prior cycle's layout state"
-        );
-
-        // Cycle 2 continued: build_layout_state persists the restored state
-        let state_2 = build_layout_state(&restored, &state_1);
-        assert_eq!(
-            state_2,
-            vec![left_path.clone(), right_path.clone()],
-            "round-trip: layout state should survive through restore + re-persist"
-        );
-    }
-    #[test]
-    fn column_memory_cross_root_doc_restores_from_submodule_path() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let submodule = tmp.path().join("src/sample-app/tasks");
-        std::fs::create_dir_all(&submodule).unwrap();
-
-        let root_doc = tmp.path().join("tasks/bugs.md");
-        std::fs::create_dir_all(root_doc.parent().unwrap()).unwrap();
-        std::fs::write(&root_doc, "---\nagent_doc_session: root-sess\n---\n").unwrap();
-
-        let child_doc = submodule.join("sampleorders.md");
-        std::fs::write(&child_doc, "---\nagent_doc_session: monster-sess\n---\n").unwrap();
-
-        let root_path = root_doc
+        let agent_doc = agent_doc
             .canonicalize()
             .unwrap()
             .to_string_lossy()
             .to_string();
-        let child_path = child_doc
+        let plain_doc = plain_doc
             .canonicalize()
             .unwrap()
             .to_string_lossy()
             .to_string();
+        let columns = classify_sync_layout_columns(&[plain_doc.clone(), agent_doc.clone()]);
 
-        // Prior layout: root on left, child on right
-        let saved = vec![root_path.clone(), child_path.clone()];
-
-        // Current: left empty (non-markdown focused), child on right
-        let cols = vec![String::new(), child_path.clone()];
-        let restored = apply_column_memory(&cols, &saved);
-        assert_eq!(
-            restored,
-            vec![root_path.clone(), child_path.clone()],
-            "cross-root doc in submodule path should restore from column memory"
-        );
+        assert_eq!(columns[0].raw, plain_doc);
+        assert_eq!(columns[0].agent_doc, None);
+        assert_eq!(columns[1].raw, agent_doc);
+        assert_eq!(columns[1].agent_doc, Some(columns[1].raw.clone()));
     }
-    #[test]
-    fn column_memory_preserves_right_column_when_left_is_empty() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let right = tmp.path().join("right.md");
-        std::fs::write(&right, "---\nagent_doc_session: right-sess\n---\n").unwrap();
-        let right_path = right.canonicalize().unwrap().to_string_lossy().to_string();
 
-        // No prior layout at all — fresh start
-        let cols = vec![String::new(), right_path.clone()];
-        let no_saved: Vec<String> = vec![];
-        let result = apply_column_memory(&cols, &no_saved);
-        assert_eq!(
-            result,
-            vec![String::new(), right_path.clone()],
-            "right-column doc must stay in position even with no column memory to restore"
-        );
-
-        // build_layout_state should record empty left, filled right
-        let state = build_layout_state(&result, &no_saved);
-        assert_eq!(
-            state,
-            vec![String::new(), right_path],
-            "layout state must preserve column positions including empty slots"
-        );
-    }
-    #[test]
-    fn safe_passive_focus_only_switch_expands_active_column_from_memory() {
-        let saved_layout = vec!["tasks/left.md".to_string(), "tasks/right.md".to_string()];
-        let focused = vec!["tasks/new-left.md".to_string()];
-
-        let expanded = expand_focus_only_columns_for_editor_switch(
-            &focused,
-            &saved_layout,
-            Some(0),
-            AutoStartMode::SafePassive,
-        );
-        assert_eq!(
-            expanded,
-            vec![
-                "tasks/new-left.md".to_string(),
-                "tasks/right.md".to_string()
-            ],
-            "a focus-only editor switch should replace the active tmux side and keep the sibling side visible"
-        );
-
-        let full_mode = expand_focus_only_columns_for_editor_switch(
-            &focused,
-            &saved_layout,
-            Some(0),
-            AutoStartMode::Full,
-        );
-        assert_eq!(
-            full_mode, focused,
-            "manual/full sync keeps the literal editor projection"
-        );
-    }
     #[test]
     fn focus_only_switch_prefers_existing_focused_column_over_active_tmux_pane() {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -719,49 +401,17 @@ mod tests {
             resolved_column, 1,
             "the focused document column should beat the stale active pane column"
         );
-        let expanded = expand_focus_only_columns_for_editor_switch(
+        let expanded = agent_doc_tmux::expand_focus_only_columns_for_editor_switch(
             std::slice::from_ref(&right),
             &saved_layout,
             Some(resolved_column),
-            AutoStartMode::SafePassive,
+            agent_doc_tmux::TmuxFocusOnlyExpansionMode::SafePassive,
         );
 
         assert_eq!(
-            expanded,
+            expanded.columns,
             vec![left, right],
             "when the focused document is already visible, focus-only sync should select that column instead of replacing the currently active tmux pane"
-        );
-    }
-    #[test]
-    fn exact_visible_projection_does_not_expand_from_remembered_focus_only_layout() {
-        let saved_layout = vec![
-            "tasks/tsift.md".to_string(),
-            "tasks/software/corky.md".to_string(),
-        ];
-        let focused = vec!["tasks/tsift.md".to_string()];
-
-        let expanded = apply_focus_only_expansion_policy(
-            &focused,
-            &saved_layout,
-            Some(0),
-            AutoStartMode::SafePassive,
-            false,
-        );
-        assert_eq!(
-            expanded, saved_layout,
-            "legacy focus-only sync still preserves remembered sibling columns"
-        );
-
-        let exact = apply_focus_only_expansion_policy(
-            &focused,
-            &saved_layout,
-            Some(0),
-            AutoStartMode::SafePassive,
-            true,
-        );
-        assert_eq!(
-            exact, focused,
-            "editor snapshots marked exact-visible must not reintroduce stale remembered siblings"
         );
     }
     #[test]

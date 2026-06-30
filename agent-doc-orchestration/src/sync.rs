@@ -1994,7 +1994,18 @@ fn run_with_options_internal(
     };
 
     let input_cols = effective_sync_columns(col_args, &saved_layout, &layout_state_path)?;
-    let mut col_args: Vec<String> = apply_column_memory(&input_cols, &saved_layout)
+    let column_memory = agent_doc_tmux::apply_column_memory(
+        &classify_sync_layout_columns(&input_cols),
+        &saved_layout,
+    );
+    for restoration in &column_memory.restorations {
+        sync_log(&format!(
+            "column {} has no agent doc, substituting remembered: {}",
+            restoration.column_index, restoration.remembered
+        ));
+    }
+    let mut col_args: Vec<String> = column_memory
+        .columns
         .into_iter()
         .filter(|col| !col.is_empty())
         .collect();
@@ -2125,16 +2136,40 @@ fn run_with_options_internal(
             auto_start_mode,
         );
     }
-    col_args = apply_focus_only_expansion_policy(
+    let focus_only_mode = if matches!(auto_start_mode, AutoStartMode::SafePassive) {
+        agent_doc_tmux::TmuxFocusOnlyExpansionMode::SafePassive
+    } else {
+        agent_doc_tmux::TmuxFocusOnlyExpansionMode::LiteralProjection
+    };
+    let focus_only_expansion = agent_doc_tmux::apply_focus_only_expansion_policy(
         &col_args,
         &remembered_layout,
         active_column_index,
-        auto_start_mode,
+        focus_only_mode,
         exact_visible_projection,
-    )
-    .into_iter()
-    .filter(|col| !col.is_empty())
-    .collect();
+    );
+    match &focus_only_expansion.event {
+        Some(agent_doc_tmux::TmuxFocusOnlyExpansionEvent::ExactVisibleProjection) => {
+            sync_log(&format!(
+                "safe_passive_exact_visible_projection columns={:?}",
+                col_args
+            ));
+        }
+        Some(agent_doc_tmux::TmuxFocusOnlyExpansionEvent::Expanded {
+            active_column_index,
+        }) => {
+            sync_log(&format!(
+                "safe_passive_focus_only_editor_switch_expanded active_column={} columns={:?}",
+                active_column_index, focus_only_expansion.columns
+            ));
+        }
+        None => {}
+    }
+    col_args = focus_only_expansion
+        .columns
+        .into_iter()
+        .filter(|col| !col.is_empty())
+        .collect();
     let col_args = col_args.as_slice();
     sync_log(&format!(
         "=== sync start: col_args={:?} window={:?} focus={:?} auto_start_mode={}",
@@ -3248,7 +3283,10 @@ fn run_with_options_internal(
     // Save column layout state: for each column that has an agent doc,
     // record it so future syncs can substitute it when the column has a non-agent file.
     {
-        let layout_state = build_layout_state(col_args, &saved_layout);
+        let layout_state = agent_doc_tmux::build_layout_state(
+            &classify_sync_layout_columns(col_args),
+            &classify_sync_layout_columns(&saved_layout),
+        );
         // Only save if at least one column has an agent doc
         if layout_state.iter().any(|s| !s.is_empty())
             && let Err(err) =

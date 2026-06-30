@@ -8032,6 +8032,73 @@ fn test_agent_doc_turn_executor_tmux_owns_prompt_parser_policy() {
 }
 
 #[test]
+fn test_agent_doc_tmux_owns_layout_memory_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let tmux_manifest = fs::read_to_string(manifest_dir.join("agent-doc-tmux/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&tmux_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+
+    let tmux_source = fs::read_to_string(manifest_dir.join("agent-doc-tmux/src/lib.rs")).unwrap();
+    for required in [
+        "pub struct TmuxLayoutColumn",
+        "pub fn apply_column_memory(",
+        "pub fn build_layout_state(",
+        "pub enum TmuxFocusOnlyExpansionMode",
+        "pub fn expand_focus_only_columns_for_editor_switch(",
+        "pub fn apply_focus_only_expansion_policy(",
+    ] {
+        assert!(
+            tmux_source.contains(required),
+            "agent-doc-tmux must own tmux layout memory and focus-only expansion policy: {required}"
+        );
+    }
+
+    let sync_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync.rs")).unwrap();
+    assert!(
+        sync_source.contains("agent_doc_tmux::apply_column_memory(")
+            && sync_source.contains("agent_doc_tmux::build_layout_state(")
+            && sync_source.contains("agent_doc_tmux::apply_focus_only_expansion_policy("),
+        "sync.rs should call the focused tmux layout policy API directly"
+    );
+
+    let sync_layout_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync/layout.rs"))
+            .unwrap();
+    assert!(
+        sync_layout_source.contains("classify_sync_layout_columns(")
+            && sync_layout_source.contains("TmuxLayoutColumn::new("),
+        "orchestration should keep only the document/frontmatter layout-column classifier"
+    );
+    for forbidden in [
+        "fn apply_column_memory(",
+        "fn build_layout_state(",
+        "fn expand_focus_only_columns_for_editor_switch(",
+        "fn apply_focus_only_expansion_policy(",
+    ] {
+        assert!(
+            !sync_layout_source.contains(forbidden),
+            "sync/layout.rs must not keep old layout policy wrappers after extraction: {forbidden}"
+        );
+    }
+
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-tmux layout policy must stay free of orchestration, git, editor IPC, sqlite, or tmux-router effects"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_tmux_commands_owns_submit_profile_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let tmux_commands_manifest =

@@ -10,6 +10,7 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_template"
 
 [dependencies]
+agent-doc-document = { path = "../agent-doc-document", version = "0.34.65" }
 agent-doc-element = { path = "../agent-doc-element", version = "0.34.65" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }

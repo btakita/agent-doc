@@ -205,6 +205,78 @@ pub fn response_materialization_probe(patches: &[PatchBlock], unmatched: &str) -
     materialized_template_response(&selected, probe_unmatched)
 }
 
+pub fn response_materialization_probe_from_response(response: &str) -> String {
+    let probe = match crate::parse_patches(response) {
+        Ok((patches, unmatched)) => response_materialization_probe(&patches, &unmatched),
+        Err(_) => response.to_string(),
+    };
+    agent_doc_document::transient_markers::strip_guard_markers(&probe)
+}
+
+pub fn strip_partial_response_materialization_from_exchange(
+    content: &str,
+    response: &str,
+) -> Option<String> {
+    let headings = response
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("### Re:"))
+        .collect::<Vec<_>>();
+    if headings.is_empty() {
+        return None;
+    }
+
+    let components = agent_doc_element::element::parse(content).ok()?;
+    let exchange = components
+        .iter()
+        .find(|component| component.name == "exchange")?;
+    let exchange_body = &content[exchange.open_end..exchange.close_start];
+    let mut repaired_exchange = String::with_capacity(exchange_body.len());
+    let mut removed = false;
+    let mut skipping_partial = false;
+
+    for segment in exchange_body.split_inclusive('\n') {
+        let line = segment.trim_end_matches('\n');
+        let trimmed = line.trim();
+        let is_target_response_heading = headings.contains(&trimmed);
+        let is_structural_boundary = trimmed.starts_with("<!-- agent:boundary:")
+            || trimmed.starts_with("<!-- /agent:")
+            || trimmed.starts_with("<!-- agent:");
+        let is_other_response_heading =
+            trimmed.starts_with("### Re:") && !is_target_response_heading;
+        let is_user_prompt_line = trimmed.starts_with('❯');
+
+        if skipping_partial
+            && (is_structural_boundary || is_other_response_heading || is_user_prompt_line)
+        {
+            skipping_partial = false;
+        }
+
+        if is_target_response_heading {
+            skipping_partial = true;
+            removed = true;
+            continue;
+        }
+
+        if skipping_partial {
+            removed = true;
+            continue;
+        }
+
+        repaired_exchange.push_str(segment);
+    }
+
+    if !removed {
+        return None;
+    }
+
+    let mut repaired = String::with_capacity(content.len());
+    repaired.push_str(&content[..exchange.open_end]);
+    repaired.push_str(&repaired_exchange);
+    repaired.push_str(&content[exchange.close_start..]);
+    Some(repaired)
+}
+
 pub fn materialized_template_response(patches: &[PatchBlock], unmatched: &str) -> String {
     let mut out = String::new();
     for patch in patches {
@@ -236,6 +308,33 @@ pub fn reject_marker_response_with_zero_patches(
         );
     }
     Ok(())
+}
+
+pub fn sanitize_template_patchback_response(response: &mut String) -> Result<()> {
+    let Ok((patches, unmatched)) = crate::parse_patches(response) else {
+        return Ok(());
+    };
+    if unmatched.trim().is_empty() || !patches.iter().any(|patch| patch.name == "exchange") {
+        return Ok(());
+    }
+
+    match crate::replay_guard::classify_replay_payload(response) {
+        crate::replay_guard::ReplayPayloadClassification::Replayable(payload) => {
+            let sanitized = payload.into_owned();
+            if sanitized != response.trim() {
+                *response = sanitized;
+            }
+            Ok(())
+        }
+        crate::replay_guard::ReplayPayloadClassification::Empty => {
+            anyhow::bail!("empty response — nothing to write")
+        }
+        crate::replay_guard::ReplayPayloadClassification::Blocked(reason) => {
+            anyhow::bail!(
+                "template response contains unsafe unmatched content around patch blocks: {reason}"
+            )
+        }
+    }
 }
 
 #[cfg(test)]
@@ -347,6 +446,59 @@ mod tests {
     }
 
     #[test]
+    fn materialization_probe_from_response_strips_transient_guard_markers() {
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: committed - gpt-5\n\n",
+            "<!-- no-pending-capture -->\n",
+            "Done.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+
+        let probe = response_materialization_probe_from_response(response);
+
+        assert!(probe.contains("### Re: committed - gpt-5"));
+        assert!(probe.contains("Done."));
+        assert!(!probe.contains("no-pending-capture"));
+        assert!(!probe.contains("<!-- patch:exchange -->"));
+    }
+
+    #[test]
+    fn strip_partial_response_materialization_removes_target_block() {
+        let content = concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ do #one\n",
+            "### Re: keep - gpt-5\n\n",
+            "Keep this response.\n",
+            "### Re: target - gpt-5\n\n",
+            "Partial response body that should be removed.\n",
+            "❯ next prompt\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let response = "### Re: target - gpt-5\n\nFull retry response.\n";
+
+        let repaired =
+            strip_partial_response_materialization_from_exchange(content, response).unwrap();
+
+        assert!(repaired.contains("### Re: keep - gpt-5"));
+        assert!(repaired.contains("Keep this response."));
+        assert!(!repaired.contains("### Re: target - gpt-5"));
+        assert!(!repaired.contains("Partial response body"));
+        assert!(repaired.contains("❯ next prompt"));
+    }
+
+    #[test]
+    fn strip_partial_response_materialization_returns_none_without_heading() {
+        assert!(
+            strip_partial_response_materialization_from_exchange(
+                "<!-- agent:exchange -->\nBody\n<!-- /agent:exchange -->\n",
+                "Body without heading",
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
     fn materialization_probe_uses_non_tracked_patch_when_no_exchange_or_unmatched() {
         let patches = vec![
             PatchBlock::new("frontmatter", "agent: codex"),
@@ -385,6 +537,40 @@ mod tests {
         );
         assert!(reject_marker_response_with_zero_patches(0, 0).is_ok());
         assert!(reject_marker_response_with_zero_patches(2, 1).is_ok());
+    }
+
+    #[test]
+    fn sanitize_template_patchback_response_extracts_patch_only_payload() {
+        let mut response = concat!(
+            "Implemented the requested change.\n\n",
+            "<!-- patch:exchange -->\n",
+            "### Re: topic - gpt-5\n\n",
+            "Done.\n",
+            "<!-- /patch:exchange -->\n",
+        )
+        .to_string();
+
+        sanitize_template_patchback_response(&mut response).unwrap();
+
+        assert!(response.starts_with("<!-- patch:exchange -->"));
+        assert!(!response.contains("Implemented the requested change"));
+        assert!(response.contains("### Re: topic - gpt-5"));
+    }
+
+    #[test]
+    fn sanitize_template_patchback_response_blocks_transcript_payload() {
+        let mut response = concat!(
+            "❯ do #item\n",
+            "<!-- patch:exchange -->\n",
+            "### Re: topic - gpt-5\n\n",
+            "Done.\n",
+            "<!-- /patch:exchange -->\n",
+        )
+        .to_string();
+
+        let err = sanitize_template_patchback_response(&mut response).unwrap_err();
+
+        assert!(err.to_string().contains("unsafe unmatched content"));
     }
 
     #[test]

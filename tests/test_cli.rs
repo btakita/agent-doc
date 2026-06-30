@@ -1467,7 +1467,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // audited reuse of the document-write guard, not a new authority source.
         ("agent-doc-orchestration/src/write.rs", "guard_") => 47,
         ("agent-doc-orchestration/src/write/pending_checks.rs", "guard_") => 4,
-        ("agent-doc-orchestration/src/write/materialize.rs", "guard_") => 3,
+        // 3 -> 2 (#template-materialization-policy): raw-response probe
+        // construction now lives in `agent-doc-template::response_materialization`,
+        // so the audited transient guard-marker stripping token moved out of
+        // the write adapter with that focused policy.
+        ("agent-doc-orchestration/src/write/materialize.rs", "guard_") => 2,
         ("agent-doc-orchestration/src/write/exchange_reconcile.rs", "guard_") => 5,
         // -2 `guard_`, -1 `reason=` (#nodiskipc): active IPC timeout/no-proof
         // paths no longer enter the direct document-write fallback, so the removed
@@ -1548,7 +1552,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // to mark the live-buffer epoch as synced. The snapshot still follows
         // the existing ack-content proof path; this is diagnostic context for
         // skipping the live-buffer barrier update.
-        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 20,
+        // 20 -> 21 (#ack-content-disk-write-through): proven ACK-content disk
+        // write-through logs `reason=already_current` when disk already matches
+        // the editor-proven content. This is diagnostic context for skipping the
+        // write-through effect, not a new flow branch.
+        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 21,
         // +1 `guard_` (#fcc0-degraded-file-ipc): `IpcPollOptions::convergence`
         // centralizes the existing committed-cycle file-IPC poll guard for
         // convergence callers; this is a constructor for the existing guard, not
@@ -11036,9 +11044,12 @@ fn test_agent_doc_template_owns_response_materialization_policy() {
         "pub fn same_ignoring_trailing_newlines",
         "pub fn serialize_template_response",
         "pub fn response_materialization_probe",
+        "pub fn response_materialization_probe_from_response",
+        "pub fn strip_partial_response_materialization_from_exchange",
         "pub fn materialized_template_response",
         "pub fn push_materialization_segment",
         "pub fn reject_marker_response_with_zero_patches",
+        "pub fn sanitize_template_patchback_response",
     ] {
         assert!(
             template_response_materialization.contains(required_snippet),
@@ -11073,12 +11084,19 @@ fn test_agent_doc_template_owns_response_materialization_policy() {
         "pub(crate) fn serialize_template_response",
         "pub fn response_materialization_probe(",
         "pub(crate) fn response_materialization_probe(",
+        "pub fn response_materialization_probe_from_response",
+        "pub(crate) fn response_materialization_probe_from_response",
+        "pub fn strip_partial_response_materialization_from_exchange",
+        "pub(crate) fn strip_partial_response_materialization_from_exchange",
         "pub fn materialized_template_response",
         "pub(crate) fn materialized_template_response",
         "pub fn push_materialization_segment",
         "pub(crate) fn push_materialization_segment",
         "pub fn reject_marker_response_with_zero_patches",
         "pub(crate) fn reject_marker_response_with_zero_patches",
+        "pub fn sanitize_template_patchback_response",
+        "pub(crate) fn sanitize_template_patchback_response",
+        "sanitize_template_patchback_response_for_write",
     ] {
         assert!(
             !write_materialize.contains(forbidden_snippet),

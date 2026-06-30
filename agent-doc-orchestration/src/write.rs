@@ -6397,13 +6397,17 @@ scratch
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
-            before,
-            "this regression models the sidecar-only path where the editor proved the apply before disk caught up"
+            ack_content,
+            "proven ack-content must be written through so stale disk cannot overwrite the editor-visible response"
         );
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
             !log.contains("file_ipc_live_exchange_unacknowledged"),
             "ack-content proof must bypass the unacknowledged live-edit fallback:\n{log}"
+        );
+        assert!(
+            log.contains("ack_content_disk_write_through"),
+            "ack-content disk write-through should be auditable:\n{log}"
         );
     }
     #[test]

@@ -2,7 +2,9 @@
 
 use super::*;
 use agent_doc_template::response_materialization::{
-    response_materialization_probe, same_ignoring_trailing_newlines, serialize_template_response,
+    response_materialization_probe, response_materialization_probe_from_response,
+    same_ignoring_trailing_newlines, serialize_template_response,
+    strip_partial_response_materialization_from_exchange,
 };
 
 pub struct NormalizedTemplateResponse {
@@ -20,20 +22,6 @@ pub(crate) fn pending_replace_escape_hatch_enabled() -> bool {
             .unwrap_or(false)
 }
 
-pub fn response_materialization_probe_from_response(response: &str) -> String {
-    let probe = match template::parse_patches(response) {
-        Ok((patches, unmatched)) => response_materialization_probe(&patches, &unmatched),
-        Err(_) => response.to_string(),
-    };
-    // Ephemeral per-cycle guard markers (`<!-- no-pending-done-guard -->`,
-    // `<!-- no-pending-capture -->`) are stripped from committed blobs by
-    // `agent_doc_document::transient_markers::strip_guard_markers`, so a captured response body that still carries
-    // them would never match the committed HEAD/archive content and
-    // `stuck_captured_cycle` would false-alarm on a response that is in fact
-    // committed (#8j86). Strip them from the probe so the match mirrors commit.
-    strip_ephemeral_markers(&probe)
-}
-
 pub fn response_materialized_in_content(response: &str, content: &str) -> bool {
     let probe = response_materialization_probe_from_response(response);
     if probe.trim().is_empty()
@@ -42,17 +30,13 @@ pub fn response_materialized_in_content(response: &str, content: &str) -> bool {
     {
         return true;
     }
-    let normalized_content = strip_ephemeral_markers(content);
+    let normalized_content = agent_doc_document::transient_markers::strip_guard_markers(content);
     normalized_content != content
         && (crate::repair::response_already_applied(&normalized_content, &probe)
             || crate::repair::response_already_applied_after_prefix_strip(
                 &normalized_content,
                 &probe,
             ))
-}
-
-fn strip_ephemeral_markers(content: &str) -> String {
-    agent_doc_document::transient_markers::strip_guard_markers(content)
 }
 
 pub(crate) fn ipc_response_materialized_or_fallback(
@@ -131,73 +115,6 @@ pub(crate) fn log_ipc_proof_failure(
     );
 }
 
-pub(crate) fn strip_partial_response_materialization_from_exchange(
-    content: &str,
-    response: &str,
-) -> Option<String> {
-    if response_materialized_in_content(response, content) {
-        return None;
-    }
-    let headings = response
-        .lines()
-        .map(str::trim)
-        .filter(|line| line.starts_with("### Re:"))
-        .collect::<Vec<_>>();
-    if headings.is_empty() {
-        return None;
-    }
-
-    let components = element::parse(content).ok()?;
-    let exchange = components
-        .iter()
-        .find(|component| component.name == "exchange")?;
-    let exchange_body = &content[exchange.open_end..exchange.close_start];
-    let mut repaired_exchange = String::with_capacity(exchange_body.len());
-    let mut removed = false;
-    let mut skipping_partial = false;
-
-    for segment in exchange_body.split_inclusive('\n') {
-        let line = segment.trim_end_matches('\n');
-        let trimmed = line.trim();
-        let is_target_response_heading = headings.contains(&trimmed);
-        let is_structural_boundary = trimmed.starts_with("<!-- agent:boundary:")
-            || trimmed.starts_with("<!-- /agent:")
-            || trimmed.starts_with("<!-- agent:");
-        let is_other_response_heading =
-            trimmed.starts_with("### Re:") && !is_target_response_heading;
-        let is_user_prompt_line = trimmed.starts_with('❯');
-
-        if skipping_partial
-            && (is_structural_boundary || is_other_response_heading || is_user_prompt_line)
-        {
-            skipping_partial = false;
-        }
-
-        if is_target_response_heading {
-            skipping_partial = true;
-            removed = true;
-            continue;
-        }
-
-        if skipping_partial {
-            removed = true;
-            continue;
-        }
-
-        repaired_exchange.push_str(segment);
-    }
-
-    if !removed {
-        return None;
-    }
-
-    let mut repaired = String::with_capacity(content.len());
-    repaired.push_str(&content[..exchange.open_end]);
-    repaired.push_str(&repaired_exchange);
-    repaired.push_str(&content[exchange.close_start..]);
-    Some(repaired)
-}
-
 pub(crate) fn log_partial_response_materialization_for_retry(
     file: &Path,
     source: &str,
@@ -206,6 +123,9 @@ pub(crate) fn log_partial_response_materialization_for_retry(
     let Ok(current) = std::fs::read_to_string(file) else {
         return Ok(());
     };
+    if response_materialized_in_content(response, &current) {
+        return Ok(());
+    }
     let Some(repaired) = strip_partial_response_materialization_from_exchange(&current, response)
     else {
         return Ok(());
@@ -444,33 +364,6 @@ pub fn canonicalize_response_for_capture(file: &Path, response: &str) -> Result<
     Ok(normalized
         .response_for_capture
         .unwrap_or_else(|| response.to_string()))
-}
-
-pub(crate) fn sanitize_template_patchback_response_for_write(response: &mut String) -> Result<()> {
-    let Ok((patches, unmatched)) = template::parse_patches(response) else {
-        return Ok(());
-    };
-    if unmatched.trim().is_empty() || !patches.iter().any(|patch| patch.name == "exchange") {
-        return Ok(());
-    }
-
-    match agent_doc_template::replay_guard::classify_replay_payload(response) {
-        agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(payload) => {
-            let sanitized = payload.into_owned();
-            if sanitized != response.trim() {
-                *response = sanitized;
-            }
-            Ok(())
-        }
-        agent_doc_template::replay_guard::ReplayPayloadClassification::Empty => {
-            anyhow::bail!("empty response — nothing to write")
-        }
-        agent_doc_template::replay_guard::ReplayPayloadClassification::Blocked(reason) => {
-            anyhow::bail!(
-                "template response contains unsafe unmatched content around patch blocks: {reason}"
-            )
-        }
-    }
 }
 
 #[cfg(test)]

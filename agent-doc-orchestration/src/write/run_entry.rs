@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::{frontmatter_io, template_io};
+use agent_doc_template::response_materialization::sanitize_template_patchback_response;
 
 /// Run the write command: append assistant response to document.
 ///
@@ -188,7 +189,7 @@ pub fn run_template(
         &current_content,
         "template write",
     )?;
-    sanitize_template_patchback_response_for_write(&mut response)?;
+    sanitize_template_patchback_response(&mut response)?;
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
     let mode_overrides = template_mode_overrides_for_current_doc(file, baseline, &current_content);
 
@@ -488,7 +489,7 @@ pub fn run_stream(
     )? {
         snapshot_doc = snapshot::load(file).ok().flatten();
     }
-    sanitize_template_patchback_response_for_write(&mut response)?;
+    sanitize_template_patchback_response(&mut response)?;
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
     let mode_overrides = template_mode_overrides_for_current_doc(file, baseline, &current_content);
 
@@ -1151,7 +1152,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
         &current_content,
         "IPC write",
     )?;
-    sanitize_template_patchback_response_for_write(&mut response)?;
+    sanitize_template_patchback_response(&mut response)?;
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
 
     // Parse and validate patchback shape before any visible document mutation.
@@ -1540,7 +1541,7 @@ pub fn apply_template_from_string_with_options(
     let use_crdt = content_uses_crdt_write(&content);
     let rc = crate::graph::RunContext::new(file.to_path_buf());
     let mut response = response.to_string();
-    sanitize_template_patchback_response_for_write(&mut response)?;
+    sanitize_template_patchback_response(&mut response)?;
 
     let parsed = crate::flow::document_mutation::parse_template_patchback(
         file,

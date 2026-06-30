@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::frontmatter_io;
+use agent_doc_template::response_materialization::response_materialization_probe_from_response;
 
 /// Read the ack-content sidecar file written by the plugin after apply.
 /// Keyed by `patch_id` (same UUID the binary embedded in the patch payload).
@@ -1599,6 +1600,7 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
             editor_id,
             &repair_decision.snapshot_content,
         );
+        write_ack_content_through_to_disk(file, patch_id, &repair_decision.snapshot_content)?;
     }
     snapshot::save(file, &repair_decision.snapshot_content)?;
     let crdt_doc = agent_doc_merge::crdt::CrdtDoc::from_text(&repair_decision.snapshot_content);
@@ -1673,6 +1675,50 @@ pub(crate) fn mark_ack_content_live_buffer_synced(
             ),
         ),
     }
+}
+
+pub(crate) fn write_ack_content_through_to_disk(
+    file: &Path,
+    patch_id: &str,
+    content: &str,
+) -> Result<()> {
+    let before = std::fs::read_to_string(file).ok();
+    if before.as_deref() == Some(content) {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "ack_content_disk_write_through_skipped file={} patch_id={} reason=already_current len={} hash={}",
+                file.display(),
+                patch_id,
+                content.len(),
+                agent_doc_hash::content_hash(content)
+            ),
+        );
+        return Ok(());
+    }
+
+    atomic_write_pub(file, content).with_context(|| {
+        format!(
+            "failed to write proven ack-content through to disk for {}",
+            file.display()
+        )
+    })?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "ack_content_disk_write_through file={} patch_id={} before_len={} before_hash={} ack_len={} ack_hash={}",
+            file.display(),
+            patch_id,
+            before.as_deref().map(str::len).unwrap_or(0),
+            before
+                .as_deref()
+                .map(agent_doc_hash::content_hash)
+                .unwrap_or_else(|| "-".to_string()),
+            content.len(),
+            agent_doc_hash::content_hash(content)
+        ),
+    );
+    Ok(())
 }
 
 pub(crate) fn normalization_prefix_observation_counts(

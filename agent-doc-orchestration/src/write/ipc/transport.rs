@@ -530,6 +530,11 @@ pub fn try_ipc(
                             socket_editor_id.as_deref(),
                             &repair_decision.snapshot_content,
                         );
+                        write_ack_content_through_to_disk(
+                            file,
+                            &patch_id,
+                            &repair_decision.snapshot_content,
+                        )?;
                     }
                     crate::ops_log::log_op(
                         file,
@@ -1619,6 +1624,20 @@ pub(crate) fn write_ipc_and_poll(
                 &ipcfullprompt_candidate,
             );
             repair_ipc_decision_visible_state(doc_file, &repair_decision, Some(patch_id))?;
+            if repair_decision.snap_source.is_ack_content_proven() {
+                let editor_id = payload.get("editor_id").and_then(|value| value.as_str());
+                mark_ack_content_live_buffer_synced(
+                    doc_file,
+                    patch_id,
+                    editor_id,
+                    &repair_decision.snapshot_content,
+                );
+                write_ack_content_through_to_disk(
+                    doc_file,
+                    patch_id,
+                    &repair_decision.snapshot_content,
+                )?;
+            }
             crate::ops_log::log_op(
                 doc_file,
                 &format!(
@@ -2386,6 +2405,28 @@ mod submodule_patch_routing_tests {
         })
     }
 
+    fn start_ack_content_only_listener(
+        project_root: &Path,
+        ack_content: String,
+    ) -> std::thread::JoinHandle<()> {
+        let root = project_root.to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::thread::spawn(move || {
+            let root_clone = root.clone();
+            let _ = crate::ipc_socket::start_listener(&root, move |msg| {
+                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
+                let patch_id = v
+                    .get("patch_id")
+                    .and_then(|p| p.as_str())
+                    .unwrap_or("unknown");
+                let ack_dir = root_clone.join(".agent-doc/ack-content");
+                let _ = std::fs::create_dir_all(&ack_dir);
+                let _ = std::fs::write(ack_dir.join(format!("{patch_id}.md")), &ack_content);
+                Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
+            });
+        })
+    }
+
     /// Helper: wait for the socket listener to become connectable (up to 1s).
     fn wait_for_listener(project_root: &Path) {
         for _ in 0..100 {
@@ -2546,9 +2587,9 @@ mod submodule_patch_routing_tests {
             "---\n\n",
             "<!-- agent:exchange patch=append -->\n",
             "❯ Please reply\n",
+            "❯ Follow-up typed while closeout saved\n",
             "### Re: Please reply — gpt-5\n\n",
             "Answered.\n",
-            "User typed the next prompt while finalize was running.\n",
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, baseline).unwrap();
@@ -2726,8 +2767,8 @@ mod submodule_patch_routing_tests {
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
-            baseline,
-            "try_ipc should not directly overwrite disk while adopting editor proof"
+            editor_ack_content,
+            "proven ack-content must be written through so stale disk cannot later overwrite the editor buffer"
         );
         assert!(
             agent_doc_debounce::editor_sync_statuses(&doc_str)
@@ -2741,8 +2782,120 @@ mod submodule_patch_routing_tests {
             log.contains("ipc_socket_already_applied_skip_file_fallback")
                 && log.contains("ipc_socket_already_applied_snapshot")
                 && log.contains("snap_source=ack_content_sidecar")
-                && log.contains("ack_content_live_buffer_synced"),
+                && log.contains("ack_content_live_buffer_synced")
+                && log.contains("ack_content_disk_write_through"),
             "already_applied ack-content adoption should be auditable:\n{log}"
+        );
+    }
+
+    #[test]
+    fn try_ipc_socket_ack_content_writes_through_when_disk_lags() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        for subdir in [
+            "ack-content",
+            "patches",
+            "snapshots",
+            "crdt",
+            "logs",
+            "state/cycles",
+            "claimed-patches",
+        ] {
+            fs::create_dir_all(root.join(".agent-doc").join(subdir)).unwrap();
+        }
+
+        let doc = root.join("session.md");
+        let baseline = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let content_ours = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let editor_ack_content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, baseline).unwrap();
+        crate::snapshot::save(&doc, baseline).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+        let editor_id = "jetbrains-test-editor";
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+            &doc_str,
+            editor_ack_content,
+            editor_id,
+            "jetbrains",
+            "test",
+            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+        )
+        .unwrap();
+
+        let patch_id = "socket-ack-content-disk-lags";
+        let _listener = start_ack_content_only_listener(&root, editor_ack_content.to_string());
+        wait_for_listener(&root);
+
+        let patch = agent_doc_template::PatchBlock::new(
+            "exchange",
+            "### Re: Please reply — gpt-5\n\nAnswered.",
+        );
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(baseline),
+            Some(content_ours),
+            None,
+            Some(patch_id),
+        )
+        .unwrap();
+
+        assert!(result.success, "socket ACK-content should prove delivery");
+        assert_eq!(
+            crate::snapshot::load(&doc).unwrap().as_deref(),
+            Some(editor_ack_content),
+            "socket ACK-content should remain the snapshot authority"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            editor_ack_content,
+            "socket ACK-content must update stale disk after the sidecar proves editor-visible content"
+        );
+        assert!(
+            agent_doc_debounce::editor_sync_statuses(&doc_str)
+                .iter()
+                .all(|status| !status.in_flight),
+            "socket ACK-content should mark the targeted live-buffer epoch synced"
+        );
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("ipc_socket_ack_content")
+                && log.contains("snap_source=ack_content_sidecar")
+                && log.contains("ack_content_live_buffer_synced")
+                && log.contains("ack_content_disk_write_through"),
+            "socket ACK-content disk write-through should be auditable:\n{log}"
         );
     }
 

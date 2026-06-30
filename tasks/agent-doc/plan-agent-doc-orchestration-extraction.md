@@ -151,6 +151,26 @@ future work thinking in the old model.
   into a clearer tracked-work command module during the backlog/queue extraction
   pass. The old `pending_cmd` module path should not remain as an alias.
 
+### Command scope for icebox
+
+Backlog/tracked-work commands should target live actionable work by default.
+Icebox is parked work, so it should be reachable only through explicit icebox
+targets or promotion/move operations, not through default backlog or queue
+activation paths.
+
+- `backlog_cmd` may own shared tracked-work file adapters, but default
+  add/done/gate/reorder/reap verbs should continue to mean active backlog unless
+  the command explicitly names `icebox` or a move/promote operation.
+- Explicit icebox subcommands may backfill, edit, reorder, clear, reap completed
+  icebox items, or move/promote items into the active backlog.
+- Document-integrity maintenance may inspect icebox ids to avoid data loss,
+  stale done markers, or broken references. That inspection is not the same as
+  making icebox items drainable or auto-queueable.
+- Queue/autodag/liveness policy must not treat icebox items as active work
+  unless an item is explicitly promoted/enqueued. Warnings for misplaced queue
+  attributes on `agent:icebox` are preferred over silently syncing parked work
+  into `agent:queue`.
+
 Allowed exception: exported editor/plugin FFI symbols are an ABI boundary, not a
 Rust API. The cdylib may keep `extern "C"` wrappers that preserve those symbols,
 but Rust call sites still move to focused crates directly.

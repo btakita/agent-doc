@@ -1393,9 +1393,6 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         ("agent-doc-orchestration/src/session_check/partial_staging.rs", "guard_") => 2,
         ("agent-doc-orchestration/src/session_check/response_guards.rs", "guard_") => 8,
         ("agent-doc-orchestration/src/session_check/detect.rs", "guard_") => 1,
-        // 70 baseline + 1 for the audited `recguard_wedge` clear call on the
-        // #recguard-wedge-escape head-consumed reset path (substring `guard_`
-        // comes from the module name `recguard_wedge`, not a new flow guard).
         // +1 for the audited `guard_visible_write_idle(..., "queue_done_id_mark")`
         // call: opportunistic done-id queue marking is a document write path and
         // must use the same visible editor drift guard as active-head queue consume.
@@ -1454,20 +1451,17 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // -2 `guard_`, -1 `reason=` (#nodiskipc): active IPC timeout/no-proof
         // paths no longer enter the direct document-write fallback, so the removed
         // visible-write guard/reason tokens are retired rather than rerouted.
-        // +1 `guard_` (#recguard-wedge-escape): the queue-consume success path
-        // clears `recguard_wedge`; substring comes from the module name, not a new
-        // flow guard boundary.
         // +1 `reason=`: non-git repair template replay now uses an explicit
         // `apply_template_writeback ... reason=force_disk` marker when the
         // existing repair replay policy elects the audited force-disk transport.
-        ("agent-doc-orchestration/src/write/run_entry.rs", "guard_") => 11,
+        ("agent-doc-orchestration/src/write/run_entry.rs", "guard_") => 10,
         ("agent-doc-orchestration/src/write/run_entry.rs", "reason=") => 2,
         // queue-prompt consumption, IPC transport/repair, and live-prompt-drift
         // convergence extracted into write/queue_consume.rs, write/ipc.rs, and
         // write/converge.rs (#splitmods3 large-module split). The moved
         // `guard_`/`reason=` tokens are tracked against the new submodules,
         // not added anew.
-        ("agent-doc-orchestration/src/write/queue_consume.rs", "guard_") => 1,
+        ("agent-doc-orchestration/src/write/queue_consume.rs", "guard_") => 0,
         // +3 (#freshqueueauth): direct queue-head removals now log explicit
         // proof fields for prune/orphan/acknowledgement paths, and the new
         // acknowledgement regression asserts that proof marker. The operations
@@ -3856,6 +3850,10 @@ fn test_agent_doc_turn_owns_owner_pane_recursion_diagnostics() {
             .unwrap();
     for required in [
         "pub struct OwnerPaneQueueHead",
+        "pub const OWNER_PANE_WEDGE_THRESHOLD",
+        "pub struct OwnerPaneWedgeRecord",
+        "pub fn record_owner_pane_wedge_fire",
+        "pub fn owner_pane_wedge_threshold_reached",
         "pub fn recursive_direct_invocation_message",
         "pub fn recursive_start_invocation_message",
         "pub fn prompt_miss_message",
@@ -3880,6 +3878,16 @@ fn test_agent_doc_turn_owns_owner_pane_recursion_diagnostics() {
 
     let run_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/run.rs")).unwrap();
+    let wedge_counter_source = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/owner_pane_wedge_counter.rs"),
+    )
+    .unwrap();
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/recguard_wedge.rs")
+            .exists(),
+        "old recguard_wedge module path should not remain as a compatibility alias"
+    );
     for forbidden in [
         "fn format_recursive_start_diagnostic",
         "fn owned_pane_prompt_miss_diagnostic",
@@ -3896,9 +3904,21 @@ fn test_agent_doc_turn_owns_owner_pane_recursion_diagnostics() {
             "orchestration run must not re-own or facade owner-pane recursion diagnostics: {forbidden}"
         );
     }
+    for forbidden in [
+        "pub const WEDGE_THRESHOLD",
+        "struct WedgeRecord",
+        "pub fn is_wedged(",
+        "pub fn threshold_reached(",
+    ] {
+        assert!(
+            !wedge_counter_source.contains(forbidden),
+            "orchestration wedge-counter adapter must not re-own extracted owner-pane wedge policy: {forbidden}"
+        );
+    }
     for required in [
         "use agent_doc_turn::owner_pane_recursion::{",
         "OwnerPaneQueueHead",
+        "owner_pane_wedge_threshold_reached",
         "prompt_miss_message",
         "queue_handoff_message",
         "queue_wedge_halt_message",
@@ -3908,6 +3928,12 @@ fn test_agent_doc_turn_owns_owner_pane_recursion_diagnostics() {
         assert!(
             run_source.contains(required),
             "orchestration run should call focused owner-pane recursion diagnostics directly: {required}"
+        );
+    }
+    for required in ["OwnerPaneWedgeRecord", "record_owner_pane_wedge_fire"] {
+        assert!(
+            wedge_counter_source.contains(required),
+            "orchestration wedge-counter adapter should persist focused owner-pane wedge records directly: {required}"
         );
     }
 }

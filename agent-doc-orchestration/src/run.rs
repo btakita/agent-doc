@@ -137,8 +137,9 @@ use agent_doc_turn::no_change::{
     NoChangeCycleStateInput, NoChangeVerdict, classify_no_change_cycle_state,
 };
 use agent_doc_turn::owner_pane_recursion::{
-    OwnerPaneQueueHead, prompt_miss_message, queue_handoff_message, queue_wedge_halt_message,
-    recursive_direct_invocation_message, recursive_start_invocation_message,
+    OwnerPaneQueueHead, owner_pane_wedge_threshold_reached, prompt_miss_message,
+    queue_handoff_message, queue_wedge_halt_message, recursive_direct_invocation_message,
+    recursive_start_invocation_message,
 };
 
 use crate::{agent, diff_io, frontmatter_io, git, merge, snapshot, template_io, write};
@@ -628,12 +629,12 @@ fn run_once(
         // mid-turn trips this guard (Option B `#codex-self-reinvoke-prevent` only
         // redirects the *Stop-hook* continuation, not a mid-turn re-run). One
         // transient self-invoke is normal, but the SAME head tripping this guard
-        // `WEDGE_THRESHOLD` times in a row is a self-driving `agent:queue auto`
-        // dead-loop with no operator watching — it would re-fire forever. Break
+        // enough times to hit the owner-pane wedge threshold is a self-driving
+        // `agent:queue auto` dead-loop with no operator watching — it would re-fire forever. Break
         // it: halt the runaway auto-queue (`queue: stop`) so the loop stops
         // burning cycles, and hand the operator one clear recovery action.
-        let wedge_count = crate::recguard_wedge::record(file, &continuation.head_prompt)?;
-        if crate::recguard_wedge::is_wedged(wedge_count) {
+        let wedge_count = crate::owner_pane_wedge_counter::record(file, &continuation.head_prompt)?;
+        if owner_pane_wedge_threshold_reached(wedge_count) {
             if let Ok(content) = std::fs::read_to_string(file)
                 && let Ok(stopped) = frontmatter::merge_queue_state(&content, false)
                 && let Err(err) = std::fs::write(file, &stopped)
@@ -644,7 +645,7 @@ fn run_once(
                     err
                 );
             }
-            crate::recguard_wedge::clear(file)?;
+            crate::owner_pane_wedge_counter::clear(file)?;
             crate::ops_log::log_op(
                 file,
                 &format!(

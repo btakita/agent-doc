@@ -1,4 +1,4 @@
-//! # Module: recguard_wedge
+//! # Module: owner_pane_wedge_counter
 //!
 //! `#recguard-wedge-escape`: detect a *wedged* owner-pane self-invocation loop
 //! and break it.
@@ -14,8 +14,8 @@
 //!
 //! This module tracks the count of *consecutive* self-invocation guard fires for
 //! the same head. A single transient self-invoke is normal; the same head
-//! tripping the guard [`WEDGE_THRESHOLD`] times in a row with no advance is a
-//! proven dead-loop. At that point the caller halts the runaway auto-queue
+//! tripping the focused owner-pane wedge threshold with no advance is a proven
+//! dead-loop. At that point the caller halts the runaway auto-queue
 //! (`queue: stop`) so the loop stops re-firing and the operator gets one clear
 //! recovery action instead of an unbounded retry storm.
 //!
@@ -23,21 +23,11 @@
 //! that occasionally self-invokes never escalates.
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-/// Consecutive same-head self-invocation guard fires that prove a dead-loop.
-/// Two transient self-invokes are tolerated; the third halts.
-pub const WEDGE_THRESHOLD: u32 = 3;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct WedgeRecord {
-    /// The queue head (or self-invocation detail) the count is keyed on. A new
-    /// head means the loop advanced, so the counter resets.
-    head: String,
-    /// Consecutive self-invocation guard fires for `head`.
-    count: u32,
-}
+#[cfg(test)]
+use agent_doc_turn::owner_pane_recursion::owner_pane_wedge_threshold_reached;
+use agent_doc_turn::owner_pane_recursion::{OwnerPaneWedgeRecord, record_owner_pane_wedge_fire};
 
 fn wedge_path(file: &Path) -> Result<Option<PathBuf>> {
     let Some(root) = agent_doc_fs::find_project_root(file) else {
@@ -45,12 +35,12 @@ fn wedge_path(file: &Path) -> Result<Option<PathBuf>> {
     };
     let hash = crate::snapshot::doc_hash(file)?;
     Ok(Some(
-        root.join(".agent-doc/recguard-wedge")
+        root.join(".agent-doc/owner-pane-wedge-counter")
             .join(format!("{hash}.json")),
     ))
 }
 
-fn read_record(path: &Path) -> Option<WedgeRecord> {
+fn read_record(path: &Path) -> Option<OwnerPaneWedgeRecord> {
     let bytes = std::fs::read(path).ok()?;
     serde_json::from_slice(&bytes).ok()
 }
@@ -64,14 +54,8 @@ pub fn record(file: &Path, head: &str) -> Result<u32> {
         return Ok(1);
     };
     let prior = read_record(&path);
-    let count = match prior {
-        Some(rec) if rec.head == head => rec.count.saturating_add(1),
-        _ => 1,
-    };
-    let record = WedgeRecord {
-        head: head.to_string(),
-        count,
-    };
+    let record = record_owner_pane_wedge_fire(prior.as_ref(), head);
+    let count = record.count;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -92,13 +76,6 @@ pub fn clear(file: &Path) -> Result<()> {
     }
 }
 
-/// `true` once `count` reaches the wedge threshold — the same head has tripped
-/// the owner-pane self-invocation guard enough times in a row to prove a
-/// dead-loop the caller should break.
-pub fn is_wedged(count: u32) -> bool {
-    count >= WEDGE_THRESHOLD
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -116,13 +93,13 @@ mod tests {
         std::fs::write(&doc, "# doc\n").unwrap();
 
         assert_eq!(record(&doc, "do [#alpha]").unwrap(), 1);
-        assert!(!is_wedged(1));
+        assert!(!owner_pane_wedge_threshold_reached(1));
         assert_eq!(record(&doc, "do [#alpha]").unwrap(), 2);
-        assert!(!is_wedged(2));
+        assert!(!owner_pane_wedge_threshold_reached(2));
         let third = record(&doc, "do [#alpha]").unwrap();
         assert_eq!(third, 3);
         assert!(
-            is_wedged(third),
+            owner_pane_wedge_threshold_reached(third),
             "third consecutive same-head fire is a wedge"
         );
     }
@@ -141,7 +118,7 @@ mod tests {
             1,
             "a new head resets the consecutive counter"
         );
-        assert!(!is_wedged(1));
+        assert!(!owner_pane_wedge_threshold_reached(1));
     }
 
     #[test]

@@ -4,6 +4,21 @@
 //! This module owns the operator-facing turn guidance when a managed owner pane
 //! tries to recursively invoke `agent-doc` for the document it already owns.
 
+use serde::{Deserialize, Serialize};
+
+/// Consecutive same-head self-invocation guard fires that prove a dead-loop.
+/// Two transient self-invokes are tolerated; the third halts.
+pub const OWNER_PANE_WEDGE_THRESHOLD: u32 = 3;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OwnerPaneWedgeRecord {
+    /// The queue head (or self-invocation detail) the count is keyed on. A new
+    /// head means the loop advanced, so the counter resets.
+    pub head: String,
+    /// Consecutive self-invocation guard fires for `head`.
+    pub count: u32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OwnerPaneQueueHead<'a> {
     pub prompt: &'a str,
@@ -26,6 +41,24 @@ fn queue_head_excerpt(head: OwnerPaneQueueHead<'_>) -> String {
 
 fn queue_head_id_note(head: OwnerPaneQueueHead<'_>) -> String {
     head.id.map(|id| format!(" (id #{id})")).unwrap_or_default()
+}
+
+pub fn record_owner_pane_wedge_fire(
+    prior: Option<&OwnerPaneWedgeRecord>,
+    head: &str,
+) -> OwnerPaneWedgeRecord {
+    let count = match prior {
+        Some(record) if record.head == head => record.count.saturating_add(1),
+        _ => 1,
+    };
+    OwnerPaneWedgeRecord {
+        head: head.to_string(),
+        count,
+    }
+}
+
+pub fn owner_pane_wedge_threshold_reached(count: u32) -> bool {
+    count >= OWNER_PANE_WEDGE_THRESHOLD
 }
 
 pub fn recursive_direct_invocation_message(document: &str, detail: &str) -> String {
@@ -79,6 +112,33 @@ mod tests {
 
     const DETAIL: &str =
         "current_pane=%9 session_id=sess actor_generation=3 actor_state=alive-busy actor_pane=%9";
+
+    #[test]
+    fn wedge_counter_counts_consecutive_same_head_and_reaches_threshold() {
+        let first = record_owner_pane_wedge_fire(None, "do [#alpha]");
+        assert_eq!(first.count, 1);
+        assert!(!owner_pane_wedge_threshold_reached(first.count));
+
+        let second = record_owner_pane_wedge_fire(Some(&first), "do [#alpha]");
+        assert_eq!(second.count, 2);
+        assert!(!owner_pane_wedge_threshold_reached(second.count));
+
+        let third = record_owner_pane_wedge_fire(Some(&second), "do [#alpha]");
+        assert_eq!(third.count, OWNER_PANE_WEDGE_THRESHOLD);
+        assert!(owner_pane_wedge_threshold_reached(third.count));
+    }
+
+    #[test]
+    fn wedge_counter_resets_when_head_advances() {
+        let first = record_owner_pane_wedge_fire(None, "do [#alpha]");
+        let second = record_owner_pane_wedge_fire(Some(&first), "do [#alpha]");
+        assert_eq!(second.count, 2);
+
+        let advanced = record_owner_pane_wedge_fire(Some(&second), "do [#beta]");
+        assert_eq!(advanced.head, "do [#beta]");
+        assert_eq!(advanced.count, 1);
+        assert!(!owner_pane_wedge_threshold_reached(advanced.count));
+    }
 
     #[test]
     fn recursive_direct_message_names_idle_reconcile_recovery() {

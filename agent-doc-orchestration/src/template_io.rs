@@ -16,7 +16,7 @@ use agent_doc_template::{
 };
 
 use crate::graph::RunContext;
-use crate::project_config_io;
+use agent_doc_project_config_io as project_config_io;
 
 /// File-based wrapper for the pure
 /// [`agent_doc_template::apply_patches_pure`]. Loads component/max_lines

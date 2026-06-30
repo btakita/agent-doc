@@ -138,7 +138,7 @@ pub fn resolve_pending_capture_guard_mode(
     if let Some(mode) = fm.pending_capture_guard {
         return Ok(mode);
     }
-    Ok(crate::project_config_io::load_project_for_doc(file)
+    Ok(agent_doc_project_config_io::load_project_for_doc(file)
         .guards
         .pending_capture
         .unwrap_or_default())
@@ -171,7 +171,7 @@ pub fn resolve_pending_done_guard_mode(
     if let Some(mode) = fm.pending_done_guard {
         return Ok(mode);
     }
-    if let Some(mode) = crate::project_config_io::load_project_for_doc(file)
+    if let Some(mode) = agent_doc_project_config_io::load_project_for_doc(file)
         .guards
         .pending_done
     {
@@ -218,7 +218,7 @@ pub fn resolve_review_done_guard_mode(
     if let Some(mode) = fm.review_done_guard {
         return Ok(mode);
     }
-    if let Some(mode) = crate::project_config_io::load_project_for_doc(file)
+    if let Some(mode) = agent_doc_project_config_io::load_project_for_doc(file)
         .guards
         .review_done
     {
@@ -248,7 +248,7 @@ pub fn resolve_auto_done(file: &Path) -> Result<bool> {
     if let Some(enabled) = fm.auto_done {
         return Ok(enabled);
     }
-    Ok(crate::project_config_io::load_project_for_doc(file)
+    Ok(agent_doc_project_config_io::load_project_for_doc(file)
         .guards
         .auto_done
         .unwrap_or(false))

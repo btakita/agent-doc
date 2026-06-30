@@ -460,7 +460,7 @@ pub fn run_with_reap_policy(
     // a fresh session in this pane. If a live owner already exists elsewhere, moving the
     // launcher pane first can rip it out of its original tmux window/session before the
     // reuse path returns.
-    if let Some(expected_session) = crate::project_config_io::project_tmux_session()
+    if let Some(expected_session) = agent_doc_project_config_io::project_tmux_session()
         && !relocate_if_wrong_session(&tmux, &pane_id, &expected_session)
     {
         rebind_project_tmux_session_if_expected_dead(&tmux, &pane_id, &expected_session);
@@ -1861,8 +1861,8 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use crate::hooks::fire_doc_hooks;
-    use crate::project_config_io as project_config;
     use agent_doc_frontmatter::frontmatter::Frontmatter;
+    use agent_doc_project_config_io as project_config_io;
     use std::collections::HashMap;
     use tempfile::TempDir;
     use tmux_router::IsolatedTmux;
@@ -1970,7 +1970,7 @@ mod tests {
         rebind_project_tmux_session_if_expected_dead(&iso, &pane, "0");
 
         assert_eq!(
-            project_config::project_tmux_session().as_deref(),
+            project_config_io::project_tmux_session().as_deref(),
             Some("14")
         );
     }
@@ -1992,7 +1992,10 @@ mod tests {
 
         rebind_project_tmux_session_if_expected_dead(&iso, &pane, "0");
 
-        assert_eq!(project_config::project_tmux_session().as_deref(), Some("0"));
+        assert_eq!(
+            project_config_io::project_tmux_session().as_deref(),
+            Some("0")
+        );
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]

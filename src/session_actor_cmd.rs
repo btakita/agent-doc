@@ -3028,7 +3028,7 @@ fn classify_dead_supervisor_recovery(ctx: &SessionContext) -> DeadSupervisorReco
         DeadSupervisorColdStartTarget::PreserveActorPane(_)
     );
     let can_resolve_tmux_target = agent_doc_orchestration::sessions::in_tmux()
-        || agent_doc_orchestration::project_config_io::project_tmux_session().is_some()
+        || agent_doc_project_config_io::project_tmux_session().is_some()
         || can_preserve_actor_pane;
     decide_dead_supervisor_recovery(
         &ctx.canonical_file,

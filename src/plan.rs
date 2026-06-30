@@ -842,9 +842,7 @@ fn pending_mutations_for_doc(
         if target_paths.is_empty()
             && !issue_units.is_empty()
             && let Some(target) =
-                agent_doc_orchestration::project_config_io::agent_doc_bug_target_document_for_doc(
-                    file,
-                )?
+                agent_doc_project_config_io::agent_doc_bug_target_document_for_doc(file)?
         {
             target_paths.push(target);
         }

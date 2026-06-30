@@ -40,6 +40,7 @@ dependencies = [
  "agent-doc-merge",
  "agent-doc-model-tier",
  "agent-doc-orchestration",
+ "agent-doc-project-config-io",
  "agent-doc-prompt-context",
  "agent-doc-prompt-contract",
  "agent-doc-queue",
@@ -370,6 +371,7 @@ dependencies = [
  "agent-doc-markdown-ast",
  "agent-doc-merge",
  "agent-doc-model-tier",
+ "agent-doc-project-config-io",
  "agent-doc-prompt-cache",
  "agent-doc-prompt-context",
  "agent-doc-prompt-contract",
@@ -426,6 +428,17 @@ dependencies = [
  "uuid",
  "yrs",
  "zip",
+]
+
+[[package]]
+name = "agent-doc-project-config-io"
+version = "0.34.65"
+dependencies = [
+ "agent-doc-frontmatter",
+ "agent-doc-fs",
+ "anyhow",
+ "tempfile",
+ "toml 1.1.2+spec-1.1.0",
 ]
 
 [[package]]

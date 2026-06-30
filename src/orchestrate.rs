@@ -608,7 +608,7 @@ fn expand_frontmatter_env(fm: &frontmatter::Frontmatter) -> Vec<(String, Option<
 }
 
 fn build_image_description_block(file: &Path, doc: &str, agent_name: &str) -> Option<String> {
-    let project_config = agent_doc_orchestration::project_config_io::load_project_for_doc(file);
+    let project_config = agent_doc_project_config_io::load_project_for_doc(file);
     let vision = &project_config.vision;
     let agent_mode = vision.agent_mode(agent_name).unwrap_or("passthrough");
     if agent_mode != "describe" {

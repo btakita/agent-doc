@@ -1,0 +1,19 @@
+[package]
+name = "agent-doc-project-config-io"
+version = "0.34.65"
+edition = "2024"
+description = "File-backed project configuration IO for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_project_config_io"
+
+[dependencies]
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.65" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.65" }
+anyhow = "1"
+toml = "1.1"
+
+[dev-dependencies]
+tempfile = "3"

@@ -106,7 +106,8 @@ use agent_doc_controller::claim::{
 };
 use agent_doc_frontmatter::{frontmatter, project_config};
 
-use crate::{project_config_io, resync, route, sessions};
+use crate::{resync, route, sessions};
+use agent_doc_project_config_io as project_config_io;
 
 fn enforce_cross_session_claim(
     file: &Path,

@@ -1111,7 +1111,7 @@ pub(crate) fn supervisor_auto_recycle_enabled(doc: &std::path::Path) -> bool {
             .and_then(|(fm, _)| fm.supervisor_auto_recycle)
     });
     let project =
-        crate::project_config_io::load_project_for_doc(doc).agent_doc_supervisor_auto_recycle;
+        agent_doc_project_config_io::load_project_for_doc(doc).agent_doc_supervisor_auto_recycle;
     agent_doc_supervisor::config::resolve_supervisor_auto_recycle(
         env.as_deref(),
         frontmatter,
@@ -1130,7 +1130,7 @@ pub(crate) fn agent_change_restart_enabled(doc: &std::path::Path) -> bool {
             .and_then(|(fm, _)| fm.agent_change_restart)
     });
     let project =
-        crate::project_config_io::load_project_for_doc(doc).agent_doc_agent_change_restart;
+        agent_doc_project_config_io::load_project_for_doc(doc).agent_doc_agent_change_restart;
     agent_doc_supervisor::config::resolve_agent_change_restart(env.as_deref(), frontmatter, project)
 }
 
@@ -1146,7 +1146,7 @@ pub(crate) fn supervisor_auto_install_enabled(doc: &std::path::Path) -> bool {
             .and_then(|(fm, _)| fm.supervisor_auto_install)
     });
     let project =
-        crate::project_config_io::load_project_for_doc(doc).agent_doc_supervisor_auto_install;
+        agent_doc_project_config_io::load_project_for_doc(doc).agent_doc_supervisor_auto_install;
     agent_doc_supervisor::config::resolve_supervisor_auto_install(
         env.as_deref(),
         frontmatter,

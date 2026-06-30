@@ -17,7 +17,7 @@ pub fn resolve_preferred_session(
         return Some(ctx.to_string());
     }
 
-    let configured = crate::project_config_io::project_tmux_session();
+    let configured = agent_doc_project_config_io::project_tmux_session();
     if configured.as_ref().is_some_and(|s| tmux.session_alive(s)) {
         return configured;
     }
@@ -83,7 +83,7 @@ pub(crate) fn ensure_auto_start_target_session(
         return Ok(());
     }
 
-    if crate::project_config_io::project_tmux_session().as_deref() == Some(session_name)
+    if agent_doc_project_config_io::project_tmux_session().as_deref() == Some(session_name)
         && tmux.session_alive(session_name)
     {
         return Ok(());

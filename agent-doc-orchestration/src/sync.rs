@@ -1552,7 +1552,7 @@ fn effective_sync_columns(
 
 pub fn configured_session_for_root(tmux: &Tmux, root: &Path) -> Option<String> {
     let config_path = root.join(".agent-doc").join("config.toml");
-    let configured = crate::project_config_io::load_project_from(&config_path).tmux_session;
+    let configured = agent_doc_project_config_io::load_project_from(&config_path).tmux_session;
     match configured {
         Some(session) if tmux.session_alive(&session) => Some(session),
         Some(session) => {

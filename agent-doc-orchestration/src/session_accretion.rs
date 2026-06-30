@@ -101,7 +101,7 @@ pub fn queue_context_reset_opted_in(file: &Path) -> bool {
     {
         return flag;
     }
-    crate::project_config_io::load_project_for_doc(file)
+    agent_doc_project_config_io::load_project_for_doc(file)
         .agent_doc_queue_context_reset
         .unwrap_or(false)
 }
@@ -122,7 +122,7 @@ pub fn clear_threshold_for_doc(file: &Path) -> u8 {
     {
         return threshold.min(100);
     }
-    crate::project_config_io::load_project_for_doc(file)
+    agent_doc_project_config_io::load_project_for_doc(file)
         .agent_doc_clear_threshold
         .unwrap_or(DEFAULT_CLEAR_THRESHOLD)
         .min(100)

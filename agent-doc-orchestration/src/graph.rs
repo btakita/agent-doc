@@ -31,8 +31,8 @@ use agent_doc_frontmatter::project_config::ProjectConfig;
 use lazily::{CellHandle, Context, SlotHandle};
 
 use crate::cycle_state::CycleState;
-use crate::project_config_io;
 use crate::{config, sessions};
+use agent_doc_project_config_io as project_config_io;
 
 pub type FilePathCell = CellHandle<PathBuf>;
 pub type DocContentCell = CellHandle<String>;

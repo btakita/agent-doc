@@ -18,7 +18,7 @@ use agent_doc_frontmatter::frontmatter::{
 use agent_doc_frontmatter::project_config::{self, ProjectConfig};
 
 use crate::graph::RunContext;
-use crate::project_config_io;
+use agent_doc_project_config_io as project_config_io;
 
 /// Parse frontmatter for a concrete document path so callers can surface
 /// actionable errors. Wraps the pure

@@ -693,7 +693,7 @@ fn file_route_dispatch_bug_report(facts: RouteDispatchBugReportFacts<'_>) {
             return;
         }
     };
-    let target_file = match crate::project_config_io::agent_doc_bug_target_document_for_doc(
+    let target_file = match agent_doc_project_config_io::agent_doc_bug_target_document_for_doc(
         facts.file,
     ) {
         Ok(Some(target)) => target,

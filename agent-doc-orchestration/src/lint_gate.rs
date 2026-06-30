@@ -41,8 +41,8 @@
 use anyhow::Result;
 use std::path::Path;
 
-use crate::project_config_io as project_config;
 use agent_doc_frontmatter::frontmatter::{self, LintDialectMode};
+use agent_doc_project_config_io as project_config_io;
 
 use tagpath::lint::agent_doc::{
     AgentDocOptions, LintFinding, LintSeverity, format_findings_text, lint_agent_doc,
@@ -116,7 +116,7 @@ pub fn resolve_mode(
     {
         return (mode, LintModeSource::Frontmatter);
     }
-    let project = project_config::load_project_for_doc(file);
+    let project = project_config_io::load_project_for_doc(file);
     if let Some(mode) = project.lint.dialect {
         return (mode, LintModeSource::ProjectConfig);
     }

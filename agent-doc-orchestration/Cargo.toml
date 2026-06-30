@@ -34,6 +34,7 @@ agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.34.65" }
 agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.65" }
 agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.65" }
 agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.34.65" }
+agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.34.65" }
 agent-doc-prompt-cache = { path = "../agent-doc-prompt-cache", version = "0.34.65" }
 agent-doc-prompt-contract = { path = "../agent-doc-prompt-contract", version = "0.34.65" }
 agent-doc-prompt-context = { path = "../agent-doc-prompt-context", version = "0.34.65" }

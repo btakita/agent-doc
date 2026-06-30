@@ -313,14 +313,14 @@ pub struct ProjectConfig {
 /// Parse a TOML string into a [`ProjectConfig`]. Pure — no fs I/O.
 ///
 /// File-based loading (with legacy `components.toml` migration) lives in
-/// `crate::project_config_io` in the main `agent-doc` crate.
+/// `agent-doc-project-config-io`.
 pub fn parse_project_toml(content: &str) -> Result<ProjectConfig> {
     toml::from_str(content).map_err(anyhow::Error::from)
 }
 
 /// Parse a legacy `components.toml` body (flat `[name]` tables of
-/// [`ComponentConfig`] fields) into a map. Used by the file-based migrator
-/// in `crate::project_config_io`.
+/// [`ComponentConfig`] fields) into a map. Used by the file-based migrator in
+/// `agent-doc-project-config-io`.
 pub fn parse_legacy_components_toml(content: &str) -> Result<BTreeMap<String, ComponentConfig>> {
     toml::from_str(content).map_err(anyhow::Error::from)
 }

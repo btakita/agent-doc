@@ -1,8 +1,8 @@
-//! Project-config I/O — `&Path`-taking and `std::fs`-using wrappers around the
+//! Project-config I/O -- `&Path`-taking and `std::fs`-using wrappers around the
 //! pure [`agent_doc_frontmatter::project_config`] surface. Kept out of
 //! `agent-doc-frontmatter` so the focused crate stays parse-only.
 //!
-//! Orchestration and the CLI shell call this module directly for file-backed
+//! Orchestration and the CLI shell call this crate directly for file-backed
 //! project configuration effects.
 
 #![allow(dead_code)]

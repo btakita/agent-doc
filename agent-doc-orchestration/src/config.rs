@@ -14,7 +14,7 @@
 //! - `load()` reads and parses the global config file; returns `Config::default()` when the
 //!   file is absent. Propagates I/O and parse errors via `anyhow::Result`.
 //! - Project-level configuration types live in `agent-doc-frontmatter`;
-//!   file-backed helpers live in `project_config_io`.
+//!   file-backed helpers live in `agent-doc-project-config-io`.
 //!
 //! ## Agentic Contracts
 //! - **Never panics on missing config**: `load()` returns defaults when the file is absent.

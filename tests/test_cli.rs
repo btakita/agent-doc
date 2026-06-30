@@ -2167,6 +2167,7 @@ fn test_manifest_uses_publishable_dependency_contract() {
         "agent-doc-merge",
         "agent-doc-model-tier",
         "agent-doc-orchestration",
+        "agent-doc-project-config-io",
         "agent-doc-prompt-contract",
         "agent-doc-queue",
         "agent-doc-response-toc-io",
@@ -4314,7 +4315,7 @@ fn test_agent_doc_fs_owns_markdown_reference_resolution() {
             "security::referenced_markdown_path",
         ),
         (
-            "agent-doc-orchestration/src/project_config_io.rs",
+            "agent-doc-project-config-io/src/lib.rs",
             "agent_doc_fs::referenced_markdown_path_checked",
             "crate::security::referenced_markdown_path_checked",
         ),
@@ -4874,14 +4875,17 @@ fn test_agent_doc_diff_owns_post_exchange_comment_policy() {
 
 #[test]
 fn test_project_config_io_tmux_helpers_have_no_config_facade() {
-    fn contains_path_segment(source: &str, needle: &str) -> bool {
-        source.match_indices(needle).any(|(index, _)| {
-            let previous = source[..index].chars().next_back();
-            !matches!(previous, Some(c) if c.is_ascii_alphanumeric() || c == '_')
-        })
-    }
-
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-project-config-io")),
+        "agent-doc-project-config-io must stay a first-class workspace crate"
+    );
+
     let config_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/config.rs")).unwrap();
     for forbidden_snippet in [
@@ -4897,39 +4901,126 @@ fn test_project_config_io_tmux_helpers_have_no_config_facade() {
     }
 
     let project_config_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/project_config_io.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-project-config-io/src/lib.rs")).unwrap();
     for required_snippet in [
+        "pub fn load_project()",
+        "pub fn load_project_for_doc(",
+        "pub fn project_root_for_doc(",
+        "pub fn agent_doc_bug_target_document_for_doc(",
+        "pub fn load_project_from(",
         "pub fn project_tmux_session()",
+        "pub fn save_project(",
+        "pub fn save_project_to(",
         "pub fn update_project_tmux_session(",
         "pub fn clear_project_tmux_session()",
+        "agent_doc_fs::find_project_root",
+        "agent_doc_fs::referenced_markdown_path_checked",
     ] {
         assert!(
             project_config_source.contains(required_snippet),
-            "project_config_io must own file-backed project tmux helper: {required_snippet}"
+            "agent-doc-project-config-io must own file-backed project config helper: {required_snippet}"
         );
     }
 
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/project_config_io.rs")
+            .exists(),
+        "orchestration must not keep project_config_io as an adapter module or facade"
+    );
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod project_config_io"),
+        "orchestration must not expose project_config_io as a module facade"
+    );
+
     for relative in [
         "src/session_cmd.rs",
+        "src/session_actor_cmd.rs",
+        "src/orchestrate.rs",
+        "src/describe_image.rs",
+        "src/plan.rs",
+        "src/patch.rs",
+        "agent-doc-orchestration/src/frontmatter_io.rs",
+        "agent-doc-orchestration/src/graph.rs",
+        "agent-doc-orchestration/src/template_io.rs",
         "agent-doc-orchestration/src/claim.rs",
+        "agent-doc-orchestration/src/lint_gate.rs",
+        "agent-doc-orchestration/src/route.rs",
         "agent-doc-orchestration/src/route/session_resolution.rs",
         "agent-doc-orchestration/src/resync.rs",
+        "agent-doc-orchestration/src/sync.rs",
+        "agent-doc-orchestration/src/session_accretion.rs",
+        "agent-doc-orchestration/src/session_check/pending_guards.rs",
+        "agent-doc-orchestration/src/project_controller/rpc.rs",
         "agent-doc-orchestration/src/start.rs",
         "agent-doc-orchestration/src/start/run.rs",
+        "agent-doc-orchestration/src/start/detection.rs",
+        "agent-doc-orchestration/src/start/supervisor_io.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("agent_doc_project_config_io"),
+            "{relative} should call project config IO through agent-doc-project-config-io directly"
+        );
         for forbidden_snippet in [
+            "agent_doc_orchestration::project_config_io",
+            "crate::project_config_io",
+            "pub use agent_doc_project_config_io",
+            "pub use crate::project_config_io",
+            "use crate::project_config_io",
+            "use crate::{project_config_io",
             "config::project_tmux_session",
             "config::clear_project_tmux_session",
             "config::update_project_tmux_session",
             "crate::config::project_tmux_session",
         ] {
             assert!(
-                !contains_path_segment(&source, forbidden_snippet),
-                "{relative} must call project_config_io helpers directly: {forbidden_snippet}"
+                !source.contains(forbidden_snippet),
+                "{relative} must not route project-config IO through orchestration or config: {forbidden_snippet}"
             );
         }
+    }
+
+    let root_manifest: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let root_dependencies = root_manifest["dependencies"].as_table().unwrap();
+    assert!(
+        root_dependencies.contains_key("agent-doc-project-config-io"),
+        "the CLI crate must depend on the focused project-config IO crate directly"
+    );
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
+    assert!(
+        orchestration_dependencies.contains_key("agent-doc-project-config-io"),
+        "orchestration must depend on the focused project-config IO crate directly"
+    );
+
+    let focused_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-project-config-io/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&focused_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    for required in ["agent-doc-frontmatter", "agent-doc-fs", "toml"] {
+        assert!(
+            dependencies.contains_key(required),
+            "agent-doc-project-config-io should depend on {required} for project config IO"
+        );
+    }
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-project-config-io must stay free of core, orchestration, git, editor IPC, sqlite, and tmux-router dependencies"
+        );
     }
 
     let closeout_guards = fs::read_to_string(

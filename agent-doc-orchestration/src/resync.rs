@@ -101,7 +101,8 @@ use agent_doc_controller::dispatch::is_stash_window_name;
 use agent_doc_frontmatter::frontmatter;
 use tmux_router::{PaneMoveOp, Tmux};
 
-use crate::{frontmatter_io, project_config_io};
+use crate::frontmatter_io;
+use agent_doc_project_config_io as project_config_io;
 
 /// Valid process names for agent-doc panes.
 const AGENT_PROCESSES: &[&str] = &["agent-doc", "claude", "codex", "node"];
@@ -1627,7 +1628,7 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
 /// `#stash-session-ttl-prune`: query live tmux state, build candidates, and
 /// either log report-only or kill idle stash panes that exceed the configured TTL.
 fn apply_stash_ttl_prune(tmux: &Tmux) {
-    let config = crate::project_config_io::load_project();
+    let config = agent_doc_project_config_io::load_project();
     let ttl_secs = config.stash_session_ttl_secs;
     if ttl_secs == 0 {
         return;

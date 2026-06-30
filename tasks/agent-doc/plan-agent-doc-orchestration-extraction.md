@@ -501,7 +501,13 @@ should be deleted during extraction.
   projection, and review open/gated counts. Write-side pending checks,
   cycle-state checkpoint normalization, preflight, and ops-proof keep file IO,
   persisted-cycle state, baselines, snapshot reconciliation, ops-log emission,
-  and guard formatting while calling the focused backlog parser directly.
+  and guard formatting while calling the focused backlog parser directly. It
+  now also owns completed tracked-item projection used by preflight and
+  session-check: body-level completed item extraction, document/component-level
+  tracked-item scanning, completed-item reference formatting, and the
+  parse-error-aware no-completed-items guard. Preflight and session-check keep
+  phase-specific interruption wording and effect-derived content/component
+  sources while calling the focused backlog helpers directly.
 - `agent-doc-turn` now owns committed-without-response-body closeout policy:
   detecting assistant `### Re:` response bodies in `agent:exchange` and deciding
   whether committed cycles with no visible response body pass, skip as no-op

@@ -1,4 +1,4 @@
-//! # Module: pending_cmd
+//! # Module: backlog_cmd
 //!
 //! CLI subcommands for managing tracked work components.
 //!
@@ -16,7 +16,6 @@ use std::cell::Cell;
 use std::collections::HashSet;
 use std::path::Path;
 
-use crate::snapshot;
 use agent_doc_element::element;
 use agent_doc_element::element::is_backlog_component;
 use agent_doc_element_backlog::backlog;
@@ -107,15 +106,8 @@ fn tracked_work_id_already_resolved(file: &Path, id: &str) -> Result<bool> {
     backlog::content_has_resolved_tracked_work_id(&content, &id)
 }
 
-/// Compute a stable document id from a file path. Uses `snapshot::doc_hash` so
-/// the id is consistent across pending ops and backfill.
-pub fn doc_id_for(file: &Path) -> String {
-    let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-    snapshot::doc_hash(&canonical).unwrap_or_else(|_| file.display().to_string())
-}
-
 fn canonicalize_component_content(file: &Path, content: &str) -> String {
-    let doc_id = doc_id_for(file);
+    let doc_id = agent_doc_hash::document_id_for_path(file);
     let (canonical, _) = backlog::backfill(content, &doc_id, &HashSet::new());
     canonical
 }
@@ -170,7 +162,7 @@ pub fn add(file: &Path, item: &str, gated: bool) -> Result<()> {
     let (full_content, comp) = find_pending_component(file)?;
     reject_colliding_explicit_id(&full_content, item)?;
     let existing = &full_content[comp.open_end..comp.close_start];
-    let doc_id = doc_id_for(file);
+    let doc_id = agent_doc_hash::document_id_for_path(file);
     let outcome = backlog::op_add_with_outcome(existing, item, &doc_id, gated)?;
     let canonical = canonicalize_component_content(file, &outcome.body);
     let new_doc = comp.replace_content(&full_content, &canonical);
@@ -210,7 +202,7 @@ fn add_many_to_list(
         let (full_content, comp) = find_tracked_list_component(file, list)?;
         reject_colliding_explicit_id(&full_content, item)?;
         let existing = &full_content[comp.open_end..comp.close_start];
-        let doc_id = doc_id_for(file);
+        let doc_id = agent_doc_hash::document_id_for_path(file);
         let outcome = backlog::op_add_with_outcome(existing, item, &doc_id, gated)?;
         let canonical = canonicalize_component_content(file, &outcome.body);
         let new_doc = comp.replace_content(&full_content, &canonical);
@@ -245,7 +237,7 @@ fn add_at_to_list(
     let (full_content, comp) = find_tracked_list_component(file, list)?;
     reject_colliding_explicit_id(&full_content, item)?;
     let existing = &full_content[comp.open_end..comp.close_start];
-    let doc_id = doc_id_for(file);
+    let doc_id = agent_doc_hash::document_id_for_path(file);
     let outcome = backlog::op_add_at_with_outcome(existing, item, &doc_id, false, position)?;
     let canonical = canonicalize_component_content(file, &outcome.body);
     let new_doc = comp.replace_content(&full_content, &canonical);
@@ -330,7 +322,7 @@ pub fn add_ungate_tasks_for_review(file: &Path) -> Result<UngateTasksReport> {
 fn backfill_list(file: &Path, list: backlog::TrackedWorkList) -> Result<()> {
     let (full_content, comp) = find_tracked_list_component(file, list)?;
     let existing = &full_content[comp.open_end..comp.close_start];
-    let doc_id = doc_id_for(file);
+    let doc_id = agent_doc_hash::document_id_for_path(file);
     let (new_content, changed) = backlog::backfill(existing, &doc_id, &HashSet::new());
     if !changed {
         eprintln!("[{}] already canonical — no changes", list.label());
@@ -422,7 +414,7 @@ pub fn review_add(file: &Path, item: &str) -> Result<Option<String>> {
     let full_content = std::fs::read_to_string(file).context("failed to read document")?;
     let (full_content, comp) = ensure_review_component_in_document(&full_content)?;
     let existing = &full_content[comp.open_end..comp.close_start];
-    let doc_id = doc_id_for(file);
+    let doc_id = agent_doc_hash::document_id_for_path(file);
     let outcome = backlog::op_add_with_outcome(existing, item, &doc_id, true)?;
     let canonical = canonicalize_component_content(file, &outcome.body);
     let new_doc = comp.replace_content(&full_content, &canonical);
@@ -455,7 +447,11 @@ pub fn review_edit(file: &Path, id: &str, text: &str) -> Result<()> {
 /// document has no review component or no item matches the id.
 pub fn review_remove(file: &Path, id: &str) -> Result<()> {
     let full_content = std::fs::read_to_string(file).context("failed to read document")?;
-    let plan = remove_review_items_from_document(&full_content, id, &doc_id_for(file))?;
+    let plan = remove_review_items_from_document(
+        &full_content,
+        id,
+        &agent_doc_hash::document_id_for_path(file),
+    )?;
     persist_pending_write(file, &full_content, &plan.content)?;
     eprintln!(
         "[pending] review-remove: removed {} entr{} for #{}",
@@ -473,7 +469,11 @@ pub fn review_remove(file: &Path, id: &str) -> Result<()> {
 /// no item matches the id.
 pub fn review_resolve(file: &Path, id: &str) -> Result<()> {
     let full_content = std::fs::read_to_string(file).context("failed to read document")?;
-    let plan = resolve_review_items_in_document(&full_content, id, &doc_id_for(file))?;
+    let plan = resolve_review_items_in_document(
+        &full_content,
+        id,
+        &agent_doc_hash::document_id_for_path(file),
+    )?;
     let archived = crate::preflight::archive_pending_done(file, &plan.content, &plan.removed)
         .context("failed to archive resolved review item(s) to agent:done")?
         .unwrap_or(plan.content);
@@ -646,7 +646,7 @@ pub fn icebox_reorder(file: &Path, ids: &[String]) -> Result<()> {
 fn reap_list(file: &Path, list: backlog::TrackedWorkList) -> Result<()> {
     let (full_content, comp) = find_tracked_list_component(file, list)?;
     let existing = &full_content[comp.open_end..comp.close_start];
-    let doc_id = doc_id_for(file);
+    let doc_id = agent_doc_hash::document_id_for_path(file);
     let (canonical_content, changed) = backlog::backfill(existing, &doc_id, &HashSet::new());
     let (new_content, removed_items) = backlog::reap_with_items(&canonical_content)?;
     let removed: Vec<String> = removed_items.iter().map(|item| item.id.clone()).collect();

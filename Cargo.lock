@@ -298,6 +298,7 @@ version = "0.34.65"
 dependencies = [
  "hex",
  "sha2 0.11.0",
+ "tempfile",
 ]
 
 [[package]]

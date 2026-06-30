@@ -755,7 +755,7 @@ fn repair_completed_backlog_items(file: &Path) -> Result<RepairOutcome> {
         return Ok(RepairOutcome::Noop);
     };
 
-    let doc_id = crate::pending_cmd::doc_id_for(file);
+    let doc_id = agent_doc_hash::document_id_for_path(file);
     let (canonical_body, _) = agent_doc_element_backlog::backlog::backfill(
         backlog.content(&content),
         &doc_id,

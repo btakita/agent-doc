@@ -6661,9 +6661,23 @@ fn test_agent_doc_element_review_owns_review_projection_and_ungate_planning() {
         );
     }
 
-    let pending_cmd =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/pending_cmd.rs"))
+    let backlog_cmd =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/backlog_cmd.rs"))
             .unwrap();
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/pending_cmd.rs")
+            .exists(),
+        "orchestration must not keep a pending_cmd compatibility module"
+    );
+    assert!(
+        orchestration_lib.contains("pub mod backlog_cmd;")
+            && !orchestration_lib.contains("pub mod pending_cmd")
+            && !orchestration_lib.contains("pub use backlog_cmd as pending_cmd"),
+        "orchestration should expose backlog_cmd directly without a pending_cmd alias"
+    );
     for forbidden in [
         "pub struct ReviewItemView",
         "pub struct ReviewListFilter",
@@ -6678,27 +6692,27 @@ fn test_agent_doc_element_review_owns_review_projection_and_ungate_planning() {
         "item.state = backlog::PendingState::Done",
     ] {
         assert!(
-            !pending_cmd.contains(forbidden),
-            "pending_cmd must stay a file-IO adapter, not a review projection/planning facade"
+            !backlog_cmd.contains(forbidden),
+            "backlog_cmd must stay a file-IO adapter, not a review projection/planning facade"
         );
     }
     assert!(
-        pending_cmd.contains("find_review_component_in_content")
-            && pending_cmd.contains("ensure_review_component_in_document"),
-        "pending_cmd should call review component helpers from agent-doc-element-review"
+        backlog_cmd.contains("find_review_component_in_content")
+            && backlog_cmd.contains("ensure_review_component_in_document"),
+        "backlog_cmd should call review component helpers from agent-doc-element-review"
     );
     assert!(
-        pending_cmd.contains("remove_review_items_from_document")
-            && pending_cmd.contains("resolve_review_items_in_document"),
-        "pending_cmd should delegate review removal/resolve planning to agent-doc-element-review directly"
+        backlog_cmd.contains("remove_review_items_from_document")
+            && backlog_cmd.contains("resolve_review_items_in_document"),
+        "backlog_cmd should delegate review removal/resolve planning to agent-doc-element-review directly"
     );
     assert!(
-        pending_cmd.contains("agent_doc_element_review::review_item_views_from_content"),
-        "pending_cmd should delegate review projection to agent-doc-element-review directly"
+        backlog_cmd.contains("agent_doc_element_review::review_item_views_from_content"),
+        "backlog_cmd should delegate review projection to agent-doc-element-review directly"
     );
     assert!(
-        pending_cmd.contains("agent_doc_element_review::plan_ungate_tasks_for_review"),
-        "pending_cmd should delegate review ungate planning to agent-doc-element-review directly"
+        backlog_cmd.contains("agent_doc_element_review::plan_ungate_tasks_for_review"),
+        "backlog_cmd should delegate review ungate planning to agent-doc-element-review directly"
     );
 
     let cli = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
@@ -6730,8 +6744,8 @@ fn test_agent_doc_element_backlog_owns_tracked_line_remove_and_prune_policy() {
         );
     }
 
-    let pending_cmd =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/pending_cmd.rs"))
+    let backlog_cmd =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/backlog_cmd.rs"))
             .unwrap();
     for forbidden in [
         "enum TrackedWorkList",
@@ -6745,22 +6759,22 @@ fn test_agent_doc_element_backlog_owns_tracked_line_remove_and_prune_policy() {
         ".filter(|line| !line_is_legacy_done_item(line))",
     ] {
         assert!(
-            !pending_cmd.contains(forbidden),
-            "pending_cmd must stay a file-IO adapter, not a tracked line remove/prune facade"
+            !backlog_cmd.contains(forbidden),
+            "backlog_cmd must stay a file-IO adapter, not a tracked line remove/prune facade"
         );
     }
     assert!(
-        pending_cmd.contains("backlog::find_tracked_work_component_in_content")
-            && pending_cmd.contains("backlog::find_open_tracked_work_component_in_content")
-            && pending_cmd.contains("backlog::open_tracked_work_component_name_in_content")
-            && pending_cmd.contains("backlog::content_has_resolved_tracked_work_id")
-            && pending_cmd.contains("backlog::TrackedWorkList"),
-        "pending_cmd should call tracked-work component lookup helpers from agent-doc-element-backlog"
+        backlog_cmd.contains("backlog::find_tracked_work_component_in_content")
+            && backlog_cmd.contains("backlog::find_open_tracked_work_component_in_content")
+            && backlog_cmd.contains("backlog::open_tracked_work_component_name_in_content")
+            && backlog_cmd.contains("backlog::content_has_resolved_tracked_work_id")
+            && backlog_cmd.contains("backlog::TrackedWorkList"),
+        "backlog_cmd should call tracked-work component lookup helpers from agent-doc-element-backlog"
     );
     assert!(
-        pending_cmd.contains("backlog::op_remove_matching_tracked_line")
-            && pending_cmd.contains("backlog::op_prune_legacy_done_lines"),
-        "pending_cmd should call tracked line remove/prune policy from agent-doc-element-backlog"
+        backlog_cmd.contains("backlog::op_remove_matching_tracked_line")
+            && backlog_cmd.contains("backlog::op_prune_legacy_done_lines"),
+        "backlog_cmd should call tracked line remove/prune policy from agent-doc-element-backlog"
     );
 }
 
@@ -7078,8 +7092,11 @@ fn test_agent_doc_hash_owns_sha256_content_policy() {
     assert!(
         hash_source.contains("pub fn content_hash(")
             && hash_source.contains("pub fn bytes_hash(")
+            && hash_source.contains("pub fn path_hash(")
+            && hash_source.contains("pub fn path_string_hash(")
+            && hash_source.contains("pub fn document_id_for_path(")
             && hash_source.contains("Sha256::new()"),
-        "agent-doc-hash must own the shared SHA-256 hex implementation"
+        "agent-doc-hash must own shared SHA-256 hex and path-derived document-id policy"
     );
 
     let debounce_manifest =
@@ -7107,12 +7124,18 @@ fn test_agent_doc_hash_owns_sha256_content_policy() {
     for relative in [
         "agent-doc-orchestration/src/ops_log.rs",
         "agent-doc-orchestration/src/op_capture.rs",
+        "agent-doc-orchestration/src/backlog_cmd.rs",
+        "agent-doc-orchestration/src/graph.rs",
+        "agent-doc-orchestration/src/snapshot.rs",
         "agent-doc-debounce/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         for forbidden in [
             "pub fn content_hash(",
             "fn content_hash(",
+            "pub fn doc_id_for(",
+            "fn doc_id_for(",
+            "fn hash_path_str(",
             "use sha2::",
             "hex::encode(",
             "pub use agent_doc_hash",
@@ -7148,6 +7171,11 @@ fn test_agent_doc_hash_owns_sha256_content_policy() {
                 "ops_log::content_hash",
                 "op_capture::content_hash",
                 "agent_doc_debounce::content_hash",
+                "pending_cmd::doc_id_for",
+                "crate::pending_cmd::doc_id_for",
+                "agent_doc_orchestration::pending_cmd",
+                "backlog_cmd::doc_id_for",
+                "crate::backlog_cmd::doc_id_for",
             ] {
                 assert!(
                     !source.contains(forbidden),
@@ -7303,7 +7331,7 @@ fn test_agent_doc_document_owns_status_projection_policy() {
     for relative in [
         "agent-doc-orchestration/src/compact.rs",
         "agent-doc-orchestration/src/repair.rs",
-        "agent-doc-orchestration/src/pending_cmd.rs",
+        "agent-doc-orchestration/src/backlog_cmd.rs",
         "agent-doc-orchestration/src/preflight/maintenance.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();

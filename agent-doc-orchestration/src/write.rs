@@ -1615,7 +1615,7 @@ fn enforce_review_done_guard(file: &Path, id: &str) -> Result<()> {
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(());
     }
-    let Some(component_name) = crate::pending_cmd::open_item_component_name(file, id)? else {
+    let Some(component_name) = crate::backlog_cmd::open_item_component_name(file, id)? else {
         return Ok(());
     };
     if agent_doc_element::element::is_review_component(&component_name) {
@@ -1856,29 +1856,29 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     }
 
     if has_pending_ops {
-        crate::pending_cmd::with_force_disk_pending_writes(options.force_disk, || {
+        crate::backlog_cmd::with_force_disk_pending_writes(options.force_disk, || {
             let pending_kept_open_ids = pending_kept_open_ids_from_options(&options);
             if options.pending_clear {
-                crate::pending_cmd::clear(file)?;
+                crate::backlog_cmd::clear(file)?;
             }
             if options.icebox_clear {
-                crate::pending_cmd::icebox_clear(file)?;
+                crate::backlog_cmd::icebox_clear(file)?;
             }
             // `#opsproof-samecycle-add`: track ids added this cycle so post-commit
             // ops-proof auto-completion never reaps a brand-new same-cycle add.
             let mut same_cycle_added_ids: Vec<String> =
-                crate::pending_cmd::add_many(file, &options.pending_add, false)?;
+                crate::backlog_cmd::add_many(file, &options.pending_add, false)?;
             let pending_add_targets = grouped_pending_add_to(&options.pending_add_to)?;
             for (target, items) in &pending_add_targets {
                 ensure_pending_add_target(target)?;
-                crate::pending_cmd::add_many(target, items, false).with_context(|| {
+                crate::backlog_cmd::add_many(target, items, false).with_context(|| {
                     format!(
                         "failed to apply --backlog-add-to target {}",
                         target.display()
                     )
                 })?;
             }
-            same_cycle_added_ids.extend(crate::pending_cmd::add_many(
+            same_cycle_added_ids.extend(crate::backlog_cmd::add_many(
                 file,
                 &options.pending_add_gated,
                 true,
@@ -1887,7 +1887,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             // the front-insert default so anchor ids added this same cycle resolve.
             for pair in options.pending_add_after.chunks(2) {
                 if let [anchor, text] = pair {
-                    let id = crate::pending_cmd::add_after(file, anchor, text)
+                    let id = crate::backlog_cmd::add_after(file, anchor, text)
                         .with_context(|| format!("failed to apply --backlog-add-after {anchor}"))?;
                     same_cycle_added_ids.push(id);
                 } else {
@@ -1897,7 +1897,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             for pair in options.pending_add_before.chunks(2) {
                 if let [anchor, text] = pair {
                     let id =
-                        crate::pending_cmd::add_before(file, anchor, text).with_context(|| {
+                        crate::backlog_cmd::add_before(file, anchor, text).with_context(|| {
                             format!("failed to apply --backlog-add-before {anchor}")
                         })?;
                     same_cycle_added_ids.push(id);
@@ -1906,15 +1906,15 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                 }
             }
             for text in &options.pending_add_back {
-                same_cycle_added_ids.push(crate::pending_cmd::add_back(file, text)?);
+                same_cycle_added_ids.push(crate::backlog_cmd::add_back(file, text)?);
             }
-            same_cycle_added_ids.extend(crate::pending_cmd::icebox_add_many(
+            same_cycle_added_ids.extend(crate::backlog_cmd::icebox_add_many(
                 file,
                 &options.icebox_add,
             )?);
             for pair in options.icebox_add_after.chunks(2) {
                 if let [anchor, text] = pair {
-                    let id = crate::pending_cmd::icebox_add_after(file, anchor, text)
+                    let id = crate::backlog_cmd::icebox_add_after(file, anchor, text)
                         .with_context(|| format!("failed to apply --icebox-add-after {anchor}"))?;
                     same_cycle_added_ids.push(id);
                 } else {
@@ -1923,7 +1923,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             }
             for pair in options.icebox_add_before.chunks(2) {
                 if let [anchor, text] = pair {
-                    let id = crate::pending_cmd::icebox_add_before(file, anchor, text)
+                    let id = crate::backlog_cmd::icebox_add_before(file, anchor, text)
                         .with_context(|| format!("failed to apply --icebox-add-before {anchor}"))?;
                     same_cycle_added_ids.push(id);
                 } else {
@@ -1931,7 +1931,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                 }
             }
             for text in &options.icebox_add_back {
-                same_cycle_added_ids.push(crate::pending_cmd::icebox_add_back(file, text)?);
+                same_cycle_added_ids.push(crate::backlog_cmd::icebox_add_back(file, text)?);
             }
             if !options.pending_add.is_empty()
                 || !options.pending_add_to.is_empty()
@@ -1952,14 +1952,14 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             }
             if !options.pending_edit.is_empty() {
                 let edits = parse_tracked_work_edits(&options.pending_edit, "--backlog-edit")?;
-                crate::pending_cmd::edit_many(file, &edits)?;
+                crate::backlog_cmd::edit_many(file, &edits)?;
             }
             if !options.icebox_edit.is_empty() {
                 let edits = parse_tracked_work_edits(&options.icebox_edit, "--icebox-edit")?;
-                crate::pending_cmd::icebox_edit_many(file, &edits)?;
+                crate::backlog_cmd::icebox_edit_many(file, &edits)?;
             }
             for id in &options.pending_gate {
-                crate::pending_cmd::gate(file, id)?;
+                crate::backlog_cmd::gate(file, id)?;
             }
             if !options.pending_gate.is_empty() {
                 crate::cycle_state::record_pending_gated_ids(file, &options.pending_gate)?;
@@ -1968,7 +1968,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                 let (id, gt) = pair.split_once('=').with_context(|| {
                     format!("--backlog-set-gate-type expects 'id=type', got: {}", pair)
                 })?;
-                crate::pending_cmd::set_gate_type(file, id, gt)?;
+                crate::backlog_cmd::set_gate_type(file, id, gt)?;
             }
             for pair in &options.pending_set_verify {
                 let (id, spec) = pair.split_once('=').with_context(|| {
@@ -1977,11 +1977,11 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                         pair
                     )
                 })?;
-                crate::pending_cmd::set_gate_verify(file, id, spec)?;
+                crate::backlog_cmd::set_gate_verify(file, id, spec)?;
             }
             let mut review_added_ids: Vec<String> = Vec::new();
             for value in &options.review_add {
-                if let Some(id) = crate::pending_cmd::review_add(file, value)? {
+                if let Some(id) = crate::backlog_cmd::review_add(file, value)? {
                     review_added_ids.push(id);
                 }
             }
@@ -1994,23 +1994,23 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                 let (id, text) = pair
                     .split_once('=')
                     .with_context(|| format!("--review-edit expects 'id=text', got: {}", pair))?;
-                crate::pending_cmd::review_edit(file, id, text)?;
+                crate::backlog_cmd::review_edit(file, id, text)?;
             }
             for id in &options.review_resolve {
-                crate::pending_cmd::review_resolve(file, id)?;
+                crate::backlog_cmd::review_resolve(file, id)?;
             }
             for id in &options.review_remove {
-                crate::pending_cmd::review_remove(file, id)?;
+                crate::backlog_cmd::review_remove(file, id)?;
             }
             for id in &options.pending_ungate {
-                crate::pending_cmd::ungate(file, id)?;
+                crate::backlog_cmd::ungate(file, id)?;
             }
             for gt in &options.pending_resolve_gate {
-                crate::pending_cmd::resolve_gate(file, gt)?;
+                crate::backlog_cmd::resolve_gate(file, gt)?;
             }
             for id in &options.pending_done {
                 enforce_review_done_guard(file, id)?;
-                crate::pending_cmd::done(file, id)?;
+                crate::backlog_cmd::done(file, id)?;
             }
             if !options.pending_done.is_empty() {
                 crate::cycle_state::record_pending_done_ids(file, &options.pending_done)?;
@@ -2022,7 +2022,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
                     .collect();
-                crate::pending_cmd::reorder(file, &ids)?;
+                crate::backlog_cmd::reorder(file, &ids)?;
             }
             if let Some(ref order) = options.icebox_reorder {
                 let ids: Vec<String> = order
@@ -2030,7 +2030,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
                     .collect();
-                crate::pending_cmd::icebox_reorder(file, &ids)?;
+                crate::backlog_cmd::icebox_reorder(file, &ids)?;
             }
             if !pending_kept_open_ids.is_empty() {
                 crate::cycle_state::record_pending_kept_open_ids(file, &pending_kept_open_ids)?;

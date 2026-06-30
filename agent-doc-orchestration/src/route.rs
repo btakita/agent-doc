@@ -657,7 +657,7 @@ struct RouteDispatchBugReportFacts<'a> {
 
 fn file_route_dispatch_bug_report(facts: RouteDispatchBugReportFacts<'_>) {
     let document_display = facts.file.display().to_string();
-    let document_id = crate::pending_cmd::doc_id_for(facts.file);
+    let document_id = agent_doc_hash::document_id_for_path(facts.file);
     let editor_attempt_id = editor_route_attempt_id();
     let dispatch_proof_state = facts.proof.map(|proof| proof.dispatch_stage_label());
     let diagnostic_path = facts.diagnostic_path.map(|path| path.display().to_string());
@@ -716,9 +716,9 @@ fn file_route_dispatch_bug_report(facts: RouteDispatchBugReportFacts<'_>) {
         }
     };
     let items = [item];
-    match crate::pending_cmd::with_force_disk_pending_writes(
+    match crate::backlog_cmd::with_force_disk_pending_writes(
         FORCE_DISK_ROUTE_WRITES.with(Cell::get),
-        || crate::pending_cmd::add_many(&target_file, &items, false),
+        || crate::backlog_cmd::add_many(&target_file, &items, false),
     ) {
         Ok(ids) => {
             let id = ids

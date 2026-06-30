@@ -207,7 +207,7 @@ impl RunContext {
             let cp = canonical_path;
             move |ctx: &Context| -> String {
                 let canonical: PathBuf = ctx.get(&cp);
-                hash_path_str(&canonical.to_string_lossy())
+                agent_doc_hash::path_string_hash(&canonical.to_string_lossy())
             }
         });
 
@@ -613,10 +613,6 @@ impl SshContextValue {
             file_display,
         }
     }
-}
-
-fn hash_path_str(path: &str) -> String {
-    agent_doc_hash::content_hash(path)
 }
 
 pub struct ActorContext {

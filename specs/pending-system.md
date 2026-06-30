@@ -353,7 +353,7 @@ Indented child task lines are canonicalized when they look like list items: the 
    - `--backlog-reorder <ids>`
    - `PendingState` enum: `Open | Gated | Done`. Parser accepts `[ ] | [/] | [x]`; renderer emits the reverse.
    - Hash generation helper in `src/pending.rs`.
-   - State transition validation (see matrix above) enforced at the `pending_cmd` layer.
+   - State transition validation (see matrix above) enforced at the `backlog_cmd` layer.
    - Enforcement: reject `replace:pending` (and deprecated `patch:pending`) blocks in parsed patches.
 
 2. **Rust — preflight** (`src/preflight.rs`):

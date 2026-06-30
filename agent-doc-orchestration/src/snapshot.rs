@@ -106,8 +106,8 @@ const CRDT_DIR: &str = ".agent-doc/crdt";
 /// Compute the SHA256 hex hash of a document's canonical path.
 /// Used for both snapshot filenames and lock filenames.
 pub fn doc_hash(doc: &Path) -> Result<String> {
-    let canonical = doc.canonicalize()?;
-    Ok(hash_path_str(&canonical.to_string_lossy()))
+    agent_doc_hash::path_hash(doc)
+        .with_context(|| format!("canonicalize document path for hash: {}", doc.display()))
 }
 
 /// Compute the SHA256 hex hash from an absolute path string.
@@ -115,11 +115,7 @@ pub fn doc_hash(doc: &Path) -> Result<String> {
 /// Unlike [`doc_hash`], this does not call `canonicalize()` and therefore works
 /// for paths that no longer exist on disk (e.g., the old path after a rename).
 pub fn doc_hash_from_str(absolute_path: &str) -> String {
-    hash_path_str(absolute_path)
-}
-
-fn hash_path_str(path: &str) -> String {
-    agent_doc_hash::content_hash(path)
+    agent_doc_hash::path_string_hash(absolute_path)
 }
 
 /// Compute the advisory lock file path for a given document.

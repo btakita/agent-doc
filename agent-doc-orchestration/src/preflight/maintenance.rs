@@ -1434,7 +1434,7 @@ fn record_selected_queue_head_state(
     let Some(node_key) = selected_queue_head_node_key(content, head_text) else {
         return Ok(());
     };
-    let document_hash = crate::pending_cmd::doc_id_for(&canonical);
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
     let content_hash = agent_doc_hash::content_hash(head_text);
     let event = crate::state_backbone::StateEvent::new(
         format!("queue-head-selected:{document_hash}:{node_key}:0:{content_hash}"),
@@ -1481,7 +1481,7 @@ fn record_deferred_queue_head_state(
     let Some(node_key) = selected_queue_head_node_key(content, head_text) else {
         return Ok(());
     };
-    let document_hash = crate::pending_cmd::doc_id_for(&canonical);
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
     let content_hash = agent_doc_hash::content_hash(head_text);
     let selected_event = crate::state_backbone::StateEvent::new(
         format!("queue-head-deferred-selected:{document_hash}:{node_key}:0:{content_hash}"),
@@ -1623,7 +1623,7 @@ fn record_queue_worklist_state(
     let Some(project_root) = agent_doc_fs::find_project_root(&canonical) else {
         return Ok(());
     };
-    let document_hash = crate::pending_cmd::doc_id_for(&canonical);
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
     let queue_hash = queue_worklist_hash(entries);
     let worklist_entries = if active {
         queue_worklist_entries(content, entries)
@@ -5052,7 +5052,7 @@ mod tests {
             .find(|node| !node.item.struck)
             .expect("deferred queue head should retain a node key")
             .node_key;
-        let document_hash = crate::pending_cmd::doc_id_for(&doc);
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
         let ledger = crate::project_controller::load_state_event_ledger(dir.path()).unwrap();
         let projection = ledger
             .project_document(&document_hash)
@@ -5379,7 +5379,7 @@ mod tests {
             .find(|node| !node.item.struck)
             .expect("active queue head should have a node key")
             .node_key;
-        let document_hash = crate::pending_cmd::doc_id_for(&doc);
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
         let ledger = crate::project_controller::load_state_event_ledger(dir.path()).unwrap();
         let projection = ledger
             .project_document(&document_hash)
@@ -5456,7 +5456,7 @@ mod tests {
             .find(|node| node.item.text.contains("#ready"))
             .expect("ready queue head should have a node key")
             .node_key;
-        let document_hash = crate::pending_cmd::doc_id_for(&doc);
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
         let ledger = crate::project_controller::load_state_event_ledger(dir.path()).unwrap();
         let projection = ledger
             .project_document(&document_hash)
@@ -5545,7 +5545,7 @@ mod tests {
             .expect("ship queue head should have a node key")
             .node_key
             .clone();
-        let document_hash = crate::pending_cmd::doc_id_for(&doc);
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
         let ledger = crate::project_controller::load_state_event_ledger(dir.path()).unwrap();
         let projection = ledger
             .project_document(&document_hash)

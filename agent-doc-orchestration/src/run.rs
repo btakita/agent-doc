@@ -2349,7 +2349,7 @@ mod tests {
             .find(|node| !node.item.struck)
             .expect("queue head should have a node key")
             .node_key;
-        let document_hash = crate::pending_cmd::doc_id_for(&doc);
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
         let event = crate::state_backbone::StateEvent::new(
             "typed-selected-head",
             crate::state_backbone::StateFact::QueueHeadSelected {
@@ -2398,7 +2398,7 @@ mod tests {
             .find(|node| !node.item.struck)
             .expect("queue head should have a node key")
             .node_key;
-        let document_hash = crate::pending_cmd::doc_id_for(&doc);
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
         let selected = crate::state_backbone::StateEvent::new(
             "typed-selected-before-deferred",
             crate::state_backbone::StateFact::QueueHeadSelected {

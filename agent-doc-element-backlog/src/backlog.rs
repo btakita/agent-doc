@@ -10,7 +10,7 @@
 //! Canonical unordered form: `- [ ] [#a3f2] refactor preflight commit path`
 //! Canonical ordered form: `1. [ ] [#a3f2] refactor preflight commit path`
 //!
-//! This module is I/O-free. Callers (`pending_cmd.rs`, `preflight.rs`, `write.rs`)
+//! This module is I/O-free. Callers (`backlog_cmd.rs`, `preflight.rs`, `write.rs`)
 //! handle reading/writing files, locking, and git commits.
 //!
 //! ## Spec
@@ -2803,7 +2803,7 @@ pub fn op_add_at_with_outcome(
 }
 
 /// Mark an item `[x]` by id. Phase 1: state-machine validation lives in
-/// the upcoming `pending_cmd` layer; this primitive forces Done unconditionally.
+/// the upcoming `backlog_cmd` layer; this primitive forces Done unconditionally.
 pub fn op_done(body: &str, id: &str) -> Result<String> {
     let id = normalize_pending_id(id);
     let mut found = false;

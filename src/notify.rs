@@ -49,7 +49,7 @@ use std::process::Command;
 use agent_doc_element::element::{self, is_backlog_component};
 use agent_doc_element_backlog::backlog;
 use agent_doc_orchestration::graph::RunContext;
-use agent_doc_orchestration::{pending_cmd, snapshot};
+use agent_doc_orchestration::snapshot;
 
 /// Format an ISO-8601 timestamp using the system `date` command.
 fn iso_timestamp() -> String {
@@ -177,7 +177,7 @@ pub fn run(
         }
 
         // Add backlog items
-        let doc_id = pending_cmd::doc_id_for(file);
+        let doc_id = agent_doc_hash::document_id_for_path(file);
         for item in pending_add.iter().rev() {
             match add_pending_item(file, item, &doc_id, false) {
                 Ok(id) => eprintln!("[notify] added backlog item #{}", id),

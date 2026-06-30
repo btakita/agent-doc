@@ -273,7 +273,7 @@ pub(crate) fn record_queue_consumption_proofs(
 }
 
 fn queue_state_document_hash(file: &Path) -> String {
-    crate::pending_cmd::doc_id_for(file)
+    agent_doc_hash::document_id_for_path(file)
 }
 
 struct QueueConsumptionStateEvent<'a> {

@@ -328,7 +328,7 @@ pub fn normalize_backlog_patch_response(
             .collect();
 
     let backlog_index = backlog_indexes[0];
-    let doc_id = crate::pending_cmd::doc_id_for(file);
+    let doc_id = agent_doc_hash::document_id_for_path(file);
     let (mut target_body, _) = agent_doc_element_backlog::backlog::backfill(
         &patches[backlog_index].content,
         &doc_id,

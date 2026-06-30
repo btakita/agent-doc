@@ -2909,6 +2909,49 @@ mod submodule_patch_routing_tests {
     }
 
     #[test]
+    fn already_applied_without_response_in_content_ours_falls_back() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        for subdir in ["snapshots", "crdt", "logs", "state/cycles"] {
+            fs::create_dir_all(root.join(".agent-doc").join(subdir)).unwrap();
+        }
+        let doc = root.join("session.md");
+        let baseline = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let content_ours = baseline;
+        fs::write(&doc, baseline).unwrap();
+        crate::snapshot::save(&doc, baseline).unwrap();
+
+        let outcome = persist_already_applied_socket_content_ours_snapshot(
+            &doc,
+            "already-applied-missing-response",
+            None,
+            Some(baseline),
+            Some(content_ours),
+            None,
+            "### Re: Please reply — gpt-5\n\nAnswered.\n",
+        )
+        .unwrap();
+
+        assert_eq!(outcome, AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+        assert_eq!(
+            crate::snapshot::load(&doc).unwrap().as_deref(),
+            Some(baseline),
+            "response-less already_applied content_ours must not replace the snapshot"
+        );
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("already_applied_snapshot_missing_response")
+                && log.contains("ipc_proof_insufficient")
+                && !log.contains("ipc_socket_already_applied_snapshot"),
+            "response-less already_applied should fail proof and fall back:\n{log}"
+        );
+    }
+
+    #[test]
     fn socket_ack_content_prompt_duplication_fails_closed_without_editor_repair() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().canonicalize().unwrap();

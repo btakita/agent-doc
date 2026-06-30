@@ -1521,6 +1521,30 @@ pub(crate) fn persist_already_applied_socket_content_ours_snapshot(
         }
     }
 
+    let response_present_in_snapshot = expected_response.trim().is_empty()
+        || response_materialized_in_content(expected_response, &repair_decision.snapshot_content)
+        || baseline.is_some_and(|base| {
+            response_already_in_current(base, ours, &repair_decision.snapshot_content)
+        });
+    if !response_present_in_snapshot {
+        log_ipc_proof_failure(
+            file,
+            "socket_already_applied",
+            Some(patch_id),
+            "already_applied_snapshot_missing_response",
+            "file_ipc_fallback",
+            &format!(
+                "response_sha256={} snapshot_len={} snapshot_hash={} content_ours_len={} content_ours_hash={}",
+                agent_doc_hash::content_hash(expected_response),
+                repair_decision.snapshot_content.len(),
+                agent_doc_hash::content_hash(&repair_decision.snapshot_content),
+                ours.len(),
+                agent_doc_hash::content_hash(ours)
+            ),
+        );
+        return Ok(AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+    }
+
     repair_ipc_decision_visible_state(file, &repair_decision, Some(patch_id))?;
     if repair_decision.snap_source.is_ack_content_proven() {
         mark_ack_content_live_buffer_synced(

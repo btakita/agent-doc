@@ -6,6 +6,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.34.65
 
+- **Socket `already_applied` now requires response materialization proof.**
+  The already-applied IPC path no longer saves `content_ours` as the committed
+  snapshot unless the expected response is actually present in the selected
+  snapshot. Response-less already-applied claims now fall back to file IPC
+  instead of closing from a prompt-only editor buffer.
+
 - **Synced editor-visible snapshots can commit while disk still lags.**
   The stale-disk commit guard now distinguishes "commit from stale disk" from
   "stage the synced editor-visible snapshot". When an operator-authority

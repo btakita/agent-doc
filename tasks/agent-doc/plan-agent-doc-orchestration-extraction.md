@@ -398,6 +398,9 @@ focused crate under the old path.
   and proof-payload joining. Project-controller RPC still gathers file-backed
   proof facts, but it no longer keeps local parser/formatter helpers for that
   pure payload policy.
+- `agent-doc-supervisor::config` now owns the pure agent-doc dogfood session
+  path policy used by supervisor auto-install. Project-controller RPC keeps only
+  canonicalization, project-root discovery, Cargo.toml validation, and file IO.
 - `agent-doc-element-backlog` already owned open backlog id extraction; preflight
   now calls `open_backlog_ids_in_content` directly for `do #id` closeout
   evidence instead of re-parsing backlog components locally.

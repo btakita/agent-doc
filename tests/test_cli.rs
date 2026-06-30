@@ -4349,6 +4349,7 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
         "pub fn render_document_section(",
         "pub fn format_active_format_requirements(",
         "pub fn render_full_document_section(",
+        "pub fn render_remote_host_scope(",
         "pub fn render_bounded_response_context(",
         "fn collect_active_format_requirements(",
         "fn render_prompt_targets(",
@@ -4377,6 +4378,8 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
         "fn render_available_components(",
         "render_bounded_response_context(BoundedResponseContext",
         "element::parse(doc)",
+        "fn render_remote_host_scope(",
+        "Globally approved SSH commands",
         "pub use agent_doc_prompt_context",
     ] {
         assert!(
@@ -4388,6 +4391,7 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
         orchestration_source.contains("agent_doc_prompt_context::{")
             && orchestration_source.contains("render_document_section(DocumentSectionContext")
             && orchestration_source.contains("document_section_needs_response_toc(")
+            && orchestration_source.contains("render_remote_host_scope(&declared_targets)")
             && orchestration_source.contains("frontmatter_io::parse_for_file_with_context")
             && orchestration_source.contains("agent_doc_response_toc_io::render_prompt_toc"),
         "orchestration prompt_context should gather project context then call focused rendering policy directly"

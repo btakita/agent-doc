@@ -1,6 +1,7 @@
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_prompt_context::{
     DocumentSectionContext, document_section_needs_response_toc, render_document_section,
+    render_remote_host_scope,
 };
 #[cfg(test)]
 use agent_doc_session_accretion::SessionAccretionLevel;
@@ -17,7 +18,7 @@ pub fn build_document_section(
     report: Option<&SessionAccretionReport>,
 ) -> String {
     let prompt_targets = prompt_targets_from_diff(diff_text);
-    let remote_host_scope = render_remote_host_scope(file, doc);
+    let remote_host_scope = remote_host_scope_for_file(file, doc);
     let response_toc = document_section_needs_response_toc(doc, report, &prompt_targets)
         .then(|| agent_doc_response_toc_io::render_prompt_toc(file, doc, &prompt_targets))
         .flatten();
@@ -31,28 +32,14 @@ pub fn build_document_section(
     })
 }
 
-fn render_remote_host_scope(file: &Path, doc: &str) -> String {
+fn remote_host_scope_for_file(file: &Path, doc: &str) -> String {
     let rc = crate::graph::RunContext::new(file.to_path_buf());
     let declared_targets = frontmatter_io::parse_for_file_with_context(doc, file, &rc)
         .or_else(|_| frontmatter::parse(doc))
         .ok()
         .map(|(fm, _)| fm.required_ssh_targets)
         .unwrap_or_default();
-    let declared = if declared_targets.is_empty() {
-        "No required SSH targets are declared for this document.".to_string()
-    } else {
-        format!(
-            "Declared required SSH targets for this document: {}.",
-            declared_targets.join(", ")
-        )
-    };
-
-    format!(
-        "<remote_host_scope>\n\
-         {declared}\n\
-         Globally approved SSH commands, ambient SSH config, and unrelated project history are not evidence that a named remote host belongs to this document's project. Use a named remote host only when the current user prompt, this session document/frontmatter, project-local `.agent-doc/config.toml`, or project-local runbooks explicitly identify it; otherwise ask or record a follow-up to confirm the intended host.\n\
-         </remote_host_scope>\n\n",
-    )
+    render_remote_host_scope(&declared_targets)
 }
 
 #[cfg(test)]
@@ -78,8 +65,6 @@ mod tests {
         assert!(section.contains("The full document is now:"));
         assert!(section.contains("<document>\ndoc body\n</document>"));
         assert!(section.contains("<remote_host_scope>"));
-        assert!(section.contains("No required SSH targets are declared"));
-        assert!(section.contains("Globally approved SSH commands"));
     }
 
     #[test]
@@ -95,7 +80,6 @@ mod tests {
         assert!(
             section.contains("Declared required SSH targets for this document: buildparty-worker.")
         );
-        assert!(section.contains("unrelated project history"));
     }
 
     #[test]

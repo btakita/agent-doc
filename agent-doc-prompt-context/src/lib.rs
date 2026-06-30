@@ -56,6 +56,24 @@ pub fn render_full_document_section(doc: &str, remote_host_scope: &str) -> Strin
     )
 }
 
+pub fn render_remote_host_scope(required_ssh_targets: &[String]) -> String {
+    let declared = if required_ssh_targets.is_empty() {
+        "No required SSH targets are declared for this document.".to_string()
+    } else {
+        format!(
+            "Declared required SSH targets for this document: {}.",
+            required_ssh_targets.join(", ")
+        )
+    };
+
+    format!(
+        "<remote_host_scope>\n\
+         {declared}\n\
+         Globally approved SSH commands, ambient SSH config, and unrelated project history are not evidence that a named remote host belongs to this document's project. Use a named remote host only when the current user prompt, this session document/frontmatter, project-local `.agent-doc/config.toml`, or project-local runbooks explicitly identify it; otherwise ask or record a follow-up to confirm the intended host.\n\
+         </remote_host_scope>\n\n",
+    )
+}
+
 pub fn document_section_needs_response_toc(
     doc: &str,
     report: Option<&SessionAccretionReport>,
@@ -548,6 +566,32 @@ mod tests {
         );
 
         assert!(format_active_format_requirements(doc).is_none());
+    }
+
+    #[test]
+    fn render_remote_host_scope_lists_no_declared_targets() {
+        let scope = render_remote_host_scope(&[]);
+
+        assert!(scope.contains("<remote_host_scope>"));
+        assert!(scope.contains("No required SSH targets are declared"));
+        assert!(scope.contains("Globally approved SSH commands"));
+        assert!(scope.contains("ambient SSH config"));
+    }
+
+    #[test]
+    fn render_remote_host_scope_lists_declared_targets() {
+        let scope = render_remote_host_scope(&[
+            "buildparty-worker".to_string(),
+            "sampleorders-server".to_string(),
+        ]);
+
+        assert!(
+            scope.contains(
+                "Declared required SSH targets for this document: buildparty-worker, sampleorders-server."
+            ),
+            "{scope}"
+        );
+        assert!(scope.contains("unrelated project history"));
     }
 
     #[test]

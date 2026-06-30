@@ -259,6 +259,11 @@ focused crate under the old path.
   backlog id parsing. Orchestration keeps file IO, cycle/capture loading,
   malformed-item checks, auto-done mutation, guard-mode formatting, and warning
   rendering.
+- `agent-doc-turn` now owns expect-done-or-gate closeout policy for `do #id`
+  directive targets: pending-done suppression, open/committed-cycle gating,
+  done/kept-open/reaped resolution, open-backlog intersection, and unresolved-id
+  decisions. Orchestration keeps cycle/capture loading, open-backlog file IO,
+  ops-log emission, guard-mode formatting, and warning rendering.
 
 ### Earlier closure finding
 

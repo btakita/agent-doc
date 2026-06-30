@@ -11895,6 +11895,69 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
 }
 
 #[test]
+fn test_agent_doc_queue_owns_queue_worklist_projection_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let queue_projection =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_projection.rs")).unwrap();
+    for required_snippet in [
+        "pub fn queue_entry_do_id(",
+        "pub fn queue_prompt_projection_rows(",
+        "pub fn active_queue_prompt_projection(",
+        "pub fn in_progress_marker_retarget_requested(",
+        "pub fn selected_queue_head_node_key(",
+        "pub fn queue_worklist_hash(",
+        "fn queue_prompt_node_key(",
+        "pub fn queue_worklist_entries(",
+        "pub enum QueueWorklistEntryKind",
+        "pub struct QueueWorklistEntry",
+    ] {
+        assert!(
+            queue_projection.contains(required_snippet),
+            "agent-doc-queue must own pure queue worklist/projection policy: {required_snippet}"
+        );
+    }
+
+    let queue_lib = fs::read_to_string(manifest_dir.join("agent-doc-queue/src/lib.rs")).unwrap();
+    assert!(
+        queue_lib.contains("pub mod queue_projection;"),
+        "agent-doc-queue should expose queue projection/worklist policy through its owning module"
+    );
+
+    let maintenance = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
+    )
+    .unwrap();
+    for forbidden_snippet in [
+        "pub(crate) fn queue_entry_do_id(",
+        "fn queue_prompt_projection_rows(",
+        "fn active_queue_prompt_projection(",
+        "fn in_progress_marker_retarget_requested(",
+        "fn selected_queue_head_node_key(",
+        "fn queue_worklist_hash(",
+        "fn queue_prompt_node_key(",
+        "fn queue_worklist_entries(",
+    ] {
+        assert!(
+            !maintenance.contains(forbidden_snippet),
+            "preflight maintenance must not re-own or facade queue worklist/projection policy: {forbidden_snippet}"
+        );
+    }
+    for required_snippet in [
+        "agent_doc_queue::queue_projection::queue_entry_do_id",
+        "agent_doc_queue::queue_projection::active_queue_prompt_projection(",
+        "agent_doc_queue::queue_projection::in_progress_marker_retarget_requested(",
+        "agent_doc_queue::queue_projection::selected_queue_head_node_key(",
+        "agent_doc_queue::queue_projection::queue_worklist_hash(",
+        "agent_doc_queue::queue_projection::queue_worklist_entries(",
+    ] {
+        assert!(
+            maintenance.contains(required_snippet),
+            "preflight maintenance should call focused queue projection/worklist policy directly: {required_snippet}"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let route_dispatch =

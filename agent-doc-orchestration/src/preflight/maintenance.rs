@@ -873,77 +873,6 @@ pub(crate) fn filter_expect_done_or_gate_ids(
         .collect()
 }
 
-pub(crate) fn queue_entry_do_id(
-    entry: &agent_doc_queue::document_queue::QueueEntry,
-) -> Option<String> {
-    match entry {
-        agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
-        | agent_doc_queue::document_queue::QueueEntry::Completed(prompt) => {
-            agent_doc_queue::queue_response::queue_prompt_done_id(&prompt.text)
-        }
-        _ => None,
-    }
-}
-
-fn queue_prompt_projection_rows(
-    content: &str,
-    entries: &[agent_doc_queue::document_queue::QueueEntry],
-) -> Vec<agent_doc_document::queue_projection::QueuePromptRow> {
-    let deferred_ids = agent_doc_queue::queue_continuation::deferred_backlog_ids(content);
-    let preset_supplies_directive = agent_doc_element::element::parse(content)
-        .ok()
-        .and_then(|components| {
-            components
-                .iter()
-                .find(|component| component.name == "queue")
-                .map(|component| component.attrs.contains_key("preset"))
-        })
-        .unwrap_or(false);
-    entries
-        .iter()
-        .filter_map(|entry| match entry {
-            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
-                let text = agent_doc_queue::document_queue::strip_in_progress_marker(&prompt.text);
-                let id = agent_doc_queue::queue_response::queue_prompt_done_id(&text);
-                let projectable_default =
-                    !agent_doc_queue::queue_continuation::is_noise_queue_head(
-                        &text,
-                        preset_supplies_directive,
-                    ) && !id.as_ref().is_some_and(|id| deferred_ids.contains(id));
-                Some(agent_doc_document::queue_projection::QueuePromptRow::new(
-                    prompt.text.clone(),
-                    id,
-                    projectable_default,
-                ))
-            }
-            _ => None,
-        })
-        .collect()
-}
-
-fn active_queue_prompt_projection(
-    content: &str,
-    entries: &[agent_doc_queue::document_queue::QueueEntry],
-    deps: &std::collections::HashMap<String, Vec<String>>,
-    honor_in_progress_markers: bool,
-) -> agent_doc_document::queue_projection::ActiveQueuePromptProjection {
-    let rows = queue_prompt_projection_rows(content, entries);
-    agent_doc_document::queue_projection::project_active_queue_prompts(
-        &rows,
-        deps,
-        honor_in_progress_markers,
-    )
-}
-
-fn in_progress_marker_retarget_requested(
-    diff: Option<&str>,
-    content: &str,
-    entries: &[agent_doc_queue::document_queue::QueueEntry],
-) -> bool {
-    let rows = queue_prompt_projection_rows(content, entries);
-    agent_doc_document::queue_projection::in_progress_marker_retarget_requested(diff, &rows)
-}
-
 pub(crate) fn dedup_queue_nodes_by_key(content: &str) -> Result<Option<(String, usize)>> {
     let before_nodes =
         agent_doc_markdown_ast::mutations::item_nodes(content, "queue").map_err(|err| {
@@ -964,25 +893,6 @@ pub(crate) fn dedup_queue_nodes_by_key(content: &str) -> Result<Option<(String, 
     Ok(Some((updated, dropped)))
 }
 
-fn selected_queue_head_node_key(content: &str, head_text: &str) -> Option<String> {
-    if let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
-        && let Some(node) = nodes.into_iter().find(|node| {
-            !node.item.struck
-                && agent_doc_queue::document_queue::strip_priority_markers(node.item.text.trim())
-                    == agent_doc_queue::document_queue::strip_priority_markers(head_text)
-        })
-    {
-        return Some(node.node_key);
-    }
-    let trimmed = head_text.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let hash = agent_doc_hash::content_hash(trimmed);
-    let short_hash = &hash[..hash.len().min(12)];
-    Some(format!("queue:entry:0:{short_hash}"))
-}
-
 fn record_selected_queue_head_state(
     file: &Path,
     content: &str,
@@ -998,7 +908,9 @@ fn record_selected_queue_head_state(
     let Some(project_root) = agent_doc_fs::find_project_root(&canonical) else {
         return Ok(());
     };
-    let Some(node_key) = selected_queue_head_node_key(content, head_text) else {
+    let Some(node_key) =
+        agent_doc_queue::queue_projection::selected_queue_head_node_key(content, head_text)
+    else {
         return Ok(());
     };
     let document_hash = agent_doc_hash::document_id_for_path(&canonical);
@@ -1045,7 +957,9 @@ fn record_deferred_queue_head_state(
     let Some(project_root) = agent_doc_fs::find_project_root(&canonical) else {
         return Ok(());
     };
-    let Some(node_key) = selected_queue_head_node_key(content, head_text) else {
+    let Some(node_key) =
+        agent_doc_queue::queue_projection::selected_queue_head_node_key(content, head_text)
+    else {
         return Ok(());
     };
     let document_hash = agent_doc_hash::document_id_for_path(&canonical);
@@ -1092,89 +1006,6 @@ fn record_deferred_queue_head_state(
     Ok(())
 }
 
-fn queue_worklist_hash(entries: &[agent_doc_queue::document_queue::QueueEntry]) -> String {
-    agent_doc_hash::content_hash(&agent_doc_queue::document_queue::render(entries))
-}
-
-fn queue_prompt_node_key(
-    nodes: &[agent_doc_markdown_ast::mutations::MutationItemNode],
-    used_nodes: &mut [bool],
-    prompt_text: &str,
-    index: usize,
-) -> Option<String> {
-    let normalized_prompt = agent_doc_queue::document_queue::strip_in_progress_marker(prompt_text)
-        .trim()
-        .to_string();
-    for (node_index, node) in nodes.iter().enumerate() {
-        if used_nodes.get(node_index).copied().unwrap_or(false) || node.item.struck {
-            continue;
-        }
-        let node_text =
-            agent_doc_queue::document_queue::strip_in_progress_marker(node.item.text.trim());
-        if node_text.trim() == normalized_prompt {
-            if let Some(used) = used_nodes.get_mut(node_index) {
-                *used = true;
-            }
-            return Some(node.node_key.clone());
-        }
-    }
-    let trimmed = normalized_prompt.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let hash = agent_doc_hash::content_hash(trimmed);
-    let short_hash = &hash[..hash.len().min(12)];
-    Some(format!("queue:entry:{index}:{short_hash}"))
-}
-
-fn queue_worklist_entries(
-    content: &str,
-    entries: &[agent_doc_queue::document_queue::QueueEntry],
-) -> Vec<crate::state_backbone::QueueWorklistEntry> {
-    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue").unwrap_or_default();
-    let mut used_nodes = vec![false; nodes.len()];
-    let mut prompt_index = 0usize;
-    entries
-        .iter()
-        .filter_map(|entry| match entry {
-            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
-                let text = agent_doc_queue::document_queue::strip_in_progress_marker(&prompt.text);
-                let node_key = queue_prompt_node_key(&nodes, &mut used_nodes, &text, prompt_index);
-                prompt_index += 1;
-                Some(crate::state_backbone::QueueWorklistEntry {
-                    kind: crate::state_backbone::QueueWorklistEntryKind::Prompt,
-                    text,
-                    node_key,
-                    backlog_id: agent_doc_queue::queue_response::queue_prompt_done_id(&prompt.text),
-                    drainable: true,
-                })
-            }
-            agent_doc_queue::document_queue::QueueEntry::Preset(preset) => {
-                Some(crate::state_backbone::QueueWorklistEntry {
-                    kind: crate::state_backbone::QueueWorklistEntryKind::Preset,
-                    text: preset.clone(),
-                    node_key: None,
-                    backlog_id: None,
-                    drainable: false,
-                })
-            }
-            agent_doc_queue::document_queue::QueueEntry::Dispatch(preset) => {
-                Some(crate::state_backbone::QueueWorklistEntry {
-                    kind: crate::state_backbone::QueueWorklistEntryKind::Dispatch,
-                    text: preset.clone(),
-                    node_key: None,
-                    backlog_id: None,
-                    drainable: false,
-                })
-            }
-            agent_doc_queue::document_queue::QueueEntry::Completed(_)
-            | agent_doc_queue::document_queue::QueueEntry::StartFence(_)
-            | agent_doc_queue::document_queue::QueueEntry::StopFence
-            | agent_doc_queue::document_queue::QueueEntry::Freeform(_) => None,
-        })
-        .collect()
-}
-
 fn record_queue_worklist_state(
     file: &Path,
     content: &str,
@@ -1191,9 +1022,28 @@ fn record_queue_worklist_state(
         return Ok(());
     };
     let document_hash = agent_doc_hash::document_id_for_path(&canonical);
-    let queue_hash = queue_worklist_hash(entries);
+    let queue_hash = agent_doc_queue::queue_projection::queue_worklist_hash(entries);
     let worklist_entries = if active {
-        queue_worklist_entries(content, entries)
+        agent_doc_queue::queue_projection::queue_worklist_entries(content, entries)
+            .into_iter()
+            .map(|entry| crate::state_backbone::QueueWorklistEntry {
+                kind: match entry.kind {
+                    agent_doc_queue::queue_projection::QueueWorklistEntryKind::Prompt => {
+                        crate::state_backbone::QueueWorklistEntryKind::Prompt
+                    }
+                    agent_doc_queue::queue_projection::QueueWorklistEntryKind::Preset => {
+                        crate::state_backbone::QueueWorklistEntryKind::Preset
+                    }
+                    agent_doc_queue::queue_projection::QueueWorklistEntryKind::Dispatch => {
+                        crate::state_backbone::QueueWorklistEntryKind::Dispatch
+                    }
+                },
+                text: entry.text,
+                node_key: entry.node_key,
+                backlog_id: entry.backlog_id,
+                drainable: entry.drainable,
+            })
+            .collect()
     } else {
         Vec::new()
     };
@@ -1432,11 +1282,11 @@ pub(crate) fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<Que
         )
         .is_some();
     let selected_queue_prompts = if activation.active {
-        active_queue_prompt_projection(
+        agent_doc_queue::queue_projection::active_queue_prompt_projection(
             &drainability_content,
             &activation.entries_after,
             &agent_doc_queue::backlog_sync::collect_after_deps(&components, &content),
-            in_progress_marker_retarget_requested(
+            agent_doc_queue::queue_projection::in_progress_marker_retarget_requested(
                 diff,
                 &drainability_content,
                 &activation.entries_after,
@@ -1634,17 +1484,19 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                                         agent_doc_queue::document_queue::QueueEntry::Prompt(_)
                                     )
                                 })
-                                .filter_map(queue_entry_do_id)
+                                .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
                                 .collect(),
                         )
                     })
                     .unwrap_or_default();
-            let current_all_ids: std::collections::HashSet<String> =
-                entries.iter().filter_map(queue_entry_do_id).collect();
+            let current_all_ids: std::collections::HashSet<String> = entries
+                .iter()
+                .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
+                .collect();
             let current_active_ids: std::collections::HashSet<String> = entries
                 .iter()
                 .filter(|e| matches!(e, agent_doc_queue::document_queue::QueueEntry::Prompt(_)))
-                .filter_map(queue_entry_do_id)
+                .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
                 .collect();
             let tombstones = super::queue_tombstone::reconcile_for_file(
                 file,
@@ -1767,7 +1619,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         if persisted_active_incoming && !queue_go_mode {
             let existing_queue_ids: std::collections::HashSet<String> = entries
                 .iter()
-                .filter_map(queue_entry_do_id)
+                .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
                 .map(|id| id.to_ascii_lowercase())
                 .collect();
             let before = backlog_ids.len();
@@ -1793,12 +1645,12 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         {
             let pre_sync_ids = entries
                 .iter()
-                .filter_map(queue_entry_do_id)
+                .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
                 .collect::<std::collections::HashSet<String>>();
             let mut seen_synced_ids = std::collections::HashSet::new();
             synced_queue_ids = synced
                 .iter()
-                .filter_map(queue_entry_do_id)
+                .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
                 .filter(|id| !pre_sync_ids.contains(id))
                 .filter(|id| seen_synced_ids.insert(id.clone()))
                 .collect();
@@ -2791,14 +2643,14 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     let mut in_progress_markers_changed = false;
     let active_queue_projection = if activation.active {
         let current_components = agent_doc_element::element::parse(&current_content)?;
-        active_queue_prompt_projection(
+        agent_doc_queue::queue_projection::active_queue_prompt_projection(
             &current_content,
             &activation.entries_after,
             &agent_doc_queue::backlog_sync::collect_after_deps(
                 &current_components,
                 &current_content,
             ),
-            in_progress_marker_retarget_requested(
+            agent_doc_queue::queue_projection::in_progress_marker_retarget_requested(
                 diff,
                 &current_content,
                 &activation.entries_after,
@@ -3260,7 +3112,7 @@ pub(crate) fn sync_same_cycle_pending_adds_into_go_queue(file: &Path) -> Result<
 
     let pre_sync_ids = entries
         .iter()
-        .filter_map(queue_entry_do_id)
+        .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
         .collect::<std::collections::HashSet<String>>();
     let Some(synced) = agent_doc_queue::document_queue::sync_backlog_into_queue(
         &entries,
@@ -3272,7 +3124,7 @@ pub(crate) fn sync_same_cycle_pending_adds_into_go_queue(file: &Path) -> Result<
     let mut seen = std::collections::HashSet::new();
     let synced_ids: Vec<String> = synced
         .iter()
-        .filter_map(queue_entry_do_id)
+        .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
         .filter(|id| !pre_sync_ids.contains(id))
         .filter(|id| seen.insert(id.clone()))
         .collect();

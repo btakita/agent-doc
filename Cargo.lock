@@ -525,6 +525,7 @@ dependencies = [
  "agent-doc-element-backlog",
  "agent-doc-element-queue",
  "agent-doc-frontmatter",
+ "agent-doc-hash",
  "agent-doc-lease",
  "agent-doc-markdown-ast",
  "anyhow",

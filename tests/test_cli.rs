@@ -5718,13 +5718,54 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
 
     let workflow_doctor =
         fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/doctor.rs")).unwrap();
-    assert!(
-        workflow_doctor.contains("pub fn classify_ops_marker("),
-        "agent-doc-workflow must own workflow doctor ops-log marker classification"
-    );
+    for required in [
+        "WORKFLOW_DOCTOR_SCHEMA_VERSION",
+        "pub enum WorkflowDoctorOutcome",
+        "pub struct WorkflowDoctorReport",
+        "pub struct WorkflowDoctorFacts",
+        "pub struct PreflightDoctorFacts",
+        "pub struct SessionCheckDoctorFacts",
+        "pub struct CycleStateDoctorFacts",
+        "pub struct OpsLogDoctorFacts",
+        "pub struct ActorDoctorFacts",
+        "pub struct GitDoctorFacts",
+        "pub struct EditorDoctorFacts",
+        "pub struct WorkflowInvariantResult",
+        "pub fn evaluate_catalog",
+        "pub fn classify_ops_marker",
+    ] {
+        assert!(
+            workflow_doctor.contains(required),
+            "agent-doc-workflow must own workflow doctor policy API: {required}"
+        );
+    }
     let orchestration_doctor =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/doctor.rs")).unwrap();
     for forbidden in [
+        "WORKFLOW_DOCTOR_SCHEMA_VERSION",
+        "pub enum WorkflowDoctorOutcome",
+        "pub struct WorkflowDoctorReport",
+        "pub struct WorkflowDoctorFacts",
+        "pub struct PreflightDoctorFacts",
+        "pub struct SessionCheckDoctorFacts",
+        "pub struct CycleStateDoctorFacts",
+        "pub struct OpsLogDoctorFacts",
+        "pub struct ActorDoctorFacts",
+        "pub struct GitDoctorFacts",
+        "pub struct EditorDoctorFacts",
+        "pub struct WorkflowInvariantResult",
+        "pub fn evaluate_catalog",
+        "fn evaluate_queue_continuation",
+        "fn evaluate_stale_supervisor",
+        "fn evaluate_closeout_commit",
+        "fn evaluate_editor_convergence",
+        "fn evaluate_generation_redirect",
+        "fn evaluate_parent_gitlink",
+        "fn closeout_repair_commands",
+        "fn safe_commands",
+        "fn operator_steps",
+        "fn remediation_label",
+        "fn has_marker",
         "fn classify_ops_marker(",
         "pub fn classify_ops_marker(",
         "pub use agent_doc_workflow::doctor",
@@ -5732,12 +5773,23 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
     ] {
         assert!(
             !orchestration_doctor.contains(forbidden),
-            "orchestration doctor must gather facts, not re-own or facade ops marker classification: {forbidden}"
+            "orchestration doctor must gather facts, not re-own or facade workflow doctor policy: {forbidden}"
         );
     }
     assert!(
-        orchestration_doctor.contains("use agent_doc_workflow::doctor::classify_ops_marker;"),
-        "orchestration doctor should call the focused ops marker classifier directly"
+        orchestration_doctor.contains("use agent_doc_workflow::doctor::{")
+            && orchestration_doctor.contains("classify_ops_marker, evaluate_catalog"),
+        "orchestration doctor should call the focused doctor policy directly"
+    );
+    let orchestration_autofix =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/autofix.rs")).unwrap();
+    assert!(
+        orchestration_autofix.contains("use agent_doc_workflow::doctor::{")
+            && orchestration_autofix.contains("WorkflowDoctorOutcome")
+            && orchestration_autofix.contains("WorkflowDoctorReport")
+            && orchestration_autofix.contains("WorkflowInvariantResult")
+            && orchestration_autofix.contains("WorkflowDoctorFacts, evaluate_catalog"),
+        "orchestration autofix should consume focused workflow doctor policy directly"
     );
 
     let flow_mod =
@@ -5844,7 +5896,8 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
         assert!(
-            source.contains("agent_doc_workflow::invariants::{"),
+            source.contains("agent_doc_workflow::invariants::")
+                && source.contains("workflow_invariant_catalog"),
             "{relative_path} should call the focused workflow invariant catalog API directly"
         );
     }

@@ -12,13 +12,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::doctor::{
-    WorkflowDoctorOptions, WorkflowDoctorOutcome, WorkflowDoctorReport, WorkflowInvariantResult,
-    diagnose,
-};
+use crate::doctor::{WorkflowDoctorOptions, diagnose};
 use crate::flow::proof_ledger::{
     OperationProofInput, OperationProofRecord, ProofEvidenceKind, ProofOperationKind, ProofOutcome,
     append_operation_proof, proof_ledger_path, read_operation_proofs,
+};
+use agent_doc_workflow::doctor::{
+    WorkflowDoctorOutcome, WorkflowDoctorReport, WorkflowInvariantResult,
 };
 use agent_doc_workflow::invariants::{
     RemediationAction, RemediationStep, WorkflowInvariantCatalog, WorkflowInvariantId,
@@ -505,7 +505,7 @@ fn print_text_report(report: &WorkflowAutofixReport) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::doctor::{WorkflowDoctorFacts, evaluate_catalog};
+    use agent_doc_workflow::doctor::{WorkflowDoctorFacts, evaluate_catalog};
 
     fn step_for(report: &WorkflowAutofixReport, id: WorkflowInvariantId) -> &WorkflowAutofixStep {
         report

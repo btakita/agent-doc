@@ -3921,6 +3921,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     }
     for required in [
         "pub fn response_satisfies_imperative_contract",
+        "pub enum ImperativeResponseContractDecision",
+        "pub fn imperative_response_contract_decision",
+        "pub fn truncate_imperative_trigger",
         "const IMPERATIVE_STATUS_ONLY_SIGNALS",
         "const IMPERATIVE_META_REFUSAL_SIGNALS",
         "const IMPERATIVE_BLOCKER_SIGNALS",
@@ -3977,6 +3980,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "fn has_commandish_backticks",
         "fn has_code_path",
         "fn contains_commit_hash",
+        "fn truncate_signal(",
+        "agent_doc_diff::diff_contains_imperative_directive",
+        "agent_doc_diff::extract_imperative_directives",
     ] {
         assert!(
             !write_normalize.contains(forbidden),
@@ -3984,8 +3990,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         );
     }
     assert!(
-        write_normalize
-            .contains("agent_doc_turn::response_text::response_satisfies_imperative_contract"),
+        write_normalize.contains("agent_doc_turn::response_text::{")
+            && write_normalize.contains("imperative_response_contract_decision")
+            && write_normalize.contains("truncate_imperative_trigger"),
         "write::normalize should call focused imperative response contract policy directly"
     );
     for relative in [

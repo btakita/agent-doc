@@ -151,6 +151,46 @@ pub fn response_satisfies_imperative_contract(response: &str) -> bool {
     false
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImperativeResponseContractDecision {
+    NoImperativeDirective,
+    Satisfied,
+    Rejected { trigger: String },
+}
+
+/// Decide whether an imperative document directive has been concretely handled.
+///
+/// The diff and response-text classification are pure turn policy. File/snapshot
+/// loading, ops-log emission, and returning a process error stay in orchestration.
+pub fn imperative_response_contract_decision(
+    diff_text: &str,
+    response: &str,
+) -> ImperativeResponseContractDecision {
+    if !agent_doc_diff::diff_contains_imperative_directive(diff_text) {
+        return ImperativeResponseContractDecision::NoImperativeDirective;
+    }
+    if response_satisfies_imperative_contract(response) {
+        return ImperativeResponseContractDecision::Satisfied;
+    }
+    let trigger = agent_doc_diff::extract_imperative_directives(diff_text)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| "approval".to_string());
+    ImperativeResponseContractDecision::Rejected { trigger }
+}
+
+pub fn truncate_imperative_trigger(value: &str, max: usize) -> String {
+    if value.len() <= max {
+        value.to_string()
+    } else {
+        let mut cut = max;
+        while cut > 0 && !value.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        format!("{}...", &value[..cut])
+    }
+}
+
 fn contains_any_signal(haystack: &str, signals: &[&str]) -> bool {
     signals.iter().any(|signal| haystack.contains(signal))
 }
@@ -323,5 +363,46 @@ mod tests {
         assert!(response_satisfies_imperative_contract(
             "Updated agent-doc-turn/src/response_text.rs and pushed 1b215b7."
         ));
+    }
+
+    #[test]
+    fn imperative_contract_decision_skips_non_imperative_diff() {
+        let diff = "--- a\n+++ b\n@@ -1 +1,2 @@\n context\n+notes only\n";
+
+        assert_eq!(
+            imperative_response_contract_decision(diff, "In progress."),
+            ImperativeResponseContractDecision::NoImperativeDirective
+        );
+    }
+
+    #[test]
+    fn imperative_contract_decision_rejects_with_first_trigger() {
+        let diff = "--- a\n+++ b\n@@ -1 +1,2 @@\n context\n+do #abc. run tests and commit + push\n";
+
+        assert_eq!(
+            imperative_response_contract_decision(diff, "In progress. Continuing now."),
+            ImperativeResponseContractDecision::Rejected {
+                trigger: "do #abc. run tests and commit + push".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn imperative_contract_decision_accepts_evidence() {
+        let diff = "--- a\n+++ b\n@@ -1 +1,2 @@\n context\n+go\n";
+
+        assert_eq!(
+            imperative_response_contract_decision(
+                diff,
+                "Verification:\n- `cargo test -p agent-doc-turn`"
+            ),
+            ImperativeResponseContractDecision::Satisfied
+        );
+    }
+
+    #[test]
+    fn imperative_trigger_truncation_preserves_char_boundaries() {
+        assert_eq!(truncate_imperative_trigger("abcdef", 4), "abcd...");
+        assert_eq!(truncate_imperative_trigger("ééé", 3), "é...");
     }
 }

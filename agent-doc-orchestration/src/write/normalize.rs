@@ -30,27 +30,28 @@ pub fn enforce_imperative_response_contract_for_diff(
     diff_text: &str,
     response: &str,
 ) -> Result<()> {
-    if !agent_doc_diff::diff_contains_imperative_directive(diff_text) {
-        return Ok(());
-    }
-    if agent_doc_turn::response_text::response_satisfies_imperative_contract(response) {
-        return Ok(());
-    }
-    let trigger = agent_doc_diff::extract_imperative_directives(diff_text)
-        .into_iter()
-        .next()
-        .unwrap_or_else(|| "approval".to_string());
+    use agent_doc_turn::response_text::{
+        ImperativeResponseContractDecision, imperative_response_contract_decision,
+        truncate_imperative_trigger,
+    };
+
+    let trigger = match imperative_response_contract_decision(diff_text, response) {
+        ImperativeResponseContractDecision::NoImperativeDirective
+        | ImperativeResponseContractDecision::Satisfied => return Ok(()),
+        ImperativeResponseContractDecision::Rejected { trigger } => trigger,
+    };
+    let trigger = truncate_imperative_trigger(&trigger, 80);
     crate::ops_log::log_op(
         file,
         &format!(
             "imperative_response_rejected file={} trigger={}",
             file.display(),
-            truncate_signal(&trigger, 80)
+            trigger
         ),
     );
     anyhow::bail!(
         "imperative document directive requires concrete execution evidence or a concrete blocker; rejected status-only/meta response for `{}`",
-        truncate_signal(&trigger, 80)
+        trigger
     );
 }
 
@@ -73,18 +74,6 @@ pub(crate) fn template_mode_overrides_for_current_doc(
         overrides.insert("exchange".to_string(), "replace".to_string());
     }
     overrides
-}
-
-pub(crate) fn truncate_signal(value: &str, max: usize) -> String {
-    if value.len() <= max {
-        value.to_string()
-    } else {
-        let mut cut = max;
-        while cut > 0 && !value.is_char_boundary(cut) {
-            cut -= 1;
-        }
-        format!("{}...", &value[..cut])
-    }
 }
 
 /// Maximum number of `❯ `-prefix lines a single normalization cycle may add.

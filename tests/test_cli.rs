@@ -7258,6 +7258,9 @@ fn test_agent_doc_element_backlog_owns_tracked_line_remove_and_prune_policy() {
         "pub fn find_open_tracked_work_component_in_content",
         "pub fn open_tracked_work_component_name_in_content",
         "pub fn content_has_resolved_tracked_work_id",
+        "pub struct TrackedComponentItemDrop",
+        "pub fn tracked_component_item_counts",
+        "pub fn dropped_tracked_component_items",
         "pub fn trim_tracked_parent_prefix",
         "pub fn line_is_legacy_done_item",
         "pub fn op_remove_matching_tracked_line",
@@ -7300,6 +7303,24 @@ fn test_agent_doc_element_backlog_owns_tracked_line_remove_and_prune_policy() {
         backlog_cmd.contains("backlog::op_remove_matching_tracked_line")
             && backlog_cmd.contains("backlog::op_prune_legacy_done_lines"),
         "backlog_cmd should call tracked line remove/prune policy from agent-doc-element-backlog"
+    );
+
+    let compact =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/compact.rs")).unwrap();
+    for forbidden in [
+        "fn non_exchange_list_item_counts(",
+        "fn tracked_component_item_counts(",
+        "fn dropped_tracked_component_items(",
+        "agent_doc_element_backlog::backlog::parse_items",
+    ] {
+        assert!(
+            !compact.contains(forbidden),
+            "compact must stay an adapter, not re-own tracked component preservation policy: {forbidden}"
+        );
+    }
+    assert!(
+        compact.contains("agent_doc_element_backlog::backlog::dropped_tracked_component_items"),
+        "compact should call tracked component preservation policy from agent-doc-element-backlog"
     );
 }
 

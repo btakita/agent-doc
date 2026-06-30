@@ -328,32 +328,6 @@ fn validate_compacted_exchange(file: &Path, compacted: &str) -> Result<()> {
     )
 }
 
-/// `#compactdropitem`: count tracked list items per non-exchange component.
-///
-/// Compaction must only archive/truncate the `exchange` component; every other
-/// singleton list component (`backlog`/legacy `pending`, `review`, `done`,
-/// `queue`, `icebox`) must keep all of its items. This returns a per-component
-/// item count for every non-exchange component that holds at least one tracked
-/// list item, so the compact path can assert item-count parity before/after a
-/// rewrite and fail closed if a whole item silently disappears (the worse
-/// sibling of #compactqattr, which only dropped attributes).
-fn non_exchange_list_item_counts(content: &str) -> BTreeMap<String, usize> {
-    let mut counts = BTreeMap::new();
-    let Ok(components) = element::parse(content) else {
-        return counts;
-    };
-    for comp in &components {
-        if comp.name == "exchange" {
-            continue;
-        }
-        let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(comp.content(content));
-        if !items.is_empty() {
-            counts.insert(comp.name.clone(), items.len());
-        }
-    }
-    counts
-}
-
 /// `#compactdropitem`: fail closed if a compaction rewrite dropped a whole item
 /// from any non-exchange singleton list component.
 ///
@@ -370,16 +344,11 @@ fn assert_non_exchange_items_preserved(
     after: &str,
     stage: &str,
 ) -> Result<()> {
-    let before_counts = non_exchange_list_item_counts(before);
-    let after_counts = non_exchange_list_item_counts(after);
-
-    let mut dropped: Vec<String> = Vec::new();
-    for (name, before_n) in &before_counts {
-        let after_n = after_counts.get(name).copied().unwrap_or(0);
-        if after_n < *before_n {
-            dropped.push(format!("{name} {before_n}→{after_n}"));
-        }
-    }
+    let dropped =
+        agent_doc_element_backlog::backlog::dropped_tracked_component_items(before, after)
+            .into_iter()
+            .map(|drop| format!("{} {}→{}", drop.component, drop.before, drop.after))
+            .collect::<Vec<_>>();
 
     if dropped.is_empty() {
         return Ok(());
@@ -1455,15 +1424,6 @@ mod tests {
     }
 
     #[test]
-    fn non_exchange_list_item_counts_counts_backlog_and_review() {
-        let counts = non_exchange_list_item_counts(COMPACTDROPITEM_DOC);
-        assert_eq!(counts.get("backlog").copied(), Some(3));
-        assert_eq!(counts.get("review").copied(), Some(1));
-        // exchange is never counted (it is the only component compaction rewrites)
-        assert_eq!(counts.get("exchange"), None);
-    }
-
-    #[test]
     fn assert_non_exchange_items_preserved_passes_when_counts_stable() {
         // Only the exchange changed; backlog/review item counts are identical.
         let after = COMPACTDROPITEM_DOC.replace("Response one.", "*Compacted.*");
@@ -1520,7 +1480,7 @@ mod tests {
         .unwrap();
 
         let result = std::fs::read_to_string(&file).unwrap();
-        let counts = non_exchange_list_item_counts(&result);
+        let counts = agent_doc_element_backlog::backlog::tracked_component_item_counts(&result);
         assert_eq!(counts.get("backlog").copied(), Some(3));
         assert_eq!(counts.get("review").copied(), Some(1));
     }

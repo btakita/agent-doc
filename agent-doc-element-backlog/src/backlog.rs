@@ -21,7 +21,7 @@
 
 use agent_doc_element::element;
 use anyhow::{Context, Result, anyhow, bail};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 pub const IN_PROGRESS_MARKER: &str = "🚧";
 
@@ -527,6 +527,53 @@ pub fn parse_items(body: &str) -> (String, Vec<PendingItem>, String) {
     }
 
     (prelude, items, postlude)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrackedComponentItemDrop {
+    pub component: String,
+    pub before: usize,
+    pub after: usize,
+}
+
+/// Count tracked checklist items in every non-exchange component.
+///
+/// This is a document-level safety policy for operations that are supposed to
+/// rewrite only `agent:exchange`. Component parse failures return no counts,
+/// matching the historical fail-open comparison behavior in compact.
+pub fn tracked_component_item_counts(content: &str) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    let Ok(components) = element::parse(content) else {
+        return counts;
+    };
+    for component in &components {
+        if component.name == "exchange" {
+            continue;
+        }
+        let (_, items, _) = parse_items(component.content(content));
+        if !items.is_empty() {
+            counts.insert(component.name.clone(), items.len());
+        }
+    }
+    counts
+}
+
+/// Return non-exchange components whose tracked checklist item count decreased.
+pub fn dropped_tracked_component_items(before: &str, after: &str) -> Vec<TrackedComponentItemDrop> {
+    let before_counts = tracked_component_item_counts(before);
+    let after_counts = tracked_component_item_counts(after);
+
+    before_counts
+        .into_iter()
+        .filter_map(|(component, before)| {
+            let after = after_counts.get(&component).copied().unwrap_or(0);
+            (after < before).then_some(TrackedComponentItemDrop {
+                component,
+                before,
+                after,
+            })
+        })
+        .collect()
 }
 
 /// Parse a single list item line into a `PendingItem` (id optional).
@@ -3072,6 +3119,51 @@ mod tests {
 
     fn ids() -> HashSet<String> {
         HashSet::new()
+    }
+
+    const TRACKED_COMPONENT_DOC: &str = concat!(
+        "---\nagent_doc_session: drop-test\nagent_doc_format: template\n---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: topic one\n\nResponse one.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "## Backlog\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#a1] item one\n",
+        "- [ ] [#a2] item two\n",
+        "- [ ] [#a3] item three\n",
+        "<!-- /agent:backlog -->\n\n",
+        "## Review\n\n",
+        "<!-- agent:review -->\n",
+        "- [/] [#r1] review one\n",
+        "<!-- /agent:review -->\n",
+    );
+
+    #[test]
+    fn tracked_component_item_counts_counts_backlog_and_review() {
+        let counts = tracked_component_item_counts(TRACKED_COMPONENT_DOC);
+        assert_eq!(counts.get("backlog").copied(), Some(3));
+        assert_eq!(counts.get("review").copied(), Some(1));
+        assert_eq!(counts.get("exchange"), None);
+    }
+
+    #[test]
+    fn dropped_tracked_component_items_is_empty_when_only_exchange_changes() {
+        let after = TRACKED_COMPONENT_DOC.replace("Response one.", "*Compacted.*");
+        assert!(dropped_tracked_component_items(TRACKED_COMPONENT_DOC, &after).is_empty());
+    }
+
+    #[test]
+    fn dropped_tracked_component_items_reports_decreased_component_count() {
+        let after = TRACKED_COMPONENT_DOC.replace("- [ ] [#a2] item two\n", "");
+        assert_eq!(
+            dropped_tracked_component_items(TRACKED_COMPONENT_DOC, &after),
+            vec![TrackedComponentItemDrop {
+                component: "backlog".to_string(),
+                before: 3,
+                after: 2,
+            }]
+        );
     }
 
     #[test]

@@ -47,7 +47,7 @@ pub fn agent_doc_bug_target_document_for_doc(file: &Path) -> Result<Option<PathB
     if target.is_empty() {
         return Ok(None);
     }
-    crate::security::referenced_markdown_path_checked(file, target)
+    agent_doc_fs::referenced_markdown_path_checked(file, target)
 }
 
 /// Load project config from an explicit path. On absence, I/O error, or

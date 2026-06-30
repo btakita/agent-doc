@@ -140,7 +140,7 @@ pub(crate) fn promised_plan_reference_paths(file: &Path, response_text: &str) ->
         if !trimmed.to_ascii_lowercase().contains("plan") {
             continue;
         }
-        let Some(path) = crate::security::referenced_markdown_path(file, trimmed) else {
+        let Some(path) = agent_doc_fs::referenced_markdown_path(file, trimmed) else {
             continue;
         };
         if !path.exists() {

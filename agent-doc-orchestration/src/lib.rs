@@ -92,7 +92,6 @@ pub mod project_controller;
 pub mod prompt;
 pub mod prompt_cache;
 pub mod prompt_context;
-pub mod prompt_contract;
 pub mod queue_cmd;
 pub mod queue_continuation;
 pub mod queue_journal;

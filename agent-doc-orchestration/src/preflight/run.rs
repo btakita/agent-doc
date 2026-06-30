@@ -886,14 +886,14 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     }
     let mut added_diff_lines = prompt_diff_result
         .as_ref()
-        .map(|d| crate::prompt_contract::collect_added_diff_lines(d))
+        .map(|d| agent_doc_prompt_contract::collect_added_diff_lines(d))
         .unwrap_or_default();
     if raw_diff.is_some()
         && let Some(harness_only_diff) = harness_diff.as_ref()
     {
         push_unique_strings(
             &mut added_diff_lines,
-            crate::prompt_contract::collect_added_diff_lines(harness_only_diff),
+            agent_doc_prompt_contract::collect_added_diff_lines(harness_only_diff),
         );
     }
 
@@ -1087,7 +1087,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     }
     push_unique_strings(
         &mut prompt_presets_requested,
-        crate::prompt_contract::requested_prompt_presets(
+        agent_doc_prompt_contract::requested_prompt_presets(
             &prompt_targets,
             &added_diff_lines,
             &frontmatter_prompt_presets,
@@ -1138,12 +1138,12 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         eprintln!("[preflight] warning: {}", warning.message);
         warnings.push(warning);
     }
-    let backlog_capture_required = crate::prompt_contract::prompt_requests_backlog_work(
+    let backlog_capture_required = agent_doc_prompt_contract::prompt_requests_backlog_work(
         &prompt_targets,
         &added_diff_lines,
         &frontmatter_prompt_presets,
     );
-    let explicit_backlog_targets = crate::prompt_contract::explicit_backlog_targets(
+    let explicit_backlog_targets = agent_doc_prompt_contract::explicit_backlog_targets(
         file,
         &prompt_targets,
         &added_diff_lines,
@@ -1163,14 +1163,14 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     let required_explicit_backlog_item_count = if explicit_backlog_requirements.is_empty() {
         0
     } else {
-        crate::prompt_contract::required_explicit_backlog_item_count(
+        agent_doc_prompt_contract::required_explicit_backlog_item_count(
             &prompt_targets,
             &added_diff_lines,
             &frontmatter_prompt_presets,
             &prompt_bearing_changes,
         )
     };
-    let required_plan_reference_count = crate::prompt_contract::required_plan_reference_count(
+    let required_plan_reference_count = agent_doc_prompt_contract::required_plan_reference_count(
         &prompt_targets,
         &added_diff_lines,
         &frontmatter_prompt_presets,

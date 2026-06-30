@@ -13,6 +13,7 @@ members = [
     "agent-doc-fs",
     "agent-doc-model-tier",
     "agent-doc-prompt-cache",
+    "agent-doc-prompt-contract",
     "agent-doc-prompt-context",
     "agent-doc-response-toc",
     "agent-doc-session-accretion",
@@ -93,6 +94,7 @@ agent-doc-merge = { path = "agent-doc-merge", version = "0.34.65" }
 agent-doc-model-tier = { path = "agent-doc-model-tier", version = "0.34.65" }
 agent-doc-orchestration = { path = "agent-doc-orchestration", version = "0.34.65" }
 agent-doc-prompt-context = { path = "agent-doc-prompt-context", version = "0.34.65" }
+agent-doc-prompt-contract = { path = "agent-doc-prompt-contract", version = "0.34.65" }
 agent-doc-queue = { path = "agent-doc-queue", version = "0.34.65" }
 agent-doc-secret-redact = { path = "agent-doc-secret-redact", version = "0.34.65" }
 agent-doc-session-accretion = { path = "agent-doc-session-accretion", version = "0.34.65" }

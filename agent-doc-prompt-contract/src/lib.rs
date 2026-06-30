@@ -375,7 +375,7 @@ fn explicit_backlog_target_in_text(current_file: &Path, text: &str) -> Result<Op
     if !references_backlog_target {
         return Ok(None);
     }
-    crate::security::referenced_markdown_path_checked(current_file, text)
+    agent_doc_fs::referenced_markdown_path_checked(current_file, text)
 }
 
 fn ordered_issue_units_from_changes(

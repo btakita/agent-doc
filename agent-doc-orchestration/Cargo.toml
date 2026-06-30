@@ -35,6 +35,7 @@ agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.6
 agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.65" }
 agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.34.65" }
 agent-doc-prompt-cache = { path = "../agent-doc-prompt-cache", version = "0.34.65" }
+agent-doc-prompt-contract = { path = "../agent-doc-prompt-contract", version = "0.34.65" }
 agent-doc-prompt-context = { path = "../agent-doc-prompt-context", version = "0.34.65" }
 agent-doc-queue = { path = "../agent-doc-queue", version = "0.34.65" }
 agent-doc-response-toc = { path = "../agent-doc-response-toc", version = "0.34.65" }

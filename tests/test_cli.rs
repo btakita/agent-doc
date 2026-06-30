@@ -2167,6 +2167,7 @@ fn test_manifest_uses_publishable_dependency_contract() {
         "agent-doc-merge",
         "agent-doc-model-tier",
         "agent-doc-orchestration",
+        "agent-doc-prompt-contract",
         "agent-doc-queue",
         "agent-doc-template",
         "agent-doc-turn",
@@ -3459,18 +3460,12 @@ fn test_agent_doc_turn_owns_pending_capture_heuristics() {
         );
     }
 
-    let prompt_contract =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/prompt_contract.rs"))
-            .unwrap();
-    for forbidden in [
-        "pub fn response_explicitly_has_no_followups(",
-        "const NO_FOLLOWUP_PHRASES",
-    ] {
-        assert!(
-            !prompt_contract.contains(forbidden),
-            "prompt_contract must not re-own turn closeout no-follow-up policy: {forbidden}"
-        );
-    }
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/prompt_contract.rs")
+            .exists(),
+        "orchestration must not keep a prompt_contract module that can re-own turn closeout no-follow-up policy"
+    );
 
     let write_normalize =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/normalize.rs"))
@@ -3898,23 +3893,12 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
         "orchestration prompt_context should gather project context then call focused rendering policy directly"
     );
 
-    let prompt_contract_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/prompt_contract.rs"))
-            .unwrap();
-    for forbidden_snippet in [
-        "pub fn format_active_format_requirements(",
-        "fn collect_active_format_requirements(",
-        "fn maybe_push_format_requirement(",
-        "fn looks_like_format_requirement(",
-        "FORMAT_REQUIREMENT_",
-        "Active document-level formatting",
-        "pub use agent_doc_prompt_context",
-    ] {
-        assert!(
-            !prompt_contract_source.contains(forbidden_snippet),
-            "orchestration prompt_contract must not re-own or facade pure format requirement rendering policy: {forbidden_snippet}"
-        );
-    }
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/prompt_contract.rs")
+            .exists(),
+        "orchestration must not keep prompt_contract as a facade for prompt-context rendering policy"
+    );
 
     for (path, required_snippet, forbidden_snippets) in [
         (
@@ -4090,6 +4074,207 @@ fn test_agent_doc_response_toc_owns_live_toc_policy() {
         assert!(
             !dependencies.contains_key(forbidden),
             "agent-doc-response-toc must stay free of orchestration and archive/effect dependencies"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_prompt_contract_owns_prompt_contract_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-prompt-contract")),
+        "agent-doc-prompt-contract must stay a first-class workspace crate"
+    );
+
+    let focused_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-prompt-contract/src/lib.rs")).unwrap();
+    for required_snippet in [
+        "pub fn prompt_requests_plan_work(",
+        "pub fn prompt_requests_backlog_work(",
+        "pub fn requested_prompt_presets(",
+        "pub fn explicit_backlog_targets(",
+        "pub fn required_explicit_backlog_item_count(",
+        "pub fn required_plan_reference_count(",
+        "pub fn ordered_issue_units_for_agent_doc_bug(",
+        "pub fn collect_added_diff_lines(",
+        "fn effective_prompt_texts(",
+        "fn referenced_presets_in_text(",
+        "fn issue_units_in_text(",
+        "agent_doc_fs::referenced_markdown_path_checked",
+    ] {
+        assert!(
+            focused_source.contains(required_snippet),
+            "agent-doc-prompt-contract must own prompt contract policy directly: {required_snippet}"
+        );
+    }
+
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/prompt_contract.rs")
+            .exists(),
+        "orchestration must not keep a prompt_contract module or facade"
+    );
+
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod prompt_contract"),
+        "orchestration must not expose prompt_contract as a module facade"
+    );
+
+    for (path, required_snippets, forbidden_snippets) in [
+        (
+            "src/plan.rs",
+            vec![
+                "agent_doc_prompt_contract::collect_added_diff_lines",
+                "agent_doc_prompt_contract::prompt_requests_backlog_work",
+                "agent_doc_prompt_contract::ordered_issue_units_for_agent_doc_bug",
+                "agent_doc_prompt_contract::explicit_backlog_targets",
+            ],
+            vec![
+                "agent_doc_orchestration::prompt_contract",
+                "crate::prompt_contract",
+            ],
+        ),
+        (
+            "agent-doc-orchestration/src/preflight.rs",
+            vec!["agent_doc_prompt_contract::requested_prompt_presets"],
+            vec!["crate::prompt_contract"],
+        ),
+        (
+            "agent-doc-orchestration/src/preflight/run.rs",
+            vec![
+                "agent_doc_prompt_contract::collect_added_diff_lines",
+                "agent_doc_prompt_contract::requested_prompt_presets",
+                "agent_doc_prompt_contract::prompt_requests_backlog_work",
+                "agent_doc_prompt_contract::explicit_backlog_targets",
+                "agent_doc_prompt_contract::required_explicit_backlog_item_count",
+                "agent_doc_prompt_contract::required_plan_reference_count",
+            ],
+            vec!["crate::prompt_contract"],
+        ),
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(path)).unwrap();
+        for required_snippet in required_snippets {
+            assert!(
+                source.contains(required_snippet),
+                "{path} should call prompt contract policy through agent-doc-prompt-contract directly: {required_snippet}"
+            );
+        }
+        for forbidden_snippet in forbidden_snippets {
+            assert!(
+                !source.contains(forbidden_snippet),
+                "{path} must not route prompt contract policy through orchestration"
+            );
+        }
+    }
+
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
+    assert!(
+        orchestration_dependencies.contains_key("agent-doc-prompt-contract"),
+        "orchestration must depend on the focused prompt-contract crate directly"
+    );
+
+    let root_manifest = toml::from_str::<toml::Value>(&workspace_manifest).unwrap();
+    let root_dependencies = root_manifest["dependencies"].as_table().unwrap();
+    assert!(
+        root_dependencies.contains_key("agent-doc-prompt-contract"),
+        "the CLI crate must depend on the focused prompt-contract crate directly"
+    );
+
+    let focused_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-prompt-contract/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&focused_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    for required in ["agent-doc-diff", "agent-doc-frontmatter", "agent-doc-fs"] {
+        assert!(
+            dependencies.contains_key(required),
+            "agent-doc-prompt-contract should depend on {required} for prompt contract inputs"
+        );
+    }
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-prompt-contract must stay free of core, orchestration, git, editor IPC, sqlite, or tmux-router effects"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_fs_owns_markdown_reference_resolution() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fs_source = fs::read_to_string(manifest_dir.join("agent-doc-fs/src/lib.rs")).unwrap();
+    for required_snippet in [
+        "pub fn referenced_markdown_path(",
+        "pub fn referenced_markdown_path_checked(",
+        "fn strip_redundant_project_prefix(",
+        "fn project_roots_for(",
+        "ambiguous markdown reference",
+        "project-prefixed markdown reference",
+    ] {
+        assert!(
+            fs_source.contains(required_snippet),
+            "agent-doc-fs must own markdown reference resolution policy: {required_snippet}"
+        );
+    }
+
+    let security_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/security.rs")).unwrap();
+    for forbidden_snippet in [
+        "pub fn referenced_markdown_path(",
+        "pub fn referenced_markdown_path_checked(",
+        "fn strip_redundant_project_prefix(",
+        "fn project_roots_for(",
+        "pub use agent_doc_fs",
+    ] {
+        assert!(
+            !security_source.contains(forbidden_snippet),
+            "orchestration security must not re-own or facade markdown reference resolution: {forbidden_snippet}"
+        );
+    }
+
+    for (path, required_snippet, forbidden_snippet) in [
+        (
+            "src/plan.rs",
+            "agent_doc_fs::referenced_markdown_path",
+            "security::referenced_markdown_path",
+        ),
+        (
+            "agent-doc-orchestration/src/project_config_io.rs",
+            "agent_doc_fs::referenced_markdown_path_checked",
+            "crate::security::referenced_markdown_path_checked",
+        ),
+        (
+            "agent-doc-orchestration/src/write/pending_checks.rs",
+            "agent_doc_fs::referenced_markdown_path",
+            "crate::security::referenced_markdown_path",
+        ),
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(path)).unwrap();
+        assert!(
+            source.contains(required_snippet),
+            "{path} should call markdown reference resolution through agent-doc-fs directly"
+        );
+        assert!(
+            !source.contains(forbidden_snippet),
+            "{path} must not route markdown reference resolution through orchestration security"
         );
     }
 }
@@ -4449,12 +4634,11 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         !plan_source.contains("agent_doc_orchestration::flow::session_cycle::"),
         "plan.rs must not route session-cycle workflow policy through orchestration"
     );
-    let prompt_contract =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/prompt_contract.rs"))
-            .unwrap();
     assert!(
-        !prompt_contract.contains("pub fn prompt_targets_reference_preset"),
-        "orchestration must not keep a public preset-reference facade for session-cycle policy"
+        !manifest_dir
+            .join("agent-doc-orchestration/src/prompt_contract.rs")
+            .exists(),
+        "orchestration must not keep a prompt_contract module for session-cycle policy facades"
     );
     let prompt_context =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/prompt_context.rs"))

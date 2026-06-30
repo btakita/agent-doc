@@ -11,3 +11,6 @@ name = "agent_doc_fs"
 
 [dependencies]
 anyhow = "1"
+
+[dev-dependencies]
+tempfile = "3"

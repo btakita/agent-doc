@@ -699,7 +699,7 @@ fn post_exchange_comment_prompt_preset_warning(
         if !prompt_presets.is_empty() {
             push_unique_strings(
                 &mut referenced,
-                crate::prompt_contract::requested_prompt_presets(
+                agent_doc_prompt_contract::requested_prompt_presets(
                     std::slice::from_ref(&comment),
                     &[],
                     prompt_presets,

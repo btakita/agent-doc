@@ -50,7 +50,7 @@ use agent_doc_element_backlog::backlog;
 
 use agent_doc_diff as diff;
 use agent_doc_frontmatter::frontmatter;
-use agent_doc_orchestration::{diff_io, frontmatter_io, security};
+use agent_doc_orchestration::{diff_io, frontmatter_io};
 use agent_doc_workflow::session_cycle::{
     FinalizePendingMutation, FinalizePendingMutationKind, SessionExecutionScope,
     classify_execution_scope, finalize_command, prompt_targets_from_changes,
@@ -238,8 +238,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
 
     let prompt_bearing_changes = diff::classify_prompt_bearing_changes(&prompt_diff_text);
     let prompt_targets = prompt_targets_from_changes(&prompt_bearing_changes);
-    let added_diff_lines =
-        agent_doc_orchestration::prompt_contract::collect_added_diff_lines(&prompt_diff_text);
+    let added_diff_lines = agent_doc_prompt_contract::collect_added_diff_lines(&prompt_diff_text);
 
     let execution_scope = execution_scope_for_prompt_targets(
         &prompt_targets,
@@ -823,19 +822,18 @@ fn pending_mutations_for_doc(
         push_resolve_existing_mutation(&mut pending_mutations, &items, &id);
     }
 
-    if agent_doc_orchestration::prompt_contract::prompt_requests_backlog_work(
+    if agent_doc_prompt_contract::prompt_requests_backlog_work(
         prompt_targets,
         added_diff_lines,
         &fm.prompt_presets,
     ) {
-        let issue_units =
-            agent_doc_orchestration::prompt_contract::ordered_issue_units_for_agent_doc_bug(
-                prompt_targets,
-                added_diff_lines,
-                &fm.prompt_presets,
-                prompt_bearing_changes,
-            );
-        let mut target_paths = agent_doc_orchestration::prompt_contract::explicit_backlog_targets(
+        let issue_units = agent_doc_prompt_contract::ordered_issue_units_for_agent_doc_bug(
+            prompt_targets,
+            added_diff_lines,
+            &fm.prompt_presets,
+            prompt_bearing_changes,
+        );
+        let mut target_paths = agent_doc_prompt_contract::explicit_backlog_targets(
             file,
             prompt_targets,
             added_diff_lines,
@@ -947,7 +945,7 @@ fn shared_doc_security_blockers(
         .iter()
         .filter(|mutation| mutation.kind == PendingMutationKind::ResolveExisting)
         .filter_map(|mutation| {
-            let referenced = security::referenced_markdown_path(file, &mutation.text)?;
+            let referenced = agent_doc_fs::referenced_markdown_path(file, &mutation.text)?;
             Some(format!(
                 "Shared document item `#{}` references {} but this file has no `agent_doc_security_review`. Add an approved review marker before reading another plan/backlog document in shared mode.",
                 mutation.id,

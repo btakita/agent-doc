@@ -9647,6 +9647,23 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
             "agent-doc-ipc-protocol must own early-ack protocol policy: {required}"
         );
     }
+    for required in [
+        "pub struct CallbackRequest",
+        "pub struct CallbackPatch",
+        "pub struct CallbackResponse",
+        "pub struct PendingCallback",
+        "pub fn callback_request(",
+        "pub fn callback_response(",
+        "pub fn callback_request_is_expired(",
+        "pub fn callback_urgency_for_elapsed(",
+        "pub fn pending_callback_from_request(",
+        "pub fn callback_response_matches_request(",
+    ] {
+        assert!(
+            protocol_source.contains(required),
+            "agent-doc-ipc-protocol must own callback protocol policy: {required}"
+        );
+    }
 
     let orchestration_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
@@ -9680,6 +9697,38 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
             "ipc_socket.rs must not keep old IPC protocol policy after extraction: {forbidden}"
         );
     }
+
+    let callback_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/callback.rs")).unwrap();
+    assert!(
+        callback_source.contains("use agent_doc_ipc_protocol::{")
+            && callback_source.contains("callback_request_is_expired")
+            && callback_source.contains("pending_callback_from_request")
+            && callback_source.contains("callback_response_matches_request"),
+        "callback.rs should import focused callback protocol policy directly"
+    );
+    for forbidden in [
+        "pub struct CallbackRequest",
+        "pub struct Patch",
+        "pub struct CallbackResponse",
+        "pub struct PendingCallback",
+        "fn callback_request_is_expired(",
+        "fn callback_urgency_for_elapsed(",
+        "pub use agent_doc_ipc_protocol",
+    ] {
+        assert!(
+            !callback_source.contains(forbidden),
+            "callback.rs must stay a filesystem adapter, not a callback protocol facade: {forbidden}"
+        );
+    }
+
+    let preflight_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    assert!(
+        preflight_source.contains("Vec<agent_doc_ipc_protocol::PendingCallback>")
+            && !preflight_source.contains("Vec<crate::callback::PendingCallback>"),
+        "preflight should type pending callbacks through the focused IPC protocol crate"
+    );
 
     let sim_world_source = fs::read_to_string(manifest_dir.join("src/sim_world.rs")).unwrap();
     assert!(

@@ -328,6 +328,7 @@ dependencies = [
 name = "agent-doc-ipc-protocol"
 version = "0.34.65"
 dependencies = [
+ "serde",
  "serde_json",
 ]
 

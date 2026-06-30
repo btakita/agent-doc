@@ -4,6 +4,112 @@
 //! create sockets, read or write files, spawn listener threads, or mutate
 //! documents.
 
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CallbackRequest {
+    pub doc_path: String,
+    pub doc_hash: String,
+    pub operations: Vec<String>,
+    pub context: Option<String>,
+    pub created_at: u64,
+    pub ttl_secs: u64,
+    pub request_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CallbackPatch {
+    pub component: String,
+    pub mode: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CallbackResponse {
+    pub request_id: String,
+    pub status: String,
+    pub summary: String,
+    pub details: Option<String>,
+    pub patches: Option<Vec<CallbackPatch>>,
+    pub completed_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingCallback {
+    pub doc_path: String,
+    pub operations: Vec<String>,
+    pub urgency: String,
+}
+
+pub fn callback_request(
+    doc_path: impl Into<String>,
+    doc_hash: impl Into<String>,
+    operations: impl IntoIterator<Item = impl Into<String>>,
+    context: Option<impl Into<String>>,
+    created_at: u64,
+    ttl_secs: u64,
+    request_id: impl Into<String>,
+) -> CallbackRequest {
+    CallbackRequest {
+        doc_path: doc_path.into(),
+        doc_hash: doc_hash.into(),
+        operations: operations.into_iter().map(Into::into).collect(),
+        context: context.map(Into::into),
+        created_at,
+        ttl_secs,
+        request_id: request_id.into(),
+    }
+}
+
+pub fn callback_response(
+    request_id: impl Into<String>,
+    status: impl Into<String>,
+    summary: impl Into<String>,
+    details: Option<impl Into<String>>,
+    patches: Option<Vec<CallbackPatch>>,
+    completed_at: u64,
+) -> CallbackResponse {
+    CallbackResponse {
+        request_id: request_id.into(),
+        status: status.into(),
+        summary: summary.into(),
+        details: details.map(Into::into),
+        patches,
+        completed_at,
+    }
+}
+
+pub fn callback_request_is_expired(request: &CallbackRequest, now: u64) -> bool {
+    now.saturating_sub(request.created_at) > request.ttl_secs
+}
+
+pub fn callback_urgency_for_elapsed(elapsed_secs: u64) -> &'static str {
+    if elapsed_secs < 10 {
+        "high"
+    } else if elapsed_secs < 60 {
+        "normal"
+    } else {
+        "low"
+    }
+}
+
+pub fn pending_callback_from_request(request: CallbackRequest, now: u64) -> PendingCallback {
+    PendingCallback {
+        doc_path: request.doc_path,
+        operations: request.operations,
+        urgency: callback_urgency_for_elapsed(now.saturating_sub(request.created_at)).to_string(),
+    }
+}
+
+pub fn callback_response_matches_request(
+    response: &CallbackResponse,
+    request: Option<&CallbackRequest>,
+) -> bool {
+    request
+        .map(|request| response.request_id == request.request_id)
+        .unwrap_or(true)
+}
+
 /// Classification of a plugin-sent IPC ack line.
 ///
 /// The plugin sends a JSON ack after applying a patch. `Ok` means the patch was
@@ -95,8 +201,10 @@ pub fn early_ack_ops_marker() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        AckClassification, classify_ack, early_ack_line, early_ack_ops_marker,
-        early_ack_tagged_message, message_requests_early_ack,
+        AckClassification, callback_request, callback_request_is_expired, callback_response,
+        callback_response_matches_request, callback_urgency_for_elapsed, classify_ack,
+        early_ack_line, early_ack_ops_marker, early_ack_tagged_message, message_requests_early_ack,
+        pending_callback_from_request,
     };
 
     #[test]
@@ -189,5 +297,68 @@ mod tests {
             "ops marker must carry the predicate token: {marker}"
         );
         assert!(!early_ack_line().contains("early_ack_pending"));
+    }
+
+    #[test]
+    fn callback_request_expiry_uses_request_ttl() {
+        let request = callback_request(
+            "/tmp/plan.md",
+            "doc-hash",
+            ["compact"],
+            None::<String>,
+            100,
+            60,
+            "request-1",
+        );
+
+        assert!(!callback_request_is_expired(&request, 160));
+        assert!(callback_request_is_expired(&request, 161));
+    }
+
+    #[test]
+    fn callback_pending_urgency_is_elapsed_time_bucket() {
+        assert_eq!(callback_urgency_for_elapsed(0), "high");
+        assert_eq!(callback_urgency_for_elapsed(9), "high");
+        assert_eq!(callback_urgency_for_elapsed(10), "normal");
+        assert_eq!(callback_urgency_for_elapsed(59), "normal");
+        assert_eq!(callback_urgency_for_elapsed(60), "low");
+    }
+
+    #[test]
+    fn callback_pending_projection_keeps_doc_and_operations() {
+        let request = callback_request(
+            "/tmp/plan.md",
+            "doc-hash",
+            ["compact", "summary"],
+            Some("operator context"),
+            100,
+            300,
+            "request-1",
+        );
+
+        let pending = pending_callback_from_request(request, 115);
+
+        assert_eq!(pending.doc_path, "/tmp/plan.md");
+        assert_eq!(pending.operations, vec!["compact", "summary"]);
+        assert_eq!(pending.urgency, "normal");
+    }
+
+    #[test]
+    fn callback_response_match_rejects_stale_request_id() {
+        let request = callback_request(
+            "/tmp/plan.md",
+            "doc-hash",
+            ["compact"],
+            None::<String>,
+            100,
+            300,
+            "request-1",
+        );
+        let matching = callback_response("request-1", "success", "done", None::<String>, None, 150);
+        let stale = callback_response("request-2", "success", "done", None::<String>, None, 150);
+
+        assert!(callback_response_matches_request(&matching, Some(&request)));
+        assert!(!callback_response_matches_request(&stale, Some(&request)));
+        assert!(callback_response_matches_request(&stale, None));
     }
 }

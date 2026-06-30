@@ -8,47 +8,16 @@
 //! - Binary polls for `response.json` with a configurable timeout
 //! - On timeout, falls back to spawning `claude --print` as a subagent
 
+use agent_doc_ipc_protocol::{
+    CallbackPatch, CallbackRequest, CallbackResponse, PendingCallback, callback_request,
+    callback_request_is_expired, callback_response, callback_response_matches_request,
+    pending_callback_from_request,
+};
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::snapshot;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CallbackRequest {
-    pub doc_path: String,
-    pub doc_hash: String,
-    pub operations: Vec<String>,
-    pub context: Option<String>,
-    pub created_at: u64,
-    pub ttl_secs: u64,
-    pub request_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Patch {
-    pub component: String,
-    pub mode: String,
-    pub content: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CallbackResponse {
-    pub request_id: String,
-    pub status: String, // "success" | "error"
-    pub summary: String,
-    pub details: Option<String>,
-    pub patches: Option<Vec<Patch>>,
-    pub completed_at: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PendingCallback {
-    pub doc_path: String,
-    pub operations: Vec<String>,
-    pub urgency: String,
-}
 
 /// Compute the callback directory path for a document.
 fn callback_dir_for(doc: &Path) -> Result<PathBuf> {
@@ -79,15 +48,15 @@ pub fn create_request(
         .unwrap()
         .as_secs();
 
-    let request = CallbackRequest {
-        doc_path: doc_path.to_string_lossy().to_string(),
-        doc_hash: hash,
-        operations: operations.iter().map(|s| s.to_string()).collect(),
-        context: context.map(|s| s.to_string()),
+    let request = callback_request(
+        doc_path.to_string_lossy(),
+        hash,
+        operations.iter().copied(),
+        context,
         created_at,
         ttl_secs,
         request_id,
-    };
+    );
 
     let json = serde_json::to_string_pretty(&request)?;
     std::fs::write(dir.join("request.json"), json)?;
@@ -109,12 +78,9 @@ pub fn read_response(doc: &Path) -> Result<Option<CallbackResponse>> {
     let response: CallbackResponse =
         serde_json::from_str(&content).context("failed to parse callback response JSON")?;
 
-    // Verify request_id matches
     let request = read_request(doc)?;
-    if let Some(req) = request
-        && response.request_id != req.request_id
-    {
-        return Ok(None); // stale response from a previous request
+    if !callback_response_matches_request(&response, request.as_ref()) {
+        return Ok(None);
     }
 
     Ok(Some(response))
@@ -143,7 +109,7 @@ pub fn write_response(
     request_id: &str,
     status: &str,
     summary: &str,
-    patches: Option<Vec<Patch>>,
+    patches: Option<Vec<CallbackPatch>>,
 ) -> Result<()> {
     let doc_path = doc.canonicalize().ok().unwrap_or_else(|| doc.to_path_buf());
     let dir = callback_dir_for(&doc_path)?;
@@ -161,14 +127,14 @@ pub fn write_response(
         .unwrap()
         .as_secs();
 
-    let response = CallbackResponse {
-        request_id: request_id.to_string(),
-        status: status.to_string(),
-        summary: summary.to_string(),
-        details: None,
+    let response = callback_response(
+        request_id,
+        status,
+        summary,
+        None::<String>,
         patches,
         completed_at,
-    };
+    );
 
     let json = serde_json::to_string_pretty(&response)?;
     std::fs::write(dir.join("response.json"), json)?;
@@ -211,12 +177,10 @@ pub fn cleanup_expired(project_root: &Path, _max_age_secs: u64) -> Result<()> {
         let request_path = path.join("request.json");
         if let Ok(content) = std::fs::read_to_string(&request_path)
             && let Ok(request) = serde_json::from_str::<CallbackRequest>(&content)
+            && callback_request_is_expired(&request, now)
         {
-            let age = now.saturating_sub(request.created_at);
-            if age > request.ttl_secs {
-                std::fs::remove_dir_all(&path)?;
-                eprintln!("[callback] removed expired request: {}", path.display());
-            }
+            std::fs::remove_dir_all(&path)?;
+            eprintln!("[callback] removed expired request: {}", path.display());
         }
     }
 
@@ -264,25 +228,11 @@ pub fn scan_pending_callbacks(project_root: Option<&str>) -> Result<Vec<PendingC
         if let Ok(content) = std::fs::read_to_string(&request_path)
             && let Ok(request) = serde_json::from_str::<CallbackRequest>(&content)
         {
-            let age = now.saturating_sub(request.created_at);
-            if age > request.ttl_secs {
-                continue; // expired
+            if callback_request_is_expired(&request, now) {
+                continue;
             }
 
-            let elapsed_secs = now.saturating_sub(request.created_at);
-            let urgency = if elapsed_secs < 10 {
-                "high"
-            } else if elapsed_secs < 60 {
-                "normal"
-            } else {
-                "low"
-            };
-
-            pending.push(PendingCallback {
-                doc_path: request.doc_path,
-                operations: request.operations,
-                urgency: urgency.to_string(),
-            });
+            pending.push(pending_callback_from_request(request, now));
         }
     }
 

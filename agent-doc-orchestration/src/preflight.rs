@@ -348,7 +348,7 @@ pub struct PreflightOutput {
     /// Non-empty when another process wrote a request and is waiting for this
     /// session to respond.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pending_callbacks: Vec<crate::callback::PendingCallback>,
+    pub pending_callbacks: Vec<agent_doc_ipc_protocol::PendingCallback>,
     /// Structured owner-pane self-invocation contract
     /// (`#codex-owned-pane-prompt-miss-followups`). Non-null only when a Codex
     /// owner-pane re-invocation has unresolved exchange work (an unanswered

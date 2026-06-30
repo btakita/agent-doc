@@ -146,6 +146,20 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    fn assert_overlay_projects_to(doc: &Path, expected: &str) {
+        let overlay = snapshot::load_overlay_crdt(doc)
+            .unwrap()
+            .expect("overlay sidecar present");
+        let projected = agent_doc_markdown_ast::crdt::OverlayCrdtDoc::decode_state(&overlay)
+            .unwrap()
+            .to_markdown()
+            .unwrap();
+        assert_eq!(
+            projected, expected,
+            "overlay sidecar must project the current visible document"
+        );
+    }
+
     #[test]
     fn from_current_rebuilds_snapshot_and_crdt() {
         let dir = TempDir::new().unwrap();
@@ -167,7 +181,7 @@ mod tests {
             .unwrap()
             .to_text();
         assert_eq!(crdt_text, updated);
-        assert!(snapshot::load_overlay_crdt(&doc).unwrap().is_some());
+        assert_overlay_projects_to(&doc, &updated);
     }
 
     #[test]
@@ -246,7 +260,7 @@ mod tests {
             .unwrap()
             .to_text();
         assert_eq!(crdt_text, current);
-        assert!(snapshot::load_overlay_crdt(&doc).unwrap().is_some());
+        assert_overlay_projects_to(&doc, current);
         assert_eq!(std::fs::read_to_string(&cycle_path).unwrap(), cycle_state);
         assert_eq!(
             std::fs::read_to_string(&capture_path).unwrap(),

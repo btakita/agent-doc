@@ -249,6 +249,13 @@ should be deleted during extraction.
   project-root/git facts, tsift process invocation, snapshot/diff gathering,
   ops-log emission, and fail-closed error adapters while importing the focused
   response-text helpers directly.
+- `agent-doc-turn::document_drift` now owns closeout/session-check document
+  drift classifiers: exchange append-vs-rewrite detection, normalized exchange
+  body extraction, exchange-only promptless drift, answered exchange plus
+  backlog metadata drift, comment-only drift, and component-content masking.
+  Session-check keeps active-session lookup, snapshot/file/git normalization,
+  repair attempts, and user-facing interruption messages while importing the
+  focused drift policy directly.
 - `agent-doc-turn` now owns turn-status policy vocabulary: turn-active and
   stale-supervisor marker path constants, the readable turn-active marker schema,
   marker freshness/pane matching, and pane-title composition. Orchestration keeps

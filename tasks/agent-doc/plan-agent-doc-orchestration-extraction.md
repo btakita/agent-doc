@@ -218,6 +218,12 @@ focused crate under the old path.
   dedupe, and reporting missing preset names. Preflight keeps frontmatter/file
   fact collection and the user-facing missing-preset error while importing the
   focused resolver directly.
+- `agent-doc-turn` now owns owner-pane self-invocation wedge counter policy:
+  the persisted record schema, same-head increment/new-head reset transition,
+  and halt threshold. Orchestration keeps the sidecar path/file IO adapter,
+  renamed from the issue-tag `recguard_wedge` module to
+  `owner_pane_wedge_counter`, and imports the focused policy directly without
+  retaining the old module path or threshold wrapper.
 - We are in the current seam-by-seam extraction wave after the transitional
   orchestration crate move. Practically, this is **Wave 2**: shrink
   `agent-doc-orchestration` by moving durable policy into focused domain crates,

@@ -140,6 +140,7 @@ use agent_doc_queue::queue::{
     IdleQueueContextResetDecision, IdleQueueDrainDecision, clean_session_head_forces_context_reset,
     idle_queue_context_reset_decision, idle_queue_drain_decision,
 };
+use agent_doc_supervisor::config::AgentLaunchArgsSources;
 use agent_doc_supervisor::crash_policy::{
     CrashPolicy, FAILED_RESUME_WINDOW, FailedResumeTracker, RestartAction,
     SupervisorCleanExitResolution, SupervisorPromptDecision, SupervisorRestartContinueExitStrategy,
@@ -2315,35 +2316,20 @@ pub(crate) use supervisor_io::*;
 mod run;
 pub use run::*;
 
-fn resolve_agent_args(
+fn agent_launch_args_sources(
     fm: &frontmatter::Frontmatter,
     global_config: &agent_doc_config::Config,
-    harness: &crate::harness::HarnessConfig,
-) -> Option<String> {
-    match harness.binary.as_str() {
-        "claude" => fm
-            .agent_args
-            .clone()
-            .or_else(|| fm.claude_args.clone())
-            .or_else(|| global_config.agent_args.clone())
-            .or_else(|| global_config.claude_args.clone())
-            .or_else(|| std::env::var("AGENT_DOC_CLAUDE_ARGS").ok()),
-        "codex" => fm
-            .agent_args
-            .clone()
-            .or_else(|| fm.codex_args.clone())
-            .or_else(|| global_config.agent_args.clone())
-            .or_else(|| global_config.codex_args.clone()),
-        "opencode" => fm
-            .agent_args
-            .clone()
-            .or_else(|| fm.opencode_args.clone())
-            .or_else(|| global_config.agent_args.clone())
-            .or_else(|| global_config.opencode_args.clone()),
-        _ => fm
-            .agent_args
-            .clone()
-            .or_else(|| global_config.agent_args.clone()),
+) -> AgentLaunchArgsSources {
+    AgentLaunchArgsSources {
+        frontmatter_agent_args: fm.agent_args.clone(),
+        frontmatter_claude_args: fm.claude_args.clone(),
+        frontmatter_codex_args: fm.codex_args.clone(),
+        frontmatter_opencode_args: fm.opencode_args.clone(),
+        config_agent_args: global_config.agent_args.clone(),
+        config_claude_args: global_config.claude_args.clone(),
+        config_codex_args: global_config.codex_args.clone(),
+        config_opencode_args: global_config.opencode_args.clone(),
+        env_claude_args: std::env::var("AGENT_DOC_CLAUDE_ARGS").ok(),
     }
 }
 
@@ -2494,7 +2480,10 @@ mod th {
         harness: &crate::harness::HarnessConfig,
     ) -> Vec<String> {
         let cfg = Config::default();
-        let resolved_agent_args = resolve_agent_args(fm, &cfg, harness);
+        let resolved_agent_args = agent_doc_supervisor::config::resolve_agent_launch_args(
+            &harness.binary,
+            agent_launch_args_sources(fm, &cfg),
+        );
         let mut base_args: Vec<String> = Vec::new();
         if let Some(ref args) = resolved_agent_args {
             base_args.extend(args.split_whitespace().map(String::from));
@@ -2663,139 +2652,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn resolve_agent_args_claude_prefers_claude_alias_chain() {
-        let fm = Frontmatter {
-            claude_args: Some("--dangerously-skip-permissions".into()),
-            ..Default::default()
-        };
-        let cfg = Config {
-            claude_args: Some("--old-flag".into()),
-            ..Default::default()
-        };
-        let harness = crate::harness::HarnessConfig::claude();
-        let resolved = resolve_agent_args(&fm, &cfg, &harness);
-        assert_eq!(resolved.as_deref(), Some("--dangerously-skip-permissions"));
-    }
-    #[test]
-    fn resolve_agent_args_claude_prefers_agent_args_over_claude_args() {
-        let fm = Frontmatter {
-            agent_args: Some("--model sonnet".into()),
-            claude_args: Some("--dangerously-skip-permissions".into()),
-            ..Default::default()
-        };
-        let cfg = Config::default();
-        let harness = crate::harness::HarnessConfig::claude();
-        let resolved = resolve_agent_args(&fm, &cfg, &harness);
-        assert_eq!(resolved.as_deref(), Some("--model sonnet"));
-    }
-    #[test]
-    fn resolve_agent_args_codex_prefers_codex_alias_chain() {
-        let fm = Frontmatter {
-            codex_args: Some("-s danger-full-access".into()),
-            claude_args: Some("--dangerously-skip-permissions".into()),
-            ..Default::default()
-        };
-        let cfg = Config {
-            codex_args: Some("-s workspace-write".into()),
-            claude_args: Some("--old-flag".into()),
-            ..Default::default()
-        };
-        let harness = crate::harness::HarnessConfig::codex();
-        let resolved = resolve_agent_args(&fm, &cfg, &harness);
-        assert_eq!(resolved.as_deref(), Some("-s danger-full-access"));
-    }
-    #[test]
-    fn resolve_agent_args_codex_ignores_claude_args_aliases() {
-        let fm = Frontmatter {
-            claude_args: Some("--dangerously-skip-permissions".into()),
-            ..Default::default()
-        };
-        let cfg = Config {
-            claude_args: Some("--old-flag".into()),
-            ..Default::default()
-        };
-        let harness = crate::harness::HarnessConfig::codex();
-        let resolved = resolve_agent_args(&fm, &cfg, &harness);
-        assert_eq!(resolved, None);
-    }
-    #[test]
-    fn resolve_agent_args_codex_uses_agent_args_only() {
-        let fm = Frontmatter {
-            agent_args: Some("-s danger-full-access".into()),
-            codex_args: Some("-s workspace-write".into()),
-            claude_args: Some("--dangerously-skip-permissions".into()),
-            ..Default::default()
-        };
-        let cfg = Config {
-            agent_args: Some("-s workspace-write".into()),
-            codex_args: Some("-s read-only".into()),
-            claude_args: Some("--old-flag".into()),
-            ..Default::default()
-        };
-        let harness = crate::harness::HarnessConfig::codex();
-        let resolved = resolve_agent_args(&fm, &cfg, &harness);
-        assert_eq!(resolved.as_deref(), Some("-s danger-full-access"));
-    }
-    #[test]
-    fn resolve_agent_args_codex_uses_config_codex_args_fallback() {
-        let fm = Frontmatter::default();
-        let cfg = Config {
-            codex_args: Some("-s danger-full-access".into()),
-            claude_args: Some("--old-flag".into()),
-            ..Default::default()
-        };
-        let harness = crate::harness::HarnessConfig::codex();
-        let resolved = resolve_agent_args(&fm, &cfg, &harness);
-        assert_eq!(resolved.as_deref(), Some("-s danger-full-access"));
-    }
-    #[test]
-    fn resolve_agent_args_opencode_prefers_opencode_alias_chain() {
-        let fm = Frontmatter {
-            opencode_args: Some("--dangerously-skip-permissions".into()),
-            codex_args: Some("-s danger-full-access".into()),
-            claude_args: Some("--old-claude".into()),
-            ..Default::default()
-        };
-        let cfg = Config {
-            opencode_args: Some("--from-config".into()),
-            codex_args: Some("-s workspace-write".into()),
-            claude_args: Some("--old-flag".into()),
-            ..Default::default()
-        };
-        let harness = crate::harness::HarnessConfig::opencode();
-        let resolved = resolve_agent_args(&fm, &cfg, &harness);
-        assert_eq!(resolved.as_deref(), Some("--dangerously-skip-permissions"));
-    }
-    #[test]
-    fn resolve_agent_args_opencode_ignores_claude_and_codex_aliases() {
-        let fm = Frontmatter {
-            claude_args: Some("--dangerously-skip-permissions".into()),
-            codex_args: Some("-s danger-full-access".into()),
-            ..Default::default()
-        };
-        let cfg = Config {
-            claude_args: Some("--old-flag".into()),
-            codex_args: Some("-s workspace-write".into()),
-            ..Default::default()
-        };
-        let harness = crate::harness::HarnessConfig::opencode();
-        let resolved = resolve_agent_args(&fm, &cfg, &harness);
-        assert_eq!(resolved, None);
-    }
-    #[test]
-    fn resolve_agent_args_opencode_uses_config_opencode_args_fallback() {
-        let fm = Frontmatter::default();
-        let cfg = Config {
-            opencode_args: Some("--dangerously-skip-permissions".into()),
-            claude_args: Some("--old-flag".into()),
-            codex_args: Some("-s workspace-write".into()),
-            ..Default::default()
-        };
-        let harness = crate::harness::HarnessConfig::opencode();
-        let resolved = resolve_agent_args(&fm, &cfg, &harness);
-        assert_eq!(resolved.as_deref(), Some("--dangerously-skip-permissions"));
-    }
     #[test]
     fn model_injected_from_claude_model_frontmatter() {
         let fm = Frontmatter {

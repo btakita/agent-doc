@@ -74,7 +74,10 @@ fn build_harness_launch_spec(
 ) -> Result<HarnessLaunchSpec> {
     // Resolve harness config from frontmatter agent > config default_agent > claude
     let harness = crate::harness::HarnessConfig::from_context(fm, global_config);
-    let resolved_agent_args = resolve_agent_args(fm, global_config, &harness);
+    let resolved_agent_args = agent_doc_supervisor::config::resolve_agent_launch_args(
+        &harness.binary,
+        agent_launch_args_sources(fm, global_config),
+    );
 
     // Resolve env — reused across all restarts for determinism within a spec.
     let env_spec = EnvSpec::from_frontmatter(fm);

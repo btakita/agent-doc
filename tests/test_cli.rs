@@ -7287,6 +7287,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     let supervisor_run_loop =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/run_loop.rs")).unwrap();
     for required_snippet in [
+        "pub struct AgentLaunchArgsSources",
+        "pub fn resolve_agent_launch_args(",
         "pub const STALE_INSTALL_GRACE_SECS",
         "pub fn classify_stale_install_artifacts",
     ] {
@@ -7355,6 +7357,18 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
     let start_run_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/run.rs")).unwrap();
+    for forbidden_snippet in ["fn resolve_agent_args("] {
+        assert!(
+            !start_source.contains(forbidden_snippet),
+            "start.rs must not re-own pure supervisor launch-args precedence: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        start_source.contains("fn agent_launch_args_sources(")
+            && start_run_source
+                .contains("agent_doc_supervisor::config::resolve_agent_launch_args("),
+        "start paths should project launch-args facts and call focused supervisor config policy directly"
+    );
     for required_snippet in ["pub struct ChildLaunchPlan", "pub fn child_launch_plan("] {
         assert!(
             supervisor_run_loop.contains(required_snippet),

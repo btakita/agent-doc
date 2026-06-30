@@ -1,5 +1,43 @@
 //! Pure supervisor configuration precedence.
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgentLaunchArgsSources {
+    pub frontmatter_agent_args: Option<String>,
+    pub frontmatter_claude_args: Option<String>,
+    pub frontmatter_codex_args: Option<String>,
+    pub frontmatter_opencode_args: Option<String>,
+    pub config_agent_args: Option<String>,
+    pub config_claude_args: Option<String>,
+    pub config_codex_args: Option<String>,
+    pub config_opencode_args: Option<String>,
+    pub env_claude_args: Option<String>,
+}
+
+pub fn resolve_agent_launch_args(
+    harness_binary: &str,
+    sources: AgentLaunchArgsSources,
+) -> Option<String> {
+    match harness_binary {
+        "claude" => sources
+            .frontmatter_agent_args
+            .or(sources.frontmatter_claude_args)
+            .or(sources.config_agent_args)
+            .or(sources.config_claude_args)
+            .or(sources.env_claude_args),
+        "codex" => sources
+            .frontmatter_agent_args
+            .or(sources.frontmatter_codex_args)
+            .or(sources.config_agent_args)
+            .or(sources.config_codex_args),
+        "opencode" => sources
+            .frontmatter_agent_args
+            .or(sources.frontmatter_opencode_args)
+            .or(sources.config_agent_args)
+            .or(sources.config_opencode_args),
+        _ => sources.frontmatter_agent_args.or(sources.config_agent_args),
+    }
+}
+
 fn truthy_or_falsey(raw: &str) -> Option<bool> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "1" | "true" | "yes" | "on" => Some(true),
@@ -95,6 +133,159 @@ pub fn host_supervisor_is_stale(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn launch_sources() -> AgentLaunchArgsSources {
+        AgentLaunchArgsSources::default()
+    }
+
+    #[test]
+    fn agent_launch_args_claude_prefers_claude_alias_chain() {
+        let sources = AgentLaunchArgsSources {
+            frontmatter_claude_args: Some("--dangerously-skip-permissions".into()),
+            config_claude_args: Some("--old-flag".into()),
+            env_claude_args: Some("--env-flag".into()),
+            ..launch_sources()
+        };
+
+        assert_eq!(
+            resolve_agent_launch_args("claude", sources).as_deref(),
+            Some("--dangerously-skip-permissions")
+        );
+    }
+
+    #[test]
+    fn agent_launch_args_claude_prefers_agent_args_over_claude_args() {
+        let sources = AgentLaunchArgsSources {
+            frontmatter_agent_args: Some("--model sonnet".into()),
+            frontmatter_claude_args: Some("--dangerously-skip-permissions".into()),
+            ..launch_sources()
+        };
+
+        assert_eq!(
+            resolve_agent_launch_args("claude", sources).as_deref(),
+            Some("--model sonnet")
+        );
+    }
+
+    #[test]
+    fn agent_launch_args_claude_uses_env_fallback_last() {
+        let sources = AgentLaunchArgsSources {
+            env_claude_args: Some("--env-flag".into()),
+            ..launch_sources()
+        };
+
+        assert_eq!(
+            resolve_agent_launch_args("claude", sources).as_deref(),
+            Some("--env-flag")
+        );
+    }
+
+    #[test]
+    fn agent_launch_args_codex_prefers_codex_alias_chain() {
+        let sources = AgentLaunchArgsSources {
+            frontmatter_codex_args: Some("-s danger-full-access".into()),
+            frontmatter_claude_args: Some("--dangerously-skip-permissions".into()),
+            config_codex_args: Some("-s workspace-write".into()),
+            config_claude_args: Some("--old-flag".into()),
+            ..launch_sources()
+        };
+
+        assert_eq!(
+            resolve_agent_launch_args("codex", sources).as_deref(),
+            Some("-s danger-full-access")
+        );
+    }
+
+    #[test]
+    fn agent_launch_args_codex_ignores_claude_args_aliases() {
+        let sources = AgentLaunchArgsSources {
+            frontmatter_claude_args: Some("--dangerously-skip-permissions".into()),
+            config_claude_args: Some("--old-flag".into()),
+            env_claude_args: Some("--env-flag".into()),
+            ..launch_sources()
+        };
+
+        assert_eq!(resolve_agent_launch_args("codex", sources), None);
+    }
+
+    #[test]
+    fn agent_launch_args_codex_uses_agent_args_only() {
+        let sources = AgentLaunchArgsSources {
+            frontmatter_agent_args: Some("-s danger-full-access".into()),
+            frontmatter_codex_args: Some("-s workspace-write".into()),
+            frontmatter_claude_args: Some("--dangerously-skip-permissions".into()),
+            config_agent_args: Some("-s workspace-write".into()),
+            config_codex_args: Some("-s read-only".into()),
+            config_claude_args: Some("--old-flag".into()),
+            ..launch_sources()
+        };
+
+        assert_eq!(
+            resolve_agent_launch_args("codex", sources).as_deref(),
+            Some("-s danger-full-access")
+        );
+    }
+
+    #[test]
+    fn agent_launch_args_codex_uses_config_codex_args_fallback() {
+        let sources = AgentLaunchArgsSources {
+            config_codex_args: Some("-s danger-full-access".into()),
+            config_claude_args: Some("--old-flag".into()),
+            ..launch_sources()
+        };
+
+        assert_eq!(
+            resolve_agent_launch_args("codex", sources).as_deref(),
+            Some("-s danger-full-access")
+        );
+    }
+
+    #[test]
+    fn agent_launch_args_opencode_prefers_opencode_alias_chain() {
+        let sources = AgentLaunchArgsSources {
+            frontmatter_opencode_args: Some("--dangerously-skip-permissions".into()),
+            frontmatter_codex_args: Some("-s danger-full-access".into()),
+            frontmatter_claude_args: Some("--old-claude".into()),
+            config_opencode_args: Some("--from-config".into()),
+            config_codex_args: Some("-s workspace-write".into()),
+            config_claude_args: Some("--old-flag".into()),
+            ..launch_sources()
+        };
+
+        assert_eq!(
+            resolve_agent_launch_args("opencode", sources).as_deref(),
+            Some("--dangerously-skip-permissions")
+        );
+    }
+
+    #[test]
+    fn agent_launch_args_opencode_ignores_claude_and_codex_aliases() {
+        let sources = AgentLaunchArgsSources {
+            frontmatter_claude_args: Some("--dangerously-skip-permissions".into()),
+            frontmatter_codex_args: Some("-s danger-full-access".into()),
+            config_claude_args: Some("--old-flag".into()),
+            config_codex_args: Some("-s workspace-write".into()),
+            env_claude_args: Some("--env-flag".into()),
+            ..launch_sources()
+        };
+
+        assert_eq!(resolve_agent_launch_args("opencode", sources), None);
+    }
+
+    #[test]
+    fn agent_launch_args_opencode_uses_config_opencode_args_fallback() {
+        let sources = AgentLaunchArgsSources {
+            config_opencode_args: Some("--dangerously-skip-permissions".into()),
+            config_claude_args: Some("--old-flag".into()),
+            config_codex_args: Some("-s workspace-write".into()),
+            ..launch_sources()
+        };
+
+        assert_eq!(
+            resolve_agent_launch_args("opencode", sources).as_deref(),
+            Some("--dangerously-skip-permissions")
+        );
+    }
 
     #[test]
     fn default_on_bool_precedence_is_env_frontmatter_project_default() {

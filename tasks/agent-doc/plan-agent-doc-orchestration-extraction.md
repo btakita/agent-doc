@@ -270,6 +270,12 @@ focused crate under the old path.
   cached-context adapters that supply parsed frontmatter/config facts to the
   focused resolver, and unused cached review/auto adapters were deleted instead
   of kept as no-shim dead paths.
+- `agent-doc-turn` now owns closeout recovery evidence-to-state
+  classification and closeout content-component signature policy. Orchestration
+  gathers cycle/snapshot/HEAD/visible/submodule facts, classifies file-backed
+  drift evidence, and calls the focused classifier; the old public
+  `classify_closeout_recovery_state` path was replaced with the explicit
+  file-backed adapter `classify_closeout_recovery_state_for_file`.
 
 ### Earlier closure finding
 

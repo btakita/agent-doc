@@ -6809,6 +6809,9 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         "pub fn codex_resume_restart_args(",
         "pub fn looks_like_codex_transport_403_429(",
         "pub fn codex_transport_403_429_diagnostic(",
+        "pub struct CodexStderrNoiseReport",
+        "pub fn codex_stderr_noise_report(",
+        "pub fn filter_codex_stderr_noise(",
         "pub fn classify_child_network_probe_failure(",
         "pub fn classify_child_required_ssh_probe_failure(",
         "pub fn classify_child_writable_root_probe_failure(",
@@ -6927,6 +6930,10 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         "fn looks_like_codex_transport_403_429(",
         "fn format_transport_403_429_diagnostic(",
         "fn codex_transport_403_429_diagnostic(",
+        "struct CodexStderrNoiseReport",
+        "fn is_codex_marketplace_manifest_noise(",
+        "fn codex_stderr_noise_report(",
+        "fn filter_codex_stderr_noise(",
         "fn classify_child_network_probe_failure(",
         "fn classify_child_required_ssh_probe_failure(",
         "fn classify_child_writable_root_probe_failure(",
@@ -6949,6 +6956,7 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         codex.contains("use agent_doc_turn_executor::codex_launch::{")
             && codex.contains("looks_like_codex_transport_403_429")
             && codex.contains("codex_transport_403_429_diagnostic")
+            && codex.contains("filter_codex_stderr_noise")
             && codex.contains("classify_child_network_probe_failure")
             && codex.contains("classify_child_required_ssh_probe_failure")
             && codex.contains("classify_child_writable_root_probe_failure")

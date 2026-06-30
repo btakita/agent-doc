@@ -66,7 +66,7 @@ use agent_doc_turn_executor::agent_stream::{StreamChunk, parse_codex_line};
 use agent_doc_turn_executor::codex_launch::{
     classify_child_network_probe_failure, classify_child_required_ssh_probe_failure,
     classify_child_writable_root_probe_failure, codex_transport_403_429_diagnostic,
-    format_required_ssh_failure, looks_like_codex_transport_403_429,
+    filter_codex_stderr_noise, format_required_ssh_failure, looks_like_codex_transport_403_429,
     looks_like_local_browser_cdp_permission_denied, looks_like_ssh_alias_config_failure,
     looks_like_ssh_auth_failure, looks_like_ssh_dns_failure, looks_like_ssh_network_failure,
     resume_capability_drift_notice, transcript_has_required_ssh_failure,
@@ -115,49 +115,6 @@ struct StreamProcess {
 
 const CODEX_CHILD_NETWORK_PROBE_MARKER: &str = "AGENT_DOC_NETWORK_PROBE_OK";
 const CODEX_CHILD_WRITABLE_ROOT_PROBE_MARKER: &str = "AGENT_DOC_WRITABLE_ROOT_PROBE_OK";
-
-fn is_codex_marketplace_manifest_noise(line: &str) -> bool {
-    let trimmed = line.trim();
-    let is_external_plugin_manifest = trimmed.contains("/.codex/.tmp/plugins/plugins/");
-    let is_prompt_warning = (trimmed.contains("codex_core_plugins::manifest:")
-        || trimmed.contains("codex_core::plugins::manifest:"))
-        && trimmed.contains("ignoring interface.defaultPrompt:");
-    let is_skill_icon_warning = trimmed.contains("codex_core_skills::loader:")
-        && (trimmed.contains("ignoring interface.icon_small: icon path must not contain '..'")
-            || trimmed.contains("ignoring interface.icon_large: icon path must not contain '..'"));
-
-    (is_external_plugin_manifest && is_prompt_warning) || is_skill_icon_warning
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct CodexStderrNoiseReport {
-    filtered: String,
-    suppressed_marketplace_manifest_warnings: usize,
-}
-
-fn filter_codex_stderr_noise(stderr: &str) -> String {
-    codex_stderr_noise_report(stderr).filtered
-}
-
-fn codex_stderr_noise_report(stderr: &str) -> CodexStderrNoiseReport {
-    let mut suppressed_marketplace_manifest_warnings = 0;
-    let mut kept = Vec::new();
-    for line in stderr.lines() {
-        if is_codex_marketplace_manifest_noise(line) {
-            suppressed_marketplace_manifest_warnings += 1;
-        } else {
-            kept.push(line);
-        }
-    }
-    let mut filtered = kept.join("\n");
-    if !filtered.is_empty() && stderr.ends_with('\n') {
-        filtered.push('\n');
-    }
-    CodexStderrNoiseReport {
-        filtered,
-        suppressed_marketplace_manifest_warnings,
-    }
-}
 
 fn append_isolated_ssh_probe_args(args: &mut Vec<String>) {
     args.extend(
@@ -2051,34 +2008,6 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("sandbox violation"), "got: {msg}");
         assert!(msg.contains("codex subprocess exited with"), "got: {msg}");
-    }
-
-    #[test]
-    fn codex_stderr_filter_drops_marketplace_manifest_noise_only() {
-        let stderr = "\
-2026-05-04T02:58:49Z WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=/home/brian/.codex/.tmp/plugins/plugins/build-ios-apps/.codex-plugin/plugin.json
-2026-05-04T02:58:49Z WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
-2026-05-04T02:58:49Z WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
-real stderr
-";
-
-        let filtered = filter_codex_stderr_noise(stderr);
-        let report = codex_stderr_noise_report(stderr);
-
-        assert_eq!(filtered, "real stderr\n");
-        assert_eq!(report.filtered, "real stderr\n");
-        assert_eq!(report.suppressed_marketplace_manifest_warnings, 3);
-    }
-
-    #[test]
-    fn codex_stderr_filter_keeps_local_plugin_manifest_warnings() {
-        let stderr = "WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=/home/brian/work/btakita/agent-loop/src/agent-doc/.codex-plugin/plugin.json\n";
-
-        let filtered = filter_codex_stderr_noise(stderr);
-        let report = codex_stderr_noise_report(stderr);
-
-        assert_eq!(filtered, stderr);
-        assert_eq!(report.suppressed_marketplace_manifest_warnings, 0);
     }
 
     #[test]

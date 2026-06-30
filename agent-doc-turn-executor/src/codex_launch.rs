@@ -168,6 +168,49 @@ pub fn codex_transport_403_429_diagnostic(stderr: &str) -> String {
     )
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodexStderrNoiseReport {
+    pub filtered: String,
+    pub suppressed_marketplace_manifest_warnings: usize,
+}
+
+fn is_codex_marketplace_manifest_noise(line: &str) -> bool {
+    let trimmed = line.trim();
+    let is_external_plugin_manifest = trimmed.contains("/.codex/.tmp/plugins/plugins/");
+    let is_prompt_warning = (trimmed.contains("codex_core_plugins::manifest:")
+        || trimmed.contains("codex_core::plugins::manifest:"))
+        && trimmed.contains("ignoring interface.defaultPrompt:");
+    let is_skill_icon_warning = trimmed.contains("codex_core_skills::loader:")
+        && (trimmed.contains("ignoring interface.icon_small: icon path must not contain '..'")
+            || trimmed.contains("ignoring interface.icon_large: icon path must not contain '..'"));
+
+    (is_external_plugin_manifest && is_prompt_warning) || is_skill_icon_warning
+}
+
+pub fn codex_stderr_noise_report(stderr: &str) -> CodexStderrNoiseReport {
+    let mut suppressed_marketplace_manifest_warnings = 0;
+    let mut kept = Vec::new();
+    for line in stderr.lines() {
+        if is_codex_marketplace_manifest_noise(line) {
+            suppressed_marketplace_manifest_warnings += 1;
+        } else {
+            kept.push(line);
+        }
+    }
+    let mut filtered = kept.join("\n");
+    if !filtered.is_empty() && stderr.ends_with('\n') {
+        filtered.push('\n');
+    }
+    CodexStderrNoiseReport {
+        filtered,
+        suppressed_marketplace_manifest_warnings,
+    }
+}
+
+pub fn filter_codex_stderr_noise(stderr: &str) -> String {
+    codex_stderr_noise_report(stderr).filtered
+}
+
 pub fn looks_like_local_browser_cdp_permission_denied(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
     let local_cdp = lower.contains("127.0.0.1:9222") || lower.contains("localhost:9222");
@@ -573,6 +616,34 @@ mod tests {
         assert!(msg.contains("403 Forbidden on WebSocket"));
         assert!(msg.contains("429 Too Many Requests"));
         assert!(msg.contains("restart the codex session"));
+    }
+
+    #[test]
+    fn codex_stderr_filter_drops_marketplace_manifest_noise_only() {
+        let stderr = "\
+2026-05-04T02:58:49Z WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=/home/brian/.codex/.tmp/plugins/plugins/build-ios-apps/.codex-plugin/plugin.json
+2026-05-04T02:58:49Z WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-04T02:58:49Z WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+real stderr
+";
+
+        let filtered = filter_codex_stderr_noise(stderr);
+        let report = codex_stderr_noise_report(stderr);
+
+        assert_eq!(filtered, "real stderr\n");
+        assert_eq!(report.filtered, "real stderr\n");
+        assert_eq!(report.suppressed_marketplace_manifest_warnings, 3);
+    }
+
+    #[test]
+    fn codex_stderr_filter_keeps_local_plugin_manifest_warnings() {
+        let stderr = "WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=/home/brian/work/btakita/agent-loop/src/agent-doc/.codex-plugin/plugin.json\n";
+
+        let filtered = filter_codex_stderr_noise(stderr);
+        let report = codex_stderr_noise_report(stderr);
+
+        assert_eq!(filtered, stderr);
+        assert_eq!(report.suppressed_marketplace_manifest_warnings, 0);
     }
 
     #[test]

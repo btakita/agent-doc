@@ -36,6 +36,7 @@ agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.34.65" }
 agent-doc-prompt-cache = { path = "../agent-doc-prompt-cache", version = "0.34.65" }
 agent-doc-prompt-context = { path = "../agent-doc-prompt-context", version = "0.34.65" }
 agent-doc-queue = { path = "../agent-doc-queue", version = "0.34.65" }
+agent-doc-response-toc = { path = "../agent-doc-response-toc", version = "0.34.65" }
 agent-doc-secret-redact = { path = "../agent-doc-secret-redact", version = "0.34.65" }
 agent-doc-session-accretion = { path = "../agent-doc-session-accretion", version = "0.34.65" }
 agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.34.65" }

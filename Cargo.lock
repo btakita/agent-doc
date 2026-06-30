@@ -361,6 +361,7 @@ dependencies = [
  "agent-doc-prompt-cache",
  "agent-doc-prompt-context",
  "agent-doc-queue",
+ "agent-doc-response-toc",
  "agent-doc-secret-redact",
  "agent-doc-session-accretion",
  "agent-doc-sqlite",
@@ -451,6 +452,14 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "agent-doc-response-toc"
+version = "0.34.65"
+dependencies = [
+ "agent-doc-element",
+ "anyhow",
 ]
 
 [[package]]

@@ -49,6 +49,73 @@ pub fn queue_prompt_text_matches(prompt_change: &str, queue_head: &str) -> bool 
     normalize_queue_prompt_text(prompt_change) == normalize_queue_prompt_text(queue_head)
 }
 
+/// First non-empty, trimmed line of `text`, or `None` when blank.
+pub fn first_nonempty_line(text: &str) -> Option<&str> {
+    text.lines().map(str::trim).find(|l| !l.is_empty())
+}
+
+/// Format consumed queue prompt(s) as a labeled blockquote echo so the response
+/// block records the prompt it answered (#queue-prompt-echo-in-response).
+///
+/// `max_chars` is the opt-in `#queue-prompt-echo-summary` threshold: when
+/// `Some(n)` and a prompt exceeds `n` characters, the echo records a bounded
+/// summary (first line truncated + elided-char count + a pointer to the full
+/// `agent:queue` text) instead of the verbatim prompt. `None` (default)
+/// preserves the verbatim copy the user asked to keep "for now".
+pub fn format_consumed_prompt_echo(consumed_texts: &[String], max_chars: Option<usize>) -> String {
+    let mut out = String::from("> **Queue prompt:**\n>\n");
+    let mut first_block = true;
+    for text in consumed_texts {
+        if text.trim().is_empty() {
+            continue;
+        }
+        if !first_block {
+            out.push_str(">\n");
+        }
+        first_block = false;
+        let rendered = match max_chars {
+            Some(limit) if text.chars().count() > limit => summarize_consumed_prompt(text, limit),
+            _ => text.clone(),
+        };
+        for line in rendered.lines() {
+            if line.trim().is_empty() {
+                out.push_str(">\n");
+            } else {
+                out.push_str("> ");
+                out.push_str(line);
+                out.push('\n');
+            }
+        }
+    }
+    out
+}
+
+/// `#queue-prompt-echo-summary`: a bounded one-line summary of a long consumed
+/// queue prompt: its first non-empty line truncated to `limit` characters on a
+/// char boundary, plus how many characters were elided and a pointer to the full
+/// text preserved in `agent:queue`.
+pub fn summarize_consumed_prompt(text: &str, limit: usize) -> String {
+    let total = text.chars().count();
+    let first = first_nonempty_line(text).unwrap_or("").trim();
+    let head: String = first.chars().take(limit).collect();
+    let elided = total.saturating_sub(head.chars().count());
+    format!("{head}… (+{elided} more chars; full prompt retained in agent:queue)")
+}
+
+pub fn line_is_response_heading(trimmed: &str) -> bool {
+    trimmed == "## Assistant"
+        || trimmed.starts_with("### Re:")
+        || trimmed.starts_with("#### Re:")
+        || trimmed.starts_with("##### Re:")
+        || trimmed.starts_with("###### Re:")
+}
+
+/// Normalize a prompt line for "already present in exchange" comparison:
+/// trim and strip a leading `❯` prompt marker.
+pub fn normalize_prompt_line(line: &str) -> String {
+    line.trim().trim_start_matches('❯').trim().to_string()
+}
+
 fn active_queue_head_text(content: &str) -> Result<Option<String>> {
     let (fm, _) = agent_doc_frontmatter::frontmatter::parse(content)?;
     if fm.queue_active != Some(true) {
@@ -258,6 +325,112 @@ fn normalize_prompt_echo_presence_line(line: &str) -> String {
     crate::document_queue::strip_priority_markers(text)
         .trim()
         .to_string()
+}
+
+/// Locate, within `region` (the exchange content), the byte offset of the line
+/// where this cycle's response heading begins. Prefers the captured response's
+/// first line; falls back to the last non-code `### Re:` heading. `region_base`
+/// is the absolute offset of `region` within the full document, used to skip
+/// matches inside fenced code blocks.
+pub fn locate_response_heading_offset(
+    region: &str,
+    region_base: usize,
+    response_first_line: Option<&str>,
+    code_ranges: &[(usize, usize)],
+) -> Option<usize> {
+    let in_code = |rel: usize| {
+        let abs = region_base + rel;
+        code_ranges.iter().any(|&(cs, ce)| abs >= cs && abs < ce)
+    };
+
+    if let Some(target) = response_first_line.map(str::trim).filter(|t| !t.is_empty()) {
+        let mut offset = 0usize;
+        for line in region.split_inclusive('\n') {
+            if line.trim() == target && !in_code(offset) {
+                return Some(offset);
+            }
+            offset += line.len();
+        }
+    }
+
+    let mut offset = 0usize;
+    let mut found = None;
+    for line in region.split_inclusive('\n') {
+        if line_is_response_heading(line.trim()) && !in_code(offset) {
+            found = Some(offset);
+        }
+        offset += line.len();
+    }
+    found
+}
+
+/// Embed the consumed queue prompt echo immediately after this cycle's response
+/// heading inside the `exchange` component. Returns `content` unchanged (fail-safe)
+/// when the exchange/heading cannot be located, the prompt is empty, or the prompt
+/// already appears in the exchange (e.g. a user typed it in directly).
+pub fn embed_consumed_prompt_in_response(
+    content: &str,
+    consumed_texts: &[String],
+    response_first_line: Option<&str>,
+) -> String {
+    if consumed_texts.iter().all(|t| t.trim().is_empty()) {
+        return content.to_string();
+    }
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return content.to_string();
+    };
+    let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
+        return content.to_string();
+    };
+    let region = &content[exchange.open_end..exchange.close_start];
+
+    // Idempotency / manual-turn dedup: if the prompt's first line already appears
+    // as an exchange line (user typed it, or a prior echo exists), skip injection.
+    // #queue-prompt-echo-summary: the opt-in length threshold is read from the
+    // document's own frontmatter (default None = verbatim copy).
+    let max_chars = agent_doc_frontmatter::frontmatter::parse(content)
+        .ok()
+        .and_then(|(fm, _)| fm.queue_prompt_echo_max_chars);
+    let echo = format_consumed_prompt_echo(consumed_texts, max_chars);
+    if region.contains(echo.trim_end()) {
+        return content.to_string();
+    }
+    let already_present = consumed_texts
+        .iter()
+        .filter_map(|t| first_nonempty_line(t))
+        .any(|first| {
+            let needle = normalize_prompt_echo_presence_line(first);
+            !needle.is_empty()
+                && region.lines().any(|line| {
+                    normalize_prompt_line(line) == needle
+                        || normalize_prompt_echo_presence_line(line) == needle
+                })
+        });
+    if already_present {
+        return content.to_string();
+    }
+
+    let code_ranges = agent_doc_element::element::find_code_ranges(content);
+    let Some(heading_rel) = locate_response_heading_offset(
+        region,
+        exchange.open_end,
+        response_first_line,
+        &code_ranges,
+    ) else {
+        return content.to_string();
+    };
+    let Some(nl) = region[heading_rel..].find('\n') else {
+        return content.to_string();
+    };
+    let insert_abs = exchange.open_end + heading_rel + nl + 1;
+
+    let mut result = String::with_capacity(content.len() + echo.len() + 2);
+    result.push_str(&content[..insert_abs]);
+    result.push('\n');
+    result.push_str(&echo);
+    result.push('\n');
+    result.push_str(&content[insert_abs..]);
+    result
 }
 
 /// True when a response contains an explicit `> **Queue prompt:**` echo whose
@@ -655,5 +828,92 @@ mod tests {
         // prose prefix and must never match.
         let log_only = "```\nsome pasted log line one\nsome pasted log line two\n```";
         assert!(!free_text_head_answered_by_response(response, log_only));
+    }
+
+    #[test]
+    fn queue_prompt_echo_copies_verbatim_when_threshold_is_none() {
+        // #queue-prompt-echo-summary: default (None) preserves the verbatim copy
+        // the user asked to keep "for now".
+        let long = "do [#x] ".to_string() + &"word ".repeat(100);
+        let echo = format_consumed_prompt_echo(std::slice::from_ref(&long), None);
+        assert!(echo.starts_with("> **Queue prompt:**\n>\n"));
+        assert!(echo.contains(long.trim_end()));
+        assert!(!echo.contains("more chars"));
+    }
+
+    #[test]
+    fn queue_prompt_echo_copies_verbatim_when_under_threshold() {
+        let short = "do [#x] short prompt".to_string();
+        let echo = format_consumed_prompt_echo(std::slice::from_ref(&short), Some(200));
+        assert!(echo.contains("> do [#x] short prompt"));
+        assert!(!echo.contains("more chars"));
+    }
+
+    #[test]
+    fn queue_prompt_echo_summarizes_when_over_threshold() {
+        let long = "First line is the gist.\n".to_string() + &"tail ".repeat(100);
+        let echo = format_consumed_prompt_echo(std::slice::from_ref(&long), Some(40));
+        // The verbatim tail must NOT appear; a bounded summary must.
+        assert!(!echo.contains(&"tail ".repeat(100)));
+        assert!(echo.contains("First line is the gist."));
+        assert!(echo.contains("more chars; full prompt retained in agent:queue"));
+        // Summary is a single quoted line plus the label.
+        assert_eq!(echo.matches("more chars").count(), 1);
+    }
+
+    #[test]
+    fn queue_prompt_echo_summary_truncates_first_line_on_char_boundary() {
+        // Multibyte content must not panic and must truncate on a char boundary.
+        let text = "héllo wörld ".repeat(20);
+        let summary = summarize_consumed_prompt(&text, 5);
+        assert!(summary.starts_with("héllo"));
+        assert!(summary.contains("more chars"));
+    }
+
+    #[test]
+    fn queue_prompt_echo_embedding_skips_stale_blockquoted_echo_variant() {
+        let prompt = ":pushpin: Fix the root cause of this issue that occurred in this document.";
+        let content = format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: root fix\n\n",
+                "> **Queue prompt:**\n>\n",
+                "> Fix the root cause of this issue that occurred in this document.\n\n",
+                "Handled once.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue priority go -->\n",
+                "- {prompt}\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            prompt = prompt
+        );
+
+        let updated = embed_consumed_prompt_in_response(
+            &content,
+            &[prompt.to_string()],
+            Some("### Re: root fix"),
+        );
+
+        assert_eq!(
+            updated, content,
+            "a stale blockquoted queue-prompt echo with the priority marker stripped must not be reinserted"
+        );
+        assert_eq!(updated.matches("> **Queue prompt:**").count(), 1);
+
+        let one_line_echo = content.replace(
+            "> **Queue prompt:**\n>\n> Fix the root cause of this issue that occurred in this document.",
+            "> **Queue prompt:** Fix the root cause of this issue that occurred in this document.",
+        );
+        let updated = embed_consumed_prompt_in_response(
+            &one_line_echo,
+            &[prompt.to_string()],
+            Some("### Re: root fix"),
+        );
+        assert_eq!(
+            updated, one_line_echo,
+            "legacy one-line queue-prompt echoes must also count as already present"
+        );
+        assert_eq!(updated.matches("> **Queue prompt:**").count(), 1);
     }
 }

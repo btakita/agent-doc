@@ -2804,6 +2804,59 @@ fn test_agent_doc_queue_owns_free_text_response_proof_policy() {
 }
 
 #[test]
+fn test_agent_doc_queue_owns_queue_prompt_echo_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let queue_response =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_response.rs")).unwrap();
+    for required in [
+        "pub fn first_nonempty_line",
+        "pub fn format_consumed_prompt_echo",
+        "pub fn summarize_consumed_prompt",
+        "pub fn line_is_response_heading",
+        "pub fn normalize_prompt_line",
+        "pub fn locate_response_heading_offset",
+        "pub fn embed_consumed_prompt_in_response",
+    ] {
+        assert!(
+            queue_response.contains(required),
+            "agent-doc-queue must own queue prompt echo/embedding policy: {required}"
+        );
+    }
+
+    let queue_consume =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/queue_consume.rs"))
+            .unwrap();
+    for forbidden in [
+        "pub(crate) fn first_nonempty_line",
+        "pub(crate) fn format_consumed_prompt_echo",
+        "pub(crate) fn summarize_consumed_prompt",
+        "pub(crate) fn line_is_response_heading",
+        "pub(crate) fn normalize_prompt_line",
+        "fn normalize_prompt_echo_presence_line",
+        "pub(crate) fn locate_response_heading_offset",
+        "pub(crate) fn embed_consumed_prompt_in_response",
+    ] {
+        assert!(
+            !queue_consume.contains(forbidden),
+            "write/queue_consume.rs must not re-own queue prompt echo/embedding policy: {forbidden}"
+        );
+    }
+    assert!(
+        queue_consume.contains("embed_consumed_prompt_in_response")
+            && queue_consume.contains("first_nonempty_line"),
+        "queue_consume should call focused queue prompt echo policy directly"
+    );
+
+    let codex_hook =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/codex_hook.rs")).unwrap();
+    assert!(
+        codex_hook.contains("agent_doc_queue::queue_response::format_consumed_prompt_echo")
+            && !codex_hook.contains("crate::write::format_consumed_prompt_echo"),
+        "codex_hook must call queue prompt echo policy through agent-doc-queue directly"
+    );
+}
+
+#[test]
 fn test_agent_doc_queue_owns_queue_command_classification() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let queue_command =
@@ -3864,6 +3917,100 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
         assert!(
             !dependencies.contains_key(forbidden),
             "agent-doc-prompt-context must stay free of orchestration and project/effect dependencies"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_response_toc_owns_live_toc_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-response-toc")),
+        "agent-doc-response-toc must stay a first-class workspace crate"
+    );
+
+    let focused_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-response-toc/src/lib.rs")).unwrap();
+    for required_snippet in [
+        "pub struct LiveTocEntry",
+        "pub struct LiveSection",
+        "pub struct PromptFilters",
+        "pub fn live_toc_entries(",
+        "pub fn live_sections(",
+        "pub fn collect_live_sections(",
+        "pub fn live_section_window(",
+        "pub fn extract_backlog_ids(",
+        "pub fn preview_text(",
+        "pub fn normalize_text(",
+        "pub fn normalize_backlog_id(",
+    ] {
+        assert!(
+            focused_source.contains(required_snippet),
+            "agent-doc-response-toc must own live response TOC policy: {required_snippet}"
+        );
+    }
+
+    let orchestration_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/response_toc.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "struct LiveSection",
+        "struct PromptFilters",
+        "fn live_entries(",
+        "fn live_sections(",
+        "fn collect_live_sections(",
+        "fn extract_backlog_ids(",
+        "fn preview_text(",
+        "fn normalize_text(",
+        "fn normalize_backlog_id(",
+        "pub use agent_doc_response_toc",
+    ] {
+        assert!(
+            !orchestration_source.contains(forbidden_snippet),
+            "orchestration must not re-own or facade live response TOC policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        orchestration_source.contains("agent_doc_response_toc::live_toc_entries")
+            && orchestration_source.contains("live_section_window(")
+            && orchestration_source.contains("agent_doc_sqlite::archive_index"),
+        "orchestration response_toc should combine focused live TOC policy with archive/file adapters"
+    );
+
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
+    assert!(
+        orchestration_dependencies.contains_key("agent-doc-response-toc"),
+        "orchestration must depend on the focused response-TOC crate directly"
+    );
+
+    let focused_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-response-toc/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&focused_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    assert!(dependencies.contains_key("agent-doc-element"));
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "agent-doc-sqlite",
+        "agent-doc-fs",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-response-toc must stay free of orchestration and archive/effect dependencies"
         );
     }
 }

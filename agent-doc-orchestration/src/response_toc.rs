@@ -1,6 +1,6 @@
+use agent_doc_response_toc::{LiveTocEntry, PromptFilters, live_section_window, live_sections};
 use anyhow::{Context, Result};
 use serde::Serialize;
-use std::collections::BTreeSet;
 use std::path::Path;
 
 const DEFAULT_TOC_LIMIT: usize = 6;
@@ -30,15 +30,6 @@ struct FetchSection {
     refs: Vec<String>,
     archived_at: Option<String>,
     text: String,
-}
-
-#[derive(Debug, Clone)]
-struct LiveSection {
-    ordinal: usize,
-    heading: String,
-    text: String,
-    refs: Vec<String>,
-    normalized_text: String,
 }
 
 pub fn run_toc(
@@ -124,13 +115,16 @@ pub fn run_fetch(
 
 pub fn render_prompt_toc(file: &Path, doc: &str, prompt_targets: &[String]) -> Option<String> {
     let filters = PromptFilters::from_prompt_targets(prompt_targets);
-    let live_entries = live_entries(
+    let live_entries = agent_doc_response_toc::live_toc_entries(
         doc,
         filters.backlog_ids.first().map(String::as_str),
         None,
         DEFAULT_TOC_LIMIT,
     )
-    .unwrap_or_default();
+    .unwrap_or_default()
+    .into_iter()
+    .map(live_entry_to_toc_entry)
+    .collect::<Vec<_>>();
     let mut entries = live_entries;
 
     let archive_batches = if filters.backlog_ids.is_empty() {
@@ -197,7 +191,11 @@ fn build_toc_entries(
 ) -> Result<Vec<TocEntry>> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    let mut entries = live_entries(&content, backlog_id, query, limit).unwrap_or_default();
+    let mut entries = agent_doc_response_toc::live_toc_entries(&content, backlog_id, query, limit)
+        .unwrap_or_default()
+        .into_iter()
+        .map(live_entry_to_toc_entry)
+        .collect::<Vec<_>>();
     for entry in archive_entries(file, backlog_id, query, limit)? {
         if !entries
             .iter()
@@ -242,13 +240,7 @@ fn fetch_sections(
         let content = std::fs::read_to_string(file)
             .with_context(|| format!("failed to read {}", file.display()))?;
         let sections = live_sections(&content)?;
-        let target_idx = ordinal
-            .checked_sub(1)
-            .filter(|idx| *idx < sections.len())
-            .with_context(|| format!("live response {} not found", ordinal))?;
-        let start = target_idx.saturating_sub(before);
-        let end = (target_idx + after + 1).min(sections.len());
-        return Ok(sections[start..end]
+        return Ok(live_section_window(&sections, ordinal, before, after)?
             .iter()
             .map(|section| FetchSection {
                 locator: format!("live:{}", section.ordinal),
@@ -290,170 +282,6 @@ fn fetch_sections(
         .collect())
 }
 
-fn live_entries(
-    doc: &str,
-    backlog_id: Option<&str>,
-    query: Option<&str>,
-    limit: usize,
-) -> Result<Vec<TocEntry>> {
-    let sections = live_sections(doc)?;
-    let backlog_id = backlog_id.map(normalize_backlog_id).transpose()?;
-    let query_norm = query.map(normalize_text);
-    let matching = sections
-        .into_iter()
-        .filter(|section| {
-            backlog_id
-                .as_deref()
-                .map(|needle| section.refs.iter().any(|candidate| candidate == needle))
-                .unwrap_or(true)
-                && query_norm
-                    .as_deref()
-                    .map(|needle| section.normalized_text.contains(needle))
-                    .unwrap_or(true)
-        })
-        .collect::<Vec<_>>();
-
-    let keep_from = matching.len().saturating_sub(limit);
-    Ok(matching[keep_from..]
-        .iter()
-        .map(|section| TocEntry {
-            locator: format!("live:{}", section.ordinal),
-            source: TocSource::Live,
-            heading: section.heading.clone(),
-            preview: preview_text(&section.text),
-            refs: section.refs.clone(),
-            archived_at: None,
-        })
-        .collect())
-}
-
-fn live_sections(doc: &str) -> Result<Vec<LiveSection>> {
-    let components = agent_doc_element::element::parse(doc)
-        .with_context(|| "failed to parse document components for response TOC")?;
-    let exchange = components
-        .iter()
-        .find(|component| component.name == "exchange")
-        .with_context(|| "exchange component not found")?;
-    Ok(collect_live_sections(exchange.content(doc)))
-}
-
-fn collect_live_sections(exchange_body: &str) -> Vec<LiveSection> {
-    let mut sections = Vec::new();
-    let mut current = Vec::new();
-
-    for line in exchange_body.lines() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("<!-- agent:boundary:") {
-            break;
-        }
-        if trimmed.starts_with("### Re:") && !current.is_empty() {
-            push_live_section(&mut sections, &mut current);
-        }
-        if !current.is_empty() || trimmed.starts_with("### Re:") {
-            current.push(line.to_string());
-        }
-    }
-    if !current.is_empty() {
-        push_live_section(&mut sections, &mut current);
-    }
-    sections
-}
-
-fn push_live_section(sections: &mut Vec<LiveSection>, current: &mut Vec<String>) {
-    let text = current.join("\n").trim().to_string();
-    current.clear();
-    if text.is_empty() {
-        return;
-    }
-    let heading = text
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .unwrap_or("### Re:")
-        .trim()
-        .to_string();
-    let refs = extract_backlog_ids(&text).into_iter().collect::<Vec<_>>();
-    sections.push(LiveSection {
-        ordinal: sections.len() + 1,
-        heading,
-        normalized_text: normalize_text(&text),
-        refs,
-        text,
-    });
-}
-
-fn extract_backlog_ids(text: &str) -> BTreeSet<String> {
-    let chars: Vec<char> = text.chars().collect();
-    let mut found = BTreeSet::new();
-    let mut idx = 0;
-    while idx < chars.len() {
-        if chars[idx] == '#'
-            && (idx == 0 || chars[idx - 1] != '#')
-            && idx + 1 < chars.len()
-            && is_backlog_id_char(chars[idx + 1])
-        {
-            let mut end = idx + 1;
-            while end < chars.len() && is_backlog_id_char(chars[end]) {
-                end += 1;
-            }
-            found.insert(chars[idx..end].iter().collect());
-            idx = end;
-            continue;
-        }
-        idx += 1;
-    }
-    found
-}
-
-fn preview_text(text: &str) -> String {
-    let collapsed = normalize_text(text);
-    let mut chars = collapsed.chars();
-    let preview: String = chars.by_ref().take(120).collect();
-    if chars.next().is_some() {
-        format!("{}...", preview.chars().take(117).collect::<String>())
-    } else {
-        preview
-    }
-}
-
-fn normalize_text(text: &str) -> String {
-    text.split_whitespace()
-        .map(|segment| segment.to_ascii_lowercase())
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-fn normalize_backlog_id(raw: &str) -> Result<String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        anyhow::bail!("backlog id cannot be empty");
-    }
-    Ok(if trimmed.starts_with('#') {
-        trimmed.to_string()
-    } else {
-        format!("#{trimmed}")
-    })
-}
-
-fn is_backlog_id_char(ch: char) -> bool {
-    ch.is_ascii_alphanumeric() || ch == '_' || ch == '-'
-}
-
-struct PromptFilters {
-    backlog_ids: Vec<String>,
-}
-
-impl PromptFilters {
-    fn from_prompt_targets(prompt_targets: &[String]) -> Self {
-        let mut backlog_ids = BTreeSet::new();
-        for target in prompt_targets {
-            backlog_ids.extend(extract_backlog_ids(target));
-        }
-        Self {
-            backlog_ids: backlog_ids.into_iter().collect(),
-        }
-    }
-}
-
 fn source_label(source: &TocSource) -> &'static str {
     match source {
         TocSource::Live => "live",
@@ -461,24 +289,20 @@ fn source_label(source: &TocSource) -> &'static str {
     }
 }
 
+fn live_entry_to_toc_entry(entry: LiveTocEntry) -> TocEntry {
+    TocEntry {
+        locator: entry.locator,
+        source: TocSource::Live,
+        heading: entry.heading,
+        preview: entry.preview,
+        refs: entry.refs,
+        archived_at: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn collect_live_sections_skips_summary_and_boundary_tail() {
-        let exchange = concat!(
-            "### Session Summary\n\nCompacted.\n\n",
-            "### Re: first — gpt-5\n\nBody one.\n\n",
-            "### Re: second — gpt-5\n\nBody #restoc.\n",
-            "<!-- agent:boundary:test -->\n",
-            "do [#restoc]. spec-test-build-install-commit-push\n",
-        );
-        let sections = collect_live_sections(exchange);
-        assert_eq!(sections.len(), 2);
-        assert_eq!(sections[0].heading, "### Re: first — gpt-5");
-        assert_eq!(sections[1].refs, vec!["#restoc".to_string()]);
-    }
 
     #[test]
     fn fetch_live_sections_returns_window() {

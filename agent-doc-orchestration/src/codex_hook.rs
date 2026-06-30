@@ -643,10 +643,9 @@ fn wrap_repeated_queue_response_patch(prompt: &str, response: &str) -> String {
         .filter(|line| !line.is_empty())
         .unwrap_or("active queue head");
     let mut patch = format!("<!-- patch:exchange -->\n### Re: {heading} — gpt-5\n\n");
-    patch.push_str(&crate::write::format_consumed_prompt_echo(
-        &[prompt.to_string()],
-        None,
-    ));
+    patch.push_str(
+        &agent_doc_queue::queue_response::format_consumed_prompt_echo(&[prompt.to_string()], None),
+    );
     patch.push('\n');
     patch.push_str(response.trim());
     if !patch.ends_with('\n') {

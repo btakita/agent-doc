@@ -4,14 +4,12 @@ use super::*;
 use agent_doc_controller::dispatch::{
     DISPATCH_COALESCED_IN_FLIGHT_MARKER, DISPATCH_STALE_GENERATION_REDIRECT_MARKER,
     DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER, StaleQueuePauseRecovery,
-    dispatch_command_kind_is_operator_reopen, dispatch_error_stale_generation_redirect_target,
+    append_dispatch_proof_payload, dispatch_command_kind_is_operator_reopen,
+    dispatch_diagnostic_field, dispatch_error_stale_generation_redirect_target,
     dispatch_should_coalesce_in_flight, pause_reason_is_stale_supervisor_churn_stop,
     spent_preset_id_from_pause_reason, stale_supervisor_pid_from_pause_reason,
 };
 use agent_doc_controller::status;
-use agent_doc_queue::{
-    queue_directive::topic_resolves_to_exact_id, queue_response::normalize_queue_prompt_text,
-};
 
 pub(crate) fn connect(project_root: &Path) -> Result<interprocess::local_socket::Stream> {
     connect_path(&socket_path(project_root))
@@ -1338,15 +1336,6 @@ fn run_supervisor_auto_install_with_retry(
     }))
 }
 
-fn active_queue_head_is_registered_preset(content: &str, preset_id: &str) -> Result<bool> {
-    let Some(head) = agent_doc_queue::queue_heads::active_queue_head_text(content)? else {
-        return Ok(false);
-    };
-    let normalized = normalize_queue_prompt_text(&head);
-    Ok(topic_resolves_to_exact_id(&normalized, preset_id)
-        && agent_doc_queue::queue_response::head_id_is_registered_preset(content, preset_id))
-}
-
 fn resume_spent_preset_pause(
     project_root: &Path,
     file: &Path,
@@ -1474,7 +1463,9 @@ fn repair_spent_preset_pause_before_dispatch(
             file.display()
         )
     })?;
-    if !active_queue_head_is_registered_preset(&content, &preset_id)? {
+    if !agent_doc_queue::queue_response::active_queue_head_is_registered_preset(
+        &content, &preset_id,
+    )? {
         resume_spent_preset_pause(
             project_root,
             file,
@@ -2608,16 +2599,6 @@ pub(crate) fn request_u64(value: Option<u64>, name: &str) -> Result<u64> {
     value.with_context(|| format!("controller request missing {name}"))
 }
 
-fn dispatch_diagnostic_field<'a>(payload: &'a str, field: &str) -> Option<&'a str> {
-    let prefix = format!("{field}=");
-    payload.split_whitespace().find_map(|token| {
-        token
-            .strip_prefix(&prefix)
-            .map(|value| value.trim_matches(|ch| matches!(ch, ',' | ';')))
-            .filter(|value| !value.is_empty())
-    })
-}
-
 fn dispatch_blocked_proof_fields(
     project_root: &Path,
     file: &Path,
@@ -2686,14 +2667,6 @@ fn dispatch_blocked_user_facing_outcome_fields(stage: &str, reason: &str) -> Str
     outcome
         .expect("static dispatch blocked user-facing outcome fields are valid")
         .log_fields()
-}
-
-fn append_dispatch_proof_payload(diagnostic_payload: &str, proof_fields: &str) -> String {
-    match (diagnostic_payload.is_empty(), proof_fields.is_empty()) {
-        (_, true) => diagnostic_payload.to_string(),
-        (true, false) => proof_fields.to_string(),
-        (false, false) => format!("{diagnostic_payload} {proof_fields}"),
-    }
 }
 
 pub(crate) fn handle_start_session(

@@ -6904,6 +6904,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             .unwrap();
     let command_line_source =
         fs::read_to_string(manifest_dir.join("agent-doc-controller/src/command_line.rs")).unwrap();
+    let controller_dispatch =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller/src/dispatch.rs")).unwrap();
     let controller_status =
         fs::read_to_string(manifest_dir.join("agent-doc-controller/src/status.rs")).unwrap();
     for required_snippet in [
@@ -6914,6 +6916,15 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         assert!(
             command_line_source.contains(required_snippet),
             "agent-doc-controller should own process command-line ownership recognition: {required_snippet}"
+        );
+    }
+    for required_snippet in [
+        "pub fn dispatch_diagnostic_field",
+        "pub fn append_dispatch_proof_payload(",
+    ] {
+        assert!(
+            controller_dispatch.contains(required_snippet),
+            "agent-doc-controller should own controller dispatch diagnostic payload policy: {required_snippet}"
         );
     }
     for required_snippet in [
@@ -6952,6 +6963,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub(crate) fn classify_closeout_block_dispatch",
         "pub(crate) fn recycle_debounce_decision",
         "pub(crate) fn force_overrides_in_flight_gate",
+        "fn dispatch_diagnostic_field",
+        "fn append_dispatch_proof_payload(",
     ] {
         assert!(
             !rpc_source.contains(forbidden_snippet),
@@ -6981,6 +6994,11 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     assert!(
         rpc_source.contains("use agent_doc_controller::dispatch::{"),
         "project_controller::rpc should import focused controller dispatch helpers privately"
+    );
+    assert!(
+        rpc_source.contains("dispatch_diagnostic_field(diagnostic_payload,")
+            && rpc_source.contains("append_dispatch_proof_payload(&diagnostic_payload,"),
+        "project_controller::rpc should call focused controller dispatch diagnostic helpers directly"
     );
     assert!(
         rpc_source.contains("use agent_doc_controller::status")
@@ -11043,6 +11061,7 @@ fn test_agent_doc_queue_owns_queue_head_classification_policy() {
     for required_snippet in [
         "pub fn head_id_names_tracked_directive_item",
         "pub fn head_id_is_registered_preset",
+        "pub fn active_queue_head_is_registered_preset",
         "pub fn queue_head_is_bare_do_directive",
         "pub fn queue_prompt_text_is_queue_activation_trigger",
         "pub fn queue_prompt_text_is_free_text",
@@ -11085,10 +11104,20 @@ fn test_agent_doc_queue_owns_queue_head_classification_policy() {
         assert!(
             !source.contains("crate::write::queue_head_is_free_text_prompt")
                 && !source.contains("crate::write::queue_prompt_text_is_free_text")
-                && !source.contains("crate::write::head_id_is_registered_preset"),
+                && !source.contains("crate::write::head_id_is_registered_preset")
+                && !source.contains("fn active_queue_head_is_registered_preset("),
             "{relative_path} should call queue classification through agent-doc-queue directly"
         );
     }
+    let rpc_source = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/project_controller/rpc.rs"),
+    )
+    .unwrap();
+    assert!(
+        rpc_source
+            .contains("agent_doc_queue::queue_response::active_queue_head_is_registered_preset("),
+        "project_controller::rpc should call the queue-owned registered-preset classifier directly"
+    );
 }
 
 #[test]

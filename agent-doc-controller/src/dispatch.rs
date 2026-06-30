@@ -76,6 +76,23 @@ pub fn dispatch_should_coalesce_in_flight(
     in_flight_same_cycle && !operator_driven
 }
 
+pub fn dispatch_diagnostic_field<'a>(payload: &'a str, field: &str) -> Option<&'a str> {
+    let prefix = format!("{field}=");
+    payload
+        .split_whitespace()
+        .find_map(|token| token.strip_prefix(&prefix))
+        .map(|value| value.trim_matches(|ch| matches!(ch, ',' | ';')))
+        .filter(|value| !value.is_empty())
+}
+
+pub fn append_dispatch_proof_payload(diagnostic_payload: &str, proof_fields: &str) -> String {
+    match (diagnostic_payload.is_empty(), proof_fields.is_empty()) {
+        (_, true) => diagnostic_payload.to_string(),
+        (true, false) => proof_fields.to_string(),
+        (false, false) => format!("{diagnostic_payload} {proof_fields}"),
+    }
+}
+
 pub fn recent_lines_contain_trigger(content: &str, trigger: &str) -> bool {
     let recent_lines: Vec<String> = content.lines().rev().take(8).map(strip_ansi).collect();
     recent_lines
@@ -2150,6 +2167,35 @@ gpt-5.4 high - ~/work/btakita/agent-loop/src/session-share - Context 31% used
         assert!(!dispatch_should_coalesce_in_flight(true, true));
         assert!(!dispatch_should_coalesce_in_flight(false, false));
         assert!(!dispatch_should_coalesce_in_flight(false, true));
+    }
+
+    #[test]
+    fn dispatch_diagnostic_field_trims_field_punctuation() {
+        let payload = "stage=queue_paused harness=codex, result=blocked; empty= ;";
+
+        assert_eq!(dispatch_diagnostic_field(payload, "harness"), Some("codex"));
+        assert_eq!(
+            dispatch_diagnostic_field(payload, "result"),
+            Some("blocked")
+        );
+        assert_eq!(dispatch_diagnostic_field(payload, "empty"), None);
+        assert_eq!(dispatch_diagnostic_field(payload, "missing"), None);
+    }
+
+    #[test]
+    fn append_dispatch_proof_payload_joins_non_empty_parts() {
+        assert_eq!(
+            append_dispatch_proof_payload("stage=queue_paused", "proof=ready"),
+            "stage=queue_paused proof=ready"
+        );
+        assert_eq!(
+            append_dispatch_proof_payload("", "proof=ready"),
+            "proof=ready"
+        );
+        assert_eq!(
+            append_dispatch_proof_payload("stage=queue_paused", ""),
+            "stage=queue_paused"
+        );
     }
 
     #[test]

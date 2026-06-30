@@ -147,6 +147,18 @@ pub fn head_id_is_registered_preset(content: &str, head_id: &str) -> bool {
         .is_some()
 }
 
+/// True when the active queue head is exactly the registered prompt preset id.
+pub fn active_queue_head_is_registered_preset(content: &str, preset_id: &str) -> Result<bool> {
+    let Some(head) = crate::queue_heads::active_queue_head_text(content)? else {
+        return Ok(false);
+    };
+    let normalized = normalize_queue_prompt_text(&head);
+    Ok(
+        crate::queue_directive::topic_resolves_to_exact_id(&normalized, preset_id)
+            && head_id_is_registered_preset(content, preset_id),
+    )
+}
+
 /// A queue head that is just a `do [#id]` / `do #id` directive: the `do` verb
 /// plus the id (with optional bracket sugar) and nothing else.
 pub fn queue_head_is_bare_do_directive(queue_head: &str) -> bool {
@@ -667,6 +679,7 @@ mod tests {
         );
         assert!(queue_head_is_free_text_prompt(registered).unwrap());
         assert!(head_id_is_registered_preset(registered, "advance-review"));
+        assert!(active_queue_head_is_registered_preset(registered, "advance-review").unwrap());
 
         let preset_and_tracked = concat!(
             "---\nqueue_active: true\n",
@@ -685,8 +698,18 @@ mod tests {
             preset_and_tracked,
             "advance-review"
         ));
+        assert!(
+            !active_queue_head_is_registered_preset(preset_and_tracked, "advance-review").unwrap()
+        );
 
         assert!(!queue_head_is_free_text_prompt(&active_queue_doc("#advance-review")).unwrap());
+        assert!(
+            !active_queue_head_is_registered_preset(
+                &active_queue_doc("#advance-review"),
+                "advance-review"
+            )
+            .unwrap()
+        );
     }
 
     #[test]

@@ -345,9 +345,11 @@ should be deleted during extraction.
 - `agent-doc-queue` now owns queue consumption entry policy used by
   `write/queue_consume`: selecting prompt texts, counting leading done-id
   consumes, matching prompt text with cosmetic priority markers ignored,
-  marking entries completed by done ids, and normalizing consumed done-id bags.
-  Orchestration keeps document locks, file/snapshot IO, IPC node ops,
-  response-echo embedding, ops logging, and editor convergence.
+  marking entries completed by done ids, normalizing consumed done-id bags, and
+  free-text struck-head annotation policy: the deterministic strike note,
+  list-bullet stripping, and newly struck free-text queue-head annotation over
+  queue AST node ranges. Orchestration keeps document locks, file/snapshot IO,
+  IPC node ops, response-echo embedding, ops logging, and editor convergence.
 - `agent-doc-queue` now owns queue prompt drift/drop accounting used by
   `write` and IPC adoption guards: queue component extraction, active prompt
   text extraction, consumed/struck prompt coverage, baseline-vs-live deletion

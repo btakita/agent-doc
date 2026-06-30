@@ -8,6 +8,7 @@ use agent_doc_document::commit_normalization::{
     normalize_component_content_for_absorb, redact_component_contents_for_absorb,
 };
 use agent_doc_document::transient_markers::strip_boundary_markers;
+use agent_doc_element::element;
 use agent_doc_prompt_lines::text_line_looks_like_prompt_target;
 use agent_doc_queue::queue_prompt_drift::queue_prompt_deletions_between;
 use agent_doc_turn::closeout_signal::line_is_carry_forward_signal;
@@ -53,6 +54,151 @@ pub fn decide_visible_write_after_typing(facts: VisibleWriteTypingFacts) -> Visi
     } else {
         VisibleWriteDecision::DeferActiveTyping
     }
+}
+
+fn normalize_component_content_for_delta(content: &str) -> String {
+    agent_doc_diff::strip_comments(&strip_boundary_markers(content))
+}
+
+fn containment_line(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+fn base_prompt_prefix_equivalents(base: &str) -> HashSet<String> {
+    base.lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            Some(
+                trimmed
+                    .strip_prefix('❯')
+                    .unwrap_or(trimmed)
+                    .trim()
+                    .to_string(),
+            )
+        })
+        .collect()
+}
+
+fn inserted_delta_hunks(base: &str, ours: &str) -> Vec<Vec<String>> {
+    let base_prefix_equivalents = base_prompt_prefix_equivalents(base);
+    let base_lines = base
+        .lines()
+        .filter_map(containment_line)
+        .collect::<HashSet<_>>();
+    let diff = similar::TextDiff::from_lines(base, ours);
+    let mut hunks = Vec::<Vec<String>>::new();
+    let mut current = Vec::<String>::new();
+
+    for change in diff.iter_all_changes() {
+        match change.tag() {
+            similar::ChangeTag::Insert => {
+                let line = change.to_string();
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if base_lines.contains(trimmed) {
+                    continue;
+                }
+                if let Some(unprefixed) = trimmed.strip_prefix('❯') {
+                    let unprefixed = unprefixed.trim();
+                    if base_prefix_equivalents.contains(unprefixed) {
+                        continue;
+                    }
+                }
+                current.push(trimmed.to_string());
+            }
+            similar::ChangeTag::Delete | similar::ChangeTag::Equal => {
+                if !current.is_empty() {
+                    hunks.push(std::mem::take(&mut current));
+                }
+            }
+        }
+    }
+    if !current.is_empty() {
+        hunks.push(current);
+    }
+
+    hunks
+        .into_iter()
+        .filter(|hunk| response_delta_hunk_is_actionable(hunk))
+        .collect()
+}
+
+fn response_delta_hunk_is_actionable(hunk: &[String]) -> bool {
+    hunk.iter().any(|line| {
+        line.starts_with("### Re:")
+            || line.starts_with("## Assistant")
+            || line.starts_with("## User")
+    }) || hunk.len() >= 2
+}
+
+fn contains_contiguous_hunk(haystack: &[String], needle: &[String]) -> bool {
+    if needle.is_empty() || needle.len() > haystack.len() {
+        return false;
+    }
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
+}
+
+/// Detect whether the current document already contains the response delta.
+///
+/// On IPC sidecar ack timeout, socket/file delivery may have succeeded while
+/// confirmation did not arrive in time. If the editor applied the patches, the
+/// exchange component in `content_current` already contains the response delta
+/// from `base -> content_ours`; applying it again would duplicate the response.
+///
+/// Detection computes normalized insertion hunks from `base -> content_ours` in
+/// `agent:exchange`, ignores boundary/comment churn and prompt-prefix-only
+/// normalization lines, and requires each actionable response hunk to appear
+/// contiguously in `content_current`.
+pub fn response_already_in_current(base: &str, content_ours: &str, content_current: &str) -> bool {
+    let base_comps = element::parse(base).unwrap_or_default();
+    let ours_comps = element::parse(content_ours).unwrap_or_default();
+    let current_comps = element::parse(content_current).unwrap_or_default();
+
+    let base_exc = base_comps
+        .iter()
+        .find(|component| component.name == "exchange");
+    let ours_exc = ours_comps
+        .iter()
+        .find(|component| component.name == "exchange");
+    let current_exc = current_comps
+        .iter()
+        .find(|component| component.name == "exchange");
+
+    let (Some(base_e), Some(ours_e), Some(current_e)) = (base_exc, ours_exc, current_exc) else {
+        return false;
+    };
+
+    let base_content = normalize_component_content_for_delta(base_e.content(base));
+    let ours_content = normalize_component_content_for_delta(ours_e.content(content_ours));
+    let current_content = normalize_component_content_for_delta(current_e.content(content_current));
+
+    if ours_content.trim() == base_content.trim() {
+        return false;
+    }
+
+    let response_hunks = inserted_delta_hunks(&base_content, &ours_content);
+    if response_hunks.is_empty() {
+        return false;
+    }
+
+    let current_lines = current_content
+        .lines()
+        .filter_map(containment_line)
+        .collect::<Vec<_>>();
+    response_hunks
+        .iter()
+        .all(|hunk| contains_contiguous_hunk(&current_lines, hunk))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1672,6 +1818,143 @@ mod tests {
         format!(
             "# Plan\n\n<!-- agent:exchange -->\n{exchange}<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n{queue}<!-- /agent:queue -->\n"
         )
+    }
+
+    #[test]
+    fn response_already_in_current_detects_plugin_applied() {
+        let base = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+<!-- /agent:exchange -->
+";
+        let content_ours = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+### Re: answer — opus-4-6
+This is the agent response.
+With multiple lines.
+<!-- /agent:exchange -->
+";
+        let content_current = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+User added this line.
+### Re: answer — opus-4-6
+This is the agent response.
+With multiple lines.
+<!-- /agent:exchange -->
+";
+        assert!(
+            response_already_in_current(base, content_ours, content_current),
+            "should detect plugin-applied response"
+        );
+    }
+
+    #[test]
+    fn response_already_in_current_rejects_partial_line_overlap() {
+        let base = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+<!-- /agent:exchange -->
+";
+        let content_ours = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+### Re: answer — gpt-5
+Done.
+<!-- /agent:exchange -->
+";
+        let content_current = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+Done.
+<!-- /agent:exchange -->
+";
+        assert!(
+            !response_already_in_current(base, content_ours, content_current),
+            "a shared response body line is not proof that the response delta was applied"
+        );
+    }
+
+    #[test]
+    fn response_already_in_current_accepts_normalized_delta_with_bare_prompt() {
+        let base = "\
+<!-- agent:exchange patch=append -->
+do #ipcd
+<!-- /agent:exchange -->
+";
+        let content_ours = "\
+<!-- agent:exchange patch=append -->
+❯ do #ipcd
+### Re: #ipcd — gpt-5
+
+Implemented.
+<!-- /agent:exchange -->
+";
+        let content_current = "\
+<!-- agent:exchange patch=append -->
+do #ipcd
+while typing next prompt
+### Re: #ipcd — gpt-5
+
+Implemented.
+<!-- /agent:exchange -->
+";
+        assert!(
+            response_already_in_current(base, content_ours, content_current),
+            "the response hunk should be detected even when prompt-prefix normalization differs"
+        );
+    }
+
+    #[test]
+    fn response_already_in_current_false_when_not_applied() {
+        let base = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+<!-- /agent:exchange -->
+";
+        let content_ours = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+### Re: answer — opus-4-6
+This is the agent response.
+With multiple lines.
+<!-- /agent:exchange -->
+";
+        let content_current = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+User typed something new.
+<!-- /agent:exchange -->
+";
+        assert!(
+            !response_already_in_current(base, content_ours, content_current),
+            "should not detect when plugin hasn't applied"
+        );
+    }
+
+    #[test]
+    fn response_already_in_current_false_when_no_exchange() {
+        let base = "No components here.";
+        let content_ours = "No components here either.";
+        let content_current = "Still no components.";
+        assert!(
+            !response_already_in_current(base, content_ours, content_current),
+            "should return false when no exchange components"
+        );
+    }
+
+    #[test]
+    fn response_already_in_current_false_when_no_changes() {
+        let base = "\
+<!-- agent:exchange patch=append -->
+Same content.
+<!-- /agent:exchange -->
+";
+        assert!(
+            !response_already_in_current(base, base, base),
+            "should return false when ours equals base"
+        );
     }
 
     #[test]

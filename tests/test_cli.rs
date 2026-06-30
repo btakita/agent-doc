@@ -11925,6 +11925,7 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         "pub fn decide_reconnect_buffer",
         "pub enum EditorlessDiskFallbackDecision",
         "pub fn decide_editorless_disk_fallback",
+        "pub fn response_already_in_current",
     ] {
         assert!(
             realtime_write_policy.contains(required_snippet),
@@ -11988,6 +11989,21 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
     }
     let write_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    for forbidden_snippet in [
+        "fn response_already_in_current(",
+        "fn inserted_delta_hunks(",
+        "fn response_delta_hunk_is_actionable(",
+        "fn contains_contiguous_hunk(",
+        "fn base_prompt_prefix_equivalents(",
+        "fn normalize_component_content_for_delta(",
+        "TextDiff::from_lines(base, ours)",
+        "pub use agent_doc_document_realtime::write_policy::response_already_in_current",
+    ] {
+        assert!(
+            !write_source.contains(forbidden_snippet),
+            "write.rs must not re-own or facade response-delta already-applied policy: {forbidden_snippet}"
+        );
+    }
     assert!(
         write_source.contains(
             "agent_doc_document_realtime::write_policy::decide_visible_write_after_typing"
@@ -12000,6 +12016,10 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         write_ipc_source
             .contains("agent_doc_document_realtime::write_policy::FullContentSourceProof"),
         "normalization repair payloads should use the focused source-proof type directly"
+    );
+    assert!(
+        write_ipc_source.contains("response_already_in_current"),
+        "write/ipc.rs should import the focused response-delta detector directly"
     );
     let write_ipc_transport_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc/transport.rs"))

@@ -219,14 +219,14 @@
 use anyhow::{Context, Result};
 use fs2::FileExt;
 use std::cell::RefCell;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::fs::OpenOptions;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
-use similar::{ChangeTag, TextDiff};
 
+use agent_doc_document_realtime::write_policy::response_already_in_current;
 pub use agent_doc_document_realtime::write_policy::{
     dropped_prompt_lines_after_content_ours,
     ipc_snapshot_would_absorb_live_prompt_drift_after_preflight,
@@ -3043,157 +3043,6 @@ fn capture_locked_pre_response(path: &Path) -> Result<(std::fs::File, String)> {
         .with_context(|| format!("failed to read {}", path.display()))?;
     snapshot::save_pre_response(path, &content_at_start)?;
     Ok((doc_lock, content_at_start))
-}
-
-fn normalize_component_content_for_delta(content: &str) -> String {
-    agent_doc_diff::strip_comments(&strip_boundary_for_dedup(content))
-}
-
-fn containment_line(line: &str) -> Option<String> {
-    let trimmed = line.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    Some(trimmed.to_string())
-}
-
-fn base_prompt_prefix_equivalents(base: &str) -> HashSet<String> {
-    base.lines()
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                return None;
-            }
-            Some(
-                trimmed
-                    .strip_prefix('❯')
-                    .unwrap_or(trimmed)
-                    .trim()
-                    .to_string(),
-            )
-        })
-        .collect()
-}
-
-fn inserted_delta_hunks(base: &str, ours: &str) -> Vec<Vec<String>> {
-    let base_prefix_equivalents = base_prompt_prefix_equivalents(base);
-    let base_lines = base
-        .lines()
-        .filter_map(containment_line)
-        .collect::<HashSet<_>>();
-    let diff = TextDiff::from_lines(base, ours);
-    let mut hunks = Vec::<Vec<String>>::new();
-    let mut current = Vec::<String>::new();
-
-    for change in diff.iter_all_changes() {
-        match change.tag() {
-            ChangeTag::Insert => {
-                let line = change.to_string();
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
-                if base_lines.contains(trimmed) {
-                    continue;
-                }
-                if let Some(unprefixed) = trimmed.strip_prefix('❯') {
-                    let unprefixed = unprefixed.trim();
-                    if base_prefix_equivalents.contains(unprefixed) {
-                        continue;
-                    }
-                }
-                current.push(trimmed.to_string());
-            }
-            ChangeTag::Delete | ChangeTag::Equal => {
-                if !current.is_empty() {
-                    hunks.push(std::mem::take(&mut current));
-                }
-            }
-        }
-    }
-    if !current.is_empty() {
-        hunks.push(current);
-    }
-
-    hunks
-        .into_iter()
-        .filter(|hunk| response_delta_hunk_is_actionable(hunk))
-        .collect()
-}
-
-fn response_delta_hunk_is_actionable(hunk: &[String]) -> bool {
-    hunk.iter().any(|line| {
-        line.starts_with("### Re:")
-            || line.starts_with("## Assistant")
-            || line.starts_with("## User")
-    }) || hunk.len() >= 2
-}
-
-fn contains_contiguous_hunk(haystack: &[String], needle: &[String]) -> bool {
-    if needle.is_empty() || needle.len() > haystack.len() {
-        return false;
-    }
-    haystack
-        .windows(needle.len())
-        .any(|window| window == needle)
-}
-
-/// Detect whether the plugin has already applied the agent's response patches.
-///
-/// On IPC sidecar ack timeout, the socket delivery may have succeeded but the
-/// confirmation did not arrive in time. If the plugin applied the patches, the
-/// exchange component in `content_current` already contains the response delta
-/// from `content_ours`. CRDT merging in this state would duplicate the response.
-///
-/// Detection: compute normalized insertion hunks from `base -> content_ours` in
-/// `agent:exchange`, ignore boundary/comment churn and prompt-prefix-only
-/// normalization lines, and require each actionable response hunk to appear
-/// contiguously in `content_current`. This is intentionally stricter than a
-/// line-overlap count so short responses do not adopt current content from a
-/// coincidental shared body line.
-fn response_already_in_current(base: &str, content_ours: &str, content_current: &str) -> bool {
-    let base_comps = agent_doc_element::element::parse(base).unwrap_or_default();
-    let ours_comps = agent_doc_element::element::parse(content_ours).unwrap_or_default();
-    let current_comps = agent_doc_element::element::parse(content_current).unwrap_or_default();
-
-    let base_exc = base_comps.iter().find(|c| c.name == "exchange");
-    let ours_exc = ours_comps.iter().find(|c| c.name == "exchange");
-    let current_exc = current_comps.iter().find(|c| c.name == "exchange");
-
-    let (Some(base_e), Some(ours_e), Some(current_e)) = (base_exc, ours_exc, current_exc) else {
-        return false;
-    };
-
-    let base_content = normalize_component_content_for_delta(base_e.content(base));
-    let ours_content = normalize_component_content_for_delta(ours_e.content(content_ours));
-    let current_content = normalize_component_content_for_delta(current_e.content(content_current));
-
-    // No changes to exchange — nothing to detect
-    if ours_content.trim() == base_content.trim() {
-        return false;
-    }
-
-    let response_hunks = inserted_delta_hunks(&base_content, &ours_content);
-    if response_hunks.is_empty() {
-        return false;
-    }
-
-    let current_lines = current_content
-        .lines()
-        .filter_map(containment_line)
-        .collect::<Vec<_>>();
-    let detected = response_hunks
-        .iter()
-        .all(|hunk| contains_contiguous_hunk(&current_lines, hunk));
-
-    if detected {
-        eprintln!(
-            "[write] plugin-applied detection: {} normalized response delta hunk(s) already in current",
-            response_hunks.len()
-        );
-    }
-
-    detected
 }
 
 /// When the current file already contains the response block, prefer adopting

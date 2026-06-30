@@ -9,6 +9,7 @@ use agent_doc_document_realtime::write_policy::{
     prompt_bearing_user_changes_between, snapshot_contains_dropped_prompt,
     stale_snapshot_reset_drift,
 };
+use std::collections::HashSet;
 
 pub fn guard_no_stale_snapshot_reset_drift(
     file: &Path,

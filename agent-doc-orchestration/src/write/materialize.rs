@@ -6,6 +6,7 @@ use agent_doc_template::response_materialization::{
     same_ignoring_trailing_newlines, serialize_template_response,
     strip_partial_response_materialization_from_exchange,
 };
+use std::collections::HashSet;
 
 pub struct NormalizedTemplateResponse {
     pub response_for_capture: Option<String>,

@@ -5,6 +5,7 @@ use crate::frontmatter_io;
 use agent_doc_document_realtime::write_policy::{
     WholeBufferAuthority, WholeBufferAuthorityFacts, WholeBufferDelivery,
     WholeBufferDeliveryAction, decide_whole_buffer_delivery, exchange_component_text,
+    response_already_in_current,
 };
 #[cfg(test)]
 use agent_doc_element_exchange::extract_post_commit_normalization_targets;

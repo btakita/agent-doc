@@ -1,6 +1,7 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use std::collections::HashSet;
 
 pub fn unresolved_backlog_capture_targets(
     file: &Path,

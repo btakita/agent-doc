@@ -4860,9 +4860,10 @@ mod th {
         let _cwd = ScopedCurrentDir::set(root);
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         std::fs::create_dir_all(root.join("tasks")).unwrap();
+        let tmux_session = format!("test-{test_name}-{}", std::process::id());
         std::fs::write(
             root.join(".agent-doc/config.toml"),
-            "tmux_session = \"test\"\n",
+            format!("tmux_session = \"{tmux_session}\"\n"),
         )
         .unwrap();
 
@@ -4884,11 +4885,16 @@ mod th {
         }
 
         let iso = IsolatedTmux::new(test_name);
-        let protected_pane = iso.new_session("test", root).unwrap();
-        let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
+        let protected_pane = iso.new_session(&tmux_session, root).unwrap();
+        let _ = iso.raw_cmd(&[
+            "rename-window",
+            "-t",
+            &format!("{tmux_session}:0"),
+            "agent-doc",
+        ]);
         let detached_pane = iso.split_window(&protected_pane, root, "-dh").unwrap();
         let target_window = iso.pane_window(&protected_pane).unwrap();
-        let requested_pane = iso.new_window("test", root).unwrap();
+        let requested_pane = iso.new_window(&tmux_session, root).unwrap();
 
         sessions::register_full_with_cwd(
             "sync-replace-protected",
@@ -4950,7 +4956,7 @@ mod th {
             "detachable visible pane should be displaced instead of making sync a no-op"
         );
         assert_eq!(
-            iso.active_pane("test").unwrap(),
+            iso.active_pane(&tmux_session).unwrap(),
             requested_pane,
             "sync should focus the requested pane after replacing a detachable visible pane"
         );

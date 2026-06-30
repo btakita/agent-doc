@@ -2996,6 +2996,54 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
 }
 
 #[test]
+fn test_agent_doc_queue_owns_queue_prompt_drift_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let queue_lib = fs::read_to_string(manifest_dir.join("agent-doc-queue/src/lib.rs")).unwrap();
+    assert!(
+        queue_lib.contains("pub mod queue_prompt_drift;"),
+        "agent-doc-queue should expose queue prompt drift policy"
+    );
+
+    let queue_prompt_drift =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_prompt_drift.rs")).unwrap();
+    for required in [
+        "pub fn queue_component_text",
+        "pub fn queue_prompt_texts",
+        "pub fn queue_prompt_texts_including_consumed",
+        "pub fn queue_prompt_deletions_between",
+        "pub fn dropped_queue_prompt_lines_after_content_ours",
+        "pub fn preserve_content_ours_over_live_queue_deletions",
+    ] {
+        assert!(
+            queue_prompt_drift.contains(required),
+            "agent-doc-queue must own queue prompt drift policy: {required}"
+        );
+    }
+
+    let orchestration_write =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    for forbidden in [
+        "fn queue_component_text(",
+        "fn queue_prompt_texts(",
+        "fn queue_prompt_texts_including_consumed(",
+        "fn queue_prompt_counts(",
+        "fn queue_prompt_count(",
+        "fn queue_prompt_deletions_between(",
+        "fn dropped_queue_prompt_lines_after_content_ours(",
+        "fn preserve_content_ours_over_live_queue_deletions(",
+    ] {
+        assert!(
+            !orchestration_write.contains(forbidden),
+            "write.rs must not re-own queue prompt drift policy: {forbidden}"
+        );
+    }
+    assert!(
+        orchestration_write.contains("agent_doc_queue::queue_prompt_drift::{"),
+        "write.rs should call queue prompt drift policy through agent-doc-queue directly"
+    );
+}
+
+#[test]
 fn test_agent_doc_queue_owns_free_text_response_proof_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let queue_response =

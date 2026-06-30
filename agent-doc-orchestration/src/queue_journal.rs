@@ -102,19 +102,11 @@ pub fn record_live_buffer(file: &Path) -> Result<()> {
     };
     // Each open editor reports its own sidecar; journal the prompts from every
     // one so a multi-editor session never drops one editor's pending add.
-    let mut prompts: Vec<agent_doc_queue::document_queue::QueuePrompt> = Vec::new();
-    for snapshot in agent_doc_debounce::live_buffer_snapshots(file_str) {
-        let Some(buffer) = snapshot.content.as_deref() else {
-            // len/hash-only sidecar: we cannot recover the prompt text from a
-            // digest, so there is nothing to journal from it.
-            continue;
-        };
-        for prompt in queue_journal_policy::queue_prompts(buffer) {
-            if !prompts.iter().any(|p| p.text == prompt.text) {
-                prompts.push(prompt);
-            }
-        }
-    }
+    let snapshots = agent_doc_debounce::live_buffer_snapshots(file_str);
+    let buffers = snapshots
+        .iter()
+        .filter_map(|snapshot| snapshot.content.as_deref());
+    let prompts = queue_journal_policy::unique_queue_prompts_from_contents(buffers);
     append_prompts(file, prompts)
 }
 
@@ -206,23 +198,8 @@ pub fn replay_missing(file: &Path, content: &str) -> Vec<QueueJournalEntry> {
     if journal.is_empty() {
         return Vec::new();
     }
-    // Present = a live prompt with the same text, OR a struck/completed entry
-    // (the operator already worked/cancelled it — do NOT resurrect).
-    let mut present_texts = queue_journal_policy::present_queue_texts(content);
-    present_texts.extend(durable_queue_texts(file));
-    queue_journal_policy::missing_entries(journal, &present_texts)
-}
-
-/// Queue prompt texts that have reached the binary's durable snapshot. If such a
-/// prompt is absent from the live document, treat that absence as an operator
-/// deletion rather than a crash-lost add; the journal has already served its
-/// purpose once the prompt is snapshot-visible.
-fn durable_queue_texts(file: &Path) -> std::collections::HashSet<String> {
-    crate::snapshot::load(file)
-        .ok()
-        .flatten()
-        .map(|content| queue_journal_policy::present_queue_texts(&content))
-        .unwrap_or_default()
+    let durable_content = crate::snapshot::load(file).ok().flatten();
+    queue_journal_policy::replay_missing_entries(journal, content, durable_content.as_deref())
 }
 
 /// Clear the journal for `file` (best-effort). Called on every clean

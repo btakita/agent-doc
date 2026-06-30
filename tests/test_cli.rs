@@ -2611,6 +2611,8 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
         "pub fn present_queue_texts(",
         "pub fn plan_append_entries(",
         "pub fn missing_entries(",
+        "pub fn replay_missing_entries(",
+        "pub fn unique_queue_prompts_from_contents(",
         "pub fn merge_missing_into_content(",
     ] {
         assert!(
@@ -2631,6 +2633,11 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
         "pub fn plan_append_entries(",
         "fn missing_entries(",
         "pub fn missing_entries(",
+        "fn replay_missing_entries(",
+        "pub fn replay_missing_entries(",
+        "fn unique_queue_prompts_from_contents(",
+        "pub fn unique_queue_prompts_from_contents(",
+        "fn durable_queue_texts(",
         "pub fn merge_missing_into_content(",
         "pub use agent_doc_queue::queue_journal",
     ] {
@@ -2644,8 +2651,10 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
             .contains("agent_doc_queue::queue_journal as queue_journal_policy")
             && orchestration_queue_journal.contains("queue_journal_policy::queue_prompts(")
             && orchestration_queue_journal.contains("queue_journal_policy::plan_append_entries(")
-            && orchestration_queue_journal.contains("queue_journal_policy::present_queue_texts(")
-            && orchestration_queue_journal.contains("queue_journal_policy::missing_entries("),
+            && orchestration_queue_journal
+                .contains("queue_journal_policy::unique_queue_prompts_from_contents(")
+            && orchestration_queue_journal
+                .contains("queue_journal_policy::replay_missing_entries("),
         "orchestration queue journal adapter should call focused queue policy directly"
     );
     let start_run_source =

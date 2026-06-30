@@ -70,6 +70,25 @@ pub fn plan_append_entries(
     planned
 }
 
+/// Extract unique live queue prompts from multiple content snapshots.
+///
+/// Deduplication is by canonical prompt text so multiple editors or repeated
+/// sidecar writes cannot double-record the same operator queue add.
+pub fn unique_queue_prompts_from_contents(
+    contents: impl IntoIterator<Item = impl AsRef<str>>,
+) -> Vec<QueuePrompt> {
+    let mut seen = HashSet::new();
+    let mut prompts = Vec::new();
+    for content in contents {
+        for prompt in queue_prompts(content.as_ref()) {
+            if seen.insert(prompt.text.clone()) {
+                prompts.push(prompt);
+            }
+        }
+    }
+    prompts
+}
+
 /// Return journal entries that are absent from the supplied live/durable queue
 /// text set.
 pub fn missing_entries(
@@ -80,6 +99,24 @@ pub fn missing_entries(
         .into_iter()
         .filter(|entry| !present_texts.contains(&entry.text))
         .collect()
+}
+
+/// Return journal entries that are absent from the live document and optional
+/// durable queue snapshot.
+///
+/// A prompt represented in either source is treated as present, including struck
+/// completed entries, so replay only resurrects prompts genuinely lost from the
+/// current durable/live queue state.
+pub fn replay_missing_entries(
+    journal: impl IntoIterator<Item = QueueJournalEntry>,
+    live_content: &str,
+    durable_content: Option<&str>,
+) -> Vec<QueueJournalEntry> {
+    let mut present_texts = present_queue_texts(live_content);
+    if let Some(content) = durable_content {
+        present_texts.extend(present_queue_texts(content));
+    }
+    missing_entries(journal, &present_texts)
 }
 
 /// All queue prompt texts currently represented in `content`, live `Prompt` AND
@@ -251,6 +288,52 @@ mod tests {
             missing,
             vec![QueueJournalEntry {
                 text: "do [#beta]".to_string(),
+                multiline: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn unique_queue_prompts_from_contents_dedupes_across_buffers_by_text() {
+        let first = doc_body(&["- do [#alpha]", "- do [#beta]"]);
+        let second = doc_body(&["- do [#beta]", "- do [#gamma]"]);
+
+        let prompts = unique_queue_prompts_from_contents([first.as_str(), second.as_str()]);
+
+        assert_eq!(
+            prompts
+                .iter()
+                .map(|prompt| prompt.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["do [#alpha]", "do [#beta]", "do [#gamma]"]
+        );
+    }
+
+    #[test]
+    fn replay_missing_entries_suppresses_live_and_durable_completed_prompts() {
+        let journal = vec![
+            QueueJournalEntry {
+                text: "do [#alpha]".to_string(),
+                multiline: false,
+            },
+            QueueJournalEntry {
+                text: "do [#beta]".to_string(),
+                multiline: false,
+            },
+            QueueJournalEntry {
+                text: "do [#gamma]".to_string(),
+                multiline: false,
+            },
+        ];
+        let live = doc_body(&["- do [#alpha]"]);
+        let durable = doc_body(&["- ~~do [#beta]~~"]);
+
+        let missing = replay_missing_entries(journal, &live, Some(&durable));
+
+        assert_eq!(
+            missing,
+            vec![QueueJournalEntry {
+                text: "do [#gamma]".to_string(),
                 multiline: false,
             }]
         );

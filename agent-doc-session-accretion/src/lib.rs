@@ -204,6 +204,65 @@ pub fn level_label(level: SessionAccretionLevel) -> &'static str {
     }
 }
 
+/// Resolve the product-wide opt-in for pre-emptive queue context resets.
+///
+/// Document frontmatter has precedence over project config. Missing values
+/// default to off so a queue drain never interleaves `/clear` without explicit
+/// operator/project opt-in.
+pub fn resolve_queue_context_reset_opt_in(
+    frontmatter_flag: Option<bool>,
+    project_flag: Option<bool>,
+) -> bool {
+    frontmatter_flag.or(project_flag).unwrap_or(false)
+}
+
+/// Resolve and clamp the editor `/clear` context-usage threshold.
+///
+/// Document frontmatter has precedence over project config, then the built-in
+/// default. Values above 100 are clamped because callers compare percentages.
+pub fn resolve_clear_threshold(
+    frontmatter_threshold: Option<u8>,
+    project_threshold: Option<u8>,
+) -> u8 {
+    frontmatter_threshold
+        .or(project_threshold)
+        .unwrap_or(DEFAULT_CLEAR_THRESHOLD)
+        .min(100)
+}
+
+/// Context-reset reason for a recent exchange compaction that happened after
+/// the last tracked `/clear`.
+pub fn context_reset_reason_for_recent_compaction(
+    recent_exchange_compaction_timestamp: Option<u64>,
+    last_context_clear_at: Option<u64>,
+) -> Option<String> {
+    if let Some(compaction_ts) = recent_exchange_compaction_timestamp
+        && last_context_clear_at.unwrap_or(0) < compaction_ts
+    {
+        return Some(
+            "exchange was compacted after the last tracked context clear; compaction shrinks the document but not the already-loaded conversation"
+                .to_string(),
+        );
+    }
+    None
+}
+
+/// Context-reset reason for the current session-accretion report.
+pub fn context_reset_reason_for_report(report: &SessionAccretionReport) -> Option<String> {
+    if report.is_healthy() {
+        return None;
+    }
+
+    Some(format!(
+        "session accretion is {} (exchange_lines={}, response_sections={}, recent_committed_cycles={}, recent_noop_closeouts={})",
+        level_label(report.level),
+        report.exchange_lines,
+        report.response_sections,
+        report.recent_committed_cycles,
+        report.recent_noop_closeouts
+    ))
+}
+
 /// Queue-aware restart guidance.
 ///
 /// While a queue is actively draining, guidance must not ask the agent to stop
@@ -367,6 +426,52 @@ mod tests {
 
         let g = compaction_guidance("/tmp/doc.md", false, false);
         assert!(g.contains("ask the user before compacting"), "got {g}");
+    }
+
+    #[test]
+    fn context_reset_opt_in_prefers_frontmatter_then_project_then_off() {
+        assert!(!resolve_queue_context_reset_opt_in(None, None));
+        assert!(resolve_queue_context_reset_opt_in(None, Some(true)));
+        assert!(!resolve_queue_context_reset_opt_in(Some(false), Some(true)));
+        assert!(resolve_queue_context_reset_opt_in(Some(true), Some(false)));
+    }
+
+    #[test]
+    fn clear_threshold_prefers_frontmatter_then_project_then_default_and_clamps() {
+        assert_eq!(resolve_clear_threshold(None, None), DEFAULT_CLEAR_THRESHOLD);
+        assert_eq!(resolve_clear_threshold(None, Some(65)), 65);
+        assert_eq!(resolve_clear_threshold(Some(70), Some(65)), 70);
+        assert_eq!(resolve_clear_threshold(Some(150), None), 100);
+        assert_eq!(resolve_clear_threshold(None, Some(150)), 100);
+    }
+
+    #[test]
+    fn context_reset_reason_for_recent_compaction_requires_clear_after_compaction() {
+        let reason = context_reset_reason_for_recent_compaction(Some(20), None)
+            .expect("missing clear should require reset after compaction");
+        assert!(reason.contains("exchange was compacted"), "got {reason}");
+        assert!(context_reset_reason_for_recent_compaction(Some(20), Some(19)).is_some());
+        assert!(context_reset_reason_for_recent_compaction(Some(20), Some(20)).is_none());
+        assert!(context_reset_reason_for_recent_compaction(None, Some(1)).is_none());
+    }
+
+    #[test]
+    fn context_reset_reason_for_report_formats_unhealthy_accretion_only() {
+        let healthy = SessionAccretionReport::default();
+        assert!(context_reset_reason_for_report(&healthy).is_none());
+
+        let warn = SessionAccretionReport {
+            level: SessionAccretionLevel::Warn,
+            exchange_lines: 170,
+            response_sections: 9,
+            recent_committed_cycles: 2,
+            recent_noop_closeouts: 1,
+            ..Default::default()
+        };
+        let reason = context_reset_reason_for_report(&warn).expect("warn report needs reason");
+        assert!(reason.contains("session accretion is warn"), "{reason}");
+        assert!(reason.contains("exchange_lines=170"), "{reason}");
+        assert!(reason.contains("response_sections=9"), "{reason}");
     }
 
     #[test]

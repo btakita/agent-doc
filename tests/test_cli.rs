@@ -4236,6 +4236,10 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
         "pub fn compaction_guidance(",
         "pub fn exchange_metrics(",
         "pub fn is_restart_churn_event(",
+        "pub fn resolve_queue_context_reset_opt_in(",
+        "pub fn resolve_clear_threshold(",
+        "pub fn context_reset_reason_for_recent_compaction(",
+        "pub fn context_reset_reason_for_report(",
     ] {
         assert!(
             focused_source.contains(required_snippet),
@@ -4258,6 +4262,15 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
         "fn level_label(",
         "pub fn is_restart_churn_event(",
         "fn is_restart_churn_event(",
+        "pub fn resolve_queue_context_reset_opt_in(",
+        "fn resolve_queue_context_reset_opt_in(",
+        "pub fn resolve_clear_threshold(",
+        "fn resolve_clear_threshold(",
+        "pub fn context_reset_reason_for_recent_compaction(",
+        "fn context_reset_reason_for_recent_compaction(",
+        "pub fn context_reset_reason_for_report(",
+        "fn context_reset_reason_for_report(",
+        "unwrap_or(DEFAULT_CLEAR_THRESHOLD)",
         "pub use agent_doc_session_accretion",
         "type SessionAccretion",
     ] {
@@ -4270,6 +4283,13 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
         orchestration_source.contains("evaluate_session_accretion(session_accretion_input(")
             && orchestration_source.contains("SessionAccretionInput {"),
         "orchestration session_accretion should gather IO facts then call focused policy directly"
+    );
+    assert!(
+        orchestration_source.contains("resolve_queue_context_reset_opt_in(")
+            && orchestration_source.contains("resolve_clear_threshold(")
+            && orchestration_source.contains("context_reset_reason_for_recent_compaction(")
+            && orchestration_source.contains("context_reset_reason_for_report("),
+        "orchestration session_accretion should call focused context-reset policy directly"
     );
 
     for relative in [
@@ -8315,6 +8335,63 @@ fn test_agent_doc_tmux_owns_focus_pane_decision() {
         assert!(
             !dependencies.contains_key(forbidden),
             "agent-doc-tmux focus policy must stay free of orchestration, git, editor IPC, sqlite, or tmux-router effects"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_tmux_owns_destructive_repair_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let tmux_manifest = fs::read_to_string(manifest_dir.join("agent-doc-tmux/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&tmux_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+
+    let tmux_source = fs::read_to_string(manifest_dir.join("agent-doc-tmux/src/lib.rs")).unwrap();
+    for required in [
+        "pub fn repair_layout_skips_rescue_phase(",
+        "pub const DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS",
+        "pub fn destructive_repair_throttled(",
+    ] {
+        assert!(
+            tmux_source.contains(required),
+            "agent-doc-tmux must own destructive repair pure policy: {required}"
+        );
+    }
+
+    let sync_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync.rs")).unwrap();
+    for forbidden in [
+        "fn repair_layout_skips_rescue_phase(",
+        "const DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS",
+        "fn destructive_repair_throttled(",
+        "pub fn repair_layout_skips_rescue_phase(",
+        "pub const DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS",
+        "pub fn destructive_repair_throttled(",
+    ] {
+        assert!(
+            !sync_source.contains(forbidden),
+            "sync.rs must call agent_doc_tmux directly instead of re-owning destructive repair policy: {forbidden}"
+        );
+    }
+    assert!(
+        sync_source.contains("agent_doc_tmux::repair_layout_skips_rescue_phase(")
+            && sync_source.contains("agent_doc_tmux::destructive_repair_throttled(")
+            && sync_source.contains("agent_doc_tmux::DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS"),
+        "sync.rs should import destructive repair policy from agent-doc-tmux directly"
+    );
+
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-tmux destructive repair policy must stay free of orchestration, git, editor IPC, sqlite, or tmux-router effects"
         );
     }
 }

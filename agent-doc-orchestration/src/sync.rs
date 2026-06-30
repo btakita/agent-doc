@@ -908,7 +908,8 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
     // Check if Phase 1+2 can be skipped. A clean single-window layout has no
     // stash yet; forcing one into existence makes repeated manual/JB syncs
     // ping-pong through destructive tmux window ops (#tmuxsynccrash).
-    let skip_phase_1_2 = repair_layout_skips_rescue_phase(has_target, stash_count, has_exact_stash);
+    let skip_phase_1_2 =
+        agent_doc_tmux::repair_layout_skips_rescue_phase(has_target, stash_count, has_exact_stash);
     if skip_phase_1_2 {
         // Target exists and stash is consolidated. Skip Phases 1+2,
         // but still run target consolidation and index normalization below.
@@ -1234,36 +1235,6 @@ fn sync_log(msg: &str) {
     }
 }
 
-fn repair_layout_skips_rescue_phase(
-    has_target: bool,
-    stash_count: usize,
-    has_exact_stash: bool,
-) -> bool {
-    has_target && (stash_count == 0 || (stash_count == 1 && has_exact_stash))
-}
-
-/// Minimum interval between destructive doctor-repair passes for one tmux
-/// session. Rapid `agent-doc sync` invocations within this window — a
-/// double-pressed `Sync Tmux Layout`, the JB supersede re-run, or any other
-/// burst — skip the destructive `repair_layout` window-op sequence
-/// (`move-window`/`swap-window`/`join-pane`/`resize-window`) that crashes the
-/// tmux server when it storms (`#tmuxsynccrash`). The non-destructive
-/// reconciler still runs so layout/focus stays correct.
-const DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS: u64 = 1500;
-
-/// Pure throttle decision: `true` ⇒ skip the destructive repair this pass.
-/// `last_ms` is the timestamp of the previous destructive repair for this
-/// session (if any). Throttle only when the previous repair is strictly within
-/// `min_interval_ms` of `now_ms`; a missing or older stamp runs the repair.
-fn destructive_repair_throttled(last_ms: Option<u64>, now_ms: u64, min_interval_ms: u64) -> bool {
-    match last_ms {
-        // Only throttle when the stamp is in the past and within the window.
-        // A future stamp (backward clock skew) is treated as stale → run.
-        Some(last) if now_ms >= last => now_ms - last < min_interval_ms,
-        _ => false,
-    }
-}
-
 fn destructive_repair_now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1314,10 +1285,17 @@ fn throttle_destructive_repair(tmux: &Tmux, session_name: &str) -> bool {
     let last = std::fs::read_to_string(&path)
         .ok()
         .and_then(|s| s.trim().parse::<u64>().ok());
-    if destructive_repair_throttled(last, now, DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS) {
+    if agent_doc_tmux::destructive_repair_throttled(
+        last,
+        now,
+        agent_doc_tmux::DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS,
+    ) {
         sync_log(&format!(
             "destructive_repair_throttled session={} last={:?} now={} min_ms={}",
-            session_name, last, now, DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS
+            session_name,
+            last,
+            now,
+            agent_doc_tmux::DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS
         ));
         return true;
     }
@@ -2036,7 +2014,8 @@ fn run_with_options_internal(
         {
             Some(session) if throttle_destructive_repair(tmux, &session) => {
                 let message = format!(
-                    "[sync] doctor repair throttled for session `{session}` (within {DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS}ms of a prior repair); running reconcile only (#tmuxsynccrash)"
+                    "[sync] doctor repair throttled for session `{session}` (within {}ms of a prior repair); running reconcile only (#tmuxsynccrash)",
+                    agent_doc_tmux::DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS
                 );
                 eprintln!("{message}");
                 sync_log(&message);
@@ -5140,51 +5119,6 @@ mod tests {
     use std::process::Command as ProcessCommand;
     use std::time::Duration;
     use tmux_router::IsolatedTmux;
-    // `#tmuxsynccrash`: a destructive doctor repair within the min interval of a
-    // prior one must be throttled (skipped) so a rapid `Sync Tmux Layout` burst /
-    // supersede re-run cannot storm tmux into a crash.
-    #[test]
-    fn destructive_repair_throttled_within_interval_only() {
-        let min = DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS;
-        // No prior repair → never throttled.
-        assert!(!destructive_repair_throttled(None, 10_000, min));
-        // Same instant and strictly inside the window → throttled (skip).
-        assert!(destructive_repair_throttled(Some(10_000), 10_000, min));
-        assert!(destructive_repair_throttled(
-            Some(10_000),
-            10_000 + min - 1,
-            min
-        ));
-        // Exactly at and beyond the interval → run again.
-        assert!(!destructive_repair_throttled(
-            Some(10_000),
-            10_000 + min,
-            min
-        ));
-        assert!(!destructive_repair_throttled(
-            Some(10_000),
-            10_000 + min + 500,
-            min
-        ));
-        // Clock skew (now < last) must not panic and must not throttle forever.
-        assert!(!destructive_repair_throttled(Some(10_000), 9_000, min));
-    }
-
-    #[test]
-    fn repair_layout_rescue_phase_skips_zero_stash_target_tmuxsynccrash() {
-        assert!(
-            repair_layout_skips_rescue_phase(true, 0, false),
-            "target+zero-stash is already converged for the destructive rescue phase"
-        );
-        assert!(repair_layout_skips_rescue_phase(true, 1, true));
-        assert!(
-            !repair_layout_skips_rescue_phase(true, 1, false),
-            "a non-canonical single stash still needs normalization through repair"
-        );
-        assert!(!repair_layout_skips_rescue_phase(false, 0, false));
-        assert!(!repair_layout_skips_rescue_phase(true, 2, true));
-    }
-
     #[test]
     fn planned_stash_window_indices_packs_overflow_after_agent_doc() {
         let windows = vec![

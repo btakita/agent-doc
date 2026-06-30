@@ -28,14 +28,15 @@
 //! - `inspect_warns_on_large_exchange`
 //! - `inspect_warns_on_repeated_noop_closeouts`
 //! - `inspect_blocks_on_restart_heavy_churn_with_active_startup_miss`
-use agent_doc_session_accretion::{
-    DEFAULT_CLEAR_THRESHOLD, POST_COMPACTION_NOOP_GRACE_SECS, RECENT_WINDOW_SECS,
-    SessionAccretionInput, SessionAccretionReport, evaluate_session_accretion, exchange_metrics,
-    is_restart_churn_event, level_label,
-};
 #[cfg(test)]
 use agent_doc_session_accretion::{
-    SessionAccretionLevel, compaction_guidance, restart_or_drain_guidance,
+    DEFAULT_CLEAR_THRESHOLD, SessionAccretionLevel, compaction_guidance, restart_or_drain_guidance,
+};
+use agent_doc_session_accretion::{
+    POST_COMPACTION_NOOP_GRACE_SECS, RECENT_WINDOW_SECS, SessionAccretionInput,
+    SessionAccretionReport, context_reset_reason_for_recent_compaction,
+    context_reset_reason_for_report, evaluate_session_accretion, exchange_metrics,
+    is_restart_churn_event, resolve_clear_threshold, resolve_queue_context_reset_opt_in,
 };
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -95,15 +96,16 @@ fn recent_exchange_compaction_timestamp_at(file: &Path, now: u64) -> Result<Opti
 /// fires a pre-emptive `/clear`, so a manual `Run Agent Doc` or an auto-loop
 /// drain does not churn the session or hit `/clear` rejected mid-turn.
 pub fn queue_context_reset_opted_in(file: &Path) -> bool {
-    if let Ok(content) = std::fs::read_to_string(file)
+    let frontmatter_flag = if let Ok(content) = std::fs::read_to_string(file)
         && let Ok((fm, _)) = agent_doc_frontmatter::frontmatter::parse(&content)
-        && let Some(flag) = fm.queue_context_reset
     {
-        return flag;
-    }
-    agent_doc_project_config_io::load_project_for_doc(file)
-        .agent_doc_queue_context_reset
-        .unwrap_or(false)
+        fm.queue_context_reset
+    } else {
+        None
+    };
+    let project_flag =
+        agent_doc_project_config_io::load_project_for_doc(file).agent_doc_queue_context_reset;
+    resolve_queue_context_reset_opt_in(frontmatter_flag, project_flag)
 }
 
 /// Resolve the context-usage percentage (0–100) at or above which an opted-in
@@ -116,44 +118,31 @@ pub fn queue_context_reset_opted_in(file: &Path) -> bool {
 /// harness shares the same gate; supported transcript readers compare live
 /// context usage against it and fail safe when no reliable percentage is known.
 pub fn clear_threshold_for_doc(file: &Path) -> u8 {
-    if let Ok(content) = std::fs::read_to_string(file)
+    let frontmatter_threshold = if let Ok(content) = std::fs::read_to_string(file)
         && let Ok((fm, _)) = agent_doc_frontmatter::frontmatter::parse(&content)
-        && let Some(threshold) = fm.clear_threshold
     {
-        return threshold.min(100);
-    }
-    agent_doc_project_config_io::load_project_for_doc(file)
-        .agent_doc_clear_threshold
-        .unwrap_or(DEFAULT_CLEAR_THRESHOLD)
-        .min(100)
+        fm.clear_threshold
+    } else {
+        None
+    };
+    let project_threshold =
+        agent_doc_project_config_io::load_project_for_doc(file).agent_doc_clear_threshold;
+    resolve_clear_threshold(frontmatter_threshold, project_threshold)
 }
 
 pub fn queue_context_reset_reason(
     file: &Path,
     last_context_clear_at: Option<u64>,
 ) -> Result<Option<String>> {
-    if let Some(compaction_ts) = recent_exchange_compaction_timestamp(file)?
-        && last_context_clear_at.unwrap_or(0) < compaction_ts
-    {
-        return Ok(Some(
-            "exchange was compacted after the last tracked context clear; compaction shrinks the document but not the already-loaded conversation"
-                .to_string(),
-        ));
+    if let Some(reason) = context_reset_reason_for_recent_compaction(
+        recent_exchange_compaction_timestamp(file)?,
+        last_context_clear_at,
+    ) {
+        return Ok(Some(reason));
     }
 
     let report = inspect(file)?;
-    if report.is_healthy() {
-        return Ok(None);
-    }
-
-    Ok(Some(format!(
-        "session accretion is {} (exchange_lines={}, response_sections={}, recent_committed_cycles={}, recent_noop_closeouts={})",
-        level_label(report.level),
-        report.exchange_lines,
-        report.response_sections,
-        report.recent_committed_cycles,
-        report.recent_noop_closeouts
-    )))
+    Ok(context_reset_reason_for_report(&report))
 }
 
 /// Accretion-driven context-reset reason, gated on the

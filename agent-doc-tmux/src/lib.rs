@@ -453,6 +453,37 @@ pub fn apply_focus_only_expansion_policy(
     }
 }
 
+pub fn repair_layout_skips_rescue_phase(
+    has_target: bool,
+    stash_count: usize,
+    has_exact_stash: bool,
+) -> bool {
+    has_target && (stash_count == 0 || (stash_count == 1 && has_exact_stash))
+}
+
+/// Minimum interval between destructive doctor-repair passes for one tmux
+/// session. Rapid `agent-doc sync` invocations within this window skip the
+/// destructive `repair_layout` window-op sequence while the non-destructive
+/// reconciler still runs.
+pub const DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS: u64 = 1500;
+
+/// Pure throttle decision: `true` means skip the destructive repair this pass.
+///
+/// `last_ms` is the timestamp of the previous destructive repair for this
+/// session, if any. Throttle only when the previous repair is in the past and
+/// strictly within `min_interval_ms` of `now_ms`; a missing or future stamp runs
+/// the repair.
+pub fn destructive_repair_throttled(
+    last_ms: Option<u64>,
+    now_ms: u64,
+    min_interval_ms: u64,
+) -> bool {
+    match last_ms {
+        Some(last) if now_ms >= last => now_ms - last < min_interval_ms,
+        _ => false,
+    }
+}
+
 pub fn transition_tmux(
     current: &TmuxRealtimeState,
     event: &TmuxObservation,
@@ -844,5 +875,43 @@ mod tests {
             exact.event,
             Some(TmuxFocusOnlyExpansionEvent::ExactVisibleProjection)
         );
+    }
+
+    #[test]
+    fn destructive_repair_throttled_within_interval_only() {
+        let min = DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS;
+        assert!(!destructive_repair_throttled(None, 10_000, min));
+        assert!(destructive_repair_throttled(Some(10_000), 10_000, min));
+        assert!(destructive_repair_throttled(
+            Some(10_000),
+            10_000 + min - 1,
+            min
+        ));
+        assert!(!destructive_repair_throttled(
+            Some(10_000),
+            10_000 + min,
+            min
+        ));
+        assert!(!destructive_repair_throttled(
+            Some(10_000),
+            10_000 + min + 500,
+            min
+        ));
+        assert!(!destructive_repair_throttled(Some(10_000), 9_000, min));
+    }
+
+    #[test]
+    fn repair_layout_rescue_phase_skips_zero_stash_target_tmuxsynccrash() {
+        assert!(
+            repair_layout_skips_rescue_phase(true, 0, false),
+            "target+zero-stash is already converged for the destructive rescue phase"
+        );
+        assert!(repair_layout_skips_rescue_phase(true, 1, true));
+        assert!(
+            !repair_layout_skips_rescue_phase(true, 1, false),
+            "a non-canonical single stash still needs normalization through repair"
+        );
+        assert!(!repair_layout_skips_rescue_phase(false, 0, false));
+        assert!(!repair_layout_skips_rescue_phase(true, 2, true));
     }
 }

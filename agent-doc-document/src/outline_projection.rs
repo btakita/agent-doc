@@ -1,68 +1,33 @@
-//! # Module: outline
+//! Pure markdown outline projection.
 //!
-//! ## Spec
-//! - Parses a markdown document (after stripping YAML frontmatter) into a list of heading-delimited sections.
-//! - Uses pulldown-cmark for CommonMark-compliant heading detection: ATX (`# …`) and setext (`===`/`---`) headings are recognized; headings inside fenced code blocks are silently ignored.
-//! - Each section records: heading text (ATX-normalized), depth (1–6), 1-based start line, content line count, and approximate token count (bytes ÷ 4).
-//! - Content before the first heading is emitted as a synthetic `(preamble)` section (depth 0) when non-empty.
-//! - `run` outputs either a human-readable table (`--json` false) or compact JSON array (`--json` true) to stdout.
-//! - Text output: indented by heading depth, padded columns for lines and tokens, with a `Total` summary row.
-//! - JSON output: array of `{"heading","depth","line","lines","tokens"}` objects, no pretty-printing.
-//!
-//! ## Agentic Contracts
-//! - `run(file, json)` — reads the file, returns `Err` if missing; otherwise prints section table/JSON and returns `Ok(())`.
-//! - Callers may rely on stable JSON field names and column ordering for downstream parsing.
-//! - Token counts are an approximation; callers must not treat them as exact.
-//! - Headings inside code fences are guaranteed to be excluded from section output.
-//!
-//! ## Evals
-//! - atx_headings: ATX `#`/`##`/`###` body → correct depth and text per section
-//! - setext_headings: `===`/`---` underlined body → ATX-normalized heading strings
-//! - code_block_ignored: `# heading` inside triple-backtick fence → not emitted as section
-//! - preamble: body with content before first heading → `(preamble)` section at depth 0
-//! - empty_doc: empty body → empty section list, no output rows
-//! - json_output: single section → valid JSON array with all five fields
+//! This module parses already-frontmatter-stripped markdown into
+//! heading-delimited sections. Callers own file IO, frontmatter stripping, and
+//! stdout formatting decisions.
 
-use anyhow::Result;
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag};
-use std::path::Path;
+use serde::{Deserialize, Serialize};
+use std::fmt::Write as _;
 
 /// A heading-delimited section of a markdown document.
-struct Section {
-    /// Heading text (e.g. "## User")
-    heading: String,
-    /// Heading depth (1 for #, 2 for ##, etc.)
-    depth: usize,
-    /// Line number where the heading appears (1-based)
-    line: usize,
-    /// Number of content lines (excluding the heading itself)
-    lines: usize,
-    /// Approximate token count (bytes / 4)
-    tokens: usize,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarkdownOutlineSection {
+    /// Heading text, e.g. `## User`.
+    pub heading: String,
+    /// Heading depth: 1 for `#`, 2 for `##`, etc.
+    pub depth: usize,
+    /// One-based line number where the heading appears.
+    pub line: usize,
+    /// Number of lines in the section. Preserves legacy outline behavior and
+    /// includes the heading line for real sections.
+    pub lines: usize,
+    /// Approximate token count: bytes / 4.
+    pub tokens: usize,
 }
 
-pub fn run(file: &Path, json: bool) -> Result<()> {
-    if !file.exists() {
-        anyhow::bail!("file not found: {}", file.display());
-    }
-
-    let content = std::fs::read_to_string(file)?;
-    let (_fm, body) = agent_doc_frontmatter::frontmatter::parse(&content)?;
-
-    let sections = parse_sections(body);
-
-    if json {
-        print_json(&sections);
-    } else {
-        print_text(&sections);
-    }
-
-    Ok(())
-}
-
-/// Collect `(byte_offset, depth, heading_text)` for every heading in `body`
-/// using pulldown-cmark. Handles ATX headings (`# …`), setext headings
-/// (`===` / `---` underlines), and correctly skips headings inside code blocks.
+/// Collect `(byte_offset, depth, heading_text)` for every heading in `body`.
+///
+/// Uses pulldown-cmark so ATX headings, setext headings, and headings inside
+/// fenced code blocks follow CommonMark behavior.
 fn collect_headings(body: &str) -> Vec<(usize, usize, String)> {
     let mut headings = Vec::new();
     let parser = Parser::new_ext(body, Options::empty());
@@ -73,7 +38,6 @@ fn collect_headings(body: &str) -> Vec<(usize, usize, String)> {
             let depth = heading_level_to_depth(level);
             let byte_start = range.start;
 
-            // Collect all inline text events until the matching End(Heading)
             let mut text = String::new();
             for (inner_event, _) in iter.by_ref() {
                 match inner_event {
@@ -100,64 +64,53 @@ fn heading_level_to_depth(level: HeadingLevel) -> usize {
     }
 }
 
-fn parse_sections(body: &str) -> Vec<Section> {
+/// Project markdown into outline sections.
+pub fn project_markdown_outline(body: &str) -> Vec<MarkdownOutlineSection> {
     let lines: Vec<&str> = body.lines().collect();
     let headings = collect_headings(body);
 
-    // Convert byte offsets → 0-based line numbers.
-    // Build a lookup: byte offset of each line start.
     let mut line_starts: Vec<usize> = Vec::with_capacity(lines.len() + 1);
     line_starts.push(0);
     for line in &lines {
         let prev = *line_starts.last().unwrap();
-        line_starts.push(prev + line.len() + 1); // +1 for '\n'
+        line_starts.push(prev + line.len() + 1);
     }
 
-    // For a given byte offset find the 0-based line index.
     let byte_to_line = |byte_off: usize| -> usize {
         line_starts
             .partition_point(|&start| start <= byte_off)
             .saturating_sub(1)
     };
 
-    // Build Section list from headings. We store line index (0-based) internally
-    // and convert to 1-based at the end, matching the original behaviour.
-    let mut sections: Vec<Section> = Vec::new();
+    let mut sections: Vec<MarkdownOutlineSection> = Vec::new();
 
     for (byte_off, depth, text) in &headings {
         let line_idx = byte_to_line(*byte_off);
-
-        // Build the canonical heading string. For ATX headings the source line
-        // starts with `#`; for setext headings the source line is plain text.
-        // We reconstruct an ATX-style string so the display format is stable.
         let heading_str = {
             let src_line = lines.get(line_idx).copied().unwrap_or("").trim();
             if src_line.starts_with('#') {
                 src_line.to_string()
             } else {
-                // Setext heading — emit canonical ATX form
                 format!("{} {}", "#".repeat(*depth), text)
             }
         };
 
-        // Close the previous section
         if let Some(prev) = sections.last_mut() {
-            let prev_line = prev.line; // 0-based
+            let prev_line = prev.line;
             prev.lines = line_idx - prev_line;
             let section_text = lines[prev_line + 1..line_idx].join("\n");
             prev.tokens = section_text.len().div_ceil(4);
         }
 
-        sections.push(Section {
+        sections.push(MarkdownOutlineSection {
             heading: heading_str,
             depth: *depth,
-            line: line_idx, // 0-based for now
+            line: line_idx,
             lines: 0,
             tokens: 0,
         });
     }
 
-    // Close the last section
     if let Some(prev) = sections.last_mut() {
         let prev_line = prev.line;
         prev.lines = lines.len() - prev_line;
@@ -165,7 +118,6 @@ fn parse_sections(body: &str) -> Vec<Section> {
         prev.tokens = section_text.len().div_ceil(4);
     }
 
-    // Preamble: content before the first heading
     let first_heading_line = sections.first().map_or(lines.len(), |s| s.line);
     if first_heading_line > 0 {
         let preamble_text: String = lines[..first_heading_line].join("\n");
@@ -173,7 +125,7 @@ fn parse_sections(body: &str) -> Vec<Section> {
         if preamble_tokens > 0 {
             sections.insert(
                 0,
-                Section {
+                MarkdownOutlineSection {
                     heading: "(preamble)".to_string(),
                     depth: 0,
                     line: 0,
@@ -184,58 +136,44 @@ fn parse_sections(body: &str) -> Vec<Section> {
         }
     }
 
-    // Convert 0-based line indices to 1-based for display
-    for s in &mut sections {
-        s.line += 1;
+    for section in &mut sections {
+        section.line += 1;
     }
 
     sections
 }
 
-fn print_text(sections: &[Section]) {
+/// Render the human-readable outline table.
+pub fn render_markdown_outline_text(sections: &[MarkdownOutlineSection]) -> String {
     let total_tokens: usize = sections.iter().map(|s| s.tokens).sum();
     let total_lines: usize = sections.iter().map(|s| s.lines).sum();
+    let mut out = String::new();
 
-    for s in sections {
-        let indent = if s.depth > 1 {
-            "  ".repeat(s.depth - 1)
+    for section in sections {
+        let indent = if section.depth > 1 {
+            "  ".repeat(section.depth - 1)
         } else {
             String::new()
         };
-        let heading = s.heading.trim_start_matches('#').trim();
+        let heading = section.heading.trim_start_matches('#').trim();
         let heading_display = if heading.is_empty() {
-            &s.heading
+            &section.heading
         } else {
             heading
         };
-        println!(
+        let _ = writeln!(
+            out,
             "{}{:<40} {:>4} lines  ~{:>5} tokens",
-            indent, heading_display, s.lines, s.tokens
+            indent, heading_display, section.lines, section.tokens
         );
     }
-    println!("---");
-    println!(
+    out.push_str("---\n");
+    let _ = writeln!(
+        out,
         "{:<40} {:>4} lines  ~{:>5} tokens",
         "Total", total_lines, total_tokens
     );
-}
-
-fn print_json(sections: &[Section]) {
-    print!("[");
-    for (i, s) in sections.iter().enumerate() {
-        if i > 0 {
-            print!(",");
-        }
-        print!(
-            r#"{{"heading":"{}","depth":{},"line":{},"lines":{},"tokens":{}}}"#,
-            s.heading.replace('"', "\\\""),
-            s.depth,
-            s.line,
-            s.lines,
-            s.tokens
-        );
-    }
-    println!("]");
+    out
 }
 
 #[cfg(test)]
@@ -243,7 +181,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_collect_headings_atx() {
+    fn collect_headings_atx() {
         let body = "# Title\n\n## Section\n\n### Sub\n";
         let headings = collect_headings(body);
         assert_eq!(headings.len(), 3);
@@ -256,8 +194,7 @@ mod tests {
     }
 
     #[test]
-    fn test_collect_headings_no_space_not_heading() {
-        // `#NoSpace` is not a valid ATX heading per CommonMark
+    fn collect_headings_no_space_not_heading() {
         let body = "#NoSpace\n\n# Real\n";
         let headings = collect_headings(body);
         assert_eq!(headings.len(), 1);
@@ -265,7 +202,7 @@ mod tests {
     }
 
     #[test]
-    fn test_collect_headings_inside_code_block_ignored() {
+    fn collect_headings_inside_code_block_ignored() {
         let body = "```\n# Not a heading\n```\n\n# Real\n";
         let headings = collect_headings(body);
         assert_eq!(headings.len(), 1);
@@ -273,9 +210,9 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_sections_basic() {
+    fn project_markdown_outline_basic() {
         let body = "## User\n\nHello world\n\n## Assistant\n\nResponse here\n";
-        let sections = parse_sections(body);
+        let sections = project_markdown_outline(body);
         assert_eq!(sections.len(), 2);
         assert_eq!(sections[0].heading, "## User");
         assert_eq!(sections[0].depth, 2);
@@ -284,9 +221,9 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_sections_with_preamble() {
+    fn project_markdown_outline_with_preamble() {
         let body = "Some intro text\n\n## First\n\nContent\n";
-        let sections = parse_sections(body);
+        let sections = project_markdown_outline(body);
         assert_eq!(sections.len(), 2);
         assert_eq!(sections[0].heading, "(preamble)");
         assert_eq!(sections[0].depth, 0);
@@ -294,17 +231,15 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_sections_empty() {
-        let body = "";
-        let sections = parse_sections(body);
+    fn project_markdown_outline_empty() {
+        let sections = project_markdown_outline("");
         assert!(sections.is_empty());
     }
 
     #[test]
-    fn test_setext_headings() {
-        // Setext-style: underlined with === (H1) or --- (H2)
+    fn project_markdown_outline_setext_headings() {
         let body = "Title\n=====\n\nSome content here\n\nSection\n-------\n\nMore content\n";
-        let sections = parse_sections(body);
+        let sections = project_markdown_outline(body);
         assert_eq!(sections.len(), 2);
         assert_eq!(sections[0].depth, 1);
         assert_eq!(sections[0].heading, "# Title");
@@ -313,24 +248,40 @@ mod tests {
     }
 
     #[test]
-    fn test_heading_inside_code_block_ignored() {
-        // A `#` heading inside a fenced code block must not create a section
+    fn project_markdown_outline_ignores_heading_inside_code_block() {
         let body = "## Real\n\nContent\n\n```\n## Fake\n```\n\nmore\n";
-        let sections = parse_sections(body);
+        let sections = project_markdown_outline(body);
         assert_eq!(sections.len(), 1);
         assert_eq!(sections[0].heading, "## Real");
     }
 
     #[test]
-    fn test_json_output() {
-        // Just ensure it doesn't panic
-        let sections = vec![Section {
+    fn outline_sections_serialize_with_stable_fields() {
+        let sections = vec![MarkdownOutlineSection {
             heading: "## Test".to_string(),
             depth: 2,
             line: 1,
             lines: 5,
             tokens: 20,
         }];
-        print_json(&sections);
+        let json = serde_json::to_string(&sections).unwrap();
+        assert_eq!(
+            json,
+            "[{\"heading\":\"## Test\",\"depth\":2,\"line\":1,\"lines\":5,\"tokens\":20}]"
+        );
+    }
+
+    #[test]
+    fn render_markdown_outline_text_includes_total() {
+        let sections = vec![MarkdownOutlineSection {
+            heading: "## Test".to_string(),
+            depth: 2,
+            line: 1,
+            lines: 5,
+            tokens: 20,
+        }];
+        let rendered = render_markdown_outline_text(&sections);
+        assert!(rendered.contains("Test"));
+        assert!(rendered.contains("Total"));
     }
 }

@@ -926,7 +926,7 @@ fn truncate_for_plan_log(text: &str) -> String {
 }
 
 fn extract_do_pending_ids(action: &str) -> Vec<String> {
-    crate::tsift_graph::extract_do_targets(action)
+    agent_doc_queue::queue_directive::explicit_do_directive_target_ids(action)
 }
 
 fn shared_doc_security_blockers(

@@ -64,7 +64,7 @@ mod notify;
 mod op_capture_verify;
 mod ops_report;
 mod orchestrate;
-mod outline;
+mod outline_cmd;
 mod parallel;
 mod patch;
 mod plan;
@@ -2628,7 +2628,7 @@ fn main() -> anyhow::Result<()> {
                 )
             }
         }
-        Commands::Outline { file, json } => outline::run(&file, json),
+        Commands::Outline { file, json } => outline_cmd::run_outline(&file, json),
         Commands::AutoDag { file, json } => auto_dag::run_command(&file, json),
         Commands::Resync { file, fix, session } => {
             if fix {

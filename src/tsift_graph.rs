@@ -558,54 +558,11 @@ fn collect_dispatch_trace(file: &Path, targets: &[String]) -> Result<TsiftDispat
     Ok(parse_dispatch_trace(&trace_json))
 }
 
-pub(crate) fn extract_do_target(text: &str) -> Option<String> {
-    extract_do_targets(text).into_iter().next()
-}
-
-pub(crate) fn extract_do_targets(text: &str) -> Vec<String> {
-    let mut normalized = text.trim().trim_start_matches('❯').trim();
-    if normalized.starts_with('[')
-        && let Some(closing) = normalized.find(']')
-    {
-        normalized = normalized[closing + 1..].trim();
-    }
-    let lower = normalized.to_ascii_lowercase();
-    let Some(rest) = lower.strip_prefix("do ") else {
-        return Vec::new();
-    };
-    extract_hash_ids(rest)
-}
-
-fn extract_hash_ids(text: &str) -> Vec<String> {
-    let mut ids = Vec::new();
-    let chars = text.chars().collect::<Vec<_>>();
-    let mut idx = 0usize;
-    while idx < chars.len() {
-        if chars[idx] != '#' {
-            idx += 1;
-            continue;
-        }
-        idx += 1;
-        let start = idx;
-        while idx < chars.len()
-            && (chars[idx].is_ascii_alphanumeric() || chars[idx] == '-' || chars[idx] == '_')
-        {
-            idx += 1;
-        }
-        if start == idx {
-            continue;
-        }
-        let id = chars[start..idx].iter().collect::<String>();
-        if !ids.iter().any(|existing| existing == &id) {
-            ids.push(id);
-        }
-    }
-    ids
-}
-
 impl TsiftGraphEvidencePlan {
     pub(crate) fn prompt_context_for_task(&self, task_label: &str) -> Result<Option<String>> {
-        let Some(target) = extract_do_target(task_label) else {
+        let Some(target) =
+            agent_doc_queue::queue_directive::explicit_do_directive_target_id(task_label)
+        else {
             return Ok(None);
         };
         let Some(handle) = self
@@ -669,7 +626,7 @@ impl TsiftGraphEvidencePlan {
         task_label: &str,
         response_text: &str,
     ) -> Option<String> {
-        let target = extract_do_target(task_label)?;
+        let target = agent_doc_queue::queue_directive::explicit_do_directive_target_id(task_label)?;
         let packet = self
             .conflict_matrix
             .worker_prompt_packets
@@ -693,7 +650,7 @@ impl TsiftGraphEvidencePlan {
     }
 
     pub(crate) fn closeout_audit_proof_for_task(&self, task_label: &str) -> Option<String> {
-        let target = extract_do_target(task_label)?;
+        let target = agent_doc_queue::queue_directive::explicit_do_directive_target_id(task_label)?;
         let handle = self
             .prompt_target_handles
             .iter()
@@ -852,7 +809,9 @@ fn collect_do_items(prompt_targets: &[String]) -> Vec<DoItem> {
     let mut seen = BTreeSet::new();
     let mut items = Vec::new();
     for prompt_target in prompt_targets {
-        let Some(target) = extract_do_target(prompt_target) else {
+        let Some(target) =
+            agent_doc_queue::queue_directive::explicit_do_directive_target_id(prompt_target)
+        else {
             continue;
         };
         if seen.insert(target.to_ascii_lowercase()) {
@@ -1825,31 +1784,6 @@ esac
         perms.set_mode(0o755);
         std::fs::set_permissions(&script, perms).unwrap();
         script
-    }
-
-    #[test]
-    fn extracts_do_targets_from_common_task_shapes() {
-        assert_eq!(
-            extract_do_target("do #agbr. spec"),
-            Some("agbr".to_string())
-        );
-        assert_eq!(
-            extract_do_target("do [#agbr]. spec"),
-            Some("agbr".to_string())
-        );
-        assert_eq!(
-            extract_do_target("[prep] do #agbr"),
-            Some("agbr".to_string())
-        );
-        assert_eq!(extract_do_target("run tests"), None);
-        assert_eq!(
-            extract_do_targets("do [#x63e] [#v4v0]. spec-test"),
-            vec!["x63e".to_string(), "v4v0".to_string()]
-        );
-        assert_eq!(
-            extract_do_target("do #inline-done-signal. spec-test"),
-            Some("inline-done-signal".to_string())
-        );
     }
 
     #[test]

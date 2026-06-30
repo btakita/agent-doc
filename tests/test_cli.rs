@@ -2686,6 +2686,8 @@ fn test_agent_doc_queue_owns_do_directive_target_parsing() {
     let queue_directive =
         fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_directive.rs")).unwrap();
     for required in [
+        "pub fn explicit_do_directive_target_id",
+        "pub fn explicit_do_directive_target_ids",
         "pub fn do_directive_target_ids",
         "pub fn do_directive_target_ids_in_line",
         "fn leads_with_bare_id_token",
@@ -2724,6 +2726,33 @@ fn test_agent_doc_queue_owns_do_directive_target_parsing() {
         closeout_signal.contains("agent_doc_element_backlog::backlog::extract_pending_hash_ids"),
         "done signal parsing should reuse the focused tracked-work #id scanner from agent-doc-turn"
     );
+
+    let tsift_graph = fs::read_to_string(manifest_dir.join("src/tsift_graph.rs")).unwrap();
+    for forbidden in [
+        "pub(crate) fn extract_do_target",
+        "pub(crate) fn extract_do_targets",
+        "fn extract_hash_ids",
+    ] {
+        assert!(
+            !tsift_graph.contains(forbidden),
+            "root tsift_graph must not re-own queue directive target parsing: {forbidden}"
+        );
+    }
+    assert!(
+        tsift_graph.contains("agent_doc_queue::queue_directive::explicit_do_directive_target_id"),
+        "root tsift graph should call focused explicit-do target parsing directly"
+    );
+    for relative in ["src/plan.rs", "src/jobs.rs"] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("agent_doc_queue::queue_directive::explicit_do_directive_target_ids"),
+            "{relative} should call focused explicit-do target parsing directly"
+        );
+        assert!(
+            !source.contains("crate::tsift_graph::extract_do_targets"),
+            "{relative} must not route explicit-do target parsing through tsift_graph"
+        );
+    }
 
     for relative in [
         "agent-doc-orchestration/src/preflight/run.rs",
@@ -8153,6 +8182,81 @@ fn test_agent_doc_document_owns_status_projection_policy() {
             "{relative} must not route status projection through status_cmd"
         );
     }
+}
+
+#[test]
+fn test_agent_doc_document_owns_markdown_outline_projection_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let outline_projection =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/outline_projection.rs"))
+            .unwrap();
+    for required in [
+        "pub struct MarkdownOutlineSection",
+        "pub fn project_markdown_outline",
+        "pub fn render_markdown_outline_text",
+        "fn collect_headings",
+    ] {
+        assert!(
+            outline_projection.contains(required),
+            "agent-doc-document must own pure markdown outline projection: {required}"
+        );
+    }
+    let document_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/lib.rs")).unwrap();
+    assert!(
+        document_lib.contains("pub mod outline_projection;"),
+        "agent-doc-document should expose outline projection through its owning module"
+    );
+
+    assert!(
+        !manifest_dir.join("src/outline.rs").exists(),
+        "root crate must not keep the old outline parser module or facade"
+    );
+    let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
+    assert!(
+        !main_source.contains("mod outline;") && !main_source.contains("outline::run"),
+        "root main must route outline through the adapter, not the old parser module"
+    );
+
+    let adapter = fs::read_to_string(manifest_dir.join("src/outline_cmd.rs")).unwrap();
+    for forbidden in [
+        "pulldown_cmark",
+        "fn parse_sections",
+        "fn collect_headings",
+        "struct Section",
+    ] {
+        assert!(
+            !adapter.contains(forbidden),
+            "outline_cmd must stay an IO/stdout adapter, not re-own outline projection: {forbidden}"
+        );
+    }
+    assert!(
+        adapter.contains("agent_doc_document::outline_projection::project_markdown_outline")
+            && adapter
+                .contains("agent_doc_document::outline_projection::render_markdown_outline_text"),
+        "outline_cmd should call focused document outline projection directly"
+    );
+
+    let root_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let root_toml: toml::Value = toml::from_str(&root_manifest).unwrap();
+    let root_deps = root_toml["dependencies"].as_table().unwrap();
+    assert!(
+        root_deps.contains_key("agent-doc-document"),
+        "root CLI adapter should depend on focused document projection crate"
+    );
+    assert!(
+        !root_deps.contains_key("pulldown-cmark"),
+        "root crate must not depend on pulldown-cmark after outline projection extraction"
+    );
+
+    let document_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/Cargo.toml")).unwrap();
+    let document_toml: toml::Value = toml::from_str(&document_manifest).unwrap();
+    let document_deps = document_toml["dependencies"].as_table().unwrap();
+    assert!(
+        document_deps.contains_key("pulldown-cmark"),
+        "agent-doc-document should own markdown parser dependency for outline projection"
+    );
 }
 
 #[test]

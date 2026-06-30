@@ -84,6 +84,7 @@ agent-doc-config = { path = "agent-doc-config", version = "0.34.65" }
 agent-doc-controller = { path = "agent-doc-controller", version = "0.34.65" }
 agent-doc-debounce = { path = "agent-doc-debounce", version = "0.34.65" }
 agent-doc-diff = { path = "agent-doc-diff", version = "0.34.65" }
+agent-doc-document = { path = "agent-doc-document", version = "0.34.65" }
 agent-doc-document-realtime = { path = "agent-doc-document-realtime", version = "0.34.65" }
 agent-doc-element = { path = "agent-doc-element", version = "0.34.65" }
 agent-doc-element-backlog = { path = "agent-doc-element-backlog", version = "0.34.65" }
@@ -128,7 +129,6 @@ notify = "8"
 agent-kit = { version = "0.4.1", features = ["hooks"] }
 instruction-files = "0.3"
 tmux-router = { path = "../tmux-router", version = "0.3.11" }
-pulldown-cmark = "0.13"
 indexmap = { version = "2", features = ["serde"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

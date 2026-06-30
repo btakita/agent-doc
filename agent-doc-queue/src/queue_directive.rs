@@ -1,17 +1,44 @@
 //! Queue directive target parsing.
 //!
 //! This module owns pure `agent:queue` prompt syntax for id-backed work targets:
-//! explicit `do #id` / `do [#id]` directives and the optional-`do` bare leading
-//! `#id` forms. Callers provide text; file-backed lifecycle checks stay outside
-//! this crate.
+//! explicit `do #id` / `do [#id]` directives, graph-task `do ...` target
+//! extraction, and the optional-`do` bare leading `#id` forms. Callers provide
+//! text; file-backed lifecycle checks stay outside this crate.
+
+/// Extract the first tracked-work id named by an explicit graph-task
+/// `do [#id]` / `do #id` directive.
+///
+/// This is deliberately stricter than queue-head parsing below: bare `#id`
+/// prompt heads are valid queue heads, but graph-task labels must use the
+/// explicit `do ` verb before they feed tsift dispatch/context lookup.
+pub fn explicit_do_directive_target_id(text: &str) -> Option<String> {
+    explicit_do_directive_target_ids(text).into_iter().next()
+}
+
+/// Extract tracked-work ids named by an explicit graph-task `do ...` directive.
+///
+/// Normalization strips a leading prompt glyph (`❯`) and an optional bracketed
+/// annotation prefix like `[prep]`, then requires a `do ` prefix. Every `#id` /
+/// `[#id]` token after the verb is returned in first-seen order.
+pub fn explicit_do_directive_target_ids(text: &str) -> Vec<String> {
+    let mut normalized = text.trim().trim_start_matches('❯').trim();
+    if normalized.starts_with('[')
+        && let Some(closing) = normalized.find(']')
+    {
+        normalized = normalized[closing + 1..].trim();
+    }
+    let lower = normalized.to_ascii_lowercase();
+    let Some(rest) = lower.strip_prefix("do ") else {
+        return Vec::new();
+    };
+    agent_doc_element_backlog::backlog::extract_pending_hash_ids(rest)
+}
 
 /// `#do-id-closeout-open-backlog`: extract the tracked-work ids named by an
 /// explicit `do [#id]` / `do #id` prompt directive.
 ///
-/// Mirrors the binary-side `tsift_graph::extract_do_targets` normalization
-/// (strip leading `❯`, an optional bracketed annotation prefix like `[id]`, then
-/// require a `do ` prefix) so preflight can record the closeout expectation for
-/// those ids. Optional-`do` bare id forms are also accepted for queue heads.
+/// Queue-head parsing accepts optional-`do` bare id forms in addition to the
+/// explicit task directive grammar.
 pub fn do_directive_target_ids(prompt_texts: &[String]) -> Vec<String> {
     let mut ids = Vec::new();
     for prompt in prompt_texts {
@@ -160,6 +187,37 @@ mod tests {
         ];
         let ids = do_directive_target_ids(&prompts);
         assert_eq!(ids, vec!["alpha", "beta", "gamma"]);
+    }
+
+    #[test]
+    fn explicit_do_directive_target_ids_extract_common_graph_task_shapes() {
+        assert_eq!(
+            explicit_do_directive_target_id("do #agbr. spec"),
+            Some("agbr".to_string())
+        );
+        assert_eq!(
+            explicit_do_directive_target_id("do [#agbr]. spec"),
+            Some("agbr".to_string())
+        );
+        assert_eq!(
+            explicit_do_directive_target_id("[prep] do #agbr"),
+            Some("agbr".to_string())
+        );
+        assert_eq!(explicit_do_directive_target_id("run tests"), None);
+        assert_eq!(
+            explicit_do_directive_target_ids("do [#x63e] [#v4v0]. spec-test"),
+            vec!["x63e".to_string(), "v4v0".to_string()]
+        );
+        assert_eq!(
+            explicit_do_directive_target_id("do #inline-done-signal. spec-test"),
+            Some("inline-done-signal".to_string())
+        );
+    }
+
+    #[test]
+    fn explicit_do_directive_target_ids_reject_optional_do_queue_heads() {
+        assert!(explicit_do_directive_target_ids("[#solo]").is_empty());
+        assert!(explicit_do_directive_target_ids("#solo proceed").is_empty());
     }
 
     #[test]

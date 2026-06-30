@@ -27,6 +27,7 @@ dependencies = [
  "agent-doc-controller",
  "agent-doc-debounce",
  "agent-doc-diff",
+ "agent-doc-document",
  "agent-doc-document-realtime",
  "agent-doc-element",
  "agent-doc-element-backlog",
@@ -71,7 +72,6 @@ dependencies = [
  "notify",
  "predicates",
  "proptest",
- "pulldown-cmark",
  "serde",
  "serde_json",
  "similar",
@@ -145,7 +145,9 @@ dependencies = [
  "agent-doc-element-backlog",
  "agent-doc-element-registry",
  "anyhow",
+ "pulldown-cmark",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

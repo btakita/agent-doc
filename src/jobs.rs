@@ -651,7 +651,7 @@ fn job_targets_from_plan(dispatch_plan: &plan::DispatchPlan) -> Vec<JobTarget> {
     let mut targets = Vec::new();
 
     for action in &dispatch_plan.repo_actions {
-        for target in crate::tsift_graph::extract_do_targets(action) {
+        for target in agent_doc_queue::queue_directive::explicit_do_directive_target_ids(action) {
             if seen.insert(target.to_ascii_lowercase()) {
                 targets.push(JobTarget {
                     target,

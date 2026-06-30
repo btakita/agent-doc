@@ -32,6 +32,7 @@ dependencies = [
  "agent-doc-element",
  "agent-doc-element-backlog",
  "agent-doc-element-boundary",
+ "agent-doc-element-exchange",
  "agent-doc-element-queue",
  "agent-doc-element-review",
  "agent-doc-ffi",
@@ -211,6 +212,7 @@ dependencies = [
 name = "agent-doc-element-exchange"
 version = "0.34.65"
 dependencies = [
+ "agent-doc-diff",
  "agent-doc-element",
 ]
 

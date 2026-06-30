@@ -2,6 +2,12 @@
 
 use super::*;
 use crate::frontmatter_io;
+#[cfg(test)]
+use agent_doc_element_exchange::extract_post_commit_normalization_targets;
+use agent_doc_element_exchange::{
+    exchange_prompt_prefix_eligible_lines, normalization_target_counts,
+    normalize_exchange_prefixes_for_targets,
+};
 use agent_doc_template::response_materialization::response_materialization_probe_from_response;
 
 /// Read the ack-content sidecar file written by the plugin after apply.

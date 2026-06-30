@@ -2,8 +2,11 @@
 
 use super::*;
 use agent_doc_element_exchange::{
-    exchange_content, exchange_content_len, is_code_fence_delimiter, normalized_prompt_counts,
-    normalized_prompt_text, split_line_segment,
+    exchange_content, exchange_content_len, is_code_fence_delimiter,
+    is_exchange_response_heading_for_prefix_repair,
+    is_prefixed_exchange_response_heading_for_prefix_repair, normalization_target_matches_line,
+    normalized_prompt_counts, normalized_prompt_text, split_line_segment,
+    starts_targeted_or_prefixed_prompt_repair_after_response,
 };
 
 /// Guard against accidental exchange content truncation.

@@ -1645,7 +1645,7 @@ impl SimWorld {
     }
 
     pub(crate) fn apply_narrow_normalization_repair(&mut self, normalize_prefix_lines: &[String]) {
-        let repaired = agent_doc_orchestration::write::normalize_exchange_prefixes_for_targets(
+        let repaired = agent_doc_element_exchange::normalize_exchange_prefixes_for_targets(
             &self.doc,
             normalize_prefix_lines,
         );
@@ -1694,7 +1694,7 @@ impl SimWorld {
             sidecar,
             normalize_prefix_lines,
         ) {
-            let fallback = agent_doc_orchestration::write::normalize_exchange_prefixes_for_targets(
+            let fallback = agent_doc_element_exchange::normalize_exchange_prefixes_for_targets(
                 content_ours,
                 normalize_prefix_lines,
             );

@@ -10491,6 +10491,17 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         "pub fn normalized_prompt_counts",
         "pub fn split_line_segment",
         "pub fn is_code_fence_delimiter",
+        "pub fn normalization_target_counts",
+        "pub fn exchange_user_region",
+        "pub fn is_exchange_response_heading_for_prefix_repair",
+        "pub fn is_prefixed_exchange_response_heading_for_prefix_repair",
+        "pub fn normalization_target_matches_line",
+        "pub fn starts_prompt_run_after_response",
+        "pub fn starts_targeted_prompt_repair_after_response",
+        "pub fn starts_targeted_or_prefixed_prompt_repair_after_response",
+        "pub fn exchange_prompt_prefix_eligible_lines",
+        "pub fn extract_post_commit_normalization_targets",
+        "pub fn normalize_exchange_prefixes_for_targets",
     ] {
         assert!(
             exchange_lib.contains(required),
@@ -10513,6 +10524,36 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         write_exchange_reconcile.contains("use agent_doc_element_exchange::{"),
         "write exchange reconciliation should import exchange policy from the focused crate"
     );
+
+    let write_normalize =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/normalize.rs"))
+            .unwrap();
+    assert!(
+        write_normalize.contains("use agent_doc_element_exchange::{"),
+        "write normalization should import exchange prefix policy from the focused crate"
+    );
+
+    let write_ipc =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+    assert!(
+        write_ipc.contains("use agent_doc_element_exchange::{"),
+        "write IPC should import exchange prefix policy from the focused crate"
+    );
+
+    let write_ipc_transport =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc/transport.rs"))
+            .unwrap();
+    assert!(
+        write_ipc_transport.contains("use agent_doc_element_exchange::{"),
+        "write IPC transport should import exchange prefix policy from the focused crate"
+    );
+
+    let orchestration_policy_sources = [
+        ("write/exchange_reconcile.rs", write_exchange_reconcile),
+        ("write/normalize.rs", write_normalize),
+        ("write/ipc.rs", write_ipc),
+        ("write/ipc/transport.rs", write_ipc_transport),
+    ];
     for forbidden in [
         "pub(crate) fn extract_exchange_content_len",
         "pub(crate) fn exchange_content(",
@@ -10521,11 +10562,24 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         "pub(crate) fn normalized_prompt_counts",
         "pub(crate) fn split_line_segment",
         "pub(crate) fn is_exchange_code_fence_delimiter",
+        "pub(crate) fn exchange_user_region",
+        "pub(crate) fn is_exchange_response_heading_for_prefix_repair",
+        "pub(crate) fn is_prefixed_exchange_response_heading_for_prefix_repair",
+        "pub(crate) fn normalization_target_matches_line",
+        "pub(crate) fn starts_prompt_run_after_response",
+        "pub(crate) fn starts_targeted_prompt_repair_after_response",
+        "pub(crate) fn starts_targeted_or_prefixed_prompt_repair_after_response",
+        "pub(crate) fn exchange_prompt_prefix_eligible_lines",
+        "pub fn extract_post_commit_normalization_targets",
+        "pub fn normalize_exchange_prefixes_for_targets",
+        "pub(crate) fn normalization_target_counts",
     ] {
-        assert!(
-            !write_exchange_reconcile.contains(forbidden),
-            "write/exchange_reconcile.rs must stay an adapter, not re-own or facade exchange element policy: {forbidden}"
-        );
+        for (path, source) in &orchestration_policy_sources {
+            assert!(
+                !source.contains(forbidden),
+                "{path} must stay an adapter, not re-own or facade exchange element policy: {forbidden}"
+            );
+        }
     }
 }
 

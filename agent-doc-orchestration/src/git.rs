@@ -1699,7 +1699,7 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
         let normalize_prefix_lines = snapshot_after_reposition
             .as_deref()
             .map(|snapshot| {
-                crate::write::extract_post_commit_normalization_targets(
+                agent_doc_element_exchange::extract_post_commit_normalization_targets(
                     snapshot,
                     &prompt_canonicalized,
                 )
@@ -1708,7 +1708,7 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
         let prefix_repaired = if normalize_prefix_lines.is_empty() {
             prompt_canonicalized
         } else {
-            crate::write::normalize_exchange_prefixes_for_targets(
+            agent_doc_element_exchange::normalize_exchange_prefixes_for_targets(
                 &prompt_canonicalized,
                 &normalize_prefix_lines,
             )

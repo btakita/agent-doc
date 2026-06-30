@@ -228,6 +228,9 @@ use serde_json::Value;
 use similar::{ChangeTag, TextDiff};
 
 use agent_doc_element::element::{self, is_backlog_component};
+use agent_doc_element_exchange::{
+    is_exchange_response_heading_for_prefix_repair, starts_prompt_run_after_response,
+};
 use agent_doc_fs::find_project_root;
 
 use crate::{

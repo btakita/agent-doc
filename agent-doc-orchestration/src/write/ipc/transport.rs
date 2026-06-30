@@ -1,6 +1,9 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use agent_doc_element_exchange::{
+    extract_post_commit_normalization_targets, normalization_target_counts,
+};
 
 fn live_editor_delivery_target(file: &Path) -> Option<String> {
     let mut file_keys = Vec::new();
@@ -1780,20 +1783,6 @@ pub(crate) fn normalize_patch_content(content: &str, prefix_lines: &[String]) ->
         result.truncate(result.len() - 1);
     }
     result
-}
-
-pub(crate) fn normalization_target_counts(
-    prefix_lines: &[String],
-) -> std::collections::HashMap<String, usize> {
-    let mut counts = std::collections::HashMap::<String, usize>::new();
-    for line in prefix_lines {
-        let trimmed = line.trim_end();
-        if trimmed.is_empty() {
-            continue;
-        }
-        *counts.entry(trimmed.to_string()).or_default() += 1;
-    }
-    counts
 }
 
 /// Build the IPC patches JSON array (shared between socket and file-based paths).

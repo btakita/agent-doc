@@ -2,6 +2,11 @@
 
 use super::*;
 use agent_doc_queue::{
+    queue_consume::{
+        first_n_queue_prompt_texts, mark_entries_completed_by_done_ids,
+        mark_first_matching_prompts_completed_by_texts, normalized_done_id_bag,
+        queue_consume_count_for_done_ids, queue_prompt_texts_match_for_consumption,
+    },
     queue_directive::topic_resolves_to_exact_id,
     queue_heads::{
         active_queue_head_text, queue_head_has_explicit_completion_signal,
@@ -1548,128 +1553,6 @@ pub(crate) fn queue_consumption_allowed_for_response(
     Ok(false)
 }
 
-pub(crate) fn first_n_queue_prompt_texts(
-    entries: &[agent_doc_queue::document_queue::QueueEntry],
-    count: usize,
-) -> Vec<String> {
-    entries
-        .iter()
-        .filter_map(|entry| match entry {
-            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => Some(
-                agent_doc_queue::document_queue::strip_in_progress_marker(&prompt.text),
-            ),
-            _ => None,
-        })
-        .take(count)
-        .collect()
-}
-
-pub(crate) fn queue_consume_count_for_done_ids(
-    entries: &[agent_doc_queue::document_queue::QueueEntry],
-    done_ids: &[String],
-) -> usize {
-    if done_ids.is_empty() {
-        return 0;
-    }
-    let done_ids = done_ids
-        .iter()
-        .map(|id| normalize_done_id(id))
-        .collect::<std::collections::HashSet<_>>();
-    let mut count = 0usize;
-    for entry in entries {
-        let agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) = entry else {
-            continue;
-        };
-        let Some(id) = queue_prompt_done_id(&prompt.text) else {
-            break;
-        };
-        if done_ids.contains(&id) {
-            count += 1;
-            continue;
-        }
-        break;
-    }
-    count
-}
-
-fn queue_prompt_texts_match_for_consumption(left: &str, right: &str) -> bool {
-    agent_doc_queue::document_queue::strip_priority_markers(left)
-        == agent_doc_queue::document_queue::strip_priority_markers(right)
-}
-
-fn mark_first_matching_prompts_completed_by_texts(
-    entries: &[agent_doc_queue::document_queue::QueueEntry],
-    target_texts: &[String],
-) -> Option<Vec<agent_doc_queue::document_queue::QueueEntry>> {
-    let mut remaining_targets = target_texts.to_vec();
-    let mut marked = Vec::with_capacity(target_texts.len());
-    let mut result = Vec::with_capacity(entries.len());
-    for entry in entries {
-        if let agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) = entry
-            && let Some(pos) = remaining_targets
-                .iter()
-                .position(|target| queue_prompt_texts_match_for_consumption(&prompt.text, target))
-        {
-            let mut completed = prompt.clone();
-            completed.text =
-                agent_doc_queue::document_queue::strip_in_progress_marker(&completed.text);
-            marked.push(remaining_targets.remove(pos));
-            result.push(agent_doc_queue::document_queue::QueueEntry::Completed(
-                completed,
-            ));
-            continue;
-        }
-        result.push(entry.clone());
-    }
-    if marked.len() == target_texts.len() {
-        Some(result)
-    } else {
-        None
-    }
-}
-
-pub(crate) fn mark_entries_completed_by_done_ids(
-    entries: &[agent_doc_queue::document_queue::QueueEntry],
-    done_ids: &[String],
-) -> (
-    Vec<agent_doc_queue::document_queue::QueueEntry>,
-    Vec<String>,
-) {
-    if done_ids.is_empty() {
-        return (entries.to_vec(), Vec::new());
-    }
-    let done_ids = done_ids
-        .iter()
-        .map(|id| normalize_done_id(id))
-        .collect::<std::collections::HashSet<_>>();
-    let mut marked_texts = Vec::new();
-    let entries = entries
-        .iter()
-        .map(|entry| match entry {
-            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
-                if queue_prompt_done_id(&prompt.text).is_some_and(|id| done_ids.contains(&id)) =>
-            {
-                let mut completed = prompt.clone();
-                completed.text =
-                    agent_doc_queue::document_queue::strip_in_progress_marker(&completed.text);
-                marked_texts.push(completed.text.clone());
-                agent_doc_queue::document_queue::QueueEntry::Completed(completed)
-            }
-            _ => entry.clone(),
-        })
-        .collect();
-    (entries, marked_texts)
-}
-
-pub(crate) fn normalized_done_id_bag(texts: &[String]) -> Vec<String> {
-    let mut ids = texts
-        .iter()
-        .filter_map(|text| queue_prompt_done_id(text))
-        .collect::<Vec<_>>();
-    ids.sort();
-    ids
-}
-
 pub(crate) fn mark_completed_queue_prompts_for_done_ids(
     file: &Path,
     done_ids: &[String],
@@ -2677,20 +2560,6 @@ mod core_tests {
             snapshot.contains("- ~~do [#opportunistic]~~\n"),
             "{snapshot}"
         );
-    }
-    #[test]
-    fn done_id_marking_ignores_already_completed_queue_prompt() {
-        let entries = agent_doc_queue::document_queue::parse(concat!(
-            "- do [#head]\n",
-            "- ~~do [#opportunistic]~~\n",
-            "- do [#tail]\n",
-        ))
-        .unwrap();
-
-        let (updated, marked) =
-            mark_entries_completed_by_done_ids(&entries, &["opportunistic".to_string()]);
-        assert!(marked.is_empty());
-        assert_eq!(updated, entries);
     }
     #[test]
     fn free_text_queue_head_detection() {

@@ -2845,6 +2845,53 @@ fn test_agent_doc_queue_owns_queue_response_head_matching_policy() {
 }
 
 #[test]
+fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let queue_lib = fs::read_to_string(manifest_dir.join("agent-doc-queue/src/lib.rs")).unwrap();
+    assert!(
+        queue_lib.contains("pub mod queue_consume;"),
+        "agent-doc-queue should expose queue consumption entry policy"
+    );
+
+    let queue_consume_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_consume.rs")).unwrap();
+    for required in [
+        "pub fn first_n_queue_prompt_texts",
+        "pub fn queue_consume_count_for_done_ids",
+        "pub fn queue_prompt_texts_match_for_consumption",
+        "pub fn mark_first_matching_prompts_completed_by_texts",
+        "pub fn mark_entries_completed_by_done_ids",
+        "pub fn normalized_done_id_bag",
+    ] {
+        assert!(
+            queue_consume_policy.contains(required),
+            "agent-doc-queue must own queue consumption entry policy: {required}"
+        );
+    }
+
+    let orchestration_queue_consume =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/queue_consume.rs"))
+            .unwrap();
+    for forbidden in [
+        "pub(crate) fn first_n_queue_prompt_texts",
+        "pub(crate) fn queue_consume_count_for_done_ids",
+        "fn queue_prompt_texts_match_for_consumption",
+        "fn mark_first_matching_prompts_completed_by_texts",
+        "pub(crate) fn mark_entries_completed_by_done_ids",
+        "pub(crate) fn normalized_done_id_bag",
+    ] {
+        assert!(
+            !orchestration_queue_consume.contains(forbidden),
+            "write/queue_consume.rs must not re-own queue consumption entry policy: {forbidden}"
+        );
+    }
+    assert!(
+        orchestration_queue_consume.contains("queue_consume::{"),
+        "write/queue_consume.rs should call queue consumption entry policy through agent-doc-queue directly"
+    );
+}
+
+#[test]
 fn test_agent_doc_queue_owns_free_text_response_proof_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let queue_response =

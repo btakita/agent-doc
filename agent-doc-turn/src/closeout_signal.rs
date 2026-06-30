@@ -315,6 +315,90 @@ pub fn partial_closeout_state_decision(
     }
 }
 
+pub const BLOCKED_CLOSEOUT_FOLLOWUP_GUARD_SUPPRESS_MARKER: &str =
+    "<!-- no-blocked-followup-guard -->";
+pub const PENDING_DONE_GUARD_SUPPRESS_MARKER: &str = "<!-- no-pending-done-guard -->";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BlockedCloseoutFollowupEvidence<'a> {
+    pub cycle_open: bool,
+    pub capture_committed: bool,
+    pub pending_added_this_cycle: bool,
+    pub response_body: &'a str,
+    pub directed_ids: &'a [String],
+    pub pending_kept_open_ids: &'a [String],
+    pub pending_done_ids: &'a [String],
+    pub pending_gated_ids: &'a [String],
+    pub still_gated_ids: &'a [String],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BlockedCloseoutFollowupDecision {
+    Pass,
+    Warn { unresolved_ids: Vec<String> },
+}
+
+pub fn blocked_closeout_followup_decision(
+    evidence: BlockedCloseoutFollowupEvidence<'_>,
+) -> BlockedCloseoutFollowupDecision {
+    if evidence.directed_ids.is_empty()
+        || evidence.pending_gated_ids.is_empty()
+        || evidence.cycle_open
+        || evidence.pending_added_this_cycle
+        || !evidence.capture_committed
+    {
+        return BlockedCloseoutFollowupDecision::Pass;
+    }
+    if evidence
+        .response_body
+        .contains(BLOCKED_CLOSEOUT_FOLLOWUP_GUARD_SUPPRESS_MARKER)
+        || evidence
+            .response_body
+            .contains(PENDING_DONE_GUARD_SUPPRESS_MARKER)
+    {
+        return BlockedCloseoutFollowupDecision::Pass;
+    }
+
+    let text = response_text_for_guards(evidence.response_body);
+    let lower = text.to_ascii_lowercase();
+    if !text_has_blocked_future_action_signal(&lower) || text_has_no_followup_justification(&lower)
+    {
+        return BlockedCloseoutFollowupDecision::Pass;
+    }
+
+    let kept_open = normalized_id_set(evidence.pending_kept_open_ids.iter().map(String::as_str));
+    let done = normalized_id_set(evidence.pending_done_ids.iter().map(String::as_str));
+    let gated = normalized_id_set(evidence.pending_gated_ids.iter().map(String::as_str));
+    let still_gated = normalized_id_set(evidence.still_gated_ids.iter().map(String::as_str));
+
+    let mut unresolved_ids = Vec::new();
+    for id in evidence
+        .directed_ids
+        .iter()
+        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
+        .filter(|id| !id.is_empty())
+    {
+        if kept_open.contains(&id) || done.contains(&id) {
+            continue;
+        }
+        if !gated.contains(&id) || !still_gated.contains(&id) {
+            continue;
+        }
+        if !blocked_signal_tied_to_id(&text, &id) {
+            continue;
+        }
+        if !unresolved_ids.iter().any(|existing| existing == &id) {
+            unresolved_ids.push(id);
+        }
+    }
+
+    if unresolved_ids.is_empty() {
+        BlockedCloseoutFollowupDecision::Pass
+    } else {
+        BlockedCloseoutFollowupDecision::Warn { unresolved_ids }
+    }
+}
+
 fn normalized_id_set<'a>(
     ids: impl IntoIterator<Item = &'a str>,
 ) -> std::collections::HashSet<String> {
@@ -789,6 +873,123 @@ mod tests {
             "### Re: do #abc\n\n#other remains blocked on approval.",
             "abc"
         ));
+    }
+
+    #[test]
+    fn blocked_closeout_followup_decision_warns_for_gated_blocked_directed_id() {
+        let response = "### Re: do #374n\n\n#374n remains blocked until the legacy rows expire.";
+        let directed_ids = vec![
+            "374n".to_string(),
+            "#374n".to_string(),
+            "done1".to_string(),
+            "kept1".to_string(),
+            "ungated1".to_string(),
+        ];
+        let pending_kept_open_ids = vec!["kept1".to_string()];
+        let pending_done_ids = vec!["done1".to_string()];
+        let pending_gated_ids = vec![
+            "374n".to_string(),
+            "kept1".to_string(),
+            "done1".to_string(),
+            "ungated1".to_string(),
+        ];
+        let still_gated_ids = vec!["374n".to_string(), "done1".to_string()];
+
+        assert_eq!(
+            blocked_closeout_followup_decision(BlockedCloseoutFollowupEvidence {
+                cycle_open: false,
+                capture_committed: true,
+                pending_added_this_cycle: false,
+                response_body: response,
+                directed_ids: &directed_ids,
+                pending_kept_open_ids: &pending_kept_open_ids,
+                pending_done_ids: &pending_done_ids,
+                pending_gated_ids: &pending_gated_ids,
+                still_gated_ids: &still_gated_ids,
+            }),
+            BlockedCloseoutFollowupDecision::Warn {
+                unresolved_ids: vec!["374n".to_string()]
+            }
+        );
+    }
+
+    #[test]
+    fn blocked_closeout_followup_decision_passes_without_required_state_or_signal() {
+        let response = "### Re: do #374n\n\n#374n remains blocked until approval.";
+        let suppressed = format!("{response}\n{BLOCKED_CLOSEOUT_FOLLOWUP_GUARD_SUPPRESS_MARKER}");
+        let pending_done_suppressed = format!("{response}\n{PENDING_DONE_GUARD_SUPPRESS_MARKER}");
+        let directed_ids = vec!["374n".to_string()];
+        let pending_gated_ids = vec!["374n".to_string()];
+        let still_gated_ids = vec!["374n".to_string()];
+        let empty = Vec::new();
+        let base = BlockedCloseoutFollowupEvidence {
+            cycle_open: false,
+            capture_committed: true,
+            pending_added_this_cycle: false,
+            response_body: response,
+            directed_ids: &directed_ids,
+            pending_kept_open_ids: &empty,
+            pending_done_ids: &empty,
+            pending_gated_ids: &pending_gated_ids,
+            still_gated_ids: &still_gated_ids,
+        };
+
+        assert_eq!(
+            blocked_closeout_followup_decision(BlockedCloseoutFollowupEvidence {
+                cycle_open: true,
+                ..base
+            }),
+            BlockedCloseoutFollowupDecision::Pass
+        );
+        assert_eq!(
+            blocked_closeout_followup_decision(BlockedCloseoutFollowupEvidence {
+                capture_committed: false,
+                ..base
+            }),
+            BlockedCloseoutFollowupDecision::Pass
+        );
+        assert_eq!(
+            blocked_closeout_followup_decision(BlockedCloseoutFollowupEvidence {
+                pending_added_this_cycle: true,
+                ..base
+            }),
+            BlockedCloseoutFollowupDecision::Pass
+        );
+        assert_eq!(
+            blocked_closeout_followup_decision(BlockedCloseoutFollowupEvidence {
+                response_body: "### Re: do #374n\n\nImplemented #374n and ready for review.",
+                ..base
+            }),
+            BlockedCloseoutFollowupDecision::Pass
+        );
+        assert_eq!(
+            blocked_closeout_followup_decision(BlockedCloseoutFollowupEvidence {
+                response_body: "### Re: do #374n\n\nBlocked on an unrelated task; no mention in paragraph.",
+                ..base
+            }),
+            BlockedCloseoutFollowupDecision::Pass
+        );
+        assert_eq!(
+            blocked_closeout_followup_decision(BlockedCloseoutFollowupEvidence {
+                response_body: "### Re: do #374n\n\n#374n remains blocked, but no additional backlog follow-up is needed because review owns it.",
+                ..base
+            }),
+            BlockedCloseoutFollowupDecision::Pass
+        );
+        assert_eq!(
+            blocked_closeout_followup_decision(BlockedCloseoutFollowupEvidence {
+                response_body: &suppressed,
+                ..base
+            }),
+            BlockedCloseoutFollowupDecision::Pass
+        );
+        assert_eq!(
+            blocked_closeout_followup_decision(BlockedCloseoutFollowupEvidence {
+                response_body: &pending_done_suppressed,
+                ..base
+            }),
+            BlockedCloseoutFollowupDecision::Pass
+        );
     }
 
     #[test]

@@ -13,90 +13,35 @@ pub(crate) fn check_blocked_closeout_followup_guard(
     let Some(state) = crate::cycle_state::load(file)? else {
         return Ok(GuardResult::None);
     };
-    if state.expect_done_or_gate_ids.is_empty()
-        || state.pending_gated_ids.is_empty()
-        || state.is_open()
-    {
-        return Ok(GuardResult::None);
-    }
-    // A new follow-up backlog/review item was captured this cycle — satisfied.
-    if state.pending_added_this_cycle {
-        return Ok(GuardResult::None);
-    }
     let Some(capture_id) = state.capture_id.as_deref() else {
         return Ok(GuardResult::None);
     };
     let Some(capture) = crate::capture::load_by_id(file, capture_id)? else {
         return Ok(GuardResult::None);
     };
-    if capture.state != crate::capture::CaptureState::Committed {
-        return Ok(GuardResult::None);
-    }
-    if capture
-        .response_body
-        .contains("<!-- no-blocked-followup-guard -->")
-        || capture
-            .response_body
-            .contains("<!-- no-pending-done-guard -->")
-    {
-        return Ok(GuardResult::None);
-    }
+    let mut still_gated = open_review_ids(file)?.into_iter().collect::<Vec<_>>();
+    still_gated.sort();
 
-    let text = agent_doc_turn::closeout_signal::response_text_for_guards(&capture.response_body);
-    let lower = text.to_ascii_lowercase();
-    if !agent_doc_turn::closeout_signal::text_has_blocked_future_action_signal(&lower) {
-        return Ok(GuardResult::None);
-    }
-    if agent_doc_turn::closeout_signal::text_has_no_followup_justification(&lower) {
-        return Ok(GuardResult::None);
-    }
-
-    let kept_open: std::collections::HashSet<String> = state
-        .pending_kept_open_ids
-        .iter()
-        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
-        .filter(|id| !id.is_empty())
-        .collect();
-    let done: std::collections::HashSet<String> = state
-        .pending_done_ids
-        .iter()
-        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
-        .filter(|id| !id.is_empty())
-        .collect();
-    let gated: std::collections::HashSet<String> = state
-        .pending_gated_ids
-        .iter()
-        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
-        .filter(|id| !id.is_empty())
-        .collect();
-    let still_gated = open_review_ids(file)?;
-
-    let mut unresolved: Vec<String> = Vec::new();
-    for id in state
-        .expect_done_or_gate_ids
-        .iter()
-        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
-        .filter(|id| !id.is_empty())
-    {
-        if kept_open.contains(&id) || done.contains(&id) {
-            continue;
+    let unresolved = match agent_doc_turn::closeout_signal::blocked_closeout_followup_decision(
+        agent_doc_turn::closeout_signal::BlockedCloseoutFollowupEvidence {
+            cycle_open: state.is_open(),
+            capture_committed: capture.state == crate::capture::CaptureState::Committed,
+            pending_added_this_cycle: state.pending_added_this_cycle,
+            response_body: &capture.response_body,
+            directed_ids: &state.expect_done_or_gate_ids,
+            pending_kept_open_ids: &state.pending_kept_open_ids,
+            pending_done_ids: &state.pending_done_ids,
+            pending_gated_ids: &state.pending_gated_ids,
+            still_gated_ids: &still_gated,
+        },
+    ) {
+        agent_doc_turn::closeout_signal::BlockedCloseoutFollowupDecision::Pass => {
+            return Ok(GuardResult::None);
         }
-        if !gated.contains(&id) || !still_gated.contains(&id) {
-            continue;
-        }
-        // Tie the blocked signal to the directed id (same paragraph) so an
-        // incidental blocked phrase about unrelated work does not fire.
-        if !agent_doc_turn::closeout_signal::blocked_signal_tied_to_id(&text, &id) {
-            continue;
-        }
-        if !unresolved.iter().any(|existing| existing == &id) {
-            unresolved.push(id);
-        }
-    }
-
-    if unresolved.is_empty() {
-        return Ok(GuardResult::None);
-    }
+        agent_doc_turn::closeout_signal::BlockedCloseoutFollowupDecision::Warn {
+            unresolved_ids,
+        } => unresolved_ids,
+    };
 
     let ids = unresolved
         .iter()
@@ -105,12 +50,12 @@ pub(crate) fn check_blocked_closeout_followup_guard(
         .join(", ");
     let edit_hint = unresolved
         .iter()
-        .map(|id| format!("--pending-edit \"{}=<remaining next action>\"", id))
+        .map(|id| format!("--backlog-edit \"{}=<remaining next action>\"", id))
         .collect::<Vec<_>>()
         .join(" ");
     let add_after_hint = unresolved
         .first()
-        .map(|id| format!("--pending-add-after {} \"<id>=<concrete next step>\"", id))
+        .map(|id| format!("--backlog-add-after {} \"<id>=<concrete next step>\"", id))
         .unwrap_or_default();
     let repair = format!(
         "agent-doc write {} {} --pending-only --commit",
@@ -136,8 +81,10 @@ pub(crate) fn check_blocked_closeout_followup_guard(
             GuardResult::Warn(vec![
                 warn_line,
                 format!(
-                    "[session-check] hint: keep the work tracked with `{}`, split a new follow-up via `{}`, add an explicit \"no additional backlog follow-up is needed because ...\" phrase for a true review-only gate, or add `<!-- no-blocked-followup-guard -->`",
-                    repair, add_after_hint
+                    "[session-check] hint: keep the work tracked with `{}`, split a new follow-up via `{}`, add an explicit \"no additional backlog follow-up is needed because ...\" phrase for a true review-only gate, or add `{}`",
+                    repair,
+                    add_after_hint,
+                    agent_doc_turn::closeout_signal::BLOCKED_CLOSEOUT_FOLLOWUP_GUARD_SUPPRESS_MARKER
                 ),
             ])
         }
@@ -154,8 +101,8 @@ pub(crate) fn check_blocked_closeout_followup_guard(
 }
 
 /// `#gated-followup-split-enforcement`: when a directed `do [#id]` cycle keeps a
-/// multi-phase item open (via `--pending-edit` / `--review-edit` /
-/// `--pending-gate`) whose body enumerates several gated/remaining phases but
+/// multi-phase item open (via `--backlog-edit` / `--review-edit` /
+/// `--backlog-gate`) whose body enumerates several gated/remaining phases but
 /// never breaks them out into discrete child backlog IDs, the deferred phases
 /// stay buried in one parent's narrowed description and are not independently
 /// trackable or queueable. Advise splitting each phase into its own child ID
@@ -190,8 +137,8 @@ pub(crate) fn check_gated_phase_split_guard(
         return Ok(GuardResult::None);
     }
 
-    // Items kept open this cycle (`--pending-edit` / `--review-edit` /
-    // `--pending-gate` all feed `pending_kept_open_ids`) that were also the
+    // Items kept open this cycle (`--backlog-edit` / `--review-edit` /
+    // `--backlog-gate` all feed `pending_kept_open_ids`) that were also the
     // directed targets — the parent items at risk of burying gated phases.
     let kept_open: std::collections::HashSet<String> = state
         .pending_kept_open_ids
@@ -249,7 +196,7 @@ pub(crate) fn check_gated_phase_split_guard(
         .join(", ");
     let add_after_hint = flagged
         .first()
-        .map(|id| format!("--pending-add-after {id} \"<child-id>=<one phase scope>\""))
+        .map(|id| format!("--backlog-add-after {id} \"<child-id>=<one phase scope>\""))
         .unwrap_or_default();
 
     crate::ops_log::log_op(

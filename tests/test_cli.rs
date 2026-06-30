@@ -3231,6 +3231,10 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub struct PartialCloseoutStateEvidence",
         "pub enum PartialCloseoutStateDecision",
         "pub fn partial_closeout_state_decision",
+        "pub const BLOCKED_CLOSEOUT_FOLLOWUP_GUARD_SUPPRESS_MARKER",
+        "pub struct BlockedCloseoutFollowupEvidence",
+        "pub enum BlockedCloseoutFollowupDecision",
+        "pub fn blocked_closeout_followup_decision",
         "pub fn normalized_prompt_for_match",
         "pub fn exchange_contains_prompt_line",
         "pub fn is_exchange_response_heading",
@@ -3311,6 +3315,11 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub(crate) const QUEUE_AUDIT_SUBSTEP_COMPLETE_PHRASES",
         "pub(crate) fn queue_audit_collapses_partial_completion",
         "pub(crate) fn queue_audit_has_none_complete_claim",
+        "agent_doc_turn::closeout_signal::text_has_blocked_future_action_signal",
+        "agent_doc_turn::closeout_signal::text_has_no_followup_justification",
+        "agent_doc_turn::closeout_signal::blocked_signal_tied_to_id",
+        ".contains(\"<!-- no-blocked-followup-guard -->\")",
+        ".contains(\"<!-- no-pending-done-guard -->\")",
     ] {
         assert!(
             !closeout_guards.contains(forbidden),
@@ -3318,9 +3327,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         );
     }
     for required in [
-        "agent_doc_turn::closeout_signal::text_has_blocked_future_action_signal",
-        "agent_doc_turn::closeout_signal::text_has_no_followup_justification",
-        "agent_doc_turn::closeout_signal::blocked_signal_tied_to_id",
+        "agent_doc_turn::closeout_signal::blocked_closeout_followup_decision",
+        "agent_doc_turn::closeout_signal::BlockedCloseoutFollowupEvidence",
+        "agent_doc_turn::closeout_signal::BlockedCloseoutFollowupDecision",
         "agent_doc_turn::closeout_signal::body_enumerates_multiple_gated_phases",
         "agent_doc_turn::closeout_signal::body_already_split_into_child_ids",
         "agent_doc_turn::closeout_signal::queue_audit_collapses_partial_completion",

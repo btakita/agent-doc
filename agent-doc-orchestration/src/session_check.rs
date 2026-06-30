@@ -5234,7 +5234,7 @@ Body\n\
         match check_blocked_closeout_followup_guard(&doc).unwrap() {
             GuardResult::Error(message) => {
                 assert!(message.contains("#374n"), "{message}");
-                assert!(message.contains("--pending-edit"), "{message}");
+                assert!(message.contains("--backlog-edit"), "{message}");
             }
             other => {
                 panic!("expected strict failure for blocked gate without follow-up, got {other:?}")

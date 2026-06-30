@@ -180,30 +180,13 @@ pub(crate) fn partial_staging_finding_for_repo(
             "HEAD^",
             "HEAD",
         ],
-    )?
-    .into_iter()
-    .filter(|path| agent_doc_diff::is_partial_staging_relevant_path(path))
-    .collect::<Vec<_>>();
-    if committed_paths.is_empty() {
-        return Ok(None);
-    }
+    )?;
 
     let mut dirty_paths = git_name_lines(repo, &["diff", "--name-only", "--diff-filter=ACMRT"])?;
     dirty_paths.extend(git_name_lines(
         repo,
         &["diff", "--cached", "--name-only", "--diff-filter=ACMRT"],
     )?);
-    dirty_paths = dirty_paths
-        .into_iter()
-        .filter(|path| agent_doc_diff::is_partial_staging_relevant_path(path))
-        .collect::<Vec<_>>();
-    dirty_paths.sort();
-    dirty_paths.dedup();
-    if dirty_paths.is_empty()
-        || !agent_doc_diff::partial_staging_paths_look_related(&committed_paths, &dirty_paths)
-    {
-        return Ok(None);
-    }
 
     let committed_diff =
         git_stdout(repo, &["diff", "--unified=0", "HEAD^", "HEAD"])?.unwrap_or_default();
@@ -215,22 +198,20 @@ pub(crate) fn partial_staging_finding_for_repo(
         dirty_diff.push_str(&cached);
     }
 
-    let committed_literals = agent_doc_diff::extract_changed_string_literals(&committed_diff);
-    let dirty_literals = agent_doc_diff::extract_changed_string_literals(&dirty_diff);
-    let mut overlap = committed_literals
-        .intersection(&dirty_literals)
-        .cloned()
-        .collect::<Vec<_>>();
-    overlap.sort();
-    if overlap.is_empty() {
+    let Some(finding) = agent_doc_diff::partial_staging_companion_finding(
+        &committed_paths,
+        &dirty_paths,
+        &committed_diff,
+        &dirty_diff,
+    ) else {
         return Ok(None);
-    }
+    };
 
     Ok(Some(PartialStagingFinding {
         repo: repo.to_path_buf(),
-        committed_paths,
-        dirty_paths,
-        literals: overlap,
+        committed_paths: finding.committed_paths,
+        dirty_paths: finding.dirty_paths,
+        literals: finding.literals,
     }))
 }
 

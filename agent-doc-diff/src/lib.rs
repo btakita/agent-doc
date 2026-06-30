@@ -3198,6 +3198,58 @@ pub fn partial_staging_paths_look_related(committed: &[String], dirty: &[String]
     dirty_has_test && committed_has_source
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PartialStagingCompanionFinding {
+    pub committed_paths: Vec<String>,
+    pub dirty_paths: Vec<String>,
+    pub literals: Vec<String>,
+}
+
+pub fn partial_staging_companion_finding(
+    committed_paths: &[String],
+    dirty_paths: &[String],
+    committed_diff: &str,
+    dirty_diff: &str,
+) -> Option<PartialStagingCompanionFinding> {
+    let committed_paths = filtered_partial_staging_paths(committed_paths);
+    if committed_paths.is_empty() {
+        return None;
+    }
+
+    let dirty_paths = filtered_partial_staging_paths(dirty_paths);
+    if dirty_paths.is_empty() || !partial_staging_paths_look_related(&committed_paths, &dirty_paths)
+    {
+        return None;
+    }
+
+    let committed_literals = extract_changed_string_literals(committed_diff);
+    let dirty_literals = extract_changed_string_literals(dirty_diff);
+    let literals = committed_literals
+        .intersection(&dirty_literals)
+        .cloned()
+        .collect::<Vec<_>>();
+    if literals.is_empty() {
+        return None;
+    }
+
+    Some(PartialStagingCompanionFinding {
+        committed_paths,
+        dirty_paths,
+        literals,
+    })
+}
+
+fn filtered_partial_staging_paths(paths: &[String]) -> Vec<String> {
+    let mut filtered = paths
+        .iter()
+        .filter(|path| is_partial_staging_relevant_path(path))
+        .cloned()
+        .collect::<Vec<_>>();
+    filtered.sort();
+    filtered.dedup();
+    filtered
+}
+
 pub fn path_looks_test_like(path: &str) -> bool {
     let lower = path.replace('\\', "/").to_ascii_lowercase();
     lower.starts_with("tests/")
@@ -3340,6 +3392,98 @@ diff --git a/src/lib.rs b/src/lib.rs
         assert!(literals.contains("retry closeout"));
         assert!(!literals.contains("x"));
         assert!(!literals.contains("ignored context"));
+    }
+
+    #[test]
+    fn partial_staging_companion_finding_detects_source_test_literal_overlap() {
+        let committed_paths = vec!["src/render.rs".to_string()];
+        let dirty_paths = vec!["tests/render_test.rs".to_string()];
+        let committed_diff = r#"
+diff --git a/src/render.rs b/src/render.rs
+@@ -1 +1 @@
+-pub fn render() -> &'static str { "old output" }
++pub fn render() -> &'static str { "new queue output" }
+"#;
+        let dirty_diff = r#"
+diff --git a/tests/render_test.rs b/tests/render_test.rs
+@@ -1 +1 @@
+-assert_eq!(render(), "old output");
++assert_eq!(render(), "new queue output");
+"#;
+
+        let finding = partial_staging_companion_finding(
+            &committed_paths,
+            &dirty_paths,
+            committed_diff,
+            dirty_diff,
+        )
+        .unwrap();
+        assert_eq!(finding.committed_paths, vec!["src/render.rs"]);
+        assert_eq!(finding.dirty_paths, vec!["tests/render_test.rs"]);
+        assert_eq!(finding.literals, vec!["new queue output", "old output"]);
+    }
+
+    #[test]
+    fn partial_staging_companion_finding_dedupes_and_sorts_paths_and_literals() {
+        let committed_paths = vec!["src/z.rs".to_string(), "src/a.rs".to_string()];
+        let dirty_paths = vec![
+            "tests/z_test.rs".to_string(),
+            "tests/a_test.rs".to_string(),
+            "tests/z_test.rs".to_string(),
+        ];
+        let committed_diff = r#"
++let a = "shared alpha";
++let z = "shared zeta";
+"#;
+        let dirty_diff = r#"
++assert_eq!(actual, "shared zeta");
++assert_eq!(other, "shared alpha");
+"#;
+
+        let finding = partial_staging_companion_finding(
+            &committed_paths,
+            &dirty_paths,
+            committed_diff,
+            dirty_diff,
+        )
+        .unwrap();
+        assert_eq!(finding.committed_paths, vec!["src/a.rs", "src/z.rs"]);
+        assert_eq!(
+            finding.dirty_paths,
+            vec!["tests/a_test.rs", "tests/z_test.rs"]
+        );
+        assert_eq!(finding.literals, vec!["shared alpha", "shared zeta"]);
+    }
+
+    #[test]
+    fn partial_staging_companion_finding_rejects_unrelated_or_no_overlap() {
+        assert!(
+            partial_staging_companion_finding(
+                &["tasks/session.md".to_string()],
+                &["tasks/other.md".to_string()],
+                "+\"make check\"\n",
+                "+\"make check\"\n",
+            )
+            .is_none()
+        );
+        assert!(
+            partial_staging_companion_finding(
+                &["tests/render_test.rs".to_string()],
+                &["src/render.rs".to_string()],
+                "+\"new queue output\"\n",
+                "+\"new queue output\"\n",
+            )
+            .is_none()
+        );
+        assert!(
+            partial_staging_companion_finding(
+                &["src/render.rs".to_string()],
+                &["tests/render_test.rs".to_string()],
+                "+\"committed literal\"\n",
+                "+\"dirty literal\"\n",
+            )
+            .is_none()
+        );
     }
 
     #[test]

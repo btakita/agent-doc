@@ -1522,7 +1522,12 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // regression now asserts `reason=listener_degraded_editor_detached`,
         // proving the path tries file IPC first and only then uses guarded
         // DetachedDisk when no live editor sidecar owns the document.
-        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 19,
+        // 19 -> 20 (#ack-content-live-buffer-sync): already-applied ack-content
+        // adoption logs `reason=no_editor_id` when the binary has no editor id
+        // to mark the live-buffer epoch as synced. The snapshot still follows
+        // the existing ack-content proof path; this is diagnostic context for
+        // skipping the live-buffer barrier update.
+        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 20,
         // +1 `guard_` (#fcc0-degraded-file-ipc): `IpcPollOptions::convergence`
         // centralizes the existing committed-cycle file-IPC poll guard for
         // convergence callers; this is a constructor for the existing guard, not
@@ -5936,6 +5941,8 @@ fn test_agent_doc_diff_owns_partial_staging_pure_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let diff_source = fs::read_to_string(manifest_dir.join("agent-doc-diff/src/lib.rs")).unwrap();
     for required in [
+        "pub struct PartialStagingCompanionFinding",
+        "pub fn partial_staging_companion_finding(",
         "pub fn is_partial_staging_relevant_path",
         "pub fn partial_staging_paths_look_related",
         "pub fn extract_changed_string_literals",
@@ -5958,22 +5965,20 @@ fn test_agent_doc_diff_owns_partial_staging_pure_policy() {
         "pub(crate) fn extract_changed_string_literals",
         "pub(crate) fn extract_string_literals_from_line",
         "pub(crate) fn interesting_changed_literal",
+        "agent_doc_diff::is_partial_staging_relevant_path",
+        "agent_doc_diff::partial_staging_paths_look_related",
+        "agent_doc_diff::extract_changed_string_literals",
+        ".intersection(&dirty_literals)",
     ] {
         assert!(
             !partial_staging.contains(forbidden),
             "session_check partial-staging must stay an adapter, not re-own pure diff/path policy"
         );
     }
-    for required in [
-        "agent_doc_diff::is_partial_staging_relevant_path",
-        "agent_doc_diff::partial_staging_paths_look_related",
-        "agent_doc_diff::extract_changed_string_literals",
-    ] {
-        assert!(
-            partial_staging.contains(required),
-            "session_check partial-staging should call focused diff helpers directly: {required}"
-        );
-    }
+    assert!(
+        partial_staging.contains("agent_doc_diff::partial_staging_companion_finding("),
+        "session_check partial-staging should call the focused diff classifier directly"
+    );
 }
 
 #[test]

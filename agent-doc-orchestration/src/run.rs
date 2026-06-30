@@ -133,6 +133,9 @@ use agent_doc_prompt_cache::{
     PromptCacheBlocks, PromptCacheSessionCostSample, render_cache_miss_ranking,
 };
 use agent_doc_template as template;
+use agent_doc_turn::no_change::{
+    NoChangeCycleStateInput, NoChangeVerdict, classify_no_change_cycle_state,
+};
 
 use crate::{agent, diff_io, frontmatter_io, git, merge, snapshot, template_io, write};
 
@@ -385,86 +388,6 @@ pub fn run_with_context(
     }
 }
 
-/// Verdict for a direct run that found no document changes since the snapshot.
-///
-/// `#nochange-after-stall`: a plain "Nothing changed" verdict hides the fact
-/// that the previous run ended abnormally — for example a recursive owner-pane
-/// invocation that abandoned its cycle, leaving the operator with no durable
-/// closeout. Classify the latest cycle state so the no-change path can surface
-/// the prior terminal state and the recovery action instead of a snapshot-only
-/// result. Healthy committed cycles stay `Clean`, so normal no-change behavior
-/// is unchanged.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum NoChangeVerdict {
-    Clean,
-    Abnormal { summary: String, recovery: String },
-}
-
-fn classify_no_change_cycle_state(
-    state: Option<&crate::cycle_state::CycleState>,
-) -> NoChangeVerdict {
-    use agent_doc_turn::CyclePhase;
-    let Some(state) = state else {
-        return NoChangeVerdict::Clean;
-    };
-    if state.phase == CyclePhase::Abandoned {
-        if state
-            .last_event
-            .starts_with("recursive_direct_invocation_blocked")
-        {
-            return NoChangeVerdict::Abnormal {
-                summary: format!(
-                    "the previous run was blocked as a recursive direct invocation and its cycle ({}) was abandoned, so no normal dispatch/response completed",
-                    state.cycle_id
-                ),
-                recovery:
-                    "if the owning pane is now idle but the document still reports busy, reconcile it without killing the pane via `agent-doc session status <FILE>` (or `agent-doc session clear <FILE>`) — idle pane evidence repairs a stale busy actor back to ready. Otherwise dispatch from the document's managed pane (editor Run Agent Doc) or restart the owner with `agent-doc start <FILE>` instead of a nested direct `agent-doc <FILE>`"
-                        .to_string(),
-            };
-        }
-        return NoChangeVerdict::Abnormal {
-            summary: format!(
-                "the previous cycle ({}) was abandoned (last_event={}) and never reached a committed response",
-                state.cycle_id, state.last_event
-            ),
-            recovery:
-                "re-run `agent-doc <FILE>` to start a fresh cycle, or inspect `.agent-doc/logs/` for that cycle id"
-                    .to_string(),
-        };
-    }
-    // #jb-codex-nochange-after-repair: a committed no-response bookkeeping-only
-    // cycle (repair/reap following an abandoned or failed run) means the prior
-    // run did not produce an assistant response. When the document matches the
-    // snapshot, the operator sees plain "Nothing changed" which hides the fact
-    // that the last turn made no durable progress. Surface the prior state so
-    // the operator can take recovery action. Broader active-queue-head checks
-    // live in session-check (#nochange-after-stall-breadth).
-    if state.phase == CyclePhase::Committed
-        && state.capture_id.is_none()
-        && state.response_sha256.is_none()
-    {
-        let bookkeeping = state.had_pending_mutations
-            || !state.pending_done_ids.is_empty()
-            || !state.pending_kept_open_ids.is_empty()
-            || !state.reaped_pending_ids.is_empty()
-            || !state.pending_gated_ids.is_empty()
-            || state.pending_added_this_cycle;
-        if bookkeeping {
-            return NoChangeVerdict::Abnormal {
-                summary: format!(
-                    "the latest cycle ({}) committed without an assistant response body (bookkeeping-only closeout: last_event={}); the prior run was likely abandoned or repaired without producing a response",
-                    state.cycle_id, state.last_event
-                ),
-                recovery: format!(
-                    "re-run `agent-doc {}` from a non-owner pane or use `agent-doc start {}` to provision a fresh pane, then inspect `.agent-doc/logs/` for cycle {} history",
-                    state.file, state.file, state.cycle_id
-                ),
-            };
-        }
-    }
-    NoChangeVerdict::Clean
-}
-
 #[allow(clippy::too_many_arguments)]
 fn run_once(
     file: &Path,
@@ -486,7 +409,22 @@ fn run_once(
 
     // Compute diff
     let Some((the_diff, queue_synthetic_diff)) = compute_run_diff(file)? else {
-        match classify_no_change_cycle_state(crate::cycle_state::load(file)?.as_ref()) {
+        let cycle_state = crate::cycle_state::load(file)?;
+        let no_change_input = cycle_state.as_ref().map(|state| NoChangeCycleStateInput {
+            cycle_id: &state.cycle_id,
+            file: &state.file,
+            phase: state.phase,
+            last_event: &state.last_event,
+            has_capture: state.capture_id.is_some(),
+            has_response_hash: state.response_sha256.is_some(),
+            had_pending_mutations: state.had_pending_mutations,
+            has_pending_done_ids: !state.pending_done_ids.is_empty(),
+            has_pending_kept_open_ids: !state.pending_kept_open_ids.is_empty(),
+            has_reaped_pending_ids: !state.reaped_pending_ids.is_empty(),
+            has_pending_gated_ids: !state.pending_gated_ids.is_empty(),
+            pending_added_this_cycle: state.pending_added_this_cycle,
+        });
+        match classify_no_change_cycle_state(no_change_input) {
             NoChangeVerdict::Abnormal { summary, recovery } => {
                 eprintln!(
                     "[run] no document changes since last run for {}, but {}. Recovery: {}",
@@ -2483,109 +2421,6 @@ mod tests {
         assert!(msg.contains("agent-doc session interrupt-clear tasks/x.md"));
         assert!(msg.contains("agent-doc session interrupt-clear tasks/x.md --force"));
         assert!(msg.contains("Do NOT re-run"));
-    }
-
-    #[test]
-    fn no_change_after_recursive_block_reports_typed_diagnostic() {
-        // #nochange-after-stall: a direct run that finds no diff but whose latest
-        // cycle was abandoned by the recursive-owner guard must surface the prior
-        // state + recovery instead of plain "Nothing changed".
-        let st: crate::cycle_state::CycleState = serde_json::from_str(
-            r#"{"cycle_id":"cycle-1","file":"x.md","phase":"abandoned","last_event":"recursive_direct_invocation_blocked recursive direct invocation would deadlock","started_at":0,"updated_at":0}"#,
-        )
-        .unwrap();
-        match classify_no_change_cycle_state(Some(&st)) {
-            NoChangeVerdict::Abnormal { summary, recovery } => {
-                assert!(summary.contains("recursive direct invocation"));
-                assert!(summary.contains("cycle-1"));
-                assert!(recovery.contains("managed pane"));
-                // #stale-busy-recursion-recovery-discoverability: a stale busy
-                // idle pane must be recoverable without a pane kill via the
-                // existing idle-reconcile path, so the diagnostic must surface
-                // `session status` / `session clear` ahead of the heavy restart.
-                assert!(recovery.contains("agent-doc session status"));
-                assert!(recovery.contains("agent-doc session clear"));
-                assert!(recovery.contains("without killing the pane"));
-            }
-            NoChangeVerdict::Clean => panic!("expected an abnormal no-change verdict"),
-        }
-    }
-
-    #[test]
-    fn no_change_after_generic_abandoned_cycle_reports_typed_diagnostic() {
-        let st: crate::cycle_state::CycleState = serde_json::from_str(
-            r#"{"cycle_id":"cycle-2","file":"x.md","phase":"abandoned","last_event":"stale_preflight","started_at":0,"updated_at":0}"#,
-        )
-        .unwrap();
-        assert!(matches!(
-            classify_no_change_cycle_state(Some(&st)),
-            NoChangeVerdict::Abnormal { .. }
-        ));
-    }
-
-    #[test]
-    fn no_change_with_committed_cycle_stays_clean() {
-        // Normal healthy completed session: no-change behavior must be unchanged.
-        let st: crate::cycle_state::CycleState = serde_json::from_str(
-            r#"{"cycle_id":"cycle-3","file":"x.md","phase":"committed","last_event":"commit","started_at":0,"updated_at":0}"#,
-        )
-        .unwrap();
-        assert_eq!(
-            classify_no_change_cycle_state(Some(&st)),
-            NoChangeVerdict::Clean
-        );
-        assert_eq!(classify_no_change_cycle_state(None), NoChangeVerdict::Clean);
-    }
-
-    #[test]
-    fn no_change_after_committed_bookkeeping_only_cycle_reports_abnormal() {
-        // #jb-codex-nochange-after-repair: when a committed cycle has no
-        // response body but carried bookkeeping-only mutations (repair/reap
-        // following an abandoned recursive invocation), the "Nothing changed"
-        // output must surface the prior abnormal state instead of Clean.
-        let st: crate::cycle_state::CycleState = serde_json::from_str(
-            r#"{"cycle_id":"cycle-repair-1","file":"tasks/sampleorders.md","phase":"committed","last_event":"commit_success","started_at":0,"updated_at":0,"had_pending_mutations":true,"reaped_pending_ids":["stale-item"]}"#,
-        )
-        .unwrap();
-        match classify_no_change_cycle_state(Some(&st)) {
-            NoChangeVerdict::Abnormal { summary, recovery } => {
-                assert!(summary.contains("cycle-repair-1"));
-                assert!(summary.contains("bookkeeping-only"));
-                assert!(summary.contains("commit_success"));
-                assert!(recovery.contains("tasks/sampleorders.md"));
-                assert!(recovery.contains("non-owner pane"));
-                assert!(recovery.contains("agent-doc start"));
-            }
-            NoChangeVerdict::Clean => {
-                panic!("expected Abnormal for committed no-response bookkeeping cycle")
-            }
-        }
-    }
-
-    #[test]
-    fn no_change_committed_no_response_no_bookkeeping_stays_clean() {
-        // A committed no-response cycle with no bookkeeping is not suspicious.
-        let st: crate::cycle_state::CycleState = serde_json::from_str(
-            r#"{"cycle_id":"cycle-4","file":"x.md","phase":"committed","last_event":"commit_success","started_at":0,"updated_at":0}"#,
-        )
-        .unwrap();
-        assert_eq!(
-            classify_no_change_cycle_state(Some(&st)),
-            NoChangeVerdict::Clean
-        );
-    }
-
-    #[test]
-    fn no_change_committed_with_response_stays_clean() {
-        // A committed cycle WITH a response body is healthy regardless of bookkeeping.
-        let st: crate::cycle_state::CycleState = serde_json::from_str(
-            r#"{"cycle_id":"cycle-5","file":"x.md","phase":"committed","last_event":"commit_success","started_at":0,"updated_at":0,"capture_id":"cap-1","response_sha256":"abc123","had_pending_mutations":true}"#,
-        )
-        .unwrap();
-        assert_eq!(
-            classify_no_change_cycle_state(Some(&st)),
-            NoChangeVerdict::Clean
-        );
     }
 
     #[test]

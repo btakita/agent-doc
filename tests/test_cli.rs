@@ -3713,6 +3713,66 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
 }
 
 #[test]
+fn test_agent_doc_turn_owns_no_change_cycle_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    assert!(
+        manifest_dir
+            .join("agent-doc-turn/src/no_change.rs")
+            .exists(),
+        "no-change cycle diagnostics should live in the focused turn crate"
+    );
+
+    let turn_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn/src/no_change.rs")).unwrap();
+    for required in [
+        "pub struct NoChangeCycleStateInput",
+        "pub enum NoChangeVerdict",
+        "pub fn classify_no_change_cycle_state",
+        "pub const fn has_bookkeeping_without_response",
+    ] {
+        assert!(
+            turn_source.contains(required),
+            "agent-doc-turn must own no-change cycle policy: {required}"
+        );
+    }
+
+    let turn_lib = fs::read_to_string(manifest_dir.join("agent-doc-turn/src/lib.rs")).unwrap();
+    assert!(
+        turn_lib.contains("pub mod no_change;"),
+        "agent-doc-turn should expose no-change policy through its owning module"
+    );
+    assert!(
+        !turn_lib.contains("pub use no_change"),
+        "agent-doc-turn should not add a no_change root facade"
+    );
+
+    let run_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/run.rs")).unwrap();
+    for forbidden in [
+        "enum NoChangeVerdict",
+        "fn classify_no_change_cycle_state(",
+        ".starts_with(\"recursive_direct_invocation_blocked\")",
+        "bookkeeping-only closeout",
+        "let bookkeeping =",
+    ] {
+        assert!(
+            !run_source.contains(forbidden),
+            "orchestration run must not re-own or facade no-change cycle policy: {forbidden}"
+        );
+    }
+    for required in [
+        "use agent_doc_turn::no_change::{",
+        "NoChangeCycleStateInput",
+        "classify_no_change_cycle_state",
+    ] {
+        assert!(
+            run_source.contains(required),
+            "orchestration run should call focused no-change policy directly: {required}"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_turn_owns_pending_capture_heuristics() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let heuristics =

@@ -276,6 +276,13 @@ focused crate under the old path.
   drift evidence, and calls the focused classifier; the old public
   `classify_closeout_recovery_state` path was replaced with the explicit
   file-backed adapter `classify_closeout_recovery_state_for_file`.
+- `agent-doc-turn` now owns no-change cycle diagnostics: classifying abandoned
+  or bookkeeping-only committed cycle-state facts into clean vs abnormal
+  no-change verdicts, including recursive direct-invocation and no-response
+  recovery messages. Orchestration keeps only snapshot comparison, cycle-state
+  file loading, fact projection, and CLI stderr rendering; the old local
+  `run.rs` verdict enum/classifier was deleted rather than retained as a
+  wrapper.
 - `agent-doc-tmux` now owns sync column-memory layout policy and safe-passive
   focus-only expansion policy: restoring remembered sibling panes, preserving
   duplicate-column layout state, returning restoration/expansion events for

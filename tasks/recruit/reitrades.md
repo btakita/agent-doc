@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 pending_done_guard: warn
 agent_doc_lint_dialect: off
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -1111,7 +1111,38 @@ This leans into what you actually like (real-time reactive — your lazily/signa
 **One tradeoff to weigh:** Option B is more *you*, but it shifts the lead from "their biggest risk" to "what I like." That's fine here — a live marketplace really does need reactive engineering, and it differentiates you from a generalist billing hours — but if the goal is purely to hook him on his stated pain, Option A stays closer to his "100% accurate" anxiety. My lean: **Option B** if you want the note to attract the kind of work you actually want; **Option A** if you just want the highest reply rate on his terms.
 
 Want me to fold one of these into the working draft? (And if you go with B, I'd keep the shared-libraries line as-is — it still fits.)
-<!-- agent:boundary:da2a97aa -->
+Option B. Make it fix my voice...no AI tells. Print the entire linked in response.
+<!-- agent:boundary:20b97d36 -->
+### Re: Option B folded in, voice-fixed, AI tells stripped — opus-4-8
+
+> **Queue prompt:** Option B. Make it fix my voice...no AI tells. Print the entire linked in response.
+
+Done. Folded Option B in and rewrote it in your voice: no em-dashes, broke the tidy triads, plain sentences. I also trimmed the AI-accuracy paragraph so it supports the reactive lead instead of pulling the note back into specialist territory (which was the point of the reframe). Full LinkedIn response, paste-ready:
+
+```
+Hi Artur,
+
+Totally get going with what fits the budget when you're bootstrapped. Hope the build's going well.
+
+I wanted to reach out anyway. REItrades is something I'd genuinely like to work on. I'm a generalist, and the thing I enjoy most is real-time reactive systems. That's basically what a live marketplace is. Listings, buyer and seller chat, engagement that updates while people are using it. The AI side overlaps with that too. Your "100% accurate" content is the part that's easiest to lose trust on, and making AI output reliable in production is the kind of problem I like solving.
+
+If it helps, the way I'd keep the AI trustworthy is simple. The code owns every number and validation, the AI only proposes, and anything it's unsure about gets flagged for a person before a buyer ever sees it. That's what makes "AI-generated" safe to put your name on.
+
+I'm flexible on how we structure it. Some of the work overlaps tooling I already build and maintain, so I can contribute those pieces at a low rate, either open-sourced or licensed to you royalty-free, so you're not paying full custom price for the plumbing. If you can give me a rough idea of your budget for this phase, I'll put together something that fits.
+
+Let me know if it's worth a quick call.
+
+Brian
+```
+
+What I did:
+- **Lead is now real-time reactive systems**, tied straight to what a live marketplace actually is, so it reads as your genuine interest rather than a niche you're claiming.
+- **Opened with "I'm a generalist"** on purpose. It's what you asked for, and it sets the frame so nothing reads as a specialist boast you'd get grilled on. With the reactive-systems line it lands as "senior, broad, with a favorite area," not jack-of-all-trades.
+- **AI dropped to a supporting role.** The accuracy method is now two plain sentences that show you'd handle it responsibly, without turning the note into an AI-accuracy pitch.
+- **Kept the shared-libraries line** as you said.
+- **AI tells removed:** no em-dashes, no rule-of-three lists with the neat final beat, no "squarely the kind of problem." Reads like you typing it.
+
+Want me to drop this into `corky`/LinkedIn as a draft (no auto-send), or tighten anything further?
 <!-- /agent:exchange -->
 
 ## Queue

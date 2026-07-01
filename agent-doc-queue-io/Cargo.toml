@@ -14,6 +14,7 @@ agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.66" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.66" }
 agent-doc-queue = { path = "../agent-doc-queue", version = "0.34.66" }
+agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.34.66" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.66" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }

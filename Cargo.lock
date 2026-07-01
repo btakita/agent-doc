@@ -648,6 +648,7 @@ dependencies = [
  "agent-doc-fs",
  "agent-doc-hash",
  "agent-doc-queue",
+ "agent-doc-sqlite",
  "agent-doc-turn",
  "anyhow",
  "serde",

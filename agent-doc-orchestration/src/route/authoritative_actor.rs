@@ -70,7 +70,8 @@ pub(crate) fn load_authoritative_actor_binding(
             return Ok(None);
         }
         if frontmatter_harness_changed {
-            let queue_paused = crate::queue_continuation::document_queue_controller_paused(file);
+            let queue_paused =
+                agent_doc_queue_io::controller_pause::document_queue_controller_paused(file);
             // `#actorswitchdefer` Part B: the route defer asserts "the supervisor
             // idle-watch will restart the harness at the next idle boundary." That is
             // only true while `agent_change_restart` is enabled — the idle-watch gates

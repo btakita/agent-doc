@@ -200,7 +200,8 @@ pub fn run(file: &Path) -> Result<()> {
 /// drain-coordination state. The guidance now carries the "queue_paused is NOT a
 /// contradiction" preamble and recorded reason whenever the queue is paused.
 fn continuation_guidance_for(file: &Path) -> String {
-    let pause_reason = crate::queue_continuation::document_queue_controller_pause_reason(file);
+    let pause_reason =
+        agent_doc_queue_io::controller_pause::document_queue_controller_pause_reason(file);
     agent_doc_queue::queue_continuation::continuation_guidance(pause_reason.as_deref())
 }
 
@@ -312,7 +313,9 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                 // via `--pending-set-verify
                 // verify=ops_log:queue_paused_continuation_guidance_emitted`).
                 if let Some(reason) =
-                    crate::queue_continuation::document_queue_controller_pause_reason(file)
+                    agent_doc_queue_io::controller_pause::document_queue_controller_pause_reason(
+                        file,
+                    )
                 {
                     crate::ops_log::log_op(
                         file,

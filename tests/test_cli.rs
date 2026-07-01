@@ -2640,6 +2640,12 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
     );
     assert!(
         manifest_dir
+            .join("agent-doc-queue-io/src/controller_pause.rs")
+            .exists(),
+        "controller queue pause state IO should live in the queue IO crate"
+    );
+    assert!(
+        manifest_dir
             .join("agent-doc-queue/src/queue_journal.rs")
             .exists(),
         "queue journal replay policy should live in the queue crate"
@@ -2663,8 +2669,24 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
     let orchestration_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/queue_continuation.rs"))
             .unwrap();
+    let queue_io_pause =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/controller_pause.rs"))
+            .unwrap();
+    for required_snippet in [
+        "pub fn document_queue_controller_paused(",
+        "pub fn document_queue_controller_pause_reason(",
+        "agent_doc_sqlite::state_store::load_effective_queue_control_from_db",
+    ] {
+        assert!(
+            queue_io_pause.contains(required_snippet),
+            "agent-doc-queue-io must own controller pause state IO: {required_snippet}"
+        );
+    }
     for forbidden_snippet in [
         "pub struct QueueContinuation",
+        "pub fn document_queue_controller_paused(",
+        "pub fn document_queue_controller_pause_reason(",
+        "load_effective_queue_control_from_db",
         "fn detect_in_content",
         "frontmatter_io::parse_for_file_with_context",
         "agent_doc_element::element::parse(content)",
@@ -2691,6 +2713,18 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
         orchestration_source.contains("queue_policy::required_continuation"),
         "orchestration queue_continuation should read file/snapshot and call agent-doc-queue directly"
     );
+    for relative in [
+        "agent-doc-orchestration/src/session_check.rs",
+        "agent-doc-orchestration/src/route/authoritative_actor.rs",
+        "agent-doc-orchestration/src/start/idle_watch.rs",
+        "agent-doc-orchestration/src/preflight/maintenance.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("agent_doc_queue_io::controller_pause::document_queue_controller_"),
+            "{relative} should call controller pause IO from agent-doc-queue-io directly"
+        );
+    }
     let preflight_maintenance = fs::read_to_string(
         manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
     )
@@ -14971,6 +15005,11 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
             .join("agent-doc-document-realtime/src/broadcast.rs")
             .exists()
     );
+    assert!(
+        manifest_dir
+            .join("agent-doc-document-realtime/src/editor_identity.rs")
+            .exists()
+    );
     let realtime_session_ops =
         fs::read_to_string(manifest_dir.join("agent-doc-document-realtime/src/session_ops.rs"))
             .unwrap();
@@ -14995,6 +15034,18 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
             "agent-doc-document-realtime must own realtime broadcast merge/planning policy: {required_snippet}"
         );
     }
+    let realtime_editor_identity =
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime/src/editor_identity.rs"))
+            .unwrap();
+    for required_snippet in [
+        "pub fn jetbrains_editor_id_pid(",
+        "pub fn sanitize_editor_id_for_filename(",
+    ] {
+        assert!(
+            realtime_editor_identity.contains(required_snippet),
+            "agent-doc-document-realtime must own pure editor identity helpers: {required_snippet}"
+        );
+    }
     assert!(
         manifest_dir
             .join("agent-doc-document-realtime/src/crdt_authority.rs")
@@ -15017,10 +15068,12 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         "pub fn compute_broadcast_plan(",
         "fn text_delta_included(",
         "fn line_counts(",
+        "fn jetbrains_editor_id_pid(",
+        "fn sanitize_editor_id_for_filename(",
     ] {
         assert!(
             !orchestration_realtime.contains(forbidden_snippet),
-            "orchestration must not re-own pure realtime read/broadcast policy: {forbidden_snippet}"
+            "orchestration must not re-own pure realtime read/broadcast/editor identity policy: {forbidden_snippet}"
         );
     }
     assert!(
@@ -15028,6 +15081,12 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
             && orchestration_realtime.contains("BroadcastPeer")
             && orchestration_realtime.contains("compute_broadcast_plan"),
         "orchestration realtime delivery should import broadcast planning from the focused realtime crate directly"
+    );
+    assert!(
+        orchestration_realtime.contains("editor_identity::{")
+            && orchestration_realtime.contains("jetbrains_editor_id_pid")
+            && orchestration_realtime.contains("sanitize_editor_id_for_filename"),
+        "orchestration realtime delivery should import editor identity helpers from the focused realtime crate directly"
     );
     let orchestration_session_actor =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_actor.rs"))
@@ -15213,6 +15272,8 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         "pub use realtime_model::{BroadcastPeer",
         "pub use realtime_model::{BroadcastTarget",
         "pub use realtime_model::{compute_broadcast",
+        "pub use realtime_model::{jetbrains_editor_id_pid",
+        "pub use realtime_model::{sanitize_editor_id_for_filename",
     ] {
         assert!(
             !orchestration_lib.contains(forbidden_snippet),

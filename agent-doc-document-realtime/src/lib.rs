@@ -11,6 +11,7 @@ pub mod broadcast;
 pub mod convergence_gate;
 pub mod crdt_authority;
 pub mod crdt_relay;
+pub mod editor_identity;
 pub mod ipc_corruption;
 pub mod read_authority;
 pub mod session_ops;

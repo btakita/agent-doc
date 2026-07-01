@@ -43,6 +43,7 @@
 use agent_doc_document_realtime::{
     BufferState, Reconciliation,
     broadcast::{BroadcastPeer, compute_broadcast_plan},
+    editor_identity::{jetbrains_editor_id_pid, sanitize_editor_id_for_filename},
     reconcile_current_doc,
 };
 
@@ -153,18 +154,6 @@ struct BroadcastDelta {
     patches: Vec<serde_json::Value>,
     node_patches: Vec<serde_json::Value>,
     frontmatter: Option<String>,
-}
-
-/// Parse the owning process id from a JetBrains plugin editor id
-/// (`jetbrains-<pid>-<uuid>`). Returns `None` for non-JetBrains editor ids
-/// (e.g. `vscode-…`) or malformed ids — callers treat those as live.
-fn jetbrains_editor_id_pid(editor_id: &str) -> Option<u32> {
-    let rest = editor_id.strip_prefix("jetbrains-")?;
-    let pid_str = rest.split('-').next()?;
-    if pid_str.is_empty() || !pid_str.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    pid_str.parse::<u32>().ok()
 }
 
 /// Whether an editor id refers to a live process (`#sqdrift` / `#fccreap2`).
@@ -425,24 +414,6 @@ fn raw_frontmatter_yaml(content: &str) -> Option<&str> {
     let rest = content.strip_prefix("---\n")?;
     let end = rest.find("\n---")?;
     Some(&rest[..end])
-}
-
-fn sanitize_editor_id_for_filename(editor_id: &str) -> String {
-    let sanitized: String = editor_id
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.' {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    if sanitized.is_empty() {
-        "editor".to_string()
-    } else {
-        sanitized
-    }
 }
 
 #[cfg(test)]

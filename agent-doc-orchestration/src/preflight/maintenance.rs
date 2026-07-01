@@ -1197,7 +1197,7 @@ pub(crate) fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<Que
         vec![]
     };
     let queue_pause_reason =
-        crate::queue_continuation::document_queue_controller_pause_reason(file);
+        agent_doc_queue_io::controller_pause::document_queue_controller_pause_reason(file);
     let queue_paused = queue_pause_reason.is_some();
     let drainability_content = if activation.active {
         let body = agent_doc_queue::document_queue::render(&activation.entries_after);
@@ -2836,7 +2836,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // (`#qdurcrash`, `#733r`, …) — the operator-rejected over-reach. Use
     // `queue: stop` frontmatter / `--- stop` fences to stop the in-session loop.
     let queue_pause_reason =
-        crate::queue_continuation::document_queue_controller_pause_reason(file);
+        agent_doc_queue_io::controller_pause::document_queue_controller_pause_reason(file);
     let queue_paused = queue_pause_reason.is_some();
     let queue_drainable_head_count = if activation.active {
         agent_doc_queue::queue_continuation::drainable_head_count(&current_content)

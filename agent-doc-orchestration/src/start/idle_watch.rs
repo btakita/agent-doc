@@ -2487,7 +2487,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
 
                 let mut paused_failsafe_active = false;
                 if active_head.is_some()
-                    && crate::queue_continuation::document_queue_controller_paused(&path)
+                    && agent_doc_queue_io::controller_pause::document_queue_controller_paused(&path)
                 {
                     // `#qstallguard` Layer C/D: pause throttles to the in-session
                     // loop owner; it does not disable the supervisor failsafe. Skip

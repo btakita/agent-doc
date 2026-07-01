@@ -149,6 +149,9 @@ use agent_doc_supervisor::crash_policy::{
     supervisor_policy_exit_code, supervisor_resume_handoff_failed,
 };
 use agent_doc_supervisor::idle_reconcile::ready_busy_conflict_reconcile_decision;
+use agent_doc_supervisor::input::{
+    normalize_supervisor_inject_bytes, prompt_input_summary, strip_stale_ctrl_d_before_prompt,
+};
 use agent_doc_supervisor::route_owned::{
     RouteOwnedLivenessReason, RouteOwnedReapDecision, RouteOwnedReapPolicy,
     route_owned_liveness_reason_for_content, route_owned_reap_decision,
@@ -542,31 +545,6 @@ enum PromptEofPolicy {
     RestartFresh,
 }
 
-fn prompt_input_summary(input: &str) -> String {
-    let trimmed = input.trim_end_matches(&['\r', '\n'][..]);
-    let mut summary = String::new();
-    let mut count = 0usize;
-    for ch in trimmed.chars() {
-        count += 1;
-        if count > 32 {
-            summary.push_str("...");
-            break;
-        }
-        match ch {
-            '\r' => summary.push_str("\\r"),
-            '\n' => summary.push_str("\\n"),
-            '\t' => summary.push_str("\\t"),
-            c if c.is_control() => summary.push('?'),
-            c => summary.push(c),
-        }
-    }
-    if summary.is_empty() {
-        "<empty>".to_string()
-    } else {
-        summary
-    }
-}
-
 fn prompt_for_restart_or_quit(
     session_log: &mut Option<std::fs::File>,
     prompt_kind: &str,
@@ -825,18 +803,6 @@ fn spawn_route_owned_completion_thread(
             }
         })
         .expect("spawn route-owned completion thread")
-}
-
-fn strip_stale_ctrl_d_before_prompt(
-    data: &[u8],
-    suppress_stale_ctrl_d_until_prompt: bool,
-    prompt_visible_once: bool,
-) -> Option<Vec<u8>> {
-    if !suppress_stale_ctrl_d_until_prompt || prompt_visible_once || !data.contains(&0x04) {
-        return None;
-    }
-
-    Some(data.iter().copied().filter(|byte| *byte != 0x04).collect())
 }
 
 fn is_forwarded_ctrl_c_interrupt_exit(
@@ -1192,26 +1158,6 @@ fn auto_trigger_submit_queue_command(
     } else {
         auto_trigger_inject_command(shared, stop, command)
     }
-}
-
-fn normalize_supervisor_inject_bytes(bytes: &str) -> Vec<u8> {
-    let mut normalized = Vec::with_capacity(bytes.len());
-    let raw = bytes.as_bytes();
-    let mut index = 0usize;
-    while index < raw.len() {
-        match raw[index] {
-            b'\r' => {
-                normalized.push(b'\r');
-                if raw.get(index + 1) == Some(&b'\n') {
-                    index += 1;
-                }
-            }
-            b'\n' => normalized.push(b'\r'),
-            byte => normalized.push(byte),
-        }
-        index += 1;
-    }
-    normalized
 }
 
 fn dispatch_submit_text_to_tmux(
@@ -2852,23 +2798,6 @@ mod tests {
     }
 
     #[test]
-    fn strip_stale_ctrl_d_before_prompt_drops_inherited_ctrl_d_bytes() {
-        let filtered =
-            strip_stale_ctrl_d_before_prompt(b"\x04status\x04", true, false).expect("filtered");
-        assert_eq!(filtered, b"status");
-    }
-    #[test]
-    fn strip_stale_ctrl_d_before_prompt_keeps_ctrl_d_once_prompt_is_visible() {
-        assert!(
-            strip_stale_ctrl_d_before_prompt(b"\x04", true, true).is_none(),
-            "prompt-visible children should still receive a fresh Ctrl+D"
-        );
-        assert!(
-            strip_stale_ctrl_d_before_prompt(b"\x04", false, false).is_none(),
-            "non-keepalive runs should not rewrite forwarded Ctrl+D"
-        );
-    }
-    #[test]
     fn ctrl_d_flag_initialized_false() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
         assert!(!shared.ctrl_d_forwarded.load(Ordering::Relaxed));
@@ -3220,17 +3149,6 @@ mod tests {
         assert_eq!(
             written.lock().unwrap().as_slice(),
             b"agent-doc tasks/software/tsift.md\r"
-        );
-    }
-    #[test]
-    fn normalize_supervisor_inject_bytes_converts_line_feeds_to_carriage_returns() {
-        assert_eq!(
-            normalize_supervisor_inject_bytes("agent-doc tasks/software/tsift.md\n"),
-            b"agent-doc tasks/software/tsift.md\r"
-        );
-        assert_eq!(
-            normalize_supervisor_inject_bytes("line one\r\nline two\nline three\r"),
-            b"line one\rline two\rline three\r"
         );
     }
     #[test]

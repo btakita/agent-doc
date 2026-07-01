@@ -9,6 +9,12 @@ pub fn content_hash(content: &str) -> String {
     bytes_hash(content.as_bytes())
 }
 
+/// Compute the 12-character SHA-256 hex prefix used in compact diagnostics.
+pub fn short_content_hash(content: &str) -> String {
+    let hash = content_hash(content);
+    hash[..hash.len().min(12)].to_string()
+}
+
 /// Compute the SHA-256 hex digest of arbitrary bytes.
 pub fn bytes_hash(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
@@ -38,7 +44,10 @@ pub fn document_id_for_path(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{bytes_hash, content_hash, document_id_for_path, path_hash, path_string_hash};
+    use super::{
+        bytes_hash, content_hash, document_id_for_path, path_hash, path_string_hash,
+        short_content_hash,
+    };
     use std::path::Path;
     use tempfile::TempDir;
 
@@ -57,6 +66,12 @@ mod tests {
     #[test]
     fn bytes_hash_matches_text_hash_for_utf8() {
         assert_eq!(bytes_hash(b"hello"), content_hash("hello"));
+    }
+
+    #[test]
+    fn short_content_hash_uses_stable_sha256_prefix() {
+        assert_eq!(short_content_hash("hello"), &content_hash("hello")[..12]);
+        assert_eq!(short_content_hash(""), &content_hash("")[..12]);
     }
 
     #[test]

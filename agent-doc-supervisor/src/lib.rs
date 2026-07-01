@@ -11,6 +11,7 @@ pub mod config;
 pub mod crash_policy;
 pub mod handoff;
 pub mod idle_reconcile;
+pub mod input;
 pub mod lifecycle;
 pub mod recycle_inflight;
 pub mod recycle_yield;

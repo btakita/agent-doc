@@ -218,6 +218,7 @@ use agent_doc_controller::dispatch::{
     startup_miss_superseded_by_later_open_start,
 };
 use agent_doc_frontmatter::frontmatter;
+use agent_doc_hash::short_content_hash;
 use agent_doc_turn::closeout_recovery::{
     CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput,
     short_recovery_command_from_recommendation,
@@ -491,11 +492,6 @@ fn append_editor_route_attempt(message: &mut String) {
     }
 }
 
-fn short_content_hash(content: &str) -> String {
-    let hash = agent_doc_hash::content_hash(content);
-    hash[..hash.len().min(12)].to_string()
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RoutePaneSnapshot {
     len: usize,
@@ -534,11 +530,9 @@ fn preserve_route_pane_snapshot(
     content: &str,
 ) -> RoutePaneSnapshot {
     let redacted = agent_doc_secret_redact::redact(content);
-    let hash = agent_doc_hash::content_hash(&redacted);
-    let short_hash = &hash[..hash.len().min(12)];
     let snapshot = RoutePaneSnapshot {
         len: redacted.len(),
-        hash: short_hash.to_string(),
+        hash: short_content_hash(&redacted),
         path: None,
     };
 
@@ -557,7 +551,7 @@ fn preserve_route_pane_snapshot(
             route_snapshot_field(phase),
             route_snapshot_field(&harness.binary),
             route_snapshot_field(pane),
-            short_hash
+            snapshot.hash.as_str()
         );
         let path = dir.join(name);
         std::fs::write(&path, redacted)

@@ -5099,6 +5099,47 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
 }
 
 #[test]
+fn test_agent_doc_topic_owns_compact_summary_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let topic_source = fs::read_to_string(manifest_dir.join("agent-doc-topic/src/lib.rs")).unwrap();
+    for required_snippet in [
+        "pub fn parse_topic_sections_with_tail(",
+        "pub fn summarize_compacted_exchange(",
+        "fn summarize_response_topic(",
+        "fn summarize_prior_preamble_context(",
+        "fn summarize_prior_compact_summary(",
+        "fn collapse_whitespace(",
+        "fn truncate_with_ellipsis(",
+    ] {
+        assert!(
+            topic_source.contains(required_snippet),
+            "agent-doc-topic must own compact exchange summary text policy: {required_snippet}"
+        );
+    }
+
+    let compact_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/compact.rs")).unwrap();
+    for forbidden_snippet in [
+        "fn summarize_compacted_exchange(",
+        "fn summarize_response_topic(",
+        "fn summarize_prior_preamble_context(",
+        "fn summarize_prior_compact_summary(",
+        "fn collapse_whitespace(",
+        "fn truncate_with_ellipsis(",
+    ] {
+        assert!(
+            !compact_source.contains(forbidden_snippet),
+            "compact.rs must stay an archive/write adapter, not re-own topic summary policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        compact_source.contains("agent_doc_topic::{")
+            && compact_source.contains("summarize_compacted_exchange"),
+        "compact.rs should call focused topic compact-summary policy directly"
+    );
+}
+
+#[test]
 fn test_agent_doc_response_toc_owns_live_toc_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
@@ -8773,6 +8814,12 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "agent-doc-supervisor must own supervisor idle/ready reconcile policy"
     );
     assert!(
+        manifest_dir
+            .join("agent-doc-supervisor/src/input.rs")
+            .exists(),
+        "agent-doc-supervisor must own pure supervisor input byte policy"
+    );
+    assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/start/decisions.rs")
             .exists(),
@@ -8802,6 +8849,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/crash_policy.rs")).unwrap();
     let supervisor_run_loop =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/run_loop.rs")).unwrap();
+    let supervisor_input_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/input.rs")).unwrap();
     for required_snippet in [
         "pub struct AgentLaunchArgsSources",
         "pub fn resolve_agent_launch_args(",
@@ -8933,6 +8982,33 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             && start_run_source.contains("supervisor_resume_handoff_failed(")
             && start_run_source.contains("supervisor_clean_exit_before_prompt_seen("),
         "start paths should call focused supervisor restart policy directly"
+    );
+    for required_snippet in [
+        "pub fn strip_stale_ctrl_d_before_prompt(",
+        "pub fn normalize_supervisor_inject_bytes(",
+        "pub fn prompt_input_summary(",
+    ] {
+        assert!(
+            supervisor_input_policy.contains(required_snippet),
+            "agent-doc-supervisor input should own pure supervisor byte policy directly: {required_snippet}"
+        );
+    }
+    for forbidden_snippet in [
+        "fn strip_stale_ctrl_d_before_prompt(",
+        "fn normalize_supervisor_inject_bytes(",
+        "fn prompt_input_summary(",
+    ] {
+        assert!(
+            !start_source.contains(forbidden_snippet),
+            "start.rs must not re-own pure supervisor byte policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        start_source.contains("agent_doc_supervisor::input::{")
+            && start_source.contains("strip_stale_ctrl_d_before_prompt")
+            && start_source.contains("normalize_supervisor_inject_bytes")
+            && start_source.contains("prompt_input_summary"),
+        "start.rs should call focused supervisor input byte policy directly"
     );
     let supervisor_route_owned =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/route_owned.rs")).unwrap();
@@ -10675,6 +10751,7 @@ fn test_agent_doc_hash_owns_sha256_content_policy() {
     assert!(
         hash_source.contains("pub fn content_hash(")
             && hash_source.contains("pub fn bytes_hash(")
+            && hash_source.contains("pub fn short_content_hash(")
             && hash_source.contains("pub fn path_hash(")
             && hash_source.contains("pub fn path_string_hash(")
             && hash_source.contains("pub fn document_id_for_path(")
@@ -10709,6 +10786,7 @@ fn test_agent_doc_hash_owns_sha256_content_policy() {
         "agent-doc-orchestration/src/op_capture.rs",
         "agent-doc-orchestration/src/backlog_cmd.rs",
         "agent-doc-orchestration/src/graph.rs",
+        "agent-doc-orchestration/src/route.rs",
         "agent-doc-orchestration/src/snapshot.rs",
         "agent-doc-debounce/src/lib.rs",
     ] {
@@ -10716,6 +10794,7 @@ fn test_agent_doc_hash_owns_sha256_content_policy() {
         for forbidden in [
             "pub fn content_hash(",
             "fn content_hash(",
+            "fn short_content_hash(",
             "pub fn doc_id_for(",
             "fn doc_id_for(",
             "fn hash_path_str(",

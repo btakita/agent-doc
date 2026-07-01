@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 
+use agent_doc_frontmatter::frontmatter::ResolvedMode;
 use anyhow::Result;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -180,6 +181,42 @@ pub fn scope_exchange_tail(exchange: &str, snapshot_exchange: &str) -> String {
     }
 
     exchange.to_string()
+}
+
+pub fn apply_prompt_preset_block(task: &str, prompt_preset_block: Option<&str>) -> String {
+    match prompt_preset_block {
+        Some(block) if !block.trim().is_empty() => format!("{}\n{}", block.trim_end(), task),
+        _ => task.to_string(),
+    }
+}
+
+pub fn append_worker_result_line(
+    response: &str,
+    worker_result_line: &str,
+    mode: ResolvedMode,
+) -> String {
+    if response.contains(worker_result_line) {
+        return response.to_string();
+    }
+    if mode.is_template() {
+        const CLOSE: &str = "<!-- /patch:exchange -->";
+        if let Some(idx) = response.rfind(CLOSE) {
+            let mut out = String::with_capacity(response.len() + worker_result_line.len() + 2);
+            out.push_str(response[..idx].trim_end());
+            out.push('\n');
+            out.push_str(worker_result_line);
+            out.push('\n');
+            out.push_str(&response[idx..]);
+            return out;
+        }
+    }
+    let mut out = response.trim_end().to_string();
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    out.push_str(worker_result_line);
+    out.push('\n');
+    out
 }
 
 fn collect_fenced_task_blocks(text: &str) -> Vec<Vec<String>> {
@@ -589,5 +626,33 @@ mod tests {
         let snapshot = "old\n<!-- agent:boundary:abc -->\n";
         let current = "old\n<!-- agent:boundary:def -->\n<!-- comment -->\ndo #new\n";
         assert_eq!(scope_exchange_tail(current, snapshot), "do #new");
+    }
+
+    #[test]
+    fn apply_prompt_preset_block_prefixes_task_prompt() {
+        let rendered = apply_prompt_preset_block(
+            "do #prep",
+            Some("(preset #1)\nToday is 2026-04-25.\nKeep the work tree clean.\n"),
+        );
+        assert_eq!(
+            rendered,
+            "(preset #1)\nToday is 2026-04-25.\nKeep the work tree clean.\ndo #prep"
+        );
+    }
+
+    #[test]
+    fn append_worker_result_line_inserts_before_template_exchange_close() {
+        let mode = ResolvedMode {
+            format: agent_doc_frontmatter::frontmatter::AgentDocFormat::Template,
+            write: agent_doc_frontmatter::frontmatter::AgentDocWrite::Merge,
+        };
+        let response = "<!-- patch:exchange -->\nbody\n<!-- /patch:exchange -->\n";
+
+        let updated = append_worker_result_line(response, "[worker] done", mode);
+
+        assert_eq!(
+            updated,
+            "<!-- patch:exchange -->\nbody\n[worker] done\n<!-- /patch:exchange -->\n"
+        );
     }
 }

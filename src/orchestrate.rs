@@ -80,9 +80,9 @@ use agent_doc_turn_executor::agent_stream::StreamChunk;
 #[cfg(test)]
 use agent_doc_workflow::orchestrate_tasks::parse_list_item;
 use agent_doc_workflow::orchestrate_tasks::{
-    DagTask, ExchangeTaskSourceFingerprint, ExecutionTask, extract_tasks_from_text,
-    find_exchange_task_source, normalize_task, parse_dag_task_line, plan_dag_execution,
-    scope_exchange_tail,
+    DagTask, ExchangeTaskSourceFingerprint, ExecutionTask, append_worker_result_line,
+    apply_prompt_preset_block, extract_tasks_from_text, find_exchange_task_source, normalize_task,
+    parse_dag_task_line, plan_dag_execution, scope_exchange_tail,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -859,13 +859,6 @@ fn load_prompt_preset_block(file: &Path, requested_presets: &[String]) -> Result
     Ok(Some(block))
 }
 
-fn apply_prompt_preset_block(task: &str, prompt_preset_block: Option<&str>) -> String {
-    match prompt_preset_block {
-        Some(block) if !block.trim().is_empty() => format!("{}\n{}", block.trim_end(), task),
-        _ => task.to_string(),
-    }
-}
-
 fn print_plan(tasks: &[ExecutionTask]) {
     eprintln!(
         "[orchestrate] plan — {} task(s) (no execution)",
@@ -1001,35 +994,6 @@ Stopped sequential orchestration after {completed_steps} of {total_steps} step(s
         completed_steps,
         total_steps
     );
-}
-
-fn append_worker_result_line(
-    response: &str,
-    worker_result_line: &str,
-    mode: ResolvedMode,
-) -> String {
-    if response.contains(worker_result_line) {
-        return response.to_string();
-    }
-    if mode.is_template() {
-        const CLOSE: &str = "<!-- /patch:exchange -->";
-        if let Some(idx) = response.rfind(CLOSE) {
-            let mut out = String::with_capacity(response.len() + worker_result_line.len() + 2);
-            out.push_str(response[..idx].trim_end());
-            out.push('\n');
-            out.push_str(worker_result_line);
-            out.push('\n');
-            out.push_str(&response[idx..]);
-            return out;
-        }
-    }
-    let mut out = response.trim_end().to_string();
-    if !out.is_empty() {
-        out.push('\n');
-    }
-    out.push_str(worker_result_line);
-    out.push('\n');
-    out
 }
 
 fn inject_prompt(file: &Path, task: &str) -> Result<()> {

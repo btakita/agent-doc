@@ -6678,6 +6678,8 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         "pub fn parse_dag_task_line(",
         "pub fn plan_dag_execution(",
         "pub fn scope_exchange_tail(",
+        "pub fn apply_prompt_preset_block(",
+        "pub fn append_worker_result_line(",
     ] {
         assert!(
             workflow_orchestrate_tasks.contains(required),
@@ -6702,6 +6704,8 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         "fn parse_dag_task_line(",
         "fn plan_dag_execution(",
         "fn scope_exchange_tail(",
+        "fn apply_prompt_preset_block(",
+        "fn append_worker_result_line(",
         "pub use agent_doc_workflow::orchestrate_tasks",
         "pub(crate) use agent_doc_workflow::orchestrate_tasks",
     ] {
@@ -6716,7 +6720,9 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
             && orchestrate_source.contains("find_exchange_task_source")
             && orchestrate_source.contains("parse_dag_task_line")
             && orchestrate_source.contains("plan_dag_execution")
-            && orchestrate_source.contains("scope_exchange_tail"),
+            && orchestrate_source.contains("scope_exchange_tail")
+            && orchestrate_source.contains("apply_prompt_preset_block")
+            && orchestrate_source.contains("append_worker_result_line"),
         "src/orchestrate.rs should call focused orchestrate task policy directly"
     );
 

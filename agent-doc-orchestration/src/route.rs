@@ -1834,35 +1834,19 @@ pub fn run_with_tmux_with_options(
     let _wait_for_ready_guard = WaitForReadyOverrideGuard::set(wait_for_ready);
     let _force_disk_guard = ForceDiskRouteWritesGuard::set(force_disk);
     tracing::debug!(file = %file.display(), pane, debounce_ms, cols = ?col_args, "route::run start");
-    let __route_t0 = std::time::Instant::now();
-    macro_rules! __route_timing {
-        ($label:expr) => {
-            if std::env::var("AGENT_DOC_ROUTE_TIMING").is_ok() {
-                eprintln!(
-                    "[route-timing] {} elapsed_ms={}",
-                    $label,
-                    __route_t0.elapsed().as_millis()
-                );
-            }
-        };
-    }
-    if std::env::var("AGENT_DOC_ROUTE_TIMING").is_ok() {
-        match resync::prune_with_tmux_timed(tmux) {
-            Ok((_, timings)) => {
-                for t in &timings {
-                    eprintln!(
-                        "[route-timing] prune_phase={} ms={}",
-                        t.phase,
-                        t.elapsed.as_millis()
-                    );
-                }
-            }
-            Err(e) => eprintln!("[route-timing] prune error: {e}"),
-        }
-    } else {
-        let _ = resync::prune_with_tmux(tmux); // Clean stale entries before lookup
-    }
-    __route_timing!("after_prune");
+    // Clean stale registry entries before lookup, but stay on the editor-driven
+    // fast path: use `SkipExpensiveStashCleanup` so the pre-lookup prune does NOT
+    // scan stash panes. The expensive stash-pane purge re-resolves every live
+    // fleet session's owner pane (tmux capture + process sampling + supervisor
+    // probe) *per unregistered stash pane*, which measured ~28s on a busy fleet
+    // and was the dominant `Run Agent Doc` dispatch latency (`#run-agent-doc-latency`).
+    // Route only needs stale registry rows + dead non-stash panes pruned for an
+    // accurate pane lookup; orphaned stash-pane hygiene belongs to explicit
+    // `resync`/`sync`, mirroring `safe_passive_prune_cleanup_mode`.
+    let _ = resync::prune_with_tmux_timed_in_mode(
+        tmux,
+        agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup,
+    );
 
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
@@ -1965,9 +1949,7 @@ pub fn run_with_tmux_with_options(
     let file_path = agent_doc_git_io::dirs::resolve_absolute_file_path(file)
         .to_string_lossy()
         .into_owned();
-    __route_timing!("before_resolve_target_session");
     let target_session = resolve_target_session(tmux, None, col_args, Some(file), &harness);
-    __route_timing!("after_resolve_target_session");
     eprintln!("[route] target tmux session: {}", target_session);
 
     // === SINGLE EXIT POINT PATTERN ===
@@ -1977,7 +1959,6 @@ pub fn run_with_tmux_with_options(
 
     let mut created_panes = Vec::new();
 
-    __route_timing!("before_resolve_or_create_pane");
     let pane_id = match mode {
         RouteMode::Managed => resolve_or_create_pane(
             tmux,
@@ -2002,7 +1983,6 @@ pub fn run_with_tmux_with_options(
             &mut created_panes,
         ),
     };
-    __route_timing!("after_resolve_or_create_pane");
 
     match pane_id {
         Ok(ref _pid) => {

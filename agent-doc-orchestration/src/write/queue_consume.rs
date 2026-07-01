@@ -182,8 +182,8 @@ pub(crate) fn record_queue_consumption_proofs(
         let operation_id = format!("queue_head:{node_id}:{index}");
         let (outcome, proof_kind, proof) = match stage {
             QueueConsumptionProofStage::BeforeMutation => (
-                crate::flow::proof_ledger::ProofOutcome::Recorded,
-                crate::flow::proof_ledger::ProofEvidenceKind::QueueHeadIdentity,
+                agent_doc_workflow_io::proof_ledger::ProofOutcome::Recorded,
+                agent_doc_workflow_io::proof_ledger::ProofEvidenceKind::QueueHeadIdentity,
                 format!(
                     "phase=before_mutation node_id={} index={} consumed_count={} text_hash={} text={:?}",
                     node_id,
@@ -194,18 +194,18 @@ pub(crate) fn record_queue_consumption_proofs(
                 ),
             ),
             QueueConsumptionProofStage::AfterMutation => (
-                crate::flow::proof_ledger::ProofOutcome::Consumed,
-                crate::flow::proof_ledger::ProofEvidenceKind::WriteResult,
+                agent_doc_workflow_io::proof_ledger::ProofOutcome::Consumed,
+                agent_doc_workflow_io::proof_ledger::ProofEvidenceKind::WriteResult,
                 format!(
                     "phase=after_mutation node_id={} index={} remaining={} drained={} auto={} save_snapshot={}",
                     node_id, index, plan.remaining, plan.drained, plan.auto, plan.save_snapshot
                 ),
             ),
         };
-        let record = crate::flow::proof_ledger::OperationProofRecord::new(
-            crate::flow::proof_ledger::OperationProofInput {
+        let record = agent_doc_workflow_io::proof_ledger::OperationProofRecord::new(
+            agent_doc_workflow_io::proof_ledger::OperationProofInput {
                 operation_id,
-                operation_kind: crate::flow::proof_ledger::ProofOperationKind::QueueHead,
+                operation_kind: agent_doc_workflow_io::proof_ledger::ProofOperationKind::QueueHead,
                 outcome,
                 subject_id: Some(node_id.to_string()),
                 content_hash,
@@ -214,8 +214,11 @@ pub(crate) fn record_queue_consumption_proofs(
                 recorded_at_ms: now_millis(),
             },
         )?;
-        let path =
-            crate::flow::proof_ledger::append_operation_proof(&project_root, &canonical, &record)?;
+        let path = agent_doc_workflow_io::proof_ledger::append_operation_proof(
+            &project_root,
+            &canonical,
+            &record,
+        )?;
         crate::ops_log::log_op(
             file,
             &format!(
@@ -1839,20 +1842,21 @@ mod core_tests {
         );
 
         let canonical = doc.canonicalize().unwrap();
-        let ledger_path = crate::flow::proof_ledger::proof_ledger_path(root, &canonical);
-        let records = crate::flow::proof_ledger::read_operation_proofs(&ledger_path).unwrap();
+        let ledger_path = agent_doc_workflow_io::proof_ledger::proof_ledger_path(root, &canonical);
+        let records =
+            agent_doc_workflow_io::proof_ledger::read_operation_proofs(&ledger_path).unwrap();
         assert_eq!(records.len(), 2, "ledger records: {records:#?}");
         assert_eq!(
             records[0].operation_kind,
-            crate::flow::proof_ledger::ProofOperationKind::QueueHead
+            agent_doc_workflow_io::proof_ledger::ProofOperationKind::QueueHead
         );
         assert_eq!(
             records[0].outcome,
-            crate::flow::proof_ledger::ProofOutcome::Recorded
+            agent_doc_workflow_io::proof_ledger::ProofOutcome::Recorded
         );
         assert_eq!(
             records[0].proof_kind,
-            crate::flow::proof_ledger::ProofEvidenceKind::QueueHeadIdentity
+            agent_doc_workflow_io::proof_ledger::ProofEvidenceKind::QueueHeadIdentity
         );
         assert!(records[0].proof.contains("phase=before_mutation"));
         assert!(records[0].proof.contains("Run queued thing"));
@@ -1862,15 +1866,15 @@ mod core_tests {
         );
         assert_eq!(
             records[1].operation_kind,
-            crate::flow::proof_ledger::ProofOperationKind::QueueHead
+            agent_doc_workflow_io::proof_ledger::ProofOperationKind::QueueHead
         );
         assert_eq!(
             records[1].outcome,
-            crate::flow::proof_ledger::ProofOutcome::Consumed
+            agent_doc_workflow_io::proof_ledger::ProofOutcome::Consumed
         );
         assert_eq!(
             records[1].proof_kind,
-            crate::flow::proof_ledger::ProofEvidenceKind::WriteResult
+            agent_doc_workflow_io::proof_ledger::ProofEvidenceKind::WriteResult
         );
         assert_eq!(records[0].operation_id, records[1].operation_id);
         assert!(records[1].proof.contains("phase=after_mutation"));

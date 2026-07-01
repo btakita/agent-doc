@@ -51,6 +51,7 @@ members = [
     "agent-doc-document",
     "agent-doc-document-realtime",
     "agent-doc-workflow",
+    "agent-doc-workflow-io",
     "agent-doc-work-graph",
     "agent-doc-state-backbone",
     "agent-doc-state-wire",
@@ -147,6 +148,7 @@ agent-doc-turn-executor-tmux = { path = "agent-doc-turn-executor-tmux", version 
 agent-doc-turn-scope-io = { path = "agent-doc-turn-scope-io", version = "0.34.66" }
 agent-doc-turn-status-io = { path = "agent-doc-turn-status-io", version = "0.34.66" }
 agent-doc-workflow = { path = "agent-doc-workflow", version = "0.34.66" }
+agent-doc-workflow-io = { path = "agent-doc-workflow-io", version = "0.34.66" }
 agent-doc-work-graph = { path = "agent-doc-work-graph", version = "0.34.66" }
 anyhow = "1"
 base64 = "0.22"

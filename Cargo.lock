@@ -73,6 +73,7 @@ dependencies = [
  "agent-doc-turn-status-io",
  "agent-doc-work-graph",
  "agent-doc-workflow",
+ "agent-doc-workflow-io",
  "agent-kit",
  "anyhow",
  "assert_cmd",
@@ -538,6 +539,7 @@ dependencies = [
  "agent-doc-watch-io",
  "agent-doc-work-graph",
  "agent-doc-workflow",
+ "agent-doc-workflow-io",
  "agent-kit",
  "alacritty_terminal",
  "anyhow",
@@ -968,6 +970,17 @@ dependencies = [
  "anyhow",
  "htmd",
  "indexmap",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "agent-doc-workflow-io"
+version = "0.34.66"
+dependencies = [
+ "agent-doc-hash",
+ "anyhow",
  "serde",
  "serde_json",
  "tempfile",

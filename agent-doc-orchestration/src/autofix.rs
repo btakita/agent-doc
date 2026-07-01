@@ -13,16 +13,16 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::doctor::{WorkflowDoctorOptions, diagnose};
-use crate::flow::proof_ledger::{
-    OperationProofInput, OperationProofRecord, ProofEvidenceKind, ProofOperationKind, ProofOutcome,
-    append_operation_proof, proof_ledger_path, read_operation_proofs,
-};
 use agent_doc_workflow::doctor::{
     WorkflowDoctorOutcome, WorkflowDoctorReport, WorkflowInvariantResult,
 };
 use agent_doc_workflow::invariants::{
     RemediationAction, RemediationStep, WorkflowInvariantCatalog, WorkflowInvariantId,
     workflow_invariant_catalog,
+};
+use agent_doc_workflow_io::proof_ledger::{
+    OperationProofInput, OperationProofRecord, ProofEvidenceKind, ProofOperationKind, ProofOutcome,
+    append_operation_proof, proof_ledger_path, read_operation_proofs,
 };
 
 pub const WORKFLOW_AUTOFIX_SCHEMA_VERSION: u8 = 1;

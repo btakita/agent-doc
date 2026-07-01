@@ -1,4 +1,4 @@
-//! Append-only proof ledger for workflow operations.
+//! Append-only proof ledger I/O for workflow operations.
 //!
 //! This module is a narrow substrate for controller cutover work: runtime paths
 //! can record a durable proof row for every queue head, response capture, patch

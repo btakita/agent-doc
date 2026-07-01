@@ -544,14 +544,15 @@ pub(crate) fn record_terminal_closeout_proof(file: &Path, did_commit: bool) -> R
         state_snapshot_hash_matches,
         agreement
     ));
-    let record = crate::flow::proof_ledger::OperationProofRecord::new(
-        crate::flow::proof_ledger::OperationProofInput {
+    let record = agent_doc_workflow_io::proof_ledger::OperationProofRecord::new(
+        agent_doc_workflow_io::proof_ledger::OperationProofInput {
             operation_id: format!("terminal_closeout:{}", state.cycle_id),
-            operation_kind: crate::flow::proof_ledger::ProofOperationKind::TerminalProof,
-            outcome: crate::flow::proof_ledger::ProofOutcome::Recorded,
+            operation_kind: agent_doc_workflow_io::proof_ledger::ProofOperationKind::TerminalProof,
+            outcome: agent_doc_workflow_io::proof_ledger::ProofOutcome::Recorded,
             subject_id: Some(state.cycle_id.clone()),
             content_hash,
-            proof_kind: crate::flow::proof_ledger::ProofEvidenceKind::TerminalStateObserved,
+            proof_kind:
+                agent_doc_workflow_io::proof_ledger::ProofEvidenceKind::TerminalStateObserved,
             proof: format!(
                 "phase={} last_event={} did_commit={} file_hash={} snapshot_hash={} head_hash={} state_file_hash_matches={} state_snapshot_hash_matches={} capture_id={} response_sha256={} session_check=ok actor_closeout=persisted agreement={}",
                 state.phase.as_str(),
@@ -569,8 +570,11 @@ pub(crate) fn record_terminal_closeout_proof(file: &Path, did_commit: bool) -> R
             recorded_at_ms: now_millis(),
         },
     )?;
-    let path =
-        crate::flow::proof_ledger::append_operation_proof(&project_root, &canonical, &record)?;
+    let path = agent_doc_workflow_io::proof_ledger::append_operation_proof(
+        &project_root,
+        &canonical,
+        &record,
+    )?;
     crate::ops_log::log_op(
         file,
         &format!(
@@ -1453,23 +1457,25 @@ mod tests {
 
         let root = dir.path().canonicalize().unwrap();
         let canonical_doc = doc.canonicalize().unwrap();
-        let ledger_path = crate::flow::proof_ledger::proof_ledger_path(&root, &canonical_doc);
-        let records = crate::flow::proof_ledger::read_operation_proofs(&ledger_path).unwrap();
+        let ledger_path =
+            agent_doc_workflow_io::proof_ledger::proof_ledger_path(&root, &canonical_doc);
+        let records =
+            agent_doc_workflow_io::proof_ledger::read_operation_proofs(&ledger_path).unwrap();
         let terminal = records
             .iter()
             .find(|record| {
                 record.operation_kind
-                    == crate::flow::proof_ledger::ProofOperationKind::TerminalProof
+                    == agent_doc_workflow_io::proof_ledger::ProofOperationKind::TerminalProof
                     && record.subject_id.as_deref() == Some(state.cycle_id.as_str())
             })
             .expect("closeout must record a terminal proof row");
         assert_eq!(
             terminal.proof_kind,
-            crate::flow::proof_ledger::ProofEvidenceKind::TerminalStateObserved
+            agent_doc_workflow_io::proof_ledger::ProofEvidenceKind::TerminalStateObserved
         );
         assert_eq!(
             terminal.outcome,
-            crate::flow::proof_ledger::ProofOutcome::Recorded
+            agent_doc_workflow_io::proof_ledger::ProofOutcome::Recorded
         );
         assert!(terminal.proof.contains("phase=committed"));
         assert!(terminal.proof.contains("session_check=ok"));
@@ -1519,12 +1525,14 @@ mod tests {
         );
         let root = doc.parent().unwrap().canonicalize().unwrap();
         let canonical_doc = doc.canonicalize().unwrap();
-        let ledger_path = crate::flow::proof_ledger::proof_ledger_path(&root, &canonical_doc);
-        let records = crate::flow::proof_ledger::read_operation_proofs(&ledger_path).unwrap();
+        let ledger_path =
+            agent_doc_workflow_io::proof_ledger::proof_ledger_path(&root, &canonical_doc);
+        let records =
+            agent_doc_workflow_io::proof_ledger::read_operation_proofs(&ledger_path).unwrap();
         assert!(
             records.iter().any(|record| {
                 record.operation_kind
-                    == crate::flow::proof_ledger::ProofOperationKind::TerminalProof
+                    == agent_doc_workflow_io::proof_ledger::ProofOperationKind::TerminalProof
                     && record.subject_id.as_deref() == Some(state.cycle_id.as_str())
                     && record.proof.contains("phase=committed")
             }),

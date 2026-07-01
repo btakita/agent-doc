@@ -279,20 +279,18 @@ fn read_cycle_state(root: &Path) -> Value {
 
 fn assert_terminal_closeout_proof(root: &Path, doc: &Path) {
     let canonical_doc = doc.canonicalize().unwrap();
-    let ledger_path = agent_doc_orchestration::flow::proof_ledger::proof_ledger_path(
+    let ledger_path = agent_doc_workflow_io::proof_ledger::proof_ledger_path(
         &root.canonicalize().unwrap(),
         &canonical_doc,
     );
-    let records =
-        agent_doc_orchestration::flow::proof_ledger::read_operation_proofs(&ledger_path).unwrap();
+    let records = agent_doc_workflow_io::proof_ledger::read_operation_proofs(&ledger_path).unwrap();
     assert!(
         records.iter().any(|record| {
             record.operation_kind
-                == agent_doc_orchestration::flow::proof_ledger::ProofOperationKind::TerminalProof
+                == agent_doc_workflow_io::proof_ledger::ProofOperationKind::TerminalProof
                 && record.proof_kind
-                    == agent_doc_orchestration::flow::proof_ledger::ProofEvidenceKind::TerminalStateObserved
-                && record.outcome
-                    == agent_doc_orchestration::flow::proof_ledger::ProofOutcome::Recorded
+                    == agent_doc_workflow_io::proof_ledger::ProofEvidenceKind::TerminalStateObserved
+                && record.outcome == agent_doc_workflow_io::proof_ledger::ProofOutcome::Recorded
                 && record.proof.contains("phase=committed")
                 && record.proof.contains("agreement=file_snapshot_head")
         }),

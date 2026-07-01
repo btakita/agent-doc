@@ -84,20 +84,18 @@ fn git_commit_count(root: &Path) -> usize {
 
 fn assert_terminal_closeout_proof(root: &Path, doc: &Path) {
     let canonical_doc = doc.canonicalize().unwrap();
-    let ledger_path = agent_doc_orchestration::flow::proof_ledger::proof_ledger_path(
+    let ledger_path = agent_doc_workflow_io::proof_ledger::proof_ledger_path(
         &root.canonicalize().unwrap(),
         &canonical_doc,
     );
-    let records =
-        agent_doc_orchestration::flow::proof_ledger::read_operation_proofs(&ledger_path).unwrap();
+    let records = agent_doc_workflow_io::proof_ledger::read_operation_proofs(&ledger_path).unwrap();
     assert!(
         records.iter().any(|record| {
             record.operation_kind
-                == agent_doc_orchestration::flow::proof_ledger::ProofOperationKind::TerminalProof
+                == agent_doc_workflow_io::proof_ledger::ProofOperationKind::TerminalProof
                 && record.proof_kind
-                    == agent_doc_orchestration::flow::proof_ledger::ProofEvidenceKind::TerminalStateObserved
-                && record.outcome
-                    == agent_doc_orchestration::flow::proof_ledger::ProofOutcome::Recorded
+                    == agent_doc_workflow_io::proof_ledger::ProofEvidenceKind::TerminalStateObserved
+                && record.outcome == agent_doc_workflow_io::proof_ledger::ProofOutcome::Recorded
                 && record.proof.contains("phase=committed")
                 && record.proof.contains("agreement=file_snapshot_head")
         }),
@@ -2282,6 +2280,7 @@ fn test_manifest_uses_publishable_dependency_contract() {
         "agent-doc-turn",
         "agent-doc-turn-scope-io",
         "agent-doc-workflow",
+        "agent-doc-workflow-io",
         "agent-doc-work-graph",
     ] {
         let dependency = dependencies[crate_name].as_table().unwrap();
@@ -7663,6 +7662,12 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         "agent-doc-workflow must stay a first-class workspace crate"
     );
     assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-workflow-io")),
+        "agent-doc-workflow-io must stay a first-class workspace crate for workflow proof ledger IO"
+    );
+    assert!(
         manifest_dir.join("agent-doc-workflow/src/lib.rs").exists(),
         "cross-cutting workflow policy should live in the focused workflow crate"
     );
@@ -7885,6 +7890,12 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
             && orchestration_autofix.contains("WorkflowDoctorFacts, evaluate_catalog"),
         "orchestration autofix should consume focused workflow doctor policy directly"
     );
+    assert!(
+        orchestration_autofix.contains("use agent_doc_workflow_io::proof_ledger::{")
+            && orchestration_autofix.contains("append_operation_proof")
+            && orchestration_autofix.contains("read_operation_proofs"),
+        "orchestration autofix should consume focused workflow proof ledger IO directly"
+    );
 
     let flow_mod =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/mod.rs")).unwrap();
@@ -7895,6 +7906,10 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
     assert!(
         !flow_mod.contains("pub mod workflow_invariants"),
         "orchestration must not expose a workflow_invariants facade"
+    );
+    assert!(
+        !flow_mod.contains("pub mod proof_ledger"),
+        "orchestration flow must not expose a proof_ledger IO facade"
     );
     for forbidden in [
         "pub use agent_doc_workflow::session_cycle",
@@ -7930,6 +7945,35 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
             .exists(),
         "orchestration must not keep a workflow_invariants module after extraction"
     );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/flow/proof_ledger.rs")
+            .exists(),
+        "orchestration must not keep a proof_ledger module after extraction"
+    );
+    let workflow_io_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow-io/src/lib.rs")).unwrap();
+    assert!(
+        workflow_io_lib.contains("pub mod proof_ledger;"),
+        "agent-doc-workflow-io must expose the proof ledger through its owning module"
+    );
+    let workflow_proof_ledger =
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow-io/src/proof_ledger.rs")).unwrap();
+    for required in [
+        "pub enum ProofOperationKind",
+        "pub enum ProofOutcome",
+        "pub enum ProofEvidenceKind",
+        "pub struct OperationProofRecord",
+        "pub struct OperationProofInput",
+        "pub fn proof_ledger_path(",
+        "pub fn append_operation_proof(",
+        "pub fn read_operation_proofs(",
+    ] {
+        assert!(
+            workflow_proof_ledger.contains(required),
+            "agent-doc-workflow-io must own workflow proof ledger IO: {required}"
+        );
+    }
     let orchestration_session_cycle =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/session_cycle.rs"))
             .unwrap();
@@ -8167,6 +8211,20 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         )),
         "agent-doc-workflow should remain pure and free of orchestration, git, editor IPC, sqlite, or tmux dependencies"
     );
+    let workflow_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow-io/Cargo.toml")).unwrap();
+    let workflow_io: toml::Value = toml::from_str(&workflow_io_manifest).unwrap();
+    let workflow_io_dependencies = workflow_io["dependencies"].as_table().unwrap();
+    assert!(
+        workflow_io_dependencies.contains_key("agent-doc-hash"),
+        "agent-doc-workflow-io proof ledger pathing should depend on focused hash helpers"
+    );
+    for forbidden in ["agent-doc-core", "agent-doc-orchestration"] {
+        assert!(
+            !workflow_io_dependencies.contains_key(forbidden),
+            "agent-doc-workflow-io must not depend on removed core/orchestration facades: {forbidden}"
+        );
+    }
 }
 
 #[test]

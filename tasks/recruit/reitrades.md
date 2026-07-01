@@ -808,12 +808,13 @@ The current committed §5 now opens:
 > The work is structured in phases so you're never committing to the whole list at once. That keeps your spend controlled and lets us validate the new code structure against your live data before you commit the full budget.
 
 Reopen the PDF once more — the §5 heading should read **"5. Phasing & engagement options."** If it still shows "Recommended phasing," the viewer is caching an old file (the committed PDF on disk has the new heading — verified). If a different phrase inside §5 reads wrong, quote it and I'll fix that exact line.
-<!-- agent:boundary:4d7a3649 -->
+<!-- agent:boundary:64f15a8d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue go -->
+- Format the linkedin draft so I can copy/paste into linkedin message.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -10007,6 +10007,7 @@ fn test_agent_doc_controller_owns_route_trigger_matching_policy() {
         "pub fn strip_leading_prompt_prefix",
         "pub fn shares_trigger_prefix",
         "pub fn recent_lines_contain_wrapped_trigger",
+        "pub fn dispatch_payload_pending_in_current_input",
         "pub fn route_trigger_visible_in_current_draft",
         "fn line_contains_equivalent_agent_doc_path_trigger",
         "fn single_agent_doc_path_arg",
@@ -10035,6 +10036,8 @@ fn test_agent_doc_controller_owns_route_trigger_matching_policy() {
             "fn strip_leading_prompt_prefix",
             "fn shares_trigger_prefix",
             "fn recent_lines_contain_wrapped_trigger",
+            "pub(crate) fn supervisor_pane_payload_pending_in_content",
+            "fn supervisor_pane_payload_pending_in_content",
             "pub(crate) fn direct_pane_existing_draft_visible",
             "fn direct_pane_existing_draft_visible",
             "fn line_contains_equivalent_agent_doc_path_trigger",
@@ -10058,8 +10061,8 @@ fn test_agent_doc_controller_owns_route_trigger_matching_policy() {
             .unwrap();
     assert!(
         route_dispatch.contains("route_trigger_visible_in_current_draft(&content, &trigger")
-            && start_detection.contains("route_trigger_visible_in_current_draft(content, payload"),
-        "route/start should call focused controller current-draft visibility policy directly"
+            && start_detection.contains("dispatch_payload_pending_in_current_input("),
+        "route/start should call focused controller dispatch visibility policy directly"
     );
 }
 
@@ -14365,6 +14368,8 @@ fn test_agent_doc_turn_executor_tmux_owns_context_clear_submit_policy() {
     let start_detection_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/detection.rs"))
             .unwrap();
+    let controller_dispatch =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller/src/dispatch.rs")).unwrap();
     for forbidden in [
         "pub(crate) fn context_clear_command_visible_in_active_input(",
         "fn line_shows_context_clear_command_input(",
@@ -14378,9 +14383,9 @@ fn test_agent_doc_turn_executor_tmux_owns_context_clear_submit_policy() {
         );
     }
     assert!(
-        start_detection_source
-            .contains("use agent_doc_turn_executor_tmux::context_clear::context_clear_command_visible_in_active_input;"),
-        "start/detection.rs should call focused context-clear policy directly"
+        start_detection_source.contains("dispatch_payload_pending_in_current_input(")
+            && controller_dispatch.contains("agent_doc_turn_executor_tmux::context_clear::context_clear_command_visible_in_active_input("),
+        "start/detection.rs should call controller payload policy, and controller dispatch should call focused context-clear policy directly"
     );
 
     for forbidden in [
@@ -17921,6 +17926,8 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
     let queue_closeout_guard =
         fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_closeout_guard.rs"))
             .unwrap();
+    let workflow_session_check =
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/session_check.rs")).unwrap();
     for required_snippet in [
         "pub fn committed_queue_head_ids(",
         "pub fn committed_current_queue_head_ids(",
@@ -17934,6 +17941,15 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
         assert!(
             queue_closeout_guard.contains(required_snippet),
             "agent-doc-queue must own queue closeout guard policy: {required_snippet}"
+        );
+    }
+    for required_snippet in [
+        "pub fn no_response_active_queue_head_result(",
+        "pub fn reaped_queue_head_without_response_result(",
+    ] {
+        assert!(
+            workflow_session_check.contains(required_snippet),
+            "agent-doc-workflow must own queue-head session-check result formatting: {required_snippet}"
         );
     }
 
@@ -17962,6 +17978,9 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
         "queue_heads::committed_queue_contains_free_text_head(",
         "free_text_head_answered_by_response(",
         "queue_continuation::is_recurring_imperative_head(",
+        "let warn_line = format!(",
+        "let repair = format!(",
+        "warn_line.replacen(\"[session-check] warn:\"",
     ] {
         assert!(
             !queue_head_guards.contains(forbidden_snippet)
@@ -17974,6 +17993,11 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
             .contains("agent_doc_queue::queue_closeout_guard::no_response_live_queue_head_ids",)
             && queue_head_guards
                 .contains("agent_doc_queue::queue_closeout_guard::reaped_queue_directive_head_ids",)
+            && queue_head_guards
+                .contains("agent_doc_workflow::session_check::no_response_active_queue_head_result")
+            && queue_head_guards.contains(
+                "agent_doc_workflow::session_check::reaped_queue_head_without_response_result"
+            )
             && provenance_guards
                 .contains("agent_doc_queue::queue_closeout_guard::queue_head_removal_decision",)
             && provenance_guards.contains(

@@ -148,9 +148,11 @@ version = "0.34.66"
 dependencies = [
  "agent-doc-element-backlog",
  "agent-doc-fs",
+ "agent-doc-queue",
  "agent-doc-supervisor",
  "agent-doc-tmux-commands",
  "agent-doc-turn",
+ "agent-doc-turn-executor-tmux",
  "hex",
  "serde",
  "sha2 0.11.0",

@@ -306,6 +306,25 @@ pub fn recent_lines_contain_wrapped_trigger(recent_lines_rev: &[String], trigger
     false
 }
 
+/// Pure in-content decision for whether the dispatch payload is already
+/// pending in the harness's current input.
+pub fn dispatch_payload_pending_in_current_input(
+    content: &str,
+    payload: &str,
+    is_dispatch_ready_prompt_line: impl Fn(&str) -> bool,
+    is_prompt_line: impl Fn(&str) -> bool,
+) -> bool {
+    if agent_doc_queue::queue_command::is_context_clear_command(payload) {
+        return agent_doc_turn_executor_tmux::context_clear::context_clear_command_visible_in_active_input(
+            content,
+            payload,
+            is_dispatch_ready_prompt_line,
+        );
+    }
+    recent_lines_contain_trigger(content, payload)
+        || route_trigger_visible_in_current_draft(content, payload, is_prompt_line)
+}
+
 pub fn route_trigger_visible_in_current_draft(
     content: &str,
     trigger: &str,
@@ -2328,6 +2347,121 @@ gpt-5.4 high - ~/work/btakita/agent-loop/src/session-share - Context 31% used
         assert!(
             recent_lines_contain_trigger(content, trigger),
             "wrapped Codex composer lines must still count as pending input"
+        );
+    }
+
+    #[test]
+    fn dispatch_payload_pending_matches_relative_codex_agent_doc_draft() {
+        let payload =
+            "agent-doc /home/brian/work/btakita/agent-loop/src/sample-app/tasks/sampleorders.md";
+        let content = "\
+› agent-doc tasks/sampleorders.md
+agent-doc tasks/sampleorders.md
+agent-doc tasks/sampleorders.md
+agent-doc tasks/sampleorders.md
+gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
+";
+
+        assert!(
+            dispatch_payload_pending_in_current_input(
+                content,
+                payload,
+                |_| false,
+                |line| line.trim_start().starts_with('›')
+            ),
+            "idle-queue dedupe must recognize equivalent relative Codex drafts before appending another trigger"
+        );
+    }
+
+    #[test]
+    fn dispatch_payload_pending_detects_codex_context_clear_draft() {
+        let content = concat!(
+            "older output\n",
+            "› /clear\n",
+            "gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used\n",
+        );
+
+        assert!(
+            dispatch_payload_pending_in_current_input(
+                content,
+                "/clear",
+                |line| line.trim() == "›",
+                |_| false
+            ),
+            "idle-queue recovery must see a visible Codex /clear draft and resubmit Enter"
+        );
+    }
+
+    #[test]
+    fn dispatch_payload_pending_ignores_submitted_context_clear_scrollback() {
+        let content = concat!(
+            "✶ Generating... (3s · esc to interrupt)\n",
+            "  ❯ /clear\n",
+            "────────────────────\n",
+            "❯ Press up to edit queued messages\n",
+            "────────────────────\n",
+            "  Opus 4.8 ctx:10% ~/work/btakita/agent-loop main brian@host\n",
+        );
+
+        assert!(
+            !dispatch_payload_pending_in_current_input(
+                content,
+                "/clear",
+                |line| line.trim() == "❯",
+                |_| false
+            ),
+            "a prior submitted /clear in scrollback must not suppress or resubmit the next drain"
+        );
+    }
+
+    #[test]
+    fn dispatch_payload_pending_detects_opencode_new_palette_row() {
+        let content = concat!(
+            "older output\n",
+            "/new        New session\n",
+            "/models     Select model\n",
+            "> /new\n",
+        );
+
+        assert!(dispatch_payload_pending_in_current_input(
+            content,
+            "/new",
+            |line| line.trim() == ">",
+            |_| false
+        ));
+    }
+
+    #[test]
+    fn dispatch_payload_pending_detects_opencode_selected_new_session_command() {
+        let content = concat!(
+            "older output\n",
+            "> New session\n",
+            "zai/glm-5 · ~/work/btakita/agent-loop · context 0% used\n",
+        );
+
+        assert!(
+            dispatch_payload_pending_in_current_input(
+                content,
+                "/new",
+                |line| line.trim() == ">",
+                |_| false
+            ),
+            "OpenCode can replace `/new` with the selected command label before the final submit Enter"
+        );
+
+        let structured = concat!(
+            "older output\n",
+            "> session_new\n",
+            "zai/glm-5 · ~/work/btakita/agent-loop · context 0% used\n",
+        );
+        assert!(
+            dispatch_payload_pending_in_current_input(
+                structured,
+                "/new",
+                |line| line.trim() == ">",
+                |_| false
+            ),
+            "OpenCode can also surface the selected command id before submission"
         );
     }
 

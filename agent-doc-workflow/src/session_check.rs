@@ -487,6 +487,90 @@ mod tests {
     use super::*;
 
     #[test]
+    fn no_response_active_queue_head_result_formats_modes() {
+        let live = vec!["alpha".to_string(), "bravo".to_string()];
+
+        let warn = no_response_active_queue_head_result(
+            "task.md",
+            "cycle-1",
+            &live,
+            PendingCaptureGuardMode::Warn,
+        );
+        let GuardResult::Warn(lines) = warn else {
+            panic!("expected warning result");
+        };
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].contains("cycle `cycle-1` committed without an assistant response body"));
+        assert!(lines[0].contains("#alpha, #bravo"));
+        assert!(lines[1].contains("agent-doc write --commit task.md"));
+        assert!(lines[1].contains("#nochange-after-stall-breadth"));
+
+        let strict = no_response_active_queue_head_result(
+            "task.md",
+            "cycle-1",
+            &live,
+            PendingCaptureGuardMode::Strict,
+        );
+        let GuardResult::Error(message) = strict else {
+            panic!("expected strict error result");
+        };
+        assert!(message.starts_with("[session-check] INTERRUPTED: cycle `cycle-1` committed"));
+        assert!(message.contains("#nochange-after-stall-breadth"));
+
+        assert_eq!(
+            no_response_active_queue_head_result(
+                "task.md",
+                "cycle-1",
+                &live,
+                PendingCaptureGuardMode::Off,
+            ),
+            GuardResult::None
+        );
+    }
+
+    #[test]
+    fn reaped_queue_head_without_response_result_formats_modes() {
+        let lost = vec!["charlie".to_string()];
+
+        let warn = reaped_queue_head_without_response_result(
+            "task.md",
+            "cycle-2",
+            &lost,
+            PendingCaptureGuardMode::Warn,
+        );
+        let GuardResult::Warn(lines) = warn else {
+            panic!("expected warning result");
+        };
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].contains("cycle `cycle-2` reaped `do` queue-directive head(s) #charlie"));
+        assert!(lines[0].contains("the response record was silently lost"));
+        assert!(lines[1].contains("agent-doc write --commit task.md"));
+        assert!(lines[1].contains("#compact-reap-no-response-record"));
+
+        let strict = reaped_queue_head_without_response_result(
+            "task.md",
+            "cycle-2",
+            &lost,
+            PendingCaptureGuardMode::Strict,
+        );
+        let GuardResult::Error(message) = strict else {
+            panic!("expected strict error result");
+        };
+        assert!(message.starts_with("[session-check] INTERRUPTED: cycle `cycle-2` reaped `do`"));
+        assert!(message.contains("#compact-reap-no-response-record"));
+
+        assert_eq!(
+            reaped_queue_head_without_response_result(
+                "task.md",
+                "cycle-2",
+                &lost,
+                PendingCaptureGuardMode::Off,
+            ),
+            GuardResult::None
+        );
+    }
+
+    #[test]
     fn blocked_closeout_message_uses_default_retry_and_optional_fields() {
         let message = blocked_closeout_message(BlockedCloseoutMessage {
             file: "task.md",

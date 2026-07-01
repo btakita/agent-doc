@@ -50,11 +50,6 @@ pub(crate) fn check_no_response_active_queue_head(
         return Ok(GuardResult::None);
     }
 
-    let ids = live
-        .iter()
-        .map(|id| format!("#{}", id))
-        .collect::<Vec<_>>()
-        .join(", ");
     crate::ops_log::log_op(
         file,
         &format!(
@@ -65,31 +60,15 @@ pub(crate) fn check_no_response_active_queue_head(
             live.join(",")
         ),
     );
-    let warn_line = format!(
-        "[session-check] warn: cycle `{}` committed without an assistant response body while runnable agent:queue head(s) {} remained queued and open in agent:backlog; this was a no-response repair/reap-only closeout, not a completed queue turn",
-        state.cycle_id, ids
-    );
-    let repair = format!(
-        "run `agent-doc {}` from the owning session so the queued head is answered, or resolve each id through `agent-doc write --commit {}` with `--done`, `--pending-gate`, or `--pending-edit` proof before closing",
-        file.display(),
-        file.display()
-    );
-
-    Ok(match mode {
-        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Warn => {
-            GuardResult::Warn(vec![
-                warn_line,
-                format!("[session-check] hint: {repair} (see #nochange-after-stall-breadth)"),
-            ])
-        }
-        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict => {
-            GuardResult::Error(format!(
-                "{}\n[session-check] hint: {repair} (see #nochange-after-stall-breadth)",
-                warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
-            ))
-        }
-        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
-    })
+    let file_display = file.display().to_string();
+    Ok(
+        agent_doc_workflow::session_check::no_response_active_queue_head_result(
+            &file_display,
+            &state.cycle_id,
+            &live,
+            mode,
+        ),
+    )
 }
 
 /// `#compact-reap-no-response-record`: a reap-only / no-response-body closeout
@@ -193,11 +172,6 @@ pub(crate) fn check_reaped_queue_head_without_response(
         return Ok(GuardResult::None);
     }
 
-    let ids = lost
-        .iter()
-        .map(|id| format!("#{}", id))
-        .collect::<Vec<_>>()
-        .join(", ");
     crate::ops_log::log_op(
         file,
         &format!(
@@ -208,29 +182,13 @@ pub(crate) fn check_reaped_queue_head_without_response(
             lost.join(",")
         ),
     );
-    let warn_line = format!(
-        "[session-check] warn: cycle `{}` reaped `do` queue-directive head(s) {} into agent:done without an assistant response landing in agent:exchange (no response body this cycle and no `### Re:` for the id in the exchange or a HEAD compact archive); the response record was silently lost",
-        state.cycle_id, ids
-    );
-    let repair = format!(
-        "recover the lost response by re-running `agent-doc {}` so the directive id is answered, or restore the missing `### Re:` block through `agent-doc write --commit {}` before closing",
-        file.display(),
-        file.display()
-    );
-
-    Ok(match mode {
-        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Warn => {
-            GuardResult::Warn(vec![
-                warn_line,
-                format!("[session-check] hint: {repair} (see #compact-reap-no-response-record)"),
-            ])
-        }
-        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict => {
-            GuardResult::Error(format!(
-                "{}\n[session-check] hint: {repair} (see #compact-reap-no-response-record)",
-                warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
-            ))
-        }
-        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
-    })
+    let file_display = file.display().to_string();
+    Ok(
+        agent_doc_workflow::session_check::reaped_queue_head_without_response_result(
+            &file_display,
+            &state.cycle_id,
+            &lost,
+            mode,
+        ),
+    )
 }

@@ -1,11 +1,8 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
-use agent_doc_controller::dispatch::{
-    recent_lines_contain_trigger, route_trigger_visible_in_current_draft,
-};
+use agent_doc_controller::dispatch::dispatch_payload_pending_in_current_input;
 use agent_doc_supervisor::idle_reconcile::recoverable_ready_busy_blocker_reason;
-use agent_doc_turn_executor_tmux::context_clear::context_clear_command_visible_in_active_input;
 
 pub(crate) fn record_recent_output(shared: &SupervisorShared, bytes: &[u8]) {
     if bytes.is_empty() {
@@ -184,27 +181,6 @@ pub(crate) fn supervisor_pane_has_busy_cue(
 /// proven pending" and dispatches normally — a failed capture must never
 /// suppress a legitimate dispatch; only a positive match dedups.
 ///
-/// Reuses `agent_doc_controller::dispatch::recent_lines_contain_trigger`, the same
-/// still-in-composer detector the route acceptance poll uses, so the dedup is
-/// keyed off the harness composer rather than scrollback far above it. For
-/// `agent-doc <path>` triggers, also reuse route's draft equivalence matcher so
-/// a visible relative-path draft dedups an absolute trigger for the same file.
-pub(crate) fn supervisor_pane_payload_pending_in_content(
-    content: &str,
-    payload: &str,
-    harness: &agent_doc_harness::HarnessConfig,
-) -> bool {
-    if agent_doc_queue::queue_command::is_context_clear_command(payload) {
-        return context_clear_command_visible_in_active_input(content, payload, |line| {
-            harness.is_dispatch_ready_prompt_line(line)
-        });
-    }
-    recent_lines_contain_trigger(content, payload)
-        || route_trigger_visible_in_current_draft(content, payload, |line| {
-            harness.is_prompt_line(line)
-        })
-}
-
 pub(crate) fn supervisor_pane_payload_already_pending(
     shared: &SupervisorShared,
     payload: &str,
@@ -216,8 +192,11 @@ pub(crate) fn supervisor_pane_payload_already_pending(
         .or_else(|| shared.actor_runtime.as_ref().map(|r| r.pane_id.clone()))?;
     let tmux = tmux_router::Tmux::default_server();
     let content = crate::sessions::capture_pane(&tmux, &pane).ok()?;
-    Some(supervisor_pane_payload_pending_in_content(
-        &content, payload, harness,
+    Some(dispatch_payload_pending_in_current_input(
+        &content,
+        payload,
+        |line| harness.is_dispatch_ready_prompt_line(line),
+        |line| harness.is_prompt_line(line),
     ))
 }
 
@@ -278,98 +257,6 @@ mod tests {
             IdleQueueDrainDecision::SkipAlreadyDispatched
         );
     }
-    #[test]
-    fn supervisor_pending_payload_matches_relative_codex_agent_doc_draft() {
-        let harness = agent_doc_harness::HarnessConfig::codex();
-        let payload =
-            "agent-doc /home/brian/work/btakita/agent-loop/src/sample-app/tasks/sampleorders.md";
-        let content = "\
-› agent-doc tasks/sampleorders.md
-agent-doc tasks/sampleorders.md
-agent-doc tasks/sampleorders.md
-agent-doc tasks/sampleorders.md
-gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
-";
-
-        assert!(
-            supervisor_pane_payload_pending_in_content(content, payload, &harness),
-            "idle-queue dedupe must recognize equivalent relative Codex drafts before appending another trigger"
-        );
-    }
-
-    #[test]
-    fn supervisor_pending_payload_detects_codex_context_clear_draft() {
-        let harness = agent_doc_harness::HarnessConfig::codex();
-        let content = concat!(
-            "older output\n",
-            "› /clear\n",
-            "gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used\n",
-        );
-
-        assert!(
-            supervisor_pane_payload_pending_in_content(content, "/clear", &harness),
-            "idle-queue recovery must see a visible Codex /clear draft and resubmit Enter"
-        );
-    }
-
-    #[test]
-    fn supervisor_pending_payload_ignores_submitted_context_clear_scrollback() {
-        let harness = agent_doc_harness::HarnessConfig::claude();
-        let content = concat!(
-            "✶ Generating... (3s · esc to interrupt)\n",
-            "  ❯ /clear\n",
-            "────────────────────\n",
-            "❯ Press up to edit queued messages\n",
-            "────────────────────\n",
-            "  Opus 4.8 ctx:10% ~/work/btakita/agent-loop main brian@host\n",
-        );
-
-        assert!(
-            !supervisor_pane_payload_pending_in_content(content, "/clear", &harness),
-            "a prior submitted /clear in scrollback must not suppress or resubmit the next drain"
-        );
-    }
-
-    #[test]
-    fn supervisor_pending_payload_detects_opencode_new_palette_row() {
-        let harness = agent_doc_harness::HarnessConfig::opencode();
-        let content = concat!(
-            "older output\n",
-            "/new        New session\n",
-            "/models     Select model\n",
-            "> /new\n",
-        );
-
-        assert!(supervisor_pane_payload_pending_in_content(
-            content, "/new", &harness
-        ));
-    }
-
-    #[test]
-    fn supervisor_pending_payload_detects_opencode_selected_new_session_command() {
-        let harness = agent_doc_harness::HarnessConfig::opencode();
-        let content = concat!(
-            "older output\n",
-            "> New session\n",
-            "zai/glm-5 · ~/work/btakita/agent-loop · context 0% used\n",
-        );
-
-        assert!(
-            supervisor_pane_payload_pending_in_content(content, "/new", &harness),
-            "OpenCode can replace `/new` with the selected command label before the final submit Enter"
-        );
-
-        let structured = concat!(
-            "older output\n",
-            "> session_new\n",
-            "zai/glm-5 · ~/work/btakita/agent-loop · context 0% used\n",
-        );
-        assert!(
-            supervisor_pane_payload_pending_in_content(structured, "/new", &harness),
-            "OpenCode can also surface the selected command id before submission"
-        );
-    }
-
     #[test]
     fn idle_queue_prompt_visible_trusts_ready_actor_over_stale_renderer_tail() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());

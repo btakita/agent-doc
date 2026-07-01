@@ -12,9 +12,11 @@ name = "agent_doc_controller"
 [dependencies]
 agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.66" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.66" }
+agent-doc-queue = { path = "../agent-doc-queue", version = "0.34.66" }
 agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.34.66" }
 agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.34.66" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.66" }
+agent-doc-turn-executor-tmux = { path = "../agent-doc-turn-executor-tmux", version = "0.34.66" }
 hex = "0.4"
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.11"

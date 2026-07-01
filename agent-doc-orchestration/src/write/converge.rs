@@ -1219,15 +1219,13 @@ fn refuse_unproven_editor_delivery(
     let sidecar_live = live_editor_sidecar_present(file);
     let owner_holds =
         !agent_doc_plugin_owner::disk_write_permitted_for_file(&file.to_string_lossy());
-    let editor_endpoint = if should_refuse_disk_fallback(
-        sidecar_live,
-        owner_holds,
-        editor_ipc_listener_active(file),
-    ) {
-        "live"
-    } else {
-        "absent"
-    };
+    let editor_endpoint =
+        if should_refuse_disk_fallback(sidecar_live, owner_holds, editor_ipc_listener_active(file))
+        {
+            "live"
+        } else {
+            "absent"
+        };
     crate::ops_log::log_op(
         file,
         &format!(

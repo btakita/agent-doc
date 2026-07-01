@@ -172,3 +172,6 @@
 [submodule "src/lazily-dart"]
 	path = src/lazily-dart
 	url = git@github.com:lazily-hub/lazily-dart.git
+[submodule "src/patchboard-mcp"]
+	path = src/patchboard-mcp
+	url = git@github.com:btakita/patchboard-mcp.git

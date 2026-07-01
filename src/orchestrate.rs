@@ -56,7 +56,6 @@ use agent_doc_session_accretion::SessionAccretionLevel;
 use agent_doc_session_accretion::SessionAccretionReport;
 use anyhow::{Context, Result};
 use clap::ValueEnum;
-use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -76,7 +75,10 @@ use agent_doc_template::patchback::child_template_finalize_text as orchestrate_f
 use agent_doc_template::patchback::{
     finalize_suffix_from_streamed_prefix, should_stream_exchange_patch,
 };
-use agent_doc_turn_executor::agent_stream::StreamChunk;
+use agent_doc_turn_executor::{
+    agent_stream::StreamChunk,
+    binary::{current_agent_doc_binary, internal_command_spawn_context},
+};
 #[cfg(test)]
 use agent_doc_workflow::orchestrate_tasks::parse_list_item;
 use agent_doc_workflow::orchestrate_tasks::{
@@ -284,91 +286,6 @@ impl LifecycleOps for CliLifecycleOps {
         let file_arg = file.to_string_lossy().into_owned();
         self.run_status(&["session-check", &file_arg])
     }
-}
-
-fn current_agent_doc_binary() -> Result<PathBuf> {
-    let cwd = std::env::current_dir().context("failed to resolve current working directory")?;
-    resolve_agent_doc_binary_from_env(
-        std::env::current_exe().ok(),
-        std::env::args_os().next(),
-        std::env::var_os("PATH"),
-        &cwd,
-    )
-}
-
-fn resolve_agent_doc_binary_from_env(
-    current_exe: Option<PathBuf>,
-    argv0: Option<OsString>,
-    path_env: Option<OsString>,
-    cwd: &Path,
-) -> Result<PathBuf> {
-    let stale_current_exe = match current_exe {
-        Some(path) if launchable_file(&path) => return Ok(path),
-        other => other,
-    };
-
-    let mut path_search_names = Vec::new();
-    if let Some(raw_argv0) = argv0.as_deref() {
-        let argv0_path = Path::new(raw_argv0);
-        if has_path_separator(argv0_path) {
-            let candidate = if argv0_path.is_absolute() {
-                argv0_path.to_path_buf()
-            } else {
-                cwd.join(argv0_path)
-            };
-            if launchable_file(&candidate) {
-                return Ok(candidate);
-            }
-        } else if !raw_argv0.is_empty() {
-            path_search_names.push(raw_argv0.to_os_string());
-        }
-    }
-    if !path_search_names
-        .iter()
-        .any(|name| name == OsStr::new("agent-doc"))
-    {
-        path_search_names.push(OsString::from("agent-doc"));
-    }
-
-    if let Some(path_env) = path_env {
-        for dir in std::env::split_paths(&path_env) {
-            for name in &path_search_names {
-                let candidate = dir.join(name);
-                if launchable_file(&candidate) {
-                    return Ok(candidate);
-                }
-            }
-        }
-    }
-
-    let stale = stale_current_exe
-        .as_ref()
-        .map(|path| format!("; skipped missing current_exe {}", path.display()))
-        .unwrap_or_default();
-    anyhow::bail!("failed to locate launchable agent-doc binary{stale}");
-}
-
-fn launchable_file(path: &Path) -> bool {
-    std::fs::metadata(path)
-        .map(|metadata| metadata.is_file())
-        .unwrap_or(false)
-}
-
-fn has_path_separator(path: &Path) -> bool {
-    path.is_absolute() || path.components().count() > 1
-}
-
-fn internal_command_spawn_context(command: &str, exe: &Path) -> String {
-    let cwd = std::env::current_dir()
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|err| format!("<unavailable: {err}>"));
-    let path_present = std::env::var_os("PATH").is_some();
-    format!(
-        "failed to spawn `agent-doc {command}` (binary={}, cwd={}, PATH_present={})",
-        exe.display(),
-        cwd,
-        path_present
-    )
 }
 
 struct CliAgentRunner;
@@ -975,54 +892,13 @@ Stopped sequential orchestration after {completed_steps} of {total_steps} step(s
 fn inject_prompt(file: &Path, task: &str) -> Result<()> {
     let doc =
         fs::read_to_string(file).with_context(|| format!("failed to read {}", file.display()))?;
-    let updated = inject_prompt_into_doc(&doc, task)?;
+    let prompt_line = format!("❯ {}", normalize_task(task));
+    let updated =
+        agent_doc_element_exchange::insert_prompt_line_before_boundary(&doc, &prompt_line)?;
     if updated != doc {
         write::atomic_write_pub(file, &updated)?;
     }
     Ok(())
-}
-
-fn inject_prompt_into_doc(doc: &str, task: &str) -> Result<String> {
-    let components = element::parse(doc).context("failed to parse document components")?;
-    let exchange = components
-        .iter()
-        .find(|comp| comp.name == "exchange")
-        .ok_or_else(|| anyhow::anyhow!("document has no `agent:exchange` component"))?;
-    let prompt_line = format!("❯ {}", normalize_task(task));
-    let existing = exchange.content(doc);
-    if existing.lines().any(|line| line.trim() == prompt_line) {
-        return Ok(doc.to_string());
-    }
-
-    let relative_boundary = existing
-        .lines()
-        .scan(0usize, |offset, line| {
-            let start = *offset;
-            *offset += line.len() + 1;
-            Some((start, line))
-        })
-        .filter_map(|(start, line)| {
-            line.trim()
-                .starts_with("<!-- agent:boundary:")
-                .then_some(start)
-        })
-        .last();
-
-    let insert_at = relative_boundary
-        .map(|rel| exchange.open_end + rel)
-        .unwrap_or(exchange.close_start);
-    let mut result = String::with_capacity(doc.len() + prompt_line.len() + 4);
-    result.push_str(&doc[..insert_at]);
-    if insert_at > exchange.open_end && !result.ends_with('\n') {
-        result.push('\n');
-    }
-    if insert_at > exchange.open_end && !result.ends_with("\n\n") {
-        result.push('\n');
-    }
-    result.push_str(&prompt_line);
-    result.push('\n');
-    result.push_str(&doc[insert_at..]);
-    Ok(result)
 }
 
 #[cfg(test)]
@@ -1627,46 +1503,6 @@ mod tests {
         agent_doc_orchestration::project_controller::append_state_event(root, &event).unwrap();
     }
 
-    #[test]
-    fn agent_doc_binary_resolution_works_without_path_when_current_exe_exists() {
-        let dir = TempDir::new().unwrap();
-        let current = dir.path().join("current-agent-doc");
-        std::fs::write(&current, "current").unwrap();
-
-        let resolved =
-            resolve_agent_doc_binary_from_env(Some(current.clone()), None, None, dir.path())
-                .unwrap();
-
-        assert_eq!(resolved, current);
-    }
-    #[test]
-    fn agent_doc_binary_resolution_falls_back_when_current_exe_is_stale() {
-        let dir = TempDir::new().unwrap();
-        let path_bin_dir = dir.path().join("bin");
-        let path_bin = path_bin_dir.join("agent-doc");
-        std::fs::create_dir_all(&path_bin_dir).unwrap();
-        std::fs::write(&path_bin, "path").unwrap();
-
-        let resolved = resolve_agent_doc_binary_from_env(
-            Some(dir.path().join("deleted-agent-doc")),
-            Some(OsString::from("agent-doc")),
-            Some(path_bin_dir.into_os_string()),
-            dir.path(),
-        )
-        .unwrap();
-
-        assert_eq!(resolved, path_bin);
-    }
-    #[test]
-    fn internal_spawn_context_names_binary_cwd_and_path_presence() {
-        let context = internal_command_spawn_context("finalize", Path::new("/tmp/agent-doc"));
-
-        assert!(context.contains("agent-doc finalize"));
-        assert!(context.contains("binary=/tmp/agent-doc"));
-        assert!(context.contains("cwd="));
-        assert!(context.contains("PATH_present="));
-    }
-    #[test]
     fn extract_tasks_prefers_last_fenced_list() {
         let text = "Notes\n\n- old one\n\n```md\n- do first\n- do second\n```\n";
         assert_eq!(
@@ -1920,14 +1756,6 @@ mod tests {
     .unwrap();
         assert_eq!(quoted_later, source);
     }
-    #[test]
-    fn inject_prompt_inserts_before_boundary() {
-        let updated = inject_prompt_into_doc(&template_doc(), "do #gkke").unwrap();
-        let prompt_pos = updated.find("❯ do #gkke").unwrap();
-        let boundary_pos = updated.find("<!-- agent:boundary:keep -->").unwrap();
-        assert!(prompt_pos < boundary_pos);
-    }
-    #[test]
     fn send_fresh_response_uses_no_resume() {
         let agent = CaptureAgent {
             seen_prompt: RefCell::new(Vec::new()),

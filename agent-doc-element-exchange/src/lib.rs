@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use agent_doc_element::{
     Component, ElementAuthority, ElementCompositionRole, ElementDescriptor, ElementRealtimeModel,
-    ElementSchedulingRole, ElementShape, ElementSource, ElementWritePolicy,
+    ElementSchedulingRole, ElementShape, ElementSource, ElementWritePolicy, element,
 };
 use agent_doc_prompt_lines::{
     line_looks_like_markdown_list_item, line_looks_like_plain_response_after_prompt,
@@ -12,7 +12,7 @@ use agent_doc_prompt_lines::{
     line_looks_like_targeted_or_prefixed_prompt_repair_start,
     line_looks_like_targeted_prompt_prefix_repair_start,
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use similar::{ChangeTag, TextDiff};
 
 pub const DESCRIPTOR: ElementDescriptor = ElementDescriptor {
@@ -30,6 +30,48 @@ pub const DESCRIPTOR: ElementDescriptor = ElementDescriptor {
 
 pub fn descriptor() -> ElementDescriptor {
     DESCRIPTOR
+}
+
+pub fn insert_prompt_line_before_boundary(doc: &str, prompt_line: &str) -> Result<String> {
+    let components = element::parse(doc).context("failed to parse document components")?;
+    let exchange = components
+        .iter()
+        .find(|comp| comp.name == "exchange")
+        .ok_or_else(|| anyhow::anyhow!("document has no `agent:exchange` component"))?;
+    let existing = exchange.content(doc);
+    if existing.lines().any(|line| line.trim() == prompt_line) {
+        return Ok(doc.to_string());
+    }
+
+    let relative_boundary = existing
+        .lines()
+        .scan(0usize, |offset, line| {
+            let start = *offset;
+            *offset += line.len() + 1;
+            Some((start, line))
+        })
+        .filter_map(|(start, line)| {
+            line.trim()
+                .starts_with("<!-- agent:boundary:")
+                .then_some(start)
+        })
+        .last();
+
+    let insert_at = relative_boundary
+        .map(|rel| exchange.open_end + rel)
+        .unwrap_or(exchange.close_start);
+    let mut result = String::with_capacity(doc.len() + prompt_line.len() + 4);
+    result.push_str(&doc[..insert_at]);
+    if insert_at > exchange.open_end && !result.ends_with('\n') {
+        result.push('\n');
+    }
+    if insert_at > exchange.open_end && !result.ends_with("\n\n") {
+        result.push('\n');
+    }
+    result.push_str(prompt_line);
+    result.push('\n');
+    result.push_str(&doc[insert_at..]);
+    Ok(result)
 }
 
 /// Extract the byte length of the exchange component's trimmed content.
@@ -1557,6 +1599,23 @@ mod tests {
 
         let no_exchange = "Just text.";
         assert_eq!(exchange_content_len(no_exchange), 0);
+    }
+
+    #[test]
+    fn insert_prompt_line_before_boundary_inserts_before_latest_boundary() {
+        let doc = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "old response\n",
+            "<!-- agent:boundary:keep -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let updated = insert_prompt_line_before_boundary(doc, "❯ do #gkke").unwrap();
+
+        let prompt_pos = updated.find("❯ do #gkke").unwrap();
+        let boundary_pos = updated.find("<!-- agent:boundary:keep -->").unwrap();
+        assert!(prompt_pos < boundary_pos);
     }
 
     #[test]

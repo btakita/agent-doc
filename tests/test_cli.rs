@@ -8963,6 +8963,8 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
             .unwrap();
     let executor_capture =
         fs::read_to_string(manifest_dir.join("agent-doc-turn-executor/src/capture.rs")).unwrap();
+    let executor_binary =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn-executor/src/binary.rs")).unwrap();
     for required_snippet in [
         "pub struct ManagedProofPolicy",
         "pub struct ManagedProofPolicyInputs",
@@ -9040,6 +9042,16 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         assert!(
             executor_capture.contains(required_snippet),
             "agent-doc-turn-executor should own executor capture-delta policy directly: {required_snippet}"
+        );
+    }
+    for required_snippet in [
+        "pub fn current_agent_doc_binary(",
+        "pub fn resolve_agent_doc_binary_from_env(",
+        "pub fn internal_command_spawn_context(",
+    ] {
+        assert!(
+            executor_binary.contains(required_snippet),
+            "agent-doc-turn-executor should own agent-doc binary launch resolution directly: {required_snippet}"
         );
     }
 
@@ -9304,6 +9316,59 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         ) && watch.contains("capture_delta(&ss.last_capture, &captured)")
             && watch.contains("limit_capture_lines(&new_content, ss.max_lines)"),
         "watch.rs should call focused executor capture policy directly"
+    );
+    let project_controller =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/project_controller.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "fn resolve_agent_doc_binary_from_env(",
+        "fn launchable_file(",
+        "fn has_path_separator(",
+        "pub(crate) fn current_agent_doc_binary(",
+        "pub(crate) use agent_doc_turn_executor::binary::current_agent_doc_binary;",
+    ] {
+        assert!(
+            !project_controller.contains(forbidden_snippet),
+            "project_controller must not re-own agent-doc binary launch resolution: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        project_controller
+            .contains("use agent_doc_turn_executor::binary::current_agent_doc_binary;"),
+        "project_controller should use focused binary launch resolution directly"
+    );
+    let start_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
+    assert!(
+        start_source.contains("use agent_doc_turn_executor::binary::current_agent_doc_binary;")
+            && !start_source.contains("project_controller::current_agent_doc_binary"),
+        "start.rs should import focused binary launch resolution directly"
+    );
+    let controller_rpc_source = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/project_controller/rpc.rs"),
+    )
+    .unwrap();
+    assert!(
+        controller_rpc_source
+            .contains("use agent_doc_turn_executor::binary::current_agent_doc_binary;"),
+        "project_controller/rpc.rs should import focused binary launch resolution directly"
+    );
+    let orchestrate_source = fs::read_to_string(manifest_dir.join("src/orchestrate.rs")).unwrap();
+    for forbidden_snippet in [
+        "fn resolve_agent_doc_binary_from_env(",
+        "fn launchable_file(",
+        "fn has_path_separator(",
+        "fn internal_command_spawn_context(",
+    ] {
+        assert!(
+            !orchestrate_source.contains(forbidden_snippet),
+            "src/orchestrate.rs must not re-own agent-doc binary launch resolution: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        orchestrate_source
+            .contains("binary::{current_agent_doc_binary, internal_command_spawn_context}"),
+        "src/orchestrate.rs should call focused binary launch resolution directly"
     );
 
     let executor_manifest =
@@ -12286,6 +12351,7 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         "pub fn exchange_content_len",
         "pub fn exchange_content",
         "pub fn exchange_component",
+        "pub fn insert_prompt_line_before_boundary",
         "pub fn strip_exchange_content",
         "pub fn redact_exchange_component_content",
         "pub fn post_commit_ipc_reposition_only_exchange_safe",
@@ -12420,6 +12486,14 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         !git_source.contains("fn redact_exchange_component_content(")
             && !git_source.contains("fn post_commit_ipc_reposition_only_exchange_safe("),
         "git.rs must not re-own exchange-only post-commit IPC policy"
+    );
+    let orchestrate_source = fs::read_to_string(manifest_dir.join("src/orchestrate.rs")).unwrap();
+    assert!(
+        orchestrate_source
+            .contains("agent_doc_element_exchange::insert_prompt_line_before_boundary")
+            && !orchestrate_source.contains("fn inject_prompt_into_doc(")
+            && !orchestrate_source.contains("starts_with(\"<!-- agent:boundary:\")"),
+        "src/orchestrate.rs should adapt file IO and delegate exchange prompt insertion to agent-doc-element-exchange"
     );
 
     let orchestration_policy_sources = [

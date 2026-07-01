@@ -162,6 +162,7 @@ use agent_doc_turn_executor::auto_trigger::{
     AutoTriggerCooldownAction, AutoTriggerMonitor, AutoTriggerNoPromptAction,
     AutoTriggerStopOutcome, auto_trigger_clear_cooldown_action, auto_trigger_no_prompt_action,
 };
+use agent_doc_turn_executor::binary::current_agent_doc_binary;
 use agent_doc_turn_executor::capability_proof::managed_capability_proof_status_message;
 
 use crate::sessions;
@@ -1412,7 +1413,7 @@ fn supervisor_reexec_candidates() -> Vec<(PathBuf, &'static str)> {
         .unwrap_or(false);
     // 1. The freshly-installed launchable binary (skips a `(deleted)` current_exe,
     //    follows argv0 + `PATH` to the on-disk build).
-    let resolved_fresh = crate::project_controller::current_agent_doc_binary().ok();
+    let resolved_fresh = current_agent_doc_binary().ok();
     agent_doc_supervisor::reexec::build_reexec_candidates(
         resolved_fresh,
         current_exe,

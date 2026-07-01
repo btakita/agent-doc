@@ -7,6 +7,7 @@
 
 pub mod agent_stream;
 pub mod auto_trigger;
+pub mod binary;
 pub mod capability_proof;
 pub mod capture;
 pub mod codex_launch;

@@ -10,6 +10,7 @@ use agent_doc_controller::dispatch::{
     spent_preset_id_from_pause_reason, stale_supervisor_pid_from_pause_reason,
 };
 use agent_doc_controller::status;
+use agent_doc_turn_executor::binary::current_agent_doc_binary;
 
 pub(crate) fn connect(project_root: &Path) -> Result<interprocess::local_socket::Stream> {
     connect_path(&socket_path(project_root))

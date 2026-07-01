@@ -10,6 +10,7 @@ use agent_doc_controller::status::{
     ControllerHandoffState, ControllerStatus, LaunchMode,
 };
 use agent_doc_sqlite::state_store;
+use agent_doc_turn_executor::binary::current_agent_doc_binary;
 use anyhow::{Context, Result};
 use fs2::FileExt;
 use interprocess::local_socket::{
@@ -38,7 +39,6 @@ use state_store::{
     load_supervisor_lease_from_db, open_state_db, store_layout_state_in_db, timestamp_secs,
 };
 use std::collections::{BTreeMap, BTreeSet};
-use std::ffi::{OsStr, OsString};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::path::{Path, PathBuf};
@@ -921,84 +921,6 @@ pub(crate) fn current_binary_identity() -> Result<ControllerBinaryIdentity> {
         modified_secs: modified.as_secs(),
         modified_nanos: modified.subsec_nanos(),
     })
-}
-
-/// Resolve the freshly-installed launchable agent-doc binary path. Prefers a
-/// launchable `current_exe`, but explicitly skips a missing/`(deleted)` mapped
-/// inode (the post-`cargo install` state) and falls back to argv0 + `PATH` so the
-/// returned path is the build on disk. Also used by `#suprecycleexe` so the
-/// supervisor self-`execve` targets the fresh binary instead of `/proc/self/exe`,
-/// which is marked `(deleted)` exactly when the recycle fires.
-pub(crate) fn current_agent_doc_binary() -> Result<PathBuf> {
-    let cwd = std::env::current_dir().context("failed to resolve current working directory")?;
-    resolve_agent_doc_binary_from_env(
-        std::env::current_exe().ok(),
-        std::env::args_os().next(),
-        std::env::var_os("PATH"),
-        &cwd,
-    )
-}
-
-fn resolve_agent_doc_binary_from_env(
-    current_exe: Option<PathBuf>,
-    argv0: Option<OsString>,
-    path_env: Option<OsString>,
-    cwd: &Path,
-) -> Result<PathBuf> {
-    let stale_current_exe = match current_exe {
-        Some(path) if launchable_file(&path) => return Ok(path),
-        other => other,
-    };
-
-    let mut path_search_names = Vec::new();
-    if let Some(raw_argv0) = argv0.as_deref() {
-        let argv0_path = Path::new(raw_argv0);
-        if has_path_separator(argv0_path) {
-            let candidate = if argv0_path.is_absolute() {
-                argv0_path.to_path_buf()
-            } else {
-                cwd.join(argv0_path)
-            };
-            if launchable_file(&candidate) {
-                return Ok(candidate);
-            }
-        } else if !raw_argv0.is_empty() {
-            path_search_names.push(raw_argv0.to_os_string());
-        }
-    }
-    if !path_search_names
-        .iter()
-        .any(|name| name == OsStr::new("agent-doc"))
-    {
-        path_search_names.push(OsString::from("agent-doc"));
-    }
-
-    if let Some(path_env) = path_env {
-        for dir in std::env::split_paths(&path_env) {
-            for name in &path_search_names {
-                let candidate = dir.join(name);
-                if launchable_file(&candidate) {
-                    return Ok(candidate);
-                }
-            }
-        }
-    }
-
-    let stale = stale_current_exe
-        .as_ref()
-        .map(|path| format!("; skipped missing current_exe {}", path.display()))
-        .unwrap_or_default();
-    anyhow::bail!("failed to locate launchable agent-doc binary{stale}");
-}
-
-fn launchable_file(path: &Path) -> bool {
-    std::fs::metadata(path)
-        .map(|metadata| metadata.is_file())
-        .unwrap_or(false)
-}
-
-fn has_path_separator(path: &Path) -> bool {
-    path.is_absolute() || path.components().count() > 1
 }
 
 fn write_bootstrap(project_root: &Path, launch_mode: LaunchMode) -> Result<ControllerBootstrap> {
@@ -3370,72 +3292,6 @@ mod tests {
         assert!(controller_status_matches_current_binary(&fresh).unwrap());
     }
 
-    #[test]
-    fn controller_binary_resolution_prefers_existing_current_exe() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let current = dir.path().join("current-agent-doc");
-        let path_bin_dir = dir.path().join("bin");
-        let path_bin = path_bin_dir.join("agent-doc");
-        std::fs::create_dir_all(&path_bin_dir).unwrap();
-        std::fs::write(&current, "current").unwrap();
-        std::fs::write(&path_bin, "path").unwrap();
-
-        let resolved = resolve_agent_doc_binary_from_env(
-            Some(current.clone()),
-            Some(OsString::from("agent-doc")),
-            Some(path_bin_dir.into_os_string()),
-            dir.path(),
-        )
-        .unwrap();
-
-        assert_eq!(resolved, current);
-    }
-    #[test]
-    fn controller_binary_resolution_falls_back_to_path_when_current_exe_is_missing() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path_bin_dir = dir.path().join("bin");
-        let path_bin = path_bin_dir.join("agent-doc");
-        std::fs::create_dir_all(&path_bin_dir).unwrap();
-        std::fs::write(&path_bin, "path").unwrap();
-
-        let resolved = resolve_agent_doc_binary_from_env(
-            Some(dir.path().join("deleted-agent-doc")),
-            Some(OsString::from("agent-doc")),
-            Some(path_bin_dir.into_os_string()),
-            dir.path(),
-        )
-        .unwrap();
-
-        assert_eq!(resolved, path_bin);
-    }
-    #[test]
-    fn controller_binary_resolution_skips_deleted_proc_self_exe_suffix() {
-        // `#suprecycleexe` — the supervisor self-`execve` recycle fires PRECISELY
-        // when a fresh binary replaced the running one, so on Linux `current_exe()`
-        // (read from `/proc/self/exe`) returns the old inode's path with a literal
-        // ` (deleted)` suffix. That path is not launchable; resolution must skip it
-        // and fall back to the fresh `PATH` binary instead of returning the deleted
-        // path (which `exec` rejects with ENOENT / "os error 2").
-        let dir = tempfile::TempDir::new().unwrap();
-        let path_bin_dir = dir.path().join("bin");
-        let path_bin = path_bin_dir.join("agent-doc");
-        std::fs::create_dir_all(&path_bin_dir).unwrap();
-        std::fs::write(&path_bin, "fresh").unwrap();
-
-        let deleted_exe = dir.path().join("agent-doc (deleted)");
-        assert!(!deleted_exe.exists());
-
-        let resolved = resolve_agent_doc_binary_from_env(
-            Some(deleted_exe),
-            Some(OsString::from("agent-doc")),
-            Some(path_bin_dir.into_os_string()),
-            dir.path(),
-        )
-        .unwrap();
-
-        assert_eq!(resolved, path_bin);
-    }
-    #[test]
     fn controller_start_register_and_lifecycle_update_actor_and_lease() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();

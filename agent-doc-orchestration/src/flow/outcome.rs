@@ -42,6 +42,13 @@ pub enum UserFacingOutcomeKind {
     /// the in-session agent simply ends its turn so the supervisor takes over
     /// (`#qfocsup`).
     DeferredForSupervisorDrain,
+    /// `#turnsaferecycle` Goal 3 — the hosting supervisor is running a stale binary,
+    /// so the current turn phase (preflight / route / stream / session-check / write)
+    /// skips its doomed IPC write, schedules the recycle (forced PCP recycle +
+    /// supervisor recycle-request), and defers uniformly instead of each phase
+    /// thrashing the buffer. No operator action is required; the recycle promotes the
+    /// fresh binary at the next idle boundary and the phase re-runs cleanly.
+    DeferredForRecycle,
     NoDrainableWork,
     RealComponentConflict,
     BlockedWithExactUnblocker,
@@ -54,6 +61,7 @@ impl UserFacingOutcomeKind {
             Self::RecoveredAndRetried => "recovered_and_retried",
             Self::DeferredForOperatorProof => "deferred_for_operator_proof",
             Self::DeferredForSupervisorDrain => "deferred_for_supervisor_drain",
+            Self::DeferredForRecycle => "deferred_for_recycle",
             Self::NoDrainableWork => "no_drainable_work",
             Self::RealComponentConflict => "real_component_conflict",
             Self::BlockedWithExactUnblocker => "blocked_with_exact_unblocker",
@@ -62,9 +70,10 @@ impl UserFacingOutcomeKind {
 
     pub const fn class(self) -> BinaryOutcomeClass {
         match self {
-            Self::QueuedBehindOwner | Self::NoDrainableWork | Self::DeferredForSupervisorDrain => {
-                BinaryOutcomeClass::Ok
-            }
+            Self::QueuedBehindOwner
+            | Self::NoDrainableWork
+            | Self::DeferredForSupervisorDrain
+            | Self::DeferredForRecycle => BinaryOutcomeClass::Ok,
             Self::RecoveredAndRetried => BinaryOutcomeClass::Recoverable,
             Self::DeferredForOperatorProof => BinaryOutcomeClass::Operator,
             Self::RealComponentConflict | Self::BlockedWithExactUnblocker => {
@@ -79,6 +88,7 @@ impl UserFacingOutcomeKind {
             Self::RecoveredAndRetried => "continue_after_recovery_retry",
             Self::DeferredForOperatorProof => "operator_proof_required",
             Self::DeferredForSupervisorDrain => "yield_to_supervisor_clear_and_continue",
+            Self::DeferredForRecycle => "yield_for_supervisor_recycle",
             Self::NoDrainableWork => "no_agent_action",
             Self::RealComponentConflict => "resolve_component_conflict",
             Self::BlockedWithExactUnblocker => "follow_unblocker",
@@ -236,6 +246,27 @@ impl BinaryOutcome {
     }
 }
 
+/// `#turnsaferecycle` Goal 3 — the production emitter for the `supervisor_freshness`
+/// binary-outcome contract. A turn phase that short-circuits a doomed IPC write
+/// against a stale supervisor (skips the write, schedules the recycle) records this
+/// recoverable outcome so the stale→self-recycle→retry contract is attributable in
+/// the flow log, not just asserted in a unit test.
+pub fn supervisor_stale_self_recycled_outcome() -> BinaryOutcome {
+    BinaryOutcome::recoverable(
+        "supervisor_freshness",
+        "supervisor_binary_stale_self_recycled",
+        "restart_supervisor_once_and_retry",
+    )
+    .expect("static supervisor_freshness outcome tokens are contract-valid")
+}
+
+/// `#turnsaferecycle` Goal 3 — the user-facing outcome every turn phase returns when
+/// it defers uniformly for a stale-supervisor recycle instead of thrashing the write.
+pub fn deferred_for_recycle_outcome() -> UserFacingOutcome {
+    UserFacingOutcome::new(UserFacingOutcomeKind::DeferredForRecycle)
+        .expect("deferred_for_recycle requires no unblocker")
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BinaryOutcomeError {
     EmptyField { field: &'static str },
@@ -292,6 +323,23 @@ mod tests {
     }
 
     #[test]
+    fn supervisor_stale_self_recycled_and_deferred_for_recycle_emitters_are_contract_valid() {
+        // `#turnsaferecycle` Goal 3: the real emitters (not test-only inline
+        // constructions) produce the supervisor_freshness recoverable contract and
+        // the deferred_for_recycle user-facing outcome.
+        let binary = supervisor_stale_self_recycled_outcome();
+        assert_eq!(binary.class, BinaryOutcomeClass::Recoverable);
+        assert_eq!(binary.invariant_id, "supervisor_freshness");
+        assert_eq!(binary.proof_marker, "supervisor_binary_stale_self_recycled");
+        assert_eq!(binary.next_action, "restart_supervisor_once_and_retry");
+
+        let ui = deferred_for_recycle_outcome();
+        assert_eq!(ui.outcome, UserFacingOutcomeKind::DeferredForRecycle);
+        assert_eq!(ui.class, BinaryOutcomeClass::Ok);
+        assert_eq!(ui.next_action, "yield_for_supervisor_recycle");
+    }
+
+    #[test]
     fn binary_outcome_classes_are_stable_snake_case() {
         assert_eq!(BinaryOutcomeClass::Ok.as_str(), "ok");
         assert_eq!(BinaryOutcomeClass::Recoverable.as_str(), "recoverable");
@@ -340,6 +388,12 @@ mod tests {
                 "deferred_for_supervisor_drain",
                 BinaryOutcomeClass::Ok,
                 "yield_to_supervisor_clear_and_continue",
+            ),
+            (
+                Kind::DeferredForRecycle,
+                "deferred_for_recycle",
+                BinaryOutcomeClass::Ok,
+                "yield_for_supervisor_recycle",
             ),
             (
                 Kind::NoDrainableWork,

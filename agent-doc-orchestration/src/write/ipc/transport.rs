@@ -227,6 +227,19 @@ pub fn try_ipc(
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let ipc_before_content = std::fs::read_to_string(file).ok();
 
+    // `#turnsaferecycle` Goal 3 — shared stale-supervisor short-circuit. Before any
+    // proof-retry work, if the hosting supervisor is running a stale binary, skip the
+    // doomed IPC write, schedule the recycle, and defer uniformly (returns a
+    // non-success result so the caller retains the response for the post-recycle
+    // retry — never a disk write). Fresh supervisor → `None`, proceed normally.
+    if crate::write::converge::stale_supervisor_write_short_circuit(file, "try_ipc").is_some() {
+        return Ok(IpcResult {
+            success: false,
+            patch_id,
+            skipped_committed_cycle: false,
+        });
+    }
+
     // Guard: if the cycle is already committed, reject the patch to prevent
     // a late fallback from re-dirtying the document.
     //
@@ -1214,6 +1227,15 @@ pub(crate) fn try_ipc_full_content_with_mode(
 ) -> Result<bool> {
     let _canonical = file.canonicalize()?;
     let before_content = std::fs::read_to_string(file).ok();
+    // `#turnsaferecycle` Goal 3 — shared stale-supervisor short-circuit (same guard
+    // as `try_ipc`): a stale hosting supervisor makes this full-content IPC write
+    // doomed. Skip it, schedule the recycle, and defer uniformly (return `false` so the
+    // caller's guarded fallback retains the response without a direct disk write).
+    if crate::write::converge::stale_supervisor_write_short_circuit(file, mode.source_label())
+        .is_some()
+    {
+        return Ok(false);
+    }
     let effective_source_content = match (mode, source_content) {
         (FullContentIpcMode::ResponseFallback, None) => Some(content),
         _ => source_content,

@@ -99,6 +99,23 @@ All 9 queue items done. Resume changes are committed in the `resume/` submodule 
 > Brian
 
 Want me to send it via corky/LinkedIn, or adjust the tone/availability first?
+
+We are just going to send the resume. Arron will tell me who the company is. Make a Python + Realtime specific resume. Tailor the message and mention lazily family as well.
+
+### Re: Python + Real-Time resume + tailored message — opus-4.8
+
+**Python + Real-Time resume built** (committed in `resume/`): `profiles/python-realtime.toml` → **`BrianTakita-python-realtime.pdf`**. It leads with real-time production depth (Presence AI H100/WebRTC pipeline scaled with Ray), the real-time reactive stack (lazily + signal-space), then Python data-at-scale history. Summary rewritten Python-first; highlights tuned to Python, real-time/distributed, event-driven, REST/GraphQL, GCP, and BDD reliability. This is the one to attach for Arron.
+
+**Tailored LinkedIn message** — drops the "who's the client?" question (Arron will name it), leads Python + real-time, mentions the lazily family, says the resume is attached:
+
+> Hi Arron — thanks for reaching out; this looks like a strong fit. I've spent 20+ years building production backend systems, Python-first, with deep real-time and distributed experience. I architected Presence AI's real-time multimodal avatar pipeline — NVIDIA H100 GPUs over WebRTC, scaled with Ray for distributed real-time compute — and I build the lazily family: cross-language reactive signals (Rust, Python, Zig, JS, Dart, Kotlin) that interoperate as one live system over FFI, IPC, WebSockets, WebRTC, and WASM. Testing and operational reliability are things I lead on, not afterthoughts.
+>
+> I've attached my resume. I can do an intro call this week — afternoons ET are easiest — and the fully-remote, $220k framing works for me. Looking forward to hearing which client it's for.
+>
+> Best,
+> Brian
+
+Both are ready to send. Say the word if you want me to send the message via corky/LinkedIn, or tweak the availability/tone first.
 <!-- /agent:exchange -->
 
 ## Queue

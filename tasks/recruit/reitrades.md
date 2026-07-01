@@ -355,7 +355,30 @@ Roll-up effect: the listing workstream rose ~15-20h. Full V1.2 moves **520-800h 
 **One question this raises for Artur:** the pilot asset class. The screenshots demo a hotel; the "one asset class at a time" instruction means whichever class ships first sets the first-tranche field schema. Worth confirming hotel vs. (say) multifamily/office/industrial before locking the Phase-1 fixed price, since field sets differ per class.
 
 Open question #7 in the report is now marked resolved; the pilot-asset-class sub-question is the only piece left on the listing/OM front.
-<!-- agent:boundary:0ae0b624 -->
+Include rubrics in AI accuracy work.
+
+### Re: Rubrics added to the AI accuracy work — opus-4-8
+
+Added an **AI accuracy rubric + evaluation harness** to the report (§3a, committed). This directly answers Artur's "AI data must be 100% accurate" ask by replacing an unmeasurable promise with a defined, auditable acceptance bar.
+
+**Two rubrics, both now in the proposal:**
+
+1. **Provenance/grade rubric** — every AI-touched field (extracted from an uploaded OM/flyer, or generated) is graded A–D:
+   - **A Source-exact** (verbatim from BatchData / rent roll / structured field) → auto-fill
+   - **B Derived-verified** (deterministic rule, e.g. NOI = EGI − Opex, reconciles within tolerance) → auto-fill, spot-check
+   - **C AI-inferred** (no citable source) → **blocked from external send** until admin approves, shown with confidence + rationale
+   - **D Missing/low-confidence** → manual entry, never auto-published
+
+2. **Acceptance thresholds** (the "done" bar, measured on a labeled ground-truth sample set):
+   - Financial fields (Asking Price, Cap Rate, NOI, Opex, LTV…): **≥99%**, zero silent Grade-C financials sent externally
+   - Structured facts (address, sq ft, year built, keys/units): **≥97%**
+   - Demographics / market data: **≥95%**, every value carrying a cited source
+   - Narrative/marketing copy: human-approved before external send; graded for factual claims only
+
+**Why this matters for the bid:** it turns "100% accurate" into a test the harness runs on every release of the extraction/generation code, gating merge on the thresholds. That protects you (you're not on the hook for an impossible absolute), protects Artur (money fields facing buyers can't ship wrong silently), and gives admin review a queue driven by grade instead of guesswork.
+
+**Cost impact:** new line item **AI accuracy rubric + evaluation harness, 14–28h**, front-loaded into the first tranche so the bar is enforced from day one rather than retrofitted. Roll-up nudges to full V1.2 **545–850h** ($54.5k–$85k) and first tranche **270–400h** ($27k–$40k); the round-number **$52k–$80k / $26k–$38k** headline still holds for the bid.
+<!-- agent:boundary:af527a1a -->
 <!-- /agent:exchange -->
 
 ## Queue

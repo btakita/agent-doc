@@ -102,7 +102,9 @@ use agent_doc_document::transient_markers::{
 use anyhow::{Context, Result};
 use fs2::FileExt;
 use std::collections::HashSet;
-use std::fs::{self, File, OpenOptions};
+#[cfg(test)]
+use std::fs;
+use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -114,6 +116,9 @@ use agent_doc_document_realtime::write_policy::{
 use agent_doc_element::element::is_backlog_component;
 use agent_doc_element_exchange::post_commit_ipc_reposition_only_exchange_safe;
 use agent_doc_git::{is_index_lock_contention_text, relative_to_root, render_git_process_output};
+use agent_doc_git_io::dirs::{
+    commit_lock_path_for_git_root, commit_lock_scope_path, narrow_to_submodule, resolve_to_git_root,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommitOutcome {
@@ -190,9 +195,6 @@ impl Drop for CommitLock {
         let _ = self._file.unlock();
     }
 }
-
-mod dirs;
-pub use dirs::*;
 
 /// After a successful commit inside a submodule, stage and partial-commit the
 /// updated submodule pointer in the superproject. Uses an explicit pathspec on

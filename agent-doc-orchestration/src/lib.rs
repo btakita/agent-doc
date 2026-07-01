@@ -60,7 +60,6 @@ pub mod compact;
 pub mod context_pct;
 pub mod convergence_playback;
 pub mod crdt_authority;
-pub mod crdt_relay;
 pub mod crdt_relay_host;
 pub mod cycle_state;
 pub mod dashboard;

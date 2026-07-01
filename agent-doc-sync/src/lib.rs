@@ -9,6 +9,21 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoStartMode {
+    Full,
+    SafePassive,
+}
+
+impl AutoStartMode {
+    pub fn log_label(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::SafePassive => "safe-passive",
+        }
+    }
+}
+
 /// Trim an optional CLI scope argument and treat empty strings as absent.
 pub fn normalize_scope_arg(value: Option<&str>) -> Option<&str> {
     value.and_then(|s| {
@@ -140,6 +155,10 @@ pub fn sync_latency_message(
     )
 }
 
+pub fn safe_passive_prune_cleanup_throttle() -> Duration {
+    Duration::from_secs(2)
+}
+
 pub fn sanitize_stamp_component(value: &str) -> String {
     value
         .chars()
@@ -151,6 +170,32 @@ pub fn sanitize_stamp_component(value: &str) -> String {
             }
         })
         .collect()
+}
+
+pub fn sync_repair_stamp_filename(server_socket: Option<&str>, session_name: &str) -> String {
+    let socket = sanitize_stamp_component(server_socket.unwrap_or("default"));
+    let session = sanitize_stamp_component(session_name);
+    format!("sync-repair-{socket}-{session}.stamp")
+}
+
+pub fn rename_debounce_expired(age: Duration, ttl: Duration) -> bool {
+    age >= ttl
+}
+
+pub fn auto_started_panes_summary(auto_started_panes: &[(String, String)]) -> Option<String> {
+    if auto_started_panes.len() <= 1 {
+        return None;
+    }
+    let summary = auto_started_panes
+        .iter()
+        .map(|(pane, file)| format!("{pane}→{file}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(format!(
+        "auto-started {} panes: {}",
+        auto_started_panes.len(),
+        summary
+    ))
 }
 
 pub fn sync_prune_fingerprint(col_args: &[String], window: Option<&str>) -> String {
@@ -213,6 +258,63 @@ pub fn planned_stash_window_indices(
         .enumerate()
         .map(|(offset, (_, id, _))| (id.clone(), offset + 1))
         .collect()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WindowIndexNormalizationPlan {
+    Missing,
+    AlreadyAtIndex,
+    Move {
+        current_index: String,
+        desired_index: String,
+        current_name: String,
+    },
+    Swap {
+        current_index: String,
+        desired_index: String,
+        current_name: String,
+        occupant_id: String,
+        occupant_name: String,
+    },
+}
+
+pub fn plan_window_index_normalization(
+    windows: &[(String, String, String)],
+    window_id: &str,
+    desired_index: usize,
+) -> WindowIndexNormalizationPlan {
+    let desired_index = desired_index.to_string();
+    let Some((current_index, _, current_name)) =
+        windows.iter().find(|(_, id, _)| id == window_id).cloned()
+    else {
+        return WindowIndexNormalizationPlan::Missing;
+    };
+    if current_index == desired_index {
+        return WindowIndexNormalizationPlan::AlreadyAtIndex;
+    }
+
+    if let Some((_, occupant_id, occupant_name)) = windows
+        .iter()
+        .find(|(index, _, _)| index == &desired_index)
+        .cloned()
+    {
+        if occupant_id == window_id {
+            return WindowIndexNormalizationPlan::AlreadyAtIndex;
+        }
+        WindowIndexNormalizationPlan::Swap {
+            current_index,
+            desired_index,
+            current_name,
+            occupant_id,
+            occupant_name,
+        }
+    } else {
+        WindowIndexNormalizationPlan::Move {
+            current_index,
+            desired_index,
+            current_name,
+        }
+    }
 }
 
 pub fn effective_sync_columns(
@@ -307,6 +409,12 @@ fn resolve_absolute_file_path(file: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auto_start_mode_reports_stable_log_labels() {
+        assert_eq!(AutoStartMode::Full.log_label(), "full");
+        assert_eq!(AutoStartMode::SafePassive.log_label(), "safe-passive");
+    }
 
     #[test]
     fn normalize_scope_arg_trims_empty_values() {
@@ -409,6 +517,47 @@ mod tests {
     }
 
     #[test]
+    fn sync_repair_stamp_filename_includes_sanitized_socket_and_session() {
+        assert_eq!(
+            sync_repair_stamp_filename(Some("/tmp/socket:name"), "agent doc/session"),
+            "sync-repair-_tmp_socket_name-agent_doc_session.stamp"
+        );
+        assert_eq!(
+            sync_repair_stamp_filename(None, "agent-doc"),
+            "sync-repair-default-agent-doc.stamp"
+        );
+    }
+
+    #[test]
+    fn rename_debounce_expired_uses_ttl_boundary() {
+        let ttl = Duration::from_secs(5);
+        assert!(!rename_debounce_expired(Duration::from_secs(4), ttl));
+        assert!(rename_debounce_expired(Duration::from_secs(5), ttl));
+        assert!(rename_debounce_expired(Duration::from_secs(6), ttl));
+    }
+
+    #[test]
+    fn auto_started_panes_summary_formats_multiple_panes() {
+        let auto_started_panes = vec![
+            ("%80".to_string(), "tasks/cursor.md".to_string()),
+            ("%81".to_string(), "tasks/feat.md".to_string()),
+            ("%82".to_string(), "tasks/agent-loop.md".to_string()),
+        ];
+
+        let summary = auto_started_panes_summary(&auto_started_panes).unwrap();
+        assert_eq!(
+            summary,
+            "auto-started 3 panes: %80→tasks/cursor.md, %81→tasks/feat.md, %82→tasks/agent-loop.md"
+        );
+    }
+
+    #[test]
+    fn auto_started_panes_summary_skips_single_pane() {
+        let auto_started_panes = vec![("%84".to_string(), "tasks/file.md".to_string())];
+        assert_eq!(auto_started_panes_summary(&auto_started_panes), None);
+    }
+
+    #[test]
     fn sync_prune_fingerprint_includes_window_and_columns() {
         let cols = vec!["left.md".to_string(), "right.md".to_string()];
         let fingerprint = sync_prune_fingerprint(&cols, Some("@1"));
@@ -458,6 +607,56 @@ mod tests {
             planned_stash_window_indices(&windows, |name| name == "stash"
                 || name.starts_with("stash-")),
             vec![("@11".to_string(), 1), ("@12".to_string(), 2)]
+        );
+    }
+
+    #[test]
+    fn plan_window_index_normalization_moves_when_target_index_is_free() {
+        let windows = vec![
+            ("1".to_string(), "@10".to_string(), "work".to_string()),
+            ("2".to_string(), "@11".to_string(), "agent-doc".to_string()),
+        ];
+
+        assert_eq!(
+            plan_window_index_normalization(&windows, "@11", 0),
+            WindowIndexNormalizationPlan::Move {
+                current_index: "2".to_string(),
+                desired_index: "0".to_string(),
+                current_name: "agent-doc".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn plan_window_index_normalization_swaps_when_target_index_is_occupied() {
+        let windows = vec![
+            ("0".to_string(), "@10".to_string(), "work".to_string()),
+            ("2".to_string(), "@11".to_string(), "agent-doc".to_string()),
+        ];
+
+        assert_eq!(
+            plan_window_index_normalization(&windows, "@11", 0),
+            WindowIndexNormalizationPlan::Swap {
+                current_index: "2".to_string(),
+                desired_index: "0".to_string(),
+                current_name: "agent-doc".to_string(),
+                occupant_id: "@10".to_string(),
+                occupant_name: "work".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn plan_window_index_normalization_noops_for_missing_or_current_index() {
+        let windows = vec![("0".to_string(), "@10".to_string(), "agent-doc".to_string())];
+
+        assert_eq!(
+            plan_window_index_normalization(&windows, "@10", 0),
+            WindowIndexNormalizationPlan::AlreadyAtIndex
+        );
+        assert_eq!(
+            plan_window_index_normalization(&windows, "@99", 0),
+            WindowIndexNormalizationPlan::Missing
         );
     }
 

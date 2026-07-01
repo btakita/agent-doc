@@ -5,6 +5,7 @@ use super::*;
 use agent_doc_controller::dispatch::{
     recent_lines_contain_trigger, route_trigger_visible_in_current_draft,
 };
+use agent_doc_harness::{pane_idle_dispatch_ready, protected_prompt_draft_preview};
 use agent_doc_supervisor::lifecycle::recycle_interrupted_resubmit_should_wait;
 use agent_doc_tmux::pane_current_command_is_bare_shell;
 
@@ -23,24 +24,6 @@ pub(crate) struct DirectPaneAcceptance {
     /// prompt was not dispatched into the session, and send + submit it".)
     not_dispatched: bool,
     diagnostic_path: Option<PathBuf>,
-}
-
-fn protected_prompt_draft_preview(harness: &HarnessConfig, content: &str) -> Option<String> {
-    let candidate = harness.last_prompt_candidate(content)?;
-    let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(&candidate);
-    let redacted = agent_doc_secret_redact::redact(stripped.trim());
-    let preview = redacted.trim();
-    if preview.is_empty() {
-        return None;
-    }
-    const MAX_CHARS: usize = 160;
-    let mut chars = preview.chars();
-    let shortened: String = chars.by_ref().take(MAX_CHARS).collect();
-    if chars.next().is_some() {
-        Some(format!("{shortened}..."))
-    } else {
-        Some(shortened)
-    }
 }
 
 /// `#rdypoll` (§D / img_52): process-global count of REAL trigger injections into
@@ -194,17 +177,6 @@ pub(crate) fn poll_direct_pane_acceptance(
         not_dispatched: false,
         diagnostic_path,
     }
-}
-
-/// True when the pane's last prompt candidate is an idle, dispatch-ready harness
-/// prompt (composer empty and waiting for input) — i.e. NOT processing a turn.
-/// Used to tell a genuine fast submit (pane now processing) from a send that never
-/// landed (pane still idle). (#jbrundispatch directive 2)
-fn pane_idle_dispatch_ready(content: &str, harness: &HarnessConfig) -> bool {
-    harness
-        .last_prompt_candidate(content)
-        .map(|line| harness.is_dispatch_ready_prompt_line(&line))
-        .unwrap_or(false)
 }
 
 fn send_direct_pane_enter_resubmit(
@@ -1042,7 +1014,7 @@ pub(crate) fn authoritative_actor_dispatch_can_queue_optimistically(
 }
 
 pub(crate) fn canonical_dispatch_file(path: &std::path::Path) -> std::path::PathBuf {
-    let resolved = crate::git::resolve_absolute_file_path(path);
+    let resolved = agent_doc_git_io::dirs::resolve_absolute_file_path(path);
     std::fs::canonicalize(&resolved).unwrap_or(resolved)
 }
 
@@ -1639,10 +1611,6 @@ pub(crate) struct DirectPaneDispatchOptions {
     pub(crate) print_unproven_progress: bool,
 }
 
-pub(crate) fn apply_plain_trigger_override(harness: &mut HarnessConfig) {
-    harness.trigger_command_template = "agent-doc {file}".to_string();
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(unused_imports)]
@@ -1667,59 +1635,6 @@ mod tests {
         assert!(
             hint.contains("agent-doc start /tmp/session.md"),
             "starting actor hint should name the owner restart recovery: {hint}"
-        );
-    }
-    #[test]
-    fn protected_prompt_draft_preview_redacts_and_bounds_latest_draft() {
-        let harness = HarnessConfig::codex();
-        let content = format!(
-            "\
-history
-› {}
-gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% used
-",
-            format!(
-                "Implement feature using OPENAI_API_KEY=sk-proj-{} and then {}",
-                "a".repeat(32),
-                "continue ".repeat(40)
-            )
-        );
-
-        let preview = protected_prompt_draft_preview(&harness, &content).unwrap();
-
-        assert!(preview.starts_with("› Implement feature"), "{preview}");
-        assert!(
-            preview.contains("OPENAI_API_KEY=[REDACTED]"),
-            "preview must redact secrets before surfacing draft text: {preview}"
-        );
-        assert!(
-            !preview.contains("sk-proj-"),
-            "raw secret must not leak into route diagnostics: {preview}"
-        );
-        assert!(preview.ends_with("..."), "{preview}");
-        assert!(
-            preview.chars().count() <= 163,
-            "preview should be bounded plus ellipsis: {preview}"
-        );
-    }
-
-    #[test]
-    fn pane_idle_dispatch_ready_distinguishes_non_dispatch_from_fast_submit() {
-        // #jbrundispatch directive 2: an empty composer at an idle prompt means the
-        // trigger never landed (re-send the full trigger); a processing pane means a
-        // genuine fast submit (do NOT re-send, or the agent runs twice).
-        let h = HarnessConfig::claude();
-        assert!(
-            pane_idle_dispatch_ready("prior output\n\n❯\n", &h),
-            "empty composer at an idle prompt is a non-dispatch"
-        );
-        assert!(
-            !pane_idle_dispatch_ready("❯ agent-doc tasks/x.md\n", &h),
-            "a drafted trigger in the composer is not idle"
-        );
-        assert!(
-            !pane_idle_dispatch_ready("Working… (esc to interrupt)\n", &h),
-            "a processing pane is not idle — a fast submit must not be re-sent"
         );
     }
 }

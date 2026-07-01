@@ -199,8 +199,10 @@ use agent_doc_controller::command_line::{
 use agent_doc_controller::dispatch::is_stash_window_name;
 use agent_doc_element::element;
 use agent_doc_sync::{
-    effective_sync_columns, is_file_rename, latency_budget_status, planned_stash_window_indices,
-    sanitize_stamp_component, sync_latency_message, sync_prune_state_update,
+    AutoStartMode, WindowIndexNormalizationPlan, auto_started_panes_summary,
+    effective_sync_columns, is_file_rename, latency_budget_status, plan_window_index_normalization,
+    planned_stash_window_indices, rename_debounce_expired, safe_passive_prune_cleanup_throttle,
+    sync_latency_message, sync_prune_state_update, sync_repair_stamp_filename,
 };
 use agent_doc_tmux::{
     AssociatedPaneCandidate, AssociatedPaneResolution, AssociatedPaneSource,
@@ -235,7 +237,6 @@ const SYNC_ROUTER_BUDGET: Duration = Duration::from_millis(1_000);
 const SYNC_SAFE_PASSIVE_TOTAL_BUDGET: Duration = Duration::from_millis(1_000);
 const SYNC_LOCK_WAIT_BUDGET: Duration = Duration::from_secs(3);
 const SYNC_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(50);
-const SAFE_PASSIVE_STASH_CLEANUP_THROTTLE: Duration = Duration::from_secs(2);
 const SAFE_PASSIVE_SYNC_LOCK_SKIPPED_MARKER: &str =
     "[sync] safe_passive_sync_lock_contention_retry";
 const STALE_SYNC_LOCK_OWNER_AGE: Duration = Duration::from_secs(300);
@@ -335,7 +336,7 @@ fn recover_jb_cache_conflict_cancel_commit_boundary(file: &Path) -> Result<Optio
 pub fn repair_file_state_with_tmux(tmux: &Tmux, file: &Path) -> Result<Vec<String>> {
     let canonical = file
         .canonicalize()
-        .unwrap_or_else(|_| crate::git::resolve_absolute_file_path(file));
+        .unwrap_or_else(|_| agent_doc_git_io::dirs::resolve_absolute_file_path(file));
     let mut actions = Vec::new();
 
     let columns = vec![canonical.to_string_lossy().to_string()];
@@ -489,7 +490,7 @@ fn has_rename_debounce(file_path: &Path) -> bool {
         .and_then(|m| m.modified())
         .ok()
         .and_then(|t| t.elapsed().ok())
-        .map(|d| d.as_secs() >= RENAME_DEBOUNCE_TTL_SECS)
+        .map(|d| rename_debounce_expired(d, Duration::from_secs(RENAME_DEBOUNCE_TTL_SECS)))
         .unwrap_or(true);
     if expired {
         let _ = std::fs::remove_file(&marker);
@@ -538,21 +539,6 @@ pub fn run_with_tmux(
     tmux: &Tmux,
 ) -> Result<()> {
     run_with_options_internal(col_args, window, focus, AutoStartMode::Full, false, tmux)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AutoStartMode {
-    Full,
-    SafePassive,
-}
-
-impl AutoStartMode {
-    fn log_label(self) -> &'static str {
-        match self {
-            Self::Full => "full",
-            Self::SafePassive => "safe-passive",
-        }
-    }
 }
 
 fn load_live_authoritative_actor_record_uncached(
@@ -1236,9 +1222,7 @@ fn destructive_repair_stamp_path(
     if !dir.is_dir() {
         return None;
     }
-    let socket = sanitize_stamp_component(server_socket.unwrap_or("default"));
-    let session = sanitize_stamp_component(session_name);
-    Some(dir.join(format!("sync-repair-{socket}-{session}.stamp")))
+    Some(dir.join(sync_repair_stamp_filename(server_socket, session_name)))
 }
 
 /// Check the per-server-per-session destructive-repair stamp. Returns `true`
@@ -1317,7 +1301,7 @@ fn safe_passive_prune_cleanup_mode_at(
     window: Option<&str>,
     now_ms: u64,
 ) -> agent_doc_tmux::PruneCleanupMode {
-    let throttle_ms = SAFE_PASSIVE_STASH_CLEANUP_THROTTLE.as_millis() as u64;
+    let throttle_ms = safe_passive_prune_cleanup_throttle().as_millis() as u64;
     let raw_state = std::fs::read_to_string(state_path).ok();
     let update =
         sync_prune_state_update(raw_state.as_deref(), col_args, window, now_ms, throttle_ms);
@@ -1583,57 +1567,54 @@ fn normalize_window_to_index(
     log_prefix: &str,
 ) {
     let windows = list_session_windows(tmux, session_name);
-    let desired = desired_index.to_string();
-    let Some((current_index, _, current_name)) =
-        windows.iter().find(|(_, id, _)| id == window_id).cloned()
-    else {
-        return;
-    };
-    if current_index == desired {
-        return;
-    }
-
-    if let Some((_, occupant_id, occupant_name)) = windows
-        .iter()
-        .find(|(index, _, _)| index == &desired)
-        .cloned()
-    {
-        if occupant_id == window_id {
-            return;
+    match plan_window_index_normalization(&windows, window_id, desired_index) {
+        WindowIndexNormalizationPlan::Missing | WindowIndexNormalizationPlan::AlreadyAtIndex => {}
+        WindowIndexNormalizationPlan::Swap {
+            current_index,
+            desired_index,
+            current_name,
+            occupant_id,
+            occupant_name,
+        } => {
+            sync_log(&format!(
+                "{}_action=swap-window src={} dst={} session={} src_name={} dst_name={}",
+                log_prefix, current_index, desired_index, session_name, current_name, occupant_name
+            ));
+            let result = tmux.raw_cmd(&["swap-window", "-s", window_id, "-t", &occupant_id]);
+            sync_log(&format!(
+                "{}_result=swap-window ok={} src={} dst={}",
+                log_prefix,
+                result.is_ok(),
+                current_index,
+                desired_index
+            ));
+            let _ = result;
         }
-        sync_log(&format!(
-            "{}_action=swap-window src={} dst={} session={} src_name={} dst_name={}",
-            log_prefix, current_index, desired, session_name, current_name, occupant_name
-        ));
-        let result = tmux.raw_cmd(&["swap-window", "-s", window_id, "-t", &occupant_id]);
-        sync_log(&format!(
-            "{}_result=swap-window ok={} src={} dst={}",
-            log_prefix,
-            result.is_ok(),
+        WindowIndexNormalizationPlan::Move {
             current_index,
-            desired
-        ));
-        let _ = result;
-    } else {
-        sync_log(&format!(
-            "{}_action=move-window src={} dst={} session={} name={}",
-            log_prefix, current_index, desired, session_name, current_name
-        ));
-        let result = tmux.raw_cmd(&[
-            "move-window",
-            "-s",
-            window_id,
-            "-t",
-            &format!("{session_name}:{desired}"),
-        ]);
-        sync_log(&format!(
-            "{}_result=move-window ok={} src={} dst={}",
-            log_prefix,
-            result.is_ok(),
-            current_index,
-            desired
-        ));
-        let _ = result;
+            desired_index,
+            current_name,
+        } => {
+            sync_log(&format!(
+                "{}_action=move-window src={} dst={} session={} name={}",
+                log_prefix, current_index, desired_index, session_name, current_name
+            ));
+            let result = tmux.raw_cmd(&[
+                "move-window",
+                "-s",
+                window_id,
+                "-t",
+                &format!("{session_name}:{desired_index}"),
+            ]);
+            sync_log(&format!(
+                "{}_result=move-window ok={} src={} dst={}",
+                log_prefix,
+                result.is_ok(),
+                current_index,
+                desired_index
+            ));
+            let _ = result;
+        }
     }
 }
 
@@ -2873,21 +2854,9 @@ fn run_with_options_internal(
             }
         }
 
-        if auto_started_panes.len() > 1 {
-            let summary: Vec<String> = auto_started_panes
-                .iter()
-                .map(|(pane, file)| format!("{}→{}", pane, file))
-                .collect();
-            eprintln!(
-                "[sync] auto-started {} panes: {}",
-                auto_started_panes.len(),
-                summary.join(", ")
-            );
-            sync_log(&format!(
-                "batch: auto-started {} panes: {}",
-                auto_started_panes.len(),
-                summary.join(", ")
-            ));
+        if let Some(summary) = auto_started_panes_summary(&auto_started_panes) {
+            eprintln!("[sync] {summary}");
+            sync_log(&format!("batch: {summary}"));
         }
 
         // Post-auto_start stash removed: the tmux_router reconciler now always runs
@@ -4715,22 +4684,6 @@ mod tests {
     use std::process::Command as ProcessCommand;
     use std::time::Duration;
     use tmux_router::IsolatedTmux;
-    #[test]
-    fn stash_window_index_plan_packs_overflow_after_agent_doc() {
-        let windows = vec![
-            ("0".to_string(), "@10".to_string(), "agent-doc".to_string()),
-            ("3".to_string(), "@11".to_string(), "stash".to_string()),
-            ("7".to_string(), "@12".to_string(), "stash-2".to_string()),
-            ("8".to_string(), "@13".to_string(), "work".to_string()),
-        ];
-
-        assert_eq!(
-            planned_stash_window_indices(&windows, is_stash_window_name),
-            vec![("@11".to_string(), 1), ("@12".to_string(), 2)],
-            "repair_layout must keep overflow stash windows adjacent after agent-doc"
-        );
-    }
-    #[test]
     fn sync_repair_closes_jb_cache_conflict_cancel_commit_boundary() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
@@ -6382,39 +6335,6 @@ mod tests {
             "log line should start with timestamp bracket, got: {matching_line}"
         );
     }
-    #[test]
-    fn latency_message_reports_budget_status_via_sync_crate() {
-        let ok = sync_latency_message(
-            "tmux_router",
-            Duration::from_millis(999),
-            Duration::from_secs(1),
-            AutoStartMode::SafePassive.log_label(),
-        );
-        assert!(ok.contains("status=ok"), "{ok}");
-        assert!(ok.contains("mode=safe-passive"), "{ok}");
-
-        let slow = sync_latency_message(
-            "safe_passive_total",
-            Duration::from_secs(1),
-            Duration::from_secs(1),
-            AutoStartMode::SafePassive.log_label(),
-        );
-        assert!(slow.contains("status=over_budget"), "{slow}");
-        assert!(slow.contains("elapsed_ms=1000"), "{slow}");
-
-        let controller = sync_latency_message(
-            "controller_actor_lookup",
-            Duration::from_millis(251),
-            SYNC_CONTROLLER_ACTOR_LOOKUP_BUDGET,
-            AutoStartMode::SafePassive.log_label(),
-        );
-        assert!(
-            controller.contains("phase=controller_actor_lookup"),
-            "{controller}"
-        );
-        assert!(controller.contains("status=over_budget"), "{controller}");
-    }
-    #[test]
     fn safe_passive_prune_state_skips_stash_cleanup_from_first_pass() {
         let tmp = tempfile::TempDir::new().unwrap();
         let state_path = tmp.path().join(".agent-doc/sync-prune-state.json");
@@ -6490,7 +6410,7 @@ mod tests {
             agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
         );
 
-        let expired_ms = 1_100 + SAFE_PASSIVE_STASH_CLEANUP_THROTTLE.as_millis() as u64;
+        let expired_ms = 1_100 + safe_passive_prune_cleanup_throttle().as_millis() as u64;
         assert_eq!(
             safe_passive_prune_cleanup_mode_at(
                 &state_path,
@@ -6700,37 +6620,6 @@ mod tests {
         assert_eq!(entry.file, old_file);
         assert_eq!(entry.pane, "%42");
     }
-    #[test]
-    fn batch_summary_format_multiple_panes() {
-        let auto_started_panes = [
-            ("%80".to_string(), "tasks/cursor.md".to_string()),
-            ("%81".to_string(), "tasks/feat.md".to_string()),
-            ("%82".to_string(), "tasks/agent-loop.md".to_string()),
-        ];
-        let summary: Vec<String> = auto_started_panes
-            .iter()
-            .map(|(pane, file)| format!("{}→{}", pane, file))
-            .collect();
-        let msg = format!(
-            "[sync] auto-started {} panes: {}",
-            auto_started_panes.len(),
-            summary.join(", ")
-        );
-        assert!(msg.contains("3 panes"));
-        assert!(msg.contains("%80→tasks/cursor.md"));
-        assert!(msg.contains("%81→tasks/feat.md"));
-        assert!(msg.contains("%82→tasks/agent-loop.md"));
-    }
-    #[test]
-    fn batch_summary_not_printed_for_single_pane() {
-        let auto_started_panes = [("%84".to_string(), "tasks/file.md".to_string())];
-        // Batch summary only prints when len > 1
-        assert!(
-            auto_started_panes.len() <= 1,
-            "single pane should not trigger batch summary"
-        );
-    }
-    #[test]
     fn rename_debounce_suppresses_auto_start() {
         let tmp = tempfile::TempDir::new().unwrap();
         let debounce_dir = tmp.path().join(".agent-doc/rename-debounce");
@@ -6761,27 +6650,6 @@ mod tests {
             "marker should be fresh"
         );
     }
-    #[test]
-    fn rename_debounce_ttl_logic() {
-        // Test the expiry logic directly: a marker older than RENAME_DEBOUNCE_TTL_SECS
-        // should be considered expired
-        let now = std::time::SystemTime::now();
-        let fresh = now - std::time::Duration::from_secs(1);
-        let expired = now - std::time::Duration::from_secs(RENAME_DEBOUNCE_TTL_SECS + 1);
-
-        let fresh_age = now.duration_since(fresh).unwrap().as_secs();
-        let expired_age = now.duration_since(expired).unwrap().as_secs();
-
-        assert!(
-            fresh_age < RENAME_DEBOUNCE_TTL_SECS,
-            "fresh marker should be within TTL"
-        );
-        assert!(
-            expired_age >= RENAME_DEBOUNCE_TTL_SECS,
-            "expired marker should exceed TTL"
-        );
-    }
-    #[test]
     fn rename_debounce_does_not_affect_other_files() {
         let tmp = tempfile::TempDir::new().unwrap();
         let debounce_dir = tmp.path().join(".agent-doc/rename-debounce");

@@ -2,7 +2,7 @@
 //!
 //! A **star-topology relay hub** built on top of the state-vector sync primitive
 //! ([`agent_doc_merge::crdt_sync`]) and gated by the CRDT-authority state machine
-//! ([`agent_doc_document_realtime::crdt_authority`]). It is the fan-out / registry
+//! ([`crate::crdt_authority`]). It is the fan-out / registry
 //! layer the plan calls for (`tasks/agent-doc/plan-crdt-authority-model.md`,
 //! "Multiple editors"):
 //!
@@ -43,7 +43,7 @@ use serde::{Deserialize, Serialize};
 
 use agent_doc_merge::crdt_sync::{ReplicaState, commit_barrier_ready, flush_to_commit_barrier};
 
-use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
+use crate::crdt_authority::CrdtAuthority;
 
 /// **Disk-demotion contract (plan phase 6).** The persisted
 /// `.agent-doc/crdt/<hash>.yrs` is a write-through **durable recovery projection
@@ -595,8 +595,8 @@ impl RelayHub {
     /// never displace the stale canonical ops. The stale canonical then re-commits
     /// the discarded content on every cycle ("`git checkout HEAD` won't hold"), and
     /// only a supervisor restart (which clears the process-global hub registry)
-    /// recovers it. This is the live-session analogue of the headless
-    /// [`crate::snapshot::crdt_merge_base_state`] projection-mismatch rebuild.
+    /// recovers it. This is the live-session analogue of orchestration's
+    /// headless `snapshot::crdt_merge_base_state` projection-mismatch rebuild.
     ///
     /// Rebuild fires only when ALL hold:
     /// - a commit baseline has been recorded (we have something to compare), AND

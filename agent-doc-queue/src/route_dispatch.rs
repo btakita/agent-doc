@@ -68,6 +68,31 @@ pub fn active_auto_route_queue_prompt_texts(content: &str) -> Result<Vec<String>
         .collect())
 }
 
+pub fn strip_route_queue_state_for_boundary_compare(content: &str) -> String {
+    let mut result = content
+        .lines()
+        .filter(|line| {
+            let t = line.trim_start();
+            // Both the canonical `queue:` control and the deprecated
+            // `queue_active:` line are transient queue-maintenance state
+            // (#queue-state-unify); normalize them away together.
+            !t.starts_with("queue_active:") && !t.starts_with("queue:")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if content.ends_with('\n') {
+        result.push('\n');
+    }
+    if let Ok(components) = agent_doc_element::element::parse(&result) {
+        for component in components.iter().rev() {
+            if component.name == "queue" {
+                result.replace_range(component.open_start..component.close_end, "");
+            }
+        }
+    }
+    agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(&result)
+}
+
 pub fn operator_prioritize_route_prompt(prompt_text: String) -> String {
     if crate::queue_command::is_slash_command(&prompt_text) {
         return prompt_text;
@@ -403,6 +428,32 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn strip_route_queue_state_for_boundary_compare_removes_transient_queue_state() {
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "queue_active: true\n",
+            "queue: go\n",
+            "---\n\n",
+            "Stable text.\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#alpha]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:boundary:head -->\n",
+            "More stable text.\n"
+        );
+
+        let stripped = strip_route_queue_state_for_boundary_compare(content);
+
+        assert!(stripped.contains("Stable text."));
+        assert!(stripped.contains("More stable text."));
+        assert!(!stripped.contains("queue_active:"));
+        assert!(!stripped.contains("queue:"));
+        assert!(!stripped.contains("agent:queue"));
+        assert!(!stripped.contains("agent:boundary"));
     }
 
     #[test]

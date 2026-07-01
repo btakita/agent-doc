@@ -222,7 +222,7 @@ impl std::fmt::Display for Issue {
 }
 
 fn resolve_target_file(file: &Path) -> Result<PathBuf> {
-    let resolved = crate::git::resolve_absolute_file_path(file);
+    let resolved = agent_doc_git_io::dirs::resolve_absolute_file_path(file);
     if !resolved.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }

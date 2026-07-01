@@ -198,6 +198,15 @@ pub fn await_idle(file: &str, debounce_ms: u64, timeout_ms: u64) -> bool {
     }
 }
 
+/// Maximum wait used by preflight before it proceeds after a debounce timeout.
+pub fn preflight_debounce_max_wait(debounce_ms: u64) -> std::time::Duration {
+    std::time::Duration::from_secs(if debounce_ms > 3000 {
+        (debounce_ms / 1000) + 1
+    } else {
+        3
+    })
+}
+
 // ── Cross-process typing bridge ──
 
 /// Directory for typing indicator files, relative to project root.
@@ -2631,5 +2640,25 @@ mod tests {
         assert_eq!(read.version, 2);
         assert!(!read.dirty);
         assert_eq!(read.hash.as_deref(), Some("newhash"));
+    }
+
+    #[test]
+    fn preflight_debounce_max_wait_uses_floor_then_longer_window() {
+        assert_eq!(
+            preflight_debounce_max_wait(2000),
+            std::time::Duration::from_secs(3)
+        );
+        assert_eq!(
+            preflight_debounce_max_wait(3000),
+            std::time::Duration::from_secs(3)
+        );
+        assert_eq!(
+            preflight_debounce_max_wait(3500),
+            std::time::Duration::from_secs(4)
+        );
+        assert_eq!(
+            preflight_debounce_max_wait(6000),
+            std::time::Duration::from_secs(7)
+        );
     }
 }

@@ -7809,14 +7809,14 @@ mod crdt_authority_sim {
 ///
 /// Models a single supervisor-hosted canonical replica with N editor replicas
 /// registered through the star-topology relay
-/// (`agent_doc_orchestration::crdt_relay::RelayHub`). Fan-out packets can be held
+/// (`agent_doc_document_realtime::crdt_relay::RelayHub`). Fan-out packets can be held
 /// in flight and delivered out of order to model propagation lag — no live editor
 /// / tmux / socket required. Convergence, the live-cut commit barrier, offline →
 /// reconnect catch-up, and unique-client-id enforcement are all asserted
 /// deterministically.
 mod crdt_relay_sim {
     use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
-    use agent_doc_orchestration::crdt_relay::{AwarenessState, RelayHub, mint_client_id};
+    use agent_doc_document_realtime::crdt_relay::{AwarenessState, RelayHub, mint_client_id};
 
     /// A supervisor pane hosting one document over the relay hub, plus an in-flight
     /// packet queue modeling the editor↔supervisor network. Delivery order is
@@ -8110,7 +8110,7 @@ mod crdt_relay_sim {
 /// keyed per-document through a real tracked path, no live editor / tmux / socket.
 mod crdt_relay_host_sim {
     use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
-    use agent_doc_orchestration::crdt_relay::mint_client_id;
+    use agent_doc_document_realtime::crdt_relay::{RelayHub, mint_client_id};
     use agent_doc_orchestration::crdt_relay_host::{
         commit_barrier_for_file_with_authority, recover_hub_from_disk, with_hub,
     };
@@ -8205,7 +8205,7 @@ mod crdt_relay_host_sim {
         // Supervisor restart: the live recovery path rebuilds the per-document
         // canonical replica from the last disk recovery projection.
         let (_dir, doc) = temp_doc("live-recover.md");
-        let mut prior = agent_doc_orchestration::crdt_relay::RelayHub::new(1);
+        let mut prior = RelayHub::new(1);
         let ed = mint_client_id("intellij:prior-restart");
         prior.register(ed).unwrap();
         prior.apply_local(ed, 0, 0, "survives-restart").unwrap();

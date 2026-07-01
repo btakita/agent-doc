@@ -209,6 +209,11 @@ impl HarnessConfig {
         self.trigger_command_template.replace("{file}", file)
     }
 
+    /// Force route reopen triggers to the portable bare `agent-doc <file>` form.
+    pub fn apply_plain_trigger_override(&mut self) {
+        self.trigger_command_template = "agent-doc {file}".to_string();
+    }
+
     /// Check if a trimmed line matches any prompt pattern.
     pub fn matches_prompt(&self, trimmed_line: &str) -> bool {
         self.prompt_patterns
@@ -676,6 +681,33 @@ impl HarnessConfig {
     pub fn cmdline_is_agent(&self, cmdline: &str) -> bool {
         self.process_names.iter().any(|name| cmdline.contains(name))
     }
+}
+
+pub fn protected_prompt_draft_preview(harness: &HarnessConfig, content: &str) -> Option<String> {
+    let candidate = harness.last_prompt_candidate(content)?;
+    let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(&candidate);
+    let redacted = agent_doc_secret_redact::redact(stripped.trim());
+    let preview = redacted.trim();
+    if preview.is_empty() {
+        return None;
+    }
+    const MAX_CHARS: usize = 160;
+    let mut chars = preview.chars();
+    let shortened: String = chars.by_ref().take(MAX_CHARS).collect();
+    if chars.next().is_some() {
+        Some(format!("{shortened}..."))
+    } else {
+        Some(shortened)
+    }
+}
+
+/// True when the pane's last prompt candidate is an idle, dispatch-ready harness
+/// prompt (composer empty and waiting for input), not an active turn.
+pub fn pane_idle_dispatch_ready(content: &str, harness: &HarnessConfig) -> bool {
+    harness
+        .last_prompt_candidate(content)
+        .map(|line| harness.is_dispatch_ready_prompt_line(&line))
+        .unwrap_or(false)
 }
 
 /// Return the latest captured prompt/chrome segment that proves the harness can
@@ -2685,6 +2717,68 @@ Press Enter to restart, or 'q' to exit.
         assert_eq!(claude_cmd, "/agent-doc tasks/bugs.md");
         assert_eq!(codex_cmd, "agent-doc tasks/bugs.md");
         assert_eq!(opencode_cmd, "/agent-doc tasks/bugs.md");
+    }
+
+    #[test]
+    fn plain_trigger_override_uses_bare_agent_doc_reopen_for_route() {
+        let mut claude = HarnessConfig::claude();
+        claude.apply_plain_trigger_override();
+        assert_eq!(claude.trigger_command("test.md"), "agent-doc test.md");
+
+        let mut opencode = HarnessConfig::opencode();
+        opencode.apply_plain_trigger_override();
+        assert_eq!(opencode.trigger_command("test.md"), "agent-doc test.md");
+    }
+
+    #[test]
+    fn protected_prompt_draft_preview_redacts_and_bounds_latest_draft() {
+        let harness = HarnessConfig::codex();
+        let content = format!(
+            "\
+history
+› {}
+gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% used
+",
+            format!(
+                "Implement feature using OPENAI_API_KEY=sk-proj-{} and then {}",
+                "a".repeat(32),
+                "continue ".repeat(40)
+            )
+        );
+
+        let preview = protected_prompt_draft_preview(&harness, &content).unwrap();
+
+        assert!(preview.starts_with("› Implement feature"), "{preview}");
+        assert!(
+            preview.contains("OPENAI_API_KEY=[REDACTED]"),
+            "preview must redact secrets before surfacing draft text: {preview}"
+        );
+        assert!(
+            !preview.contains("sk-proj-"),
+            "raw secret must not leak into route diagnostics: {preview}"
+        );
+        assert!(preview.ends_with("..."), "{preview}");
+        assert!(
+            preview.chars().count() <= 163,
+            "preview should be bounded plus ellipsis: {preview}"
+        );
+    }
+
+    #[test]
+    fn pane_idle_dispatch_ready_distinguishes_non_dispatch_from_fast_submit() {
+        let h = HarnessConfig::claude();
+        assert!(
+            pane_idle_dispatch_ready("prior output\n\n❯\n", &h),
+            "empty composer at an idle prompt is a non-dispatch"
+        );
+        assert!(
+            !pane_idle_dispatch_ready("❯ agent-doc tasks/x.md\n", &h),
+            "a drafted trigger in the composer is not idle"
+        );
+        assert!(
+            !pane_idle_dispatch_ready("Working… (esc to interrupt)\n", &h),
+            "a processing pane is not idle"
+        );
     }
 
     #[test]

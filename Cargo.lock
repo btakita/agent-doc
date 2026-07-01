@@ -371,6 +371,7 @@ name = "agent-doc-git-io"
 version = "0.34.66"
 dependencies = [
  "agent-doc-git",
+ "agent-doc-hash",
  "anyhow",
  "tempfile",
 ]
@@ -381,6 +382,7 @@ version = "0.34.66"
 dependencies = [
  "agent-doc-config",
  "agent-doc-frontmatter",
+ "agent-doc-secret-redact",
  "agent-doc-turn-executor",
  "agent-doc-turn-executor-tmux",
  "anyhow",
@@ -841,12 +843,16 @@ dependencies = [
  "agent-doc-diff",
  "agent-doc-element-backlog",
  "agent-doc-frontmatter",
+ "agent-doc-hash",
  "agent-doc-markdown-ast",
+ "agent-doc-prompt-contract",
  "agent-doc-turn",
  "anyhow",
+ "htmd",
  "indexmap",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

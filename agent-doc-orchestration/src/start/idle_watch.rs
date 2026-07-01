@@ -116,7 +116,7 @@ fn editor_typing_active_for_idle_queue(file: &std::path::Path) -> bool {
     if agent_doc_debounce::is_typing_via_file(&file_str, debounce_ms) {
         return true;
     }
-    let absolute = crate::git::resolve_absolute_file_path(file);
+    let absolute = agent_doc_git_io::dirs::resolve_absolute_file_path(file);
     if absolute == file {
         return false;
     }

@@ -3,7 +3,8 @@
 //!
 //! The state-vector sync primitive ([`agent_doc_merge::crdt_sync`]), the authority
 //! state machine ([`agent_doc_document_realtime::crdt_authority`]), and the relay
-//! hub ([`crate::crdt_relay`]) were built and tested as standalone modules. This
+//! hub ([`agent_doc_document_realtime::crdt_relay`]) were built and tested as
+//! standalone modules. This
 //! module is the **live cutover**: it routes the real `finalize` commit point and
 //! the real `.yrs` load/merge call-sites through the authority-gated barrier,
 //! while keeping the headless / [`CrdtAuthority::GitAuthoritative`] path
@@ -54,13 +55,15 @@ use std::sync::{Mutex, OnceLock};
 use anyhow::Result;
 
 use crate::crdt_authority::authority_for_file;
-use crate::crdt_relay::{PendingReplicaUpdate, RelayHub, ReplicaDeliverySnapshot};
 use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
+use agent_doc_document_realtime::crdt_relay::{
+    AwarenessState, PendingReplicaUpdate, RelayHub, ReplicaDeliverySnapshot, mint_client_id,
+};
 
 /// The canonical replica's reserved yrs client-id for every per-document hub. The
 /// supervisor's canonical replica is the hub authority; editor replicas mint
-/// their own ids via [`crate::crdt_relay::mint_client_id`] and can never collide
-/// with this reserved id (`RelayHub::register` rejects it).
+/// their own ids via [`mint_client_id`] and can never collide with this reserved
+/// id (`RelayHub::register` rejects it).
 const CANONICAL_CLIENT_ID: u64 = 1;
 const EDITOR_SYNC_SETTLE_MS: u64 = 75;
 const EDITOR_SYNC_TIMEOUT_MS: u64 = 150;
@@ -169,7 +172,7 @@ pub fn register_replica_for_file(file: &Path, identity: &str) -> Result<Option<(
     if !authority.editor_attached() {
         return Ok(None);
     }
-    let client_id = crate::crdt_relay::mint_client_id(identity);
+    let client_id = mint_client_id(identity);
     let bootstrap = with_hub_seeded_from_file(file, |hub| {
         if hub.is_registered(client_id) {
             // Idempotent re-register (e.g. an editor reconnect that re-announces
@@ -203,7 +206,7 @@ pub fn deregister_replica_for_file(file: &Path, identity: &str) -> Result<bool> 
     if !authority.editor_attached() {
         return Ok(false);
     }
-    let client_id = crate::crdt_relay::mint_client_id(identity);
+    let client_id = mint_client_id(identity);
     let removed = with_hub_seeded_from_file(file, |hub| hub.deregister(client_id))?;
     crate::ops_log::log_op(
         file,
@@ -240,7 +243,7 @@ pub fn relay_replica_update_for_file(
     if !authority.editor_attached() {
         return Ok(None);
     }
-    let client_id = crate::crdt_relay::mint_client_id(identity);
+    let client_id = mint_client_id(identity);
     let packet = with_hub_seeded_from_file(file, |hub| hub.relay_update(client_id, update))??;
     let canonical_len =
         with_hub_seeded_from_file(file, |hub| hub.canonical_text().chars().count())?;
@@ -271,7 +274,7 @@ pub fn pull_replica_updates_for_file(file: &Path, identity: &str) -> Result<Opti
     if !authority.editor_attached() {
         return Ok(None);
     }
-    let client_id = crate::crdt_relay::mint_client_id(identity);
+    let client_id = mint_client_id(identity);
     let updates = with_hub_seeded_from_file(file, |hub| hub.pending_updates(client_id))??;
     let delivery = with_hub_seeded_from_file(file, |hub| {
         hub.delivery_snapshot()
@@ -309,7 +312,7 @@ pub fn ack_replica_update_for_file(
     if !authority.editor_attached() {
         return Ok(None);
     }
-    let client_id = crate::crdt_relay::mint_client_id(identity);
+    let client_id = mint_client_id(identity);
     let acknowledged = with_hub_seeded_from_file(file, |hub| {
         hub.ack_delivery(client_id, patch_id, generation)
     })??;
@@ -334,13 +337,13 @@ pub fn ack_replica_update_for_file(
 pub fn set_replica_awareness_for_file(
     file: &Path,
     identity: &str,
-    state: crate::crdt_relay::AwarenessState,
-) -> Result<Option<Vec<(u64, crate::crdt_relay::AwarenessState)>>> {
+    state: AwarenessState,
+) -> Result<Option<Vec<(u64, AwarenessState)>>> {
     let authority = authority_for_file(&file.display().to_string());
     if !authority.editor_attached() {
         return Ok(None);
     }
-    let client_id = crate::crdt_relay::mint_client_id(identity);
+    let client_id = mint_client_id(identity);
     let snapshot = with_hub_seeded_from_file(file, |hub| {
         hub.set_awareness(client_id, state);
         hub.awareness_snapshot()
@@ -562,7 +565,8 @@ pub fn record_committed_baseline_for_file(file: &Path) {
 ///
 /// Under [`CrdtAuthority::MultiReplica`] the in-memory canonical replica is the
 /// authority and the disk `.yrs` is a write-through **recovery projection only**
-/// ([`crate::crdt_relay::DISK_IS_RECOVERY_PROJECTION_ONLY`]): a (possibly stale)
+/// ([`agent_doc_document_realtime::crdt_relay::DISK_IS_RECOVERY_PROJECTION_ONLY`]):
+/// a (possibly stale)
 /// disk projection is reconciled INTO the live replica, which can only add ops the
 /// live replica genuinely lost (a crash gap) and can never regress live text —
 /// in-memory wins. Returns `Some(changed)` where `changed` is whether the disk
@@ -791,7 +795,6 @@ fn mark_published_live_buffer_snapshots_synced(file: &Path, file_key: &str, reas
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crdt_relay::mint_client_id;
     use std::io::Write;
     use std::sync::{Arc, Mutex};
     use std::thread;

@@ -11,6 +11,7 @@ name = "agent_doc_git_io"
 
 [dependencies]
 agent-doc-git = { path = "../agent-doc-git", version = "0.34.66" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.66" }
 anyhow = "1"
 
 [dev-dependencies]

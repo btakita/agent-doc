@@ -142,6 +142,17 @@ pub struct PreflightWarning {
     pub active_harness: Option<String>,
 }
 
+impl From<agent_doc_workflow::preflight_policy::PreflightPolicyWarning> for PreflightWarning {
+    fn from(warning: agent_doc_workflow::preflight_policy::PreflightPolicyWarning) -> Self {
+        Self {
+            code: warning.code,
+            message: warning.message,
+            document_agent: None,
+            active_harness: None,
+        }
+    }
+}
+
 /// Per-item opportunistic gated-review verification result (`#optverify`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GateVerifyResult {
@@ -561,60 +572,6 @@ fn explicit_backlog_target_requirements(
         });
     }
     Ok(requirements)
-}
-
-fn post_exchange_comment_prompt_preset_warning(
-    file: &Path,
-    content: &str,
-    prompt_presets: &indexmap::IndexMap<String, String>,
-) -> Option<PreflightWarning> {
-    let mut referenced = Vec::new();
-    for comment in agent_doc_diff::post_exchange_ordinary_html_comments(content) {
-        if !prompt_presets.is_empty() {
-            agent_doc_prompt_contract::push_unique_strings(
-                &mut referenced,
-                agent_doc_prompt_contract::requested_prompt_presets(
-                    std::slice::from_ref(&comment),
-                    &[],
-                    prompt_presets,
-                ),
-            );
-        }
-        agent_doc_prompt_contract::push_unique_strings(
-            &mut referenced,
-            agent_doc_diff::post_exchange_comment_directive_signals(&comment),
-        );
-    }
-    if referenced.is_empty() {
-        return None;
-    }
-
-    Some(PreflightWarning {
-        code: "post_exchange_comment_prompt_preset".to_string(),
-        message: format!(
-            "Post-exchange HTML comment in {} references prompt preset/directive text ({}) that is preserved as a non-executable user note. Move it into `agent:exchange` or `agent:queue` if it should run.",
-            file.display(),
-            referenced.join(", ")
-        ),
-        document_agent: None,
-        active_harness: None,
-    })
-}
-
-fn preset_item_id_collision_warning(content: &str) -> Option<PreflightWarning> {
-    let collisions = agent_doc_element_backlog::backlog::detect_identity_collisions(content);
-    if collisions.is_empty() {
-        return None;
-    }
-    Some(PreflightWarning {
-        code: "preset_item_id_collision".to_string(),
-        message: format!(
-            "Ambiguous identities — the same #id resolves under multiple active sources: {}. Each #id must have one active meaning per document, so `do #id`, queue generation, and \"top backlog item\" are unambiguous. Rename the colliding prompt preset or tracked item before dispatch. (#preset-item-id-collision)",
-            collisions.join("; ")
-        ),
-        document_agent: None,
-        active_harness: None,
-    })
 }
 
 /// Unix mtime (seconds) of `path`, following symlinks. `None` when
@@ -1310,38 +1267,13 @@ fn append_ipc_dogfood_note_to_content(content: &str, diagnostic: &str) -> Result
     else {
         return Ok(None);
     };
-    let note = format_ipc_dogfood_note(diagnostic);
+    let note = agent_doc_workflow::preflight_policy::format_ipc_dogfood_note(diagnostic);
     let updated = exchange.append_with_caret(content, &note, None);
     if updated == content {
         Ok(None)
     } else {
         Ok(Some(updated))
     }
-}
-
-fn format_ipc_dogfood_note(diagnostic: &str) -> String {
-    let diagnostic = diagnostic.replace("```", "'''");
-    // The note opens with a `### Re:` response heading and folds the body into
-    // a fenced block so the prompt-bearing diff classifier sees ONE
-    // `[user+]` block whose first line is a recovery artifact heading → it is
-    // classified as a binary-authored `RecoveryArtifact`, never a user
-    // `PromptTarget`. Without this, the bare-text note closes the exchange
-    // tail, is classified as a fresh prompt, gets `❯`-normalized, and becomes
-    // an unresolved prompt-only tail that forces an extra acknowledgment
-    // cycle (`#ipcqproof`). A fence-opening line after a blank joins the
-    // heading's block, and blank lines inside a fence never split it.
-    format!(
-        "### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc\n\n\
-```text\n\
-**IPC proof issue dogfood log**\n\
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.\n\
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.\n\
-Issue class: `ipc_proof_insufficient`\n\
-Affected component: editor IPC / writeback\n\n\
-{}\n\
-```",
-        diagnostic
-    )
 }
 
 fn enforce_no_uncommitted_closeout_drift(file: &Path, rc: &crate::graph::RunContext) -> Result<()> {
@@ -1730,8 +1662,10 @@ fn detect_route_queue_snapshot_commit_boundary_recoverable(
         return Ok(false);
     }
 
-    let head_norm = strip_route_queue_state_for_boundary_compare(&head);
-    let snapshot_norm = strip_route_queue_state_for_boundary_compare(&snapshot);
+    let head_norm =
+        agent_doc_queue::route_dispatch::strip_route_queue_state_for_boundary_compare(&head);
+    let snapshot_norm =
+        agent_doc_queue::route_dispatch::strip_route_queue_state_for_boundary_compare(&snapshot);
     let Some(diff_text) = agent_doc_diff::unified_diff_from_contents(&head_norm, &snapshot_norm)
     else {
         return Ok(true);
@@ -1757,31 +1691,6 @@ fn detect_route_queue_snapshot_commit_boundary_recoverable(
     }))
 }
 
-fn strip_route_queue_state_for_boundary_compare(content: &str) -> String {
-    let mut result = content
-        .lines()
-        .filter(|line| {
-            let t = line.trim_start();
-            // Both the canonical `queue:` control and the deprecated
-            // `queue_active:` line are transient queue-maintenance state
-            // (#queue-state-unify); normalize them away together.
-            !t.starts_with("queue_active:") && !t.starts_with("queue:")
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    if content.ends_with('\n') {
-        result.push('\n');
-    }
-    if let Ok(components) = agent_doc_element::element::parse(&result) {
-        for component in components.iter().rev() {
-            if component.name == "queue" {
-                result.replace_range(component.open_start..component.close_end, "");
-            }
-        }
-    }
-    agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(&result)
-}
-
 pub(crate) fn preflight_debounce_ms(file: &Path) -> u64 {
     std::fs::read_to_string(file)
         .ok()
@@ -1793,16 +1702,8 @@ pub(crate) fn preflight_debounce_ms(file: &Path) -> u64 {
         .unwrap_or(2000)
 }
 
-fn preflight_debounce_max_wait(debounce_ms: u64) -> std::time::Duration {
-    std::time::Duration::from_secs(if debounce_ms > 3000 {
-        (debounce_ms / 1000) + 1
-    } else {
-        3
-    })
-}
-
 fn wait_for_typing_idle_before_mutation(file: &Path, debounce_ms: u64) -> Result<()> {
-    let max_wait = preflight_debounce_max_wait(debounce_ms);
+    let max_wait = agent_doc_debounce::preflight_debounce_max_wait(debounce_ms);
     let poll = std::time::Duration::from_millis(100);
     let start = std::time::Instant::now();
     let file_str = file.to_string_lossy();
@@ -2328,10 +2229,7 @@ fn read_and_truncate_claims(file: &Path) -> Vec<String> {
 /// - Checks if the file exists
 /// - Compares the related doc's last git commit time against our snapshot mtime
 /// - If newer, summarizes the recent commits
-fn is_url(link: &str) -> bool {
-    link.starts_with("http://") || link.starts_with("https://")
-}
-
+///
 /// Resolve the links cache directory, creating it if needed.
 fn links_cache_dir(file: &Path) -> Option<std::path::PathBuf> {
     let mut search = file.parent();
@@ -2347,29 +2245,9 @@ fn links_cache_dir(file: &Path) -> Option<std::path::PathBuf> {
     None
 }
 
-/// Compute a cache filename for a URL.
-fn url_cache_path(cache_dir: &Path, url: &str) -> std::path::PathBuf {
-    let hash = agent_doc_hash::content_hash(url);
-    cache_dir.join(format!("{}.txt", hash))
-}
-
 /// Fetch a URL and compare against cached content. Returns a change entry if content differs.
-/// Convert HTML content to markdown, stripping boilerplate elements.
-fn html_to_markdown(html: &str) -> String {
-    use htmd::HtmlToMarkdown;
-    let converter = HtmlToMarkdown::builder()
-        .skip_tags(vec!["script", "style", "nav", "footer", "noscript", "svg"])
-        .build();
-    converter.convert(html).unwrap_or_else(|_| html.to_string())
-}
-
-/// Returns true if the response content-type indicates HTML.
-fn is_html_content(content_type: &str) -> bool {
-    content_type.contains("text/html") || content_type.contains("application/xhtml")
-}
-
 fn check_url_link(url: &str, cache_dir: &Path) -> RelatedDocChange {
-    let cache_path = url_cache_path(cache_dir, url);
+    let cache_path = agent_doc_workflow::preflight_policy::url_cache_path(cache_dir, url);
     let cached = std::fs::read_to_string(&cache_path).ok();
 
     // Fetch with a reasonable timeout
@@ -2399,8 +2277,8 @@ fn check_url_link(url: &str, cache_dir: &Path) -> RelatedDocChange {
             };
 
             // Convert HTML to markdown for cleaner agent context
-            let content = if is_html_content(&content_type) {
-                html_to_markdown(&body)
+            let content = if agent_doc_workflow::preflight_policy::is_html_content(&content_type) {
+                agent_doc_workflow::preflight_policy::html_to_markdown(&body)
             } else {
                 body
             };
@@ -2470,7 +2348,7 @@ fn check_linked_docs(file: &Path) -> Vec<RelatedDocChange> {
 
     let mut changes = Vec::new();
     for link in &fm.links {
-        if is_url(link) {
+        if agent_doc_workflow::preflight_policy::is_url(link) {
             // URL link — fetch and compare against cache
             if let Some(ref cache) = cache_dir {
                 let change = check_url_link(link, cache);
@@ -2533,7 +2411,7 @@ fn recent_commit_summary(file: &Path, since: Option<std::time::SystemTime>) -> S
             .map(|d| format!("--since={}", d.as_secs()))
     });
 
-    let (git_root, resolved) = match git::resolve_to_git_root(file) {
+    let (git_root, resolved) = match agent_doc_git_io::dirs::resolve_to_git_root(file) {
         Ok(pair) => pair,
         Err(_) => return "changed (git unavailable)".to_string(),
     };
@@ -3588,12 +3466,13 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         let (fm, _) = agent_doc_frontmatter::frontmatter::parse(content).unwrap();
-        let warning = post_exchange_comment_prompt_preset_warning(
-            Path::new("session.md"),
-            content,
-            &fm.prompt_presets,
-        )
-        .expect("known prompt preset in ordinary post-exchange comment should warn");
+        let warning =
+            agent_doc_workflow::preflight_policy::post_exchange_comment_prompt_preset_warning(
+                "session.md",
+                content,
+                &fm.prompt_presets,
+            )
+            .expect("known prompt preset in ordinary post-exchange comment should warn");
 
         assert_eq!(warning.code, "post_exchange_comment_prompt_preset");
         assert!(
@@ -3626,8 +3505,8 @@ mod tests {
         let (fm, _) = agent_doc_frontmatter::frontmatter::parse(content).unwrap();
 
         assert!(
-            post_exchange_comment_prompt_preset_warning(
-                Path::new("session.md"),
+            agent_doc_workflow::preflight_policy::post_exchange_comment_prompt_preset_warning(
+                "session.md",
                 content,
                 &fm.prompt_presets,
             )
@@ -3699,12 +3578,13 @@ mod tests {
             "-->\n",
         );
         let (fm, _) = agent_doc_frontmatter::frontmatter::parse(content).unwrap();
-        let warning = post_exchange_comment_prompt_preset_warning(
-            Path::new("session.md"),
-            content,
-            &fm.prompt_presets,
-        )
-        .expect("dispatch-looking text in ordinary post-exchange comment should warn");
+        let warning =
+            agent_doc_workflow::preflight_policy::post_exchange_comment_prompt_preset_warning(
+                "session.md",
+                content,
+                &fm.prompt_presets,
+            )
+            .expect("dispatch-looking text in ordinary post-exchange comment should warn");
 
         assert_eq!(warning.code, "post_exchange_comment_prompt_preset");
         assert!(warning.message.contains("dispatch #manual-review"));
@@ -4120,24 +4000,42 @@ mod tests {
     }
     #[test]
     fn is_url_detects_http() {
-        assert!(is_url("http://example.com"));
-        assert!(is_url("https://example.com/path"));
-        assert!(!is_url("../relative/path.md"));
-        assert!(!is_url("tasks/software/agent-doc.md"));
-        assert!(!is_url(""));
+        assert!(agent_doc_workflow::preflight_policy::is_url(
+            "http://example.com"
+        ));
+        assert!(agent_doc_workflow::preflight_policy::is_url(
+            "https://example.com/path"
+        ));
+        assert!(!agent_doc_workflow::preflight_policy::is_url(
+            "../relative/path.md"
+        ));
+        assert!(!agent_doc_workflow::preflight_policy::is_url(
+            "tasks/software/agent-doc.md"
+        ));
+        assert!(!agent_doc_workflow::preflight_policy::is_url(""));
     }
     #[test]
     fn is_html_content_detects_html() {
-        assert!(is_html_content("text/html; charset=utf-8"));
-        assert!(is_html_content("text/html"));
-        assert!(is_html_content("application/xhtml+xml"));
-        assert!(!is_html_content("application/json"));
-        assert!(!is_html_content("text/plain"));
+        assert!(agent_doc_workflow::preflight_policy::is_html_content(
+            "text/html; charset=utf-8"
+        ));
+        assert!(agent_doc_workflow::preflight_policy::is_html_content(
+            "text/html"
+        ));
+        assert!(agent_doc_workflow::preflight_policy::is_html_content(
+            "application/xhtml+xml"
+        ));
+        assert!(!agent_doc_workflow::preflight_policy::is_html_content(
+            "application/json"
+        ));
+        assert!(!agent_doc_workflow::preflight_policy::is_html_content(
+            "text/plain"
+        ));
     }
     #[test]
     fn html_to_markdown_converts_basic_html() {
         let html = "<h1>Title</h1><p>Hello <strong>world</strong>.</p>";
-        let md = html_to_markdown(html);
+        let md = agent_doc_workflow::preflight_policy::html_to_markdown(html);
         assert!(md.contains("Title"), "should contain heading text");
         assert!(md.contains("**world**"), "should convert bold");
     }
@@ -4145,7 +4043,7 @@ mod tests {
     fn html_to_markdown_strips_script_and_style() {
         let html =
             "<p>Visible</p><script>alert('xss')</script><style>.foo{}</style><p>Also visible</p>";
-        let md = html_to_markdown(html);
+        let md = agent_doc_workflow::preflight_policy::html_to_markdown(html);
         assert!(md.contains("Visible"));
         assert!(md.contains("Also visible"));
         assert!(!md.contains("alert"), "script content should be stripped");
@@ -4155,7 +4053,7 @@ mod tests {
     fn html_to_markdown_strips_nav_and_footer() {
         let html =
             "<nav><a href='/'>Home</a></nav><main><p>Content</p></main><footer>Copyright</footer>";
-        let md = html_to_markdown(html);
+        let md = agent_doc_workflow::preflight_policy::html_to_markdown(html);
         assert!(md.contains("Content"));
         assert!(!md.contains("Home"), "nav content should be stripped");
         assert!(
@@ -4166,11 +4064,14 @@ mod tests {
     #[test]
     fn url_cache_path_is_deterministic() {
         let dir = TempDir::new().unwrap();
-        let p1 = url_cache_path(dir.path(), "https://example.com");
-        let p2 = url_cache_path(dir.path(), "https://example.com");
+        let p1 =
+            agent_doc_workflow::preflight_policy::url_cache_path(dir.path(), "https://example.com");
+        let p2 =
+            agent_doc_workflow::preflight_policy::url_cache_path(dir.path(), "https://example.com");
         assert_eq!(p1, p2, "same URL should produce same cache path");
 
-        let p3 = url_cache_path(dir.path(), "https://other.com");
+        let p3 =
+            agent_doc_workflow::preflight_policy::url_cache_path(dir.path(), "https://other.com");
         assert_ne!(
             p1, p3,
             "different URLs should produce different cache paths"

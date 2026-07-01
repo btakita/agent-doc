@@ -12,6 +12,7 @@ name = "agent_doc_harness"
 [dependencies]
 agent-doc-config = { path = "../agent-doc-config", version = "0.34.66" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.66" }
+agent-doc-secret-redact = { path = "../agent-doc-secret-redact", version = "0.34.66" }
 agent-doc-turn-executor = { path = "../agent-doc-turn-executor", version = "0.34.66" }
 agent-doc-turn-executor-tmux = { path = "../agent-doc-turn-executor-tmux", version = "0.34.66" }
 anyhow = "1"

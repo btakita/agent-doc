@@ -1683,7 +1683,7 @@ pub use materialize::*;
 /// plain git repos without `.agent-doc/`, then the file's parent directory.
 fn resolve_ipc_project_root(canonical: &Path) -> std::path::PathBuf {
     let parent = canonical.parent().unwrap_or(Path::new("/"));
-    let git_toplevel = crate::git::git_toplevel_at(parent);
+    let git_toplevel = agent_doc_git_io::dirs::git_toplevel_at(parent);
     // 1. Nearest .agent-doc/ root — mirrors IDE plugin's resolveRootFor.
     //    Submodule files resolve to the submodule root, not the superproject,
     //    so ack-content and patch paths agree between Rust and Kotlin.

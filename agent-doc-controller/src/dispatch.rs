@@ -76,6 +76,16 @@ pub fn dispatch_should_coalesce_in_flight(
     in_flight_same_cycle && !operator_driven
 }
 
+/// Seconds to report in dispatch-only busy / not-ready refusal messages.
+/// Prefer the caller's explicit ready-wait override when one was used; otherwise
+/// report the harness recovery-timeout default.
+pub fn dispatch_only_busy_refusal_wait_secs(
+    wait_for_ready_override: Option<Duration>,
+    default: Duration,
+) -> u64 {
+    wait_for_ready_override.unwrap_or(default).as_secs()
+}
+
 pub fn dispatch_diagnostic_field<'a>(payload: &'a str, field: &str) -> Option<&'a str> {
     let prefix = format!("{field}=");
     payload
@@ -3366,6 +3376,21 @@ gpt-5.4 high - ~/work/btakita/agent-loop/src/session-share - Context 31% used
             cold.contains("ui_outcome=blocked_with_exact_unblocker")
                 && cold.contains("unblocker=wait_for_dispatch_ready_prompt"),
             "cold-wait refusal must carry the typed unblocker outcome: {cold}"
+        );
+    }
+
+    #[test]
+    fn busy_refusal_wait_secs_reports_override_then_default() {
+        assert_eq!(
+            dispatch_only_busy_refusal_wait_secs(
+                Some(Duration::from_secs(60)),
+                Duration::from_secs(8),
+            ),
+            60
+        );
+        assert_eq!(
+            dispatch_only_busy_refusal_wait_secs(None, Duration::from_secs(8)),
+            8
         );
     }
 

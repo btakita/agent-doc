@@ -15,10 +15,13 @@ use agent_doc_sqlite::state_store::{
 };
 use agent_doc_tmux_commands::tmux_submit_mode_for_harness;
 use agent_doc_turn_executor_tmux::context_clear::{
-    ContextClearSubmitObservation, ContextClearSubmitStatus,
+    ContextClearSubmitObservation, ContextClearSubmitStatus, InterruptClearTimeoutFacts,
+    busy_clear_already_deferred_message, busy_clear_deferred_message, busy_clear_refusal_message,
     context_clear_command_visible_in_active_input, context_clear_submit_blocked_line,
     context_clear_submit_blocked_message, context_clear_submit_needs_enter_resubmit,
     context_clear_submit_observation_line, context_clear_submit_resubmit_proof_line,
+    interrupt_clear_timeout_message, operator_interrupt_key_plan, operator_interrupt_step_delay,
+    protected_clear_refusal_message, terminal_editor_command,
 };
 use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry, Tmux};
 
@@ -793,7 +796,14 @@ fn reconcile_idle_projection_before_clear(
                 );
                 anyhow::bail!(
                     "{}",
-                    protected_clear_refusal_message(&ctx.canonical_file, &evidence, &reason)
+                    protected_clear_refusal_message(
+                        &ctx.canonical_file,
+                        evidence.pane_id.as_deref(),
+                        evidence.source,
+                        evidence.current_command.as_deref(),
+                        evidence.tail.as_deref(),
+                        &reason,
+                    )
                 );
             }
         }
@@ -847,7 +857,10 @@ fn reconcile_idle_projection_before_clear(
                     );
                     eprintln!(
                         "{}",
-                        busy_clear_deferred_message(&ctx.canonical_file, &evidence)
+                        busy_clear_deferred_message(
+                            &ctx.canonical_file,
+                            evidence.pane_id.as_deref()
+                        )
                     );
                     return Ok(ClearPreflightOutcome::DeferredPreempt);
                 }
@@ -866,7 +879,10 @@ fn reconcile_idle_projection_before_clear(
                     );
                     eprintln!(
                         "{}",
-                        busy_clear_already_deferred_message(&ctx.canonical_file, &evidence)
+                        busy_clear_already_deferred_message(
+                            &ctx.canonical_file,
+                            evidence.pane_id.as_deref()
+                        )
                     );
                     return Ok(ClearPreflightOutcome::DeferredPreempt);
                 }
@@ -885,37 +901,20 @@ fn reconcile_idle_projection_before_clear(
                     );
                     anyhow::bail!(
                         "{}",
-                        busy_clear_refusal_message(&ctx.canonical_file, &evidence, &busy_reason)
+                        busy_clear_refusal_message(
+                            &ctx.canonical_file,
+                            evidence.pane_id.as_deref(),
+                            evidence.source,
+                            evidence.current_command.as_deref(),
+                            evidence.tail.as_deref(),
+                            &busy_reason,
+                        )
                     );
                 }
             }
         }
     }
     Ok(ClearPreflightOutcome::Proceed)
-}
-
-/// User-facing message when a non-interrupting clear pauses an active auto-loop
-/// and defers (`#autoloop-command-preemption` Phase 2). The loop is paused via
-/// the clear cooldown so the pane reaches an idle gap; the operator can re-run
-/// `session clear` there, and the destructive path stays explicit.
-fn busy_clear_deferred_message(file: &Path, evidence: &LivePaneEvidence) -> String {
-    let pane = evidence.pane_id.as_deref().unwrap_or("unknown");
-    format!(
-        "session_clear deferred for {} — pane {} is alive-busy under an active `agent:queue auto` loop, so the clear cannot run mid-turn without discarding in-flight work. Queued one clear for automatic delivery at the next idle prompt; the loop resumes after the clear settles. Run `agent-doc session interrupt-clear {}` to interrupt the turn and clear now.",
-        file.display(),
-        pane,
-        file.display()
-    )
-}
-
-fn busy_clear_already_deferred_message(file: &Path, evidence: &LivePaneEvidence) -> String {
-    let pane = evidence.pane_id.as_deref().unwrap_or("unknown");
-    format!(
-        "session_clear already deferred for {} — pane {} still has a queued clear waiting for the next idle prompt. Not sending another clear into the active turn. Run `agent-doc session interrupt-clear {}` to interrupt the turn and clear now.",
-        file.display(),
-        pane,
-        file.display()
-    )
 }
 
 fn operator_clear_input_state_for_evidence(
@@ -1159,42 +1158,6 @@ fn harness_for_evidence(
         .unwrap_or_else(|| agent_doc_harness::HarnessConfig::from_agent_name(&ctx.harness))
 }
 
-fn protected_clear_refusal_message(
-    file: &Path,
-    evidence: &LivePaneEvidence,
-    reason: &str,
-) -> String {
-    let pane = evidence.pane_id.as_deref().unwrap_or("unknown");
-    let command = evidence.current_command.as_deref().unwrap_or("unknown");
-    let tail = evidence.tail.as_deref().unwrap_or("unknown");
-    format!(
-        "session_clear refused for {} because pane {} contains protected prompt input (reason={}, source={}, current_command={}, tail={:?}). Clear the prompt input manually, or run `agent-doc session interrupt-clear {}` to intentionally interrupt the pane and clear context.",
-        file.display(),
-        pane,
-        reason,
-        evidence.source,
-        command,
-        tail,
-        file.display()
-    )
-}
-
-fn busy_clear_refusal_message(file: &Path, evidence: &LivePaneEvidence, reason: &str) -> String {
-    let pane = evidence.pane_id.as_deref().unwrap_or("unknown");
-    let command = evidence.current_command.as_deref().unwrap_or("unknown");
-    let tail = evidence.tail.as_deref().unwrap_or("unknown");
-    format!(
-        "session_clear refused for {} because pane {} is alive-busy (reason={}, source={}, current_command={}, tail={:?}). Wait for an idle prompt, or run `agent-doc session interrupt-clear {}` to intentionally interrupt the pane and clear context.",
-        file.display(),
-        pane,
-        reason,
-        evidence.source,
-        command,
-        tail,
-        file.display()
-    )
-}
-
 /// Pure decision for `session cancel-turn`: interrupt the running turn, or
 /// no-op when the harness is idle. The whole safety contract lives here — when
 /// no turn is active the command must NOT send the harness interrupt sequence,
@@ -1431,12 +1394,16 @@ pub fn interrupt_clear(file: &Path, force: bool) -> Result<()> {
             editor_recovery_attempted,
         } => anyhow::bail!(
             "{}",
-            interrupt_clear_timeout_message(
-                &ctx.canonical_file,
+            interrupt_clear_timeout_message(InterruptClearTimeoutFacts {
+                file: &ctx.canonical_file,
                 pane,
-                &evidence,
-                editor_recovery_attempted
-            )
+                state: evidence.state.as_str(),
+                source: evidence.source,
+                current_command: evidence.current_command.as_deref(),
+                prompt_ready: evidence.prompt_ready,
+                tail: evidence.tail.as_deref(),
+                editor_recovery_attempted,
+            })
         ),
     }
 }
@@ -1735,58 +1702,6 @@ fn interrupt_clear_initial_action(evidence: &LivePaneEvidence) -> InterruptClear
     }
 }
 
-fn interrupt_clear_timeout_message(
-    file: &Path,
-    pane: &str,
-    evidence: &LivePaneEvidence,
-    editor_recovery_attempted: bool,
-) -> String {
-    let command = evidence.current_command.as_deref().unwrap_or("unknown");
-    let tail = evidence.tail.as_deref().unwrap_or("unknown");
-    if editor_recovery_attempted {
-        return format!(
-            "session_interrupt_clear timed out for {} because pane {} stayed {} after interrupt and forced editor recovery (source={}, current_command={}, prompt_ready={}, tail={:?}). Inspect the pane, exit any editor prompt with `:qa!`, then run `agent-doc session status {}` before retrying.",
-            file.display(),
-            pane,
-            evidence.state.as_str(),
-            evidence.source,
-            command,
-            evidence
-                .prompt_ready
-                .map(|ready| ready.to_string())
-                .unwrap_or_else(|| "unknown".to_string()),
-            tail,
-            file.display()
-        );
-    }
-    format!(
-        "session_interrupt_clear timed out for {} because pane {} stayed {} after interrupt (source={}, current_command={}, prompt_ready={}, tail={:?}). Run `agent-doc session status {}` before retrying.",
-        file.display(),
-        pane,
-        evidence.state.as_str(),
-        evidence.source,
-        command,
-        evidence
-            .prompt_ready
-            .map(|ready| ready.to_string())
-            .unwrap_or_else(|| "unknown".to_string()),
-        tail,
-        file.display()
-    )
-}
-
-fn terminal_editor_command(command: &str) -> bool {
-    let name = Path::new(command)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(command)
-        .trim();
-    matches!(
-        name,
-        "vi" | "view" | "vim" | "vim.basic" | "vimdiff" | "nvim" | "nvimdiff"
-    )
-}
-
 /// The harness-native command that clears session context (starts a fresh
 /// conversation). Claude Code and Codex use `/clear`; OpenCode has **no
 /// `/clear` command** — its equivalent is `/new` (`session_new`, "Create a new
@@ -2027,29 +1942,6 @@ fn require_context_clear_submit_accepted(
 fn short_context_clear_submit_content_hash(content: &str) -> String {
     let hash = agent_doc_hash::content_hash(content);
     hash[..hash.len().min(12)].to_string()
-}
-
-/// Ordered interrupt keys for an operator interrupt-clear / force-restart on a
-/// live pane. `codex_shell_search` is true only when the Codex pane is in a
-/// shell `reverse-i-search` / history-search state — the one place `C-g` is
-/// safe and useful (it aborts the search). In the normal Codex TUI composer
-/// `C-g` opens the external editor (`$EDITOR`, e.g. nvim), so it must be omitted
-/// there and the interrupt falls through to `Escape` + `C-c`
-/// (#codex-interrupt-clear-ctrl-g-opens-editor).
-fn operator_interrupt_key_plan(harness: &str, codex_shell_search: bool) -> Vec<&'static str> {
-    match harness {
-        "opencode" => vec!["Escape", "Escape"],
-        "codex" if codex_shell_search => vec!["C-g", "Escape", "C-c"],
-        "codex" => vec!["Escape", "C-c"],
-        _ => vec!["C-c"],
-    }
-}
-
-fn operator_interrupt_step_delay(harness: &str) -> Duration {
-    match harness {
-        "opencode" => Duration::from_millis(200),
-        _ => Duration::from_millis(100),
-    }
 }
 
 fn send_operator_interrupt_sequence(
@@ -2571,7 +2463,7 @@ fn clear_closed_actor_pane_projection(ctx: &SessionContext) -> Result<Option<Str
 fn build_context(file: &Path) -> Result<SessionContext> {
     let canonical_file = file
         .canonicalize()
-        .unwrap_or_else(|_| agent_doc_orchestration::git::resolve_absolute_file_path(file));
+        .unwrap_or_else(|_| agent_doc_git_io::dirs::resolve_absolute_file_path(file));
     let content = std::fs::read_to_string(&canonical_file)
         .with_context(|| format!("failed to read {}", canonical_file.display()))?;
     let session_id = agent_doc_orchestration::frontmatter_io::read_session_id(&canonical_file)
@@ -4070,29 +3962,6 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
     }
 
     #[test]
-    fn protected_clear_refusal_points_to_interrupt_clear() {
-        let evidence = LivePaneEvidence {
-            pane_id: Some("%7".to_string()),
-            source: "authoritative_actor",
-            state: LivePaneState::AliveBusy,
-            current_command: Some("agent-doc".to_string()),
-            prompt_ready: Some(false),
-            tail: Some("gpt-5.5 high · ~/work/btakita/agent-loop · Context 85% used".to_string()),
-        };
-
-        let message = protected_clear_refusal_message(
-            Path::new("/tmp/doc.md"),
-            &evidence,
-            "drafted prompt input",
-        );
-
-        assert!(message.contains("session_clear refused"));
-        assert!(message.contains("pane %7 contains protected prompt input"));
-        assert!(message.contains("reason=drafted prompt input"));
-        assert!(message.contains("agent-doc session interrupt-clear /tmp/doc.md"));
-    }
-
-    #[test]
     fn operator_clear_allows_agent_doc_wrapper_without_busy_cue() {
         let evidence = LivePaneEvidence {
             pane_id: Some("%7".to_string()),
@@ -4130,49 +3999,6 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             agent_doc_controller::operator_clear::clear_guard_outcome(state),
             OperatorClearGuardOutcome::Blocked
         );
-        let message =
-            busy_clear_refusal_message(Path::new("/tmp/doc.md"), &evidence, "active codex turn");
-        assert!(message.contains("session_clear refused"));
-        assert!(message.contains("pane %7 is alive-busy"));
-        assert!(message.contains("reason=active codex turn"));
-        assert!(message.contains("agent-doc session interrupt-clear /tmp/doc.md"));
-    }
-
-    #[test]
-    fn busy_clear_deferred_message_names_automatic_single_delivery() {
-        let evidence = LivePaneEvidence {
-            pane_id: Some("%7".to_string()),
-            source: "authoritative_actor",
-            state: LivePaneState::AliveBusy,
-            current_command: Some("agent-doc".to_string()),
-            prompt_ready: Some(false),
-            tail: Some("Working...".to_string()),
-        };
-
-        let message = busy_clear_deferred_message(Path::new("/tmp/doc.md"), &evidence);
-
-        assert!(message.contains("session_clear deferred"));
-        assert!(message.contains("Queued one clear for automatic delivery"));
-        assert!(!message.contains("retry `agent-doc session clear"));
-        assert!(message.contains("agent-doc session interrupt-clear /tmp/doc.md"));
-    }
-
-    #[test]
-    fn busy_clear_already_deferred_message_refuses_duplicate_clear() {
-        let evidence = LivePaneEvidence {
-            pane_id: Some("%7".to_string()),
-            source: "authoritative_actor",
-            state: LivePaneState::AliveBusy,
-            current_command: Some("agent-doc".to_string()),
-            prompt_ready: Some(false),
-            tail: Some("Working...".to_string()),
-        };
-
-        let message = busy_clear_already_deferred_message(Path::new("/tmp/doc.md"), &evidence);
-
-        assert!(message.contains("session_clear already deferred"));
-        assert!(message.contains("Not sending another clear into the active turn"));
-        assert!(message.contains("agent-doc session interrupt-clear /tmp/doc.md"));
     }
 
     #[test]
@@ -4307,110 +4133,6 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             agent_doc_controller::operator_clear::clear_guard_outcome(state),
             OperatorClearGuardOutcome::Completed
         );
-    }
-
-    #[test]
-    fn terminal_editor_command_detects_vim_family_processes() {
-        for command in [
-            "vi",
-            "view",
-            "vim",
-            "vim.basic",
-            "vimdiff",
-            "nvim",
-            "nvimdiff",
-        ] {
-            assert!(
-                terminal_editor_command(command),
-                "{command} should trigger interrupt-clear editor recovery"
-            );
-        }
-        assert!(!terminal_editor_command("codex"));
-        assert!(!terminal_editor_command("agent-doc"));
-        assert!(!terminal_editor_command("vim-addon-manager"));
-    }
-
-    #[test]
-    fn operator_interrupt_key_plan_omits_ctrl_g_for_codex_composer() {
-        // #codex-interrupt-clear-ctrl-g-opens-editor: C-g opens the external
-        // editor (nvim) in the Codex composer, so the normal interrupt path must
-        // not send it — Escape + C-c is the safe interrupt.
-        assert_eq!(
-            operator_interrupt_key_plan("codex", false),
-            vec!["Escape", "C-c"]
-        );
-        assert!(!operator_interrupt_key_plan("codex", false).contains(&"C-g"));
-    }
-
-    #[test]
-    fn operator_interrupt_key_plan_sends_ctrl_g_only_for_codex_shell_search() {
-        // C-g is safe (aborts the search) only when the Codex pane is in a shell
-        // reverse-i-search / history-search state.
-        assert_eq!(
-            operator_interrupt_key_plan("codex", true),
-            vec!["C-g", "Escape", "C-c"]
-        );
-    }
-
-    #[test]
-    fn operator_interrupt_key_plan_unchanged_for_other_harnesses() {
-        // The codex_shell_search flag is codex-scoped and must not perturb other
-        // harnesses' interrupt sequences.
-        assert_eq!(
-            operator_interrupt_key_plan("opencode", false),
-            vec!["Escape", "Escape"]
-        );
-        assert_eq!(
-            operator_interrupt_key_plan("opencode", true),
-            vec!["Escape", "Escape"]
-        );
-        assert_eq!(operator_interrupt_key_plan("claude", false), vec!["C-c"]);
-        assert_eq!(operator_interrupt_key_plan("claude", true), vec!["C-c"]);
-    }
-
-    #[test]
-    fn interrupt_clear_timeout_message_reports_editor_recovery() {
-        let evidence = LivePaneEvidence {
-            pane_id: Some("%7".to_string()),
-            source: "authoritative_actor",
-            state: LivePaneState::AliveBusy,
-            current_command: Some("vim".to_string()),
-            prompt_ready: Some(false),
-            tail: Some("-- INSERT --".to_string()),
-        };
-        let message =
-            interrupt_clear_timeout_message(Path::new("/tmp/doc.md"), "%7", &evidence, true);
-
-        assert!(message.contains("forced editor recovery"));
-        assert!(message.contains("stayed alive-busy"));
-        assert!(message.contains("source=authoritative_actor"));
-        assert!(message.contains("current_command=vim"));
-        assert!(message.contains("prompt_ready=false"));
-        assert!(message.contains("tail=\"-- INSERT --\""));
-        assert!(message.contains(":qa!"));
-        assert!(message.contains("agent-doc session status /tmp/doc.md"));
-    }
-
-    #[test]
-    fn interrupt_clear_timeout_message_reports_last_command_without_editor_recovery() {
-        let evidence = LivePaneEvidence {
-            pane_id: Some("%7".to_string()),
-            source: "authoritative_actor",
-            state: LivePaneState::AliveBusy,
-            current_command: Some("codex".to_string()),
-            prompt_ready: Some(false),
-            tail: Some("⏵⏵ bypass permissions on".to_string()),
-        };
-        let message =
-            interrupt_clear_timeout_message(Path::new("/tmp/doc.md"), "%7", &evidence, false);
-
-        assert!(!message.contains("forced editor recovery"));
-        assert!(message.contains("stayed alive-busy"));
-        assert!(message.contains("source=authoritative_actor"));
-        assert!(message.contains("current_command=codex"));
-        assert!(message.contains("prompt_ready=false"));
-        assert!(message.contains("tail=\"⏵⏵ bypass permissions on\""));
-        assert!(message.contains("agent-doc session status /tmp/doc.md"));
     }
 
     #[test]

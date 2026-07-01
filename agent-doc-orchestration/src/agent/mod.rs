@@ -39,6 +39,7 @@ use std::time::{Duration, Instant};
 use self::streaming::StreamingAgent;
 use agent_doc_config::AgentConfig;
 use agent_doc_frontmatter::frontmatter::Frontmatter;
+use agent_doc_git_io::dirs::workspace_access_dirs_for_doc;
 
 /// Response from an agent backend.
 pub struct AgentResponse {
@@ -157,7 +158,7 @@ pub fn append_workspace_access_args(agent_name: &str, args: &mut Vec<String>, fi
         }
     }
 
-    for dir in crate::git::workspace_access_dirs_for_doc(file) {
+    for dir in workspace_access_dirs_for_doc(file) {
         let dir = dir.to_string_lossy().into_owned();
         if existing.insert(dir.clone()) {
             args.push("--add-dir".into());

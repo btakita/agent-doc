@@ -5,10 +5,14 @@
 
 use std::collections::HashSet;
 
-use agent_doc_document::queue_projection::{strip_in_progress_marker, strip_priority_markers};
+use agent_doc_document::queue_projection::{
+    IN_PROGRESS_MARKER, strip_in_progress_marker, strip_priority_markers,
+};
+use agent_doc_element::element;
+use anyhow::{Context, Result};
 
 use crate::{
-    document_queue::QueueEntry,
+    document_queue::{self, QueueEntry},
     queue_response::{normalize_done_id, queue_prompt_done_id, queue_prompt_text_is_free_text},
 };
 
@@ -121,6 +125,370 @@ pub fn normalized_done_id_bag(texts: &[String]) -> Vec<String> {
         .collect::<Vec<_>>();
     ids.sort();
     ids
+}
+
+/// Node keys selected for queue consumption.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueuePromptNodeKeys {
+    pub keys: Vec<String>,
+    pub ast_backed: bool,
+}
+
+pub fn queue_prompt_node_keys_for_texts(
+    content: &str,
+    target_texts: &[String],
+    preferred_node_keys: &[String],
+) -> Result<Option<QueuePromptNodeKeys>> {
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+        .map_err(|err| anyhow::anyhow!("queue consume: failed to derive queue node keys: {err}"))?;
+    let mut selected_indices = HashSet::new();
+    let mut keys = Vec::with_capacity(target_texts.len());
+    for (target_index, target_text) in target_texts.iter().enumerate() {
+        let preferred = preferred_node_keys.get(target_index);
+        let preferred_index = preferred.and_then(|preferred_key| {
+            nodes.iter().enumerate().position(|(node_index, node)| {
+                !selected_indices.contains(&node_index)
+                    && !node.item.struck
+                    && node.node_key == *preferred_key
+                    && queue_prompt_texts_match_for_consumption(&node.item.text, target_text)
+            })
+        });
+        let fallback_index = || {
+            nodes.iter().enumerate().position(|(node_index, node)| {
+                !selected_indices.contains(&node_index)
+                    && !node.item.struck
+                    && queue_prompt_texts_match_for_consumption(&node.item.text, target_text)
+            })
+        };
+        let Some(node_index) = preferred_index.or_else(fallback_index) else {
+            return Ok(None);
+        };
+        selected_indices.insert(node_index);
+        keys.push(nodes[node_index].node_key.clone());
+    }
+    Ok(Some(QueuePromptNodeKeys {
+        keys,
+        ast_backed: true,
+    }))
+}
+
+pub fn queue_prompt_node_keys_for_count(
+    content: &str,
+    count: usize,
+) -> Result<QueuePromptNodeKeys> {
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+        .map_err(|err| anyhow::anyhow!("queue consume: failed to derive queue node keys: {err}"))?;
+    let ast_keys = nodes
+        .into_iter()
+        .filter(|node| !node.item.struck)
+        .take(count)
+        .map(|node| node.node_key)
+        .collect::<Vec<_>>();
+    if ast_keys.len() >= count {
+        return Ok(QueuePromptNodeKeys {
+            keys: ast_keys,
+            ast_backed: true,
+        });
+    }
+
+    let components = element::parse(content)?;
+    let queue_component = components
+        .iter()
+        .find(|c| c.name == "queue")
+        .ok_or_else(|| anyhow::anyhow!("queue consume: document has no agent:queue component"))?;
+    let body = &content[queue_component.open_end..queue_component.close_start];
+    let entries =
+        document_queue::parse(body).context("queue consume: failed to parse document queue")?;
+    let prompt_texts = first_n_queue_prompt_texts(&entries, count);
+    if prompt_texts.len() < count {
+        anyhow::bail!(
+            "queue consume: document has {} prompt(s) but planned to consume {}",
+            prompt_texts.len(),
+            count
+        );
+    }
+
+    let keys = prompt_texts
+        .iter()
+        .enumerate()
+        .map(|(index, text)| {
+            let hash = agent_doc_hash::content_hash(text);
+            let short_hash = &hash[..hash.len().min(12)];
+            format!("queue:entry:{index}:{short_hash}")
+        })
+        .collect::<Vec<_>>();
+
+    Ok(QueuePromptNodeKeys {
+        keys,
+        ast_backed: false,
+    })
+}
+
+pub fn queue_prompt_node_keys_for_done_ids(
+    content: &str,
+    done_ids: &[String],
+    consumed_texts: &[String],
+) -> QueuePromptNodeKeys {
+    let done_ids = done_ids
+        .iter()
+        .map(|id| normalize_done_id(id))
+        .collect::<HashSet<_>>();
+
+    if let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes(content, "queue") {
+        let keys = nodes
+            .into_iter()
+            .filter(|node| !node.item.struck)
+            .filter(|node| {
+                queue_prompt_done_id(&node.item.text).is_some_and(|id| done_ids.contains(&id))
+            })
+            .map(|node| node.node_key)
+            .collect::<Vec<_>>();
+        if keys.len() == consumed_texts.len() {
+            return QueuePromptNodeKeys {
+                keys,
+                ast_backed: true,
+            };
+        }
+    }
+
+    let keys = consumed_texts
+        .iter()
+        .enumerate()
+        .map(|(index, text)| {
+            let hash = agent_doc_hash::content_hash(text);
+            let short_hash = &hash[..hash.len().min(12)];
+            format!("queue:done:{index}:{short_hash}")
+        })
+        .collect::<Vec<_>>();
+    QueuePromptNodeKeys {
+        keys,
+        ast_backed: false,
+    }
+}
+
+pub fn consume_queue_nodes_by_key(content: &str, node_keys: &[String]) -> Result<String> {
+    let borrowed = node_keys.iter().map(String::as_str).collect::<Vec<_>>();
+    let consumed = agent_doc_markdown_ast::mutations::consume_nodes(content, "queue", &borrowed)
+        .map_err(|err| {
+            anyhow::anyhow!("queue consume: failed to apply node-keyed consume: {err}")
+        })?;
+    Ok(strip_in_progress_marker_from_struck_queue_items(&consumed))
+}
+
+fn strip_in_progress_marker_from_struck_queue_items(content: &str) -> String {
+    let Ok(components) = element::parse(content) else {
+        return content.to_string();
+    };
+    let Some(queue) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return content.to_string();
+    };
+    let body = queue.content(content);
+    let needle_with_space = format!("~~{} ", IN_PROGRESS_MARKER);
+    let needle_bare = format!("~~{}", IN_PROGRESS_MARKER);
+    let updated_body = body
+        .replace(&needle_with_space, "~~")
+        .replace(&needle_bare, "~~");
+    if updated_body == body {
+        content.to_string()
+    } else {
+        queue.replace_content(content, &updated_body)
+    }
+}
+
+/// Node keys of every active (non-struck) queue head that is non-drainable
+/// **noise** (`#goqstall2` / `#qcontam`): pasted console output, an agent-response
+/// fragment, or another structural/log artifact. `preset_supplies_directive` is
+/// taken from the queue's `preset` attribute so classification matches
+/// `queue_continuation::queue_stale_noise_lines` exactly. Id-backed directive heads
+/// (`do [#id]`) and genuinely drainable free-text/prose heads are excluded, so
+/// pruning never desyncs tracked or runnable work.
+pub fn noise_queue_head_node_keys(content: &str) -> Result<Vec<String>> {
+    let preset_supplies_directive = element::parse(content)
+        .ok()
+        .and_then(|comps| {
+            comps
+                .iter()
+                .find(|c| c.name == "queue")
+                .map(|c| c.attrs.contains_key("preset"))
+        })
+        .unwrap_or(false);
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+        .map_err(|err| anyhow::anyhow!("noise prune: failed to derive queue node keys: {err}"))?;
+    let mut keys = Vec::new();
+    for node in nodes {
+        if node.item.struck {
+            continue;
+        }
+        let text = node.item.text.trim();
+        if text.is_empty() {
+            continue;
+        }
+        if crate::queue_continuation::is_noise_queue_head(text, preset_supplies_directive) {
+            keys.push(node.node_key);
+        }
+    }
+    Ok(keys)
+}
+
+/// Node keys of every live (non-struck) **orphan id-backed** queue head: an
+/// id-backed directive (`do [#id]` / `[#id]` / `#id`) whose id names NO open
+/// `agent:backlog` item (#orphanqhead bulk prune / #qchurn). Such a head has no
+/// drain path — `queue consume` rejects id-backed heads ("reap via --done") and
+/// `--done <id>` is a no-op — yet it is excluded from `drainable_head_count` and,
+/// when it sits at the queue head, BLOCKS the leading-run `queue consume` from
+/// reaching answered free-text heads behind it, so the go-mode loop churns. Bulk
+/// pruning it (alongside noise) clears that wedge without the operator naming each
+/// id via the targeted `queue consume --id <id>` escape hatch.
+///
+/// Gated on an `agent:backlog` component being PRESENT: a free-form id-head queue
+/// (no backlog) treats the id-heads AS the work, so membership is not required and
+/// nothing is pruned — mirroring `head_is_drainable`'s `open_backlog_ids` gate so
+/// the prune set and the drainable set agree on what an "orphan" is.
+pub fn orphan_id_queue_head_node_keys(content: &str) -> Result<Vec<String>> {
+    let has_backlog = element::parse(content)
+        .map(|comps| comps.iter().any(|c| element::is_backlog_component(&c.name)))
+        .unwrap_or(false);
+    if !has_backlog {
+        return Ok(Vec::new());
+    }
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+        .map_err(|err| anyhow::anyhow!("orphan prune: failed to derive queue node keys: {err}"))?;
+    let mut keys = Vec::new();
+    for node in nodes {
+        if node.item.struck {
+            continue;
+        }
+        let text = node.item.text.trim();
+        // Only id-backed heads are candidates; a free-text report that merely
+        // contains a stray `#token` must never be force-struck here.
+        if text.is_empty() || queue_prompt_text_is_free_text(content, text) {
+            continue;
+        }
+        let Some(id) = queue_prompt_done_id(text) else {
+            continue;
+        };
+        // An id naming OPEN backlog work (including a deferred `[operator-verify]` /
+        // `[focused-cycle]` item, which is still an open `[ ]`/`[/]` entry) has a
+        // real drain path — preserve it. Only a truly absent id is an orphan.
+        if !head_id_names_open_backlog_item(content, &id) {
+            keys.push(node.node_key);
+        }
+    }
+    Ok(keys)
+}
+
+/// Clear every non-drainable queue head from `content`, returning the rewritten
+/// document and the number struck. Two non-drainable classes are cleared: **noise**
+/// (pasted console output / agent fragments / structural artifacts) and **orphan
+/// id-backed heads** (`#orphanqhead`: a `do [#id]` / `[#id]` head whose id names no
+/// open `agent:backlog` item). Multiline fenced noise blocks are excised by byte
+/// range (`queue::parse_spans`); bulleted single-line noise AND orphan id heads are
+/// struck by durable node key (`item_nodes`). Multiline removal runs first so the
+/// node-key pass sees stable post-excision offsets. (#qnoise-multiline-strike)
+pub fn strike_all_noise_queue_heads(content: &str) -> Result<(String, usize)> {
+    let comps = element::parse(content)?;
+    let Some(queue) = comps.iter().find(|c| c.name == "queue") else {
+        return Ok((content.to_string(), 0));
+    };
+    let preset_supplies_directive = queue.attrs.contains_key("preset");
+    let body_start = queue.open_end;
+    let body = &content[body_start..queue.close_start];
+
+    // 1. Multiline noise Prompt blocks AND pasted-evidence `Freeform` lines, by exact
+    //    byte range (#qnoise-multiline-strike). A multiline `---`/~~~-fenced Prompt is
+    //    excised only when its text is noise (multi-line console dump, nested ``` fence,
+    //    agent-marker, or bold-report) — a single-line `do [#id]` directive that merely
+    //    happens to be `---`-wrapped stays drainable and is preserved. A bare ```` ``` ````
+    //    console paste (the most common operator flood) is not a recognized queue fence,
+    //    so it lands as a run of `Freeform` lines instead; `is_noise_freeform_line`
+    //    excises those while preserving `---`/`~~~` separators and `re [#id]` references.
+    let mut ranges: Vec<std::ops::Range<usize>> = Vec::new();
+    for (entry, range) in document_queue::parse_spans(body)? {
+        let is_noise = match &entry {
+            QueueEntry::Prompt(prompt) => {
+                prompt.multiline
+                    && crate::queue_continuation::is_noise_queue_head(
+                        &prompt.text,
+                        preset_supplies_directive,
+                    )
+            }
+            QueueEntry::Freeform(line) => document_queue::is_noise_freeform_line(line),
+            _ => false,
+        };
+        if is_noise {
+            ranges.push((body_start + range.start)..(body_start + range.end));
+        }
+    }
+    let multiline_struck = ranges.len();
+    let mut working = content.to_string();
+    ranges.sort_by_key(|r| r.start);
+    // Excise back-to-front so earlier offsets stay valid.
+    for range in ranges.into_iter().rev() {
+        working.replace_range(range, "");
+    }
+
+    // 2. Bulleted single-line noise heads AND orphan id-backed heads (#orphanqhead),
+    //    struck via durable node keys. Orphan id-heads are non-drainable like noise
+    //    but `is_noise_queue_head` keeps them (they carry an `#id`), so they are
+    //    collected separately and merged into one strike set. Dedup so a head that
+    //    somehow matches both passes is not double-counted.
+    let mut keys = noise_queue_head_node_keys(&working)?;
+    for key in orphan_id_queue_head_node_keys(&working)? {
+        if !keys.contains(&key) {
+            keys.push(key);
+        }
+    }
+    let bulleted_struck = keys.len();
+    if !keys.is_empty() {
+        working = consume_queue_nodes_by_key(&working, &keys)?;
+    }
+
+    Ok((working, multiline_struck + bulleted_struck))
+}
+
+/// Node keys of every live (non-struck) id-backed queue head whose directive id
+/// resolves to exactly `target_id`. Free-text prompts — even ones that merely
+/// *contain* a `#token` — are excluded so the orphan escape hatch can never strike
+/// a free-text operator report by accident.
+pub fn id_backed_head_node_keys(content: &str, target_id: &str) -> Result<Vec<String>> {
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+        .map_err(|err| anyhow::anyhow!("orphan strike: failed to derive queue node keys: {err}"))?;
+    let mut keys = Vec::new();
+    for node in nodes {
+        if node.item.struck {
+            continue;
+        }
+        let text = node.item.text.trim();
+        if text.is_empty() || queue_prompt_text_is_free_text(content, text) {
+            continue;
+        }
+        if queue_prompt_done_id(text).as_deref() == Some(target_id) {
+            keys.push(node.node_key);
+        }
+    }
+    Ok(keys)
+}
+
+/// True when `target_id` names a NON-done item in any `agent:backlog` component —
+/// live work that should drain through the normal `--done` lifecycle rather than
+/// the orphan escape hatch.
+pub fn head_id_names_open_backlog_item(content: &str, target_id: &str) -> bool {
+    let Ok(comps) = element::parse(content) else {
+        return false;
+    };
+    comps
+        .iter()
+        .filter(|c| element::is_backlog_component(&c.name))
+        .any(|comp| {
+            let (_, items, _) =
+                agent_doc_element_backlog::backlog::parse_items(comp.content(content));
+            items.iter().any(|item| {
+                !item.is_done() && !item.id.is_empty() && item.id.eq_ignore_ascii_case(target_id)
+            })
+        })
 }
 
 /// Given a single queue line, append the deterministic auto-struck explanation
@@ -360,6 +728,116 @@ mod tests {
             normalized_done_id_bag(&["do [#b]".to_string(), "do #a".to_string()]),
             vec!["a".to_string(), "b".to_string()]
         );
+    }
+
+    #[test]
+    fn consume_queue_nodes_by_key_strips_in_progress_marker_before_strike_text() {
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "- 🚧 do [#head]\n",
+            "- do [#tail]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let mut keys = queue_prompt_node_keys_for_count(content, 1).unwrap().keys;
+        let key = keys.remove(0);
+
+        let updated = consume_queue_nodes_by_key(content, &[key]).unwrap();
+
+        assert!(updated.contains("- ~~do [#head]~~\n"), "{updated}");
+        assert!(!updated.contains("~~🚧"), "{updated}");
+        assert!(updated.contains("- do [#tail]\n"), "{updated}");
+    }
+
+    #[test]
+    fn id_backed_head_node_keys_targets_only_id_backed_heads() {
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "- do [#orphangone]\n",
+            "- Please keep [#orphangone] visible in the report\n",
+            "- do [#other]\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let keys = id_backed_head_node_keys(content, "orphangone").unwrap();
+
+        assert_eq!(keys.len(), 1, "only the exact id directive is targetable");
+        let updated = consume_queue_nodes_by_key(content, &keys).unwrap();
+        assert!(updated.contains("- ~~do [#orphangone]~~\n"), "{updated}");
+        assert!(
+            updated.contains("- Please keep [#orphangone] visible in the report\n"),
+            "{updated}"
+        );
+        assert!(updated.contains("- do [#other]\n"), "{updated}");
+    }
+
+    #[test]
+    fn strike_all_noise_queue_heads_strikes_noise_and_orphan_id_heads_only() {
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- [route] target tmux session: 0\n",
+            "- :pushpin: [#orphan]\n",
+            "- :pushpin: do [#focused]\n",
+            "- fix the tokenizer now\n",
+            "- do [#keepme]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keepme] real open work\n",
+            "- [ ] [#focused] [focused-cycle] dedicated cycle work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        let (planned, struck) = strike_all_noise_queue_heads(content).unwrap();
+
+        assert_eq!(struck, 2, "{planned}");
+        assert!(
+            planned.contains("~~[route] target tmux session: 0~~"),
+            "{planned}"
+        );
+        assert!(
+            planned.contains("~~:pushpin: [#orphan]~~") || planned.contains("~~[#orphan]~~"),
+            "{planned}"
+        );
+        assert!(planned.contains("- :pushpin: do [#focused]\n"), "{planned}");
+        assert!(planned.contains("- fix the tokenizer now\n"), "{planned}");
+        assert!(planned.contains("- do [#keepme]\n"), "{planned}");
+    }
+
+    #[test]
+    fn strike_all_noise_queue_heads_excises_multiline_log_blocks() {
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue preset=\"#spec-test-build-install-commit-push\" go -->\n",
+            "- [#keepme]\n",
+            "---\n",
+            "```\n",
+            "[route] target tmux session: 0\n",
+            "Error: dispatch blocked: only the gated #5eq8 remains.\n",
+            "```\n",
+            "---\n",
+            "---\n",
+            ":pushpin: JB `Run Agent Doc` report that should remain.\n",
+            "```\n",
+            "Error: diagnostic evidence\n",
+            "```\n",
+            "---\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let (planned, struck) = strike_all_noise_queue_heads(content).unwrap();
+
+        assert_eq!(struck, 1, "{planned}");
+        assert!(planned.contains("- [#keepme]\n"), "{planned}");
+        assert!(
+            !planned.contains("[route] target tmux session: 0"),
+            "{planned}"
+        );
+        assert!(!planned.contains("#5eq8"), "{planned}");
+        assert!(
+            planned.contains("JB `Run Agent Doc` report that should remain."),
+            "{planned}"
+        );
+        assert!(planned.contains("Error: diagnostic evidence"), "{planned}");
     }
 
     #[test]

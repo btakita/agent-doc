@@ -222,6 +222,7 @@ pub(crate) fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcRes
 // family is inert on the headless control-plane path. Per-document isolation is
 // structural: the hub is keyed by the document hash, never shared across docs.
 
+use agent_doc_document_realtime::crdt_relay::AwarenessState;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 
 fn handle_replica_register(file: &str, identity: &str) -> IpcResponse {
@@ -337,7 +338,7 @@ fn handle_replica_awareness(file: &str, identity: &str, awareness_b64: &str) -> 
         Ok(bytes) => bytes,
         Err(e) => return IpcResponse::err(format!("crdt awareness: bad base64: {e}")),
     };
-    let state: crate::crdt_relay::AwarenessState = match serde_json::from_slice(&json) {
+    let state: AwarenessState = match serde_json::from_slice(&json) {
         Ok(state) => state,
         Err(e) => return IpcResponse::err(format!("crdt awareness: bad json: {e}")),
     };

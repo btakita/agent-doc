@@ -1040,7 +1040,7 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-orchestration/src/git.rs",
         "agent-doc-document-realtime/src/write_policy.rs",
         "agent-doc-document/src/commit_normalization.rs",
-        "agent-doc-orchestration/src/git/dirs.rs",
+        "agent-doc-git-io/src/dirs.rs",
         "src/orchestrate.rs",
         "src/orchestrate/dag.rs",
         "agent-doc-orchestration/src/preflight.rs",
@@ -5799,6 +5799,13 @@ fn test_agent_doc_prompt_contract_owns_prompt_contract_policy() {
         (
             "agent-doc-orchestration/src/preflight.rs",
             vec![
+                "agent_doc_workflow::preflight_policy::post_exchange_comment_prompt_preset_warning",
+            ],
+            vec!["crate::prompt_contract"],
+        ),
+        (
+            "agent-doc-workflow/src/preflight_policy.rs",
+            vec![
                 "agent_doc_prompt_contract::requested_prompt_presets",
                 "agent_doc_prompt_contract::push_unique_strings",
             ],
@@ -6711,6 +6718,7 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         "pub mod invariants;",
         "pub mod doctor;",
         "pub mod orchestrate_tasks;",
+        "pub mod preflight_policy;",
         "pub mod session_cycle;",
         "pub enum WorkflowEvidenceKind",
         "pub enum WorkflowProof",
@@ -6729,6 +6737,24 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
     }
     let session_cycle_policy =
         fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/session_cycle.rs")).unwrap();
+    let preflight_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/preflight_policy.rs"))
+            .unwrap();
+    for required in [
+        "pub struct PreflightPolicyWarning",
+        "pub fn post_exchange_comment_prompt_preset_warning(",
+        "pub fn preset_item_id_collision_warning(",
+        "pub fn format_ipc_dogfood_note(",
+        "pub fn is_url(",
+        "pub fn url_cache_path(",
+        "pub fn html_to_markdown(",
+        "pub fn is_html_content(",
+    ] {
+        assert!(
+            preflight_policy.contains(required),
+            "agent-doc-workflow must own pure preflight policy: {required}"
+        );
+    }
     for required in [
         "pub enum SessionExecutionScope",
         "pub enum FinalizePendingMutationKind",
@@ -6964,6 +6990,25 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
     let preflight_mod =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
     for forbidden in [
+        "fn post_exchange_comment_prompt_preset_warning(",
+        "fn preset_item_id_collision_warning(",
+        "fn format_ipc_dogfood_note(",
+        "fn is_url(",
+        "fn url_cache_path(",
+        "fn html_to_markdown(",
+        "fn is_html_content(",
+    ] {
+        assert!(
+            !preflight_mod.contains(forbidden) && !preflight_run.contains(forbidden),
+            "orchestration preflight must not re-own pure preflight policy: {forbidden}"
+        );
+    }
+    assert!(
+        preflight_mod.contains("agent_doc_workflow::preflight_policy::")
+            && preflight_run.contains("agent_doc_workflow::preflight_policy::"),
+        "orchestration preflight should call focused workflow preflight policy directly"
+    );
+    for forbidden in [
         "pub(crate) fn compute_user_intent_prompt_changes",
         "pub(crate) fn derive_turn_scope",
         "pub(crate) fn exchange_node_count",
@@ -7102,9 +7147,12 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         "agent-doc-diff",
         "agent-doc-element-backlog",
         "agent-doc-frontmatter",
+        "agent-doc-hash",
         "agent-doc-markdown-ast",
+        "agent-doc-prompt-contract",
         "agent-doc-turn",
         "anyhow",
+        "htmd",
         "indexmap",
         "serde",
         "serde_json",
@@ -7120,9 +7168,12 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
             "agent-doc-diff"
                 | "agent-doc-element-backlog"
                 | "agent-doc-frontmatter"
+                | "agent-doc-hash"
                 | "agent-doc-markdown-ast"
+                | "agent-doc-prompt-contract"
                 | "agent-doc-turn"
                 | "anyhow"
+                | "htmd"
                 | "indexmap"
                 | "serde"
                 | "serde_json"
@@ -7331,6 +7382,9 @@ fn test_agent_doc_diff_owns_post_exchange_comment_policy() {
 
     let preflight_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let workflow_preflight_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/preflight_policy.rs"))
+            .unwrap();
     for forbidden in [
         "fn post_exchange_ordinary_html_comments",
         "fn comment_is_user_note",
@@ -7348,10 +7402,16 @@ fn test_agent_doc_diff_owns_post_exchange_comment_policy() {
         "agent_doc_diff::post_exchange_comment_directive_signals",
     ] {
         assert!(
-            preflight_source.contains(required),
-            "preflight should call the focused diff comment policy directly: {required}"
+            workflow_preflight_policy.contains(required),
+            "workflow preflight policy should call the focused diff comment policy directly: {required}"
         );
     }
+    assert!(
+        preflight_source.contains(
+            "agent_doc_workflow::preflight_policy::post_exchange_comment_prompt_preset_warning",
+        ),
+        "orchestration preflight should call the focused workflow warning policy directly"
+    );
 }
 
 #[test]
@@ -8682,6 +8742,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn existing_pane_ready_timeout(",
         "pub struct DispatchOnlyBusyRefusalFacts",
         "pub fn dispatch_only_busy_refusal_message(",
+        "pub fn dispatch_only_busy_refusal_wait_secs(",
     ] {
         assert!(
             controller_dispatch.contains(required_snippet),
@@ -8726,6 +8787,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn route_dispatch_bug_report_item(",
         "fn routed_dispatch_start_timeout(",
         "fn dispatch_only_busy_refusal_message(",
+        "fn dispatch_only_busy_refusal_wait_secs(",
     ] {
         assert!(
             !route_source.contains(forbidden_snippet),
@@ -9549,6 +9611,9 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         "pub enum RestartBehavior",
         "pub enum CleanExitBehavior",
         "pub fn normalize_harness_name(",
+        "fn protected_prompt_draft_preview(",
+        "fn pane_idle_dispatch_ready(",
+        "fn apply_plain_trigger_override(",
     ] {
         for source_path in &orchestration_sources {
             let source = fs::read_to_string(source_path).unwrap();
@@ -9567,6 +9632,9 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         "pub fn dispatch_blocker_reason(",
         "pub fn protected_prompt_input_reason(",
         "pub fn normalize_harness_name(",
+        "pub fn apply_plain_trigger_override(",
+        "pub fn protected_prompt_draft_preview(",
+        "pub fn pane_idle_dispatch_ready(",
     ] {
         assert!(
             harness_crate.contains(required_snippet),
@@ -11894,6 +11962,15 @@ fn test_agent_doc_turn_executor_tmux_owns_context_clear_submit_policy() {
         "pub fn context_clear_submit_resubmit_proof_line(",
         "pub fn context_clear_submit_blocked_line(",
         "pub fn context_clear_submit_blocked_message(",
+        "pub fn busy_clear_deferred_message(",
+        "pub fn busy_clear_already_deferred_message(",
+        "pub fn protected_clear_refusal_message(",
+        "pub fn busy_clear_refusal_message(",
+        "pub struct InterruptClearTimeoutFacts",
+        "pub fn interrupt_clear_timeout_message(",
+        "pub fn terminal_editor_command(",
+        "pub fn operator_interrupt_key_plan(",
+        "pub fn operator_interrupt_step_delay(",
     ] {
         assert!(
             context_clear_source.contains(required),
@@ -11916,6 +11993,14 @@ fn test_agent_doc_turn_executor_tmux_owns_context_clear_submit_policy() {
         "fn clear_command_candidate_visible(",
         "fn line_starts_with_clear_prompt_prefix(",
         "fn strip_clear_prompt_prefix(",
+        "fn busy_clear_deferred_message(",
+        "fn busy_clear_already_deferred_message(",
+        "fn protected_clear_refusal_message(",
+        "fn busy_clear_refusal_message(",
+        "fn interrupt_clear_timeout_message(",
+        "fn terminal_editor_command(",
+        "fn operator_interrupt_key_plan(",
+        "fn operator_interrupt_step_delay(",
     ] {
         assert!(
             !session_actor_source.contains(forbidden),
@@ -12202,6 +12287,12 @@ fn test_agent_doc_hash_owns_sha256_content_policy() {
             && hash_source.contains("pub fn document_id_for_path(")
             && hash_source.contains("Sha256::new()"),
         "agent-doc-hash must own shared SHA-256 hex and path-derived document-id policy"
+    );
+    let debounce_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-debounce/src/lib.rs")).unwrap();
+    assert!(
+        debounce_source.contains("pub fn preflight_debounce_max_wait("),
+        "agent-doc-debounce must own pure preflight debounce wait policy"
     );
 
     let debounce_manifest =
@@ -13213,6 +13304,46 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         "git IO sibling commits must not reach back through orchestration"
     );
 
+    let git_io_lib = fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/lib.rs")).unwrap();
+    assert!(
+        git_io_lib.contains("pub mod dirs;"),
+        "agent-doc-git-io should expose git directory/path IO helpers"
+    );
+    let git_dirs_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/dirs.rs")).unwrap();
+    for required in [
+        "pub fn absolute_git_dir_at",
+        "pub fn git_toplevel_at",
+        "pub fn git_superproject_at",
+        "pub fn resolve_absolute_file_path",
+        "pub fn resolve_to_git_root",
+        "pub fn workspace_access_dirs_for_doc",
+        "pub fn commit_lock_path_for_git_root",
+    ] {
+        assert!(
+            git_dirs_source.contains(required),
+            "agent-doc-git-io must own git directory/path IO helper: {required}"
+        );
+    }
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/git/dirs.rs")
+            .exists(),
+        "orchestration must not retain a git dirs shim module"
+    );
+    let git_adapter_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+    assert!(
+        git_adapter_source.contains("use agent_doc_git_io::dirs::{"),
+        "orchestration git adapter should import git directory/path helpers directly"
+    );
+    for forbidden in ["mod dirs;", "pub use dirs", "pub mod dirs"] {
+        assert!(
+            !git_adapter_source.contains(forbidden),
+            "orchestration git adapter must not facade git directory/path IO: {forbidden}"
+        );
+    }
+
     let main = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
     assert!(
         main.contains("agent_doc_git_io::checkpoint::run("),
@@ -13667,6 +13798,12 @@ fn test_agent_doc_element_backlog_owns_active_identity_projection_policy() {
 
     let preflight =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let preflight_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
+    let workflow_preflight_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/preflight_policy.rs"))
+            .unwrap();
     for forbidden in [
         "pub fn document_active_identities",
         "pub fn detect_identity_collisions",
@@ -13681,8 +13818,14 @@ fn test_agent_doc_element_backlog_owns_active_identity_projection_policy() {
         );
     }
     assert!(
-        preflight.contains("agent_doc_element_backlog::backlog::detect_identity_collisions"),
-        "preflight should call focused active identity collision detection directly"
+        workflow_preflight_policy
+            .contains("agent_doc_element_backlog::backlog::detect_identity_collisions"),
+        "workflow preflight policy should call focused active identity collision detection directly"
+    );
+    assert!(
+        preflight_run
+            .contains("agent_doc_workflow::preflight_policy::preset_item_id_collision_warning",),
+        "orchestration preflight should call the focused workflow identity warning policy directly"
     );
 
     let backlog_cmd =
@@ -14291,8 +14434,51 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
             "write/ipc/transport.rs must not re-own or facade full-content scope policy: {forbidden_snippet}"
         );
     }
+    let realtime_crdt_relay =
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime/src/crdt_relay.rs"))
+            .unwrap();
+    for required_snippet in [
+        "pub struct PendingReplicaUpdate",
+        "pub struct ReplicaDeliverySnapshot",
+        "pub struct RelayHub",
+        "pub struct AwarenessState",
+        "pub fn mint_client_id(",
+    ] {
+        assert!(
+            realtime_crdt_relay.contains(required_snippet),
+            "agent-doc-document-realtime must own CRDT relay policy: {required_snippet}"
+        );
+    }
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/crdt_relay.rs")
+            .exists(),
+        "orchestration must not retain a CRDT relay shim module"
+    );
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod crdt_relay;"),
+        "orchestration must not export a CRDT relay facade"
+    );
+    let crdt_relay_host =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/crdt_relay_host.rs"))
+            .unwrap();
+    assert!(
+        crdt_relay_host.contains("use agent_doc_document_realtime::crdt_relay::{"),
+        "crdt_relay_host should call the focused realtime relay directly"
+    );
+    for forbidden_snippet in [
+        "use crate::crdt_relay::",
+        "crate::crdt_relay::",
+        "agent_doc_orchestration::crdt_relay::",
+    ] {
+        assert!(
+            !crdt_relay_host.contains(forbidden_snippet),
+            "crdt_relay_host must not route through an orchestration relay facade: {forbidden_snippet}"
+        );
+    }
     for relative in [
-        "agent-doc-orchestration/src/crdt_relay.rs",
         "agent-doc-orchestration/src/crdt_relay_host.rs",
         "src/sim_world.rs",
     ] {
@@ -15108,6 +15294,7 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
     for required_snippet in [
         "pub fn route_prompt_text_for_change(",
         "pub fn active_auto_route_queue_prompt_texts(",
+        "pub fn strip_route_queue_state_for_boundary_compare(",
         "pub fn operator_prioritize_route_prompt(",
         "pub fn prepare_route_dispatch_queue_update(",
         "pub fn dispatch_active_turn_queue_source(",
@@ -15137,6 +15324,7 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
         "fn queue_prompt_text_for_route_change(",
         "fn operator_prioritize_route_prompt(",
         "fn route_queue_head_backed_by_committed_snapshot(",
+        "fn strip_route_queue_state_for_boundary_compare(",
         "fn strip_queue_component_auto_attr(",
         "fn insert_queue_component(",
         "document_queue::resolve_activation(",
@@ -15156,6 +15344,7 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
     for forbidden_snippet in [
         "fn route_queue_prompt_texts(",
         "fn normalize_route_queue_prompt_text(",
+        "fn preflight_debounce_max_wait(",
     ] {
         assert!(
             !preflight_source.contains(forbidden_snippet),
@@ -15172,6 +15361,10 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
                 .contains("agent_doc_queue::route_dispatch::route_prompt_text_for_change")
             && preflight_source
                 .contains("agent_doc_queue::route_dispatch::active_auto_route_queue_prompt_texts")
+            && preflight_source.contains(
+                "agent_doc_queue::route_dispatch::strip_route_queue_state_for_boundary_compare",
+            )
+            && preflight_source.contains("agent_doc_debounce::preflight_debounce_max_wait")
             && route_dispatch_only
                 .contains("agent_doc_queue::route_dispatch::dispatch_active_turn_queue_source"),
         "route/preflight should call route-dispatch queue policy through agent-doc-queue directly"
@@ -15349,6 +15542,13 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         "pub struct SyncPruneStateUpdate",
         "pub fn sync_prune_state_update",
         "pub fn planned_stash_window_indices",
+        "pub enum AutoStartMode",
+        "pub fn safe_passive_prune_cleanup_throttle",
+        "pub fn sync_repair_stamp_filename",
+        "pub fn rename_debounce_expired",
+        "pub fn auto_started_panes_summary",
+        "pub enum WindowIndexNormalizationPlan",
+        "pub fn plan_window_index_normalization",
         "pub fn effective_sync_columns",
         "pub fn is_file_rename",
         "pub struct ResyncTargetMatcher",
@@ -15390,6 +15590,14 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         "struct SyncPruneState",
         "fn sync_prune_state_update",
         "fn planned_stash_window_indices",
+        "enum AutoStartMode",
+        "fn safe_passive_prune_cleanup_throttle",
+        "fn sync_repair_stamp_filename",
+        "fn rename_debounce_expired",
+        "fn auto_started_panes_summary",
+        "enum WindowIndexNormalizationPlan",
+        "fn plan_window_index_normalization",
+        "const SAFE_PASSIVE_STASH_CLEANUP_THROTTLE",
         "serde_json::from_str::<SyncPruneState>",
         "fn effective_sync_columns",
         "pub fn is_file_rename",
@@ -15422,10 +15630,16 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
             && sync_orchestration.contains("effective_sync_columns")
             && sync_orchestration.contains("is_file_rename")
             && sync_orchestration.contains("latency_budget_status")
-            && sync_orchestration.contains("sanitize_stamp_component")
             && sync_orchestration.contains("sync_latency_message")
             && sync_orchestration.contains("sync_prune_state_update")
             && sync_orchestration.contains("planned_stash_window_indices")
+            && sync_orchestration.contains("AutoStartMode")
+            && sync_orchestration.contains("safe_passive_prune_cleanup_throttle")
+            && sync_orchestration.contains("sync_repair_stamp_filename")
+            && sync_orchestration.contains("rename_debounce_expired")
+            && sync_orchestration.contains("auto_started_panes_summary")
+            && sync_orchestration.contains("WindowIndexNormalizationPlan")
+            && sync_orchestration.contains("plan_window_index_normalization")
             && route_session_resolution.contains("agent_doc_sync::shared_sync_scope_root"),
         "orchestration should call sync scope policy through agent-doc-sync directly"
     );

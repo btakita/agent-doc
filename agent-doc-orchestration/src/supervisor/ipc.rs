@@ -221,7 +221,7 @@ pub enum IpcMethod {
     ReplicaAwareness {
         file: String,
         identity: String,
-        /// Base64-encoded JSON [`crate::crdt_relay::AwarenessState`].
+        /// Base64-encoded JSON [`agent_doc_document_realtime::crdt_relay::AwarenessState`].
         awareness_b64: String,
     },
 }

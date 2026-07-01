@@ -904,7 +904,7 @@ pub fn delete_pre_response(doc: &Path) -> Result<()> {
 // baseline is discarded in favor of the known baseline (it can otherwise replay
 // stale content as a fresh concurrent insert — the stale-`.yrs`-residue bug
 // class this whole model root-fixes). See
-// `agent_doc_orchestration::crdt_relay::DISK_IS_RECOVERY_PROJECTION_ONLY` and
+// `agent_doc_document_realtime::crdt_relay::DISK_IS_RECOVERY_PROJECTION_ONLY` and
 // `crdt_authority::CrdtAuthority::disk_is_durable_projection`.
 // ---------------------------------------------------------------------------
 

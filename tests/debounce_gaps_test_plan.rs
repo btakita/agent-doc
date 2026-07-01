@@ -680,16 +680,22 @@ fn test_preflight_timing_1500ms_is_configurable() {
 #[test]
 fn test_preflight_3s_timeout_is_sufficient_for_debounce() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let debounce_src = std::fs::read_to_string(root.join("agent-doc-debounce/src/lib.rs"))
+        .expect("agent-doc-debounce source should exist");
     let preflight_src =
         std::fs::read_to_string(root.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
 
     assert!(
-        preflight_src.contains("if debounce_ms > 3000"),
-        "preflight must expand max_wait when configured debounce exceeds 3s"
+        debounce_src.contains("if debounce_ms > 3000"),
+        "agent-doc-debounce must expand max_wait when configured debounce exceeds 3s"
     );
     assert!(
-        preflight_src.contains("(debounce_ms / 1000) + 1"),
-        "preflight max_wait must leave margin for long configured debounce values"
+        debounce_src.contains("(debounce_ms / 1000) + 1"),
+        "focused preflight debounce max_wait must leave margin for long configured debounce values"
+    );
+    assert!(
+        preflight_src.contains("agent_doc_debounce::preflight_debounce_max_wait"),
+        "preflight should call focused debounce wait policy directly"
     );
 }
 
@@ -725,8 +731,10 @@ fn test_timing_constants_are_documented() {
         std::fs::read_to_string(root.join("agent-doc-orchestration/src/preflight/run.rs")).unwrap();
     assert!(
         debounce_src.contains("1500")
-            && preflight_src.contains("3000")
+            && debounce_src.contains("preflight_debounce_max_wait")
+            && debounce_src.contains("3000")
+            && preflight_src.contains("agent_doc_debounce::preflight_debounce_max_wait")
             && preflight_run_src.contains("Default: 2000ms"),
-        "expected agent-doc-debounce and preflight{{,/run}}.rs to retain the documented debounce-related timeout constants"
+        "expected agent-doc-debounce to own documented debounce timing and preflight{{,/run}}.rs to call it directly"
     );
 }

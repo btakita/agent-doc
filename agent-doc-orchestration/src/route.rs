@@ -192,7 +192,7 @@ use agent_doc_controller::dispatch::{
     direct_pane_submit_acceptance_timeout, direct_pane_submit_outcome,
     dispatch_drain_retry_decision, dispatch_only_blocked_guard_reason,
     dispatch_only_busy_refusal_message as controller_dispatch_only_busy_refusal_message,
-    dispatch_only_busy_should_wait_for_ready,
+    dispatch_only_busy_refusal_wait_secs, dispatch_only_busy_should_wait_for_ready,
     dispatch_only_dispatch_start_proof_required as controller_dispatch_only_dispatch_start_proof_required,
     dispatch_only_focus_only_should_fail_closed, dispatch_only_sent_console_message,
     dispatch_only_sent_log_message, dispatch_only_should_print_unproven_progress,
@@ -310,17 +310,6 @@ fn route_write_document(
 
 fn wait_for_ready_override() -> Option<Duration> {
     WAIT_FOR_READY_OVERRIDE.with(|cell| cell.get())
-}
-
-/// Seconds to report as the dispatch-only busy / not-ready wait in operator-facing
-/// refusal messages: the caller's explicit `--wait-for-ready` override when set
-/// (the time route actually waited), otherwise the harness recovery-timeout
-/// `default`. Reporting the default alone is misleading when an editor passed a
-/// longer override — the JetBrains plugin's `--wait-for-ready 60` made the refusal
-/// claim "waiting 8s" (the Codex recovery constant) after a real 60s wait
-/// (`#busy-not-ready-message-reports-actual-wait`).
-fn dispatch_only_busy_refusal_wait_secs(default: Duration) -> u64 {
-    wait_for_ready_override().unwrap_or(default).as_secs()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1951,14 +1940,14 @@ pub fn run_with_tmux_with_options(
     let global_config = rc.global_config();
     let mut harness = HarnessConfig::from_context(&fm, &global_config);
     if plain_trigger {
-        apply_plain_trigger_override(&mut harness);
+        harness.apply_plain_trigger_override();
     }
 
     // Use absolute path for trigger commands to avoid CWD-dependent resolution
     // when the pane's CWD differs from the invoker's (e.g., narrowed to a
     // submodule root). Relative paths would resolve to the submodule's version
     // of the file when the same relative path exists in both locations.
-    let file_path = crate::git::resolve_absolute_file_path(file)
+    let file_path = agent_doc_git_io::dirs::resolve_absolute_file_path(file)
         .to_string_lossy()
         .into_owned();
     let target_session = resolve_target_session(tmux, None, col_args, Some(file), &harness);
@@ -3130,6 +3119,7 @@ fn route_via_authoritative_actor(
             harness.binary,
             cue,
             dispatch_only_busy_refusal_wait_secs(
+                wait_for_ready_override(),
                 dispatch_only_starting_pane_recovery_timeout_for_binary(
                     Some(harness.binary.as_str()),
                     cfg!(test),
@@ -3563,6 +3553,7 @@ fn route_via_authoritative_actor(
                         harness_binary: &harness.binary,
                         reason,
                         wait_secs: dispatch_only_busy_refusal_wait_secs(
+                            wait_for_ready_override(),
                             dispatch_only_starting_pane_recovery_timeout_for_binary(
                                 Some(harness.binary.as_str()),
                                 cfg!(test),
@@ -3675,6 +3666,7 @@ fn route_via_authoritative_actor(
                         harness_binary: &harness.binary,
                         reason,
                         wait_secs: dispatch_only_busy_refusal_wait_secs(
+                            wait_for_ready_override(),
                             dispatch_only_starting_pane_recovery_timeout_for_binary(
                                 Some(harness.binary.as_str()),
                                 cfg!(test),
@@ -3787,6 +3779,7 @@ fn route_via_authoritative_actor(
                 harness,
                 busy_cue.as_deref(),
                 dispatch_only_busy_refusal_wait_secs(
+                    wait_for_ready_override(),
                     dispatch_only_starting_pane_recovery_timeout_for_binary(
                         Some(harness.binary.as_str()),
                         cfg!(test),
@@ -6180,16 +6173,6 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         );
     }
     #[test]
-    fn plain_trigger_override_uses_bare_agent_doc_reopen_for_route() {
-        let mut claude = HarnessConfig::claude();
-        apply_plain_trigger_override(&mut claude);
-        assert_eq!(claude.trigger_command("test.md"), "agent-doc test.md");
-
-        let mut opencode = HarnessConfig::opencode();
-        apply_plain_trigger_override(&mut opencode);
-        assert_eq!(opencode.trigger_command("test.md"), "agent-doc test.md");
-    }
-    #[test]
     fn drain_reaps_completed_review_item_across_all_surfaces() {
         // #route-drain reap-all-surfaces: the focused route-drain repair reaped only
         // the backlog, so a deployed `[x]` item left in review blocked dispatch until
@@ -6900,8 +6883,9 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
 
         let _cwd_guard = ScopedCurrentDir::set(&root);
 
-        let resolved =
-            crate::git::resolve_absolute_file_path(std::path::Path::new("tasks/bugs.md"));
+        let resolved = agent_doc_git_io::dirs::resolve_absolute_file_path(std::path::Path::new(
+            "tasks/bugs.md",
+        ));
         assert!(
             resolved.is_absolute(),
             "route must send absolute paths to avoid submodule CWD misrouting"
@@ -7597,28 +7581,6 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
         drop(outer);
         // Outer dropped — back to unset baseline.
         assert_eq!(wait_for_ready_override(), None);
-    }
-    #[test]
-    fn busy_refusal_wait_secs_reports_override_then_default() {
-        use std::time::Duration;
-
-        // `#busy-not-ready-message-reports-actual-wait`: the busy/not-ready refusal
-        // must report the caller's `--wait-for-ready` override (the time route really
-        // waited), not the harness recovery constant. The JetBrains plugin passes 60,
-        // so the message must say 60 even when the Codex default is 8.
-        let guard = WaitForReadyOverrideGuard::set(Some(Duration::from_secs(60)));
-        assert_eq!(
-            dispatch_only_busy_refusal_wait_secs(Duration::from_secs(8)),
-            60
-        );
-        drop(guard);
-
-        // Without an override, the harness recovery-timeout default is reported.
-        let _none = WaitForReadyOverrideGuard::set(None);
-        assert_eq!(
-            dispatch_only_busy_refusal_wait_secs(Duration::from_secs(8)),
-            8
-        );
     }
     #[test]
     fn dispatch_only_starting_pane_ready_timeout_honors_override_then_default() {

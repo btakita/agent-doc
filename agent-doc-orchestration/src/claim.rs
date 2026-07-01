@@ -160,7 +160,7 @@ fn enforce_cross_session_claim(
 }
 
 fn normalize_claim_path(path: &Path) -> std::path::PathBuf {
-    let resolved = crate::git::resolve_absolute_file_path(path);
+    let resolved = agent_doc_git_io::dirs::resolve_absolute_file_path(path);
     resolved.canonicalize().unwrap_or(resolved)
 }
 

@@ -13,9 +13,15 @@ name = "agent_doc_workflow"
 agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.66" }
 agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.66" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.66" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.66" }
 agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.66" }
+agent-doc-prompt-contract = { path = "../agent-doc-prompt-contract", version = "0.34.66" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.66" }
 anyhow = "1"
+htmd = "0.5.3"
 indexmap = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"

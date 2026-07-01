@@ -588,7 +588,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     if !options.probe {
         let debounce_ms = preflight_debounce_ms(file);
         let debounce = std::time::Duration::from_millis(debounce_ms);
-        let max_wait = preflight_debounce_max_wait(debounce_ms);
+        let max_wait = agent_doc_debounce::preflight_debounce_max_wait(debounce_ms);
         let poll = std::time::Duration::from_millis(100);
         let start = std::time::Instant::now();
         let file_str = file.to_string_lossy();
@@ -1144,7 +1144,12 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     let prompt_presets_requested = prompt_preset_resolution.requested;
     if let Ok(content) = std::fs::read_to_string(file) {
         if let Some(warning) =
-            post_exchange_comment_prompt_preset_warning(file, &content, &frontmatter_prompt_presets)
+            agent_doc_workflow::preflight_policy::post_exchange_comment_prompt_preset_warning(
+                &file.display().to_string(),
+                &content,
+                &frontmatter_prompt_presets,
+            )
+            .map(PreflightWarning::from)
         {
             eprintln!("[preflight] warning: {}", warning.message);
             warnings.push(warning);
@@ -1153,12 +1158,15 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             eprintln!("[preflight] warning: {}", warning.message);
             warnings.push(warning);
         }
-        if let Some(warning) = preset_item_id_collision_warning(&content) {
+        if let Some(warning) =
+            agent_doc_workflow::preflight_policy::preset_item_id_collision_warning(&content)
+                .map(PreflightWarning::from)
+        {
             eprintln!("[preflight] warning: {}", warning.message);
             warnings.push(warning);
         }
     }
-    if let Ok((git_root, _)) = git::resolve_to_git_root(file)
+    if let Ok((git_root, _)) = agent_doc_git_io::dirs::resolve_to_git_root(file)
         && let Some(warning) = stale_install_warning(&git_root)
     {
         eprintln!("[preflight] warning: {}", warning.message);
@@ -3910,11 +3918,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         let (fm, _) = agent_doc_frontmatter::frontmatter::parse(content).unwrap();
-        let warning = post_exchange_comment_prompt_preset_warning(
-            Path::new("session.md"),
-            content,
-            &fm.prompt_presets,
-        );
+        let warning =
+            agent_doc_workflow::preflight_policy::post_exchange_comment_prompt_preset_warning(
+                "session.md",
+                content,
+                &fm.prompt_presets,
+            );
         assert!(
             warning.is_none(),
             "post-exchange comment with horizontal rule and prose is a user note, not a directive: {:?}",

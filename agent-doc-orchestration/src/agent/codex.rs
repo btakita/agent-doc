@@ -62,6 +62,7 @@ use std::time::{Duration, Instant};
 use super::streaming::StreamingAgent;
 use super::{Agent, AgentResponse};
 use agent_doc_frontmatter::frontmatter::{CodexNetworkAccess, Frontmatter};
+use agent_doc_git_io::dirs::workspace_access_dirs_for_doc;
 use agent_doc_turn_executor::agent_stream::{StreamChunk, parse_codex_line};
 #[cfg(test)]
 use agent_doc_turn_executor::codex_launch::CODEX_CHILD_WRITABLE_ROOT_PROBE_MARKER;
@@ -517,7 +518,7 @@ pub fn managed_capability_contract_required_for_doc_and_harness(
     resolve_codex_network_access(fm.codex_network_access, global_config.codex_network_access)
         == CodexNetworkAccess::Enabled
         || !fm.required_ssh_targets.is_empty()
-        || !crate::git::workspace_access_dirs_for_doc(file).is_empty()
+        || !workspace_access_dirs_for_doc(file).is_empty()
         || fm.agent_args.as_deref().is_some_and(args_contain_add_dir)
         || fm.codex_args.as_deref().is_some_and(args_contain_add_dir)
         || global_config

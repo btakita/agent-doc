@@ -72,9 +72,12 @@ use agent_doc_diff as diff;
 use agent_doc_orchestration::{agent, preflight::PreflightOutput, snapshot, write};
 use agent_doc_queue::dispatch_item::{QueueItemKind, classify};
 use agent_doc_turn_executor::agent_stream::StreamChunk;
+#[cfg(test)]
+use agent_doc_workflow::orchestrate_tasks::parse_list_item;
 use agent_doc_workflow::orchestrate_tasks::{
-    DagTask, ExecutionTask, extract_tasks_from_text, normalize_task, parse_dag_task_line,
-    parse_list_item, plan_dag_execution,
+    DagTask, ExchangeTaskSourceFingerprint, ExecutionTask, extract_tasks_from_text,
+    find_exchange_task_source, normalize_task, parse_dag_task_line, plan_dag_execution,
+    scope_exchange_tail,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -106,18 +109,6 @@ pub(crate) struct ResolvedTaskBatch {
     tasks: Vec<String>,
     requested_presets: Vec<String>,
     exchange_source: Option<ExchangeTaskSourceFingerprint>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ExchangeTaskSourceFingerprint {
-    tasks: Vec<String>,
-    requested_presets: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ExchangeTaskSourceBlock {
-    tasks: Vec<String>,
-    requested_presets: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -892,92 +883,6 @@ fn exchange_task_source_changed(
     })
 }
 
-fn find_exchange_task_source(
-    exchange: &str,
-    original: &ExchangeTaskSourceFingerprint,
-) -> Option<ExchangeTaskSourceFingerprint> {
-    if original.tasks.is_empty() {
-        return None;
-    }
-    let mut candidates = collect_markdown_list_source_blocks(exchange)
-        .into_iter()
-        .filter(|block| contains_ordered_subsequence(&block.tasks, &original.tasks))
-        .collect::<Vec<_>>();
-
-    let candidate = candidates
-        .iter()
-        .rev()
-        .find(|block| block.requested_presets == original.requested_presets)
-        .cloned()
-        .or_else(|| candidates.pop())?;
-
-    Some(ExchangeTaskSourceFingerprint {
-        tasks: candidate.tasks,
-        requested_presets: candidate.requested_presets,
-    })
-}
-
-fn collect_markdown_list_source_blocks(text: &str) -> Vec<ExchangeTaskSourceBlock> {
-    let lines = text.lines().collect::<Vec<_>>();
-    let mut blocks = Vec::new();
-    let mut idx = 0usize;
-
-    while idx < lines.len() {
-        let Some(first_task) = parse_list_item(lines[idx]) else {
-            idx += 1;
-            continue;
-        };
-
-        let list_start = idx;
-        let mut tasks = vec![first_task];
-        idx += 1;
-        while idx < lines.len() {
-            let Some(task) = parse_list_item(lines[idx]) else {
-                break;
-            };
-            tasks.push(task);
-            idx += 1;
-        }
-        let list_end = idx;
-
-        let mut context_start = list_start;
-        while context_start > 0 {
-            let previous = lines[context_start - 1].trim();
-            if previous.is_empty()
-                || previous.starts_with("### ")
-                || previous.starts_with("## ")
-                || previous.starts_with("<!-- agent:boundary:")
-            {
-                break;
-            }
-            context_start -= 1;
-        }
-        let source_text = lines[context_start..list_end].join("\n");
-        blocks.push(ExchangeTaskSourceBlock {
-            tasks,
-            requested_presets: diff::extract_prompt_preset_requests_from_text(&source_text),
-        });
-    }
-
-    blocks
-}
-
-fn contains_ordered_subsequence(haystack: &[String], needle: &[String]) -> bool {
-    if needle.is_empty() {
-        return true;
-    }
-    let mut cursor = 0usize;
-    for item in haystack {
-        if item == &needle[cursor] {
-            cursor += 1;
-            if cursor == needle.len() {
-                return true;
-            }
-        }
-    }
-    false
-}
-
 /// Scope exchange text to the user's latest additions by comparing against
 /// the snapshot. Prevents stale task lists in response content from being
 /// picked by `extract_tasks_from_text` when the user's directive is a bare
@@ -992,40 +897,7 @@ fn scope_exchange_for_tasks(exchange: &str, file: &Path) -> String {
         Err(_) => return exchange.to_string(),
     };
 
-    let current_lines: Vec<&str> = exchange.lines().collect();
-    let snap_lines: Vec<&str> = snap_exchange.lines().collect();
-
-    // Compare lines, ignoring boundary artifacts like (HEAD) markers
-    let normalize_for_compare = |line: &str| -> String {
-        let trimmed = line.trim();
-        if trimmed.starts_with("<!-- agent:boundary:") {
-            return String::new();
-        }
-        line.replace(" (HEAD)", "")
-    };
-
-    let mut matching = 0;
-    for (curr, snap) in current_lines.iter().zip(snap_lines.iter()) {
-        if normalize_for_compare(curr) == normalize_for_compare(snap) {
-            matching += 1;
-        } else {
-            break;
-        }
-    }
-
-    if matching >= snap_lines.len() && current_lines.len() > snap_lines.len() {
-        let tail: String = current_lines[snap_lines.len()..]
-            .iter()
-            .filter(|line| !line.trim().starts_with("<!--"))
-            .copied()
-            .collect::<Vec<_>>()
-            .join("\n");
-        if !tail.trim().is_empty() {
-            return tail;
-        }
-    }
-
-    exchange.to_string()
+    scope_exchange_tail(exchange, &snap_exchange)
 }
 
 fn resolve_dag_tasks(batch: &ResolvedTaskBatch) -> Result<Vec<DagTask>> {

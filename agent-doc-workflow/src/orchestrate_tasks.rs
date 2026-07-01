@@ -5,6 +5,18 @@ use std::collections::HashSet;
 use anyhow::Result;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExchangeTaskSourceFingerprint {
+    pub tasks: Vec<String>,
+    pub requested_presets: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExchangeTaskSourceBlock {
+    tasks: Vec<String>,
+    requested_presets: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionTask {
     pub label: String,
     pub prompt: String,
@@ -42,6 +54,132 @@ pub fn extract_tasks_from_text(text: &str) -> Vec<String> {
         .map(normalize_task)
         .filter(|line| !line.is_empty())
         .collect()
+}
+
+pub fn find_exchange_task_source(
+    exchange: &str,
+    original: &ExchangeTaskSourceFingerprint,
+) -> Option<ExchangeTaskSourceFingerprint> {
+    if original.tasks.is_empty() {
+        return None;
+    }
+    let mut candidates = collect_markdown_list_source_blocks(exchange)
+        .into_iter()
+        .filter(|block| contains_ordered_subsequence(&block.tasks, &original.tasks))
+        .collect::<Vec<_>>();
+
+    let candidate = candidates
+        .iter()
+        .rev()
+        .find(|block| block.requested_presets == original.requested_presets)
+        .cloned()
+        .or_else(|| candidates.pop())?;
+
+    Some(ExchangeTaskSourceFingerprint {
+        tasks: candidate.tasks,
+        requested_presets: candidate.requested_presets,
+    })
+}
+
+fn collect_markdown_list_source_blocks(text: &str) -> Vec<ExchangeTaskSourceBlock> {
+    let lines = text.lines().collect::<Vec<_>>();
+    let mut blocks = Vec::new();
+    let mut idx = 0usize;
+
+    while idx < lines.len() {
+        let Some(first_task) = parse_list_item(lines[idx]) else {
+            idx += 1;
+            continue;
+        };
+
+        let list_start = idx;
+        let mut tasks = vec![first_task];
+        idx += 1;
+        while idx < lines.len() {
+            let Some(task) = parse_list_item(lines[idx]) else {
+                break;
+            };
+            tasks.push(task);
+            idx += 1;
+        }
+        let list_end = idx;
+
+        let mut context_start = list_start;
+        while context_start > 0 {
+            let previous = lines[context_start - 1].trim();
+            if previous.is_empty()
+                || previous.starts_with("### ")
+                || previous.starts_with("## ")
+                || previous.starts_with("<!-- agent:boundary:")
+            {
+                break;
+            }
+            context_start -= 1;
+        }
+        let source_text = lines[context_start..list_end].join("\n");
+        blocks.push(ExchangeTaskSourceBlock {
+            tasks,
+            requested_presets: agent_doc_diff::extract_prompt_preset_requests_from_text(
+                &source_text,
+            ),
+        });
+    }
+
+    blocks
+}
+
+fn contains_ordered_subsequence(haystack: &[String], needle: &[String]) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    let mut cursor = 0usize;
+    for item in haystack {
+        if item == &needle[cursor] {
+            cursor += 1;
+            if cursor == needle.len() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Scope current exchange text to lines appended after a snapshot exchange.
+pub fn scope_exchange_tail(exchange: &str, snapshot_exchange: &str) -> String {
+    let current_lines: Vec<&str> = exchange.lines().collect();
+    let snap_lines: Vec<&str> = snapshot_exchange.lines().collect();
+
+    // Compare lines, ignoring boundary artifacts like (HEAD) markers.
+    let normalize_for_compare = |line: &str| -> String {
+        let trimmed = line.trim();
+        if trimmed.starts_with("<!-- agent:boundary:") {
+            return String::new();
+        }
+        line.replace(" (HEAD)", "")
+    };
+
+    let mut matching = 0;
+    for (curr, snap) in current_lines.iter().zip(snap_lines.iter()) {
+        if normalize_for_compare(curr) == normalize_for_compare(snap) {
+            matching += 1;
+        } else {
+            break;
+        }
+    }
+
+    if matching >= snap_lines.len() && current_lines.len() > snap_lines.len() {
+        let tail: String = current_lines[snap_lines.len()..]
+            .iter()
+            .filter(|line| !line.trim().starts_with("<!--"))
+            .copied()
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !tail.trim().is_empty() {
+            return tail;
+        }
+    }
+
+    exchange.to_string()
 }
 
 fn collect_fenced_task_blocks(text: &str) -> Vec<Vec<String>> {
@@ -403,5 +541,53 @@ mod tests {
     fn parse_list_item_strips_prompt_prefix_with_star() {
         let result = parse_list_item("❯ * do #task2");
         assert_eq!(result, Some("do #task2".to_string()));
+    }
+
+    #[test]
+    fn exchange_task_source_fingerprint_detects_list_mutations() {
+        let original = ExchangeTaskSourceFingerprint {
+            tasks: vec!["do #first".to_string(), "do #second".to_string()],
+            requested_presets: vec!["#spec".to_string()],
+        };
+        let source = find_exchange_task_source(
+            "sync orchestra\npreset #spec\n- do #first\n- do #second\n<!-- agent:boundary:keep -->\n",
+            &original,
+        )
+        .unwrap();
+        assert_eq!(source, original);
+
+        let boundary_only = find_exchange_task_source(
+            "sync orchestra\npreset #spec\n- do #first\n- do #second\n<!-- agent:boundary:new -->\n",
+            &source,
+        )
+        .unwrap();
+        assert_eq!(boundary_only, source);
+
+        let inserted = find_exchange_task_source(
+            "sync orchestra\npreset #spec\n- do #first\n- do #inserted\n- do #second\n",
+            &source,
+        )
+        .unwrap();
+        assert_ne!(inserted, source);
+
+        let reordered = find_exchange_task_source(
+            "sync orchestra\npreset #spec\n- do #second\n- do #first\n",
+            &source,
+        );
+        assert!(reordered.is_none());
+
+        let quoted_later = find_exchange_task_source(
+            "sync orchestra\npreset #spec\n- do #first\n- do #second\n\n### Re: response - gpt-5\n\n- do #first\n- do #extra\n- do #second\n",
+            &source,
+        )
+        .unwrap();
+        assert_eq!(quoted_later, source);
+    }
+
+    #[test]
+    fn scope_exchange_tail_returns_appended_non_marker_lines() {
+        let snapshot = "old\n<!-- agent:boundary:abc -->\n";
+        let current = "old\n<!-- agent:boundary:def -->\n<!-- comment -->\ndo #new\n";
+        assert_eq!(scope_exchange_tail(current, snapshot), "do #new");
     }
 }

@@ -6668,13 +6668,16 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/orchestrate_tasks.rs"))
             .unwrap();
     for required in [
+        "pub struct ExchangeTaskSourceFingerprint",
         "pub struct ExecutionTask",
         "pub struct DagTask",
         "pub fn extract_tasks_from_text(",
+        "pub fn find_exchange_task_source(",
         "pub fn parse_list_item(",
         "pub fn normalize_task(",
         "pub fn parse_dag_task_line(",
         "pub fn plan_dag_execution(",
+        "pub fn scope_exchange_tail(",
     ] {
         assert!(
             workflow_orchestrate_tasks.contains(required),
@@ -6683,16 +6686,22 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
     }
     let orchestrate_source = fs::read_to_string(manifest_dir.join("src/orchestrate.rs")).unwrap();
     for forbidden in [
+        "struct ExchangeTaskSourceFingerprint",
+        "struct ExchangeTaskSourceBlock",
         "struct ExecutionTask",
         "struct DagTask",
         "struct DagMetadata",
         "fn extract_tasks_from_text(",
         "fn collect_fenced_task_blocks(",
         "fn collect_markdown_list_blocks(",
+        "fn collect_markdown_list_source_blocks(",
+        "fn contains_ordered_subsequence(",
+        "fn find_exchange_task_source(",
         "fn parse_list_item(",
         "fn normalize_task(",
         "fn parse_dag_task_line(",
         "fn plan_dag_execution(",
+        "fn scope_exchange_tail(",
         "pub use agent_doc_workflow::orchestrate_tasks",
         "pub(crate) use agent_doc_workflow::orchestrate_tasks",
     ] {
@@ -6704,8 +6713,10 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
     assert!(
         orchestrate_source.contains("use agent_doc_workflow::orchestrate_tasks::{")
             && orchestrate_source.contains("extract_tasks_from_text")
+            && orchestrate_source.contains("find_exchange_task_source")
             && orchestrate_source.contains("parse_dag_task_line")
-            && orchestrate_source.contains("plan_dag_execution"),
+            && orchestrate_source.contains("plan_dag_execution")
+            && orchestrate_source.contains("scope_exchange_tail"),
         "src/orchestrate.rs should call focused orchestrate task policy directly"
     );
 

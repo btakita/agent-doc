@@ -12725,6 +12725,44 @@ fn test_agent_doc_document_owns_write_normalization_policy() {
 }
 
 #[test]
+fn test_agent_doc_document_owns_queue_in_progress_projection_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let queue_projection =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/queue_projection.rs"))
+            .unwrap();
+    for required in [
+        "pub fn set_in_progress_work_item_markers(",
+        "pub fn sync_in_progress_marker_regions(",
+        "pub fn strip_in_progress_marker(",
+        "pub fn strip_priority_markers(",
+    ] {
+        assert!(
+            queue_projection.contains(required),
+            "agent-doc-document must own queue in-progress document projection policy: {required}"
+        );
+    }
+
+    let maintenance = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
+    )
+    .unwrap();
+    for forbidden in [
+        "fn set_in_progress_work_item_markers(",
+        "fn sync_in_progress_marker_regions(",
+    ] {
+        assert!(
+            !maintenance.contains(forbidden),
+            "preflight maintenance must not re-own queue in-progress projection policy: {forbidden}"
+        );
+    }
+    assert!(
+        maintenance.contains("set_in_progress_work_item_markers")
+            && maintenance.contains("sync_in_progress_marker_regions"),
+        "preflight maintenance should call focused queue in-progress projection policy directly"
+    );
+}
+
+#[test]
 fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let exchange_lib =

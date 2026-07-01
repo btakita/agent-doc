@@ -1,7 +1,10 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
-use agent_doc_document::queue_projection::{strip_in_progress_marker, strip_priority_markers};
+use agent_doc_document::queue_projection::{
+    set_in_progress_work_item_markers, strip_in_progress_marker, strip_priority_markers,
+    sync_in_progress_marker_regions,
+};
 use agent_doc_element_backlog::backlog::{
     component_matches_tracked_surface, ensure_no_completed_tracked_items,
     maintenance_surface_label, review_counts, should_reap_already_done_mirrors,
@@ -2937,64 +2940,6 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         synced_queue_ids,
         warnings: queue_warnings,
     })
-}
-
-fn set_in_progress_work_item_markers(
-    content: &str,
-    active_ids: &std::collections::HashSet<String>,
-) -> Result<(String, bool)> {
-    let mut updated = content.to_string();
-    let mut changed = false;
-    let components = agent_doc_element::element::parse(&updated)?;
-    for component in components
-        .iter()
-        .filter(|component| {
-            matches!(
-                component.name.as_str(),
-                "backlog" | "pending" | "review" | "icebox"
-            )
-        })
-        .rev()
-    {
-        let (new_body, body_changed) = agent_doc_element_backlog::backlog::set_in_progress_item_ids(
-            component.content(&updated),
-            active_ids,
-        );
-        if body_changed {
-            updated = component.replace_content(&updated, &new_body);
-            changed = true;
-        }
-    }
-    Ok((updated, changed))
-}
-
-fn sync_in_progress_marker_regions(snapshot_content: &str, current_content: &str) -> String {
-    let Ok(current_components) = agent_doc_element::element::parse(current_content) else {
-        return snapshot_content.to_string();
-    };
-    let mut updated = snapshot_content.to_string();
-    for name in ["queue", "backlog", "pending", "review", "icebox"] {
-        let Some(current_component) = current_components
-            .iter()
-            .find(|component| component.name == name)
-        else {
-            continue;
-        };
-        let current_body = current_component.content(current_content);
-        let Ok(snapshot_components) = agent_doc_element::element::parse(&updated) else {
-            return updated;
-        };
-        let Some(snapshot_component) = snapshot_components
-            .iter()
-            .find(|component| component.name == name)
-        else {
-            continue;
-        };
-        if snapshot_component.content(&updated) != current_body {
-            updated = snapshot_component.replace_content(&updated, current_body);
-        }
-    }
-    updated
 }
 
 /// Closeout-side repair for same-cycle backlog capture.

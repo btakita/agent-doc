@@ -5,6 +5,7 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 pub const PRIORITIZED_MARKERS: [&str; 7] = [
@@ -119,6 +120,64 @@ pub fn has_in_progress_marker(text: &str) -> bool {
 pub fn strip_in_progress_marker_for_display(text: &str) -> Option<String> {
     let stripped = strip_in_progress_marker(text);
     (stripped != text.trim()).then_some(stripped)
+}
+
+pub fn set_in_progress_work_item_markers(
+    content: &str,
+    active_ids: &HashSet<String>,
+) -> Result<(String, bool)> {
+    let mut updated = content.to_string();
+    let mut changed = false;
+    let components = agent_doc_element::element::parse(&updated)?;
+    for component in components
+        .iter()
+        .filter(|component| {
+            matches!(
+                component.name.as_str(),
+                "backlog" | "pending" | "review" | "icebox"
+            )
+        })
+        .rev()
+    {
+        let (new_body, body_changed) = agent_doc_element_backlog::backlog::set_in_progress_item_ids(
+            component.content(&updated),
+            active_ids,
+        );
+        if body_changed {
+            updated = component.replace_content(&updated, &new_body);
+            changed = true;
+        }
+    }
+    Ok((updated, changed))
+}
+
+pub fn sync_in_progress_marker_regions(snapshot_content: &str, current_content: &str) -> String {
+    let Ok(current_components) = agent_doc_element::element::parse(current_content) else {
+        return snapshot_content.to_string();
+    };
+    let mut updated = snapshot_content.to_string();
+    for name in ["queue", "backlog", "pending", "review", "icebox"] {
+        let Some(current_component) = current_components
+            .iter()
+            .find(|component| component.name == name)
+        else {
+            continue;
+        };
+        let current_body = current_component.content(current_content);
+        let Ok(snapshot_components) = agent_doc_element::element::parse(&updated) else {
+            return updated;
+        };
+        let Some(snapshot_component) = snapshot_components
+            .iter()
+            .find(|component| component.name == name)
+        else {
+            continue;
+        };
+        if snapshot_component.content(&updated) != current_body {
+            updated = snapshot_component.replace_content(&updated, current_body);
+        }
+    }
+    updated
 }
 
 /// Strip priority and in-progress markers from the visible prompt identity.
@@ -304,6 +363,53 @@ mod tests {
             strip_priority_markers(":round_pushpin: 🚧 do [#alpha]"),
             "do [#alpha]"
         );
+    }
+
+    #[test]
+    fn set_in_progress_work_item_markers_updates_tracked_components() {
+        let content = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#alpha] Alpha\n",
+            "- [ ] [#beta] Beta\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:review -->\n",
+            "- [ ] [#alpha] Alpha review\n",
+            "<!-- /agent:review -->\n",
+        );
+        let active_ids = HashSet::from(["alpha".to_string()]);
+
+        let (updated, changed) = set_in_progress_work_item_markers(content, &active_ids).unwrap();
+
+        assert!(changed);
+        assert!(updated.contains("- [ ] 🚧 [#alpha] Alpha"));
+        assert!(updated.contains("- [ ] [#beta] Beta"));
+        assert!(updated.contains("- [ ] 🚧 [#alpha] Alpha review"));
+    }
+
+    #[test]
+    fn sync_in_progress_marker_regions_copies_work_regions_from_current() {
+        let snapshot = concat!(
+            "<!-- agent:queue -->\n",
+            "- do [#old]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#alpha] Alpha\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:queue -->\n",
+            "- 🚧 do [#alpha]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] 🚧 [#alpha] Alpha\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        let synced = sync_in_progress_marker_regions(snapshot, current);
+
+        assert!(synced.contains("- 🚧 do [#alpha]"));
+        assert!(synced.contains("- [ ] 🚧 [#alpha] Alpha"));
+        assert!(!synced.contains("#old"));
     }
 
     #[test]

@@ -13179,6 +13179,9 @@ fn test_agent_doc_template_owns_patchback_policy() {
         "pub enum ChildPatchbackNormalizationDecision",
         "pub struct ChildPatchbackNormalization",
         "pub fn normalize_child_template_response",
+        "pub fn child_template_finalize_text",
+        "pub fn should_stream_exchange_patch",
+        "pub fn finalize_suffix_from_streamed_prefix",
     ] {
         assert!(
             template_patchback.contains(required_snippet),
@@ -13262,6 +13265,26 @@ fn test_agent_doc_template_owns_patchback_policy() {
         write_run_entry
             .contains("agent_doc_template::patchback::enforce_orchestrate_patchback_contract"),
         "write run entry should enforce orchestrate patchback contracts through the focused template API"
+    );
+    let orchestrate_source = fs::read_to_string(manifest_dir.join("src/orchestrate.rs")).unwrap();
+    for forbidden_snippet in [
+        "fn orchestrate_finalize_text_for_template(",
+        "fn should_stream_exchange_patch(",
+        "fn finalize_suffix_from_streamed_prefix(",
+        "fn finalize_suffix_from_open_patch_prefix(",
+        "pub use agent_doc_template::patchback",
+        "pub(crate) use agent_doc_template::patchback",
+    ] {
+        assert!(
+            !orchestrate_source.contains(forbidden_snippet),
+            "src/orchestrate.rs must not re-own or facade template patchback stream/finalize policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        orchestrate_source.contains("use agent_doc_template::patchback::{")
+            && orchestrate_source.contains("finalize_suffix_from_streamed_prefix")
+            && orchestrate_source.contains("should_stream_exchange_patch"),
+        "src/orchestrate.rs should call template patchback stream/finalize policy directly"
     );
 }
 

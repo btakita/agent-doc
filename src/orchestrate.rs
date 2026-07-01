@@ -71,6 +71,11 @@ use agent_doc_config::{AgentConfig, Config};
 use agent_doc_diff as diff;
 use agent_doc_orchestration::{agent, preflight::PreflightOutput, snapshot, write};
 use agent_doc_queue::dispatch_item::{QueueItemKind, classify};
+#[cfg(test)]
+use agent_doc_template::patchback::child_template_finalize_text as orchestrate_finalize_text_for_template;
+use agent_doc_template::patchback::{
+    finalize_suffix_from_streamed_prefix, should_stream_exchange_patch,
+};
 use agent_doc_turn_executor::agent_stream::StreamChunk;
 #[cfg(test)]
 use agent_doc_workflow::orchestrate_tasks::parse_list_item;
@@ -478,89 +483,6 @@ pub(crate) use dag::*;
 
 mod dispatch;
 pub(crate) use dispatch::*;
-
-#[cfg(test)]
-fn orchestrate_finalize_text_for_template(response: String) -> String {
-    agent_doc_template::patchback::normalize_child_template_response(response).response
-}
-
-fn should_stream_exchange_patch(response: &str) -> bool {
-    response.contains("<!-- patch:exchange")
-}
-
-fn finalize_suffix_from_streamed_prefix(streamed: &str, full: &str) -> Option<String> {
-    if let Some(delta) = finalize_suffix_from_open_patch_prefix(streamed, full) {
-        return Some(delta);
-    }
-
-    if let (Ok((full_patches, full_unmatched)), Ok((streamed_patches, streamed_unmatched))) = (
-        agent_doc_template::parse_patches(full),
-        agent_doc_template::parse_patches(streamed),
-    ) && full_unmatched.trim().is_empty()
-        && streamed_unmatched.trim().is_empty()
-        && full_patches.len() == streamed_patches.len()
-    {
-        let mut delta = String::new();
-        for (full_patch, streamed_patch) in full_patches.iter().zip(streamed_patches.iter()) {
-            if full_patch.name != streamed_patch.name
-                || !full_patch.content.starts_with(&streamed_patch.content)
-            {
-                return None;
-            }
-            let suffix = &full_patch.content[streamed_patch.content.len()..];
-            if suffix.is_empty() {
-                continue;
-            }
-            delta.push_str(&format!(
-                "<!-- patch:{} -->\n{}<!-- /patch:{} -->\n",
-                full_patch.name, suffix, full_patch.name
-            ));
-        }
-
-        if !delta.trim().is_empty() {
-            return Some(delta);
-        }
-    }
-    None
-}
-
-fn finalize_suffix_from_open_patch_prefix(streamed: &str, full: &str) -> Option<String> {
-    if !full.starts_with(streamed) {
-        return None;
-    }
-
-    let open_start = streamed.find("<!-- patch:")?;
-    let open_end = streamed[open_start..].find("-->")? + open_start + 3;
-    let open_marker = &streamed[open_start..open_end];
-    let patch_name = open_marker
-        .strip_prefix("<!-- patch:")?
-        .strip_suffix(" -->")?
-        .trim();
-    if patch_name.is_empty() {
-        return None;
-    }
-
-    let mut content_start = open_end;
-    if streamed.as_bytes().get(content_start) == Some(&b'\n') {
-        content_start += 1;
-    }
-    let close_marker = format!("<!-- /patch:{} -->", patch_name);
-    let close_pos = full[content_start..].find(&close_marker)? + content_start;
-    let full_content = &full[content_start..close_pos];
-    let streamed_content = &streamed[content_start..];
-    if !full_content.starts_with(streamed_content) {
-        return None;
-    }
-    let suffix = &full_content[streamed_content.len()..];
-    if suffix.is_empty() {
-        return None;
-    }
-
-    Some(format!(
-        "<!-- patch:{} -->\n{}<!-- /patch:{} -->\n",
-        patch_name, suffix, patch_name
-    ))
-}
 
 fn expand_frontmatter_env(fm: &frontmatter::Frontmatter) -> Vec<(String, Option<String>)> {
     if fm.env.is_empty() {

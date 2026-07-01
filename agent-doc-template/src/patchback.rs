@@ -371,6 +371,87 @@ pub fn normalize_child_template_response(response: String) -> ChildPatchbackNorm
     ChildPatchbackNormalization { response, decision }
 }
 
+pub fn child_template_finalize_text(response: String) -> String {
+    normalize_child_template_response(response).response
+}
+
+pub fn should_stream_exchange_patch(response: &str) -> bool {
+    response.contains("<!-- patch:exchange")
+}
+
+pub fn finalize_suffix_from_streamed_prefix(streamed: &str, full: &str) -> Option<String> {
+    if let Some(delta) = finalize_suffix_from_open_patch_prefix(streamed, full) {
+        return Some(delta);
+    }
+
+    if let (Ok((full_patches, full_unmatched)), Ok((streamed_patches, streamed_unmatched))) =
+        (parse_patches(full), parse_patches(streamed))
+        && full_unmatched.trim().is_empty()
+        && streamed_unmatched.trim().is_empty()
+        && full_patches.len() == streamed_patches.len()
+    {
+        let mut delta = String::new();
+        for (full_patch, streamed_patch) in full_patches.iter().zip(streamed_patches.iter()) {
+            if full_patch.name != streamed_patch.name
+                || !full_patch.content.starts_with(&streamed_patch.content)
+            {
+                return None;
+            }
+            let suffix = &full_patch.content[streamed_patch.content.len()..];
+            if suffix.is_empty() {
+                continue;
+            }
+            delta.push_str(&format!(
+                "<!-- patch:{} -->\n{}<!-- /patch:{} -->\n",
+                full_patch.name, suffix, full_patch.name
+            ));
+        }
+
+        if !delta.trim().is_empty() {
+            return Some(delta);
+        }
+    }
+    None
+}
+
+fn finalize_suffix_from_open_patch_prefix(streamed: &str, full: &str) -> Option<String> {
+    if !full.starts_with(streamed) {
+        return None;
+    }
+
+    let open_start = streamed.find("<!-- patch:")?;
+    let open_end = streamed[open_start..].find("-->")? + open_start + 3;
+    let open_marker = &streamed[open_start..open_end];
+    let patch_name = open_marker
+        .strip_prefix("<!-- patch:")?
+        .strip_suffix(" -->")?
+        .trim();
+    if patch_name.is_empty() {
+        return None;
+    }
+
+    let mut content_start = open_end;
+    if streamed.as_bytes().get(content_start) == Some(&b'\n') {
+        content_start += 1;
+    }
+    let close_marker = format!("<!-- /patch:{} -->", patch_name);
+    let close_pos = full[content_start..].find(&close_marker)? + content_start;
+    let full_content = &full[content_start..close_pos];
+    let streamed_content = &streamed[content_start..];
+    if !full_content.starts_with(streamed_content) {
+        return None;
+    }
+    let suffix = &full_content[streamed_content.len()..];
+    if suffix.is_empty() {
+        return None;
+    }
+
+    Some(format!(
+        "<!-- patch:{} -->\n{}<!-- /patch:{} -->\n",
+        patch_name, suffix, patch_name
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -504,5 +585,43 @@ mod tests {
             ChildPatchbackNormalizationDecision::KeptRejectedPlainResponse
         );
         assert_eq!(normalized.response, transcript);
+    }
+
+    #[test]
+    fn finalize_suffix_uses_only_unseen_stream_tail() {
+        let streamed = "<!-- patch:exchange -->\n### Re: streamed - gpt-5\n";
+        let full = "<!-- patch:exchange -->\n### Re: streamed - gpt-5\n\nImplemented and verified.\n<!-- /patch:exchange -->\n";
+        let delta = finalize_suffix_from_streamed_prefix(streamed, full).unwrap();
+        assert!(!delta.contains("### Re: streamed - gpt-5"));
+        assert!(delta.contains("Implemented and verified."));
+    }
+
+    #[test]
+    fn child_template_finalize_wraps_plain_response_as_exchange_patch() {
+        let finalize = child_template_finalize_text(
+            "### Re: plain orch - gpt-5\n\nImplemented and verified.".to_string(),
+        );
+
+        assert!(finalize.starts_with("<!-- patch:exchange -->"));
+        assert!(finalize.contains("### Re: plain orch"));
+        assert!(finalize.ends_with("<!-- /patch:exchange -->\n"));
+    }
+
+    #[test]
+    fn child_template_finalize_does_not_wrap_transcript_response() {
+        let transcript = "❯ do #next\n### Re: malformed - gpt-5\nBody";
+        let finalize = child_template_finalize_text(transcript.to_string());
+
+        assert_eq!(finalize, transcript);
+    }
+
+    #[test]
+    fn streamed_flush_waits_for_exchange_patch_marker() {
+        assert!(!should_stream_exchange_patch(
+            "### Re: malformed streaming closeout - gpt-5\nBody"
+        ));
+        assert!(should_stream_exchange_patch(
+            "<!-- patch:exchange -->\n### Re: streamed - gpt-5\n"
+        ));
     }
 }

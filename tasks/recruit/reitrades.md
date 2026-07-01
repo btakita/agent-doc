@@ -725,12 +725,38 @@ Notes:
 - The cost bullet leads with the phased first tranche (the low-commitment number for a bootstrapped founder) and only mentions the full range so it's not a surprise later.
 - LinkedIn strips most formatting; if you paste into the message box the bullets render as plain lines — still scannable.
 - Say the word and I'll publish it via `corky`/LinkedIn (draft only — no auto-send), or tweak tone/length.
+"5. Recommended phasing (competitive bid)" seems to be written for the operator...not the client. Please rephrase it to be client-facing.
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/recruit/reitrades.md source=ipc_visible_repair patch_id=07f2773a-e962-471e-852e-498385b1b4df invariant=live_prompt_drift recovery=retry_without_disk_write redeliver_editor=true bad_len=70661 bad_hash=e51edf951ee8744102757dd8337e8a87f69a7dcaed7a3c1b663c08e42c8cd22f repaired_len=72678 repaired_hash=1dd188be7660c91000a417657e352d0cb263cf364b3d0792f4e627d5fd1d710c doc=reitrades session=62d195b8-b029-42a5-9c6c-836cb1b5b103 turn=synthetic-1782924927293
+```
+
+### Re: §5 phasing rewritten client-facing — opus-4-8
+
+Good catch — §5 was written *to you*, not *to Artur*. Rewrote it to address him directly (committed `4258311e8`, PDF regenerated, 12 pages). Substance is unchanged — same phases, hours, dollar ranges, and engagement options — only the voice.
+
+What changed:
+- **Heading:** "Recommended phasing (competitive bid)" → "Recommended phasing". "(competitive bid)" was a note to you about how the bid is positioned; not something Artur should read.
+- **Voice → second person:** "controls Artur's spend" → "keeps your spend controlled"; "Artur controls burn" → "you control the burn... and can pause anytime"; "if we proceed" → "if you proceed".
+- **Dropped the "Competitive note" paragraph** entirely — it was internal self-justification ("this is a competitive bid without underpricing..."). Replaced it with a client-benefit closing line: at $100/hr with the AI-native workflow biasing toward the low end, you get senior production quality without paying twice for the migration/QA risk.
+- **"Engagement options (pick one)"** → "pick whichever fits your budgeting" — framed as his choice.
+
+If you want, I can do the same client-facing pass on §1 ("How to read this estimate"), which still has a couple of you-facing asides ("that is the competitive lever, not cutting scope") — say the word.
 <!-- agent:boundary:60ddffc8 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue go -->
+- Make "6. Assumptions & open questions (confirm before locking a fixed price)" client facing.
 <!-- /agent:queue -->
 
 ## Backlog

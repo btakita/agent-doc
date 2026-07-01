@@ -1834,7 +1834,35 @@ pub fn run_with_tmux_with_options(
     let _wait_for_ready_guard = WaitForReadyOverrideGuard::set(wait_for_ready);
     let _force_disk_guard = ForceDiskRouteWritesGuard::set(force_disk);
     tracing::debug!(file = %file.display(), pane, debounce_ms, cols = ?col_args, "route::run start");
-    let _ = resync::prune_with_tmux(tmux); // Clean stale entries before lookup
+    let __route_t0 = std::time::Instant::now();
+    macro_rules! __route_timing {
+        ($label:expr) => {
+            if std::env::var("AGENT_DOC_ROUTE_TIMING").is_ok() {
+                eprintln!(
+                    "[route-timing] {} elapsed_ms={}",
+                    $label,
+                    __route_t0.elapsed().as_millis()
+                );
+            }
+        };
+    }
+    if std::env::var("AGENT_DOC_ROUTE_TIMING").is_ok() {
+        match resync::prune_with_tmux_timed(tmux) {
+            Ok((_, timings)) => {
+                for t in &timings {
+                    eprintln!(
+                        "[route-timing] prune_phase={} ms={}",
+                        t.phase,
+                        t.elapsed.as_millis()
+                    );
+                }
+            }
+            Err(e) => eprintln!("[route-timing] prune error: {e}"),
+        }
+    } else {
+        let _ = resync::prune_with_tmux(tmux); // Clean stale entries before lookup
+    }
+    __route_timing!("after_prune");
 
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
@@ -1937,7 +1965,9 @@ pub fn run_with_tmux_with_options(
     let file_path = agent_doc_git_io::dirs::resolve_absolute_file_path(file)
         .to_string_lossy()
         .into_owned();
+    __route_timing!("before_resolve_target_session");
     let target_session = resolve_target_session(tmux, None, col_args, Some(file), &harness);
+    __route_timing!("after_resolve_target_session");
     eprintln!("[route] target tmux session: {}", target_session);
 
     // === SINGLE EXIT POINT PATTERN ===
@@ -1947,6 +1977,7 @@ pub fn run_with_tmux_with_options(
 
     let mut created_panes = Vec::new();
 
+    __route_timing!("before_resolve_or_create_pane");
     let pane_id = match mode {
         RouteMode::Managed => resolve_or_create_pane(
             tmux,
@@ -1971,6 +2002,7 @@ pub fn run_with_tmux_with_options(
             &mut created_panes,
         ),
     };
+    __route_timing!("after_resolve_or_create_pane");
 
     match pane_id {
         Ok(ref _pid) => {

@@ -11,9 +11,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_doc_supervisor::route_submit_inflight::{
     ROUTE_BLOCKED_DIR, ROUTE_BLOCKED_TTL_SECS, ROUTE_DISPATCH_SUBMIT_REASON, ROUTE_IN_FLIGHT_DIR,
-    RouteSubmitBlocked, RouteSubmitInFlight, route_submit_blocked_marker,
-    route_submit_blocked_marker_is_fresh, route_submit_inflight_marker,
-    route_submit_inflight_marker_is_fresh,
+    RouteSubmitBlocked, RouteSubmitInFlight, RouteSubmitMarkerJson,
+    parse_route_submit_blocked_marker_json, parse_route_submit_inflight_marker_json,
+    route_submit_blocked_marker, route_submit_blocked_marker_json, route_submit_inflight_marker,
+    route_submit_inflight_marker_json,
 };
 use anyhow::{Context, Result};
 
@@ -119,7 +120,8 @@ pub fn begin_route_submit_with_reason(
         reason,
         now_secs(),
     );
-    let json = serde_json::to_string_pretty(&marker).context("serialize route-submit marker")?;
+    let json =
+        route_submit_inflight_marker_json(&marker).context("serialize route-submit marker")?;
     std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
     crate::ops_log::log_op(
         file,
@@ -154,18 +156,17 @@ fn active_in_flight_marker_at(path: &Path) -> Result<bool> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(err) => return Err(err).with_context(|| format!("read {}", path.display())),
     };
-    let marker: RouteSubmitInFlight = match serde_json::from_str(&content) {
-        Ok(marker) => marker,
-        Err(_) => {
+    match parse_route_submit_inflight_marker_json(&content, now_secs()) {
+        RouteSubmitMarkerJson::Fresh(_) => Ok(true),
+        RouteSubmitMarkerJson::Malformed => {
             remove_marker_file(path, "malformed_route_submit_marker");
-            return Ok(false);
+            Ok(false)
         }
-    };
-    if route_submit_inflight_marker_is_fresh(&marker, now_secs()) {
-        return Ok(true);
+        RouteSubmitMarkerJson::Stale => {
+            remove_marker_file(path, "stale_route_submit_marker");
+            Ok(false)
+        }
     }
-    remove_marker_file(path, "stale_route_submit_marker");
-    Ok(false)
 }
 
 fn remove_marker_file(path: &Path, reason: &str) {
@@ -200,8 +201,8 @@ pub fn mark_route_submit_blocked(
         reason,
         now_secs(),
     );
-    let json =
-        serde_json::to_string_pretty(&marker).context("serialize route-submit blocked marker")?;
+    let json = route_submit_blocked_marker_json(&marker)
+        .context("serialize route-submit blocked marker")?;
     std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
     crate::ops_log::log_op(
         file,
@@ -226,18 +227,17 @@ pub fn route_submit_blocked(file: &Path) -> Result<Option<RouteSubmitBlocked>> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(err) => return Err(err).with_context(|| format!("read {}", path.display())),
     };
-    let marker: RouteSubmitBlocked = match serde_json::from_str(&content) {
-        Ok(marker) => marker,
-        Err(_) => {
+    match parse_route_submit_blocked_marker_json(&content, now_secs()) {
+        RouteSubmitMarkerJson::Fresh(marker) => Ok(Some(marker)),
+        RouteSubmitMarkerJson::Malformed => {
             remove_marker_file(&path, "malformed_route_submit_blocked_marker");
-            return Ok(None);
+            Ok(None)
         }
-    };
-    if route_submit_blocked_marker_is_fresh(&marker, now_secs()) {
-        return Ok(Some(marker));
+        RouteSubmitMarkerJson::Stale => {
+            remove_marker_file(&path, "stale_route_submit_blocked_marker");
+            Ok(None)
+        }
     }
-    remove_marker_file(&path, "stale_route_submit_blocked_marker");
-    Ok(None)
 }
 
 #[cfg(test)]
@@ -257,10 +257,11 @@ mod tests {
 
         let guard = begin_route_submit(&doc, "%1", "codex").unwrap();
         assert!(route_submit_in_flight(&doc).unwrap());
-        let marker = serde_json::from_str::<RouteSubmitInFlight>(
-            &std::fs::read_to_string(marker_path(&doc).unwrap().unwrap()).unwrap(),
-        )
-        .unwrap();
+        let content = std::fs::read_to_string(marker_path(&doc).unwrap().unwrap()).unwrap();
+        let marker = match parse_route_submit_inflight_marker_json(&content, now_secs()) {
+            RouteSubmitMarkerJson::Fresh(marker) => marker,
+            state => panic!("expected fresh marker, got {state:?}"),
+        };
         assert_eq!(marker.reason, "dispatch_submit");
         drop(guard);
         assert!(!route_submit_in_flight(&doc).unwrap());
@@ -282,8 +283,11 @@ mod tests {
         .unwrap();
         assert!(route_submit_in_flight(&doc).unwrap());
         let path = marker_path(&doc).unwrap().unwrap();
-        let marker: RouteSubmitInFlight =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        let marker = match parse_route_submit_inflight_marker_json(&content, now_secs()) {
+            RouteSubmitMarkerJson::Fresh(marker) => marker,
+            state => panic!("expected fresh marker, got {state:?}"),
+        };
         assert_eq!(marker.pane, "%42");
         assert_eq!(marker.harness, "codex");
         assert_eq!(marker.reason, ROUTE_DISPATCH_ONLY_READY_PROBE_REASON);
@@ -308,7 +312,7 @@ mod tests {
             reason: ROUTE_DISPATCH_ONLY_READY_PROBE_REASON.to_string(),
             written_at: now_secs().saturating_sub(ROUTE_IN_FLIGHT_TTL_SECS + 1),
         };
-        std::fs::write(&path, serde_json::to_string(&marker).unwrap()).unwrap();
+        std::fs::write(&path, route_submit_inflight_marker_json(&marker).unwrap()).unwrap();
 
         assert!(route_submit_in_flight(&doc).unwrap());
 
@@ -316,7 +320,7 @@ mod tests {
             written_at: now_secs().saturating_sub(ROUTE_READY_PROBE_TTL_SECS + 1),
             ..marker
         };
-        std::fs::write(&path, serde_json::to_string(&stale).unwrap()).unwrap();
+        std::fs::write(&path, route_submit_inflight_marker_json(&stale).unwrap()).unwrap();
         assert!(!route_submit_in_flight(&doc).unwrap());
         assert!(!path.exists());
     }
@@ -336,7 +340,7 @@ mod tests {
             reason: "dispatch_submit".to_string(),
             written_at: now_secs().saturating_sub(ROUTE_IN_FLIGHT_TTL_SECS + 1),
         };
-        std::fs::write(&path, serde_json::to_string(&marker).unwrap()).unwrap();
+        std::fs::write(&path, route_submit_inflight_marker_json(&marker).unwrap()).unwrap();
 
         assert!(!route_submit_in_flight(&doc).unwrap());
         assert!(!path.exists());
@@ -363,7 +367,7 @@ mod tests {
             reason: "accepted_without_dispatch_start_proof".to_string(),
             written_at: now_secs().saturating_sub(ROUTE_BLOCKED_TTL_SECS + 1),
         };
-        std::fs::write(&path, serde_json::to_string(&stale).unwrap()).unwrap();
+        std::fs::write(&path, route_submit_blocked_marker_json(&stale).unwrap()).unwrap();
         assert!(!route_submit_in_flight(&doc).unwrap());
         assert!(!path.exists());
     }

@@ -635,6 +635,7 @@ dependencies = [
  "agent-doc-queue",
  "lazily 0.13.1",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -5899,8 +5899,13 @@ fn test_agent_doc_supervisor_owns_route_submit_inflight_marker_policy() {
         "pub const ROUTE_DISPATCH_ONLY_READY_PROBE_REASON",
         "pub struct RouteSubmitInFlight",
         "pub struct RouteSubmitBlocked",
+        "pub enum RouteSubmitMarkerJson",
         "pub fn route_submit_inflight_marker(",
         "pub fn route_submit_blocked_marker(",
+        "pub fn route_submit_inflight_marker_json(",
+        "pub fn route_submit_blocked_marker_json(",
+        "pub fn parse_route_submit_inflight_marker_json(",
+        "pub fn parse_route_submit_blocked_marker_json(",
         "pub fn route_submit_ttl_secs_for_reason(",
         "pub fn route_submit_inflight_marker_is_fresh(",
         "pub fn route_submit_blocked_marker_is_fresh(",
@@ -5924,6 +5929,8 @@ fn test_agent_doc_supervisor_owns_route_submit_inflight_marker_policy() {
         "fn route_submit_ttl_secs_for_reason(",
         "pub fn route_submit_ttl_secs_for_reason(",
         "agent_doc_lease::timestamp_is_fresh",
+        "serde_json::from_str",
+        "serde_json::to_string",
         "pub use agent_doc_supervisor::route_submit_inflight",
     ] {
         assert!(
@@ -5933,8 +5940,10 @@ fn test_agent_doc_supervisor_owns_route_submit_inflight_marker_policy() {
     }
     assert!(
         route_in_flight.contains("use agent_doc_supervisor::route_submit_inflight::{")
-            && route_in_flight.contains("route_submit_inflight_marker_is_fresh")
-            && route_in_flight.contains("route_submit_blocked_marker_is_fresh"),
+            && route_in_flight.contains("parse_route_submit_inflight_marker_json")
+            && route_in_flight.contains("parse_route_submit_blocked_marker_json")
+            && route_in_flight.contains("route_submit_inflight_marker_json")
+            && route_in_flight.contains("route_submit_blocked_marker_json"),
         "route_in_flight adapter should import focused supervisor marker policy directly"
     );
 }

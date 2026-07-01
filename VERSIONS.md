@@ -24,7 +24,10 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   orchestration retaining only marker path, clock, JSON, and file IO.
   Transcript-content context percentage policy now also lives in
   `agent-doc-model-tier`; orchestration only reads transcript files and renders
-  the existing operator diagnostics.
+  the existing operator diagnostics. Route-submit marker JSON serialization and
+  fresh/stale/malformed classification now lives with the marker schema in
+  `agent-doc-supervisor`, leaving route orchestration to handle only sidecar
+  file IO, cleanup, and ops-log reporting.
 
 - **Pure helper layer extracted from orchestration.** Exchange shrink/ack retry
   and prompt-dedupe helpers now live in `agent-doc-element-exchange`; preflight

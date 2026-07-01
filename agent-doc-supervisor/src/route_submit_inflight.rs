@@ -91,6 +91,55 @@ pub fn route_submit_blocked_marker(
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RouteSubmitMarkerJson<T> {
+    Fresh(T),
+    Stale,
+    Malformed,
+}
+
+pub fn route_submit_inflight_marker_json(
+    marker: &RouteSubmitInFlight,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string_pretty(marker)
+}
+
+pub fn route_submit_blocked_marker_json(
+    marker: &RouteSubmitBlocked,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string_pretty(marker)
+}
+
+pub fn parse_route_submit_inflight_marker_json(
+    content: &str,
+    now: u64,
+) -> RouteSubmitMarkerJson<RouteSubmitInFlight> {
+    let marker: RouteSubmitInFlight = match serde_json::from_str(content) {
+        Ok(marker) => marker,
+        Err(_) => return RouteSubmitMarkerJson::Malformed,
+    };
+    if route_submit_inflight_marker_is_fresh(&marker, now) {
+        RouteSubmitMarkerJson::Fresh(marker)
+    } else {
+        RouteSubmitMarkerJson::Stale
+    }
+}
+
+pub fn parse_route_submit_blocked_marker_json(
+    content: &str,
+    now: u64,
+) -> RouteSubmitMarkerJson<RouteSubmitBlocked> {
+    let marker: RouteSubmitBlocked = match serde_json::from_str(content) {
+        Ok(marker) => marker,
+        Err(_) => return RouteSubmitMarkerJson::Malformed,
+    };
+    if route_submit_blocked_marker_is_fresh(&marker, now) {
+        RouteSubmitMarkerJson::Fresh(marker)
+    } else {
+        RouteSubmitMarkerJson::Stale
+    }
+}
+
 pub fn route_submit_ttl_secs_for_reason(reason: &str) -> u64 {
     match reason {
         ROUTE_DISPATCH_ONLY_READY_PROBE_REASON => ROUTE_READY_PROBE_TTL_SECS,
@@ -150,6 +199,54 @@ mod tests {
         assert_eq!(marker.harness, "codex");
         assert_eq!(marker.reason, "accepted_without_dispatch_start_proof");
         assert_eq!(marker.written_at, 2_000);
+    }
+
+    #[test]
+    fn marker_json_helpers_parse_fresh_stale_and_malformed_inflight_payloads() {
+        let marker = route_submit_inflight_marker(
+            "plan.md",
+            "%1",
+            "codex",
+            ROUTE_DISPATCH_SUBMIT_REASON,
+            1_000,
+        );
+        let json = route_submit_inflight_marker_json(&marker).unwrap();
+        assert_eq!(
+            parse_route_submit_inflight_marker_json(&json, 1_000 + ROUTE_IN_FLIGHT_TTL_SECS),
+            RouteSubmitMarkerJson::Fresh(marker.clone())
+        );
+        assert_eq!(
+            parse_route_submit_inflight_marker_json(&json, 1_000 + ROUTE_IN_FLIGHT_TTL_SECS + 1),
+            RouteSubmitMarkerJson::Stale
+        );
+        assert_eq!(
+            parse_route_submit_inflight_marker_json("not json", 1_000),
+            RouteSubmitMarkerJson::Malformed
+        );
+    }
+
+    #[test]
+    fn marker_json_helpers_parse_fresh_stale_and_malformed_blocked_payloads() {
+        let marker = route_submit_blocked_marker(
+            "plan.md",
+            "%1",
+            "codex",
+            "accepted_without_dispatch_start_proof",
+            1_000,
+        );
+        let json = route_submit_blocked_marker_json(&marker).unwrap();
+        assert_eq!(
+            parse_route_submit_blocked_marker_json(&json, 1_000 + ROUTE_BLOCKED_TTL_SECS),
+            RouteSubmitMarkerJson::Fresh(marker.clone())
+        );
+        assert_eq!(
+            parse_route_submit_blocked_marker_json(&json, 1_000 + ROUTE_BLOCKED_TTL_SECS + 1),
+            RouteSubmitMarkerJson::Stale
+        );
+        assert_eq!(
+            parse_route_submit_blocked_marker_json("not json", 1_000),
+            RouteSubmitMarkerJson::Malformed
+        );
     }
 
     #[test]

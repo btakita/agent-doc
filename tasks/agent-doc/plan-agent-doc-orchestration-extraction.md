@@ -918,6 +918,13 @@ should be deleted during extraction.
 - Drain-stall sidecar ownership was tightened as well: `agent-doc-turn` now
   owns continuation-pending marker construction, while orchestration keeps only
   path lookup, current-time capture, serialization, and sidecar file IO.
+- Tmux input diagnostics now have separate pure/effect layers:
+  `agent-doc-tmux-commands` owns the structured key/payload/byte/transform
+  formatting policy, and `agent-doc-tmux-io` owns the effectful stderr plus
+  ops-log adapter through an injected sink. Root and orchestration callers import
+  the focused tmux IO adapter directly; the old
+  `agent-doc-orchestration::input_diag` module was deleted rather than kept as a
+  compatibility facade.
 - Route-submit sidecar policy was tightened too: `agent-doc-supervisor` now owns
   route-submit marker JSON serialization plus fresh/stale/malformed
   classification for in-flight and blocked markers. Orchestration keeps only

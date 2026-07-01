@@ -658,6 +658,8 @@ name = "agent-doc-sync"
 version = "0.34.65"
 dependencies = [
  "agent-doc-fs",
+ "anyhow",
+ "serde_json",
  "tempfile",
 ]
 

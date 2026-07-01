@@ -11,6 +11,8 @@ name = "agent_doc_sync"
 
 [dependencies]
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.65" }
+anyhow = "1"
+serde_json = "1"
 
 [dev-dependencies]
 tempfile = "3"

@@ -197,6 +197,10 @@ use agent_doc_controller::command_line::{
     agent_doc_cmdline_is_owner, cmdline_owns_other_document, owner_document_from_cmdline,
 };
 use agent_doc_controller::dispatch::is_stash_window_name;
+use agent_doc_sync::{
+    effective_sync_columns, is_file_rename, latency_budget_status, sanitize_stamp_component,
+    sync_latency_message, sync_prune_fingerprint,
+};
 use agent_doc_element::element;
 use agent_doc_tmux::{
     AssociatedPaneCandidate, AssociatedPaneResolution, AssociatedPaneSource,
@@ -236,30 +240,6 @@ const SAFE_PASSIVE_SYNC_LOCK_SKIPPED_MARKER: &str =
     "[sync] safe_passive_sync_lock_contention_retry";
 const STALE_SYNC_LOCK_OWNER_AGE: Duration = Duration::from_secs(300);
 
-fn latency_budget_status(elapsed: Duration, budget: Duration) -> &'static str {
-    if elapsed >= budget {
-        "over_budget"
-    } else {
-        "ok"
-    }
-}
-
-fn sync_latency_message(
-    phase: &str,
-    elapsed: Duration,
-    budget: Duration,
-    auto_start_mode: AutoStartMode,
-) -> String {
-    format!(
-        "sync_latency phase={} elapsed_ms={} budget_ms={} status={} mode={}",
-        phase,
-        elapsed.as_millis(),
-        budget.as_millis(),
-        latency_budget_status(elapsed, budget),
-        auto_start_mode.log_label()
-    )
-}
-
 mod lock;
 pub(crate) use lock::*;
 
@@ -270,7 +250,8 @@ fn log_sync_latency(
     budget: Duration,
     auto_start_mode: AutoStartMode,
 ) {
-    let message = sync_latency_message(phase, elapsed, budget, auto_start_mode);
+    let mode_label = auto_start_mode.log_label();
+    let message = sync_latency_message(phase, elapsed, budget, mode_label);
     sync_log(&message);
     if latency_budget_status(elapsed, budget) == "over_budget" {
         eprintln!(
@@ -278,7 +259,7 @@ fn log_sync_latency(
             phase,
             elapsed.as_millis(),
             budget.as_millis(),
-            auto_start_mode.log_label()
+            mode_label
         );
     }
     if let Some(focus) = focus {
@@ -1249,19 +1230,6 @@ fn destructive_repair_now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-fn sanitize_stamp_component(value: &str) -> String {
-    value
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
-
 /// Stamp path keyed by BOTH the tmux server socket and the session name. The
 /// socket key keeps isolated test servers (each a unique socket) from sharing a
 /// stamp with each other or with the default production server, so the rate
@@ -1355,14 +1323,6 @@ fn epoch_millis_now() -> u64 {
         .min(u128::from(u64::MAX)) as u64
 }
 
-fn sync_prune_fingerprint(col_args: &[String], window: Option<&str>) -> String {
-    serde_json::json!({
-        "window": window.unwrap_or(""),
-        "columns": col_args,
-    })
-    .to_string()
-}
-
 fn safe_passive_prune_cleanup_mode_at(
     state_path: &Path,
     col_args: &[String],
@@ -1411,28 +1371,6 @@ fn safe_passive_prune_cleanup_mode(
     let state_path = agent_doc_sync::sync_prune_state_path(col_args, focus, &cwd);
     let _ = safe_passive_prune_cleanup_mode_at(&state_path, col_args, window, epoch_millis_now());
     agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
-}
-
-fn effective_sync_columns(
-    col_args: &[String],
-    saved_layout: &[String],
-    layout_state_path: &Path,
-) -> Result<Vec<String>> {
-    if !col_args.is_empty() {
-        return Ok(col_args.to_vec());
-    }
-
-    if saved_layout.iter().all(|col| col.trim().is_empty()) {
-        anyhow::bail!(
-            "no sync columns provided and no recorded layout exists at {}",
-            layout_state_path.display()
-        );
-    }
-
-    Ok(saved_layout
-        .iter()
-        .map(|col| col.trim().to_string())
-        .collect())
 }
 
 pub fn configured_session_for_root(tmux: &Tmux, root: &Path) -> Option<String> {
@@ -4531,12 +4469,6 @@ fn pid_has_agent_doc_for_file(pid: &str, file_path: &str) -> bool {
     agent_doc_cmdline_is_owner(&cmdline, file_path)
 }
 
-/// Detect whether a file has been renamed: the registered path differs from
-/// the current path and the old path no longer exists on disk.
-pub fn is_file_rename(registered_path: &str, current_path: &str) -> bool {
-    registered_path != current_path && !Path::new(registered_path).exists()
-}
-
 #[cfg(test)]
 mod th {
     use super::*;
@@ -6266,14 +6198,6 @@ mod tests {
             .collect();
         assert_eq!(filtered, vec!["file1.md", "file2.md"]);
     }
-    #[test]
-    fn effective_sync_columns_fall_back_to_recorded_layout() {
-        let saved_layout = vec!["left.md".to_string(), "right.md".to_string()];
-        let cols =
-            effective_sync_columns(&[], &saved_layout, Path::new(".agent-doc/last_layout.json"))
-                .expect("recorded layout should satisfy a no-col sync");
-        assert_eq!(cols, saved_layout);
-    }
     /// Empty .md files should be auto-scaffolded by sync's resolve_file.
     /// This tests the scaffolding logic inline (resolve_file is a closure in run()).
     #[test]
@@ -6480,12 +6404,12 @@ mod tests {
         );
     }
     #[test]
-    fn sync_latency_message_marks_budget_status() {
+    fn latency_message_reports_budget_status_via_sync_crate() {
         let ok = sync_latency_message(
             "tmux_router",
             Duration::from_millis(999),
             Duration::from_secs(1),
-            AutoStartMode::SafePassive,
+            AutoStartMode::SafePassive.log_label(),
         );
         assert!(ok.contains("status=ok"), "{ok}");
         assert!(ok.contains("mode=safe-passive"), "{ok}");
@@ -6494,7 +6418,7 @@ mod tests {
             "safe_passive_total",
             Duration::from_secs(1),
             Duration::from_secs(1),
-            AutoStartMode::SafePassive,
+            AutoStartMode::SafePassive.log_label(),
         );
         assert!(slow.contains("status=over_budget"), "{slow}");
         assert!(slow.contains("elapsed_ms=1000"), "{slow}");
@@ -6503,7 +6427,7 @@ mod tests {
             "controller_actor_lookup",
             Duration::from_millis(251),
             SYNC_CONTROLLER_ACTOR_LOOKUP_BUDGET,
-            AutoStartMode::SafePassive,
+            AutoStartMode::SafePassive.log_label(),
         );
         assert!(
             controller.contains("phase=controller_actor_lookup"),
@@ -6754,50 +6678,6 @@ mod tests {
             iso.active_pane("test").unwrap(),
             active_pane,
             "safe-passive editor sync should focus the known local actor pane before sync lock contention defers prune/reconcile"
-        );
-    }
-    #[test]
-    fn is_file_rename_detects_rename_when_old_path_gone() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let old_path = tmp.path().join("old.md");
-        // old_path does NOT exist on disk
-        let current_path = tmp.path().join("new.md").to_string_lossy().to_string();
-        assert!(
-            is_file_rename(&old_path.to_string_lossy(), &current_path),
-            "should detect rename when old path doesn't exist and paths differ"
-        );
-    }
-    #[test]
-    fn is_file_rename_returns_false_when_paths_match() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let path = tmp.path().join("same.md");
-        std::fs::write(&path, "content").unwrap();
-        let path_str = path.to_string_lossy().to_string();
-        assert!(
-            !is_file_rename(&path_str, &path_str),
-            "should not detect rename when paths are identical"
-        );
-    }
-    #[test]
-    fn is_file_rename_returns_false_when_old_path_still_exists() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let old_path = tmp.path().join("old.md");
-        let new_path = tmp.path().join("new.md");
-        std::fs::write(&old_path, "content").unwrap();
-        std::fs::write(&new_path, "content").unwrap();
-        assert!(
-            !is_file_rename(&old_path.to_string_lossy(), &new_path.to_string_lossy()),
-            "should not detect rename when old path still exists (both files present)"
-        );
-    }
-    #[test]
-    fn is_file_rename_handles_relative_paths() {
-        assert!(
-            is_file_rename(
-                "tasks/nonexistent-old-file.md",
-                "tasks/software/renamed-file.md"
-            ),
-            "should detect rename with relative paths when old doesn't exist"
         );
     }
     #[test]

@@ -14281,6 +14281,12 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         "pub fn layout_state_scope_root",
         "pub fn layout_state_path",
         "pub fn sync_prune_state_path",
+        "pub fn latency_budget_status",
+        "pub fn sync_latency_message",
+        "pub fn sanitize_stamp_component",
+        "pub fn sync_prune_fingerprint",
+        "pub fn effective_sync_columns",
+        "pub fn is_file_rename",
     ] {
         assert!(
             sync_source.contains(required_snippet),
@@ -14304,6 +14310,12 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         "fn layout_state_scope_root_for_sync",
         "fn layout_state_path_for_sync",
         "fn sync_prune_state_path_for_sync",
+        "fn latency_budget_status",
+        "fn sync_latency_message",
+        "fn sanitize_stamp_component",
+        "fn sync_prune_fingerprint",
+        "fn effective_sync_columns",
+        "pub fn is_file_rename",
     ] {
         assert!(
             !sync_orchestration.contains(forbidden_snippet),
@@ -14316,6 +14328,13 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
             && sync_orchestration.contains("agent_doc_sync::layout_state_scope_root")
             && sync_orchestration.contains("agent_doc_sync::layout_state_path")
             && sync_orchestration.contains("agent_doc_sync::sync_prune_state_path")
+            && sync_orchestration.contains("use agent_doc_sync::{")
+            && sync_orchestration.contains("effective_sync_columns")
+            && sync_orchestration.contains("is_file_rename")
+            && sync_orchestration.contains("latency_budget_status")
+            && sync_orchestration.contains("sanitize_stamp_component")
+            && sync_orchestration.contains("sync_latency_message")
+            && sync_orchestration.contains("sync_prune_fingerprint")
             && route_session_resolution.contains("agent_doc_sync::shared_sync_scope_root"),
         "orchestration should call sync scope policy through agent-doc-sync directly"
     );

@@ -39,6 +39,7 @@
 //! - `test_plan_detects_recommendation_request`
 //! - `test_plan_no_false_positive_on_questions`
 
+use agent_doc_document::queue_projection::strip_in_progress_marker;
 use agent_doc_hash::content_hash;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -401,7 +402,7 @@ fn active_queue_prompt(content: &str) -> Option<String> {
     }
     agent_doc_queue::document_queue::prompts(&activation.entries_after)
         .first()
-        .map(|prompt| agent_doc_queue::document_queue::strip_in_progress_marker(&prompt.text))
+        .map(|prompt| strip_in_progress_marker(&prompt.text))
 }
 
 fn queue_is_active_for_diff(content: &str, diff_text: &str) -> bool {

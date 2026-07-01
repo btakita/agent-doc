@@ -4,6 +4,7 @@
 //! already-read document/response text; file IO and lifecycle mutations stay in
 //! orchestration.
 
+use agent_doc_document::queue_projection::{IN_PROGRESS_MARKER, strip_priority_markers};
 use anyhow::Result;
 
 pub fn queue_prompt_done_id(text: &str) -> Option<String> {
@@ -32,7 +33,7 @@ pub fn display_queue_prompt_text(text: &str) -> String {
     text.lines()
         .map(|line| {
             let line = line.trim().trim_start_matches('❯').trim();
-            crate::document_queue::strip_priority_markers(line)
+            strip_priority_markers(line)
                 .replace("[#", "#")
                 .replace(']', "")
         })
@@ -321,9 +322,7 @@ fn normalize_prompt_echo_presence_line(line: &str) -> String {
     text = text.trim_start_matches('❯').trim_start();
     text = strip_echo_presence_list_marker(text);
     text = strip_echo_presence_checkbox_marker(text);
-    crate::document_queue::strip_priority_markers(text)
-        .trim()
-        .to_string()
+    strip_priority_markers(text).trim().to_string()
 }
 
 /// Locate, within `region` (the exchange content), the byte offset of the line
@@ -437,7 +436,7 @@ pub fn embed_consumed_prompt_in_response(
 /// prompt path: a one-word head like `deploy` is proof only when it appears in
 /// the labeled queue-prompt echo, not just anywhere in assistant prose.
 fn response_explicit_queue_prompt_echoes_head(response_body: &str, head_text: &str) -> bool {
-    let head_clean = crate::document_queue::strip_priority_markers(head_text);
+    let head_clean = strip_priority_markers(head_text);
     let head_norm = normalize_for_answer_match(&free_text_head_match_prose(&head_clean));
     if head_norm.is_empty() {
         return false;
@@ -484,8 +483,7 @@ fn response_explicit_queue_prompt_echoes_head(response_body: &str, head_text: &s
 /// of "the head this cycle is working" -- used by `#qheadstrikeauto` to auto-strike
 /// an answered free-text drain target without depending on agent prose formatting.
 pub fn head_carries_in_progress_marker(text: &str) -> bool {
-    text.trim_start()
-        .starts_with(crate::document_queue::IN_PROGRESS_MARKER)
+    text.trim_start().starts_with(IN_PROGRESS_MARKER)
 }
 
 /// The prose prefix of a free-text queue head used for answer-matching: every
@@ -519,7 +517,7 @@ pub fn free_text_head_match_prose(head_text: &str) -> String {
 pub fn free_text_head_answered_by_response(response_body: &str, head_text: &str) -> bool {
     // Strip the leading operator/agent pin (`:pushpin:` ...) first -- its literal
     // shortcode word would otherwise survive normalization and break the match.
-    let head_clean = crate::document_queue::strip_priority_markers(head_text);
+    let head_clean = strip_priority_markers(head_text);
     if response_explicit_queue_prompt_echoes_head(response_body, &head_clean) {
         return true;
     }

@@ -1,6 +1,7 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use agent_doc_document::queue_projection::{strip_in_progress_marker, strip_priority_markers};
 use agent_doc_element_backlog::backlog::{
     component_matches_tracked_surface, ensure_no_completed_tracked_items,
     maintenance_surface_label, review_counts, should_reap_already_done_mirrors,
@@ -1183,7 +1184,7 @@ pub(crate) fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<Que
     let queue_prompts = if activation.active {
         agent_doc_queue::document_queue::prompts(&activation.entries_after)
             .iter()
-            .map(|prompt| agent_doc_queue::document_queue::strip_in_progress_marker(&prompt.text))
+            .map(|prompt| strip_in_progress_marker(&prompt.text))
             .collect()
     } else {
         vec![]
@@ -1985,7 +1986,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         // Normalized prose of every free-text head committed in the snapshot — the
         // in-flight-edit gate. `snapshot_queue_entries` was parsed above.
         let gate_norm = |text: &str| -> String {
-            agent_doc_queue::document_queue::strip_priority_markers(text)
+            strip_priority_markers(text)
                 .to_lowercase()
                 .split_whitespace()
                 .collect::<Vec<_>>()
@@ -2013,8 +2014,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                     // cosmetic `🚧` marker so it does not linger inside the
                     // strikethrough (`set_first_prompt_in_progress` re-applies it to
                     // the genuinely-active next head).
-                    let cleaned =
-                        agent_doc_queue::document_queue::strip_in_progress_marker(&p.text);
+                    let cleaned = strip_in_progress_marker(&p.text);
                     if cleaned == p.text {
                         agent_doc_queue::document_queue::QueueEntry::Completed(p.clone())
                     } else {
@@ -2082,7 +2082,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // prompt verbatim inside the strikethrough for auditability.
     {
         let gate_norm = |text: &str| -> String {
-            agent_doc_queue::document_queue::strip_priority_markers(text)
+            strip_priority_markers(text)
                 .to_lowercase()
                 .split_whitespace()
                 .collect::<Vec<_>>()
@@ -2147,8 +2147,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                                     // in progress, so the marker must not linger inside
                                     // the strikethrough (and `set_first_prompt_in_progress`
                                     // re-applies it to the genuinely-active next head).
-                                    let head_clean =
-                                        agent_doc_queue::document_queue::strip_in_progress_marker(p.text.trim_end());
+                                    let head_clean = strip_in_progress_marker(p.text.trim_end());
                                     let annotated = format!("{head_clean} — {reason}");
                                     struck.push((m.clone(), annotated.clone()));
                                     agent_doc_queue::document_queue::QueueEntry::Completed(agent_doc_queue::document_queue::QueuePrompt {
@@ -2285,8 +2284,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
             }
             record_queue_worklist_state(file, &current_content, &after_stop, false)?;
             if let Some(head) = agent_doc_queue::document_queue::first_prompt(&after_stop) {
-                let head_text =
-                    agent_doc_queue::document_queue::strip_in_progress_marker(&head.text);
+                let head_text = strip_in_progress_marker(&head.text);
                 record_deferred_queue_head_state(file, &current_content, &head_text, "stop_fence")?;
             }
             return Ok(QueueState {
@@ -2316,8 +2314,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
             if let Some(head) =
                 agent_doc_queue::document_queue::first_prompt(&activation.entries_after)
             {
-                let head_text =
-                    agent_doc_queue::document_queue::strip_in_progress_marker(&head.text);
+                let head_text = strip_in_progress_marker(&head.text);
                 let reason = format!("time_gate:{dt}");
                 record_deferred_queue_head_state(file, &current_content, &head_text, &reason)?;
             }
@@ -2464,8 +2461,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                     if let Some(head) =
                         agent_doc_queue::document_queue::first_prompt(&activation.entries_after)
                     {
-                        let head_text =
-                            agent_doc_queue::document_queue::strip_in_progress_marker(&head.text);
+                        let head_text = strip_in_progress_marker(&head.text);
                         record_deferred_queue_head_state(
                             file,
                             &current_content,
@@ -2775,7 +2771,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     let queue_prompts: Vec<String> = if activation.active {
         agent_doc_queue::document_queue::prompts(&activation.entries_after)
             .iter()
-            .map(|p| agent_doc_queue::document_queue::strip_in_progress_marker(&p.text))
+            .map(|p| strip_in_progress_marker(&p.text))
             .collect()
     } else {
         vec![]
@@ -2839,7 +2835,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     } else if activation.deferred
         && let Some(head) = agent_doc_queue::document_queue::first_prompt(&activation.entries_after)
     {
-        let head_text = agent_doc_queue::document_queue::strip_in_progress_marker(&head.text);
+        let head_text = strip_in_progress_marker(&head.text);
         let reason = activation
             .start_at
             .as_deref()
@@ -3278,8 +3274,7 @@ fn selected_queue_head_unchanged_in_snapshot(
     let Some(snapshot_head) = snapshot_prompts.first() else {
         return false;
     };
-    agent_doc_queue::document_queue::strip_priority_markers(&snapshot_head.text)
-        == agent_doc_queue::document_queue::strip_priority_markers(&current_head.text)
+    strip_priority_markers(&snapshot_head.text) == strip_priority_markers(&current_head.text)
 }
 
 fn queue_region_differs_from_snapshot(file: &Path, current_content: &str) -> bool {
@@ -3357,6 +3352,7 @@ pub(crate) fn queue_entries_are_drained_residue(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
+    use agent_doc_document::queue_projection::IN_PROGRESS_MARKER;
     use std::io::Write;
     use std::process::Command;
     use tempfile::TempDir;
@@ -6916,29 +6912,28 @@ mod tests {
             completed.iter().any(|t| {
                 t.contains("Fix JB File Cache Conflict dialogs")
                     && t.contains("auto-struck: completed by #jbcache (#qftbklgstrike)")
-                    && !t.contains(agent_doc_queue::document_queue::IN_PROGRESS_MARKER)
+                    && !t.contains(IN_PROGRESS_MARKER)
             }),
             "struck head must be annotated with NO 🚧 marker:\ncompleted={completed:?}"
         );
         // The 🚧 marker is not stranded on any struck/completed entry.
         assert!(
-            !completed
-                .iter()
-                .any(|t| t.contains(agent_doc_queue::document_queue::IN_PROGRESS_MARKER)),
+            !completed.iter().any(|t| t.contains(IN_PROGRESS_MARKER)),
             "no completed entry may carry 🚧:\ncompleted={completed:?}"
         );
         // The newly-promoted active head is the in-progress head now.
         assert!(
             active
                 .iter()
-                .filter(|t| t.contains(agent_doc_queue::document_queue::IN_PROGRESS_MARKER))
+                .filter(|t| t.contains(IN_PROGRESS_MARKER))
                 .count()
                 == 1,
             "exactly one active head should carry 🚧 (the new in-progress head):\nactive={active:?}"
         );
         assert!(
-            active.iter().any(|t| t.contains("[#stillopen]")
-                && t.contains(agent_doc_queue::document_queue::IN_PROGRESS_MARKER)),
+            active
+                .iter()
+                .any(|t| t.contains("[#stillopen]") && t.contains(IN_PROGRESS_MARKER)),
             "the genuinely-active next head should be the 🚧 in-progress head:\nactive={active:?}"
         );
     }

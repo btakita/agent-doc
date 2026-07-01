@@ -851,15 +851,6 @@ fn discover_entries_in(base_dir: &Path) -> Result<Vec<WatchEntry>> {
     Ok(entries)
 }
 
-/// Discover only file paths (backward-compat wrapper used by tests).
-#[cfg(test)]
-fn discover_files_in(base_dir: &Path) -> Result<Vec<PathBuf>> {
-    Ok(discover_entries_in(base_dir)?
-        .into_iter()
-        .map(|e| e.path)
-        .collect())
-}
-
 /// Stop the watch daemon by removing the PID file.
 pub fn stop() -> Result<()> {
     match read_pid() {
@@ -983,8 +974,8 @@ mod tests {
     #[test]
     fn discover_empty_registry() {
         let dir = TempDir::new().unwrap();
-        let files = discover_files_in(dir.path()).unwrap();
-        assert!(files.is_empty());
+        let entries = discover_entries_in(dir.path()).unwrap();
+        assert!(entries.is_empty());
     }
 
     #[test]

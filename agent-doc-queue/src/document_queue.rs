@@ -28,6 +28,11 @@
 //!
 //! This module is I/O-free. Callers handle reading/writing files.
 
+use agent_doc_document::queue_projection::{
+    AGENT_PRIORITIZED_MARKER, AGENT_PRIORITIZED_MARKERS, PRIORITIZED_MARKER, PRIORITIZED_MARKERS,
+    apply_in_progress_marker, strip_in_progress_marker, strip_in_progress_marker_for_display,
+    strip_priority_markers,
+};
 use agent_doc_element_queue::QueueItemLifecycle;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -706,12 +711,6 @@ pub fn sync_backlog_into_queue(
 /// Strong emphasis / pushpin == operator; italic emphasis / round-pushpin ==
 /// agent. Both asterisk and underscore spellings are accepted (markdown treats
 /// them identically), so toggling spelling never changes the tier.
-pub use agent_doc_document::queue_projection::{
-    AGENT_PRIORITIZED_MARKER, AGENT_PRIORITIZED_MARKERS, IN_PROGRESS_MARKER, PRIORITIZED_MARKER,
-    PRIORITIZED_MARKERS, apply_in_progress_marker, has_in_progress_marker,
-    strip_in_progress_marker, strip_in_progress_marker_for_display, strip_priority_markers,
-};
-
 /// True when `text` carries an **operator** (strong-emphasis) pin marker at its
 /// head (after optional leading whitespace), in either spelling.
 pub fn is_prioritized(text: &str) -> bool {
@@ -2558,6 +2557,7 @@ fn first_live_control_or_prompt(entries: &[QueueEntry]) -> Option<&QueueEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_doc_document::queue_projection::has_in_progress_marker;
 
     fn ids(value: &[&str]) -> Vec<String> {
         value.iter().map(|s| s.to_string()).collect()

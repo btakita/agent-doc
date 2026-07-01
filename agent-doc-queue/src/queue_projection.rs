@@ -5,7 +5,9 @@
 
 use std::collections::HashMap;
 
-use agent_doc_document::queue_projection::{ActiveQueuePromptProjection, QueuePromptRow};
+use agent_doc_document::queue_projection::{
+    ActiveQueuePromptProjection, QueuePromptRow, strip_in_progress_marker, strip_priority_markers,
+};
 
 use crate::document_queue::{self, QueueEntry};
 
@@ -49,7 +51,7 @@ pub fn queue_prompt_projection_rows(content: &str, entries: &[QueueEntry]) -> Ve
         .iter()
         .filter_map(|entry| match entry {
             QueueEntry::Prompt(prompt) => {
-                let text = document_queue::strip_in_progress_marker(&prompt.text);
+                let text = strip_in_progress_marker(&prompt.text);
                 let id = crate::queue_response::queue_prompt_done_id(&text);
                 let projectable_default =
                     !crate::queue_continuation::is_noise_queue_head(
@@ -94,8 +96,8 @@ pub fn selected_queue_head_node_key(content: &str, head_text: &str) -> Option<St
     if let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
         && let Some(node) = nodes.into_iter().find(|node| {
             !node.item.struck
-                && document_queue::strip_priority_markers(node.item.text.trim())
-                    == document_queue::strip_priority_markers(head_text)
+                && strip_priority_markers(node.item.text.trim())
+                    == strip_priority_markers(head_text)
         })
     {
         return Some(node.node_key);
@@ -119,14 +121,12 @@ fn queue_prompt_node_key(
     prompt_text: &str,
     index: usize,
 ) -> Option<String> {
-    let normalized_prompt = document_queue::strip_in_progress_marker(prompt_text)
-        .trim()
-        .to_string();
+    let normalized_prompt = strip_in_progress_marker(prompt_text).trim().to_string();
     for (node_index, node) in nodes.iter().enumerate() {
         if used_nodes.get(node_index).copied().unwrap_or(false) || node.item.struck {
             continue;
         }
-        let node_text = document_queue::strip_in_progress_marker(node.item.text.trim());
+        let node_text = strip_in_progress_marker(node.item.text.trim());
         if node_text.trim() == normalized_prompt {
             if let Some(used) = used_nodes.get_mut(node_index) {
                 *used = true;
@@ -151,7 +151,7 @@ pub fn queue_worklist_entries(content: &str, entries: &[QueueEntry]) -> Vec<Queu
         .iter()
         .filter_map(|entry| match entry {
             QueueEntry::Prompt(prompt) => {
-                let text = document_queue::strip_in_progress_marker(&prompt.text);
+                let text = strip_in_progress_marker(&prompt.text);
                 let node_key = queue_prompt_node_key(&nodes, &mut used_nodes, &text, prompt_index);
                 prompt_index += 1;
                 Some(QueueWorklistEntry {

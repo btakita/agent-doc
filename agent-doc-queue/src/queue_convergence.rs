@@ -6,6 +6,7 @@
 
 use std::collections::HashSet;
 
+use agent_doc_document::queue_projection::strip_priority_markers;
 use agent_doc_element::element;
 use agent_doc_element_backlog::backlog;
 
@@ -81,7 +82,7 @@ fn first_queue_prompt_identity(content: &str) -> Option<String> {
 }
 
 fn queue_prompt_identity(prompt: &str) -> String {
-    document_queue::strip_priority_markers(prompt)
+    strip_priority_markers(prompt)
 }
 
 fn content_without_queue_body(content: &str) -> Option<String> {

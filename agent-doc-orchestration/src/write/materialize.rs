@@ -2,8 +2,7 @@
 
 use super::*;
 use agent_doc_template::response_materialization::{
-    response_materialization_probe, response_materialization_probe_from_response,
-    same_ignoring_trailing_newlines, serialize_template_response,
+    response_materialization_probe, same_ignoring_trailing_newlines, serialize_template_response,
     strip_partial_response_materialization_from_exchange,
 };
 use std::collections::HashSet;
@@ -21,25 +20,6 @@ pub(crate) fn pending_replace_escape_hatch_enabled() -> bool {
         || std::env::var("AGENT_DOC_ALLOW_PATCH_PENDING")
             .map(|v| v == "1")
             .unwrap_or(false)
-}
-
-pub fn response_materialized_in_content(response: &str, content: &str) -> bool {
-    let probe = response_materialization_probe_from_response(response);
-    if probe.trim().is_empty()
-        || agent_doc_turn::response_replay::response_already_applied(content, &probe)
-        || agent_doc_turn::response_replay::response_already_applied_after_prefix_strip(
-            content, &probe,
-        )
-    {
-        return true;
-    }
-    let normalized_content = agent_doc_document::transient_markers::strip_guard_markers(content);
-    normalized_content != content
-        && (agent_doc_turn::response_replay::response_already_applied(&normalized_content, &probe)
-            || agent_doc_turn::response_replay::response_already_applied_after_prefix_strip(
-                &normalized_content,
-                &probe,
-            ))
 }
 
 pub(crate) fn ipc_response_materialized_or_fallback(
@@ -385,15 +365,6 @@ mod pending_patch_normalization_tests {
         (doc, content)
     }
 
-    fn doc_with_todo(root: &TempDir, todo_body: &str) -> (PathBuf, String) {
-        let doc = root.path().join("todo.md");
-        let content = format!(
-            "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange -->\n❯ Please reply\n<!-- /agent:exchange -->\n\n<!-- agent:todo patch=replace -->\n{todo_body}<!-- /agent:todo -->\n"
-        );
-        fs::write(&doc, &content).unwrap();
-        (doc, content)
-    }
-
     #[test]
     fn normalize_pending_patch_repairs_lone_bare_placeholder() {
         let tmp = TempDir::new().unwrap();
@@ -552,63 +523,6 @@ mod pending_patch_normalization_tests {
         super::enforce_no_replace_pending(&patches, false)
             .expect_err("allow=false should reject backlog replacement");
     }
-
-    #[test]
-    fn destructive_todo_patch_is_rejected_when_it_drops_checklist_items() {
-        let tmp = TempDir::new().unwrap();
-        let (_doc, content) = doc_with_todo(
-            &tmp,
-            concat!(
-                "### Phase 1\n\n",
-                "- [x] Select benchmark\n",
-                "- [x] Write methodology\n\n",
-                "### Phase 2\n\n",
-                "- [ ] Expand git signal extraction\n",
-                "- [ ] Re-score sessions\n",
-            ),
-        );
-        let patches = vec![agent_doc_template::PatchBlock::new(
-            "todo",
-            concat!(
-                "### Phase 1\n\n",
-                "- [x] Select benchmark\n",
-                "- [x] Write methodology\n",
-            ),
-        )];
-
-        let err = super::enforce_no_destructive_todo_patch(&content, &patches)
-            .expect_err("subset todo patch should fail closed");
-        let msg = err.to_string();
-        assert!(
-            msg.contains("patch:todo would reduce total checklist item count from 4 to 2"),
-            "unexpected error: {}",
-            msg
-        );
-    }
-
-    #[test]
-    fn todo_patch_with_same_checklist_count_is_allowed() {
-        let tmp = TempDir::new().unwrap();
-        let (_doc, content) = doc_with_todo(
-            &tmp,
-            concat!(
-                "### Phase 1\n\n",
-                "- [ ] Original item 1\n",
-                "- [ ] Original item 2\n",
-            ),
-        );
-        let patches = vec![agent_doc_template::PatchBlock::new(
-            "todo",
-            concat!(
-                "### Phase 1\n\n",
-                "- [x] Updated item 1\n",
-                "- [ ] Updated item 2\n",
-            ),
-        )];
-
-        super::enforce_no_destructive_todo_patch(&content, &patches)
-            .expect("same-size todo rewrite should remain allowed");
-    }
 }
 
 #[cfg(test)]
@@ -620,58 +534,4 @@ mod core_tests {
     use std::fs::OpenOptions;
     use std::time::Duration;
     use tempfile::TempDir;
-
-    #[test]
-    fn materialization_probe_uses_patch_body_not_patch_markers() {
-        let response = concat!(
-            "<!-- patch:exchange -->\n",
-            "### Re: materialized — gpt-5\n\n",
-            "Committed through boundary insertion.\n",
-            "<!-- /patch:exchange -->\n",
-        );
-
-        let probe = response_materialization_probe_from_response(response);
-
-        assert!(probe.contains("### Re: materialized — gpt-5"));
-        assert!(!probe.contains("<!-- patch:exchange -->"));
-        assert!(!probe.contains("<!-- /patch:exchange -->"));
-    }
-    #[test]
-    fn patch_wrapped_response_is_materialized_by_visible_patch_body() {
-        let response = concat!(
-            "<!-- patch:exchange -->\n",
-            "### Re: visible body — gpt-5\n\n",
-            "The document contains the applied body only.\n",
-            "<!-- /patch:exchange -->\n",
-        );
-        let content = concat!(
-            "<!-- agent:exchange -->\n",
-            "### Re: visible body — gpt-5\n\n",
-            "The document contains the applied body only.\n",
-            "<!-- agent:boundary:test -->\n",
-            "<!-- /agent:exchange -->\n",
-        );
-
-        assert!(response_materialized_in_content(response, content));
-    }
-    #[test]
-    fn patch_wrapped_response_matches_visible_body_with_transient_markers() {
-        let response = concat!(
-            "<!-- patch:exchange -->\n",
-            "### Re: visible body — gpt-5\n\n",
-            "The document contains the applied body only.\n",
-            "No follow-up. <!-- no-pending-capture -->\n",
-            "<!-- /patch:exchange -->\n",
-        );
-        let content = concat!(
-            "<!-- agent:exchange -->\n",
-            "### Re: visible body — gpt-5 (HEAD)\n\n",
-            "The document contains the applied body only.\n",
-            "No follow-up. <!-- no-pending-capture -->\n",
-            "<!-- agent:boundary:test -->\n",
-            "<!-- /agent:exchange -->\n",
-        );
-
-        assert!(response_materialized_in_content(response, content));
-    }
 }

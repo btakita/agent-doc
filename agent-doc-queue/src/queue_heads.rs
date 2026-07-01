@@ -4,6 +4,7 @@
 //! document text; file IO, cycle-state persistence, and closeout guards stay in
 //! orchestration.
 
+use agent_doc_document::queue_projection::strip_priority_markers;
 use anyhow::{Context, Result};
 
 use crate::queue_response::{
@@ -175,9 +176,7 @@ pub fn queue_head_matches_done_ids(content: &str, done_ids: &[String]) -> Result
 /// Normalized identity for matching free-text queue heads across queue rows and
 /// response echoes. Priority markers are cosmetic and do not affect identity.
 pub fn free_text_queue_head_identity(text: &str) -> String {
-    crate::document_queue::strip_priority_markers(text)
-        .trim()
-        .to_ascii_lowercase()
+    strip_priority_markers(text).trim().to_ascii_lowercase()
 }
 
 /// True when the supplied document content still has an active free-text queue

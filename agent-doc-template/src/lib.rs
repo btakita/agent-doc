@@ -14,5 +14,6 @@ pub mod replay_guard;
 pub mod response_materialization;
 pub mod sanitize;
 pub mod stale_baseline;
+pub mod todo_patch_guard;
 
 pub use template::*;

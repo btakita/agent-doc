@@ -11,7 +11,6 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MutationError {
     ComponentNotFound(String),
-    ItemNotFound { component: String, id: String },
     NodeNotFound { component: String, node_key: String },
     DuplicateNodeKey { component: String, node_key: String },
     StaleNode { component: String, node_key: String },
@@ -24,9 +23,6 @@ impl fmt::Display for MutationError {
         match self {
             MutationError::ComponentNotFound(component) => {
                 write!(f, "component `{component}` was not found")
-            }
-            MutationError::ItemNotFound { component, id } => {
-                write!(f, "item `{id}` was not found in component `{component}`")
             }
             MutationError::NodeNotFound {
                 component,
@@ -470,68 +466,6 @@ fn patch_node_source(patch: &MutationNodePatch) -> MutationResult<String> {
     Ok(content)
 }
 
-/// Compatibility wrapper for older id-keyed callers.
-pub fn consume_item(source: &str, component: &str, item_id: &str) -> MutationResult<String> {
-    let node_key = find_node_key_by_item_id(source, component, item_id)?;
-    consume_node(source, component, &node_key)
-}
-
-/// Compatibility wrapper for older id-keyed callers.
-pub fn dedup_id_backed_items(source: &str, component: &str) -> MutationResult<String> {
-    let nodes = item_nodes(source, component)?;
-    let mut seen = HashSet::new();
-    let mut removals = Vec::new();
-    for node in &nodes {
-        if node.item.id.starts_with("ft-") {
-            continue;
-        }
-        if !seen.insert(node.item.id.clone()) {
-            removals.push((node.item.start_byte, node.item.end_byte));
-        }
-    }
-    Ok(remove_ranges(source, removals))
-}
-
-/// Compatibility wrapper for older id-keyed callers.
-pub fn reorder_items(
-    source: &str,
-    component: &str,
-    ordered_ids: &[&str],
-) -> MutationResult<String> {
-    let nodes = item_nodes(source, component)?;
-    let mut used = HashSet::new();
-    let mut order = Vec::new();
-    for id in ordered_ids {
-        if let Some(node) = nodes
-            .iter()
-            .find(|node| node.item.id == *id && !used.contains(node.node_key.as_str()))
-        {
-            used.insert(node.node_key.as_str());
-            order.push(node.node_key.as_str());
-        }
-    }
-    for node in &nodes {
-        if used.insert(node.node_key.as_str()) {
-            order.push(node.node_key.as_str());
-        }
-    }
-    reorder_nodes(source, component, &order)
-}
-
-/// Compatibility wrapper for older id-keyed callers.
-pub fn enqueue_item_after(
-    source: &str,
-    component: &str,
-    after_id: Option<&str>,
-    item_text: &str,
-) -> MutationResult<String> {
-    let position = match after_id {
-        Some(id) => MutationInsertPosition::After(find_node_key_by_item_id(source, component, id)?),
-        None => MutationInsertPosition::Back,
-    };
-    enqueue_node(source, component, position, item_text)
-}
-
 fn find_component(source: &str, component: &str) -> MutationResult<(usize, Component)> {
     overlay::components(source)
         .into_iter()
@@ -551,21 +485,6 @@ fn find_node<'a>(
         .ok_or_else(|| MutationError::NodeNotFound {
             component: component.to_string(),
             node_key: node_key.to_string(),
-        })
-}
-
-fn find_node_key_by_item_id(
-    source: &str,
-    component: &str,
-    item_id: &str,
-) -> MutationResult<String> {
-    item_nodes(source, component)?
-        .into_iter()
-        .find(|node| node.item.id == item_id)
-        .map(|node| node.node_key)
-        .ok_or_else(|| MutationError::ItemNotFound {
-            component: component.to_string(),
-            id: item_id.to_string(),
         })
 }
 
@@ -674,7 +593,7 @@ mod tests {
             .clone();
 
         let once = consume_node(DOC, "queue", &alpha).unwrap();
-        let twice = consume_item(&once, "queue", "alpha").unwrap();
+        let twice = consume_node(&once, "queue", &alpha).unwrap();
 
         assert_eq!(once, twice);
     }

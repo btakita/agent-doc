@@ -38,6 +38,7 @@
 //! - `stop_blocks_open_cycle_without_recoverable_response`
 //! - `stop_fails_closed_after_one_auto_continue`
 
+use agent_doc_document::queue_projection::strip_in_progress_marker;
 use agent_doc_model_tier::context_usage::{Harness, clear_decision};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -410,7 +411,7 @@ fn first_active_queue_prompt_in_content(content: &str) -> Option<String> {
     let entries = agent_doc_queue::document_queue::parse(queue.content(content)).ok()?;
     let prompt = agent_doc_queue::document_queue::prompts(&entries)
         .into_iter()
-        .map(|prompt| agent_doc_queue::document_queue::strip_in_progress_marker(&prompt.text))
+        .map(|prompt| strip_in_progress_marker(&prompt.text))
         .map(|prompt| prompt.trim().to_string())
         .find(|prompt| !prompt.is_empty())?;
     if is_context_clear_prompt(&prompt)

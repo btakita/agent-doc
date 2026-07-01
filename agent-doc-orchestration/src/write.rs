@@ -253,6 +253,7 @@ use agent_doc_template as template;
 
 use crate::{merge, repair, sessions, snapshot};
 use agent_doc_template::stale_baseline::{is_append_mode_component, is_stale_baseline};
+use agent_doc_turn::response_replay::response_materialized_in_content;
 
 thread_local! {
     static RESPONSE_STDIN_OVERRIDE: RefCell<Option<String>> = const { RefCell::new(None) };
@@ -2059,66 +2060,6 @@ pub fn enforce_no_replace_pending(patches: &[template::PatchBlock], allow: bool)
              See specs/pending-system.md."
         );
     }
-    Ok(())
-}
-
-fn count_markdown_checklist_items(body: &str) -> usize {
-    body.lines()
-        .filter(|line| {
-            let trimmed = line.trim_start();
-            let Some(rest) = trimmed
-                .strip_prefix("- ")
-                .or_else(|| trimmed.strip_prefix("* "))
-                .or_else(|| trimmed.strip_prefix("+ "))
-                .or_else(|| {
-                    let digit_run = trimmed.chars().take_while(|c| c.is_ascii_digit()).count();
-                    if digit_run > 0 {
-                        trimmed[digit_run..].strip_prefix(". ")
-                    } else {
-                        None
-                    }
-                })
-            else {
-                return false;
-            };
-
-            rest.starts_with("[ ] ") || rest.starts_with("[x] ") || rest.starts_with("[/] ")
-        })
-        .count()
-}
-
-fn todo_component_checklist_count(current_content: &str) -> Result<Option<usize>> {
-    let components = element::parse(current_content)
-        .context("failed to parse components for todo patch validation")?;
-    Ok(components
-        .iter()
-        .find(|component| component.name == "todo")
-        .map(|component| count_markdown_checklist_items(component.content(current_content))))
-}
-
-pub fn enforce_no_destructive_todo_patch(
-    current_content: &str,
-    patches: &[template::PatchBlock],
-) -> Result<()> {
-    let Some(todo_patch) = patches.iter().rev().find(|patch| patch.name == "todo") else {
-        return Ok(());
-    };
-    let Some(current_count) = todo_component_checklist_count(current_content)? else {
-        return Ok(());
-    };
-    if current_count == 0 {
-        return Ok(());
-    }
-
-    let patched_count = count_markdown_checklist_items(&todo_patch.content);
-    if patched_count < current_count {
-        anyhow::bail!(
-            "ERR: patch:todo would reduce total checklist item count from {} to {} and is forbidden because it can silently delete untouched todo entries. Rewrite the full todo component or edit the document directly.",
-            current_count,
-            patched_count
-        );
-    }
-
     Ok(())
 }
 

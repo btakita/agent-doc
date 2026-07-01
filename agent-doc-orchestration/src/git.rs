@@ -2277,7 +2277,10 @@ fn ensure_active_capture_materialized_for_commit(
     let Some(materialized) = staged_content else {
         return Ok(());
     };
-    if crate::write::response_materialized_in_content(&capture.response_body, materialized) {
+    if agent_doc_turn::response_replay::response_materialized_in_content(
+        &capture.response_body,
+        materialized,
+    ) {
         return Ok(());
     }
 

@@ -5,8 +5,10 @@
 
 use std::collections::HashSet;
 
+use agent_doc_document::queue_projection::{strip_in_progress_marker, strip_priority_markers};
+
 use crate::{
-    document_queue::{self, QueueEntry},
+    document_queue::QueueEntry,
     queue_response::{normalize_done_id, queue_prompt_done_id, queue_prompt_text_is_free_text},
 };
 
@@ -19,9 +21,7 @@ pub fn first_n_queue_prompt_texts(entries: &[QueueEntry], count: usize) -> Vec<S
     entries
         .iter()
         .filter_map(|entry| match entry {
-            QueueEntry::Prompt(prompt) => {
-                Some(document_queue::strip_in_progress_marker(&prompt.text))
-            }
+            QueueEntry::Prompt(prompt) => Some(strip_in_progress_marker(&prompt.text)),
             _ => None,
         })
         .take(count)
@@ -54,7 +54,7 @@ pub fn queue_consume_count_for_done_ids(entries: &[QueueEntry], done_ids: &[Stri
 }
 
 pub fn queue_prompt_texts_match_for_consumption(left: &str, right: &str) -> bool {
-    document_queue::strip_priority_markers(left) == document_queue::strip_priority_markers(right)
+    strip_priority_markers(left) == strip_priority_markers(right)
 }
 
 pub fn mark_first_matching_prompts_completed_by_texts(
@@ -71,7 +71,7 @@ pub fn mark_first_matching_prompts_completed_by_texts(
                 .position(|target| queue_prompt_texts_match_for_consumption(&prompt.text, target))
         {
             let mut completed = prompt.clone();
-            completed.text = document_queue::strip_in_progress_marker(&completed.text);
+            completed.text = strip_in_progress_marker(&completed.text);
             marked.push(remaining_targets.remove(pos));
             result.push(QueueEntry::Completed(completed));
             continue;
@@ -104,7 +104,7 @@ pub fn mark_entries_completed_by_done_ids(
                 if queue_prompt_done_id(&prompt.text).is_some_and(|id| done_ids.contains(&id)) =>
             {
                 let mut completed = prompt.clone();
-                completed.text = document_queue::strip_in_progress_marker(&completed.text);
+                completed.text = strip_in_progress_marker(&completed.text);
                 marked_texts.push(completed.text.clone());
                 QueueEntry::Completed(completed)
             }
@@ -224,6 +224,8 @@ pub fn annotate_newly_struck_free_text_heads(before: &str, after: &str) -> anyho
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::document_queue;
+    use agent_doc_document::queue_projection::IN_PROGRESS_MARKER;
 
     fn entries(body: &str) -> Vec<QueueEntry> {
         document_queue::parse(body).unwrap()
@@ -233,7 +235,7 @@ mod tests {
     fn first_n_queue_prompt_texts_skips_non_prompts_and_strips_in_progress_marker() {
         let body = format!(
             "--- stop\n- {} do [#head]\n- do [#tail]\n",
-            document_queue::IN_PROGRESS_MARKER,
+            IN_PROGRESS_MARKER,
         );
         let entries = entries(&body);
 

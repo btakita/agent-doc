@@ -1642,7 +1642,7 @@ pub(crate) fn run_with_queue_completion_ids(
 }
 
 fn ensure_repair_materialized_response(file: &Path, final_doc: &str, response: &str) -> Result<()> {
-    if crate::write::response_materialized_in_content(response, final_doc) {
+    if agent_doc_turn::response_replay::response_materialized_in_content(response, final_doc) {
         return Ok(());
     }
     anyhow::bail!(

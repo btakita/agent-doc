@@ -261,6 +261,23 @@ pub fn response_already_applied_after_prefix_strip(doc: &str, response: &str) ->
         .any(|window| window == response_lines.as_slice())
 }
 
+pub fn response_materialized_in_content(response: &str, content: &str) -> bool {
+    let probe =
+        agent_doc_template::response_materialization::response_materialization_probe_from_response(
+            response,
+        );
+    if probe.trim().is_empty()
+        || response_already_applied(content, &probe)
+        || response_already_applied_after_prefix_strip(content, &probe)
+    {
+        return true;
+    }
+    let normalized_content = agent_doc_document::transient_markers::strip_guard_markers(content);
+    normalized_content != content
+        && (response_already_applied(&normalized_content, &probe)
+            || response_already_applied_after_prefix_strip(&normalized_content, &probe))
+}
+
 fn normalized_response_lines(content: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut lines = content.lines().peekable();
@@ -367,6 +384,46 @@ mod tests {
         let doc = "Implemented.\nOther line.\nDone.\n";
 
         assert!(!response_already_applied(doc, response));
+    }
+
+    #[test]
+    fn patch_wrapped_response_is_materialized_by_visible_patch_body() {
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: visible body — gpt-5\n\n",
+            "The document contains the applied body only.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let content = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: visible body — gpt-5\n\n",
+            "The document contains the applied body only.\n",
+            "<!-- agent:boundary:test -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert!(response_materialized_in_content(response, content));
+    }
+
+    #[test]
+    fn patch_wrapped_response_matches_visible_body_with_transient_markers() {
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: visible body — gpt-5\n\n",
+            "The document contains the applied body only.\n",
+            "No follow-up. <!-- no-pending-capture -->\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let content = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: visible body — gpt-5 (HEAD)\n\n",
+            "The document contains the applied body only.\n",
+            "No follow-up. <!-- no-pending-capture -->\n",
+            "<!-- agent:boundary:test -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert!(response_materialized_in_content(response, content));
     }
 
     #[test]

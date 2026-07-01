@@ -244,7 +244,10 @@ pub fn stuck_captured_cycle(file: &Path) -> Option<StuckCapturedCycleInfo> {
             return None;
         }
     };
-    if crate::write::response_materialized_in_content(&capture.response_body, &head) {
+    if agent_doc_turn::response_replay::response_materialized_in_content(
+        &capture.response_body,
+        &head,
+    ) {
         return None;
     }
     if response_materialized_in_head_compact_archive(file, &capture.response_body, &head) {
@@ -303,7 +306,10 @@ pub fn reconcile_compacted_committed_capture(file: &Path) -> Result<bool> {
         return Ok(false);
     };
     // Present in HEAD → a normal committed response; nothing to reconcile.
-    if crate::write::response_materialized_in_content(&capture.response_body, &head) {
+    if agent_doc_turn::response_replay::response_materialized_in_content(
+        &capture.response_body,
+        &head,
+    ) {
         return Ok(false);
     }
     // Absent from HEAD but present in a HEAD-referenced compact archive → the
@@ -336,7 +342,12 @@ fn response_materialized_in_head_compact_archive(
 ) -> bool {
     compact_archive_pointers(head).into_iter().any(|pointer| {
         read_head_compact_archive(file, pointer)
-            .map(|archive| crate::write::response_materialized_in_content(response_body, &archive))
+            .map(|archive| {
+                agent_doc_turn::response_replay::response_materialized_in_content(
+                    response_body,
+                    &archive,
+                )
+            })
             .unwrap_or(false)
     })
 }

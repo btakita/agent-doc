@@ -7,6 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use agent_doc_document::queue_projection::strip_in_progress_marker;
 use agent_doc_element::element;
 use agent_doc_element_backlog::backlog;
 use agent_doc_frontmatter::frontmatter;
@@ -402,7 +403,7 @@ pub fn drainable_head_prompt_for_scope(content: &str, scope: DrainScope) -> Opti
 /// Live drainable active queue head for `scope`.
 pub fn live_drainable_continuation_head(content: &str, scope: DrainScope) -> Option<String> {
     let head = drainable_head_prompt_for_scope(content, scope)?;
-    let stripped = document_queue::strip_in_progress_marker(&head.text);
+    let stripped = strip_in_progress_marker(&head.text);
     Some(extract_head_id(&stripped).unwrap_or(stripped))
 }
 

@@ -6,6 +6,7 @@
 //! ranking is intentionally local and cheap; heavier codebase indexing stays
 //! in the tsift CLI.
 
+use agent_doc_document::queue_projection::strip_in_progress_marker;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -541,9 +542,7 @@ fn collect_completion_candidates(file: &Path) -> Result<Vec<CompletionCandidate>
                     source: "queue".to_string(),
                     source_ref: format!("{session_ref}#queue:{index}"),
                     item_id: None,
-                    text: agent_doc_queue::document_queue::strip_in_progress_marker(
-                        prompt.text.trim(),
-                    ),
+                    text: strip_in_progress_marker(prompt.text.trim()),
                 });
             }
         }

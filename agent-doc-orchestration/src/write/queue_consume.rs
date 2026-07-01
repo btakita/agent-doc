@@ -1,6 +1,7 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use agent_doc_document::queue_projection::{IN_PROGRESS_MARKER, strip_priority_markers};
 use agent_doc_queue::{
     queue_consume::{
         annotate_newly_struck_free_text_heads, first_n_queue_prompt_texts,
@@ -750,7 +751,7 @@ pub(crate) fn response_targets_synthetic_queue_head_id(
 /// four significant prose words can never be confidently identified in the
 /// baseline (matching the answer-match floor), so it is treated as not-present.
 fn free_text_head_present_in_baseline(baseline: &str, head_text: &str) -> bool {
-    let head_clean = agent_doc_queue::document_queue::strip_priority_markers(head_text);
+    let head_clean = strip_priority_markers(head_text);
     let head_norm = normalize_for_answer_match(&free_text_head_match_prose(&head_clean));
     if head_norm.split(' ').filter(|w| !w.is_empty()).count() < 4 {
         return false;
@@ -759,8 +760,7 @@ fn free_text_head_present_in_baseline(baseline: &str, head_text: &str) -> bool {
         return false;
     };
     nodes.iter().any(|node| {
-        let base_clean =
-            agent_doc_queue::document_queue::strip_priority_markers(node.item.text.trim());
+        let base_clean = strip_priority_markers(node.item.text.trim());
         let base_norm = normalize_for_answer_match(&free_text_head_match_prose(&base_clean));
         !base_norm.is_empty() && base_norm == head_norm
     })
@@ -1648,8 +1648,8 @@ fn strip_in_progress_marker_from_struck_queue_items(content: &str) -> String {
         return content.to_string();
     };
     let body = queue.content(content);
-    let needle_with_space = format!("~~{} ", agent_doc_queue::document_queue::IN_PROGRESS_MARKER);
-    let needle_bare = format!("~~{}", agent_doc_queue::document_queue::IN_PROGRESS_MARKER);
+    let needle_with_space = format!("~~{} ", IN_PROGRESS_MARKER);
+    let needle_bare = format!("~~{}", IN_PROGRESS_MARKER);
     let updated_body = body
         .replace(&needle_with_space, "~~")
         .replace(&needle_bare, "~~");
@@ -1904,7 +1904,7 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
     let norm = |texts: &[String]| {
         texts
             .iter()
-            .map(|t| agent_doc_queue::document_queue::strip_priority_markers(t))
+            .map(|text| strip_priority_markers(text))
             .collect::<Vec<_>>()
     };
     let mut consume_snapshot_head_for_live_addition = false;
@@ -1921,10 +1921,10 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
             .unwrap_or_default();
         let doc_head_is_recorded_addition = !dropped_evidence.is_empty()
             && consumed_texts.iter().all(|doc_head| {
-                let doc_norm = agent_doc_queue::document_queue::strip_priority_markers(doc_head);
+                let doc_norm = strip_priority_markers(doc_head);
                 dropped_evidence
                     .iter()
-                    .any(|d| agent_doc_queue::document_queue::strip_priority_markers(d) == doc_norm)
+                    .any(|d| strip_priority_markers(d) == doc_norm)
             });
         if doc_head_is_recorded_addition {
             consume_snapshot_head_for_live_addition = true;

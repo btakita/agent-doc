@@ -108,6 +108,7 @@
 //! - `build_prompt_resume_lists_required_response_targets`: resumed prompt with
 //!   two user request blocks → prompt includes the ordered turn-completeness section
 
+use agent_doc_document::queue_projection::strip_in_progress_marker;
 #[cfg(test)]
 use agent_doc_session_accretion::SessionAccretionLevel;
 use agent_doc_session_accretion::SessionAccretionReport;
@@ -883,7 +884,7 @@ fn active_queue_prompt_state(file: &Path) -> Result<ActiveQueuePromptState> {
         return Ok(ActiveQueuePromptState::Inactive);
     }
     let document_head = agent_doc_queue::document_queue::first_prompt(&activation.entries_after)
-        .map(|prompt| agent_doc_queue::document_queue::strip_in_progress_marker(&prompt.text));
+        .map(|prompt| strip_in_progress_marker(&prompt.text));
     if document_head.is_none() {
         return Ok(ActiveQueuePromptState::Empty);
     };

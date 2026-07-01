@@ -1467,11 +1467,13 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // audited reuse of the document-write guard, not a new authority source.
         ("agent-doc-orchestration/src/write.rs", "guard_") => 47,
         ("agent-doc-orchestration/src/write/pending_checks.rs", "guard_") => 4,
-        // 3 -> 2 (#template-materialization-policy): raw-response probe
+        // 3 -> 1 (#template-materialization-policy): raw-response probe
         // construction now lives in `agent-doc-template::response_materialization`,
         // so the audited transient guard-marker stripping token moved out of
-        // the write adapter with that focused policy.
-        ("agent-doc-orchestration/src/write/materialize.rs", "guard_") => 2,
+        // the write adapter with that focused policy. The later
+        // `agent_doc_turn::response_replay` ownership move removed the duplicate
+        // materialization-policy copy and its final guard-marker token.
+        ("agent-doc-orchestration/src/write/materialize.rs", "guard_") => 1,
         ("agent-doc-orchestration/src/write/exchange_reconcile.rs", "guard_") => 5,
         // -2 `guard_`, -1 `reason=` (#nodiskipc): active IPC timeout/no-proof
         // paths no longer enter the direct document-write fallback, so the removed
@@ -4093,6 +4095,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     for required in [
         "pub fn response_already_applied",
         "pub fn response_already_applied_after_prefix_strip",
+        "pub fn response_materialized_in_content",
         "pub fn first_response_heading_line",
         "pub fn live_exchange_answers_heading",
         "pub fn has_matching_orphan_prompt_for_committed_capture",
@@ -4123,6 +4126,24 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         write_source.contains("agent_doc_turn::response_replay::response_already_applied"),
         "orchestration write should call focused response replay policy directly"
     );
+    assert!(
+        write_source
+            .contains("use agent_doc_turn::response_replay::response_materialized_in_content;"),
+        "orchestration write should import focused response materialization policy directly"
+    );
+    let write_materialize =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/materialize.rs"))
+            .unwrap();
+    for forbidden in [
+        "pub fn response_materialized_in_content",
+        "pub(crate) fn response_materialized_in_content",
+        "response_materialization_probe_from_response",
+    ] {
+        assert!(
+            !write_materialize.contains(forbidden),
+            "write/materialize must not re-own response materialization policy: {forbidden}"
+        );
+    }
     let repair_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
     for forbidden in [
@@ -4143,7 +4164,6 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     for relative in [
         "agent-doc-orchestration/src/capture.rs",
         "agent-doc-orchestration/src/flow/closeout.rs",
-        "agent-doc-orchestration/src/write/materialize.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -9299,6 +9319,7 @@ fn test_agent_doc_queue_has_no_manual_addition_compatibility_shim() {
     for forbidden_snippet in [
         "pub fn annotate_manual_queue_additions(",
         "compatibility shim for older call sites",
+        "pub use agent_doc_document::queue_projection",
     ] {
         assert!(
             !queue_source.contains(forbidden_snippet),
@@ -9329,6 +9350,14 @@ fn test_agent_doc_queue_has_no_manual_addition_compatibility_shim() {
             "response_guards should call focused queue identity policy directly: {required}"
         );
     }
+    let queue_consume =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_consume.rs")).unwrap();
+    assert!(
+        queue_consume.contains("use agent_doc_document::queue_projection::{")
+            && queue_consume.contains("strip_in_progress_marker")
+            && queue_consume.contains("strip_priority_markers"),
+        "agent-doc-queue modules should import marker projection helpers directly instead of through document_queue"
+    );
 
     let maintenance_source = fs::read_to_string(
         manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
@@ -9354,6 +9383,38 @@ fn test_agent_doc_queue_has_no_manual_addition_compatibility_shim() {
         assert!(
             maintenance_source.contains(required),
             "preflight maintenance should call focused queue deletion policy directly: {required}"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_markdown_ast_uses_current_node_key_mutation_api_names() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mutations =
+        fs::read_to_string(manifest_dir.join("agent-doc-markdown-ast/src/mutations.rs")).unwrap();
+    for required in [
+        "pub fn consume_node(",
+        "pub fn dedup_node_keys(",
+        "pub fn reorder_nodes(",
+        "pub fn enqueue_node(",
+    ] {
+        assert!(
+            mutations.contains(required),
+            "agent-doc-markdown-ast should expose current node-key mutation API: {required}"
+        );
+    }
+    for forbidden in [
+        "pub fn consume_item(",
+        "pub fn dedup_id_backed_items(",
+        "pub fn reorder_items(",
+        "pub fn enqueue_item_after(",
+        "fn find_node_key_by_item_id(",
+        "ItemNotFound",
+        "Compatibility wrapper for older id-keyed callers",
+    ] {
+        assert!(
+            !mutations.contains(forbidden),
+            "agent-doc-markdown-ast must not preserve deprecated id-keyed mutation wrappers: {forbidden}"
         );
     }
 }
@@ -12469,6 +12530,58 @@ fn test_agent_doc_template_owns_response_materialization_policy() {
             "{relative_path} should call the focused response materialization API directly"
         );
     }
+}
+
+#[test]
+fn test_agent_doc_template_owns_todo_patch_guard_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let todo_guard =
+        fs::read_to_string(manifest_dir.join("agent-doc-template/src/todo_patch_guard.rs"))
+            .unwrap();
+    for required in [
+        "pub fn enforce_no_destructive_todo_patch(",
+        "fn count_markdown_checklist_items(",
+        "fn todo_component_checklist_count(",
+    ] {
+        assert!(
+            todo_guard.contains(required),
+            "agent-doc-template must own pure todo patch guard policy: {required}"
+        );
+    }
+
+    let template_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-template/src/lib.rs")).unwrap();
+    assert!(
+        template_lib.contains("pub mod todo_patch_guard;"),
+        "agent-doc-template should expose todo patch guard through its owning module"
+    );
+    assert!(
+        !template_lib.contains("pub use todo_patch_guard"),
+        "agent-doc-template should not add a todo patch guard root facade"
+    );
+
+    let write_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    let write_run_entry =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/run_entry.rs"))
+            .unwrap();
+    for forbidden in [
+        "fn count_markdown_checklist_items(",
+        "fn todo_component_checklist_count(",
+        "pub fn enforce_no_destructive_todo_patch(",
+        "pub(crate) fn enforce_no_destructive_todo_patch(",
+    ] {
+        assert!(
+            !write_source.contains(forbidden),
+            "orchestration write must not re-own todo patch guard policy: {forbidden}"
+        );
+    }
+    assert!(
+        write_run_entry.contains(
+            "use agent_doc_template::todo_patch_guard::enforce_no_destructive_todo_patch;"
+        ),
+        "write run entry should call todo patch guard through the focused template module"
+    );
 }
 
 #[test]

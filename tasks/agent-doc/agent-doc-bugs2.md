@@ -39,6 +39,10 @@ done
 Compacted content:
 - Archived 2 response topic(s): JB Compact Exchange should not leave uncommitted changes; agent-doc Claude Code has stderr bleeding (img_57.png)
 - Prior summary/context: prior compacted content: Archived 10 response topic(s): preflight exchange precedence; preflight exchange precedence;...
+- **Commit/push:** shipped to `src/agent-doc` main and pushed; version bumped 0.34.65 → 0.34.66 (lockstep).
+- **Build/install:** `make check` green (one unrelated flaky tmux-timing test), release binary rebuilt to 0.34.66 so `.bin/agent-doc` (the binary JB Compact Exchange invokes) carries the fix.
+- **Test:** `compact_with_commit_flushes_editor_buffer_to_disk` — a buffer-only listener (applies to buffer, saves only on `save_document`, exactly like the real plugin) proves the working tree equals HEAD after compact. The existing disk-writing test listener was masking the bug.
+- **Spec:** documented in `runbooks/compact-exchange.md`.
 JB `Compact Exchange` still leaves an uncommitted summary. Simplify and fix. #spec-test-build-install-commit-push
 
 ### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
@@ -52,12 +56,30 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=ipc_visible_repair patch_id=7f826d44-426b-418c-9b3a-ee48e69201b4 invariant=ipc_dedupe recovery=retry_without_disk_write redeliver_editor=true bad_len=18253 bad_hash=5af18d4230ed2c9b6ceeb95fffe0fb3766fcbfe7a7cbfb60b9aabffb73942cd3 repaired_len=20144 repaired_hash=c2cc85874f75c1f641fdb6addda3f22dd42fa019da85c877ab2ec719ff917a70 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782888834645
 ```
-<!-- agent:boundary:731e5557 -->
+STDERR is still bleeding over Claude Code after a reinstall ![img_58.png](img_58.png).
+
+### Re: "I was not typing" — false typing signal wedging the write — opus-4-8
+
+You're right — that was a false `editor_typing_active` signal, and it's now fixed.
+
+**Root cause** (`#falsetyping`, `editors/jetbrains/.../TypingTracker.kt`): `documentChanged` bumped the typing indicator (`lastChangeMs` + the native `agent_doc_document_changed` marker) for **every** Document change — including **remote CRDT-replica applies**. While the realtime replica reconciled the buffer from other replicas, the CLI idle guard (`guard_visible_write_idle`) saw "typing active" continuously, so `finalize`/`write` deferred forever with *"retry after typing stops"* though nobody was typing. It even computed `remoteCrdtApply` already but only used it for the pending-op record, never to gate the typing signal.
+
+**Fix:** suppress the typing indicator for `remoteCrdtApply` changes (mirroring the suppression `CrdtReplicaManager`'s own listener already applies); still record the op and report live-buffer content. Shipped in JB plugin **0.2.203**, committed + pushed, zip built.
+
+**To make it live in this session:** reinstall `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.203.zip` and restart the IDE — the running plugin is the old one. For an immediate one-off unblock without reinstalling, save (or discard) the JetBrains editor buffer for this doc so it settles once.
+
+**Follow-up (deeper, tracked):** the binary-side guard also fails closed ("visible editor buffer differs from expected disk state") when the live buffer diverges due to CRDT-replica churn rather than a real operator edit. Making that guard provenance-aware (re-merge on replica churn instead of demanding a save/discard) is a focused-cycle change and is filed as `#falsetyping-guard`.
+
+Also shipping this turn: the original **Compact Exchange uncommitted-summary** fix (`#jb-compact-editor-buffer-flush`, agent-doc 0.34.66) — flush the editor buffer to disk before the compact commit so the working tree matches HEAD. Code + test + spec committed and pushed; release binary rebuilt.
+<!-- agent:boundary:397705d5 -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- :pushpin: do [#jbcompactcommit]
+- 🚧 :pushpin: do [#restartstderrbleed]
+- :pushpin: do [#kjw0]
 - :pushpin: do [#2y8j]
 - :pushpin: do [#cdtcutover]
 - :pushpin: do [#crdtauth6]
@@ -65,7 +87,7 @@ ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=ipc_visibl
 - :pushpin: do [#kj5flive]
 - :pushpin: do [#tmuxsynccrashlog]
 - :pushpin: do [#tmuxsynccrashlog]
-- 🚧 :pushpin: do [#60ev]
+- :pushpin: do [#60ev]
 - :pushpin: do [#suprestassoc-live]
 - :pushpin: do [#agentsignals]
 - :pushpin: do [#qftlossdelta]
@@ -75,8 +97,9 @@ ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=ipc_visibl
 - :pushpin: do [#elementgraphprd]
 - :pushpin: do [#60ev]
 - do [#jbcompactcommit]
-- do [#kjw0]
 - do [#restartstderrbleed]
+- do [#kjw0]
+- 🚧 :pushpin: do [#60ev]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

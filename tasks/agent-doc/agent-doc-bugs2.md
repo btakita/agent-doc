@@ -34,28 +34,21 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260701-181327.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260701-211950.md`*
 
 Compacted content:
-- Archived 5 response topic(s): Pre-run queue edits partially reverted (only first added head kept); Realtime sync of `go` marker ↔ `queue:` frontmatter; Free-text prompts should begin work immediately (auto `/clear` or PCP restart if a dedicated session is needed); 2 more
-- Prior summary/context: prior compacted content: Archived 2 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); Pre-run que...
-
-### Re: Claim for Tmux Pane should open a NEW pane in the same session — opus-4.8
-
-Captured as a `[focused-cycle]` feature, `#claimnewpane`, plan at `tasks/agent-doc/plan-claim-new-pane-same-session.md`.
-
-**What's happening now.** `ClaimAction` (JB plugin) runs `agent-doc claim <file> --position <left|right>` then `SyncLayoutAction.syncLayout(...)`. `claim` *binds* the document to a pane it infers from the editor split position, falling back to the last-active pane — it never allocates a fresh pane for a genuinely new document. So a second claim reads as "Replace the current pane." The cross-session dialog only offers **Force Claim / Switch Project Session / Cancel** — "Switch Project Session" is the `session set` migration, which is why reaching for a move pushed the window to another session, and there's no built-in way back. The pane-creation primitives already exist in the `tmux-router` sibling (`split_window`, `new_window`, `auto_start`), but the claim path never calls them to open a *new pane* for an unclaimed doc.
-
-**Fix direction (binary-first).** Add a claim mode that, when a document has no bound pane and the authoritative session already has an occupied agent-doc pane, splits a **new pane in the same session/window** (respecting `specs/pane-groups.md`) and binds the new doc to it — making new-pane the default for a distinct new document, never replace/move. Add an explicit "New pane in this session" choice to the claim dialog, and a supported command to pull a window that landed in another session back to the project's authoritative one (reusing the `sync`/`session set` path). Decision logic stays in `claim.rs`/`tmux-router`; the JB plugin stays a thin caller. Acceptance criteria (new-pane-not-replace, no window migration, SimWorld/tmux-ci coverage) are in the plan.
-
-**Note on this cycle's persistence.** No JetBrains IDE is currently running — `.agent-doc/controller.sock`/`ipc.sock` are stale 0-byte files and IPC patches were sitting un-drained in `.agent-doc/patches/`. The IPC write path reported `send_failed` against that stale `live` endpoint, so I persisted this response and the backlog item via `--force-disk` (git is authoritative; your prompt was already safe on disk). I moved the stale `publish-live-buffer.signal` and an orphaned backlog patch aside to clear a false-positive visible-buffer guard. Heads-up: remaining stale patches/live-buffer snapshots would be replayed if an IDE reattaches — worth clearing `.agent-doc/patches/*.json` before reopening the doc in JetBrains.
-<!-- agent:boundary:8000ce0b -->
+- Archived 1 response topic(s): Claim for Tmux Pane should open a NEW pane in the same session
+- Prior summary/context: prior compacted content: Archived 5 response topic(s): Pre-run queue edits partially reverted (only first added head ...
+<!-- agent:boundary:ac8a1913 -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
-/goal Implement backlog item(s): #jq4f
+- [#claimnewpane]
+- [#boundaryaccum1]
+- [#qactsync]
+- [#ftimmediate]
 - :pushpin: do [#restartstderrbleed]
 Error: timed out waiting for project controller at /home/brian/work/btakita/agent-loop/.agent-doc/controller.sock`
 - I saw serious bleeding into Claude Code during a previous restart. Also, a split pane was opened with Claude Code `/usage` somehow called.

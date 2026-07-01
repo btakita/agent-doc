@@ -15,6 +15,7 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
+🔴 (restart/recycle your supervisor)
 <!-- /agent:status -->
 
 ## Exchange
@@ -30,7 +31,7 @@ batch/async is good. I want to work on the AI...perhaps where the AI signals com
 
 ❯ Regenerate the linkedin response.
 
-### Re: Regenerated — reactive-data reframe folded in — opus-4-8 (HEAD)
+### Re: Regenerated — reactive-data reframe folded in — opus-4-8
 
 > **Queue prompt:** Regenerate the linkedin response.
 
@@ -82,7 +83,7 @@ The line to hold: **share the engines, keep their schemas, templates, business r
 **On your other note (batch/async is fine, you want the AI, maybe signals / MLPs):** worth being clear-eyed here. REItrades' AI need is almost entirely **LLM extraction and generation** (structured data out of documents, teaser/OM copy), not model-building. There's little call for custom MLPs or signal-processing models in their stack. So if what you actually want is to build reactive-signal or MLP systems, this engagement won't scratch that itch — it'd be LLM-plumbing work. That's not a reason to skip it (it pays and it's real), but don't take it expecting an ML-modeling playground. If the signals/MLP direction is where you want to steer your work, that's a bigger conversation about which clients/problems fit it, and I'm happy to dig into that separately.
 
 Want me to turn the top three into a short "here's what I'd bring off the shelf" paragraph for Artur once he responds?
-<!-- agent:boundary:5588e027 -->
+<!-- agent:boundary:cbb93584 -->
 <!-- /agent:exchange -->
 
 ## Queue

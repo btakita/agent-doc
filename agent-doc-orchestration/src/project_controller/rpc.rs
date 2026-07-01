@@ -6301,7 +6301,9 @@ mod tests {
         // returns a (marked, skipped) tally even when no route-owned supervisor is
         // running in this test environment.
         let (marked, skipped) = recycle_supervisors_all_projects_force(false).unwrap();
-        assert!(marked + skipped >= 0);
+        // Fail-open: the tally is well-formed; no route-owned supervisor is expected
+        // in the test environment, but the walk must not panic or error.
+        let _total = marked + skipped;
     }
 
     #[test]

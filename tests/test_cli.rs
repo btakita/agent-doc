@@ -1703,7 +1703,13 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // 26 -> 27 (#detached-disk-current-file): the audited `DetachedDisk`
         // path logs `transport=disk_detached reason=<...>` after proving no live
         // editor owner/sidecar and rechecking the current visible file.
-        ("agent-doc-orchestration/src/write/converge.rs", "reason=") => 27,
+        // 27 -> 29 (#turnsaferecycle Goal 2): `schedule_stale_supervisor_pcp_recycle`
+        // logs the two audited stale-supervisor IPC-drift diagnostics —
+        // `reason=stale_supervisor_ipc` when a forced PCP recycle is scheduled and
+        // `reason=auto_recycle_opted_out` when it stays advisory. These route the
+        // stale-IPC hot path through the `decide_stale_supervisor` workflow kernel;
+        // they are not new ad hoc flow branches.
+        ("agent-doc-orchestration/src/write/converge.rs", "reason=") => 29,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.
         // +1 for the audited `queue_consume_divergence_reconciled ... reason=crdt_merge_authoritative`

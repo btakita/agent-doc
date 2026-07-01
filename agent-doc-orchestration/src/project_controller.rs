@@ -1134,7 +1134,8 @@ pub fn persist_session_actor_closeout(file: &Path) -> Result<bool> {
         .first()
         .or_else(|| state.active_free_text_queue_heads.first())
         .map(String::as_str);
-    let queue_head_id = queue_head_prompt.and_then(queue_head_id_from_prompt);
+    let queue_head_id =
+        queue_head_prompt.and_then(agent_doc_queue::queue_directive::first_directive_target_id);
     let response_commit = state
         .file_hash
         .as_deref()
@@ -1168,12 +1169,6 @@ fn cycle_phase_store_label(phase: agent_doc_turn::CyclePhase) -> &'static str {
         agent_doc_turn::CyclePhase::Committed => "committed",
         agent_doc_turn::CyclePhase::Abandoned => "abandoned",
     }
-}
-
-fn queue_head_id_from_prompt(prompt: &str) -> Option<String> {
-    agent_doc_queue::queue_directive::do_directive_target_ids(&[prompt.to_string()])
-        .into_iter()
-        .next()
 }
 
 fn session_actor_closeout_mutations(

@@ -57,6 +57,13 @@ pub fn do_directive_target_ids(prompt_texts: &[String]) -> Vec<String> {
     ids
 }
 
+pub fn first_directive_target_id(prompt: &str) -> Option<String> {
+    prompt
+        .lines()
+        .flat_map(do_directive_target_ids_in_line)
+        .next()
+}
+
 pub fn do_directive_target_ids_in_line(line: &str) -> Vec<String> {
     let mut normalized = line.trim().trim_start_matches('❯').trim();
     normalized = normalized
@@ -212,6 +219,15 @@ mod tests {
         ];
         let ids = do_directive_target_ids(&prompts);
         assert_eq!(ids, vec!["alpha", "beta", "gamma"]);
+    }
+
+    #[test]
+    fn first_directive_target_id_returns_first_queue_head_target() {
+        assert_eq!(
+            first_directive_target_id("notes first\n- :pushpin: do [#alpha]\n- do [#beta]"),
+            Some("alpha".to_string())
+        );
+        assert_eq!(first_directive_target_id("re [#ref]\nplain text"), None);
     }
 
     #[test]

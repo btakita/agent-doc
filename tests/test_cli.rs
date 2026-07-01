@@ -2952,6 +2952,7 @@ fn test_agent_doc_queue_owns_do_directive_target_parsing() {
     for required in [
         "pub fn explicit_do_directive_target_id",
         "pub fn explicit_do_directive_target_ids",
+        "pub fn first_directive_target_id",
         "pub fn do_directive_target_ids",
         "pub fn do_directive_target_ids_in_line",
         "pub fn filter_expect_done_or_gate_ids",
@@ -3023,7 +3024,6 @@ fn test_agent_doc_queue_owns_do_directive_target_parsing() {
 
     for relative in [
         "agent-doc-orchestration/src/preflight/run.rs",
-        "agent-doc-orchestration/src/project_controller.rs",
         "agent-doc-orchestration/src/session_check/response_guards.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -3036,6 +3036,17 @@ fn test_agent_doc_queue_owns_do_directive_target_parsing() {
             "{relative} must not route queue directive parsing through session_check"
         );
     }
+    let project_controller =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/project_controller.rs"))
+            .unwrap();
+    assert!(
+        project_controller.contains("agent_doc_queue::queue_directive::first_directive_target_id"),
+        "project_controller should call focused first queue directive target parsing directly"
+    );
+    assert!(
+        !project_controller.contains("fn queue_head_id_from_prompt("),
+        "project_controller must not keep a local queue directive parsing wrapper"
+    );
     let queue_closeout_guard =
         fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_closeout_guard.rs"))
             .unwrap();

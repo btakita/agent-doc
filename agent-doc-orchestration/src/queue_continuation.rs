@@ -23,6 +23,10 @@
 //! reasoning.
 
 use agent_doc_queue::queue_continuation as queue_policy;
+use agent_doc_queue::queue_preemption::{
+    DeferredOperatorClear, deferred_operator_clear_marker, deferred_operator_clear_marker_json,
+    parse_deferred_operator_clear_marker_json,
+};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -306,21 +310,6 @@ pub fn clear_cooldown_active(file: &Path) -> Result<bool> {
     }
 }
 
-/// A clear that an operator command deferred because the pane was busy under an
-/// active auto-queue loop (`#autoloop-command-preemption` Phase 2b). The
-/// supervisor idle-queue watch delivers `clear_command` at the next idle gap,
-/// then resumes the loop. The record is the durable hand-off between the
-/// `session clear` command path (which pauses + records) and the supervisor
-/// (which delivers + resumes), so the two never need to share memory.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DeferredOperatorClear {
-    pub file: String,
-    /// Harness-specific clear command text to submit into the pane (e.g.
-    /// `/clear`), captured at defer time so the watch does not re-derive it.
-    pub clear_command: String,
-    pub written_at: u64,
-}
-
 fn deferred_clear_marker_path(file: &Path) -> Result<Option<PathBuf>> {
     let Some(root) = agent_doc_fs::find_project_root(file) else {
         return Ok(None);
@@ -343,12 +332,13 @@ pub fn write_deferred_operator_clear(file: &Path, clear_command: &str) -> Result
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
-    let payload = DeferredOperatorClear {
-        file: file.to_string_lossy().into_owned(),
-        clear_command: clear_command.to_string(),
-        written_at: now_secs(),
-    };
-    let json = serde_json::to_string_pretty(&payload).context("serialize deferred clear marker")?;
+    let payload = deferred_operator_clear_marker(
+        file.to_string_lossy().into_owned(),
+        clear_command,
+        now_secs(),
+    );
+    let json =
+        deferred_operator_clear_marker_json(&payload).context("serialize deferred clear marker")?;
     std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
     Ok(())
 }
@@ -359,7 +349,7 @@ pub fn read_deferred_operator_clear(file: &Path) -> Result<Option<DeferredOperat
         return Ok(None);
     };
     match std::fs::read_to_string(&path) {
-        Ok(content) => Ok(serde_json::from_str(&content).ok()),
+        Ok(content) => Ok(parse_deferred_operator_clear_marker_json(&content)),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(err) => Err(err).with_context(|| format!("read {}", path.display())),
     }

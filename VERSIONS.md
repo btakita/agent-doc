@@ -27,7 +27,10 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   the existing operator diagnostics. Route-submit marker JSON serialization and
   fresh/stale/malformed classification now lives with the marker schema in
   `agent-doc-supervisor`, leaving route orchestration to handle only sidecar
-  file IO, cleanup, and ops-log reporting.
+  file IO, cleanup, and ops-log reporting. Deferred operator-clear marker
+  payload construction and JSON parsing now lives with queue preemption policy in
+  `agent-doc-queue`, while orchestration keeps marker path resolution,
+  read/write/remove effects, and idle-watch delivery.
 
 - **Pure helper layer extracted from orchestration.** Exchange shrink/ack retry
   and prompt-dedupe helpers now live in `agent-doc-element-exchange`; preflight

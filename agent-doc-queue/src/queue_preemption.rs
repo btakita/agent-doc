@@ -18,6 +18,7 @@
 
 use agent_doc_frontmatter::frontmatter::{self, QueueControl};
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 
 /// What an operator command should do with an active auto-queue loop.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,6 +106,39 @@ pub enum DeferredClearStep {
     /// prompt — deliver the clear now, then clear both markers to resume the
     /// loop.
     Deliver,
+}
+
+/// A clear that an operator command deferred because the pane was busy under an
+/// active auto-queue loop (`#autoloop-command-preemption` Phase 2b).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeferredOperatorClear {
+    pub file: String,
+    /// Harness-specific clear command text to submit into the pane (e.g.
+    /// `/clear`), captured at defer time so the watch does not re-derive it.
+    pub clear_command: String,
+    pub written_at: u64,
+}
+
+pub fn deferred_operator_clear_marker(
+    file: impl Into<String>,
+    clear_command: impl Into<String>,
+    written_at: u64,
+) -> DeferredOperatorClear {
+    DeferredOperatorClear {
+        file: file.into(),
+        clear_command: clear_command.into(),
+        written_at,
+    }
+}
+
+pub fn deferred_operator_clear_marker_json(
+    marker: &DeferredOperatorClear,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string_pretty(marker)
+}
+
+pub fn parse_deferred_operator_clear_marker_json(content: &str) -> Option<DeferredOperatorClear> {
+    serde_json::from_str(content).ok()
 }
 
 /// Decide the deferred-clear step for one watch tick. Deliver only when a clear
@@ -249,6 +283,17 @@ mod tests {
             DeferredClearStep::Deliver,
             "deliver the deferred clear once the pane reaches a dispatch-ready prompt"
         );
+    }
+
+    #[test]
+    fn deferred_operator_clear_marker_json_round_trips_and_ignores_malformed() {
+        let marker = deferred_operator_clear_marker("task.md", "/clear", 42);
+        let json = deferred_operator_clear_marker_json(&marker).unwrap();
+        assert_eq!(
+            parse_deferred_operator_clear_marker_json(&json),
+            Some(marker)
+        );
+        assert_eq!(parse_deferred_operator_clear_marker_json("not json"), None);
     }
 
     #[test]

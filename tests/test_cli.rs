@@ -9879,6 +9879,50 @@ fn test_agent_doc_queue_owns_continuation_guidance_policy() {
 }
 
 #[test]
+fn test_agent_doc_queue_owns_operator_clear_preemption_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let queue_preemption =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_preemption.rs")).unwrap();
+    for required in [
+        "pub enum OperatorQueuePreemption",
+        "pub enum BusyClearOutcome",
+        "pub enum DeferredClearStep",
+        "pub fn plan_operator_queue_preemption(",
+        "pub fn plan_busy_clear(",
+        "pub fn plan_deferred_clear_step(",
+        "pub struct DeferredOperatorClear",
+        "pub fn deferred_operator_clear_marker(",
+        "pub fn deferred_operator_clear_marker_json(",
+        "pub fn parse_deferred_operator_clear_marker_json(",
+    ] {
+        assert!(
+            queue_preemption.contains(required),
+            "agent-doc-queue must own operator clear preemption policy: {required}"
+        );
+    }
+
+    let orchestration_adapter =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/queue_continuation.rs"))
+            .unwrap();
+    for forbidden in [
+        "pub struct DeferredOperatorClear",
+        "DeferredOperatorClear {",
+    ] {
+        assert!(
+            !orchestration_adapter.contains(forbidden),
+            "queue_continuation.rs must stay a marker IO adapter, not re-own deferred-clear payload policy: {forbidden}"
+        );
+    }
+    assert!(
+        orchestration_adapter.contains("use agent_doc_queue::queue_preemption::{")
+            && orchestration_adapter.contains("deferred_operator_clear_marker(")
+            && orchestration_adapter.contains("deferred_operator_clear_marker_json(")
+            && orchestration_adapter.contains("parse_deferred_operator_clear_marker_json("),
+        "queue_continuation.rs should call focused queue-preemption marker policy directly"
+    );
+}
+
+#[test]
 fn test_agent_doc_element_review_owns_review_projection_and_ungate_planning() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let review_model =

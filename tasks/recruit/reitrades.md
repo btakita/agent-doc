@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 pending_done_guard: warn
 agent_doc_lint_dialect: off
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -935,13 +935,31 @@ Two optional tweaks depending on how forward you want to be:
 Say the word and I'll publish it via `corky`/LinkedIn as a draft (no auto-send), or adjust tone/length.
 
 *(Session note: exchange is large — 875 lines / 30 sections — but the queue is active, so I'm continuing rather than pausing to compact.)*
+### Re: Is cash+equity a common ask here? — opus-4-8
+
+> **Queue prompt:** I don't think he would want a cash + equity since that ties us together prematurely. Is this a common ask?
+
+Your instinct is right — leave equity off. "Ties us together prematurely" is exactly the problem, and it cuts both ways.
+
+**Is it a common ask? Depends on who's asking whom.**
+
+- **Common:** a *funded* startup offering equity as part of an early *employee/team* comp package. That's standard — cash below market, equity makes up the gap.
+- **Common:** a founder *offering* a contractor some equity to conserve runway — the company initiates it because cash is the scarce resource.
+- **Uncommon:** a *contractor asking a founder* for equity on a first small engagement. That reads as one of two things, both bad here — either you want to be a quasi-co-founder (a big relationship ask before you've done a day of work together), or you're hedging a discounted cash rate. Neither is the signal you want to send to someone who just chose the cheapest option on the board.
+
+**Why "prematurely" is the whole point.** Equity isn't just upside — it's entanglement: a cap-table entry, vesting, expectations of continued involvement, and a governance/exit relationship. You take that on *after* you know the product, the person, and that you work well together — not as the opening move. For a first thin slice of work, you want the *lowest*-commitment structure that exists (a few capped hours), not the highest. Equity is the opposite direction.
+
+And the asymmetry favors your read: equity from an unfunded, pre-revenue idea whose founder just picked an overseas Upwork team is worth ~nothing as compensation today. You'd be trading real hours for a lottery ticket *and* locking yourself into his cap table. All cost, little near-term value.
+
+**So the move is unchanged from the last note:** limited hours at your rate is the affordability lever, not equity. Keep equity out of the re-approach entirely. If the relationship becomes real and he's the one who raises "could we do some equity to stretch the cash," *then* you evaluate his offer — full rate as the anchor, equity strictly on top, and only if it's a signed instrument with a legible cap table. Let him bring it up; don't you.
+
+The current draft already does this — no equity mention. I'd keep it that way. (Earlier I'd floated an optional "cash-plus-equity mix" tweak line — drop that idea; your reasoning is the better call.)
 <!-- agent:boundary:6ac487e3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue go -->
-/goal Implement backlog item(s): #hm0k
+<!-- agent:queue stop -->
 <!-- /agent:queue -->
 
 ## Backlog

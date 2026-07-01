@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 pending_done_guard: warn
 agent_doc_lint_dialect: off
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -894,12 +894,12 @@ Short answer: only under specific conditions, and never as a plain discount. The
 **For the Arthur re-approach specifically:** he hasn't even said yes to paid work yet, so leading with an equity ask is premature and can read as desperation. Keep the re-engagement note as drafted — signal *openness* to a blended structure as a door, not a discount you're pre-offering. Let him come back first; negotiate structure only once there's a real conversation. If it does progress, anchor on full rate and let *him* propose equity to bring the cash number down — then you're evaluating his offer, not giving away margin up front.
 
 Bottom line: be willing to *discuss* a blend, don't be willing to *cut your rate* for it. Equity is a bonus you accept on top of fair pay, not a reason to work cheap.
-<!-- agent:boundary:ca37e82e -->
+<!-- agent:boundary:9abfcebc -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue start -->
 /goal Implement backlog item(s): #eeee
 <!-- /agent:queue -->
 

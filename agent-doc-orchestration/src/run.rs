@@ -874,7 +874,10 @@ fn active_queue_prompt_state(file: &Path) -> Result<ActiveQueuePromptState> {
     else {
         return Ok(ActiveQueuePromptState::Inactive);
     };
-    if !explicit_queue_go_mode(&queue_component.attrs, fm.queue.as_deref()) {
+    if !agent_doc_queue::control_binding::explicit_queue_go_mode(
+        &queue_component.attrs,
+        fm.queue.as_deref(),
+    ) {
         return Ok(ActiveQueuePromptState::Inactive);
     }
     let body = &content[queue_component.open_end..queue_component.close_start];
@@ -903,14 +906,6 @@ fn active_queue_prompt_state(file: &Path) -> Result<ActiveQueuePromptState> {
         reason: "missing_or_stale_typed_queue_head".to_string(),
         document_head,
     })
-}
-
-fn explicit_queue_go_mode(
-    attrs: &std::collections::HashMap<String, String>,
-    frontmatter_queue: Option<&str>,
-) -> bool {
-    attrs.contains_key("go")
-        || frontmatter_queue.is_some_and(|raw| raw.trim().eq_ignore_ascii_case("go"))
 }
 
 fn typed_queue_prompt_state(file: &Path, content: &str) -> Option<ActiveQueuePromptState> {

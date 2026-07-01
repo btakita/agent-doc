@@ -3218,7 +3218,6 @@ fn test_agent_doc_queue_owns_free_text_admission_policy() {
         "pub enum FreeTextAdmissionScope",
         "pub fn normalize_admitted_free_text",
         "pub fn free_text_prompt_is_backlog_task",
-        "pub fn explicit_queue_go_mode",
         "pub struct ActionableFreeTextPrompts",
         "pub fn collect_actionable_free_text_prompts",
         "pub fn append_empty_agent_component",
@@ -3244,7 +3243,6 @@ fn test_agent_doc_queue_owns_free_text_admission_policy() {
         "enum QueueFreeTextAdmissionScope",
         "fn normalize_admitted_free_text",
         "fn free_text_prompt_is_backlog_task",
-        "fn explicit_queue_go_mode",
         "struct FreeTextWorkPrompt",
         "struct ActionableFreeTextPrompts",
         "fn collect_actionable_free_text_prompts",
@@ -3357,6 +3355,58 @@ fn test_agent_doc_queue_owns_queue_command_classification() {
         assert!(
             response_guards.contains(required),
             "response_guards should call focused queue command classification directly: {required}"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_queue_owns_queue_control_binding_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let control_binding =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/control_binding.rs")).unwrap();
+    for required in [
+        "pub fn explicit_queue_go_mode",
+        "pub fn explicit_queue_start_mode",
+        "pub fn explicit_queue_stop_mode",
+        "pub fn converge_queue_control_binding_content",
+        "pub fn strip_queue_activation_tokens_in_content",
+    ] {
+        assert!(
+            control_binding.contains(required),
+            "agent-doc-queue must own queue control binding policy: {required}"
+        );
+    }
+
+    let maintenance = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
+    )
+    .unwrap();
+    let run = fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/run.rs")).unwrap();
+    let free_text_admission =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/free_text_admission.rs"))
+            .unwrap();
+    for forbidden in [
+        "fn explicit_queue_go_mode",
+        "fn explicit_queue_start_mode",
+        "fn explicit_queue_stop_mode",
+        "enum QueueBindingMode",
+        "fn converge_queue_control_binding_content",
+        "fn queue_binding_state",
+        "fn queue_binding_target",
+        "fn set_queue_marker_binding",
+        "fn strip_queue_activation_tokens_in_content",
+    ] {
+        assert!(
+            !maintenance.contains(forbidden),
+            "preflight maintenance must not own queue control binding policy: {forbidden}"
+        );
+        assert!(
+            !run.contains(forbidden),
+            "orchestration run must not own queue control binding policy: {forbidden}"
+        );
+        assert!(
+            !free_text_admission.contains(forbidden),
+            "free-text admission must not own queue control binding policy: {forbidden}"
         );
     }
 }

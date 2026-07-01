@@ -55,14 +55,6 @@ pub fn free_text_prompt_is_backlog_task(text: &str) -> bool {
         && agent_doc_prompt_lines::text_line_looks_like_prompt_target(&trimmed)
 }
 
-pub fn explicit_queue_go_mode(
-    attrs: &std::collections::HashMap<String, String>,
-    frontmatter_queue: Option<&str>,
-) -> bool {
-    attrs.contains_key("go")
-        || frontmatter_queue.is_some_and(|raw| raw.trim().eq_ignore_ascii_case("go"))
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FreeTextWorkPrompt {
     pub text: String,

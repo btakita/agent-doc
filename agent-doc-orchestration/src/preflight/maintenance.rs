@@ -11,11 +11,15 @@ use agent_doc_element_backlog::backlog::{
     should_reap_ops_proof_completions, tracked_body_for_reorder,
 };
 use agent_doc_queue::{
+    control_binding::{
+        converge_queue_control_binding_content, explicit_queue_go_mode, explicit_queue_start_mode,
+        explicit_queue_stop_mode, strip_queue_activation_tokens_in_content,
+    },
     free_text_admission::{
         FreeTextAdmissionScope, append_empty_agent_component, collect_actionable_free_text_prompts,
-        ensure_queue_priority_attr, explicit_queue_go_mode, goal_command_already_queued,
-        goal_command_for_ids, queue_currently_active_for_free_text_admission,
-        queue_entry_is_admitted_free_text, queue_free_text_admission_scope,
+        ensure_queue_priority_attr, goal_command_already_queued, goal_command_for_ids,
+        queue_currently_active_for_free_text_admission, queue_entry_is_admitted_free_text,
+        queue_free_text_admission_scope,
     },
     queue_response::{free_text_head_answered_by_response, queue_prompt_text_is_free_text},
 };
@@ -1097,7 +1101,9 @@ pub(crate) fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<Que
         Ok(content) => content,
         Err(_) => return Ok(QueueState::default()),
     };
-    let (content, _) = project_queue_control_binding_content(file, &content)?;
+    let snapshot_content = snapshot::load(file).ok().flatten();
+    let (content, _) =
+        converge_queue_control_binding_content(&content, snapshot_content.as_deref())?;
     let components = match agent_doc_element::element::parse(&content) {
         Ok(components) => components,
         Err(_) => return Ok(QueueState::default()),
@@ -1384,7 +1390,11 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         .ok()
         .and_then(|(fm, _)| fm.queue_active)
         .unwrap_or(false);
-    if let (projected, true) = project_queue_control_binding_content(file, &current_content)? {
+    let control_snapshot_content = snapshot::load(file).ok().flatten();
+    if let (projected, true) = converge_queue_control_binding_content(
+        &current_content,
+        control_snapshot_content.as_deref(),
+    )? {
         current_content = projected;
         content = current_content.clone();
         components = agent_doc_element::element::parse(&current_content)?;
@@ -3086,223 +3096,6 @@ pub(crate) fn sync_same_cycle_pending_adds_into_go_queue(file: &Path) -> Result<
     Ok(synced_ids)
 }
 
-fn explicit_queue_start_mode(
-    attrs: &std::collections::HashMap<String, String>,
-    frontmatter_queue: Option<&str>,
-) -> bool {
-    attrs.contains_key("start")
-        || frontmatter_queue.is_some_and(|raw| raw.trim().eq_ignore_ascii_case("start"))
-}
-
-fn explicit_queue_stop_mode(
-    attrs: &std::collections::HashMap<String, String>,
-    frontmatter_queue: Option<&str>,
-) -> bool {
-    attrs.contains_key("stop")
-        || frontmatter_queue.is_some_and(|raw| raw.trim().eq_ignore_ascii_case("stop"))
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum QueueBindingMode {
-    Start,
-    Go,
-    Stop,
-}
-
-impl QueueBindingMode {
-    fn from_frontmatter(raw: Option<&str>) -> Option<Self> {
-        match raw?.trim().to_ascii_lowercase().as_str() {
-            "start" => Some(Self::Start),
-            "go" => Some(Self::Go),
-            "stop" => Some(Self::Stop),
-            _ => None,
-        }
-    }
-
-    fn from_marker(attrs: &std::collections::HashMap<String, String>) -> Option<Self> {
-        if attrs.contains_key("stop") {
-            Some(Self::Stop)
-        } else if attrs.contains_key("go") {
-            Some(Self::Go)
-        } else if attrs.contains_key("start") {
-            Some(Self::Start)
-        } else {
-            None
-        }
-    }
-
-    fn frontmatter_value(self) -> &'static str {
-        match self {
-            Self::Start => "start",
-            Self::Go => "go",
-            Self::Stop => "stop",
-        }
-    }
-
-    fn marker_token(self) -> Option<&'static str> {
-        match self {
-            Self::Start => Some("start"),
-            Self::Go => Some("go"),
-            Self::Stop => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct QueueBindingState {
-    marker_mode: Option<QueueBindingMode>,
-    frontmatter_mode: Option<QueueBindingMode>,
-    legacy_queue_active: Option<bool>,
-    has_auto: bool,
-}
-
-fn project_queue_control_binding_content(file: &Path, content: &str) -> Result<(String, bool)> {
-    let snapshot_content = snapshot::load(file).ok().flatten();
-    converge_queue_control_binding_content(content, snapshot_content.as_deref())
-}
-
-fn converge_queue_control_binding_content(
-    content: &str,
-    snapshot_content: Option<&str>,
-) -> Result<(String, bool)> {
-    let Some(current) = queue_binding_state(content) else {
-        return Ok((content.to_string(), false));
-    };
-    let previous = snapshot_content.and_then(queue_binding_state);
-    let Some(target) = queue_binding_target(current, previous) else {
-        return Ok((content.to_string(), false));
-    };
-
-    let mut updated = set_queue_marker_binding(content, target.marker_token())?;
-    updated = frontmatter::merge_queue_control(&updated, target.frontmatter_value())?;
-    let changed = updated != content;
-    Ok((updated, changed))
-}
-
-fn queue_binding_state(content: &str) -> Option<QueueBindingState> {
-    let (fm, _) = frontmatter::parse(content).ok()?;
-    let components = agent_doc_element::element::parse(content).ok()?;
-    let queue_component = components
-        .iter()
-        .find(|component| component.name == "queue")?;
-    Some(QueueBindingState {
-        marker_mode: QueueBindingMode::from_marker(&queue_component.attrs),
-        frontmatter_mode: QueueBindingMode::from_frontmatter(fm.queue.as_deref()),
-        legacy_queue_active: if fm.queue.is_none() {
-            fm.queue_active
-        } else {
-            None
-        },
-        has_auto: agent_doc_queue::document_queue::has_auto_attr(&queue_component.attrs),
-    })
-}
-
-fn queue_binding_target(
-    current: QueueBindingState,
-    previous: Option<QueueBindingState>,
-) -> Option<QueueBindingMode> {
-    let has_current_control = current.marker_mode.is_some()
-        || current.frontmatter_mode.is_some()
-        || current.legacy_queue_active.is_some()
-        || current.has_auto;
-    if !has_current_control && previous.is_none() {
-        return None;
-    }
-
-    let marker_changed = previous.is_some_and(|prev| current.marker_mode != prev.marker_mode);
-    let frontmatter_changed = previous.is_some_and(|prev| {
-        current.frontmatter_mode != prev.frontmatter_mode
-            || current.legacy_queue_active != prev.legacy_queue_active
-    });
-
-    if marker_changed && !frontmatter_changed {
-        return Some(current.marker_mode.unwrap_or(QueueBindingMode::Stop));
-    }
-    if frontmatter_changed && !marker_changed {
-        return current
-            .frontmatter_mode
-            .or_else(|| {
-                current.legacy_queue_active.map(|active| {
-                    if active {
-                        QueueBindingMode::Start
-                    } else {
-                        QueueBindingMode::Stop
-                    }
-                })
-            })
-            .or(current.marker_mode)
-            .or(Some(QueueBindingMode::Stop));
-    }
-    if marker_changed && frontmatter_changed {
-        return current
-            .frontmatter_mode
-            .or(current.marker_mode)
-            .or(Some(QueueBindingMode::Stop));
-    }
-    if let Some(marker_mode) = current.marker_mode {
-        return Some(marker_mode);
-    }
-    if current.has_auto {
-        return Some(QueueBindingMode::Start);
-    }
-    if previous.is_none() {
-        return current.frontmatter_mode.or_else(|| {
-            current.legacy_queue_active.map(|active| {
-                if active {
-                    QueueBindingMode::Start
-                } else {
-                    QueueBindingMode::Stop
-                }
-            })
-        });
-    }
-    if current.frontmatter_mode.is_some() || current.legacy_queue_active.is_some() {
-        return Some(QueueBindingMode::Stop);
-    }
-    None
-}
-
-fn set_queue_marker_binding(content: &str, marker_token: Option<&str>) -> Result<String> {
-    let components = agent_doc_element::element::parse(content)?;
-    let Some(queue_component) = components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
-        return Ok(content.to_string());
-    };
-    let raw_tag = &content[queue_component.open_start..queue_component.open_end];
-    let new_tag = agent_doc_queue::document_queue::set_control_in_tag(raw_tag, marker_token);
-    if new_tag == raw_tag {
-        return Ok(content.to_string());
-    }
-    let mut rebuilt = String::with_capacity(content.len());
-    rebuilt.push_str(&content[..queue_component.open_start]);
-    rebuilt.push_str(&new_tag);
-    rebuilt.push_str(&content[queue_component.open_end..]);
-    Ok(rebuilt)
-}
-
-fn strip_queue_activation_tokens_in_content(content: &str) -> Result<String> {
-    let components = agent_doc_element::element::parse(content)?;
-    let Some(queue_component) = components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
-        return Ok(content.to_string());
-    };
-    let raw_tag = &content[queue_component.open_start..queue_component.open_end];
-    let new_tag = agent_doc_queue::document_queue::strip_control_from_tag(
-        &agent_doc_queue::document_queue::strip_auto_from_tag(raw_tag),
-    );
-    if new_tag == raw_tag {
-        return Ok(content.to_string());
-    }
-    let mut rebuilt = String::with_capacity(content.len());
-    rebuilt.push_str(&content[..queue_component.open_start]);
-    rebuilt.push_str(&new_tag);
-    rebuilt.push_str(&content[queue_component.open_end..]);
-    Ok(rebuilt)
-}
 struct FreeTextAdmission {
     content: String,
     queued_ids: Vec<String>,

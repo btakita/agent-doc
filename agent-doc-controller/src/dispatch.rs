@@ -1898,6 +1898,14 @@ pub fn dispatch_only_should_probe_active_turn_cue(
 pub enum RoutedDispatchStartProof {
     CommandAcceptedOnly,
     DispatchStartUnproven,
+    /// The routed trigger was accepted into a pane that is mid-turn, so it is
+    /// queued behind that active turn and dispatches when the turn finishes.
+    /// Harness dispatch-start proof cannot arrive within the proof budget in
+    /// this case, so the route short-circuits here instead of burning the full
+    /// budget and filing a false `accepted_without_dispatch_start_proof` bug
+    /// (#kjw0 / #jbrunautobug). Treated as accepted (not fail-closed) because
+    /// the dispatch WAS accepted and will run.
+    AcceptedQueuedBehindActiveTurn,
     HookPromptMatched,
     HookStateAdvanced,
     PaneStateChanged,
@@ -1908,6 +1916,7 @@ impl RoutedDispatchStartProof {
         match self {
             Self::CommandAcceptedOnly => "accepted",
             Self::DispatchStartUnproven => "accepted_without_dispatch_start_proof",
+            Self::AcceptedQueuedBehindActiveTurn => "queued_behind_active_turn",
             Self::HookPromptMatched => "consumed",
             Self::HookStateAdvanced => "submitted",
             Self::PaneStateChanged => "pane_state_changed",
@@ -1916,7 +1925,9 @@ impl RoutedDispatchStartProof {
 
     pub const fn proof_scope_label(self) -> &'static str {
         match self {
-            Self::CommandAcceptedOnly | Self::DispatchStartUnproven => "accepted_only",
+            Self::CommandAcceptedOnly
+            | Self::DispatchStartUnproven
+            | Self::AcceptedQueuedBehindActiveTurn => "accepted_only",
             Self::HookPromptMatched | Self::HookStateAdvanced | Self::PaneStateChanged => {
                 "dispatch_start"
             }
@@ -1929,6 +1940,9 @@ impl RoutedDispatchStartProof {
                 "accepted-only; no harness dispatch-start proof was available"
             }
             Self::DispatchStartUnproven => "accepted-only; harness dispatch-start proof timed out",
+            Self::AcceptedQueuedBehindActiveTurn => {
+                "accepted-only; routed trigger queued behind an active turn and dispatches when it finishes"
+            }
             Self::HookPromptMatched => "dispatch-start proof matched the routed prompt",
             Self::HookStateAdvanced => "dispatch-start proof observed newer harness prompt state",
             Self::PaneStateChanged => "dispatch-start proof observed pane state leave idle chrome",
@@ -1939,10 +1953,18 @@ impl RoutedDispatchStartProof {
         match self {
             Self::CommandAcceptedOnly => "acceptance",
             Self::DispatchStartUnproven => "accepted-without-dispatch-proof",
+            Self::AcceptedQueuedBehindActiveTurn => "queued-behind-active-turn",
             Self::HookPromptMatched => "consumption",
             Self::HookStateAdvanced => "submission",
             Self::PaneStateChanged => "pane-state-change",
         }
+    }
+
+    /// True when this proof outcome means the routed trigger was accepted into a
+    /// busy pane and queued behind an active turn (no immediate dispatch-start
+    /// proof, but not a failure).
+    pub const fn is_queued_behind_active_turn(self) -> bool {
+        matches!(self, Self::AcceptedQueuedBehindActiveTurn)
     }
 }
 

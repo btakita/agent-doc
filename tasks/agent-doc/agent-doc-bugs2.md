@@ -26,6 +26,7 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
+🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -197,7 +198,7 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=file_ipc patch_id=0c4fde76-ae00-4e2e-b9ec-ea2d2569924f invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0.json doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782881096099
 ```
-<!-- agent:boundary:aa4204c9 -->
+<!-- agent:boundary:2a0c6c77 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -261,7 +262,6 @@ What are #next-steps to fix bugs?
 - [ ] [#restartstderrbleed] #agent-doc-bug Diagnose binary-restart stderr bleed into the agent after supervisor/PCP restart; capture the stderr source and add regression/proof that restart diagnostics stay out of the agent prompt/UI. Related JB Run Agent Doc route failure remains tracked by #kjw0.
 - [ ] [#qftlossdelta] #agent-doc-bug focused invariant-loss follow-up from failed #qftlossproof live proof: `.agent-doc/logs/ops.log:4338964-4338997` shows ACK/live-buffer content at len 16676 hash `83f08ab7e6be49a671f96f7c0ffbb71fe28bba858929b883c5904140cabd5192`, then closeout committed len 16669 hash `dc278d260b5b2a3efffeb12c428f0f81f5be1c8373fdd3ef044eee4b39adda4f`; `live_buffer_classify` suppressed the differing operator-capable buffer with `reason=write_provenance_newer_than_buffer` and no durable sidecar preserving the 16676-byte content was found. Fix the operator-wins merge/write-provenance path so concurrent operator text is preserved end-to-end or the write fails closed with a recoverable artifact. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#tmuxsynccrashlog] [operator-verify] Replacement for #tmuxsynccrash: JB Sync Tmux Layout live repro log review. After the operator runs repeated JB Sync Tmux Layout against the repro layout, inspect idea.log, agent-doc ops.log, and tmux server pid/session evidence; close only if the server pid stays stable with repair_layout no-op/passive supersede markers, otherwise file a follow-up bug with the failing log markers. Plan: tasks/agent-doc/plan-sync-tmux-layout-crash.md
-- [ ] 🚧 [#supstaledetectverify] Replacement for #supstaledetect: stale-install warning merge/install verification. Merge the source-mtime warning fix, install/recycle, then verify logs show a fresh build no longer warns while a genuinely stale binary still emits stale_install evidence.
 - [ ] [#suptmuxstaleverify] Replacement for #suptmuxstale: stale-supervisor pane indicator install/log proof. Merge/install the pane-title marker change, recycle, then verify .agent-doc/supervisor-stale plus pane title/turn_status logs show STALE SUPERVISOR only when the supervisor binary is actually stale.
 - [ ] [#60ev] plan-dynamic-context-injection-ledger.md
 - [ ] [#2y8j] [operator-verify] #qbasehashmemo live typing proof: after the supervisor auto-installs 0.34.49 and recycles, type a sustained burst in a large doc (equityfundingsource.md or agent-doc-bugs2.md) in the JB editor and confirm typing is smooth; grep ops.log to confirm crdt_merge_base no longer fires per keystroke during a typing burst.

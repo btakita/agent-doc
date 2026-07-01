@@ -20,15 +20,15 @@
 
 use anyhow::{Context, Result};
 use serde::Serialize;
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::sessions;
-use agent_doc_controller::fleet::{AdminActor, detect_admin_findings};
+use agent_doc_controller::fleet::{
+    ActorListRecord, ActorListRegistryBinding, AdminReceiptLine, build_admin_actor_list,
+    detect_admin_findings, format_admin_receipt_line,
+};
 use agent_doc_controller::status::controller_freshness_summary;
-use tmux_router::{Registry as SessionRegistry, Tmux};
-
-type ActorStore = BTreeMap<String, agent_doc_sqlite::state_store::ActorRecord>;
+use tmux_router::Tmux;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct ReapAllStaleSummary {
@@ -72,60 +72,17 @@ fn print_receipt(
         println!("{}", serde_json::to_string_pretty(receipt)?);
         return Ok(());
     }
-    let mut line = format!(
-        "{} {} receipt_id={}",
-        receipt.operation_kind, receipt.status, receipt.receipt_id
-    );
-    if let Some(document_id) = receipt.document_id.as_deref() {
-        line.push_str(&format!(" document={document_id}"));
-    }
-    if let Some(stage) = receipt.failed_stage.as_deref() {
-        line.push_str(&format!(" failed_stage={stage}"));
-    }
-    if let Some(current) = receipt.current_generation {
-        line.push_str(&format!(" current_generation={current}"));
-    }
-    if let Some(hint) = receipt.unblock_hint.as_deref() {
-        line.push_str(&format!(" hint={hint}"));
-    }
+    let line = format_admin_receipt_line(AdminReceiptLine {
+        operation_kind: receipt.operation_kind.as_str(),
+        status: receipt.status.as_str(),
+        receipt_id: receipt.receipt_id,
+        document_id: receipt.document_id.as_deref(),
+        failed_stage: receipt.failed_stage.as_deref(),
+        current_generation: receipt.current_generation,
+        unblock_hint: receipt.unblock_hint.as_deref(),
+    });
     println!("{line}");
     Ok(())
-}
-
-/// Build the enumerated actor list from the actor store + registry, using
-/// `pane_alive` to mark live panes.
-///
-/// Pure over its inputs (liveness is injected) so it can be unit-tested without
-/// a live tmux server. Registry entries are matched to actor records by session
-/// id to enrich the supervisor pid and cwd that the actor store does not hold.
-pub fn build_actor_list(
-    actors: &ActorStore,
-    registry: &SessionRegistry,
-    pane_alive: impl Fn(&str) -> bool,
-) -> Vec<AdminActor> {
-    let by_session: BTreeMap<&str, &tmux_router::RegistryEntry> = registry
-        .values()
-        .map(|entry| (entry.session_id.as_str(), entry))
-        .collect();
-
-    actors
-        .values()
-        .map(|record| {
-            let reg = by_session.get(record.session_id.as_str());
-            AdminActor {
-                document_id: record.document_id.clone(),
-                session_id: record.session_id.clone(),
-                pane: record.pane_id.clone(),
-                window: record.window_id.clone(),
-                harness: record.harness.clone(),
-                generation: record.generation,
-                state: record.state.as_str().to_string(),
-                pane_alive: !record.pane_id.is_empty() && pane_alive(&record.pane_id),
-                supervisor_pid: reg.map(|e| e.pid),
-                cwd: reg.map(|e| e.cwd.clone()),
-            }
-        })
-        .collect()
 }
 
 /// `agent-doc admin list` — enumerate the project fleet.
@@ -134,7 +91,23 @@ pub fn list(project_root: Option<&Path>, json: bool) -> Result<()> {
     let actors = crate::project_controller::load_actor_store(&root)?;
     let registry = sessions::load_in(&root)?;
     let tmux = Tmux::default_server();
-    let rows = build_actor_list(&actors, &registry, |pane| tmux.pane_alive(pane));
+    let rows = build_admin_actor_list(
+        actors.values().map(|record| ActorListRecord {
+            document_id: record.document_id.clone(),
+            session_id: record.session_id.clone(),
+            pane: record.pane_id.clone(),
+            window: record.window_id.clone(),
+            harness: record.harness.clone(),
+            generation: record.generation,
+            state: record.state.as_str().to_string(),
+        }),
+        registry.values().map(|entry| ActorListRegistryBinding {
+            session_id: entry.session_id.clone(),
+            supervisor_pid: entry.pid,
+            cwd: entry.cwd.clone(),
+        }),
+        |pane| tmux.pane_alive(pane),
+    );
 
     if json {
         println!("{}", serde_json::to_string_pretty(&rows)?);
@@ -169,7 +142,23 @@ pub fn detect(project_root: Option<&Path>, json: bool) -> Result<()> {
     let actors = crate::project_controller::load_actor_store(&root)?;
     let registry = sessions::load_in(&root)?;
     let tmux = Tmux::default_server();
-    let rows = build_actor_list(&actors, &registry, |pane| tmux.pane_alive(pane));
+    let rows = build_admin_actor_list(
+        actors.values().map(|record| ActorListRecord {
+            document_id: record.document_id.clone(),
+            session_id: record.session_id.clone(),
+            pane: record.pane_id.clone(),
+            window: record.window_id.clone(),
+            harness: record.harness.clone(),
+            generation: record.generation,
+            state: record.state.as_str().to_string(),
+        }),
+        registry.values().map(|entry| ActorListRegistryBinding {
+            session_id: entry.session_id.clone(),
+            supervisor_pid: entry.pid,
+            cwd: entry.cwd.clone(),
+        }),
+        |pane| tmux.pane_alive(pane),
+    );
     let findings = detect_admin_findings(&rows);
 
     if json {
@@ -375,52 +364,6 @@ mod tests {
                 new_generation: 1,
             },
         }
-    }
-
-    fn store(records: Vec<ActorRecord>) -> ActorStore {
-        records
-            .into_iter()
-            .map(|r| (r.document_id.clone(), r))
-            .collect()
-    }
-
-    fn entry(session_id: &str, pane: &str, pid: u32, cwd: &str) -> tmux_router::RegistryEntry {
-        tmux_router::RegistryEntry {
-            pane: pane.to_string(),
-            pid,
-            cwd: cwd.to_string(),
-            started: "2026-06-02".to_string(),
-            session_id: session_id.to_string(),
-            file: String::new(),
-            window: "@1".to_string(),
-            supervisor_instance_id: String::new(),
-        }
-    }
-
-    #[test]
-    fn build_actor_list_enriches_with_registry_and_liveness() {
-        let actors = store(vec![
-            record("tasks/a.md", "sid-a", "%1", ActorState::Busy),
-            record("tasks/b.md", "sid-b", "%2", ActorState::Ready),
-        ]);
-        let mut registry = SessionRegistry::new();
-        registry.insert("a".to_string(), entry("sid-a", "%1", 1001, "/proj"));
-        registry.insert("b".to_string(), entry("sid-b", "%2", 1002, "/proj"));
-
-        // %1 alive, %2 dead.
-        let rows = build_actor_list(&actors, &registry, |p| p == "%1");
-        assert_eq!(rows.len(), 2);
-
-        let a = rows.iter().find(|r| r.document_id == "tasks/a.md").unwrap();
-        assert_eq!(a.pane, "%1");
-        assert!(a.pane_alive);
-        assert_eq!(a.state, "busy");
-        assert_eq!(a.supervisor_pid, Some(1001));
-        assert_eq!(a.cwd.as_deref(), Some("/proj"));
-
-        let b = rows.iter().find(|r| r.document_id == "tasks/b.md").unwrap();
-        assert!(!b.pane_alive, "dead pane must be marked not alive");
-        assert_eq!(b.supervisor_pid, Some(1002));
     }
 
     #[test]

@@ -4,6 +4,19 @@
 //! owns the filename vocabulary and pure dead-pid cleanup decisions for
 //! JetBrains consumer patch files and live-buffer sidecars.
 
+use std::path::{Path, PathBuf};
+
+/// `#fccreap`: project-local directory holding per-instance JetBrains consumer
+/// patch files.
+pub fn jetbrains_consumer_patches_dir(project_root: &Path) -> PathBuf {
+    project_root.join(".agent-doc").join("patches")
+}
+
+/// `#lbreap`: project-local directory holding live-buffer sidecars.
+pub fn jetbrains_live_buffer_sidecar_dir(project_root: &Path) -> PathBuf {
+    project_root.join(".agent-doc").join("live-buffer")
+}
+
 /// `#fccreap`: parse the IntelliJ-plugin consumer pid out of a per-instance
 /// patch filename.
 ///
@@ -88,6 +101,21 @@ pub fn should_reap_jetbrains_live_buffer_sidecar(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn cleanup_paths_are_project_local() {
+        let root = Path::new("/tmp/project");
+
+        assert_eq!(
+            jetbrains_consumer_patches_dir(root),
+            Path::new("/tmp/project/.agent-doc/patches")
+        );
+        assert_eq!(
+            jetbrains_live_buffer_sidecar_dir(root),
+            Path::new("/tmp/project/.agent-doc/live-buffer")
+        );
+    }
 
     #[test]
     fn jetbrains_consumer_pid_parses_pid_and_rejects_non_matching() {

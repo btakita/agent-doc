@@ -18,6 +18,26 @@ pub struct AdminActor {
     pub cwd: Option<String>,
 }
 
+/// Minimal stored actor snapshot used to build `admin list` rows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActorListRecord {
+    pub document_id: String,
+    pub session_id: String,
+    pub pane: String,
+    pub window: String,
+    pub harness: String,
+    pub generation: u64,
+    pub state: String,
+}
+
+/// Registry metadata that enriches an actor row by session id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActorListRegistryBinding {
+    pub session_id: String,
+    pub supervisor_pid: u32,
+    pub cwd: String,
+}
+
 /// One derived diagnostic (`admin detect`).
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct AdminFinding {
@@ -25,6 +45,18 @@ pub struct AdminFinding {
     pub detail: String,
     pub documents: Vec<String>,
     pub pane: Option<String>,
+}
+
+/// Plain-text fields rendered for mutating admin command receipts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AdminReceiptLine<'a> {
+    pub operation_kind: &'a str,
+    pub status: &'a str,
+    pub receipt_id: u64,
+    pub document_id: Option<&'a str>,
+    pub failed_stage: Option<&'a str>,
+    pub current_generation: Option<u64>,
+    pub unblock_hint: Option<&'a str>,
 }
 
 /// One rendered dashboard row: an enumerated actor plus the finding kinds that
@@ -66,6 +98,62 @@ pub struct DashboardModel {
     pub rows: Vec<DashboardRow>,
     pub findings: Vec<AdminFinding>,
     pub problem_count: usize,
+}
+
+/// Build the enumerated actor list from stored actor rows + registry metadata.
+///
+/// Pure over its inputs (liveness is injected) so callers can adapt from SQLite
+/// and tmux state without making this crate depend on those adapters.
+pub fn build_admin_actor_list(
+    actors: impl IntoIterator<Item = ActorListRecord>,
+    registry: impl IntoIterator<Item = ActorListRegistryBinding>,
+    pane_alive: impl Fn(&str) -> bool,
+) -> Vec<AdminActor> {
+    let by_session: BTreeMap<String, ActorListRegistryBinding> = registry
+        .into_iter()
+        .map(|entry| (entry.session_id.clone(), entry))
+        .collect();
+
+    actors
+        .into_iter()
+        .map(|record| {
+            let reg = by_session.get(record.session_id.as_str());
+            let is_pane_alive = !record.pane.is_empty() && pane_alive(&record.pane);
+            AdminActor {
+                document_id: record.document_id,
+                session_id: record.session_id,
+                pane: record.pane,
+                window: record.window,
+                harness: record.harness,
+                generation: record.generation,
+                state: record.state,
+                pane_alive: is_pane_alive,
+                supervisor_pid: reg.map(|entry| entry.supervisor_pid),
+                cwd: reg.map(|entry| entry.cwd.clone()),
+            }
+        })
+        .collect()
+}
+
+/// Render the concise non-JSON line for mutating admin command receipts.
+pub fn format_admin_receipt_line(receipt: AdminReceiptLine<'_>) -> String {
+    let mut line = format!(
+        "{} {} receipt_id={}",
+        receipt.operation_kind, receipt.status, receipt.receipt_id
+    );
+    if let Some(document_id) = receipt.document_id {
+        line.push_str(&format!(" document={document_id}"));
+    }
+    if let Some(stage) = receipt.failed_stage {
+        line.push_str(&format!(" failed_stage={stage}"));
+    }
+    if let Some(current) = receipt.current_generation {
+        line.push_str(&format!(" current_generation={current}"));
+    }
+    if let Some(hint) = receipt.unblock_hint {
+        line.push_str(&format!(" hint={hint}"));
+    }
+    line
 }
 
 /// Derive cross-document / staleness findings from enumerated admin actor rows.
@@ -305,6 +393,35 @@ fn row_flags(row: &DashboardRow) -> Vec<String> {
 mod tests {
     use super::*;
 
+    fn actor_list_record(
+        document_id: &str,
+        session_id: &str,
+        pane: &str,
+        state: &str,
+    ) -> ActorListRecord {
+        ActorListRecord {
+            document_id: document_id.to_string(),
+            session_id: session_id.to_string(),
+            pane: pane.to_string(),
+            window: "@1".to_string(),
+            harness: "codex".to_string(),
+            generation: 1,
+            state: state.to_string(),
+        }
+    }
+
+    fn registry_binding(
+        session_id: &str,
+        supervisor_pid: u32,
+        cwd: &str,
+    ) -> ActorListRegistryBinding {
+        ActorListRegistryBinding {
+            session_id: session_id.to_string(),
+            supervisor_pid,
+            cwd: cwd.to_string(),
+        }
+    }
+
     fn actor(document_id: &str, pane: &str, state: &str, alive: bool) -> AdminActor {
         AdminActor {
             document_id: document_id.to_string(),
@@ -318,6 +435,49 @@ mod tests {
             supervisor_pid: Some(1234),
             cwd: Some("/proj".to_string()),
         }
+    }
+
+    #[test]
+    fn build_admin_actor_list_enriches_with_registry_and_liveness() {
+        let actors = vec![
+            actor_list_record("tasks/a.md", "sid-a", "%1", "busy"),
+            actor_list_record("tasks/b.md", "sid-b", "%2", "ready"),
+        ];
+        let registry = vec![
+            registry_binding("sid-a", 1001, "/proj"),
+            registry_binding("sid-b", 1002, "/proj"),
+        ];
+
+        let rows = build_admin_actor_list(actors, registry, |p| p == "%1");
+        assert_eq!(rows.len(), 2);
+
+        let a = rows.iter().find(|r| r.document_id == "tasks/a.md").unwrap();
+        assert_eq!(a.pane, "%1");
+        assert!(a.pane_alive);
+        assert_eq!(a.state, "busy");
+        assert_eq!(a.supervisor_pid, Some(1001));
+        assert_eq!(a.cwd.as_deref(), Some("/proj"));
+
+        let b = rows.iter().find(|r| r.document_id == "tasks/b.md").unwrap();
+        assert!(!b.pane_alive, "dead pane must be marked not alive");
+        assert_eq!(b.supervisor_pid, Some(1002));
+    }
+
+    #[test]
+    fn format_admin_receipt_line_includes_optional_fields() {
+        let line = format_admin_receipt_line(AdminReceiptLine {
+            operation_kind: "queue_control",
+            status: "rejected",
+            receipt_id: 42,
+            document_id: Some("tasks/a.md"),
+            failed_stage: Some("cas"),
+            current_generation: Some(7),
+            unblock_hint: Some("retry"),
+        });
+        assert_eq!(
+            line,
+            "queue_control rejected receipt_id=42 document=tasks/a.md failed_stage=cas current_generation=7 hint=retry"
+        );
     }
 
     #[test]

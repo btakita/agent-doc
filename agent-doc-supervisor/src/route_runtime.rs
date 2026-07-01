@@ -98,6 +98,34 @@ pub fn effective_authoritative_actor_state(
     runtime_state.unwrap_or(record_state)
 }
 
+pub fn mismatched_authoritative_actor_can_be_replaced(
+    runtime: &SupervisorRuntime,
+    actor_state: RouteActorState,
+) -> bool {
+    runtime.health != SupervisorHealth::Healthy || actor_state == RouteActorState::Closed
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CurrentGenerationReadyTransitionFacts<'a> {
+    pub current_generation: u64,
+    pub transition_generation: u64,
+    pub transition_reason: &'a str,
+    pub actor_state: RouteActorState,
+}
+
+/// Does the actor's last transition already prove current-generation dispatch
+/// readiness without needing a fresh pane capture?
+pub fn transition_proves_current_generation_ready(
+    facts: CurrentGenerationReadyTransitionFacts<'_>,
+) -> bool {
+    facts.transition_generation == facts.current_generation
+        && matches!(
+            facts.transition_reason,
+            "prompt_ready" | "dispatch_ready_prompt" | "idle_pane_reconcile"
+        )
+        && facts.actor_state == RouteActorState::Ready
+}
+
 pub fn authoritative_actor_dispatch_guard_reason(
     facts: AuthoritativeRuntimeFacts,
 ) -> Option<String> {
@@ -177,6 +205,97 @@ mod tests {
         assert_eq!(
             authoritative_actor_dispatch_guard_reason(missing_state.facts()).as_deref(),
             Some("supervisor actor_state is missing")
+        );
+    }
+
+    #[test]
+    fn mismatched_authoritative_actor_can_be_replaced_only_when_not_live_authority() {
+        let healthy_ready = SupervisorRuntime {
+            health: SupervisorHealth::Healthy,
+            actor_state: Some(RouteActorState::Ready),
+        };
+        assert!(
+            !mismatched_authoritative_actor_can_be_replaced(&healthy_ready, RouteActorState::Ready),
+            "a healthy ready actor from another harness is still authoritative and must block"
+        );
+
+        let healthy_closed = SupervisorRuntime {
+            health: SupervisorHealth::Healthy,
+            actor_state: Some(RouteActorState::Closed),
+        };
+        assert!(
+            mismatched_authoritative_actor_can_be_replaced(
+                &healthy_closed,
+                RouteActorState::Closed
+            ),
+            "a closed actor from another harness should not strand a fresh harness start"
+        );
+
+        let unreachable = SupervisorRuntime {
+            health: SupervisorHealth::Unreachable,
+            actor_state: None,
+        };
+        assert!(
+            mismatched_authoritative_actor_can_be_replaced(&unreachable, RouteActorState::Ready),
+            "an unreachable supervisor cannot prove live cross-harness ownership"
+        );
+    }
+
+    fn ready_transition_facts(reason: &str) -> CurrentGenerationReadyTransitionFacts<'_> {
+        CurrentGenerationReadyTransitionFacts {
+            current_generation: 5,
+            transition_generation: 5,
+            transition_reason: reason,
+            actor_state: RouteActorState::Ready,
+        }
+    }
+
+    #[test]
+    fn transition_proves_ready_accepts_idle_pane_reconcile() {
+        let facts = ready_transition_facts("idle_pane_reconcile");
+        assert!(
+            transition_proves_current_generation_ready(facts),
+            "idle_pane_reconcile is supervisor-proven direct pane evidence and must satisfy the route ready barrier"
+        );
+    }
+
+    #[test]
+    fn transition_proves_ready_accepts_prompt_ready_and_dispatch_ready_prompt() {
+        for reason in ["prompt_ready", "dispatch_ready_prompt"] {
+            let facts = ready_transition_facts(reason);
+            assert!(
+                transition_proves_current_generation_ready(facts),
+                "{reason} must remain a valid ready-proof reason"
+            );
+        }
+    }
+
+    #[test]
+    fn transition_proves_ready_rejects_unmatched_reason() {
+        let facts = ready_transition_facts("starting_actor_timeout");
+        assert!(
+            !transition_proves_current_generation_ready(facts),
+            "an unmatched transition reason must not satisfy the ready barrier"
+        );
+    }
+
+    #[test]
+    fn transition_proves_ready_rejects_stale_generation() {
+        let mut facts = ready_transition_facts("idle_pane_reconcile");
+        facts.transition_generation = 3;
+        assert!(
+            !transition_proves_current_generation_ready(facts),
+            "a prior-generation transition must not satisfy the current-generation ready barrier"
+        );
+    }
+
+    #[test]
+    fn transition_proves_ready_rejects_non_ready_actor() {
+        let mut facts = ready_transition_facts("idle_pane_reconcile");
+        facts.actor_state = RouteActorState::Busy;
+        assert!(
+            !transition_proves_current_generation_ready(facts),
+            "a non-Ready actor must not satisfy the ready barrier even with a matching reason"
         );
     }
 }

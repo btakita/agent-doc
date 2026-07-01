@@ -21,7 +21,8 @@ use std::time::Duration;
 
 use crate::sessions;
 use agent_doc_controller::fleet::{
-    AdminActor, DashboardActorDiagnostics, DashboardModel, build_dashboard_model_with_diagnostics,
+    ActorListRecord, ActorListRegistryBinding, AdminActor, DashboardActorDiagnostics,
+    DashboardModel, build_admin_actor_list, build_dashboard_model_with_diagnostics,
     detect_admin_findings, render_dashboard,
 };
 use tmux_router::Tmux;
@@ -47,7 +48,23 @@ fn snapshot_model(root: &Path) -> Result<DashboardModel> {
     let actors = crate::project_controller::load_actor_store(root)?;
     let registry = sessions::load_in(root)?;
     let tmux = Tmux::default_server();
-    let rows = crate::admin::build_actor_list(&actors, &registry, |pane| tmux.pane_alive(pane));
+    let rows = build_admin_actor_list(
+        actors.values().map(|record| ActorListRecord {
+            document_id: record.document_id.clone(),
+            session_id: record.session_id.clone(),
+            pane: record.pane_id.clone(),
+            window: record.window_id.clone(),
+            harness: record.harness.clone(),
+            generation: record.generation,
+            state: record.state.as_str().to_string(),
+        }),
+        registry.values().map(|entry| ActorListRegistryBinding {
+            session_id: entry.session_id.clone(),
+            supervisor_pid: entry.pid,
+            cwd: entry.cwd.clone(),
+        }),
+        |pane| tmux.pane_alive(pane),
+    );
     let findings = detect_admin_findings(&rows);
     let diagnostics = snapshot_controller_diagnostics(root, &rows)?;
     Ok(build_dashboard_model_with_diagnostics(

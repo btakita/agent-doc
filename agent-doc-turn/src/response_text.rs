@@ -64,6 +64,17 @@ pub fn summarize_response_for_hook(response_body: &str) -> String {
     truncate_response_summary(lines.trim(), 4000)
 }
 
+pub fn render_interleaved_thinking_response(thinking: &str, response: &str) -> String {
+    if thinking.is_empty() {
+        return response.to_string();
+    }
+
+    format!(
+        "<details>\n<summary>Thinking</summary>\n\n{}\n</details>\n\n{}",
+        thinking, response
+    )
+}
+
 fn truncate_response_summary(input: &str, max_chars: usize) -> String {
     let mut chars = input.chars();
     let mut output = String::new();
@@ -328,6 +339,23 @@ mod tests {
         assert!(!summary.contains("patch:exchange"));
         assert!(summary.contains("[truncated]"));
         assert!(summary.starts_with("### Re: x"));
+    }
+
+    #[test]
+    fn interleaved_thinking_response_wraps_thinking_in_details() {
+        let rendered = render_interleaved_thinking_response("Reasoning here.", "Visible answer.");
+
+        assert!(rendered.starts_with("<details>\n<summary>Thinking</summary>"));
+        assert!(rendered.contains("Reasoning here."));
+        assert!(rendered.ends_with("\n\nVisible answer."));
+    }
+
+    #[test]
+    fn interleaved_thinking_response_leaves_response_when_thinking_empty() {
+        assert_eq!(
+            render_interleaved_thinking_response("", "Visible answer."),
+            "Visible answer."
+        );
     }
 
     #[test]

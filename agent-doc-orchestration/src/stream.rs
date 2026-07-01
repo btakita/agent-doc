@@ -23,14 +23,15 @@
 //! - `flush_to_document()` tries IPC to the IDE plugin first. It falls back to
 //!   flock + atomic write only when IPC is unavailable; an unproven active IPC
 //!   attempt fails closed for retry.
-//! - `build_prompt()` produces distinct prompts for first submit (no `resume`) vs.
-//!   resumed sessions (includes diff + full document). Resumed prompts also restate
-//!   ordered request blocks extracted from the diff so the agent does not anchor only
-//!   on the newest question in a changed exchange tail. When session accretion has
-//!   already reached warn/block severity and the diff still contains live prompt
-//!   targets, resumed prompts replace the full exchange tail with a bounded
-//!   response-context pack containing prompt targets, session summary, backlog
-//!   head, and available component names.
+//! - Streaming prompts use `agent_doc_prompt_context::render_streaming_agent_prompt`
+//!   to produce distinct prompts for first submit (no `resume`) vs. resumed sessions
+//!   (includes diff + full document). Resumed prompts also restate ordered request
+//!   blocks extracted from the diff so the agent does not anchor only on the newest
+//!   question in a changed exchange tail. When session accretion has already reached
+//!   warn/block severity and the diff still contains live prompt targets, resumed
+//!   prompts replace the full exchange tail with a bounded response-context pack
+//!   containing prompt targets, session summary, backlog head, and available component
+//!   names.
 //!
 //! Write-back loop:
 //! ```text
@@ -56,11 +57,8 @@
 //! - stream_loop_captures_partial_checkpoints: non-final streamed text persists
 //!   in the partial checkpoint ledger without waiting for final closeout
 //! - stream_loop_empty_chunks: empty-text chunks → session_id None, doc unchanged
-//! - build_prompt_first_submit: no resume → prompt says "starting a session", no diff included
-//! - build_prompt_resume: resume ID set → prompt includes diff and full document
-//! - build_prompt_mentions_patch_blocks: prompt always references `patch:exchange` format
-//! - build_prompt_resume_lists_required_response_targets: resumed prompt with two user request
-//!   blocks → prompt includes the ordered turn-completeness section
+//! - render_streaming_agent_prompt_* (agent-doc-prompt-context): first submit vs.
+//!   resume prompt rendering and patch-block contract
 //! - stream_loop_thinking_to_separate_component: thinking_target="log" → thinking in log, response in exchange
 //! - stream_loop_thinking_interleaved: no thinking_target → `<details>` block in target component
 //! - stream_loop_no_thinking_skips_thinking_blocks: thinking_cfg=None → thinking content absent from doc
@@ -77,13 +75,11 @@ use std::time::Duration;
 
 use crate::agent::streaming::StreamingAgent;
 use agent_doc_config::Config;
-use agent_doc_diff as diff;
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_merge::crdt;
-#[cfg(test)]
-use agent_doc_session_accretion::SessionAccretionLevel;
-use agent_doc_session_accretion::SessionAccretionReport;
+use agent_doc_prompt_context::StreamingAgentPromptContext;
 use agent_doc_template as template;
+use agent_doc_turn::response_text::render_interleaved_thinking_response;
 use agent_doc_turn_executor::agent_stream::StreamChunk;
 
 use crate::{agent, diff_io, git, repair, snapshot, template_io};
@@ -193,13 +189,19 @@ pub fn run(
 
     // Build prompt
     let session_accretion = crate::session_accretion::inspect(file).ok();
-    let prompt = build_prompt(
+    let document_section = crate::prompt_context::build_document_section(
         file,
-        &fm,
         &the_diff,
         &content_original,
         session_accretion.as_ref(),
     );
+    let prompt =
+        agent_doc_prompt_context::render_streaming_agent_prompt(StreamingAgentPromptContext {
+            resuming: fm.resume.is_some(),
+            diff_text: &the_diff,
+            doc: &content_original,
+            document_section: &document_section,
+        });
 
     // Pre-commit user changes
     if !no_git && let Err(e) = git::commit(file) {
@@ -403,14 +405,7 @@ fn stream_loop(
                 if thinking_cfg.is_some() && thinking_cfg.unwrap().target.is_none() {
                     // Interleave: prepend thinking as collapsible details
                     let thinking_text = thinking_buffer.lock().unwrap().clone();
-                    if !thinking_text.is_empty() {
-                        *buf = format!(
-                            "<details>\n<summary>Thinking</summary>\n\n{}\n</details>\n\n{}",
-                            thinking_text, chunk.text
-                        );
-                    } else {
-                        *buf = chunk.text.clone();
-                    }
+                    *buf = render_interleaved_thinking_response(&thinking_text, &chunk.text);
                 } else {
                     *buf = chunk.text.clone();
                 }
@@ -574,47 +569,6 @@ pub fn flush_to_document(file: &Path, text: &str, target: &str, _baseline: &str)
 
     drop(lock_file);
     Ok(())
-}
-
-/// Build the prompt for the streaming agent.
-fn build_prompt(
-    file: &Path,
-    fm: &frontmatter::Frontmatter,
-    the_diff: &str,
-    content: &str,
-    session_accretion: Option<&SessionAccretionReport>,
-) -> String {
-    let prompt_bearing_changes = diff::format_prompt_bearing_changes(the_diff)
-        .map(|section| format!("\n\n{}\n", section))
-        .unwrap_or_default();
-    let active_format_requirements =
-        agent_doc_prompt_context::format_active_format_requirements(content)
-            .map(|section| format!("\n\n{}\n", section))
-            .unwrap_or_default();
-    let document_section =
-        crate::prompt_context::build_document_section(file, the_diff, content, session_accretion);
-    if fm.resume.is_some() {
-        format!(
-            "The user edited the session document. Here is the diff since the last run:\n\n\
-             <diff>\n{}\n</diff>\n\n\
-             {}{}\
-             {}\
-             Respond to the user's new content. Write your response in markdown.\n\
-             Format your response as patch blocks targeting document components.\n\
-             Example: <!-- patch:exchange -->\\nYour response\\n<!-- /patch:exchange -->",
-            the_diff, prompt_bearing_changes, active_format_requirements, document_section
-        )
-    } else {
-        format!(
-            "The user is starting a session document. Here is the full document:\n\n\
-             {}\
-             <document>\n{}\n</document>\n\n\
-             Respond to the user's content. Write your response in markdown.\n\
-             Format your response as patch blocks targeting document components.\n\
-             Example: <!-- patch:exchange -->\\nYour response\\n<!-- /patch:exchange -->",
-            active_format_requirements, content
-        )
-    }
 }
 
 /// Resolve a streaming agent backend by name.
@@ -905,130 +859,6 @@ mod tests {
 
         let result = stream_loop(&doc, chunks, 100, "exchange", content, None).unwrap();
         assert!(result.session_id.is_none());
-    }
-
-    #[test]
-    fn build_prompt_first_submit() {
-        let fm = frontmatter::Frontmatter {
-            resume: None,
-            ..Default::default()
-        };
-        let prompt = build_prompt(
-            Path::new("session.md"),
-            &fm,
-            "diff here",
-            "doc content",
-            None,
-        );
-        assert!(prompt.contains("starting a session"));
-        assert!(prompt.contains("doc content"));
-        assert!(!prompt.contains("diff here")); // no diff for first submit
-    }
-
-    #[test]
-    fn build_prompt_resume() {
-        let fm = frontmatter::Frontmatter {
-            resume: Some("sess-123".to_string()),
-            ..Default::default()
-        };
-        let prompt = build_prompt(
-            Path::new("session.md"),
-            &fm,
-            "diff here",
-            "doc content",
-            None,
-        );
-        assert!(prompt.contains("edited the session document"));
-        assert!(prompt.contains("diff here"));
-        assert!(prompt.contains("doc content"));
-    }
-
-    #[test]
-    fn build_prompt_mentions_patch_blocks() {
-        let fm = frontmatter::Frontmatter::default();
-        let prompt = build_prompt(Path::new("session.md"), &fm, "diff", "content", None);
-        assert!(
-            prompt.contains("patch:exchange"),
-            "prompt should mention patch block format"
-        );
-    }
-
-    #[test]
-    fn build_prompt_resume_lists_required_response_targets() {
-        let fm = frontmatter::Frontmatter {
-            resume: Some("sess-123".to_string()),
-            ..Default::default()
-        };
-        let diff = "--- snapshot\n+++ document\n@@ -1 +1,5 @@\n\
-           ctx\n\
-           +❯ First unresolved question?\n\
-           +\n\
-           +❯ Second unresolved question?\n";
-        let prompt = build_prompt(Path::new("session.md"), &fm, diff, "doc content", None);
-        assert!(prompt.contains("User-authored prompt-bearing changes (oldest first):"));
-        assert!(prompt.contains("Do not stop at the newest question"));
-        assert!(prompt.contains("kind=\"prompt_target\""));
-        assert!(prompt.contains("❯ First unresolved question?"));
-        assert!(prompt.contains("❯ Second unresolved question?"));
-    }
-
-    #[test]
-    fn build_prompt_carries_forward_active_format_requirements() {
-        let fm = frontmatter::Frontmatter {
-            resume: Some("sess-123".to_string()),
-            ..Default::default()
-        };
-        let doc = concat!(
-            "❯ Please organize the backlog into a 2-level list. ",
-            "Place the urgent-security matters at the top. ",
-            "Use a numeric list where appropriate.\n",
-            "### Re: backlog organization — gpt-5\n",
-            "Done.\n",
-        );
-
-        let prompt = build_prompt(Path::new("session.md"), &fm, "diff", doc, None);
-        assert!(
-            prompt.contains(
-                "Active document-level formatting / structure requirements carried forward"
-            )
-        );
-        assert!(prompt.contains(
-            "Please organize the backlog into a 2-level list. Place the urgent-security matters at the top. Use a numeric list where appropriate."
-        ));
-    }
-
-    #[test]
-    fn build_prompt_uses_bounded_context_pack_for_warn_level_prompt_targets() {
-        let fm = frontmatter::Frontmatter {
-            resume: Some("sess-123".to_string()),
-            ..Default::default()
-        };
-        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,4 @@\n\
-           Done.\n\
-           +do [#ctxpack]. spec-test-build-install-commit-push\n\
-           <!-- /agent:exchange -->\n";
-        let doc = concat!(
-            "## Exchange\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "### Session Summary\n\n",
-            "Compacted earlier turns.\n\n",
-            "### Re: older topic — gpt-5\n\n",
-            "Older response body.\n",
-            "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:backlog -->\n",
-            "- [ ] [#ctxpack] Add bounded context pack\n",
-            "<!-- /agent:backlog -->\n",
-        );
-        let report = SessionAccretionReport {
-            level: SessionAccretionLevel::Warn,
-            reasons: vec!["document hit 2 no-op closeouts in the last 30 minutes".to_string()],
-            ..Default::default()
-        };
-
-        let prompt = build_prompt(Path::new("session.md"), &fm, diff, doc, Some(&report));
-        assert!(prompt.contains("<response_context level=\"warn\">"));
-        assert!(prompt.contains("<recent_exchange_turns limit=\"2\">"));
-        assert!(!prompt.contains("<document>\n## Exchange"));
     }
 
     #[test]

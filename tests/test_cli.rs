@@ -6070,7 +6070,6 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
         "agent-doc-orchestration/src/preflight.rs",
         "agent-doc-orchestration/src/prompt_context.rs",
         "agent-doc-orchestration/src/run.rs",
-        "agent-doc-orchestration/src/stream.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
@@ -6083,6 +6082,18 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
             "{relative} must not route session-accretion types through orchestration"
         );
     }
+    let stream_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/stream.rs")).unwrap();
+    assert!(
+        stream_source.contains("crate::session_accretion::inspect(file)")
+            && stream_source.contains("crate::prompt_context::build_document_section("),
+        "stream should gather session-accretion facts through the orchestration adapter and delegate document-section rendering"
+    );
+    assert!(
+        !stream_source.contains("agent_doc_orchestration::session_accretion::SessionAccretion")
+            && !stream_source.contains("crate::session_accretion::SessionAccretion"),
+        "stream must not route session-accretion types through orchestration"
+    );
 
     let root_dependencies = workspace["dependencies"].as_table().unwrap();
     assert!(
@@ -6147,7 +6158,9 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
         "pub struct BoundedResponseContext",
         "pub struct DocumentSectionContext",
         "pub struct AgentPromptContext",
+        "pub struct StreamingAgentPromptContext",
         "pub fn render_agent_prompt(",
+        "pub fn render_streaming_agent_prompt(",
         "pub fn document_section_needs_response_toc(",
         "pub fn render_document_section(",
         "pub fn format_active_format_requirements(",
@@ -6260,7 +6273,7 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
         ),
         (
             "agent-doc-orchestration/src/stream.rs",
-            "agent_doc_prompt_context::format_active_format_requirements",
+            "agent_doc_prompt_context::render_streaming_agent_prompt",
             [
                 "agent_doc_orchestration::prompt_contract::format_active_format_requirements",
                 "prompt_contract::format_active_format_requirements",
@@ -11255,9 +11268,14 @@ fn test_agent_doc_controller_owns_fleet_dashboard_policy() {
     for required in [
         "pub struct AdminActor",
         "pub struct AdminFinding",
+        "pub struct ActorListRecord",
+        "pub struct ActorListRegistryBinding",
+        "pub struct AdminReceiptLine",
         "pub struct DashboardRow",
         "pub struct DashboardActorDiagnostics",
         "pub struct DashboardModel",
+        "pub fn build_admin_actor_list(",
+        "pub fn format_admin_receipt_line(",
         "pub fn detect_admin_findings(",
         "pub fn build_dashboard_model(",
         "pub fn build_dashboard_model_with_diagnostics(",
@@ -11298,12 +11316,19 @@ fn test_agent_doc_controller_owns_fleet_dashboard_policy() {
         );
     }
     assert!(
-        orchestration_admin
-            .contains("use agent_doc_controller::fleet::{AdminActor, detect_admin_findings};"),
-        "admin should construct focused fleet actor rows and call controller finding derivation directly"
+        orchestration_admin.contains("use agent_doc_controller::fleet::{")
+            && orchestration_admin.contains("ActorListRecord")
+            && orchestration_admin.contains("ActorListRegistryBinding")
+            && orchestration_admin.contains("build_admin_actor_list")
+            && orchestration_admin.contains("detect_admin_findings")
+            && orchestration_admin.contains("format_admin_receipt_line"),
+        "admin should adapt IO rows and call focused fleet list/finding/receipt policy directly"
     );
     assert!(
         orchestration_dashboard.contains("use agent_doc_controller::fleet::{")
+            && orchestration_dashboard.contains("ActorListRecord")
+            && orchestration_dashboard.contains("ActorListRegistryBinding")
+            && orchestration_dashboard.contains("build_admin_actor_list")
             && orchestration_dashboard.contains("detect_admin_findings")
             && orchestration_dashboard.contains("build_dashboard_model_with_diagnostics")
             && orchestration_dashboard.contains("render_dashboard"),
@@ -18703,6 +18728,8 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
     let route_cycle_ack =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/cycle_ack.rs"))
             .unwrap();
+    let turn_cycle_ack =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn/src/cycle_ack.rs")).unwrap();
     let preflight_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
     for forbidden_snippet in [
@@ -18742,7 +18769,8 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
             && route_source.contains("agent_doc_queue::route_dispatch::inactive_route_queue_head")
             && route_source
                 .contains("agent_doc_queue::route_dispatch::activate_existing_route_queue_content")
-            && route_cycle_ack
+            && route_cycle_ack.contains("agent_doc_turn::cycle_ack")
+            && turn_cycle_ack
                 .contains("agent_doc_queue::route_dispatch::route_prompt_text_for_change")
             && preflight_source
                 .contains("agent_doc_queue::route_dispatch::active_auto_route_queue_prompt_texts")

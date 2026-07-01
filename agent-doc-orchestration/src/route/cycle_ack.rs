@@ -1,22 +1,9 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
-
-pub(crate) fn cycle_state_advances_start_ack(
-    current: &crate::cycle_state::CycleState,
-    baseline: Option<&crate::cycle_state::CycleState>,
-) -> bool {
-    match baseline {
-        None => true,
-        Some(previous) if previous.is_open() => {
-            current.cycle_id != previous.cycle_id
-                || current.updated_at != previous.updated_at
-                || current.phase != previous.phase
-                || current.last_event != previous.last_event
-        }
-        Some(previous) => current.cycle_id != previous.cycle_id,
-    }
-}
+use agent_doc_turn::cycle_ack::{
+    CycleAckState, cycle_state_advances_start_ack, prompt_bearing_route_context_from_change,
+};
 
 pub(crate) fn wait_for_start_ack(
     file: &Path,
@@ -28,7 +15,20 @@ pub(crate) fn wait_for_start_ack(
 
     while start.elapsed() < timeout {
         if let Ok(Some(state)) = crate::cycle_state::load(file)
-            && cycle_state_advances_start_ack(&state, baseline)
+            && cycle_state_advances_start_ack(
+                CycleAckState {
+                    cycle_id: &state.cycle_id,
+                    phase: state.phase,
+                    updated_at: state.updated_at,
+                    last_event: &state.last_event,
+                },
+                baseline.map(|state| CycleAckState {
+                    cycle_id: &state.cycle_id,
+                    phase: state.phase,
+                    updated_at: state.updated_at,
+                    last_event: &state.last_event,
+                }),
+            )
         {
             return Some(state);
         }
@@ -258,25 +258,13 @@ pub(crate) fn pending_prompt_bearing_context_for_route(
     let Some(change) = crate::session_check::first_unstarted_prompt_bearing_change(file)? else {
         return Ok(None);
     };
-    let marker = match change.kind {
-        agent_doc_diff::PromptBearingChangeKind::PromptTarget => "prompt_target",
-        agent_doc_diff::PromptBearingChangeKind::ContentEdit => "content_edit",
-        agent_doc_diff::PromptBearingChangeKind::RecoveryArtifact
-        | agent_doc_diff::PromptBearingChangeKind::BoundaryArtifact => return Ok(None),
+    let Some(context) = prompt_bearing_route_context_from_change(&change) else {
+        return Ok(None);
     };
-    let preview = change
-        .text
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .unwrap_or(change.text.as_str())
-        .trim();
-    let prompt_text = agent_doc_queue::route_dispatch::route_prompt_text_for_change(&change.text)
-        .unwrap_or_else(|| preview.trim_start_matches('❯').trim().to_string());
-    let slash_command = agent_doc_queue::queue_command::slash_command_text(&prompt_text);
     Ok(Some(PendingPromptBearingRouteContext {
-        marker: format!("{marker}: {preview}"),
-        prompt_text,
-        slash_command,
+        marker: context.marker,
+        prompt_text: context.prompt_text,
+        slash_command: context.slash_command,
     }))
 }
 

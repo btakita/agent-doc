@@ -15,6 +15,7 @@
 use std::path::Path;
 
 use agent_doc_plugin_owner::stale_cleanup::{
+    jetbrains_consumer_patches_dir, jetbrains_live_buffer_sidecar_dir,
     should_reap_jetbrains_consumer_file, should_reap_jetbrains_live_buffer_sidecar,
 };
 use agent_doc_turn::response_text::{
@@ -366,7 +367,7 @@ pub(crate) fn reap_local_model_leases(file: &Path) -> ReapOutcome {
 /// closeout must never fail because a reap could not run. On non-Unix this is a
 /// no-op (returns 0). Returns the number of files reaped.
 pub fn reap_stale_jetbrains_consumers(project_root: &Path) -> usize {
-    let patches_dir = project_root.join(".agent-doc").join("patches");
+    let patches_dir = jetbrains_consumer_patches_dir(project_root);
     reap_stale_jetbrains_consumers_with(&patches_dir, pid_is_live)
 }
 
@@ -439,7 +440,7 @@ fn reap_stale_jetbrains_consumers_with(
 /// closeout must never fail because a reap could not run. On non-Unix this is a
 /// no-op (returns 0). Returns the number of files reaped.
 pub fn reap_stale_jetbrains_live_buffers(project_root: &Path) -> usize {
-    let dir = project_root.join(".agent-doc").join("live-buffer");
+    let dir = jetbrains_live_buffer_sidecar_dir(project_root);
     reap_stale_jetbrains_live_buffers_with(&dir, pid_is_live)
 }
 

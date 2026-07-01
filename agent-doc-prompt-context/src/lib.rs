@@ -59,6 +59,13 @@ pub struct AgentPromptContext<'a> {
     pub document_section: &'a str,
 }
 
+pub struct StreamingAgentPromptContext<'a> {
+    pub resuming: bool,
+    pub diff_text: &'a str,
+    pub doc: &'a str,
+    pub document_section: &'a str,
+}
+
 pub fn render_agent_prompt(input: AgentPromptContext<'_>) -> String {
     let prompt_bearing = agent_doc_diff::format_prompt_bearing_changes(input.diff_text)
         .map(|section| format!("\n\n{}\n", section))
@@ -88,6 +95,41 @@ pub fn render_agent_prompt(input: AgentPromptContext<'_>) -> String {
              Do not include a ## Assistant heading — it will be added automatically.\n\
              If the user inserted prompt-bearing edits inline, classify them as prompt targets vs content edits before responding.",
             input.diff_text, prompt_bearing, active_format_requirements, input.document_section
+        )
+    }
+}
+
+pub fn render_streaming_agent_prompt(input: StreamingAgentPromptContext<'_>) -> String {
+    let prompt_bearing_changes = agent_doc_diff::format_prompt_bearing_changes(input.diff_text)
+        .map(|section| format!("\n\n{}\n", section))
+        .unwrap_or_default();
+    let active_format_requirements = format_active_format_requirements(input.doc)
+        .map(|section| format!("\n\n{}\n", section))
+        .unwrap_or_default();
+
+    if input.resuming {
+        format!(
+            "The user edited the session document. Here is the diff since the last run:\n\n\
+             <diff>\n{}\n</diff>\n\n\
+             {}{}\
+             {}\
+             Respond to the user's new content. Write your response in markdown.\n\
+             Format your response as patch blocks targeting document components.\n\
+             Example: <!-- patch:exchange -->\\nYour response\\n<!-- /patch:exchange -->",
+            input.diff_text,
+            prompt_bearing_changes,
+            active_format_requirements,
+            input.document_section
+        )
+    } else {
+        format!(
+            "The user is starting a session document. Here is the full document:\n\n\
+             {}\
+             <document>\n{}\n</document>\n\n\
+             Respond to the user's content. Write your response in markdown.\n\
+             Format your response as patch blocks targeting document components.\n\
+             Example: <!-- patch:exchange -->\\nYour response\\n<!-- /patch:exchange -->",
+            active_format_requirements, input.doc
         )
     }
 }
@@ -636,6 +678,109 @@ mod tests {
             "Please organize the backlog into a 2-level list. Place the urgent-security matters at the top. Use a numeric list where appropriate."
         ));
         assert!(prompt.contains("Format your response as patch blocks"));
+    }
+
+    #[test]
+    fn render_streaming_agent_prompt_first_submit_uses_full_document_without_diff() {
+        let prompt = render_streaming_agent_prompt(StreamingAgentPromptContext {
+            resuming: false,
+            diff_text: "diff here",
+            doc: "doc content",
+            document_section: "<document>ignored</document>",
+        });
+
+        assert!(prompt.contains("starting a session"));
+        assert!(prompt.contains("doc content"));
+        assert!(!prompt.contains("diff here"));
+    }
+
+    #[test]
+    fn render_streaming_agent_prompt_resume_uses_diff_and_document_section() {
+        let prompt = render_streaming_agent_prompt(StreamingAgentPromptContext {
+            resuming: true,
+            diff_text: "diff here",
+            doc: "doc content",
+            document_section: "The full document is now:\n\n<document>\ndoc content\n</document>\n\n",
+        });
+
+        assert!(prompt.contains("edited the session document"));
+        assert!(prompt.contains("diff here"));
+        assert!(prompt.contains("doc content"));
+        assert!(prompt.contains("patch:exchange"));
+    }
+
+    #[test]
+    fn render_streaming_agent_prompt_resume_lists_required_response_targets() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,5 @@\n\
+ctx\n\
++❯ First unresolved question?\n\
++\n\
++❯ Second unresolved question?\n";
+        let prompt = render_streaming_agent_prompt(StreamingAgentPromptContext {
+            resuming: true,
+            diff_text: diff,
+            doc: "doc content",
+            document_section: "<document>doc content</document>\n\n",
+        });
+
+        assert!(prompt.contains("User-authored prompt-bearing changes (oldest first):"));
+        assert!(prompt.contains("Do not stop at the newest question"));
+        assert!(prompt.contains("kind=\"prompt_target\""));
+        assert!(prompt.contains("❯ First unresolved question?"));
+        assert!(prompt.contains("❯ Second unresolved question?"));
+    }
+
+    #[test]
+    fn render_streaming_agent_prompt_carries_forward_active_format_requirements() {
+        let doc = concat!(
+            "❯ Please organize the backlog into a 2-level list. ",
+            "Place the urgent-security matters at the top. ",
+            "Use a numeric list where appropriate.\n",
+            "### Re: backlog organization - gpt-5\n",
+            "Done.\n",
+        );
+
+        let prompt = render_streaming_agent_prompt(StreamingAgentPromptContext {
+            resuming: true,
+            diff_text: "diff",
+            doc,
+            document_section: "<document>doc</document>\n\n",
+        });
+
+        assert!(
+            prompt.contains(
+                "Active document-level formatting / structure requirements carried forward"
+            )
+        );
+        assert!(prompt.contains(
+            "Please organize the backlog into a 2-level list. Place the urgent-security matters at the top. Use a numeric list where appropriate."
+        ));
+    }
+
+    #[test]
+    fn render_streaming_agent_prompt_includes_bounded_document_section() {
+        let prompt_targets = vec!["do [#ctxpack]. spec-test-build-install-commit-push".to_string()];
+        let document_section = render_document_section(DocumentSectionContext {
+            doc: context_doc(),
+            report: Some(&warn_report()),
+            prompt_targets: &prompt_targets,
+            response_toc: None,
+            remote_host_scope: "<remote_host_scope>\nNo targets.\n</remote_host_scope>\n\n",
+        });
+        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,4 @@\n\
+Done.\n\
++do [#ctxpack]. spec-test-build-install-commit-push\n\
+<!-- /agent:exchange -->\n";
+        let prompt = render_streaming_agent_prompt(StreamingAgentPromptContext {
+            resuming: true,
+            diff_text: diff,
+            doc: context_doc(),
+            document_section: &document_section,
+        });
+
+        assert!(prompt.contains("<response_context level=\"warn\">"));
+        assert!(prompt.contains("do [#ctxpack]. spec-test-build-install-commit-push"));
+        assert!(prompt.contains("No live or archived response TOC entries are available yet."));
     }
 
     #[test]

@@ -48,10 +48,9 @@ pub(crate) fn load_authoritative_actor_binding(
         );
         let frontmatter_harness_changed =
             document_declares_expected_harness(file, &expected_harness);
-        if mismatched_authoritative_actor_can_be_replaced(
+        if agent_doc_supervisor::route_runtime::mismatched_authoritative_actor_can_be_replaced(
             &runtime,
             effective_state,
-            frontmatter_harness_changed,
         ) {
             crate::ops_log::log_op(
                 file,
@@ -178,14 +177,6 @@ pub(crate) fn load_authoritative_actor_binding(
         tmux, file, file_path, record, runtime, harness,
     );
     Ok(Some(AuthoritativeActorDispatchTarget { record, runtime }))
-}
-
-pub(crate) fn mismatched_authoritative_actor_can_be_replaced(
-    runtime: &SupervisorRuntime,
-    actor_state: RouteActorState,
-    _frontmatter_harness_changed: bool,
-) -> bool {
-    runtime.health != SupervisorHealth::Healthy || actor_state == RouteActorState::Closed
 }
 
 /// Build the operator-actionable recovery suffix for the `defer_to_boundary_restart`
@@ -424,18 +415,14 @@ pub(crate) fn current_generation_ready_prompt_proven(
     // to `Ready`. That direct pane evidence is as strong as the footer-shape proof
     // above, so accepting it here keeps the route from waiting the full 60s timeout
     // when the edge-triggered pty redraw missed re-emitting a recognized prompt shape.
-    transition_proves_current_generation_ready(target)
-}
-
-/// Pure check: does the actor's last transition already prove current-generation
-/// dispatch readiness without needing a fresh capture?
-fn transition_proves_current_generation_ready(target: &AuthoritativeActorDispatchTarget) -> bool {
-    target.record.last_transition.new_generation == target.record.generation
-        && matches!(
-            target.record.last_transition.reason.as_str(),
-            "prompt_ready" | "dispatch_ready_prompt" | "idle_pane_reconcile"
-        )
-        && target.actor_state() == agent_doc_sqlite::state_store::ActorState::Ready
+    agent_doc_supervisor::route_runtime::transition_proves_current_generation_ready(
+        agent_doc_supervisor::route_runtime::CurrentGenerationReadyTransitionFacts {
+            current_generation: target.record.generation,
+            transition_generation: target.record.last_transition.new_generation,
+            transition_reason: target.record.last_transition.reason.as_str(),
+            actor_state: route_actor_state_from_sqlite(target.actor_state()),
+        },
+    )
 }
 
 /// Outcome of a route-side controller dispatch authorization.
@@ -943,136 +930,11 @@ mod tests {
         ));
     }
     #[test]
-    fn mismatched_authoritative_actor_can_be_replaced_only_when_not_live_authority() {
-        let healthy_ready = SupervisorRuntime {
-            health: SupervisorHealth::Healthy,
-            actor_state: Some(RouteActorState::Ready),
-        };
-        assert!(
-            !mismatched_authoritative_actor_can_be_replaced(
-                &healthy_ready,
-                RouteActorState::Ready,
-                false,
-            ),
-            "a healthy ready actor from another harness is still authoritative and must block"
-        );
-        assert!(
-            !mismatched_authoritative_actor_can_be_replaced(
-                &healthy_ready,
-                RouteActorState::Ready,
-                true,
-            ),
-            "an explicit frontmatter harness switch must defer to the boundary restart guard while the old-harness actor is healthy"
-        );
-
-        let healthy_closed = SupervisorRuntime {
-            health: SupervisorHealth::Healthy,
-            actor_state: Some(RouteActorState::Closed),
-        };
-        assert!(
-            mismatched_authoritative_actor_can_be_replaced(
-                &healthy_closed,
-                RouteActorState::Closed,
-                false,
-            ),
-            "a closed actor from another harness should not strand a fresh harness start"
-        );
-
-        let unreachable = SupervisorRuntime {
-            health: SupervisorHealth::Unreachable,
-            actor_state: None,
-        };
-        assert!(
-            mismatched_authoritative_actor_can_be_replaced(
-                &unreachable,
-                RouteActorState::Ready,
-                false,
-            ),
-            "an unreachable supervisor cannot prove live cross-harness ownership"
-        );
-    }
-
-    #[test]
     fn document_declares_expected_harness_normalizes_claude_alias() {
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("session.md");
         std::fs::write(&doc, "---\nagent: claude\n---\n").unwrap();
         assert!(document_declares_expected_harness(&doc, "claude-code"));
         assert!(!document_declares_expected_harness(&doc, "codex"));
-    }
-
-    fn ready_target_with_reason(reason: &str) -> AuthoritativeActorDispatchTarget {
-        AuthoritativeActorDispatchTarget {
-            record: agent_doc_sqlite::state_store::ActorRecord {
-                document_id: "test-doc".to_string(),
-                session_id: "test-session".to_string(),
-                generation: 5,
-                pane_id: "%7".to_string(),
-                window_id: "@1".to_string(),
-                harness: "codex".to_string(),
-                state: agent_doc_sqlite::state_store::ActorState::Ready,
-                last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
-                    caller: "supervisor".to_string(),
-                    reason: reason.to_string(),
-                    timestamp: 0,
-                    prior_generation: 4,
-                    new_generation: 5,
-                },
-            },
-            runtime: SupervisorRuntime {
-                health: SupervisorHealth::Healthy,
-                actor_state: Some(RouteActorState::Ready),
-            },
-        }
-    }
-
-    #[test]
-    fn transition_proves_ready_accepts_idle_pane_reconcile() {
-        let target = ready_target_with_reason("idle_pane_reconcile");
-        assert!(
-            transition_proves_current_generation_ready(&target),
-            "idle_pane_reconcile is supervisor-proven direct pane evidence and must satisfy the route ready barrier"
-        );
-    }
-
-    #[test]
-    fn transition_proves_ready_accepts_prompt_ready_and_dispatch_ready_prompt() {
-        for reason in ["prompt_ready", "dispatch_ready_prompt"] {
-            let target = ready_target_with_reason(reason);
-            assert!(
-                transition_proves_current_generation_ready(&target),
-                "{reason} must remain a valid ready-proof reason"
-            );
-        }
-    }
-
-    #[test]
-    fn transition_proves_ready_rejects_unmatched_reason() {
-        let target = ready_target_with_reason("starting_actor_timeout");
-        assert!(
-            !transition_proves_current_generation_ready(&target),
-            "an unmatched transition reason must not satisfy the ready barrier"
-        );
-    }
-
-    #[test]
-    fn transition_proves_ready_rejects_stale_generation() {
-        let mut target = ready_target_with_reason("idle_pane_reconcile");
-        target.record.last_transition.new_generation = 3;
-        assert!(
-            !transition_proves_current_generation_ready(&target),
-            "a prior-generation transition must not satisfy the current-generation ready barrier"
-        );
-    }
-
-    #[test]
-    fn transition_proves_ready_rejects_non_ready_actor() {
-        let mut target = ready_target_with_reason("idle_pane_reconcile");
-        target.record.state = agent_doc_sqlite::state_store::ActorState::Busy;
-        target.runtime.actor_state = Some(RouteActorState::Busy);
-        assert!(
-            !transition_proves_current_generation_ready(&target),
-            "a non-Ready actor must not satisfy the ready barrier even with a matching reason"
-        );
     }
 }

@@ -201,6 +201,7 @@ use agent_doc_element::element;
 use agent_doc_supervisor::ipc_protocol::IpcMethod;
 #[cfg(test)]
 use agent_doc_supervisor::ipc_protocol::IpcResponse;
+use agent_doc_supervisor::startup_miss::unresolved_startup_miss_blocks_autostart;
 use agent_doc_sync::{
     AutoStartMode, WindowIndexNormalizationPlan, auto_started_panes_summary,
     effective_sync_columns, epoch_millis_now, is_file_rename, last_visible_excerpt,
@@ -725,34 +726,20 @@ fn passive_autostart_skip_reason(
     session_id: &str,
     unresolved_startup_miss: Option<&agent_doc_supervisor::startup_miss::StartupMiss>,
 ) -> Result<Option<String>> {
-    if unresolved_startup_miss.is_some() {
-        return Ok(Some(
-            "startup-miss is still unresolved for this document".to_string(),
-        ));
-    }
-
-    let Some(status) = crate::startup_miss::session_log_status(file, session_id)? else {
-        return Ok(None);
-    };
-
-    if !status.latest_session_closed() {
-        return Ok(Some(format!(
-            "latest session log is still open or ambiguous (last_event={})",
-            agent_doc_supervisor::startup_miss::latest_log_last_event(&status)
-        )));
-    }
-
-    let last_event = agent_doc_supervisor::startup_miss::latest_log_last_event(&status);
-    if last_event.starts_with("session_end origin=registry_rebind ")
-        && let Some(successor) =
+    let status = crate::startup_miss::session_log_status(file, session_id)?;
+    let live_registry_rebind_successor = status
+        .as_ref()
+        .and_then(agent_doc_supervisor::startup_miss::latest_registry_rebind_successor)
+        .and_then(|_| {
             find_alive_pane_via_registry_rebind_successor(tmux, file, session_id, None, false)
-    {
-        return Ok(Some(format!(
-            "latest session ended via registry_rebind and successor pane {successor} is still alive (last_event={last_event})"
-        )));
-    }
-
-    Ok(None)
+        });
+    Ok(
+        agent_doc_supervisor::startup_miss::passive_autostart_skip_reason(
+            unresolved_startup_miss.is_some(),
+            status.as_ref(),
+            live_registry_rebind_successor.as_deref(),
+        ),
+    )
 }
 
 fn open_session_log_owner_fail_closed_diagnostic(
@@ -2401,7 +2388,7 @@ fn run_with_options_internal(
                 continue;
             }
 
-            if should_skip_autostart_for_unresolved_startup_miss(
+            if unresolved_startup_miss_blocks_autostart(
                 registered_pane.as_deref(),
                 registered_pane
                     .as_deref()
@@ -4260,14 +4247,6 @@ fn pid_is_agent_session(pid: &str) -> bool {
         || cmdline.contains("opencode")
 }
 
-fn should_skip_autostart_for_unresolved_startup_miss(
-    registered_pane: Option<&str>,
-    pane_alive: bool,
-    miss: Option<&agent_doc_supervisor::startup_miss::StartupMiss>,
-) -> bool {
-    pane_alive && registered_pane.is_some_and(|pane| miss.is_some_and(|miss| miss.pane_id == pane))
-}
-
 /// Diagnostic sibling of [`pane_runs_other_document_owner`]: returns the foreign
 /// document path the pane's live process tree owns (a document other than
 /// `claimed_file`), or `None`. Used only for cross-document execution logging.
@@ -5000,39 +4979,6 @@ mod tests {
             bare,
             "guard must not reject a candidate it cannot prove owns another document"
         );
-    }
-    #[test]
-    fn unresolved_startup_miss_skips_sync_autostart_only_for_matching_alive_pane() {
-        let miss = agent_doc_supervisor::startup_miss::StartupMiss {
-            file: "tasks/owned.md".to_string(),
-            pane_id: "%42".to_string(),
-            session_id: "associated-supervisor".to_string(),
-            harness: "codex".to_string(),
-            timestamp: 5,
-            origin: agent_doc_supervisor::startup_miss::StartupMissOrigin::RoutedTrigger,
-            cycle_baseline_id: None,
-        };
-
-        assert!(should_skip_autostart_for_unresolved_startup_miss(
-            Some("%42"),
-            true,
-            Some(&miss)
-        ));
-        assert!(!should_skip_autostart_for_unresolved_startup_miss(
-            Some("%42"),
-            false,
-            Some(&miss)
-        ));
-        assert!(!should_skip_autostart_for_unresolved_startup_miss(
-            Some("%43"),
-            true,
-            Some(&miss)
-        ));
-        assert!(!should_skip_autostart_for_unresolved_startup_miss(
-            Some("%42"),
-            true,
-            None
-        ));
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]

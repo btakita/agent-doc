@@ -42,60 +42,64 @@ pub(crate) fn check_pending_capture_guard(
     if !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
         && !missing_targets.is_empty()
     {
-        return Ok(GuardResult::Error(format!(
-            "[session-check] error: committed response came from a prompt that required backlog capture in {}, but those tracked-work surfaces did not change this cycle",
-            missing_targets.join(", ")
-        )));
+        return Ok(
+            agent_doc_workflow::session_check::pending_capture_missing_targets_guard_result(
+                &missing_targets,
+            ),
+        );
     }
     if !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
         && let Some((expected_count, promised_count)) =
             crate::write::promised_backlog_item_inventory_shortfall(&state, &response_text)
     {
-        return Ok(GuardResult::Error(format!(
-            "[session-check] error: active #agent-doc-bug contract described at least {} distinct issue(s), but the committed response only enumerated {} explicit backlog item(s) for target(s) {}",
-            expected_count,
-            promised_count,
-            state
-                .required_backlog_targets
-                .iter()
-                .map(|target| target.path.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )));
+        let targets = state
+            .required_backlog_targets
+            .iter()
+            .map(|target| target.path.clone())
+            .collect::<Vec<_>>();
+        return Ok(
+            agent_doc_workflow::session_check::pending_capture_inventory_shortfall_guard_result(
+                expected_count,
+                promised_count,
+                &targets,
+            ),
+        );
     }
     if !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
         && let Some((expected_count, promised_count)) =
             crate::write::promised_plan_reference_shortfall(file, &state, &response_text)
     {
-        return Ok(GuardResult::Error(format!(
-            "[session-check] error: active #agent-doc-bug contract required at least {} explicit plan reference(s), but the committed response only cited {} existing plan path(s)",
-            expected_count, promised_count,
-        )));
+        return Ok(
+            agent_doc_workflow::session_check::pending_capture_plan_reference_shortfall_guard_result(
+                expected_count,
+                promised_count,
+            ),
+        );
     }
     let missing_ids =
         crate::write::unresolved_promised_backlog_item_ids(file, &state, &response_text);
     if !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
         && !missing_ids.is_empty()
     {
-        return Ok(GuardResult::Error(format!(
-            "[session-check] error: committed response promised new tracked item(s) {} for explicit backlog target(s) {}, but those ids are still missing after this cycle",
-            missing_ids.join(", "),
-            state
-                .required_backlog_targets
-                .iter()
-                .map(|target| target.path.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )));
+        let targets = state
+            .required_backlog_targets
+            .iter()
+            .map(|target| target.path.clone())
+            .collect::<Vec<_>>();
+        return Ok(
+            agent_doc_workflow::session_check::pending_capture_missing_promised_ids_guard_result(
+                &missing_ids,
+                &targets,
+            ),
+        );
     }
     if state.requires_backlog_capture
         && state.required_backlog_targets.is_empty()
         && !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
     {
-        return Ok(GuardResult::Error(
-            "[session-check] error: committed response came from a prompt that required backlog capture, but this cycle recorded no backlog mutations and did not explicitly state that there were no actionable follow-up items"
-                .to_string(),
-        ));
+        return Ok(
+            agent_doc_workflow::session_check::pending_capture_required_no_mutations_guard_result(),
+        );
     }
 
     let signal = agent_doc_turn::heuristics::detect_uncaptured_recommendations(&response_text);
@@ -108,26 +112,12 @@ pub(crate) fn check_pending_capture_guard(
         return Ok(GuardResult::None);
     }
 
-    let warn_line = format!(
-        "[session-check] warn: response contains ~{} recommendation-like items but no --pending-add flags were used this cycle",
-        signal.estimated_count
-    );
-    let hint_line =
-        "[session-check] hint: consider adding pending items for actionable follow-up work"
-            .to_string();
-
-    Ok(match mode {
-        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Warn => {
-            GuardResult::Warn(vec![warn_line, hint_line])
-        }
-        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict => {
-            GuardResult::Error(format!(
-                "{}\n[session-check] hint: re-run with --pending-add flags or set pending_capture_guard = \"warn\" to downgrade",
-                warn_line.replacen("[session-check] warn:", "[session-check] error:", 1)
-            ))
-        }
-        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
-    })
+    Ok(
+        agent_doc_workflow::session_check::pending_capture_recommendations_guard_result(
+            signal.estimated_count,
+            mode,
+        ),
+    )
 }
 
 pub(crate) fn resolve_pending_capture_guard_mode(

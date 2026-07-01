@@ -15,6 +15,35 @@ pub struct RecoveryTag {
     pub subject: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubmodulePointerDrift {
+    pub relative_path: String,
+    pub parent_head: Option<String>,
+    pub submodule_head: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PostCommitLocalDriftKind {
+    UserFollowUp,
+    WorkingTreeEdits,
+}
+
+impl PostCommitLocalDriftKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::UserFollowUp => "user_follow_up",
+            Self::WorkingTreeEdits => "working_tree_edits",
+        }
+    }
+
+    pub fn describe(self) -> &'static str {
+        match self {
+            Self::UserFollowUp => "later local user follow-up edits",
+            Self::WorkingTreeEdits => "later local working-tree edits",
+        }
+    }
+}
+
 /// Compute `path` relative to `root`, canonicalizing both sides so symlinks do
 /// not cause `strip_prefix` mismatches. Falls back through non-canonical strip
 /// and finally to the original path.
@@ -137,11 +166,59 @@ pub fn line_looks_like_explicit_post_commit_prompt_directive(line: &str) -> bool
         || lower.contains(" spec test")
 }
 
+pub fn classify_prompt_bearing_post_commit_drift(
+    has_changes: bool,
+    has_explicit_prompt_target: bool,
+    has_content_edit: bool,
+    has_recovery_artifact: bool,
+) -> Option<PostCommitLocalDriftKind> {
+    if !has_changes {
+        return None;
+    }
+    if has_explicit_prompt_target && !has_content_edit && !has_recovery_artifact {
+        Some(PostCommitLocalDriftKind::UserFollowUp)
+    } else {
+        Some(PostCommitLocalDriftKind::WorkingTreeEdits)
+    }
+}
+
+pub fn classify_post_commit_local_drift_from_checks(
+    contents_equal: bool,
+    transient_only: bool,
+    re_heading_only: bool,
+    safe_user_follow_up: bool,
+    prompt_classifier_kind: Option<PostCommitLocalDriftKind>,
+) -> Option<PostCommitLocalDriftKind> {
+    if contents_equal || transient_only || re_heading_only {
+        return None;
+    }
+    if safe_user_follow_up {
+        return Some(PostCommitLocalDriftKind::UserFollowUp);
+    }
+    prompt_classifier_kind.or(Some(PostCommitLocalDriftKind::WorkingTreeEdits))
+}
+
 pub fn doc_stem(file: &Path) -> String {
+    doc_stem_or(file, "doc")
+}
+
+pub fn doc_stem_or(file: &Path, fallback: &str) -> String {
     file.file_stem()
         .and_then(|s| s.to_str())
-        .unwrap_or("doc")
+        .unwrap_or(fallback)
         .to_string()
+}
+
+pub fn agent_doc_commit_message_for_file(file: &Path, timestamp: &str) -> String {
+    format!("agent-doc({}): {}", doc_stem_or(file, "unknown"), timestamp)
+}
+
+pub fn agent_doc_branch_name_for_file(file: &Path) -> String {
+    format!("agent-doc/{}", doc_stem_or(file, "session"))
+}
+
+pub fn parent_submodule_pointer_commit_message(message: &str) -> String {
+    format!("{message} (submodule pointer)")
 }
 
 pub fn short_oid(value: Option<&str>) -> String {
@@ -224,11 +301,14 @@ fn render_git_streams(stderr: &[u8], stdout: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        commit_retry_backoff, doc_stem, is_index_lock_contention_text,
-        line_looks_like_explicit_post_commit_prompt_directive, output_has_index_lock_contention,
-        parent_pointer_recovery_hint, parent_submodule_pointer_message, parse_porcelain_path,
-        parse_recovery_tags, parse_submodule_paths, relative_to_root, render_git_streams,
-        short_oid, tracked_modified_paths_from_porcelain,
+        PostCommitLocalDriftKind, agent_doc_branch_name_for_file,
+        agent_doc_commit_message_for_file, classify_post_commit_local_drift_from_checks,
+        classify_prompt_bearing_post_commit_drift, commit_retry_backoff, doc_stem, doc_stem_or,
+        is_index_lock_contention_text, line_looks_like_explicit_post_commit_prompt_directive,
+        output_has_index_lock_contention, parent_pointer_recovery_hint,
+        parent_submodule_pointer_commit_message, parent_submodule_pointer_message,
+        parse_porcelain_path, parse_recovery_tags, parse_submodule_paths, relative_to_root,
+        render_git_streams, short_oid, tracked_modified_paths_from_porcelain,
     };
     use std::collections::HashSet;
     use std::path::{Path, PathBuf};
@@ -422,9 +502,88 @@ mod tests {
     }
 
     #[test]
+    fn prompt_bearing_post_commit_drift_classifies_prompt_only_changes() {
+        assert_eq!(
+            classify_prompt_bearing_post_commit_drift(false, false, false, false),
+            None
+        );
+        assert_eq!(
+            classify_prompt_bearing_post_commit_drift(true, true, false, false),
+            Some(PostCommitLocalDriftKind::UserFollowUp)
+        );
+        assert_eq!(
+            classify_prompt_bearing_post_commit_drift(true, true, true, false),
+            Some(PostCommitLocalDriftKind::WorkingTreeEdits)
+        );
+        assert_eq!(
+            classify_prompt_bearing_post_commit_drift(true, false, false, false),
+            Some(PostCommitLocalDriftKind::WorkingTreeEdits)
+        );
+    }
+
+    #[test]
+    fn post_commit_local_drift_policy_honors_normalization_and_prompt_classifier() {
+        assert_eq!(
+            classify_post_commit_local_drift_from_checks(true, false, false, false, None),
+            None
+        );
+        assert_eq!(
+            classify_post_commit_local_drift_from_checks(false, true, false, true, None),
+            None
+        );
+        assert_eq!(
+            classify_post_commit_local_drift_from_checks(false, false, true, true, None),
+            None
+        );
+        assert_eq!(
+            classify_post_commit_local_drift_from_checks(false, false, false, true, None),
+            Some(PostCommitLocalDriftKind::UserFollowUp)
+        );
+        assert_eq!(
+            classify_post_commit_local_drift_from_checks(
+                false,
+                false,
+                false,
+                false,
+                Some(PostCommitLocalDriftKind::UserFollowUp)
+            ),
+            Some(PostCommitLocalDriftKind::UserFollowUp)
+        );
+        assert_eq!(
+            classify_post_commit_local_drift_from_checks(false, false, false, false, None),
+            Some(PostCommitLocalDriftKind::WorkingTreeEdits)
+        );
+    }
+
+    #[test]
     fn doc_stem_uses_file_stem_or_doc_fallback() {
         assert_eq!(doc_stem(Path::new("tasks/plan.md")), "plan");
         assert_eq!(doc_stem(Path::new(".")), "doc");
+        assert_eq!(doc_stem_or(Path::new("."), "unknown"), "unknown");
+    }
+
+    #[test]
+    fn commit_and_branch_policy_use_expected_stem_fallbacks() {
+        assert_eq!(
+            agent_doc_commit_message_for_file(Path::new("tasks/session.md"), "2026-07-01"),
+            "agent-doc(session): 2026-07-01"
+        );
+        assert_eq!(
+            agent_doc_commit_message_for_file(Path::new("."), "2026-07-01"),
+            "agent-doc(unknown): 2026-07-01"
+        );
+        assert_eq!(
+            agent_doc_branch_name_for_file(Path::new("tasks/session.md")),
+            "agent-doc/session"
+        );
+        assert_eq!(
+            agent_doc_branch_name_for_file(Path::new(".")),
+            "agent-doc/session"
+        );
+        assert_eq!(
+            parent_submodule_pointer_commit_message("agent-doc(session): 2026-07-01"),
+            "agent-doc(session): 2026-07-01 (submodule pointer)"
+        );
     }
 
     #[test]

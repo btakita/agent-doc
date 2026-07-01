@@ -60,6 +60,75 @@ pub fn pending_done_guard_result(
     }
 }
 
+pub fn pending_capture_missing_targets_guard_result(missing_targets: &[String]) -> GuardResult {
+    GuardResult::Error(format!(
+        "[session-check] error: committed response came from a prompt that required backlog capture in {}, but those tracked-work surfaces did not change this cycle",
+        missing_targets.join(", ")
+    ))
+}
+
+pub fn pending_capture_inventory_shortfall_guard_result(
+    expected_count: usize,
+    promised_count: usize,
+    targets: &[String],
+) -> GuardResult {
+    GuardResult::Error(format!(
+        "[session-check] error: active #agent-doc-bug contract described at least {} distinct issue(s), but the committed response only enumerated {} explicit backlog item(s) for target(s) {}",
+        expected_count,
+        promised_count,
+        targets.join(", ")
+    ))
+}
+
+pub fn pending_capture_plan_reference_shortfall_guard_result(
+    expected_count: usize,
+    promised_count: usize,
+) -> GuardResult {
+    GuardResult::Error(format!(
+        "[session-check] error: active #agent-doc-bug contract required at least {} explicit plan reference(s), but the committed response only cited {} existing plan path(s)",
+        expected_count, promised_count,
+    ))
+}
+
+pub fn pending_capture_missing_promised_ids_guard_result(
+    missing_ids: &[String],
+    targets: &[String],
+) -> GuardResult {
+    GuardResult::Error(format!(
+        "[session-check] error: committed response promised new tracked item(s) {} for explicit backlog target(s) {}, but those ids are still missing after this cycle",
+        missing_ids.join(", "),
+        targets.join(", ")
+    ))
+}
+
+pub fn pending_capture_required_no_mutations_guard_result() -> GuardResult {
+    GuardResult::Error(
+        "[session-check] error: committed response came from a prompt that required backlog capture, but this cycle recorded no backlog mutations and did not explicitly state that there were no actionable follow-up items"
+            .to_string(),
+    )
+}
+
+pub fn pending_capture_recommendations_guard_result(
+    estimated_count: usize,
+    mode: PendingCaptureGuardMode,
+) -> GuardResult {
+    let warn_line = format!(
+        "[session-check] warn: response contains ~{estimated_count} recommendation-like items but no --pending-add flags were used this cycle"
+    );
+    let hint_line =
+        "[session-check] hint: consider adding pending items for actionable follow-up work"
+            .to_string();
+
+    match mode {
+        PendingCaptureGuardMode::Warn => GuardResult::Warn(vec![warn_line, hint_line]),
+        PendingCaptureGuardMode::Strict => GuardResult::Error(format!(
+            "{}\n[session-check] hint: re-run with --pending-add flags or set pending_capture_guard = \"warn\" to downgrade",
+            warn_line.replacen("[session-check] warn:", "[session-check] error:", 1)
+        )),
+        PendingCaptureGuardMode::Off => GuardResult::None,
+    }
+}
+
 pub fn expect_done_or_gate_guard_result(
     file: &str,
     unresolved: &[String],
@@ -443,6 +512,35 @@ pub fn committed_without_response_body_guard_message(
     )
 }
 
+pub fn prompt_only_exchange_tail_guard_message(prompt: &str, file: &str) -> String {
+    format!(
+        "[session-check] INTERRUPTED: live exchange ends with unresolved prompt-only closeout tail and no assistant response: {prompt}. Finish the turn through `agent-doc finalize {file}` or recover the missing response with `agent-doc write --commit {file}` before reporting closeout success."
+    )
+}
+
+pub fn likely_direct_response_patchback_message(
+    marker: &str,
+    side_effects: &str,
+    recovery_hint: &str,
+) -> String {
+    format!(
+        "[session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: {marker}{side_effects} {recovery_hint}"
+    )
+}
+
+pub fn committed_head_response_missing_message(
+    file: &str,
+    cycle_id: &str,
+    phase: CyclePhase,
+    last_event: &str,
+    heading: &str,
+) -> String {
+    format!(
+        "[session-check] INTERRUPTED: cycle `{cycle_id}` is `{}` ({last_event}), but the current visible document is missing the latest committed HEAD response `{heading}`. Preserve any current operator edits, then rerun `agent-doc write --commit {file}` so realtime closeout can merge the committed response back into the visible document.",
+        phase.as_str(),
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlockedCloseoutMessage<'a> {
     pub file: &'a str,
@@ -601,6 +699,66 @@ mod tests {
                 &live,
                 PendingCaptureGuardMode::Off,
             ),
+            GuardResult::None
+        );
+    }
+
+    #[test]
+    fn pending_capture_result_builders_format_error_cases() {
+        let targets = vec!["tasks/a.md".to_string(), "tasks/b.md".to_string()];
+        let missing_ids = vec!["new1".to_string(), "new2".to_string()];
+
+        assert!(matches!(
+            pending_capture_missing_targets_guard_result(&targets),
+            GuardResult::Error(message)
+                if message.contains("required backlog capture in tasks/a.md, tasks/b.md")
+        ));
+        assert!(matches!(
+            pending_capture_inventory_shortfall_guard_result(3, 1, &targets),
+            GuardResult::Error(message)
+                if message.contains("at least 3 distinct issue(s)")
+                    && message.contains("1 explicit backlog item(s)")
+                    && message.contains("tasks/a.md, tasks/b.md")
+        ));
+        assert!(matches!(
+            pending_capture_plan_reference_shortfall_guard_result(2, 0),
+            GuardResult::Error(message)
+                if message.contains("at least 2 explicit plan reference(s)")
+                    && message.contains("cited 0 existing plan path(s)")
+        ));
+        assert!(matches!(
+            pending_capture_missing_promised_ids_guard_result(&missing_ids, &targets),
+            GuardResult::Error(message)
+                if message.contains("new1, new2") && message.contains("tasks/a.md, tasks/b.md")
+        ));
+        assert!(matches!(
+            pending_capture_required_no_mutations_guard_result(),
+            GuardResult::Error(message)
+                if message.contains("recorded no backlog mutations")
+        ));
+    }
+
+    #[test]
+    fn pending_capture_recommendations_result_formats_modes() {
+        let warn = pending_capture_recommendations_guard_result(4, PendingCaptureGuardMode::Warn);
+        let GuardResult::Warn(lines) = warn else {
+            panic!("expected warning result");
+        };
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].contains("~4 recommendation-like items"));
+        assert!(lines[1].contains("consider adding pending items"));
+
+        let strict =
+            pending_capture_recommendations_guard_result(2, PendingCaptureGuardMode::Strict);
+        assert!(matches!(
+            strict,
+            GuardResult::Error(message)
+                if message.starts_with("[session-check] error: response contains ~2")
+                    && message.contains("set pending_capture_guard = \"warn\"")
+        ));
+
+        assert_eq!(
+            pending_capture_recommendations_guard_result(2, PendingCaptureGuardMode::Off),
             GuardResult::None
         );
     }
@@ -859,5 +1017,31 @@ mod tests {
 
         assert!(message.contains("found visible response patchback ### Re: answer"));
         assert!(message.contains("agent-doc write --commit doc.md"));
+    }
+
+    #[test]
+    fn extracted_session_check_messages_format_context() {
+        let prompt_message = prompt_only_exchange_tail_guard_message("please continue", "doc.md");
+        assert!(prompt_message.contains("unresolved prompt-only closeout tail"));
+        assert!(prompt_message.contains("agent-doc finalize doc.md"));
+
+        let patchback_message = likely_direct_response_patchback_message(
+            "### Re: answer",
+            "; tracked side-effect edits: src/lib.rs",
+            "Recovery [retry]: agent-doc write --commit doc.md.",
+        );
+        assert!(patchback_message.contains("### Re: answer; tracked side-effect edits"));
+        assert!(patchback_message.contains("Recovery [retry]"));
+
+        let missing_message = committed_head_response_missing_message(
+            "doc.md",
+            "cycle-1",
+            CyclePhase::Committed,
+            "commit_success",
+            "### Re: latest",
+        );
+        assert!(missing_message.contains("cycle `cycle-1` is `committed`"));
+        assert!(missing_message.contains("missing the latest committed HEAD response"));
+        assert!(missing_message.contains("agent-doc write --commit doc.md"));
     }
 }

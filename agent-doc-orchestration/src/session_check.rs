@@ -80,58 +80,6 @@ pub use detect::*;
 mod partial_staging;
 pub(crate) use partial_staging::*;
 
-/// True when the flagged response `marker` heading (a `### Re:` line, or
-/// `## Assistant`) is present in the document's committed HEAD content — proof the
-/// binary's `finalize` write/commit path ran for it, so the snapshot-vs-working-tree
-/// "direct response patchback" heuristic is a false positive. Transient `(HEAD)` /
-/// boundary markers are normalized before the line-containment check so a preserved
-/// `(HEAD)` annotation does not defeat the match. (#patchback-head-tolerant)
-fn response_marker_committed_in_head(file: &std::path::Path, marker: &str) -> anyhow::Result<bool> {
-    let Some(head) = crate::git::show_head(file)? else {
-        return Ok(false);
-    };
-    let needle =
-        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(marker);
-    let needle = needle.trim();
-    if needle.is_empty() {
-        return Ok(false);
-    }
-    let head_norm =
-        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(&head);
-    Ok(head_norm.lines().any(|line| line.trim() == needle))
-}
-
-fn latest_committed_head_response_missing_from_working(file: &Path) -> Result<Option<String>> {
-    let Some(head) = crate::git::show_head(file)? else {
-        return Ok(None);
-    };
-    let working = match std::fs::read_to_string(file) {
-        Ok(content) => content,
-        Err(_) => return Ok(None),
-    };
-    let head_norm =
-        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(&head);
-    let working_norm =
-        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(&working);
-    let Some(heading) = head_norm
-        .lines()
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            trimmed.starts_with("### Re:").then(|| trimmed.to_string())
-        })
-        .next_back()
-    else {
-        return Ok(None);
-    };
-    if working_norm.lines().any(|line| line.trim() == heading) {
-        return Ok(None);
-    }
-    if operator_live_buffer_contains_heading(file, &heading) {
-        return Ok(None);
-    }
-    Ok(Some(heading))
-}
-
 fn operator_live_buffer_contains_heading(file: &Path, heading: &str) -> bool {
     let file_key = file.to_string_lossy();
     let heading = heading.trim();
@@ -882,7 +830,12 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
             // run for it — it is not a bypassed patchback. Do not interrupt; fall
             // through to the remaining guards (post-commit drift etc.) which catch a
             // genuine working-tree problem without the false closeout-violation.
-            if response_marker_committed_in_head(file, &marker)? {
+            let marker_committed_in_head = crate::git::show_head(file)?.is_some_and(|head| {
+                agent_doc_document::write_normalization::response_marker_present_in_content(
+                    &head, &marker,
+                )
+            });
+            if marker_committed_in_head {
                 crate::ops_log::log_op(
                     file,
                     &format!(
@@ -892,23 +845,38 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                     ),
                 );
             } else {
-                return Ok(SessionCheckStatus::Interrupted(format!(
-                    "[session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: {}{} {}",
-                    marker,
-                    tracked_side_effect_note(file)?,
-                    closeout_recovery_hint(file)
-                )));
+                return Ok(SessionCheckStatus::Interrupted(
+                    agent_doc_workflow::session_check::likely_direct_response_patchback_message(
+                        &marker,
+                        &tracked_side_effect_note(file)?,
+                        &closeout_recovery_hint(file),
+                    ),
+                ));
             }
         }
-        if let Some(heading) = latest_committed_head_response_missing_from_working(file)? {
-            return Ok(SessionCheckStatus::Interrupted(format!(
-                "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), but the current visible document is missing the latest committed HEAD response `{}`. Preserve any current operator edits, then rerun `agent-doc write --commit {}` so realtime closeout can merge the committed response back into the visible document.",
-                state.cycle_id,
-                state.phase.as_str(),
-                state.last_event,
-                heading,
-                file.display()
-            )));
+        let latest_head_response_missing = match crate::git::show_head(file)? {
+            Some(head) => match std::fs::read_to_string(file) {
+                Ok(working) => {
+                    let heading =
+                        agent_doc_document::write_normalization::latest_response_heading_missing_from_current(
+                            &head, &working,
+                        );
+                    heading.filter(|heading| !operator_live_buffer_contains_heading(file, heading))
+                }
+                Err(_) => None,
+            },
+            None => None,
+        };
+        if let Some(heading) = latest_head_response_missing {
+            return Ok(SessionCheckStatus::Interrupted(
+                agent_doc_workflow::session_check::committed_head_response_missing_message(
+                    &file.display().to_string(),
+                    &state.cycle_id,
+                    state.phase,
+                    &state.last_event,
+                    &heading,
+                ),
+            ));
         }
         if let Some(marker) = detect_active_session_post_commit_drift(file)? {
             return Ok(SessionCheckStatus::Interrupted(format!(
@@ -1583,36 +1551,6 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
     }
-    #[test]
-    fn response_marker_committed_in_head_is_head_tolerant() {
-        // #patchback-head-tolerant: a `### Re:` heading committed to HEAD is proof the
-        // finalize write path ran, so the patchback heuristic must not interrupt even
-        // when the snapshot is stale / the working tree was post-commit-drifted.
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        partial_staging_git(root, &["init"]);
-        partial_staging_git(root, &["config", "user.email", "t@t.com"]);
-        partial_staging_git(root, &["config", "user.name", "T"]);
-        let doc = root.join("session.md");
-        let committed = "<!-- agent:exchange -->\n❯ q\n\n### Re: shipped the fix — opus-4-8\n\nDone.\n<!-- /agent:exchange -->\n";
-        fs::write(&doc, committed).unwrap();
-        partial_staging_git(root, &["add", "session.md"]);
-        partial_staging_git(root, &["commit", "-m", "commit response"]);
-
-        // The committed heading IS in HEAD → tolerated (true), even with a preserved
-        // transient `(HEAD)` marker on the queried heading.
-        assert!(
-            response_marker_committed_in_head(&doc, "### Re: shipped the fix — opus-4-8 (HEAD)")
-                .unwrap(),
-            "a response heading committed to HEAD must be recognized (markers normalized)"
-        );
-        // A heading NOT in HEAD → not tolerated (false) — a genuine uncommitted
-        // patchback still trips the guard.
-        assert!(
-            !response_marker_committed_in_head(&doc, "### Re: never committed — opus-4-8").unwrap()
-        );
-    }
-
     #[test]
     fn session_check_interrupts_when_visible_file_lost_latest_committed_response() {
         // A stale editor buffer can overwrite the working file after closeout so

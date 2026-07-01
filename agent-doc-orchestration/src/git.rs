@@ -116,8 +116,11 @@ use agent_doc_document_realtime::write_policy::{
 use agent_doc_element::element::is_backlog_component;
 use agent_doc_element_exchange::post_commit_ipc_reposition_only_exchange_safe;
 use agent_doc_git::{
-    commit_retry_backoff, line_looks_like_explicit_post_commit_prompt_directive,
-    output_has_index_lock_contention, parse_submodule_paths, relative_to_root,
+    PostCommitLocalDriftKind, SubmodulePointerDrift, agent_doc_branch_name_for_file,
+    agent_doc_commit_message_for_file, classify_post_commit_local_drift_from_checks,
+    classify_prompt_bearing_post_commit_drift, commit_retry_backoff,
+    line_looks_like_explicit_post_commit_prompt_directive, output_has_index_lock_contention,
+    parent_submodule_pointer_commit_message, parse_submodule_paths, relative_to_root,
     render_git_process_output, tracked_modified_paths_from_porcelain,
 };
 use agent_doc_git_io::dirs::{
@@ -233,7 +236,7 @@ fn update_parent_submodule_pointer(super_root: &Path, submodule_root: &Path, msg
         }
     }
 
-    let parent_msg = format!("{} (submodule pointer)", msg);
+    let parent_msg = parent_submodule_pointer_commit_message(msg);
     let commit = Command::new("git")
         .current_dir(super_root)
         .args(["commit", "-m", &parent_msg, "--no-verify", "--", &rel_str])
@@ -687,11 +690,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     strike_answered_free_text_heads_at_commit_seam(file);
 
     let timestamp = chrono_timestamp();
-    let doc_name = file
-        .file_stem()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown");
-    let msg = format!("agent-doc({}): {}", doc_name, timestamp);
+    let msg = agent_doc_commit_message_for_file(file, &timestamp);
 
     // Selective commit: stage only the snapshot content (agent response),
     // leaving user edits in the working tree as uncommitted.
@@ -2046,28 +2045,6 @@ fn stage_and_commit_once(
     Ok(output)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PostCommitLocalDriftKind {
-    UserFollowUp,
-    WorkingTreeEdits,
-}
-
-impl PostCommitLocalDriftKind {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::UserFollowUp => "user_follow_up",
-            Self::WorkingTreeEdits => "working_tree_edits",
-        }
-    }
-
-    fn describe(self) -> &'static str {
-        match self {
-            Self::UserFollowUp => "later local user follow-up edits",
-            Self::WorkingTreeEdits => "later local working-tree edits",
-        }
-    }
-}
-
 fn prompt_classifier_post_commit_drift_kind(
     head_doc: &str,
     current_doc: &str,
@@ -2103,43 +2080,49 @@ fn prompt_classifier_post_commit_drift_kind(
     let has_recovery_artifact = changes
         .iter()
         .any(|change| change.kind == agent_doc_diff::PromptBearingChangeKind::RecoveryArtifact);
-    if has_explicit_prompt_target && !has_content_edit && !has_recovery_artifact {
-        Some(PostCommitLocalDriftKind::UserFollowUp)
-    } else {
-        Some(PostCommitLocalDriftKind::WorkingTreeEdits)
-    }
+    classify_prompt_bearing_post_commit_drift(
+        !changes.is_empty(),
+        has_explicit_prompt_target,
+        has_content_edit,
+        has_recovery_artifact,
+    )
 }
 
 fn classify_post_commit_local_drift(
     head_doc: &str,
     current_doc: &str,
 ) -> Option<PostCommitLocalDriftKind> {
-    if head_doc == current_doc {
-        return None;
-    }
-    if normalize_transient_agent_doc_markers(current_doc)
-        == normalize_transient_agent_doc_markers(head_doc)
-    {
-        return None;
-    }
-    if normalize_post_commit_re_heading_drift(current_doc)
-        == normalize_post_commit_re_heading_drift(head_doc)
-    {
-        return None;
-    }
-    if is_safe_user_only_follow_up_after_committed_head(head_doc, current_doc) {
-        return Some(PostCommitLocalDriftKind::UserFollowUp);
-    }
-    if let Ok(Some(cleaned_head)) =
-        agent_doc_template::strip_conversation_tail_outside_exchange(head_doc)
-        && is_safe_user_only_follow_up_after_committed_head(&cleaned_head, current_doc)
-    {
-        return Some(PostCommitLocalDriftKind::UserFollowUp);
-    }
-    if let Some(kind) = prompt_classifier_post_commit_drift_kind(head_doc, current_doc) {
-        return Some(kind);
-    }
-    Some(PostCommitLocalDriftKind::WorkingTreeEdits)
+    let contents_equal = head_doc == current_doc;
+    let transient_only = !contents_equal
+        && normalize_transient_agent_doc_markers(current_doc)
+            == normalize_transient_agent_doc_markers(head_doc);
+    let re_heading_only = !contents_equal
+        && !transient_only
+        && normalize_post_commit_re_heading_drift(current_doc)
+            == normalize_post_commit_re_heading_drift(head_doc);
+    let safe_user_follow_up = !contents_equal
+        && !transient_only
+        && !re_heading_only
+        && (is_safe_user_only_follow_up_after_committed_head(head_doc, current_doc)
+            || (if let Ok(Some(cleaned_head)) =
+                agent_doc_template::strip_conversation_tail_outside_exchange(head_doc)
+            {
+                is_safe_user_only_follow_up_after_committed_head(&cleaned_head, current_doc)
+            } else {
+                false
+            }));
+    let prompt_classifier_kind =
+        (!contents_equal && !transient_only && !re_heading_only && !safe_user_follow_up)
+            .then(|| prompt_classifier_post_commit_drift_kind(head_doc, current_doc))
+            .flatten();
+
+    classify_post_commit_local_drift_from_checks(
+        contents_equal,
+        transient_only,
+        re_heading_only,
+        safe_user_follow_up,
+        prompt_classifier_kind,
+    )
 }
 
 fn repair_stale_agent_response_collapse_worktree(
@@ -2508,11 +2491,7 @@ fn cycle_is_terminal(file: &Path) -> bool {
 
 /// Create and checkout a branch for the session.
 pub fn create_branch(file: &Path) -> Result<()> {
-    let stem = file
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| "session".to_string());
-    let branch_name = format!("agent-doc/{}", stem);
+    let branch_name = agent_doc_branch_name_for_file(file);
 
     let status = Command::new("git")
         .args(["checkout", "-b", &branch_name])
@@ -2637,13 +2616,6 @@ pub enum SnapshotCommitStatus {
     NoSnapshot,
     NoHead,
     NotInGitRepo,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SubmodulePointerDrift {
-    pub relative_path: String,
-    pub parent_head: Option<String>,
-    pub submodule_head: String,
 }
 
 /// Verify that the current snapshot for `file` is committed in its owning git root.

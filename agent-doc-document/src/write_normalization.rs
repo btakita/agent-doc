@@ -175,23 +175,42 @@ pub fn cleanup_resolved_backlog_prompts_after_response(
 }
 
 pub fn latest_response_block_missing_from_current(head: &str, current: &str) -> Option<String> {
-    let head_norm = normalize_transient_agent_doc_markers(head);
-    let current_norm = normalize_transient_agent_doc_markers(current);
-    let heading = head_norm
-        .lines()
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            trimmed.starts_with("### Re:").then_some(trimmed)
-        })
-        .next_back()?;
-    if current_norm.lines().any(|line| line.trim() == heading) {
-        return None;
-    }
+    let heading = latest_response_heading_missing_from_current(head, current)?;
     let head_components = element::parse(head).ok()?;
     let head_exchange = head_components
         .iter()
         .find(|component| component.name == "exchange")?;
-    latest_response_block_from_exchange_body(head_exchange.content(head))
+    latest_response_block_from_exchange_body(head_exchange.content(head)).filter(|block| {
+        block
+            .lines()
+            .next()
+            .is_some_and(|line| line.trim() == heading)
+    })
+}
+
+pub fn response_marker_present_in_content(content: &str, marker: &str) -> bool {
+    let needle = normalize_transient_agent_doc_markers(marker);
+    let needle = needle.trim();
+    if needle.is_empty() {
+        return false;
+    }
+    let content_norm = normalize_transient_agent_doc_markers(content);
+    content_norm.lines().any(|line| line.trim() == needle)
+}
+
+pub fn latest_response_heading_missing_from_current(head: &str, current: &str) -> Option<String> {
+    let head_norm = normalize_transient_agent_doc_markers(head);
+    let heading = head_norm
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            trimmed.starts_with("### Re:").then(|| trimmed.to_string())
+        })
+        .next_back()?;
+    if response_marker_present_in_content(current, &heading) {
+        return None;
+    }
+    Some(heading)
 }
 
 pub fn latest_response_block_from_exchange_body(body: &str) -> Option<String> {
@@ -466,6 +485,54 @@ mod tests {
         assert!(recovered.contains("### Re: latest - gpt-5"));
         assert!(recovered.contains("Recovered."));
         assert!(recovered.contains("<!-- agent:boundary:def -->"));
+    }
+
+    #[test]
+    fn response_marker_present_in_content_normalizes_transient_markers() {
+        let content = concat!(
+            "<!-- agent:exchange -->\n",
+            "<!-- agent:boundary:abc -->\n",
+            "### Re: shipped the fix - gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert!(response_marker_present_in_content(
+            content,
+            "### Re: shipped the fix - gpt-5 (HEAD)"
+        ));
+        assert!(!response_marker_present_in_content(
+            content,
+            "### Re: never committed - gpt-5"
+        ));
+        assert!(!response_marker_present_in_content(content, "   "));
+    }
+
+    #[test]
+    fn latest_response_heading_missing_from_current_reports_latest_head_heading() {
+        let head = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: old - gpt-5\n\n",
+            "Done.\n\n",
+            "### Re: latest - gpt-5 (HEAD)\n\n",
+            "Recovered.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: old - gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert_eq!(
+            latest_response_heading_missing_from_current(head, current).as_deref(),
+            Some("### Re: latest - gpt-5")
+        );
+        assert_eq!(
+            latest_response_heading_missing_from_current(head, head),
+            None
+        );
     }
 
     #[test]

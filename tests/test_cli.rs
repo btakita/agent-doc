@@ -1404,7 +1404,13 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // partial-staging warning/result builders and their focused unit tests
         // moved from orchestration into workflow. These are message-formatting
         // ownership tokens, not new hot-path guard branches.
-        ("agent-doc-workflow/src/session_check.rs", "guard_") => 22,
+        // 22 -> 38 (#pending-capture-workflow-extract,
+        // #prompt-tail-workflow-extract): pending-capture result builders and
+        // prompt-tail/direct-patchback/committed-HEAD message builders moved
+        // from orchestration into this focused workflow owner with direct unit
+        // coverage. These tokens name owned guard message policy, not new flow
+        // branches.
+        ("agent-doc-workflow/src/session_check.rs", "guard_") => 38,
         ("agent-doc-workflow/src/session_check.rs", "reason=") => 1,
         // 4 -> 7 (#session-check-guard-policy-extract): orchestration keeps the
         // IO/proof collection and calls the focused workflow guard-result
@@ -1439,7 +1445,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // +4 audited tokens.
         // 12 -> 13 (#session-check-guard-policy-extract): the adapter now calls
         // the focused workflow pending-done guard-result builder directly.
-        ("agent-doc-orchestration/src/session_check/pending_guards.rs", "guard_") => 13,
+        // 13 -> 19 (#pending-capture-workflow-extract): pending-capture guard
+        // result formatting moved to `agent-doc-workflow`; this adapter keeps
+        // only direct calls to the focused builders and no longer owns the
+        // message strings.
+        ("agent-doc-orchestration/src/session_check/pending_guards.rs", "guard_") => 19,
         ("agent-doc-orchestration/src/session_check/queue_head_guards.rs", "guard_") => 2,
         // 2 -> 4 (#partial-staging-workflow-extract): this adapter now calls
         // the focused workflow partial closeout and partial-staging result
@@ -1452,7 +1462,10 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // committed-without-response diagnostics. These are adapter references
         // to the owning policy crate, not new local guard branches.
         ("agent-doc-orchestration/src/session_check/response_guards.rs", "guard_") => 14,
-        ("agent-doc-orchestration/src/session_check/detect.rs", "guard_") => 1,
+        // 1 -> 2 (#prompt-tail-workflow-extract): the prompt-only exchange tail
+        // message moved to `agent-doc-workflow`; this adapter now names the
+        // focused guard message builder directly.
+        ("agent-doc-orchestration/src/session_check/detect.rs", "guard_") => 2,
         // +1 for the audited `guard_visible_write_idle(..., "queue_done_id_mark")`
         // call: opportunistic done-id queue marking is a document write path and
         // must use the same visible editor drift guard as active-head queue consume.

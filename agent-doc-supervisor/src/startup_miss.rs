@@ -306,6 +306,43 @@ pub fn latest_registry_rebind_successor(status: &SessionLogStatus) -> Option<&st
         .filter(|pane| !pane.is_empty())
 }
 
+pub fn unresolved_startup_miss_blocks_autostart(
+    registered_pane: Option<&str>,
+    pane_alive: bool,
+    miss: Option<&StartupMiss>,
+) -> bool {
+    pane_alive && registered_pane.is_some_and(|pane| miss.is_some_and(|miss| miss.pane_id == pane))
+}
+
+pub fn passive_autostart_skip_reason(
+    unresolved_startup_miss: bool,
+    status: Option<&SessionLogStatus>,
+    live_registry_rebind_successor: Option<&str>,
+) -> Option<String> {
+    if unresolved_startup_miss {
+        return Some("startup-miss is still unresolved for this document".to_string());
+    }
+
+    let status = status?;
+    if !status.latest_session_closed() {
+        return Some(format!(
+            "latest session log is still open or ambiguous (last_event={})",
+            latest_log_last_event(status)
+        ));
+    }
+
+    let last_event = latest_log_last_event(status);
+    if last_event.starts_with("session_end origin=registry_rebind ")
+        && let Some(successor) = live_registry_rebind_successor
+    {
+        return Some(format!(
+            "latest session ended via registry_rebind and successor pane {successor} is still alive (last_event={last_event})"
+        ));
+    }
+
+    None
+}
+
 pub fn recent_session_loss_window_at(
     content: &str,
     now_epoch_secs: u64,
@@ -366,6 +403,99 @@ mod tests {
             Some("registered_pane_dead".to_string())
         );
         assert_eq!(event_reason("session_end origin=manual"), None);
+    }
+
+    #[test]
+    fn unresolved_startup_miss_blocks_only_matching_alive_pane() {
+        let miss = StartupMiss {
+            file: "tasks/owned.md".to_string(),
+            pane_id: "%42".to_string(),
+            session_id: "associated-supervisor".to_string(),
+            harness: "codex".to_string(),
+            timestamp: 5,
+            origin: StartupMissOrigin::RoutedTrigger,
+            cycle_baseline_id: None,
+        };
+
+        assert!(unresolved_startup_miss_blocks_autostart(
+            Some("%42"),
+            true,
+            Some(&miss)
+        ));
+        assert!(!unresolved_startup_miss_blocks_autostart(
+            Some("%42"),
+            false,
+            Some(&miss)
+        ));
+        assert!(!unresolved_startup_miss_blocks_autostart(
+            Some("%43"),
+            true,
+            Some(&miss)
+        ));
+        assert!(!unresolved_startup_miss_blocks_autostart(
+            Some("%42"),
+            true,
+            None
+        ));
+    }
+
+    #[test]
+    fn passive_autostart_skip_reason_reports_unresolved_miss() {
+        assert_eq!(
+            passive_autostart_skip_reason(true, None, None),
+            Some("startup-miss is still unresolved for this document".to_string())
+        );
+    }
+
+    #[test]
+    fn passive_autostart_skip_reason_blocks_open_latest_session() {
+        let status = session_log_status_from_content(
+            "[1] session_start file=test.md pane=%52 session=s generation=1\n\
+             [2] codex_start mode=fresh restart_count=0\n",
+        )
+        .expect("status");
+
+        assert_eq!(
+            passive_autostart_skip_reason(false, Some(&status), None),
+            Some(
+                "latest session log is still open or ambiguous (last_event=codex_start mode=fresh restart_count=0)"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn passive_autostart_skip_reason_blocks_live_registry_rebind_successor() {
+        let status = session_log_status_from_content(
+            "[1] session_start file=test.md pane=%52 session=s generation=1\n\
+             [2] codex_start mode=fresh restart_count=0\n\
+             [3] session_end origin=registry_rebind next_pane=%77\n",
+        )
+        .expect("status");
+
+        assert_eq!(
+            passive_autostart_skip_reason(false, Some(&status), Some("%77")),
+            Some(
+                "latest session ended via registry_rebind and successor pane %77 is still alive (last_event=session_end origin=registry_rebind next_pane=%77)"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn passive_autostart_skip_reason_allows_closed_without_live_successor() {
+        let status = session_log_status_from_content(
+            "[1] session_start file=test.md pane=%52 session=s generation=1\n\
+             [2] codex_start mode=fresh restart_count=0\n\
+             [3] codex_exit code=0 restart_count=0\n",
+        )
+        .expect("status");
+
+        assert_eq!(
+            passive_autostart_skip_reason(false, Some(&status), None),
+            None
+        );
+        assert_eq!(passive_autostart_skip_reason(false, None, None), None);
     }
 
     #[test]

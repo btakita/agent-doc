@@ -109,12 +109,13 @@ pub(crate) fn check_prompt_only_exchange_tail_guard(
     let Some(prompt) = agent_doc_turn::exchange_tail::prompt_only_exchange_tail(&content) else {
         return Ok(GuardResult::None);
     };
-    Ok(GuardResult::Error(format!(
-        "[session-check] INTERRUPTED: live exchange ends with unresolved prompt-only closeout tail and no assistant response: {}. Finish the turn through `agent-doc finalize {}` or recover the missing response with `agent-doc write --commit {}` before reporting closeout success.",
-        prompt,
-        file.display(),
-        file.display()
-    )))
+    let file_display = file.display().to_string();
+    Ok(GuardResult::Error(
+        agent_doc_workflow::session_check::prompt_only_exchange_tail_guard_message(
+            &prompt,
+            &file_display,
+        ),
+    ))
 }
 
 pub(crate) fn tracked_side_effect_paths(file: &Path) -> Result<Vec<String>> {

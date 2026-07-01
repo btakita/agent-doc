@@ -169,3 +169,6 @@
 [submodule "src/agent-doc-signal-space"]
 	path = src/agent-doc-signal-space
 	url = git@github.com:signal-space/agent-doc-signal-space.git
+[submodule "src/lazily-dart"]
+	path = src/lazily-dart
+	url = git@github.com:lazily-hub/lazily-dart.git

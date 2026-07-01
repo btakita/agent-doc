@@ -531,6 +531,30 @@ pub fn free_text_head_answered_by_response(response_body: &str, head_text: &str)
     response_blockquote_text(response_body).contains(&head_norm)
 }
 
+/// True when `head_text`'s normalized prose prefix matches a free-text queue head
+/// present in the stable pre-turn `baseline` document.
+///
+/// This is the conservative same-cycle strike gate: a head that first appeared in
+/// the live buffer during the current turn is treated as not present, so callers
+/// can defer striking it until a later cycle. The match reuses the free-text
+/// answer normalization and therefore ignores pin/list cosmetics. A head with
+/// fewer than four significant prose words is too ambiguous and returns false.
+pub fn free_text_head_present_in_baseline(baseline: &str, head_text: &str) -> bool {
+    let head_clean = strip_priority_markers(head_text);
+    let head_norm = normalize_for_answer_match(&free_text_head_match_prose(&head_clean));
+    if head_norm.split(' ').filter(|w| !w.is_empty()).count() < 4 {
+        return false;
+    }
+    let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes(baseline, "queue") else {
+        return false;
+    };
+    nodes.iter().any(|node| {
+        let base_clean = strip_priority_markers(node.item.text.trim());
+        let base_norm = normalize_for_answer_match(&free_text_head_match_prose(&base_clean));
+        !base_norm.is_empty() && base_norm == head_norm
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -553,6 +577,23 @@ mod tests {
             ),
             head
         )
+    }
+
+    #[test]
+    fn free_text_head_present_in_baseline_ignores_pin_and_dash_cosmetics() {
+        let baseline = concat!(
+            "<!-- agent:queue -->\n",
+            "- My free-text queue items are not immediately struck as if they are addressed.\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert!(free_text_head_present_in_baseline(
+            baseline,
+            ":pushpin: My free-text queue items are not immediately struck as if they are addressed."
+        ));
+        assert!(!free_text_head_present_in_baseline(
+            baseline,
+            "An unrelated head about a completely separate matter entirely"
+        ));
     }
 
     #[test]

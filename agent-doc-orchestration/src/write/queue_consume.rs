@@ -16,9 +16,9 @@ use agent_doc_queue::{
     },
     queue_response::{
         embed_consumed_prompt_in_response, first_nonempty_line,
-        free_text_head_answered_by_response, free_text_head_match_prose,
+        free_text_head_answered_by_response, free_text_head_present_in_baseline,
         head_carries_in_progress_marker, head_id_names_tracked_directive_item, normalize_done_id,
-        normalize_for_answer_match, normalize_queue_prompt_text, queue_head_is_bare_do_directive,
+        normalize_queue_prompt_text, queue_head_is_bare_do_directive,
         queue_head_is_free_text_prompt, queue_prompt_done_id, queue_prompt_text_is_free_text,
         queue_prompt_text_matches, response_explicitly_targets_queue_head, response_heading_topic,
     },
@@ -738,32 +738,6 @@ pub(crate) fn response_targets_synthetic_queue_head_id(
         .lines()
         .filter_map(response_heading_topic)
         .any(|topic| topic_resolves_to_exact_id(topic, &head_id)))
-}
-
-/// True when `head_text`'s normalized prose prefix matches a free-text queue head
-/// present in the stable pre-turn `baseline` document (`#qstrikeexplain` Phase 2).
-///
-/// Gates `#ftstrike` so a head that first appeared in the live buffer THIS turn —
-/// an in-flight operator edit the operator is still authoring — is never
-/// same-cycle struck. The match reuses the same prose-prefix normalization the
-/// answer-match uses, so a baseline head and the current head compare on equal
-/// footing regardless of cosmetic pin/`- ` differences. A head with fewer than
-/// four significant prose words can never be confidently identified in the
-/// baseline (matching the answer-match floor), so it is treated as not-present.
-fn free_text_head_present_in_baseline(baseline: &str, head_text: &str) -> bool {
-    let head_clean = strip_priority_markers(head_text);
-    let head_norm = normalize_for_answer_match(&free_text_head_match_prose(&head_clean));
-    if head_norm.split(' ').filter(|w| !w.is_empty()).count() < 4 {
-        return false;
-    }
-    let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes(baseline, "queue") else {
-        return false;
-    };
-    nodes.iter().any(|node| {
-        let base_clean = strip_priority_markers(node.item.text.trim());
-        let base_norm = normalize_for_answer_match(&free_text_head_match_prose(&base_clean));
-        !base_norm.is_empty() && base_norm == head_norm
-    })
 }
 
 /// Node keys of every non-struck free-text queue head that this cycle answered,
@@ -3420,24 +3394,6 @@ mod core_tests {
             keys.is_empty(),
             "an id-backed 🚧 marker head must not be struck by the free-text pass: {keys:?}"
         );
-    }
-
-    #[test]
-    fn free_text_head_present_in_baseline_ignores_pin_and_dash_cosmetics() {
-        let baseline = concat!(
-            "<!-- agent:queue -->\n",
-            "- My free-text queue items are not immediately struck as if they are addressed.\n",
-            "<!-- /agent:queue -->\n",
-        );
-        assert!(free_text_head_present_in_baseline(
-            baseline,
-            ":pushpin: My free-text queue items are not immediately struck as if they are addressed."
-        ));
-        // A different head is not present.
-        assert!(!free_text_head_present_in_baseline(
-            baseline,
-            "An unrelated head about a completely separate matter entirely"
-        ));
     }
 
     #[test]

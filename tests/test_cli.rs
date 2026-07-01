@@ -3168,6 +3168,7 @@ fn test_agent_doc_queue_owns_free_text_response_proof_policy() {
         "pub fn head_carries_in_progress_marker",
         "pub fn free_text_head_match_prose",
         "pub fn free_text_head_answered_by_response",
+        "pub fn free_text_head_present_in_baseline",
     ] {
         assert!(
             queue_response.contains(required),
@@ -3188,6 +3189,7 @@ fn test_agent_doc_queue_owns_free_text_response_proof_policy() {
             "fn head_carries_in_progress_marker",
             "fn free_text_head_match_prose",
             "fn free_text_head_answered_by_response",
+            "fn free_text_head_present_in_baseline",
         ] {
             assert!(
                 !source.contains(forbidden),
@@ -3201,9 +3203,10 @@ fn test_agent_doc_queue_owns_free_text_response_proof_policy() {
             .unwrap();
     assert!(
         queue_consume.contains("free_text_head_answered_by_response")
-            && queue_consume.contains("free_text_head_match_prose")
+            && queue_consume.contains("free_text_head_present_in_baseline")
             && queue_consume.contains("head_carries_in_progress_marker")
-            && queue_consume.contains("normalize_for_answer_match"),
+            && !queue_consume.contains("free_text_head_match_prose")
+            && !queue_consume.contains("normalize_for_answer_match"),
         "queue_consume should import focused free-text queue response proof policy directly"
     );
 }

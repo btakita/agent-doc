@@ -10,7 +10,7 @@
 ## 1. How to read this estimate
 
 - **These are agentic hours — compressed by an AI-native workflow.** They already assume heavy use of coding agents, so you get senior-quality delivery faster and at a lower total than a conventional solo build. They still include human review, integration, targeted tests, and production QA on a **live** marketplace — the parts agents do not compress.
-- **Ranges are real.** The low end is hit when existing patterns are clean and reusable; the high end when data models are inconsistent or production migration risk is high. With my tooling I bias toward the **low end of each range** — that is the competitive lever, not cutting scope.
+- **Ranges are real.** The low end applies when your existing patterns are clean and reusable; the high end when data models are inconsistent or production-migration risk is high. My AI-native workflow biases delivery toward the **low end of each range**, so you're most likely to land there — from efficiency, not from cutting scope.
 - **Rows are incremental within a shared implementation.** Admin grid columns/filters/inline-edit, bulk-action plumbing, audit logging, import/export, role gates, and listing-data mapping are built **once** and reused. Per-row numbers assume those primitives already exist, so they do not sum naively — see the de-duped roll-up.
 - **What agents compress vs. what they don't:**
   - Admin table/UI work: ~25-40% faster.
@@ -270,15 +270,17 @@ Either way, $100/hr sits at the lower end of the market for senior Rust + Vue co
 
 ---
 
-## 6. Assumptions & open questions (confirm before locking a fixed price)
+## 6. Assumptions & open questions
 
-1. How many asset classes must ship in the first release?
-2. Is "separate broker database" a hard **physical** separation, or role/account-segment separation in the same Postgres system? (Physical adds 16-40h.)
-3. Are MailerLite, DocuSign/e-signature, Stripe, BatchData, and the AI provider already integrated in production with accessible credentials?
-4. Hard deletes or soft deletes with audit retention? I default to soft delete for transaction records unless told otherwise.
-5. Are approved OM/teaser templates per asset class already designed, or is template/design work in scope?
-6. What review is expected on AI-generated fields before emails/OMs are sent externally?
-7. ~~Do the PDF "Listing Creation Steps" screenshots define fields/steps beyond the markdown brief?~~ **Resolved** — the PDF confirms a 5-step wizard (Location / Property Overview / Financials / Attachments / Marketing Materials) plus a 5-state lifecycle (Draft→Under Review→Active→Pending→Closed) and dense asset-class fields; folded into §3. Remaining sub-question: **which single asset class ships first** (the screenshots show a hospitality/hotel example — is hotel the pilot, or another class?).
+A few things I'd want to confirm with you before locking a fixed price. None of them block starting Phase 0 — they mostly affect where each estimate lands within its range.
+
+1. How many asset classes need to ship in the first release?
+2. Is the "separate broker database" a hard **physical** separation, or role/account-segment separation within your existing Postgres system? (A physically separate database adds 16-40h.)
+3. Are MailerLite, DocuSign/e-signature, Stripe, BatchData, and your AI provider already integrated in production, with credentials I can access?
+4. Would you prefer hard deletes, or soft deletes with audit retention? For transaction records I'd default to soft delete unless you'd rather not.
+5. Do you already have approved OM/teaser templates per asset class, or is template/design work in scope?
+6. What review do you expect on AI-generated fields before emails/OMs go out to buyers?
+7. Which single asset class should ship first? The Listing Creation Steps screens show a hospitality/hotel example — is hotel the pilot, or another class?
 
 ---
 

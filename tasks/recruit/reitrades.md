@@ -491,8 +491,23 @@ Yes — and it's the honest way to say "100% accurate" without overpromising on 
 This is the same accuracy stack I described for the MLP question — the deterministic layer is just the part of it I'd lead with in the proposal, because it's the strongest trust argument and it's cheaper and more testable than trying to make the AI itself infallible (which fits the bootstrapped budget).
 
 **Recommendation:** yes, put the deterministic layer front and center. Just attach "100%" to the deterministic parts (math, validation, structured data, rendering), and describe the AI parts as *validated + reviewed*, not perfect. That's a claim you can actually stand behind on a call and in a contract.
+Fix the last response of this session, add the suggestion to the proposal, and draft the proposal in PDF.
 
-<!-- agent:boundary:e424afc7 -->
+### Re: Deterministic-core suggestion applied to the proposal + PDF drafted — opus-4-8
+
+Done. The last response ("Deterministic software for 100% accuracy") recommended leading the accuracy story with a deterministic core but stopped at the recommendation — it never touched the proposal. Applied it and drafted the PDF.
+
+**Suggestion added to the proposal** (`tasks/recruit/rei-trades/reitrades-v1.2-estimate-report.md`):
+
+- **New §3b — "Deterministic core vs. AI assist (where '100%' is honest)".** Splits the pipeline into a deterministic layer and a generative layer. A table nails down what deterministic software makes *provably* correct — calculations (cap rate, NOI, price/unit, GRM, LTV), schema/field validation, structured retrieval from BatchData/rent rolls, and Tera OM/template rendering. The AI layer only *proposes*; every proposal runs validators + confidence + the A–D provenance rubric (§3a) + admin review before it ships. Closes with why to lead with it (strongest trust argument, cheaper, testable, fits a bootstrapped budget) and folds in the earlier MLP point — a phase-2 learned model on tabular data would use gradient-boosted trees, not MLPs, and is out of V1.2 scope.
+- **Sharpened the §1 framing bullet** so "100% accurate" reads as a deterministic core with an AI assist from the top of the document, cross-referencing §3b.
+
+**Proposal drafted to PDF:** `tasks/recruit/rei-trades/REItrades V1.2 - Proposal & Estimate.pdf` — 12 pages, US Letter, generated from the estimate markdown (pandoc + WeasyPrint). This is Brian's proposal/estimate to Artur; the pre-existing `REItrades V1.2.pdf` is Artur's requirements doc, left untouched.
+
+Both deliverables are committed (`9776c1e48`).
+
+Note: the task named `agent-doc-bugs2.md`, but the proposal/PDF work only fits this reitrades session — confirmed with you before proceeding. The `agent-doc-bugs2.md` session still has uncommitted working-tree drift from an interrupted IPC cycle; say the word if you want me to recover that one too.
+<!-- agent:boundary:01eb80e8 -->
 <!-- /agent:exchange -->
 
 ## Queue

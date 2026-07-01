@@ -8,6 +8,7 @@ claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 pending_done_guard: warn
 agent_doc_lint_dialect: off
+queue: start
 ---
 
 ## Status
@@ -45,7 +46,6 @@ Thanks,
 Arron Fray
 Director at Velocity Tech | Scaling technology teams by reliably providing support
 ```
-<!-- agent:boundary:8c37810b -->
 ### Re: Contact created + should you apologize for replying today — opus-4.8
 
 **Contact created** at `mail/contacts/arron-fray/` (committed in the `mail` submodule):
@@ -61,11 +61,17 @@ Quick read on the opportunity: agency recruiter (Velocity Tech), not the hiring 
 - Opening with an apology cedes leverage — it signals over-eagerness and frames you as the one who was tardy, when he's the one asking you for something. Reply from mild scarcity, not deference.
 
 Just reply normally and warmly, no apology. If you want a softener, "Thanks for reaching out" does all the work an apology would, without the downside. Want me to draft the reply? I'd lead by asking the client name and flagging your availability/comp expectations before committing a call slot.
+<!-- agent:boundary:1f13cbe5 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue go -->
+- 🚧 In resumes, rename "INDEPENDENT SOFTWARE CONSULTANT — CURRENT CLIENT WORK", to "INDEPENDENT SOFTWARE CONSULTANT — CLIENT WORK"
+- Resume: Under Open Source: Make lazily first. Mention all projects, including lazily-spec and lazily-formal. Include FFI, IPC, Web Sockets, WebRTC, and WASM. Mention primitives including state machines and state planes.
+- resume: Under Open Source: Make signal-space second.
+- resume: Under Open Source: Make agent-doc third.
+- resume: Under Open Source: Make tsift fourth.
 <!-- /agent:queue -->
 
 ## Backlog

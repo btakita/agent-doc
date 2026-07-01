@@ -776,13 +776,26 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/recruit/reitrades.md source=ipc_visible_repair patch_id=67fb1e16-ac79-4b61-88f9-f188ac4c9223 invariant=live_prompt_drift recovery=retry_without_disk_write redeliver_editor=true bad_len=74265 bad_hash=7765b1e25cce8671ac732705fd41c281ad7a1eabc48186f8c5871a6f3076d920 repaired_len=75577 repaired_hash=69022564947aaf29eead5a43b0fa2ca71272c7539b4b45de9f7b682f39980217 doc=reitrades session=62d195b8-b029-42a5-9c6c-836cb1b5b103 turn=cycle-1782926193304
 ```
-<!-- agent:boundary:df37d029 -->
+
+### Re: §5 client-facing — one more pass + a stale-PDF flag — opus-4-8
+
+> **Queue prompt:** 5. Recommended phasing is not client-facing.
+
+I did rewrite §5 client-facing earlier this session (commit `4258311e8`): the "(competitive bid)" was dropped from the heading, the "Competitive note" self-justification paragraph was removed, and everything switched to second person. So the committed §5 already reads to Artur, not to you.
+
+Two things:
+
+1. **I softened one more line just now** (`158b079be`, PDF regenerated). The closing sentence still opened with "$100/hr sits at the lower end of the market for senior Rust + Vue work" — that's bid-positioning, the kind of thing you'd say *about* the proposal, not *in* it. Replaced with a client-control benefit: *"the phased structure means you only fund the next step after you've seen the last one work on your data..."* That was the last sentence in §5 that read like it was aimed at you.
+
+2. **If §5 still looks operator-facing on your end, you're likely viewing a stale PDF.** The JB IPC has been wedged all session, and the PDF viewer often holds the previously-opened file — so if you still see "(competitive bid)" in the §5 heading, that's the pre-rewrite copy. The current committed PDF (`REItrades V1.2 - Proposal & Estimate.pdf`, 12 pages) has the client-facing version. Close and reopen it to confirm.
+
+If there's a specific phrase in the *current* §5 that still reads wrong to you, point me at it and I'll fix that exact line — but as committed, §5 now addresses Artur throughout.
+<!-- agent:boundary:6bf7c675 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue go -->
-- 5. Recommended phasing is not client-facing.
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

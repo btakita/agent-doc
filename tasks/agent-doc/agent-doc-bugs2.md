@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -40,7 +40,19 @@ Compacted content:
 - Archived 2 response topic(s): JB Compact Exchange should not leave uncommitted changes; agent-doc Claude Code has stderr bleeding (img_57.png)
 - Prior summary/context: prior compacted content: Archived 10 response topic(s): preflight exchange precedence; preflight exchange precedence;...
 JB `Compact Exchange` still leaves an uncommitted summary. Simplify and fix. #spec-test-build-install-commit-push
-<!-- agent:boundary:0fe073d1 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=ipc_visible_repair patch_id=7f826d44-426b-418c-9b3a-ee48e69201b4 invariant=ipc_dedupe recovery=retry_without_disk_write redeliver_editor=true bad_len=18253 bad_hash=5af18d4230ed2c9b6ceeb95fffe0fb3766fcbfe7a7cbfb60b9aabffb73942cd3 repaired_len=20144 repaired_hash=c2cc85874f75c1f641fdb6addda3f22dd42fa019da85c877ab2ec719ff917a70 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782888834645
+```
+<!-- agent:boundary:731e5557 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -53,7 +65,7 @@ JB `Compact Exchange` still leaves an uncommitted summary. Simplify and fix. #sp
 - :pushpin: do [#kj5flive]
 - :pushpin: do [#tmuxsynccrashlog]
 - :pushpin: do [#tmuxsynccrashlog]
-- :pushpin: do [#60ev]
+- 🚧 :pushpin: do [#60ev]
 - :pushpin: do [#suprestassoc-live]
 - :pushpin: do [#agentsignals]
 - :pushpin: do [#qftlossdelta]
@@ -62,6 +74,9 @@ JB `Compact Exchange` still leaves an uncommitted summary. Simplify and fix. #sp
 - :pushpin: do [#skillharnessplugin]
 - :pushpin: do [#elementgraphprd]
 - :pushpin: do [#60ev]
+- do [#jbcompactcommit]
+- do [#kjw0]
+- do [#restartstderrbleed]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

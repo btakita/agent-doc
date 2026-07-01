@@ -2141,16 +2141,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     }
                 }
 
-                // `#cleandrainsup`/`#qfocsup`: a `[clean-session]` OR `[focused-cycle]`
-                // head asks for a fresh agent context regardless of the global opt-in.
-                // A `[focused-cycle]` head is drained ONLY by this supervisor
-                // clear-and-continue path (the in-session loop defers it), so forcing
-                // the `/clear` here is what gives it the fresh context the tag demands.
-                // Ordinary Codex heads may also clear here when the project opted into
-                // queue context reset and the Codex transcript/accretion decision
-                // requires fresh context. The reset decision still runs through
-                // prompt/turn/route gates below, so a live queue edit or in-flight
-                // route cannot churn clears.
+                // Background context-reset injection used to live here for
+                // `[clean-session]`, `[focused-cycle]`, and opted-in Codex
+                // accretion/threshold resets. It is disabled: ordinary queue
+                // heads drain in pane, while only explicit operator clears and
+                // explicit queued slash commands may submit a visible clear.
                 let context_reset_reason = if supervisor_background_context_clear_enabled() {
                     let forced_context_reset_reason = active_head
                         .as_deref()

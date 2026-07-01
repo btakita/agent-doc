@@ -1,9 +1,10 @@
 //! Short-lived supervisor context-clear marker.
 //!
-//! The idle-queue watcher can send a `/clear` or equivalent fresh-context
-//! command before draining a queue head. A supervisor recycle/restart must not
-//! forget that the clear is still pending or settling, or the replacement
-//! watcher can stack another clear or drain trigger into the same composer.
+//! Explicit operator clears and queued slash-command clears can leave a
+//! harness-native `/clear` or equivalent command pending across a supervisor
+//! recycle/restart. The replacement watcher must preserve that in-flight state
+//! so it neither stacks another clear nor drains a trigger into the same
+//! composer.
 
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};

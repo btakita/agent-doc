@@ -902,7 +902,7 @@ mod tests {
         // #drain-no-defer: off the queue, the normal clean-restart guidance applies.
         assert!(restart_or_drain_guidance(false).contains("Restart cleanly"));
         // While a queue is draining, never tell the agent to stop/restart/defer — the
-        // supervisor /clears + recycles between items instead.
+        // owner turn should keep draining in pane instead.
         let draining = restart_or_drain_guidance(true);
         assert!(draining.contains("do NOT stop"), "got: {draining}");
         assert!(draining.contains("#drain-no-defer"), "got: {draining}");

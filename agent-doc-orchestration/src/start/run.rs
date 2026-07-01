@@ -65,6 +65,20 @@ struct SupervisorStderrRedirect {
     saved_stderr: Option<OwnedFd>,
 }
 
+fn supervisor_stderr_redirect_needed(
+    harness: &agent_doc_harness::HarnessConfig,
+    route_owned: bool,
+) -> bool {
+    route_owned && harness.is_tui_harness()
+}
+
+fn supervisor_stderr_redirect_path(project_root: &Path) -> std::path::PathBuf {
+    project_root
+        .join(".agent-doc")
+        .join("logs")
+        .join("supervisor-stderr.log")
+}
+
 #[cfg(unix)]
 impl SupervisorStderrRedirect {
     fn inactive() -> Self {
@@ -77,7 +91,7 @@ impl SupervisorStderrRedirect {
         route_owned: bool,
         session_log: &mut Option<std::fs::File>,
     ) -> Self {
-        if !route_owned || !harness.is_tui_harness() {
+        if !supervisor_stderr_redirect_needed(harness, route_owned) {
             return Self::inactive();
         }
         match Self::start(project_root, harness, session_log) {
@@ -105,10 +119,12 @@ impl SupervisorStderrRedirect {
         harness: &agent_doc_harness::HarnessConfig,
         session_log: &mut Option<std::fs::File>,
     ) -> Result<Self> {
-        let logs_dir = project_root.join(".agent-doc").join("logs");
+        let stderr_path = supervisor_stderr_redirect_path(project_root);
+        let logs_dir = stderr_path
+            .parent()
+            .context("supervisor stderr path must include logs directory")?;
         std::fs::create_dir_all(&logs_dir)
             .with_context(|| format!("failed to create {}", logs_dir.display()))?;
-        let stderr_path = logs_dir.join("supervisor-stderr.log");
         let log_file = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -2000,6 +2016,25 @@ mod tests {
         assert!(
             content.contains("[start] harness resolved: binary=codex"),
             "status proof should remain in the session log: {content}"
+        );
+    }
+
+    #[test]
+    fn route_owned_tui_supervisor_stderr_redirect_targets_log() {
+        let tmp = TempDir::new().unwrap();
+        let codex = agent_doc_harness::HarnessConfig::codex();
+        let mut generic = codex.clone();
+        generic.binary = "bash".to_string();
+
+        assert!(supervisor_stderr_redirect_needed(&codex, true));
+        assert!(!supervisor_stderr_redirect_needed(&codex, false));
+        assert!(!supervisor_stderr_redirect_needed(&generic, true));
+        assert_eq!(
+            supervisor_stderr_redirect_path(tmp.path()),
+            tmp.path()
+                .join(".agent-doc")
+                .join("logs")
+                .join("supervisor-stderr.log")
         );
     }
 

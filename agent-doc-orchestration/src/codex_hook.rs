@@ -615,7 +615,7 @@ fn log_codex_background_context_clear_suppressed(
     );
 }
 
-fn fresh_context_handoff_response(
+fn background_context_clear_suppression_response(
     file: &Path,
     prompt: &str,
     source: &str,
@@ -869,7 +869,7 @@ fn tracked_repeated_queue_recovery_response(
     save_state_across_roots(cleanup_roots, loaded_root, &next_state)?;
     let _ = crate::queue_continuation::record_requested_head(file, &next_prompt);
     let context_reset_reason = codex_continuation_clear_reason(file, state.last_context_clear_at);
-    if let Some(response) = fresh_context_handoff_response(
+    if let Some(response) = background_context_clear_suppression_response(
         file,
         &next_prompt,
         "tracked_state_after_recovery",
@@ -915,7 +915,7 @@ fn marker_repeated_queue_recovery_response(
     }
     crate::queue_continuation::record_requested_head(file, &next_prompt)?;
     let context_reset_reason = codex_continuation_clear_reason(file, None);
-    if let Some(response) = fresh_context_handoff_response(
+    if let Some(response) = background_context_clear_suppression_response(
         file,
         &next_prompt,
         "durable_marker_after_recovery",
@@ -986,7 +986,7 @@ fn auto_queue_continuation_response(
     let _ = crate::queue_continuation::record_requested_head(file, &prompt);
     let context_reset_reason = codex_continuation_clear_reason(file, state.last_context_clear_at);
     log_codex_stop_queue_continuation(file, &prompt, "tracked_state");
-    if let Some(response) = fresh_context_handoff_response(
+    if let Some(response) = background_context_clear_suppression_response(
         file,
         &prompt,
         "tracked_state",
@@ -1076,7 +1076,7 @@ fn marker_fallback_continuation_response(
     crate::queue_continuation::record_requested_head(&file, &continuation.head_prompt)?;
     let context_reset_reason = codex_continuation_clear_reason(&file, None);
     log_codex_stop_queue_continuation(&file, &continuation.head_prompt, "durable_marker");
-    if let Some(response) = fresh_context_handoff_response(
+    if let Some(response) = background_context_clear_suppression_response(
         &file,
         &continuation.head_prompt,
         "durable_marker",

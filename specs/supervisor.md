@@ -474,22 +474,15 @@ distinct from the one-shot restart auto-trigger:
   help, and clean-exit blockers still produce `SkipNotIdle`.
   - `SkipNoActiveHead` clears the dedup so a later re-enqueue of the same prompt
     text fires again.
-- Before dispatching a head, the watch starts a context reset for explicit
-  operator clears, explicit `[clean-session]` heads (`#cleandrainsup`), or an
-  ordinary Codex head whose project/document opted into queue context reset and
-  still has an active accretion/threshold reset reason. Ordinary heads with no
-  reset reason, including JetBrains `Run Agent Doc` follow-ups after a supervisor
-  recycle/restart, drain as harness triggers. When a reset is required and no
-  manual clear cooldown is pausing dispatch, the watch injects the harness-native
-  context reset command at the idle gap (`/clear` for Claude/Codex, `/new` for
-  OpenCode), records that clear for Codex/OpenCode hook state, latches the
-  current head as reset, writes a short-lived
-  `.agent-doc/context-clear-in-flight/<doc-hash>.json` marker, and waits for a
-  later idle tick to drain the same head. The in-memory latch prevents a
-  clean-session head from clearing forever without dispatching; the marker
-  survives supervisor recycle/restart so the replacement watcher blocks drains
-  until the clear settles, or presses the shared submit key once when the clear
-  command is still visible in the composer. Once the pane settles for
+- Background context reset injection is disabled for queue heads: `[clean-session]`,
+  `[focused-cycle]`, and accretion/threshold reset reasons drain in pane instead
+  of causing the supervisor to submit `/clear` or `/new`. Only explicit operator
+  clears and explicit queued slash-command heads may create a context-clear
+  in-flight marker. For those explicit sources, the marker survives supervisor
+  recycle/restart so the replacement watcher blocks drains until the clear
+  settles, or presses the shared submit key once when the clear command is still
+  visible in the composer. Legacy or background-sourced markers are dropped
+  rather than submitted. Once the pane settles for
   `CLEAR_COOLDOWN_RESUME_IDLE_TICKS` consecutive polls the marker is cleared. A
   manual clear cooldown remains authoritative for a plain operator clear with no
   active queue (it suppresses passive dispatch until cleared by the existing

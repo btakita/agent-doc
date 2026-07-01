@@ -34,17 +34,6 @@ pub(crate) fn check_partial_closeout_state_guard(file: &Path) -> Result<GuardRes
         }
     };
 
-    let ids = candidates
-        .iter()
-        .map(|id| format!("#{}", id))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let edit_hint = candidates
-        .iter()
-        .map(|id| format!("--backlog-edit \"{}=<remaining next-phase scope>\"", id))
-        .collect::<Vec<_>>()
-        .join(" ");
-
     crate::ops_log::log_op(
         file,
         &format!(
@@ -54,17 +43,7 @@ pub(crate) fn check_partial_closeout_state_guard(file: &Path) -> Result<GuardRes
         ),
     );
 
-    Ok(GuardResult::Warn(vec![
-        format!(
-            "[session-check] warn: partial `do [#id]` closeout — work shipped (committed + pushed) but the response says live deploy/sync/verification work remains, yet tracked target {} still carries its original full-task text in agent:backlog",
-            ids
-        ),
-        format!(
-            "[session-check] hint: narrow the backlog item + queue head to the next phase with `{}` (or `--backlog-gate <id>` if only review/external validation remains), or add `{}` when it is already narrowed",
-            edit_hint,
-            agent_doc_turn::closeout_signal::PARTIAL_CLOSEOUT_GUARD_SUPPRESS_MARKER
-        ),
-    ]))
+    Ok(agent_doc_workflow::session_check::partial_closeout_state_guard_result(&candidates))
 }
 
 #[derive(Debug, Clone)]
@@ -87,7 +66,6 @@ pub(crate) fn check_partial_staging_closeout_guard(file: &Path) -> Result<GuardR
         return Ok(GuardResult::None);
     }
 
-    let mut lines = Vec::new();
     for finding in findings.iter().take(3) {
         crate::ops_log::log_op(
             file,
@@ -100,25 +78,25 @@ pub(crate) fn check_partial_staging_closeout_guard(file: &Path) -> Result<GuardR
                 finding.literals.join("|")
             ),
         );
-        lines.push(format!(
-            "[session-check] warn: possible partial staging closeout in {} — latest commit changed {}, but tracked uncommitted companion changes remain in {} with overlapping changed string literal(s): {}.",
-            finding.repo.display(),
-            preview_items(&finding.committed_paths, 4),
-            preview_items(&finding.dirty_paths, 4),
-            preview_items(&finding.literals, 3)
-        ));
     }
-    if findings.len() > 3 {
-        lines.push(format!(
-            "[session-check] warn: {} additional partial staging candidate(s) omitted.",
-            findings.len() - 3
-        ));
-    }
-    lines.push(
-        "[session-check] hint: commit the companion changes, revert them, or rerun verification against the committed tree before reporting CI-ready closeout."
-            .to_string(),
-    );
-    Ok(GuardResult::Warn(lines))
+
+    let workflow_findings = findings
+        .iter()
+        .map(
+            |finding| agent_doc_workflow::session_check::PartialStagingCloseoutGuardFinding {
+                repo: finding.repo.display().to_string(),
+                committed_paths: finding.committed_paths.clone(),
+                dirty_paths: finding.dirty_paths.clone(),
+                literals: finding.literals.clone(),
+            },
+        )
+        .collect::<Vec<_>>();
+
+    Ok(
+        agent_doc_workflow::session_check::partial_staging_closeout_guard_result(
+            &workflow_findings,
+        ),
+    )
 }
 
 pub(crate) fn partial_staging_closeout_findings(file: &Path) -> Result<Vec<PartialStagingFinding>> {
@@ -251,16 +229,4 @@ pub(crate) fn git_stdout(repo: &Path, args: &[&str]) -> Result<Option<String>> {
         return Ok(None);
     }
     Ok(Some(String::from_utf8_lossy(&output.stdout).to_string()))
-}
-
-pub(crate) fn preview_items(items: &[String], limit: usize) -> String {
-    let mut preview = items
-        .iter()
-        .take(limit)
-        .map(|item| format!("`{}`", item))
-        .collect::<Vec<_>>();
-    if items.len() > limit {
-        preview.push(format!("...(+{})", items.len() - limit));
-    }
-    preview.join(", ")
 }

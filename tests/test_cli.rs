@@ -1396,7 +1396,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // checks moved to the focused workflow policy crate. These are the
         // canonical guard-result function names, not new orchestration flow
         // boundaries.
-        ("agent-doc-workflow/src/session_check.rs", "guard_") => 14,
+        // 14 -> 22 (#partial-staging-workflow-extract): partial closeout and
+        // partial-staging warning/result builders and their focused unit tests
+        // moved from orchestration into workflow. These are message-formatting
+        // ownership tokens, not new hot-path guard branches.
+        ("agent-doc-workflow/src/session_check.rs", "guard_") => 22,
         ("agent-doc-workflow/src/session_check.rs", "reason=") => 1,
         // 4 -> 7 (#session-check-guard-policy-extract): orchestration keeps the
         // IO/proof collection and calls the focused workflow guard-result
@@ -1433,7 +1437,10 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // the focused workflow pending-done guard-result builder directly.
         ("agent-doc-orchestration/src/session_check/pending_guards.rs", "guard_") => 13,
         ("agent-doc-orchestration/src/session_check/queue_head_guards.rs", "guard_") => 2,
-        ("agent-doc-orchestration/src/session_check/partial_staging.rs", "guard_") => 2,
+        // 2 -> 4 (#partial-staging-workflow-extract): this adapter now calls
+        // the focused workflow partial closeout and partial-staging result
+        // builders directly.
+        ("agent-doc-orchestration/src/session_check/partial_staging.rs", "guard_") => 4,
         // 8 -> 14 (#session-check-response-guard-message-extract):
         // response_guards now calls the focused workflow result/message
         // builders directly for dropped queue/exchange prompts, queue-response
@@ -8372,6 +8379,9 @@ fn test_agent_doc_workflow_owns_session_check_response_messages() {
         "pub fn completed_pending_reap_guard_message(",
         "pub fn snapshot_committed_guard_message(",
         "pub fn committed_without_response_body_guard_message(",
+        "pub fn partial_closeout_state_guard_result(",
+        "pub struct PartialStagingCloseoutGuardFinding",
+        "pub fn partial_staging_closeout_guard_result(",
     ] {
         assert!(
             workflow_session_check.contains(required),
@@ -8407,6 +8417,34 @@ fn test_agent_doc_workflow_owns_session_check_response_messages() {
         assert!(
             response_guards.contains(required),
             "response_guards should call focused workflow message policy directly: {required}"
+        );
+    }
+
+    let partial_staging = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/partial_staging.rs"),
+    )
+    .unwrap();
+    for forbidden in [
+        "[session-check] warn: partial `do [#id]` closeout",
+        "[session-check] hint: narrow the backlog item",
+        "possible partial staging closeout",
+        "additional partial staging candidate(s) omitted",
+        "commit the companion changes",
+        "fn preview_items(",
+    ] {
+        assert!(
+            !partial_staging.contains(forbidden),
+            "partial_staging must not re-own session-check response message policy: {forbidden}"
+        );
+    }
+    for required in [
+        "agent_doc_workflow::session_check::partial_closeout_state_guard_result",
+        "agent_doc_workflow::session_check::PartialStagingCloseoutGuardFinding",
+        "agent_doc_workflow::session_check::partial_staging_closeout_guard_result",
+    ] {
+        assert!(
+            partial_staging.contains(required),
+            "partial_staging should call focused workflow message policy directly: {required}"
         );
     }
 }
@@ -16697,6 +16735,11 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
         "pub fn dropped_prompt_lines_after_content_ours",
         "pub fn prompt_bearing_user_changes_between",
         "pub fn exchange_component_text",
+        "pub fn new_agent_response_headings",
+        "pub fn ack_content_contains_latest_response",
+        "fn latest_exchange_response_block",
+        "fn exchange_content",
+        "pub fn first_response_heading",
         "merge_contents: impl FnOnce(&str, &str, &str) -> Option<String>",
     ] {
         assert!(
@@ -16716,6 +16759,11 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
         "fn dropped_prompt_lines_after_content_ours(",
         "fn prompt_bearing_user_changes_between(",
         "fn exchange_component_text(",
+        "fn new_agent_response_headings(",
+        "fn ack_content_contains_latest_response(",
+        "fn latest_exchange_response_block(",
+        "fn exchange_content(",
+        "fn first_response_heading(",
         "pub use agent_doc_document_realtime::write_policy::{",
     ] {
         assert!(
@@ -16742,9 +16790,24 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
         write_ipc.contains("agent_doc_document_realtime::write_policy::{")
             && write_ipc.contains("ipc_snapshot_would_absorb_live_prompt_drift_after_preflight")
             && write_ipc.contains("response_target_disjoint_from_user_edit")
-            && write_ipc.contains("dropped_prompt_lines_after_content_ours"),
+            && write_ipc.contains("dropped_prompt_lines_after_content_ours")
+            && write_ipc.contains("new_agent_response_headings")
+            && write_ipc.contains("ack_content_contains_latest_response")
+            && write_ipc.contains("first_response_heading"),
         "write/ipc.rs should import focused realtime snapshot/live-drift policy directly"
     );
+    for forbidden_snippet in [
+        "fn new_agent_response_headings(",
+        "fn ack_content_contains_latest_response(",
+        "fn latest_exchange_response_block(",
+        "fn exchange_content(",
+        "fn first_response_heading(",
+    ] {
+        assert!(
+            !write_ipc.contains(forbidden_snippet),
+            "write/ipc.rs must not re-own response-delta write policy: {forbidden_snippet}"
+        );
+    }
     assert!(
         preflight_run.contains(
             "agent_doc_document_realtime::write_policy::ipc_snapshot_would_absorb_live_prompt_drift_after_preflight"

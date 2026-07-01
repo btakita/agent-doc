@@ -123,6 +123,33 @@ pub fn blocked_closeout_followup_guard_result(
     }
 }
 
+pub fn partial_closeout_state_guard_result(candidate_ids: &[String]) -> GuardResult {
+    if candidate_ids.is_empty() {
+        return GuardResult::None;
+    }
+
+    let ids = candidate_ids
+        .iter()
+        .map(|id| format!("#{id}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let edit_hint = candidate_ids
+        .iter()
+        .map(|id| format!("--backlog-edit \"{id}=<remaining next-phase scope>\""))
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    GuardResult::Warn(vec![
+        format!(
+            "[session-check] warn: partial `do [#id]` closeout — work shipped (committed + pushed) but the response says live deploy/sync/verification work remains, yet tracked target {ids} still carries its original full-task text in agent:backlog"
+        ),
+        format!(
+            "[session-check] hint: narrow the backlog item + queue head to the next phase with `{edit_hint}` (or `--backlog-gate <id>` if only review/external validation remains), or add `{}` when it is already narrowed",
+            agent_doc_turn::closeout_signal::PARTIAL_CLOSEOUT_GUARD_SUPPRESS_MARKER
+        ),
+    ])
+}
+
 pub fn gated_phase_split_guard_result(file: &str, flagged: &[String]) -> GuardResult {
     let ids = hash_refs(flagged);
     let add_after_hint = flagged
@@ -149,6 +176,56 @@ pub fn queue_audit_partial_completion_guard_result() -> GuardResult {
             agent_doc_turn::closeout_signal::QUEUE_AUDIT_GUARD_SUPPRESS_MARKER
         ),
     ])
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PartialStagingCloseoutGuardFinding {
+    pub repo: String,
+    pub committed_paths: Vec<String>,
+    pub dirty_paths: Vec<String>,
+    pub literals: Vec<String>,
+}
+
+pub fn partial_staging_closeout_guard_result(
+    findings: &[PartialStagingCloseoutGuardFinding],
+) -> GuardResult {
+    if findings.is_empty() {
+        return GuardResult::None;
+    }
+
+    let mut lines = Vec::new();
+    for finding in findings.iter().take(3) {
+        lines.push(format!(
+            "[session-check] warn: possible partial staging closeout in {} — latest commit changed {}, but tracked uncommitted companion changes remain in {} with overlapping changed string literal(s): {}.",
+            finding.repo,
+            preview_items(&finding.committed_paths, 4),
+            preview_items(&finding.dirty_paths, 4),
+            preview_items(&finding.literals, 3)
+        ));
+    }
+    if findings.len() > 3 {
+        lines.push(format!(
+            "[session-check] warn: {} additional partial staging candidate(s) omitted.",
+            findings.len() - 3
+        ));
+    }
+    lines.push(
+        "[session-check] hint: commit the companion changes, revert them, or rerun verification against the committed tree before reporting CI-ready closeout."
+            .to_string(),
+    );
+    GuardResult::Warn(lines)
+}
+
+fn preview_items(items: &[String], limit: usize) -> String {
+    let mut preview = items
+        .iter()
+        .take(limit)
+        .map(|item| format!("`{item}`"))
+        .collect::<Vec<_>>();
+    if items.len() > limit {
+        preview.push(format!("...(+{})", items.len() - limit));
+    }
+    preview.join(", ")
 }
 
 pub fn queue_head_removal_guard_result(
@@ -641,6 +718,78 @@ mod tests {
         let queue = format!("- {head}\n");
 
         assert!(queue_response_contamination_candidates(&queue, &exchange).is_empty());
+    }
+
+    #[test]
+    fn partial_closeout_state_guard_result_formats_candidates() {
+        let candidates = vec!["nstep2".to_string(), "deploy7".to_string()];
+
+        let GuardResult::Warn(lines) = partial_closeout_state_guard_result(&candidates) else {
+            panic!("expected warning result");
+        };
+
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].contains("#nstep2, #deploy7"));
+        assert!(lines[0].contains("partial `do [#id]` closeout"));
+        assert!(lines[1].contains(
+            "--backlog-edit \"nstep2=<remaining next-phase scope>\" --backlog-edit \"deploy7=<remaining next-phase scope>\""
+        ));
+        assert!(
+            lines[1]
+                .contains(agent_doc_turn::closeout_signal::PARTIAL_CLOSEOUT_GUARD_SUPPRESS_MARKER)
+        );
+        assert_eq!(partial_closeout_state_guard_result(&[]), GuardResult::None);
+    }
+
+    #[test]
+    fn partial_staging_closeout_guard_result_formats_previews_and_omissions() {
+        let first = PartialStagingCloseoutGuardFinding {
+            repo: "/repo/one".to_string(),
+            committed_paths: vec![
+                "src/render.rs".to_string(),
+                "src/lib.rs".to_string(),
+                "src/view.rs".to_string(),
+                "src/model.rs".to_string(),
+                "src/extra.rs".to_string(),
+            ],
+            dirty_paths: vec!["tests/render_test.rs".to_string()],
+            literals: vec![
+                "new queue output".to_string(),
+                "alt output".to_string(),
+                "third output".to_string(),
+                "fourth output".to_string(),
+            ],
+        };
+        let extra = PartialStagingCloseoutGuardFinding {
+            repo: "/repo/extra".to_string(),
+            committed_paths: vec!["src/a.rs".to_string()],
+            dirty_paths: vec!["tests/a_test.rs".to_string()],
+            literals: vec!["same literal".to_string()],
+        };
+        let findings = vec![first, extra.clone(), extra.clone(), extra];
+
+        let GuardResult::Warn(lines) = partial_staging_closeout_guard_result(&findings) else {
+            panic!("expected warning result");
+        };
+
+        assert_eq!(lines.len(), 5);
+        assert!(lines[0].contains("possible partial staging closeout in /repo/one"));
+        assert!(
+            lines[0]
+                .contains("`src/render.rs`, `src/lib.rs`, `src/view.rs`, `src/model.rs`, ...(+1)")
+        );
+        assert!(lines[0].contains("`tests/render_test.rs`"));
+        assert!(lines[0].contains("`new queue output`, `alt output`, `third output`, ...(+1)"));
+        assert!(
+            lines[3].contains(
+                "[session-check] warn: 1 additional partial staging candidate(s) omitted."
+            )
+        );
+        assert!(lines[4].contains("commit the companion changes"));
+        assert_eq!(
+            partial_staging_closeout_guard_result(&[]),
+            GuardResult::None
+        );
     }
 
     #[test]

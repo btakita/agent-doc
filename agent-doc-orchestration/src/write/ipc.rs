@@ -4,10 +4,10 @@ use super::*;
 use agent_doc_document::singleton_repair::repair_duplicate_singleton_components;
 use agent_doc_document_realtime::write_policy::{
     WholeBufferAuthority, WholeBufferAuthorityFacts, WholeBufferDelivery,
-    WholeBufferDeliveryAction, decide_whole_buffer_delivery,
-    dropped_prompt_lines_after_content_ours, exchange_component_text,
-    ipc_snapshot_would_absorb_live_prompt_drift_after_preflight, response_already_in_current,
-    response_target_disjoint_from_user_edit,
+    WholeBufferDeliveryAction, ack_content_contains_latest_response, decide_whole_buffer_delivery,
+    dropped_prompt_lines_after_content_ours, first_response_heading,
+    ipc_snapshot_would_absorb_live_prompt_drift_after_preflight, new_agent_response_headings,
+    response_already_in_current, response_target_disjoint_from_user_edit,
 };
 #[cfg(test)]
 use agent_doc_element_exchange::extract_post_commit_normalization_targets;
@@ -735,27 +735,6 @@ pub(crate) enum AlreadyAppliedSnapshotOutcome {
     NeedsFileFallback,
 }
 
-/// `#smconv` helper: the `### Re:` response heading lines present in the agent's
-/// `candidate` exchange component but absent from `base` — i.e. the new response
-/// turn(s) the agent authored this cycle. Used by [`try_semantic_merge_convergence`]
-/// to refuse a merge that would silently drop the agent's heading-prose response.
-fn new_agent_response_headings(base: &str, candidate: &str) -> Vec<String> {
-    let base_ex = exchange_component_text(base);
-    let candidate_ex = exchange_component_text(candidate);
-    let base_headings: std::collections::HashSet<&str> = base_ex
-        .lines()
-        .map(str::trim)
-        .filter(|l| l.starts_with("### Re:"))
-        .collect();
-    candidate_ex
-        .lines()
-        .map(str::trim)
-        .filter(|l| l.starts_with("### Re:"))
-        .filter(|l| !base_headings.contains(l))
-        .map(str::to_string)
-        .collect()
-}
-
 /// `#smconv` (`#semmerge-converge-adapter`, Phase 2): attempt a node-keyed
 /// semantic merge of `base`, `candidate` (the agent's response snapshot =
 /// `ours_agent`), and `content_ours` (the editor buffer = `theirs_operator`),
@@ -1131,56 +1110,6 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
     true
 }
 
-fn ack_content_contains_latest_response(ack_content: &str, target: &str) -> bool {
-    let Some(response) = latest_exchange_response_block(target) else {
-        return true;
-    };
-    response_materialized_in_content(&response, ack_content)
-}
-
-fn latest_exchange_response_block(content: &str) -> Option<String> {
-    let exchange = exchange_content(content);
-    let lines = exchange
-        .split_inclusive('\n')
-        .scan(0usize, |offset, text| {
-            let start = *offset;
-            *offset += text.len();
-            Some((start, text))
-        })
-        .collect::<Vec<_>>();
-    let start = lines
-        .iter()
-        .rposition(|(_, line)| line.trim_start().starts_with("### Re:"))?;
-    let end = lines
-        .iter()
-        .enumerate()
-        .skip(start + 1)
-        .find_map(|(idx, (_, line))| {
-            (line.trim_start().starts_with("### Re:")
-                || line.trim_start().starts_with("<!-- agent:boundary:"))
-            .then_some(idx)
-        })
-        .unwrap_or(lines.len());
-    let block_start = lines[start].0;
-    let block_end = lines
-        .get(end)
-        .map(|(offset, _)| *offset)
-        .unwrap_or(exchange.len());
-    Some(exchange[block_start..block_end].to_string())
-}
-
-fn exchange_content(content: &str) -> &str {
-    element::parse(content)
-        .ok()
-        .and_then(|components| {
-            components
-                .into_iter()
-                .find(|component| component.name == "exchange")
-        })
-        .map(|component| component.content(content))
-        .unwrap_or(content)
-}
-
 pub(crate) fn guard_ipc_snapshot_adoption_against_prompt_duplication(
     file: &Path,
     source: &str,
@@ -1432,14 +1361,6 @@ pub fn materialize_response_in_current_exchange(
         &response,
     );
     Some(exchange.replace_content(current, &exchange_body))
-}
-
-fn first_response_heading(response: &str) -> Option<String> {
-    response
-        .lines()
-        .map(str::trim)
-        .find(|line| line.starts_with("### Re:"))
-        .map(str::to_string)
 }
 
 pub(crate) fn materialize_missing_response_for_socket_ack_drift(

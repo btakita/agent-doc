@@ -14,6 +14,7 @@ use agent_doc_element_exchange::normalize_exchange_prefixes_for_targets;
 use agent_doc_prompt_lines::text_line_looks_like_prompt_target;
 use agent_doc_queue::queue_prompt_drift::queue_prompt_deletions_between;
 use agent_doc_turn::closeout_signal::line_is_carry_forward_signal;
+use agent_doc_turn::response_replay::response_materialized_in_content;
 use anyhow::Result;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
@@ -201,6 +202,85 @@ pub fn response_already_in_current(base: &str, content_ours: &str, content_curre
     response_hunks
         .iter()
         .all(|hunk| contains_contiguous_hunk(&current_lines, hunk))
+}
+
+/// The `### Re:` response heading lines present in the agent's `candidate`
+/// exchange component but absent from `base`.
+pub fn new_agent_response_headings(base: &str, candidate: &str) -> Vec<String> {
+    let base_ex = exchange_component_text(base);
+    let candidate_ex = exchange_component_text(candidate);
+    let base_headings: HashSet<&str> = base_ex
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("### Re:"))
+        .collect();
+    candidate_ex
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("### Re:"))
+        .filter(|line| !base_headings.contains(line))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Return true when `ack_content` already contains `target`'s latest exchange
+/// response block.
+pub fn ack_content_contains_latest_response(ack_content: &str, target: &str) -> bool {
+    let Some(response) = latest_exchange_response_block(target) else {
+        return true;
+    };
+    response_materialized_in_content(&response, ack_content)
+}
+
+fn latest_exchange_response_block(content: &str) -> Option<String> {
+    let exchange = exchange_content(content);
+    let lines = exchange
+        .split_inclusive('\n')
+        .scan(0usize, |offset, text| {
+            let start = *offset;
+            *offset += text.len();
+            Some((start, text))
+        })
+        .collect::<Vec<_>>();
+    let start = lines
+        .iter()
+        .rposition(|(_, line)| line.trim_start().starts_with("### Re:"))?;
+    let end = lines
+        .iter()
+        .enumerate()
+        .skip(start + 1)
+        .find_map(|(idx, (_, line))| {
+            (line.trim_start().starts_with("### Re:")
+                || line.trim_start().starts_with("<!-- agent:boundary:"))
+            .then_some(idx)
+        })
+        .unwrap_or(lines.len());
+    let block_start = lines[start].0;
+    let block_end = lines
+        .get(end)
+        .map(|(offset, _)| *offset)
+        .unwrap_or(exchange.len());
+    Some(exchange[block_start..block_end].to_string())
+}
+
+fn exchange_content(content: &str) -> &str {
+    element::parse(content)
+        .ok()
+        .and_then(|components| {
+            components
+                .into_iter()
+                .find(|component| component.name == "exchange")
+        })
+        .map(|component| component.content(content))
+        .unwrap_or(content)
+}
+
+pub fn first_response_heading(response: &str) -> Option<String> {
+    response
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with("### Re:"))
+        .map(str::to_string)
 }
 
 /// True when a rejected editor state can be repaired by applying only exchange
@@ -1972,6 +2052,91 @@ Same content.
             !response_already_in_current(base, base, base),
             "should return false when ours equals base"
         );
+    }
+
+    #[test]
+    fn new_agent_response_headings_returns_candidate_exchange_headings_missing_from_base() {
+        let base = doc_with_exchange(
+            "❯ do #old\n### Re: do #old - gpt-5\n\nOld response.\n",
+            "### Re: queue text is not exchange\n",
+        );
+        let candidate = doc_with_exchange(
+            concat!(
+                "❯ do #old\n",
+                "### Re: do #old - gpt-5\n\n",
+                "Old response.\n",
+                "  ### Re: do #new - gpt-5\n\n",
+                "New response.\n",
+                "### Re: do #second - gpt-5\n\n",
+                "Second response.\n",
+            ),
+            "### Re: queue text is not exchange\n",
+        );
+
+        assert_eq!(
+            new_agent_response_headings(&base, &candidate),
+            vec![
+                "### Re: do #new - gpt-5".to_string(),
+                "### Re: do #second - gpt-5".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn ack_content_contains_latest_response_uses_latest_exchange_block() {
+        let target = doc_with_exchange(
+            concat!(
+                "❯ do #old\n",
+                "### Re: do #old - gpt-5\n\n",
+                "Old response.\n",
+                "### Re: do #latest - gpt-5\n\n",
+                "Latest response.\n",
+                "<!-- agent:boundary: next -->\n",
+                "❯ do #next\n",
+            ),
+            "",
+        );
+        let ack_with_latest =
+            doc_with_exchange("### Re: do #latest - gpt-5\n\nLatest response.\n", "");
+        let ack_with_old = doc_with_exchange("### Re: do #old - gpt-5\n\nOld response.\n", "");
+
+        assert!(ack_content_contains_latest_response(
+            &ack_with_latest,
+            &target
+        ));
+        assert!(!ack_content_contains_latest_response(
+            &ack_with_old,
+            &target
+        ));
+    }
+
+    #[test]
+    fn ack_content_contains_latest_response_allows_targets_without_response_heading() {
+        let target = doc_with_exchange("❯ do #pending\nstill typing\n", "");
+
+        assert!(ack_content_contains_latest_response("", &target));
+    }
+
+    #[test]
+    fn ack_content_contains_latest_response_falls_back_to_whole_content_without_exchange() {
+        let target = "### Re: loose response - gpt-5\n\nLoose response body.\n";
+
+        assert!(ack_content_contains_latest_response(target, target));
+        assert!(!ack_content_contains_latest_response(
+            "### Re: other response - gpt-5\n\nOther body.\n",
+            target,
+        ));
+    }
+
+    #[test]
+    fn first_response_heading_returns_trimmed_first_re_heading() {
+        let response = "preface\n  ### Re: do #fix - gpt-5\n\nBody.\n### Re: later\n";
+
+        assert_eq!(
+            first_response_heading(response).as_deref(),
+            Some("### Re: do #fix - gpt-5")
+        );
+        assert_eq!(first_response_heading("no response heading"), None);
     }
 
     #[test]

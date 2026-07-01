@@ -110,16 +110,16 @@ I kept terminal proof strict. The fix is that a real commit closeout now superse
 
 Red-green-refactor evidence:
 
-❯ - Red: the new closeout regression failed before the fix with `terminal proof cannot record closeout ... is abandoned`.
-❯ - Green: `cargo test -p agent-doc-orchestration abandoned` passes, including the new terminal-proof regression and the cycle-state unit regression.
-❯ - Refactor: updated the cycle-state contract docs to distinguish abandoned stale preflight terminal state from a later real commit closeout that supersedes it.
+- Red: the new closeout regression failed before the fix with `terminal proof cannot record closeout ... is abandoned`.
+- Green: `cargo test -p agent-doc-orchestration abandoned` passes, including the new terminal-proof regression and the cycle-state unit regression.
+- Refactor: updated the cycle-state contract docs to distinguish abandoned stale preflight terminal state from a later real commit closeout that supersedes it.
 
 Verification completed:
 
-❯ - `cargo test -p agent-doc-orchestration abandoned`
-❯ - `cargo test -p agent-doc-queue in_progress_marker_detection_allows_priority_prefix`
-❯ - `make check` — clippy, 6155 nextest tests, doctests, SimWorld medium seed, and Lean all passed.
-❯ - `make install` — installed `agent-doc` and `libagent_doc.so`; installer marked 2 controllers to recycle at the next idle boundary.
+- `cargo test -p agent-doc-orchestration abandoned`
+- `cargo test -p agent-doc-queue in_progress_marker_detection_allows_priority_prefix`
+- `make check` — clippy, 6155 nextest tests, doctests, SimWorld medium seed, and Lean all passed.
+- `make install` — installed `agent-doc` and `libagent_doc.so`; installer marked 2 controllers to recycle at the next idle boundary.
 
 GitHub CI for `fee78f7a` is currently in progress: run `28485233701`.
 ❯ Fix
@@ -159,9 +159,33 @@ Verification passed:
 - `cargo test -p agent-doc-orchestration live_buffer`
 - `cargo test -p agent-doc-orchestration visible_write`
 - `cargo test -p agent-doc-orchestration stale_supervisor_content_ours`
+- parent repo: `33b314d2d` (`Update agent-doc submodule for operator buffer preservation`)
+- `src/agent-doc`: `61566d04` (`Preserve live editor digests over write provenance`)
+- Latest GitHub Actions CI was `in_progress` for workflow `CI`, run `28493126754`, at 2026-07-01T04:16:45Z.
+- `make check` completed with exit code 0 via tsift digest runner; the digest runner misclassified two `PASS ... editor_route_error` lines as failures, but the command succeeded.
+- `cargo test -p agent-doc-debounce` passed: 50 tests.
+- `cargo fmt -p agent-doc-debounce --check`
 
 Confidence: high for the audit result and regression coverage. Escalation: none; I did not use `--force-disk`.
-<!-- agent:boundary:c4de4058 -->
+
+### Re: :pushpin: do [#supstaledetectverify] — gpt-5
+
+> **Queue prompt:**
+>
+> :pushpin: do [#supstaledetectverify]
+
+`agent-doc` is installed: `agent-doc 0.34.65`.
+
+I could not safely finalize `#supstaledetectverify`. The response is captured, but closeout is blocked by `editor_convergence_required`: the JetBrains live buffer for `tasks/agent-doc/agent-doc-bugs2.md` is unsaved/ahead of disk, and current plugin code intentionally disables `save_document` IPC. I retried `finalize`/`write --commit`, refreshed the live buffer, recycled the supervisor, and did not use `--force-disk`.
+
+Next safe operator action: save or resolve the live JetBrains buffer for `tasks/agent-doc/agent-doc-bugs2.md`, then rerun:
+
+```bash
+agent-doc write --commit tasks/agent-doc/agent-doc-bugs2.md
+```
+
+Only use `--force-disk` if you explicitly want to override the live-editor safety guard.
+<!-- agent:boundary:b1f0f0bc -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -177,26 +201,24 @@ Confidence: high for the audit result and regression coverage. Escalation: none;
 - :pushpin: do [#kj5flive]
 - :pushpin: do [#tmuxsynccrashlog]
 - ~~:pushpin: do [#qftlossproof]~~
-- 🚧 :pushpin: do [#midturnrecycleproof]
-- :pushpin: do [#midturnresumeimpl]
-- :pushpin: do [#provauth3bimpl]
-- :pushpin: do [#supstaledetectverify]
+- ~~:pushpin: do [#midturnrecycleproof]~~
+- ~~:pushpin: do [#midturnresumeimpl]~~
+- ~~:pushpin: do [#provauth3bimpl]~~
+- 🚧 :pushpin: do [#supstaledetectverify]
 - :pushpin: do [#suptmuxstaleverify]
 - :pushpin: do [#tmuxsynccrashlog]
 - ~~:pushpin: do [#qftlossproof]~~
-- :pushpin: do [#midturnrecycleproof]
-- :pushpin: do [#midturnresumeimpl]
-- :pushpin: do [#provauth3bimpl]
+- ~~:pushpin: do [#provauth3bimpl]~~
 - :pushpin: do [#supstaledetectverify]
 - :pushpin: do [#suptmuxstaleverify]
 - :pushpin: do [#60ev]
-- do [#suprestassoc-live]
-- do [#agentsignals]
-- do [#qftlossdelta]
-- do [#coredecomp]
-- do [#orchdecomp]
-- do [#skillharnessplugin]
-- do [#elementgraphprd]
+- :pushpin: do [#suprestassoc-live]
+- :pushpin: do [#agentsignals]
+- :pushpin: do [#qftlossdelta]
+- :pushpin: do [#coredecomp]
+- :pushpin: do [#orchdecomp]
+- :pushpin: do [#skillharnessplugin]
+- :pushpin: do [#elementgraphprd]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

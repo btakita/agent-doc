@@ -74,6 +74,29 @@ pub fn insert_prompt_line_before_boundary(doc: &str, prompt_line: &str) -> Resul
     Ok(result)
 }
 
+pub fn append_deduped_content_to_exchange(
+    doc: &str,
+    dedupe_key: &str,
+    content: &str,
+) -> Result<Option<String>> {
+    if doc.contains(dedupe_key) {
+        return Ok(None);
+    }
+    let components = element::parse(doc).context("failed to parse document components")?;
+    let Some(exchange) = components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return Ok(None);
+    };
+    let updated = exchange.append_with_caret(doc, content, None);
+    if updated == doc {
+        Ok(None)
+    } else {
+        Ok(Some(updated))
+    }
+}
+
 /// Extract the byte length of the exchange component's trimmed content.
 /// Returns 0 if no exchange component is found or component parsing fails.
 pub fn exchange_content_len(doc: &str) -> usize {
@@ -2502,5 +2525,102 @@ do #one
 ";
 
         assert_eq!(duplicate_prompt_line_count(content), 2);
+    }
+
+    #[test]
+    fn append_deduped_content_to_exchange_appends_and_dedupes() {
+        let doc = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior - gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#next]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let dedupe_key = "dedupe-key-123";
+        let note = "### Re: diagnostic - gpt-5\n\nIssue: dedupe-key-123";
+
+        let updated = append_deduped_content_to_exchange(doc, dedupe_key, note)
+            .unwrap()
+            .expect("expected content to append");
+
+        assert!(updated.contains(note));
+        assert!(
+            updated.find(note).unwrap() < updated.find("<!-- /agent:exchange -->").unwrap(),
+            "content must stay inside agent:exchange"
+        );
+        assert!(
+            updated.contains("- do [#next]\n<!-- /agent:queue -->"),
+            "queue content must be preserved"
+        );
+
+        let second = append_deduped_content_to_exchange(&updated, dedupe_key, note).unwrap();
+        assert!(second.is_none(), "same dedupe key should not duplicate");
+    }
+
+    #[test]
+    fn append_deduped_content_to_exchange_noops_without_exchange_component() {
+        let doc = "<!-- agent:queue -->\n- do [#next]\n<!-- /agent:queue -->\n";
+        let updated =
+            append_deduped_content_to_exchange(doc, "dedupe-key-123", "### Re: diagnostic")
+                .unwrap();
+
+        assert!(updated.is_none());
+    }
+
+    #[test]
+    fn appended_recovery_artifact_is_not_prompt_bearing() {
+        let before = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior - gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#next]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let note = "### Re: IPC proof diagnostic (interrupted-cycle recovery) - agent-doc\n\n```text\nIssue class: `ipc_proof_insufficient`\nipc_proof_insufficient file=/tmp/session.md\n```";
+
+        let updated =
+            append_deduped_content_to_exchange(before, "ipc_proof_insufficient file=", note)
+                .unwrap()
+                .expect("expected note to append");
+
+        let diff_text = agent_doc_diff::unified_diff_from_contents(before, &updated)
+            .expect("expected a non-empty diff after appending the note");
+        let changes = agent_doc_diff::classify_prompt_bearing_changes(&diff_text);
+        assert!(
+            !changes.iter().any(|c| matches!(
+                c.kind,
+                agent_doc_diff::PromptBearingChangeKind::PromptTarget
+            )),
+            "diagnostic note must not classify as a PromptTarget: {changes:?}"
+        );
+        assert!(
+            changes.iter().any(|c| matches!(
+                c.kind,
+                agent_doc_diff::PromptBearingChangeKind::RecoveryArtifact
+            )),
+            "diagnostic note must classify as a RecoveryArtifact: {changes:?}"
+        );
+        assert!(
+            agent_doc_diff::prompt_prefix_normalization_targets(&diff_text).is_empty(),
+            "diagnostic note must not trigger prompt-prefix normalization"
+        );
+        assert!(
+            agent_doc_turn::exchange_tail::prompt_only_exchange_tail(&updated).is_none(),
+            "diagnostic note must not leave a prompt-only exchange tail"
+        );
     }
 }

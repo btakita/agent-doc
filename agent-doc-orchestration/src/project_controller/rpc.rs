@@ -2244,7 +2244,7 @@ pub(crate) fn controller_self_watchdog_should_suicide(
     let Ok(bootstrap) = runtime.bootstrap_snapshot() else {
         return false;
     };
-    preparing_controller_is_stale(
+    status::preparing_controller_is_stale(
         bootstrap.handoff_state,
         bootstrap.handoff_started_at,
         timestamp_secs(),

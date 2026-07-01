@@ -262,6 +262,7 @@ dependencies = [
  "agent-doc-element",
  "agent-doc-element-boundary",
  "agent-doc-prompt-lines",
+ "agent-doc-turn",
  "anyhow",
  "similar",
 ]

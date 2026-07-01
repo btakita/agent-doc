@@ -16,3 +16,6 @@ agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.34.6
 agent-doc-element = { path = "../agent-doc-element", version = "0.34.66" }
 anyhow = "1"
 similar = "3"
+
+[dev-dependencies]
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.66" }

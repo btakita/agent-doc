@@ -7,7 +7,7 @@
 use agent_doc_controller::status::{
     ControlPlaneStoreCounts as ControllerControlPlaneStoreCounts, ControllerBinaryIdentity,
     ControllerBootstrapStatusFacts, ControllerFreshnessFacts, ControllerFreshnessStatus,
-    ControllerHandoffState, ControllerStatus, LaunchMode,
+    ControllerHandoffState, ControllerStatus, LaunchMode, preparing_controller_is_stale,
 };
 use agent_doc_sqlite::state_store;
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
@@ -1768,29 +1768,6 @@ pub fn stale_preparing_controller_threshold() -> Duration {
         .and_then(|raw| raw.trim().parse::<u64>().ok())
         .unwrap_or(DEFAULT_STALE_PREPARING_CONTROLLER_SECS);
     Duration::from_secs(secs.max(1))
-}
-
-/// Pure staleness predicate for the stuck-handoff reaper (#kqr6 / #sjwm). A
-/// controller stuck in `Preparing` (or `Promoted`-but-never-finalized) past
-/// `stale_after` is wedged. `Stable`/`Retiring`/`Failed` and records with no
-/// `handoff_started_at` are never stale. Side-effect free for deterministic
-/// unit tests.
-fn preparing_controller_is_stale(
-    handoff_state: ControllerHandoffState,
-    handoff_started_at: Option<u64>,
-    now: u64,
-    stale_after: Duration,
-) -> bool {
-    if !matches!(
-        handoff_state,
-        ControllerHandoffState::Preparing | ControllerHandoffState::Promoted
-    ) {
-        return false;
-    }
-    let Some(started) = handoff_started_at else {
-        return false;
-    };
-    now.saturating_sub(started) > stale_after.as_secs()
 }
 
 /// Terminate a controller wedged in `Preparing`/`Promoted` past `stale_after`
@@ -5698,59 +5675,6 @@ agent:queue\n\
         );
     }
     // ── Stuck-`Preparing` controller reaper (#kqr6 / #sjwm / #stuckhandoff) ──
-    #[test]
-    fn preparing_controller_staleness_truth_table() {
-        let stale_after = Duration::from_secs(45);
-        let now = 10_000u64;
-        // Preparing + old handoff_started_at + no fresh lease ⇒ reap.
-        assert!(preparing_controller_is_stale(
-            ControllerHandoffState::Preparing,
-            Some(now - 100),
-            now,
-            stale_after,
-        ));
-        // Promoted-but-never-finalized + old ⇒ reap.
-        assert!(preparing_controller_is_stale(
-            ControllerHandoffState::Promoted,
-            Some(now - 100),
-            now,
-            stale_after,
-        ));
-        // Within threshold ⇒ keep (healthy mid-handoff).
-        assert!(!preparing_controller_is_stale(
-            ControllerHandoffState::Preparing,
-            Some(now - 5),
-            now,
-            stale_after,
-        ));
-        // Exactly at threshold ⇒ keep (strictly greater-than is stale).
-        assert!(!preparing_controller_is_stale(
-            ControllerHandoffState::Preparing,
-            Some(now - 45),
-            now,
-            stale_after,
-        ));
-        // Stable / Retiring / Failed ⇒ never stale even when old.
-        for state in [
-            ControllerHandoffState::Stable,
-            ControllerHandoffState::Retiring,
-            ControllerHandoffState::Failed,
-        ] {
-            assert!(!preparing_controller_is_stale(
-                state,
-                Some(now - 100),
-                now,
-                stale_after,
-            ));
-        }
-        // No handoff_started_at ⇒ never stale.
-        assert!(!preparing_controller_is_stale(
-            ControllerHandoffState::Preparing,
-            None,
-            now,
-            stale_after,
-        ));
-    }
     #[test]
     fn reaper_keeps_fresh_preparing_bootstrap() {
         let dir = tempfile::TempDir::new().unwrap();

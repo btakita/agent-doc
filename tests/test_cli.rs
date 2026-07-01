@@ -7470,6 +7470,7 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         "fn post_exchange_comment_prompt_preset_warning(",
         "fn preset_item_id_collision_warning(",
         "fn format_ipc_dogfood_note(",
+        "fn append_ipc_dogfood_note_to_content(",
         "fn is_url(",
         "fn url_cache_path(",
         "fn html_to_markdown(",
@@ -9214,6 +9215,41 @@ fn test_agent_doc_controller_owns_route_trigger_matching_policy() {
         route_dispatch.contains("route_trigger_visible_in_current_draft(&content, &trigger")
             && start_detection.contains("route_trigger_visible_in_current_draft(content, payload"),
         "route/start should call focused controller current-draft visibility policy directly"
+    );
+}
+
+#[test]
+fn test_agent_doc_controller_owns_handoff_staleness_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let controller_status =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller/src/status.rs")).unwrap();
+    assert!(
+        controller_status.contains("pub fn preparing_controller_is_stale("),
+        "agent-doc-controller status must own pure controller handoff staleness policy"
+    );
+
+    for relative_path in [
+        "agent-doc-orchestration/src/project_controller.rs",
+        "agent-doc-orchestration/src/project_controller/rpc.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
+        assert!(
+            !source.contains("fn preparing_controller_is_stale("),
+            "{relative_path} must not re-own controller handoff staleness policy"
+        );
+    }
+
+    let project_controller =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/project_controller.rs"))
+            .unwrap();
+    let project_controller_rpc = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/project_controller/rpc.rs"),
+    )
+    .unwrap();
+    assert!(
+        project_controller.contains("preparing_controller_is_stale")
+            && project_controller_rpc.contains("status::preparing_controller_is_stale"),
+        "orchestration should call focused controller handoff staleness policy directly"
     );
 }
 
@@ -14732,6 +14768,7 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         "pub fn exchange_content",
         "pub fn exchange_component",
         "pub fn insert_prompt_line_before_boundary",
+        "pub fn append_deduped_content_to_exchange",
         "pub fn strip_exchange_content",
         "pub fn redact_exchange_component_content",
         "pub fn post_commit_ipc_reposition_only_exchange_safe",

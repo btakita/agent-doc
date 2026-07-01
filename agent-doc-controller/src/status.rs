@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -234,6 +235,28 @@ impl ControllerHandoffState {
             Self::Failed => "failed",
         }
     }
+}
+
+/// Pure staleness predicate for stuck controller handoffs. A controller stuck
+/// in `Preparing` (or `Promoted` but not finalized) past `stale_after` is
+/// wedged. Stable terminal states and records without a handoff start are
+/// never stale.
+pub fn preparing_controller_is_stale(
+    handoff_state: ControllerHandoffState,
+    handoff_started_at: Option<u64>,
+    now: u64,
+    stale_after: Duration,
+) -> bool {
+    if !matches!(
+        handoff_state,
+        ControllerHandoffState::Preparing | ControllerHandoffState::Promoted
+    ) {
+        return false;
+    }
+    let Some(started) = handoff_started_at else {
+        return false;
+    };
+    now.saturating_sub(started) > stale_after.as_secs()
 }
 
 pub fn default_control_plane_status() -> ControlPlaneStatus {
@@ -558,5 +581,54 @@ mod tests {
             ControllerHandoffState::Preparing
         );
         assert!(parse_handoff_state("wedged").is_err());
+    }
+
+    #[test]
+    fn preparing_controller_staleness_truth_table() {
+        let stale_after = Duration::from_secs(45);
+        let now = 10_000u64;
+
+        assert!(preparing_controller_is_stale(
+            ControllerHandoffState::Preparing,
+            Some(now - 100),
+            now,
+            stale_after,
+        ));
+        assert!(preparing_controller_is_stale(
+            ControllerHandoffState::Promoted,
+            Some(now - 100),
+            now,
+            stale_after,
+        ));
+        assert!(!preparing_controller_is_stale(
+            ControllerHandoffState::Preparing,
+            Some(now - 5),
+            now,
+            stale_after,
+        ));
+        assert!(!preparing_controller_is_stale(
+            ControllerHandoffState::Preparing,
+            Some(now - 45),
+            now,
+            stale_after,
+        ));
+        for state in [
+            ControllerHandoffState::Stable,
+            ControllerHandoffState::Retiring,
+            ControllerHandoffState::Failed,
+        ] {
+            assert!(!preparing_controller_is_stale(
+                state,
+                Some(now - 100),
+                now,
+                stale_after,
+            ));
+        }
+        assert!(!preparing_controller_is_stale(
+            ControllerHandoffState::Preparing,
+            None,
+            now,
+            stale_after,
+        ));
     }
 }

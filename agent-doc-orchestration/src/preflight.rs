@@ -1239,7 +1239,11 @@ pub(crate) fn append_ipc_dogfood_note_for_diagnostic(
 ) -> Result<bool> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {} for IPC dogfood note", file.display()))?;
-    let Some(updated) = append_ipc_dogfood_note_to_content(&content, diagnostic)? else {
+    let note = agent_doc_workflow::preflight_policy::format_ipc_dogfood_note(diagnostic);
+    let Some(updated) = agent_doc_element_exchange::append_deduped_content_to_exchange(
+        &content, diagnostic, &note,
+    )?
+    else {
         return Ok(false);
     };
     std::fs::write(file, updated)
@@ -1253,27 +1257,6 @@ pub(crate) fn append_ipc_dogfood_note_for_diagnostic(
         file.display()
     );
     Ok(true)
-}
-
-fn append_ipc_dogfood_note_to_content(content: &str, diagnostic: &str) -> Result<Option<String>> {
-    if content.contains(diagnostic) {
-        return Ok(None);
-    }
-    let components = agent_doc_element::element::parse(content)
-        .context("failed to parse document components")?;
-    let Some(exchange) = components
-        .iter()
-        .find(|component| component.name == "exchange")
-    else {
-        return Ok(None);
-    };
-    let note = agent_doc_workflow::preflight_policy::format_ipc_dogfood_note(diagnostic);
-    let updated = exchange.append_with_caret(content, &note, None);
-    if updated == content {
-        Ok(None)
-    } else {
-        Ok(Some(updated))
-    }
 }
 
 fn enforce_no_uncommitted_closeout_drift(file: &Path, rc: &crate::graph::RunContext) -> Result<()> {
@@ -2813,55 +2796,6 @@ mod tests {
         assert!(diff_result.is_some(), "diff should detect new content");
     }
     #[test]
-    fn ipc_dogfood_note_appends_to_exchange_and_dedupes() {
-        let content = concat!(
-            "---\n",
-            "agent_doc_session: test\n",
-            "---\n\n",
-            "## Exchange\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "### Re: prior - gpt-5\n\n",
-            "Done.\n",
-            "<!-- /agent:exchange -->\n\n",
-            "## Queue\n\n",
-            "<!-- agent:queue -->\n",
-            "- do [#next]\n",
-            "<!-- /agent:queue -->\n",
-        );
-        let diagnostic = "ipc_proof_insufficient file=/tmp/session.md source=socket_ack_content patch_id=abc invariant=live_prompt_drift_after_preflight recovery=visible_repair_required";
-
-        let updated = super::append_ipc_dogfood_note_to_content(content, diagnostic)
-            .unwrap()
-            .expect("expected IPC note to append");
-
-        assert!(updated.contains("IPC proof issue dogfood log"));
-        assert!(updated.contains("Issue class: `ipc_proof_insufficient`"));
-        assert!(updated.contains(diagnostic));
-        assert!(
-            updated.find("IPC proof issue dogfood log").unwrap()
-                < updated.find("<!-- /agent:exchange -->").unwrap(),
-            "note must stay inside agent:exchange"
-        );
-        assert!(
-            updated.contains("- do [#next]\n<!-- /agent:queue -->"),
-            "queue content must be preserved"
-        );
-
-        let second = super::append_ipc_dogfood_note_to_content(&updated, diagnostic).unwrap();
-        assert!(second.is_none(), "same diagnostic should not duplicate");
-    }
-
-    #[test]
-    fn ipc_dogfood_note_noops_without_exchange_component() {
-        let content = "<!-- agent:queue -->\n- do [#next]\n<!-- /agent:queue -->\n";
-        let diagnostic = "ipc_proof_insufficient file=/tmp/session.md source=file_ipc patch_id=- invariant=missing_response recovery=retry_without_disk_write";
-
-        let updated = super::append_ipc_dogfood_note_to_content(content, diagnostic).unwrap();
-
-        assert!(updated.is_none());
-    }
-
-    #[test]
     fn append_latest_ipc_dogfood_note_reads_matching_ops_log_entry() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
@@ -2893,85 +2827,6 @@ mod tests {
         assert!(updated.contains(&diagnostic));
 
         assert!(!super::append_latest_ipc_dogfood_note(&doc).unwrap());
-    }
-
-    /// `#ipcqproof`: an IPC proof diagnostic appended during interrupted-cycle
-    /// recovery must NOT become an unresolved prompt-bearing exchange item. The
-    /// queue-consume `socket_ack_content` ACK mismatch (`live_prompt_drift_after_preflight`)
-    /// and the `missing_response_probe` variant both record a fail-closed
-    /// diagnostic; the appended dogfood note must classify as a binary-authored
-    /// `RecoveryArtifact`, never a user `PromptTarget`, so it does not get
-    /// `❯`-normalized into a prompt-only tail that forces a follow-up cycle.
-    #[test]
-    fn ipc_dogfood_note_is_recovery_artifact_not_prompt_bearing() {
-        let before = concat!(
-            "---\n",
-            "agent_doc_session: test\n",
-            "---\n\n",
-            "## Exchange\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "### Re: prior — gpt-5\n\n",
-            "Done.\n",
-            "<!-- /agent:exchange -->\n\n",
-            "## Queue\n\n",
-            "<!-- agent:queue -->\n",
-            "- do [#next]\n",
-            "<!-- /agent:queue -->\n",
-        );
-
-        let cases = [
-            // socket ACK content mismatch on a queue-consume write.
-            "ipc_proof_insufficient file=/tmp/session.md source=socket_ack_content patch_id=abc invariant=live_prompt_drift_after_preflight recovery=visible_repair_required",
-            // queue-consume patch consumed without the response body present.
-            "ipc_proof_insufficient file=/tmp/session.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write",
-        ];
-
-        for diagnostic in cases {
-            let updated = super::append_ipc_dogfood_note_to_content(before, diagnostic)
-                .unwrap()
-                .expect("expected IPC note to append");
-
-            // The note opens with a `### Re:` heading → RecoveryArtifact.
-            assert!(
-                updated.contains("### Re: IPC proof diagnostic"),
-                "dogfood note must open with a ### Re: heading for {diagnostic}"
-            );
-            // Fail-closed recovery stays on the binary-owned path (no direct disk write).
-            assert!(
-                !diagnostic.contains("direct_write_fallback"),
-                "IPC proof diagnostic must remain fail-closed for {diagnostic}"
-            );
-
-            // Mirrors `first_unstarted_prompt_bearing_change`: classify the diff
-            // the prompt-bearing guard would see.
-            let diff_text = agent_doc_diff::unified_diff_from_contents(before, &updated)
-                .expect("expected a non-empty diff after appending the note");
-            let changes = agent_doc_diff::classify_prompt_bearing_changes(&diff_text);
-            assert!(
-                !changes.iter().any(|c| matches!(
-                    c.kind,
-                    agent_doc_diff::PromptBearingChangeKind::PromptTarget
-                )),
-                "dogfood note must not classify as a PromptTarget for {diagnostic}: {changes:?}"
-            );
-            assert!(
-                changes.iter().any(|c| matches!(
-                    c.kind,
-                    agent_doc_diff::PromptBearingChangeKind::RecoveryArtifact
-                )),
-                "dogfood note must classify as a RecoveryArtifact for {diagnostic}: {changes:?}"
-            );
-            // No `❯` prompt-prefix normalization may be derived from the note.
-            assert!(
-                agent_doc_diff::prompt_prefix_normalization_targets(&diff_text).is_empty(),
-                "dogfood note must not trigger prompt-prefix normalization for {diagnostic}"
-            );
-            // The exchange tail is not left as a prompt-only tail.
-            assert!(
-                agent_doc_turn::exchange_tail::prompt_only_exchange_tail(&updated).is_none(),
-                "dogfood note must not leave a prompt-only exchange tail for {diagnostic}"
-            );
-        }
     }
 
     /// #drained-done-queue-clear: a standalone no-diff preflight that drains a

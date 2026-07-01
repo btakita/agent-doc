@@ -157,6 +157,17 @@ Both done, committed in `resume/`, resumes rebuilt.
 **Skills section** — added a `[skills.livekit]` taxonomy entry (CopilotKit was already registered), so **LiveKit** and **CopilotKit** now both appear in the Skills list, and both are bolded in the tailored `python-realtime` / `arron-fray` profiles.
 
 Rebuilt & verified `BrianTakita-python-realtime.pdf`, `BrianTakita-arron-fray.pdf`, `BrianTakita.pdf`. `BrianTakita-python-realtime.pdf` stays the one to attach for Arron. Nothing sent yet.
+
+Add Lean to the resume. Under lazily and skills.
+
+### Re: Lean added — under lazily (lazily-formal) and Skills — opus-4.8
+
+Done, committed in `resume/`, resumes rebuilt.
+
+- **Under lazily:** the entry now names it — *"…anchored by a shared conformance spec (lazily-spec) and a **Lean 4** formal model (lazily-formal) whose types machine-check that every language binding agrees on the reactive semantics."* (Accurate to the repo: `lazily-formal` is a Lean 4 model whose total, deterministic `send` is a confluence proof across bindings.) Added `Lean`/`formal methods` to that entry's tags.
+- **Under Skills:** added a `[skills.lean]` taxonomy entry, so **Lean** now appears in the Skills list; also bolded in the tailored `python-realtime`/`arron-fray` profiles.
+
+Rebuilt & verified `BrianTakita-python-realtime.pdf`, `BrianTakita-arron-fray.pdf`, `BrianTakita.pdf`. `BrianTakita-python-realtime.pdf` stays the one to attach for Arron. Nothing sent yet.
 <!-- /agent:exchange -->
 
 ## Queue

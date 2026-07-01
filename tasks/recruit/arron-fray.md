@@ -116,6 +116,17 @@ Brian
 
 Both are ready to send. Say the word if you want me to send the message via corky/LinkedIn, or tweak the availability/tone first.
 <!-- agent:boundary:764a2286 -->
+In the resume, highlight Numpy, Pytorch, Msgspec. Mention Numpy, Pytorch, Msgspec in Presence AI job.
+
+### Re: Highlight NumPy / PyTorch / msgspec in Presence AI — opus-4.8
+
+Done, committed in `resume/`, all PDFs rebuilt.
+
+- **Presence AI now names them:** added a bullet — *"Scaled the avatar pipeline with Ray for distributed and real-time parallel compute — orchestrating PyTorch lip-sync inference and NumPy numeric workloads, with msgspec for low-latency message serialization."* (This was already in `data.toml`'s Presence AI accomplishments, so the built resumes had it; I added it to `BrianTakita.md` too so the source template matches.)
+- **Highlighted (bolded):** NumPy, PyTorch, and msgspec added to both the `highlight.phrases` (bolds them in the Presence AI bullet) and the `skills` bold list in `profiles/python-realtime.toml` and `profiles/arron-fray.toml`.
+- **Rebuilt:** `BrianTakita-python-realtime.pdf`, `BrianTakita-arron-fray.pdf`, `BrianTakita.pdf` — verified NumPy/PyTorch/msgspec render (Presence AI + Skills).
+
+`BrianTakita-python-realtime.pdf` remains the one to attach for Arron. Still nothing sent — say the word to send the message or adjust it.
 <!-- /agent:exchange -->
 
 ## Queue

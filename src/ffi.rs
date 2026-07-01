@@ -2095,9 +2095,7 @@ pub unsafe extern "C" fn agent_doc_state_subscribe(
         }
     };
     let json = match state_ledger().lock() {
-        Ok(ledger) => {
-            agent_doc_orchestration::state_wire::subscribe(&ledger, doc_hash, last_epoch).to_json()
-        }
+        Ok(ledger) => agent_doc_state_wire::subscribe(&ledger, doc_hash, last_epoch).to_json(),
         Err(err) => {
             eprintln!("[state-projection] agent_doc_state_subscribe: ledger lock poisoned: {err}");
             "null".to_string()

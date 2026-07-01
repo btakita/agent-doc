@@ -2270,6 +2270,7 @@ fn test_manifest_uses_publishable_dependency_contract() {
         "agent-doc-queue",
         "agent-doc-response-toc-io",
         "agent-doc-state-backbone",
+        "agent-doc-state-wire",
         "agent-doc-template",
         "agent-doc-turn",
         "agent-doc-workflow",
@@ -2414,6 +2415,84 @@ fn test_state_backbone_extraction_stays_first_class_and_facade_free() {
             "{relative_path} must use agent_doc_state_backbone directly"
         );
     }
+}
+
+#[test]
+fn test_state_wire_extraction_stays_first_class_and_facade_free() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let package_version = workspace["package"]["version"].as_str();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-state-wire")),
+        "agent-doc-state-wire must stay a first-class workspace crate"
+    );
+
+    let root_dependencies = workspace["dependencies"].as_table().unwrap();
+    let root_dependency = root_dependencies["agent-doc-state-wire"]
+        .as_table()
+        .unwrap();
+    assert_eq!(
+        root_dependency.get("path").and_then(toml::Value::as_str),
+        Some("agent-doc-state-wire")
+    );
+    assert_eq!(
+        root_dependency.get("version").and_then(toml::Value::as_str),
+        package_version
+    );
+
+    let state_wire_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-state-wire/Cargo.toml")).unwrap();
+    let state_wire: toml::Value = toml::from_str(&state_wire_manifest).unwrap();
+    let state_wire_dependencies = state_wire["dependencies"].as_table().unwrap();
+    assert!(
+        state_wire_dependencies.contains_key("agent-doc-state-backbone"),
+        "state wire must consume the extracted state backbone directly"
+    );
+    for forbidden_dependency in ["agent-doc-orchestration", "agent-doc-workflow"] {
+        assert!(
+            !state_wire_dependencies.contains_key(forbidden_dependency),
+            "state wire must stay free of orchestration/workflow facade dependencies: {forbidden_dependency}"
+        );
+    }
+
+    for removed_module in [
+        "agent-doc-orchestration/src/state_wire.rs",
+        "agent-doc-workflow/src/state_wire.rs",
+    ] {
+        assert!(
+            !manifest_dir.join(removed_module).exists(),
+            "{removed_module} must not remain as a state-wire facade module"
+        );
+    }
+
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod state_wire"),
+        "orchestration must not re-export state_wire as a compatibility facade"
+    );
+    let workflow_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/lib.rs")).unwrap();
+    assert!(
+        !workflow_lib.contains("pub mod state_wire"),
+        "workflow must not re-export state_wire as a compatibility facade"
+    );
+
+    let ffi_source = fs::read_to_string(manifest_dir.join("src/ffi.rs")).unwrap();
+    assert!(
+        ffi_source.contains("agent_doc_state_wire::subscribe"),
+        "FFI subscribe path must call the focused state-wire crate directly"
+    );
+    assert!(
+        !ffi_source.contains("agent_doc_orchestration::state_wire")
+            && !ffi_source.contains("agent_doc_workflow::state_wire"),
+        "FFI subscribe path must not use removed state-wire facades"
+    );
 }
 
 #[test]

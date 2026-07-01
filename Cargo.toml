@@ -51,6 +51,7 @@ members = [
     "agent-doc-workflow",
     "agent-doc-work-graph",
     "agent-doc-state-backbone",
+    "agent-doc-state-wire",
     "agent-doc-turn",
     "agent-doc-turn-executor",
     "agent-doc-turn-executor-tmux",
@@ -131,6 +132,7 @@ agent-doc-secret-redact = { path = "agent-doc-secret-redact", version = "0.34.66
 agent-doc-session-accretion = { path = "agent-doc-session-accretion", version = "0.34.66" }
 agent-doc-sqlite = { path = "agent-doc-sqlite", version = "0.34.66" }
 agent-doc-state-backbone = { path = "agent-doc-state-backbone", version = "0.34.66" }
+agent-doc-state-wire = { path = "agent-doc-state-wire", version = "0.34.66" }
 agent-doc-supervisor = { path = "agent-doc-supervisor", version = "0.34.66" }
 agent-doc-supervisor-io = { path = "agent-doc-supervisor-io", version = "0.34.66" }
 agent-doc-template = { path = "agent-doc-template", version = "0.34.66" }

@@ -26,6 +26,7 @@ pub mod route_submit_inflight;
 pub mod run_loop;
 pub mod selfkill;
 pub mod startup_miss;
+pub mod terminal_filter;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

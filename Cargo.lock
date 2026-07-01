@@ -383,7 +383,9 @@ version = "0.34.66"
 dependencies = [
  "agent-doc-frontmatter",
  "agent-doc-fs",
+ "agent-doc-project-config-io",
  "anyhow",
+ "tempfile",
 ]
 
 [[package]]

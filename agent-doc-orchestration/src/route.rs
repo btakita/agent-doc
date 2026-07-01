@@ -1879,9 +1879,9 @@ pub fn run_with_tmux_with_options(
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     // Opt-in gate: a plain `.md` must not be auto-converted into a session.
-    frontmatter_io::require_agent_doc_document(&content, file)?;
+    agent_doc_frontmatter_io::session::require_agent_doc_document(&content, file)?;
     let (mut updated_content, session_id) =
-        frontmatter_io::ensure_session_for_file(&content, file)?;
+        agent_doc_frontmatter_io::session::ensure_session_for_file(&content, file)?;
     if updated_content != content {
         route_write_document(file, &updated_content, &content, "route_session_id")
             .with_context(|| format!("failed to write {}", file.display()))?;

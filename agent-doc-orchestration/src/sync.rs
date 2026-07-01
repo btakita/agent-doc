@@ -1278,7 +1278,8 @@ fn sync_doctor_repair_candidate(col_args: &[String], focus: Option<&str>) -> Opt
     agent_doc_sync::sync_candidate_files(col_args, focus)
         .into_iter()
         .find_map(|path| {
-            if !path.exists() || frontmatter_io::read_session_id(&path).is_none() {
+            if !path.exists() || agent_doc_frontmatter_io::session::read_session_id(&path).is_none()
+            {
                 return None;
             }
             Some(path.canonicalize().unwrap_or(path))

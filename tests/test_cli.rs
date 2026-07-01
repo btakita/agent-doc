@@ -8796,7 +8796,7 @@ fn test_project_config_io_tmux_helpers_have_no_config_facade() {
         "src/describe_image.rs",
         "src/plan.rs",
         "src/patch.rs",
-        "agent-doc-orchestration/src/frontmatter_io.rs",
+        "agent-doc-frontmatter-io/src/session.rs",
         "agent-doc-orchestration/src/graph.rs",
         "agent-doc-orchestration/src/template_io.rs",
         "agent-doc-orchestration/src/claim.rs",
@@ -9279,6 +9279,8 @@ fn test_agent_doc_frontmatter_owns_session_id_and_document_gate_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-frontmatter/src/project_config.rs"))
             .unwrap();
     let frontmatter_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-frontmatter-io/src/session.rs")).unwrap();
+    let orchestration_frontmatter_io =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/frontmatter_io.rs"))
             .unwrap();
 
@@ -9290,6 +9292,20 @@ fn test_agent_doc_frontmatter_owns_session_id_and_document_gate_policy() {
         project_config_source.contains("pub fn require_agent_doc_document("),
         "agent-doc-frontmatter must own pure document opt-in gate policy"
     );
+    for required in [
+        "pub fn parse_for_file<'a>(content:",
+        "pub fn ensure_session_for_file(",
+        "pub fn read_session_id(",
+        "pub fn is_agent_doc_document_for_file(",
+        "pub fn require_agent_doc_document(",
+        "agent_doc_project_config_io::load_project_for_doc",
+        "agent_doc_project_config_io::project_root_for_doc",
+    ] {
+        assert!(
+            frontmatter_io_source.contains(required),
+            "agent-doc-frontmatter-io should own file/config-backed frontmatter adapter: {required}"
+        );
+    }
     for forbidden in [
         "let (fm, _) = parse(&content)",
         "fm.session",
@@ -9303,7 +9319,26 @@ fn test_agent_doc_frontmatter_owns_session_id_and_document_gate_policy() {
     assert!(
         frontmatter_io_source.contains("session_id_from_content(&content)")
             && frontmatter_io_source.contains("project_config::require_agent_doc_document("),
-        "frontmatter_io should resolve IO inputs then call frontmatter-owned helpers directly"
+        "agent-doc-frontmatter-io should resolve IO inputs then call frontmatter-owned helpers directly"
+    );
+    for forbidden in [
+        "pub fn parse_for_file<'a>(content:",
+        "pub fn ensure_session_for_file(",
+        "pub fn read_session_id(",
+        "pub fn is_agent_doc_document_for_file(",
+        "pub fn require_agent_doc_document(",
+        "agent_doc_project_config_io::load_project_for_doc",
+    ] {
+        assert!(
+            !orchestration_frontmatter_io.contains(forbidden),
+            "orchestration frontmatter_io must not keep a file-backed frontmatter IO facade: {forbidden}"
+        );
+    }
+    assert!(
+        orchestration_frontmatter_io.contains("pub fn parse_for_file_with_context")
+            && orchestration_frontmatter_io
+                .contains("pub fn ensure_session_for_file_with_context("),
+        "orchestration frontmatter_io should only adapt RunContext-backed frontmatter parsing"
     );
 }
 
@@ -11720,6 +11755,12 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "agent-doc-supervisor must own pure startup-miss/session-log policy"
     );
     assert!(
+        manifest_dir
+            .join("agent-doc-supervisor/src/terminal_filter.rs")
+            .exists(),
+        "agent-doc-supervisor must own pure supervisor PTY terminal filtering policy"
+    );
+    assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/start/decisions.rs")
             .exists(),
@@ -11765,8 +11806,14 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/startup_miss.rs")).unwrap();
     let supervisor_idle_watch =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/idle_watch.rs")).unwrap();
+    let supervisor_terminal_filter =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/terminal_filter.rs"))
+            .unwrap();
     let supervisor_io_startup_miss =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/startup_miss.rs"))
+            .unwrap();
+    let supervisor_pty =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/supervisor/pty.rs"))
             .unwrap();
     let orchestration_startup_miss =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/startup_miss.rs"))
@@ -11804,6 +11851,38 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         session_actor_source.contains("use agent_doc_supervisor::{")
             && session_actor_source.contains("infer_latest_generation_from_content(&content)"),
         "session_actor should call focused supervisor lifecycle vocabulary directly"
+    );
+    for required_snippet in [
+        "pub struct TerminalFilterConfig",
+        "pub enum TerminalFilterAction",
+        "pub enum TerminalFilterTraceKind",
+        "pub struct TerminalFilterTrace",
+        "pub struct TerminalFilter",
+        "pub fn filter_with_trace(",
+        "fn kitty_trace_kind(",
+    ] {
+        assert!(
+            supervisor_terminal_filter.contains(required_snippet),
+            "agent-doc-supervisor must own PTY terminal filter policy: {required_snippet}"
+        );
+    }
+    for forbidden_snippet in [
+        "while i < len",
+        "data[i] == 0x1b",
+        "fn kitty_trace_kind(",
+        "fn filter_terminal_queries(",
+        "filter_strips_da1_query",
+        "filter_strips_kitty_keyboard_push",
+    ] {
+        assert!(
+            !supervisor_pty.contains(forbidden_snippet),
+            "supervisor pty adapter must not re-own terminal escape filtering policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        supervisor_pty.contains("TerminalFilter::with_config")
+            && supervisor_pty.contains("log_terminal_filter_trace("),
+        "supervisor pty adapter should configure the focused filter and keep only trace logging effects"
     );
     for required_snippet in [
         "pub fn session_log_status_from_content(",
@@ -12547,10 +12626,24 @@ fn test_agent_doc_supervisor_process_owns_resize_effects() {
     for required in [
         "pub const ROUTE_BIN_ENV: &str = \"AGENT_DOC_ROUTE_BIN\";",
         "pub fn agent_doc_start_bin() -> String",
+        "pub mod start_command;",
     ] {
         assert!(
             supervisor_process.contains(required),
             "agent-doc-supervisor-process should own supervisor start-binary resolution: {required}"
+        );
+    }
+    let supervisor_start_command =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-process/src/start_command.rs"))
+            .unwrap();
+    for required in [
+        "pub fn route_owned_start_command(",
+        "fn shell_quote_arg(",
+        "start --route-owned",
+    ] {
+        assert!(
+            supervisor_start_command.contains(required),
+            "agent-doc-supervisor-process should own route-owned supervisor start command rendering: {required}"
         );
     }
     for (relative, required) in [
@@ -12571,6 +12664,8 @@ fn test_agent_doc_supervisor_process_owns_resize_effects() {
         for forbidden in [
             "fn agent_doc_start_bin(",
             "fn agent_doc_start_bin_for_supervisor_replacement(",
+            "fn supervisor_replacement_start_command(",
+            "fn shell_quote_arg(",
             "std::env::var(\"AGENT_DOC_ROUTE_BIN\")",
             "std::env::current_exe()",
         ] {

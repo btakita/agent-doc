@@ -10,7 +10,7 @@ pub(crate) fn safe_passive_focus_path_and_session(
         return None;
     }
     let focus_path = PathBuf::from(focus);
-    let session_id = frontmatter_io::read_session_id(&focus_path)?;
+    let session_id = agent_doc_frontmatter_io::session::read_session_id(&focus_path)?;
     Some((focus_path, session_id))
 }
 

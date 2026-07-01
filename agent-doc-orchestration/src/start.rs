@@ -344,7 +344,7 @@ fn record_session_startup_miss(
     reason: &str,
 ) {
     let pane = shared.inject_pane.as_deref().unwrap_or("child_pty");
-    let session_id = crate::frontmatter_io::read_session_id(path).unwrap_or_default();
+    let session_id = agent_doc_frontmatter_io::session::read_session_id(path).unwrap_or_default();
     let deadline_secs = AUTO_TRIGGER_TIMEOUT.as_secs();
     match crate::startup_miss::record(
         path,

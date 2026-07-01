@@ -51,7 +51,7 @@ use agent_doc_prompt_context::loaded_context::{
 
 use agent_doc_diff as diff;
 use agent_doc_frontmatter::frontmatter;
-use agent_doc_orchestration::{diff_io, frontmatter_io};
+use agent_doc_orchestration::diff_io;
 use agent_doc_workflow::session_cycle::{
     FinalizePendingMutation, FinalizePendingMutationKind, SessionExecutionScope,
     classify_execution_scope, finalize_command, prompt_targets_from_changes,
@@ -157,7 +157,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
 
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    let (fm, _body) = frontmatter_io::parse_for_file(&content, file)
+    let (fm, _body) = agent_doc_frontmatter_io::session::parse_for_file(&content, file)
         .with_context(|| format!("failed to parse frontmatter in {}", file.display()))?;
 
     let doc_diff = diff_io::compute(file)?;

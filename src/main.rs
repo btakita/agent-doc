@@ -3441,8 +3441,7 @@ fn main() -> anyhow::Result<()> {
                             && target
                                 .as_deref()
                                 .map(|p| {
-                                    agent_doc_orchestration::frontmatter_io::read_session_id(p)
-                                        .is_some()
+                                    agent_doc_frontmatter_io::session::read_session_id(p).is_some()
                                 })
                                 .unwrap_or(false);
                     if json {

@@ -32,7 +32,7 @@ pub fn fire(
 
     let session_id = session_id
         .map(|s| s.to_string())
-        .or_else(|| agent_doc_orchestration::frontmatter_io::read_session_id(file_path))
+        .or_else(|| agent_doc_frontmatter_io::session::read_session_id(file_path))
         .unwrap_or_default();
 
     let data_value: serde_json::Value = data

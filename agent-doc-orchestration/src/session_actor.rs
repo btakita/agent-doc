@@ -110,7 +110,7 @@ fn legacy_generation_for_document(file: &Path, session_id_hint: Option<&str>) ->
     };
     let Some(session_id) = session_id_hint
         .map(ToOwned::to_owned)
-        .or_else(|| crate::frontmatter_io::read_session_id(&canonical))
+        .or_else(|| agent_doc_frontmatter_io::session::read_session_id(&canonical))
     else {
         return Ok(0);
     };

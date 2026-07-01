@@ -343,8 +343,9 @@ pub fn run_with_reap_policy(
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     // Opt-in gate: a plain `.md` must not be auto-converted into a session.
-    frontmatter_io::require_agent_doc_document(&content, file)?;
-    let (updated_content, session_id) = frontmatter_io::ensure_session_for_file(&content, file)?;
+    agent_doc_frontmatter_io::session::require_agent_doc_document(&content, file)?;
+    let (updated_content, session_id) =
+        agent_doc_frontmatter_io::session::ensure_session_for_file(&content, file)?;
     let generated_session_uuid = updated_content != content;
     if updated_content != content {
         std::fs::write(file, &updated_content)

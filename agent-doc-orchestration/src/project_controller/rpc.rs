@@ -4602,7 +4602,10 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
     let tmux = tmux_router::Tmux::default_server();
     if !work.pane_id.trim().is_empty() && tmux.pane_alive(&work.pane_id) {
         let agent_doc_bin = agent_doc_supervisor_process::agent_doc_start_bin();
-        let start_cmd = supervisor_replacement_start_command(&agent_doc_bin, &work.file);
+        let start_cmd = agent_doc_supervisor_process::start_command::route_owned_start_command(
+            &agent_doc_bin,
+            &work.file,
+        );
         agent_doc_tmux_io::input_diag::log_text_submit(
             agent_doc_tmux_io::input_diag::InputDiagSink::new(
                 Some(&work.file),
@@ -4633,27 +4636,6 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
                 work.file.display()
             )
         },
-    )
-}
-
-#[cfg(not(any(test, feature = "test-support")))]
-fn shell_quote_arg(raw: &str) -> String {
-    if !raw.is_empty()
-        && raw
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '_' | '-' | ':' | '+'))
-    {
-        return raw.to_string();
-    }
-    format!("'{}'", raw.replace('\'', "'\\''"))
-}
-
-#[cfg(not(any(test, feature = "test-support")))]
-fn supervisor_replacement_start_command(agent_doc_bin: &str, file: &Path) -> String {
-    format!(
-        "{} start --route-owned {}",
-        shell_quote_arg(agent_doc_bin),
-        shell_quote_arg(&file.to_string_lossy())
     )
 }
 

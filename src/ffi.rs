@@ -817,7 +817,7 @@ pub unsafe extern "C" fn agent_doc_is_session_document(file_path: *const c_char)
         Ok(c) => c,
         Err(_) => return 0,
     };
-    agent_doc_orchestration::frontmatter_io::is_agent_doc_document_for_file(
+    agent_doc_frontmatter_io::session::is_agent_doc_document_for_file(
         &content,
         std::path::Path::new(path),
     ) as i32

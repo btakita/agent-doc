@@ -12,4 +12,8 @@ name = "agent_doc_frontmatter_io"
 [dependencies]
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.66" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.66" }
+agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.34.66" }
 anyhow = "1"
+
+[dev-dependencies]
+tempfile = "3"

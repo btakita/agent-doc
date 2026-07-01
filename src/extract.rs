@@ -39,7 +39,6 @@ use agent_doc_element::element::{self, is_backlog_component, is_icebox_component
 
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_frontmatter_io::security_review::enforce_cross_document_review;
-use agent_doc_orchestration::frontmatter_io;
 use agent_doc_orchestration::{snapshot, write};
 
 /// Check pane ownership for the target file. Returns Ok if no conflict or if
@@ -207,8 +206,10 @@ pub fn run(source: &Path, target: &Path, component_name: Option<&str>) -> Result
         .with_context(|| format!("failed to read {}", source.display()))?;
     let target_content = std::fs::read_to_string(target)
         .with_context(|| format!("failed to read {}", target.display()))?;
-    let (source_fm, _) = frontmatter_io::parse_for_file(&source_content, source)?;
-    let (target_fm, _) = frontmatter_io::parse_for_file(&target_content, target)?;
+    let (source_fm, _) =
+        agent_doc_frontmatter_io::session::parse_for_file(&source_content, source)?;
+    let (target_fm, _) =
+        agent_doc_frontmatter_io::session::parse_for_file(&target_content, target)?;
     enforce_cross_document_review("extract", source, &source_fm, target, Some(&target_fm))?;
 
     let comp_name = component_name.unwrap_or("exchange");
@@ -340,7 +341,8 @@ pub fn transfer(
 
     let source_content = std::fs::read_to_string(source)
         .with_context(|| format!("failed to read {}", source.display()))?;
-    let (source_fm, _) = frontmatter_io::parse_for_file(&source_content, source)?;
+    let (source_fm, _) =
+        agent_doc_frontmatter_io::session::parse_for_file(&source_content, source)?;
 
     let target_existing = if target.exists() {
         Some(
@@ -351,7 +353,7 @@ pub fn transfer(
         None
     };
     let target_fm = if let Some(content) = target_existing.as_ref() {
-        Some(frontmatter_io::parse_for_file(content, target)?.0)
+        Some(agent_doc_frontmatter_io::session::parse_for_file(content, target)?.0)
     } else {
         None
     };

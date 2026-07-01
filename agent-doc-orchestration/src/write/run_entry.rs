@@ -1,7 +1,7 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
-use crate::{frontmatter_io, template_io};
+use crate::template_io;
 use agent_doc_document_realtime::write_policy::{
     snapshot_content_to_persist, snapshot_persist_mode, snapshot_persist_mode_with_current,
 };
@@ -780,7 +780,8 @@ pub fn run_stream(
                     ),
                 );
                 // Fire post_write hook for cross-session coordination
-                let session_id = frontmatter_io::read_session_id(file).unwrap_or_default();
+                let session_id =
+                    agent_doc_frontmatter_io::session::read_session_id(file).unwrap_or_default();
                 crate::hooks::fire_post_write(file, &session_id, patches.len());
                 crate::hooks::fire_doc_event(file, "post_write");
                 drop(doc_lock);

@@ -1298,6 +1298,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     match &commit_status {
         Ok(s) if s.success() => {
             did_commit = true;
+            enforce_committed_single_boundary_invariant(file, &git_root, &resolved);
             crate::ops_log::log_cycle(file, "commit", None, None);
             crate::ops_log::log_op(file, &format!("commit_success file={}", file.display()));
             crate::flow::proof::log_flow_event(
@@ -1365,7 +1366,8 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                 }
             }
             // Fire post_commit hook for cross-session coordination
-            let session_id = crate::frontmatter_io::read_session_id(file).unwrap_or_default();
+            let session_id =
+                agent_doc_frontmatter_io::session::read_session_id(file).unwrap_or_default();
             crate::hooks::fire_post_commit(file, &session_id);
             crate::hooks::fire_doc_event(file, "post_commit");
         }
@@ -1611,19 +1613,28 @@ fn strip_guard_markers_from_disk(file: &Path) {
 ///
 /// Returns true if the snapshot OR working tree content changed.
 fn reposition_boundary_in_snapshot(file: &Path) -> bool {
-    // Check for active run — don't reposition if a run is in progress.
-    // The in-flight `agent-doc write` owns the transition via IPC.
-    if let Ok(canonical) = file.canonicalize()
-        && let Ok(pending_path) = agent_doc_fs::pending_response_path_for(&canonical)
-        && pending_path.exists()
-    {
-        eprintln!("[commit] skipping boundary reposition — active run detected");
-        return false;
-    }
+    // An in-flight `agent-doc write` owns the *working-tree/editor* transition
+    // via IPC — but the binary-owned snapshot/staged blob is never raced by the
+    // editor (git stages a snapshot, not the live file). So the active-run guard
+    // must scope ONLY the disk/working-tree rewrite below; the snapshot collapse
+    // that follows runs unconditionally. Previously this early-returned before
+    // the snapshot collapse too, so a wedged finalize (leftover pending-response
+    // file) that landed via a direct commit skipped the collapse and accreted
+    // one boundary per cycle (#boundaryaccum1).
+    let active_run = file
+        .canonicalize()
+        .ok()
+        .and_then(|canonical| agent_doc_fs::pending_response_path_for(&canonical).ok())
+        .map(|pending_path| pending_path.exists())
+        .unwrap_or(false);
 
     let mut changed = false;
 
     // Reposition the snapshot to the same clean shape we stage into git.
+    // ALWAYS runs — the snapshot is a binary-owned artifact that never races the
+    // live editor buffer, so collapsing it to exactly one boundary here is the
+    // invariant-enforcement point regardless of which write path delivered the
+    // response (finalize, wedged direct commit, or sweep commit).
     if let Ok(Some(snap_content)) = crate::snapshot::load(file) {
         let prompt_canonicalized = canonicalize_answered_prompt_prefixes(&snap_content);
         let new_snap = agent_doc_template::reposition_boundary_to_end_clean(&prompt_canonicalized);
@@ -1641,6 +1652,15 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
                 }
             }
         }
+    }
+
+    // Working-tree/editor rewrite. Skipped during an active run — the in-flight
+    // `agent-doc write` owns the disk/editor transition via IPC. The snapshot
+    // collapse above already ran, so the staged/committed blob is single-boundary
+    // regardless; only the live disk file is deferred here.
+    if active_run {
+        eprintln!("[commit] skipping working-tree boundary reposition — active run detected");
+        return changed;
     }
 
     // Reposition in the working tree unless a live IDE listener is available.
@@ -1746,6 +1766,76 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
     }
 
     changed
+}
+
+/// Enforce the single-boundary invariant on the just-committed HEAD artifact
+/// (#boundaryaccum1). The pre-stage snapshot collapse in
+/// `reposition_boundary_in_snapshot` should already guarantee this, but a
+/// previously-accreted blob (committed before this fix, or any future
+/// regression) is caught here and self-healed with a binary-owned follow-up
+/// collapse commit. This never races the live editor — it re-collapses the
+/// committed content, which is a binary-owned artifact, not the editor buffer.
+fn enforce_committed_single_boundary_invariant(file: &Path, git_root: &Path, resolved: &Path) {
+    let Ok(Some(head_blob)) = crate::git::show_head(file) else {
+        return;
+    };
+    let boundary_count = head_blob
+        .matches(agent_doc_element_boundary::boundary::BOUNDARY_PREFIX)
+        .count();
+    if boundary_count <= 1 {
+        return;
+    }
+    eprintln!(
+        "[commit] boundary_invariant_violation: committed HEAD carries {} agent:boundary markers (expected 1) — self-healing collapse",
+        boundary_count
+    );
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "boundary_invariant_violation phase=post_commit file={} committed_boundaries={}",
+            file.display(),
+            boundary_count
+        ),
+    );
+    let collapsed = agent_doc_template::reposition_boundary_to_end_clean(&head_blob);
+    let collapsed_count = collapsed
+        .matches(agent_doc_element_boundary::boundary::BOUNDARY_PREFIX)
+        .count();
+    if collapsed == head_blob || collapsed_count > 1 {
+        eprintln!(
+            "[commit] boundary_invariant self-heal could not reduce to a single boundary (still {}); leaving for next cycle",
+            collapsed_count
+        );
+        return;
+    }
+    // Keep the snapshot aligned with the collapsed blob so the next preflight
+    // does not observe snapshot/HEAD drift.
+    if let Err(e) = crate::snapshot::save(file, &collapsed) {
+        eprintln!(
+            "[commit] boundary_invariant self-heal snapshot save failed: {} (non-fatal)",
+            e
+        );
+    }
+    match stage_and_commit_once(
+        git_root,
+        resolved,
+        Some(collapsed.as_str()),
+        "agent-doc: collapse accreted agent:boundary markers (#boundaryaccum1)",
+    ) {
+        Ok(_) => {
+            eprintln!("[commit] boundary_invariant self-heal collapse committed");
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "boundary_invariant_selfheal_committed file={}",
+                    file.display()
+                ),
+            );
+        }
+        Err(_) => {
+            eprintln!("[commit] boundary_invariant self-heal collapse failed (non-fatal)");
+        }
+    }
 }
 
 fn document_uses_crdt(content: &str) -> bool {

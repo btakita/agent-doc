@@ -544,7 +544,7 @@ fn explicit_backlog_target_requirements(
             None
         };
         let target_frontmatter = if let Some(content) = target_existing.as_ref() {
-            Some(frontmatter_io::parse_for_file(content, target)?.0)
+            Some(agent_doc_frontmatter_io::session::parse_for_file(content, target)?.0)
         } else {
             None
         };

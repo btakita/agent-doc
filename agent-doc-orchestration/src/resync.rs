@@ -107,7 +107,6 @@ use agent_doc_tmux::{
 };
 use tmux_router::{PaneMoveOp, Tmux};
 
-use crate::frontmatter_io;
 use agent_doc_project_config_io as project_config_io;
 
 const PROCESS_GRACE_SAMPLES: usize = 4;
@@ -383,7 +382,7 @@ fn recover_target_document_pane_in(
     target: &Path,
     base_dir: &Path,
 ) -> Result<TargetDocumentFixOutcome> {
-    let Some(session_id) = frontmatter_io::read_session_id(target) else {
+    let Some(session_id) = agent_doc_frontmatter_io::session::read_session_id(target) else {
         return Ok(TargetDocumentFixOutcome::default());
     };
 
@@ -805,7 +804,8 @@ fn registered_pane_still_owns_file(tmux: &Tmux, key: &str, file: &str, pane: &st
         return false;
     }
     let file_path = std::path::Path::new(file);
-    let session_id = frontmatter_io::read_session_id(file_path).unwrap_or_else(|| key.to_string());
+    let session_id = agent_doc_frontmatter_io::session::read_session_id(file_path)
+        .unwrap_or_else(|| key.to_string());
     crate::sync::find_live_owner_pane(tmux, file_path, &session_id).as_deref() == Some(pane)
 }
 
@@ -999,7 +999,7 @@ fn refresh_target_no_live_owner_registry_entry(
         entry.file = matcher.registry_file_for_target();
     }
     if entry.session_id.is_empty()
-        && let Some(session_id) = frontmatter_io::read_session_id(scope.target)
+        && let Some(session_id) = agent_doc_frontmatter_io::session::read_session_id(scope.target)
     {
         entry.session_id = session_id;
     }

@@ -1,7 +1,6 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
-use crate::frontmatter_io;
 use agent_doc_document::singleton_repair::repair_duplicate_singleton_components;
 use agent_doc_document_realtime::write_policy::{
     WholeBufferAuthority, WholeBufferAuthorityFacts, WholeBufferDelivery,
@@ -85,7 +84,7 @@ pub(crate) fn cleanup_legacy_ipc_degraded(project_root: &Path) {
 pub(crate) const IPC_DEWEDGE_TIMEOUT_THRESHOLD: u64 = 2;
 
 pub(crate) fn ipc_dewedge_session_id(file: &Path) -> String {
-    frontmatter_io::read_session_id(file).unwrap_or_else(|| "-".to_string())
+    agent_doc_frontmatter_io::session::read_session_id(file).unwrap_or_else(|| "-".to_string())
 }
 
 pub(crate) fn ipc_dewedge_marker_path(project_root: &Path, file: &Path) -> Result<PathBuf> {

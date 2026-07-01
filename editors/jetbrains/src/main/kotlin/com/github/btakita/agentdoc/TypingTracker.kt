@@ -124,26 +124,41 @@ object TypingTracker : DocumentListener {
         val vFile = FileDocumentManager.getInstance().getFile(event.document) ?: return
         if (!vFile.name.endsWith(".md")) return
         val filePath = vFile.path
-        lastChangeMs = System.currentTimeMillis()
+
+        // #falsetyping: a remote CRDT-replica apply is NOT operator typing. Marking
+        // the typing indicator for it makes the CLI idle-guard
+        // (`guard_visible_write_idle`) see "typing active" for as long as the
+        // realtime replica keeps reconciling the buffer from other replicas, so
+        // finalize/write defer forever with "retry after typing stops" even though
+        // nobody is typing. Record the pending op and report the live-buffer
+        // content (the buffer genuinely changed), but do NOT bump the typing
+        // indicator / `lastChangeMs` for a programmatic remote apply — mirror the
+        // suppression `CrdtReplicaManager`'s own DocumentListener already applies.
+        val remoteCrdtApply = CrdtReplicaManager.isApplyingRemote(filePath)
+        if (!remoteCrdtApply) {
+            lastChangeMs = System.currentTimeMillis()
+        }
 
         val lib = AgentDocLib.get()
         if (lib != null) {
-            try {
-                lib.agent_doc_document_changed(filePath)
-            } catch (_: UnsatisfiedLinkError) {
-                // older cdylib without the lightweight marker; fall back to local debounce
-            } catch (_: NoSuchMethodError) {
-                // older cdylib without the lightweight marker; fall back to local debounce
+            if (!remoteCrdtApply) {
+                try {
+                    lib.agent_doc_document_changed(filePath)
+                } catch (_: UnsatisfiedLinkError) {
+                    // older cdylib without the lightweight marker; fall back to local debounce
+                } catch (_: NoSuchMethodError) {
+                    // older cdylib without the lightweight marker; fall back to local debounce
+                }
             }
             val op = PendingEditorOp(
                 offset = event.offset,
                 oldFragment = event.oldFragment.toString(),
                 newFragment = event.newFragment.toString(),
-                remoteCrdtApply = CrdtReplicaManager.isApplyingRemote(filePath),
+                remoteCrdtApply = remoteCrdtApply,
             )
             recordPendingEditorOp(filePath, op)
             scheduleFullContentReport(lib, filePath, event.document)
-            LOG.debug("[native] document_changed queued content report: ${vFile.name}")
+            LOG.debug("[native] document_changed queued content report: ${vFile.name} (remoteCrdtApply=$remoteCrdtApply)")
         } else {
             LOG.debug("[fallback] document_changed: ${vFile.name}")
         }

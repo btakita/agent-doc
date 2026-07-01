@@ -4025,6 +4025,58 @@ Duplicate replay should stay live.
         );
     }
     #[test]
+    fn reposition_collapses_snapshot_boundaries_even_during_active_run() {
+        // Regression for #boundaryaccum1: a wedged finalize leaves a
+        // pending-response file on disk, and the response lands via a direct
+        // commit. The active-run guard must scope ONLY the working-tree rewrite
+        // — the binary-owned snapshot collapse must still run, so the
+        // staged/committed blob always carries exactly one boundary and a
+        // boundary can no longer accrete per wedged cycle.
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        init_repo(root);
+
+        let doc = root.join("session.md");
+        // Snapshot carries THREE scattered stale boundaries, as a wedged
+        // multi-cycle drain would leave them.
+        let multi = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange -->\n\
+            ### Re: one\nbody one\n\
+            <!-- agent:boundary:aaa111 -->\n\
+            ### Re: two\nbody two\n\
+            <!-- agent:boundary:bbb222 -->\n\
+            User prompt.\n\
+            <!-- agent:boundary:ccc333 -->\n\
+            <!-- /agent:exchange -->\n";
+        fs::write(&doc, multi).unwrap();
+        let snap_path = agent_doc_fs::snapshot_path_for(&doc).unwrap();
+        let snap_abs = root.join(&snap_path);
+        fs::create_dir_all(snap_abs.parent().unwrap()).unwrap();
+        fs::write(&snap_abs, multi).unwrap();
+
+        // Simulate an ACTIVE RUN: a leftover pending-response file makes the
+        // active-run guard fire (previously this early-returned, skipping the
+        // snapshot collapse entirely).
+        let canonical = doc.canonicalize().unwrap();
+        let pending = agent_doc_fs::pending_response_path_for(&canonical).unwrap();
+        if let Some(parent) = pending.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(&pending, "in-flight").unwrap();
+
+        reposition_boundary_in_snapshot(&doc);
+
+        let snap = crate::snapshot::load(&doc).unwrap().unwrap();
+        let count = snap
+            .matches(agent_doc_element_boundary::boundary::BOUNDARY_PREFIX)
+            .count();
+        assert_eq!(
+            count, 1,
+            "snapshot must collapse to exactly one boundary even during an active run; got {count}:\n{snap}"
+        );
+    }
+    #[test]
     fn commit_skips_ignored_untracked_path() {
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();

@@ -52,10 +52,8 @@ The plan's core convergence already shipped on main, but this fresh pre-run repr
 I did **not** attempt the merge fix inline: root-causing + fixing the reconcile is a focused cycle (live-CRDT / two-writer, needs `make tmux-ci` across live panes) per the existing plan. And I deliberately did **not** hand-edit this doc's duplicate heads — a direct queue edit is precisely what re-triggers the churn, so that cleanup belongs to the fix, not a manual patch.
 
 Next step (the focused cycle): instrument the maintenance reconcile to log which operator-added heads it keeps vs reverts, confirm the exact drop point, then make the reconcile replay ALL journaled operator adds (not just the first) — or fail closed with a recoverable artifact instead of silently reverting.
-<!-- agent:boundary:d0dd7c4e -->
 When the user adds/removes `go` on the `agent:queue`, or changes the `queue: ` value in the frontmatter, the realtime system should sync the values of the `agent:queue` and `queue: ` to the user edit in the realtime system.
 
-<!-- agent:boundary:qactsync1 -->
 
 ### Re: Realtime sync of `go` marker ↔ `queue:` frontmatter — opus-4-8
 
@@ -71,7 +69,6 @@ Filed as focused-cycle item **#qactsync** with a plan (`tasks/agent-doc/plan-que
 
 When I type in a free text prompt, the work on it should begin immediately. If the agent thinks it requires a dedicated session, then run `/clear` or PCP restart and run the work.
 
-<!-- agent:boundary:ftimm0001 -->
 
 ### Re: Free-text prompts should begin work immediately (auto `/clear` or PCP restart if a dedicated session is needed) — opus-4-8
 
@@ -80,6 +77,24 @@ Agreed, and that's the intended contract. A free-text prompt (queue head or exch
 I've filed **#ftimmediate** to close that gap: a free-text prompt begins work immediately; if the agent determines it needs a dedicated/fresh session (high accretion or focused-cycle scope), it should auto `/clear` or request a PCP restart and *run* the work — not park it as an operator-gated defer.
 
 Two honesty notes on this cycle: the live JB editor IPC churned (`live_prompt_drift_after_preflight` + duplicate-prompt in the ack buffer) because of a **mid-session binary mismatch** — I installed my controller-state fix earlier, and a concurrent session has since landed newer refactors (`d34b622e`), so the running editor/cdylib is stale relative to my finalize client (the `stale_install` warning). That wedged `finalize`, so I landed both responses via a direct commit. To stabilize the editor, recycle it onto the current binary (`make install` in `src/agent-doc` + `agent-doc admin recycle`) or restart the JB session. I also set `queue: stop` to halt the auto-loop while we work these queue bugs.
+
+❯ `agent:boundary` tags are scattered in this document.
+
+### Re: `agent:boundary` tags are scattered in this document — opus-4-8
+
+Confirmed, and it's a real bug — not cosmetic. The invariant is **exactly one** `<!-- agent:boundary:… -->` marker, at the end of `agent:exchange` (the `ffi.rs` boundary tests assert `count == 1`; `template.rs` documents `reposition_boundary_removes_stale`: "multiple stale boundaries are reduced to exactly one"). This document has **three**, mid-component, in both HEAD and the snapshot: `d0dd7c4e`, `qactsync1`, `ftimm0001` — one left behind per recent cycle.
+
+**Root cause.** `reposition_boundary_in_snapshot` (`git.rs:1613`) is the canonical collapse (strip all, insert one fresh at end), but it *hands ownership away* under two guards:
+
+1. **Active-run guard** — if a `finalize`/`write` is in flight, it returns early: "the IPC path owns the transition." The pre-staging collapse (`git.rs:1189`) is the same function, so during a finalize-driven commit the collapse is expected to happen inside finalize's apply_patches pre-patch, not in git.rs.
+2. **IPC-listener guard** — the working-tree rewrite is skipped when a live IDE listener is present, delegating to a post-commit IPC reposition signal the plugin applies.
+
+The chain that stranded three: over the last cycles the JB plugin was **stale** (`stale_install`) and finalize **wedged** on editor-IPC churn, so — as your own notes in those responses record — the responses "landed via a direct commit." The finalize path that owned the transition never delivered the collapse, the stale plugin never applied the IPC reposition signal, and git.rs's own collapse was skipped by the active-run guard. Nothing re-enforced the invariant on the binary's own committed blob, so a boundary accreted per wedged cycle.
+
+**Fix direction** (filed as **#boundaryaccum1**, focused-cycle, plan `tasks/agent-doc/plan-boundary-accumulation-committed-blob.md`): the staged git blob and snapshot are *binary-owned* artifacts — collapsing their boundaries never races the live editor buffer (git stages a snapshot, not the live file), so the single-boundary collapse should run there **unconditionally**, with the active-run and listener guards scoped only to the working-tree disk rewrite that actually races the editor. Plus a post-commit invariant check that reconciles or fails loudly if HEAD ever carries >1 boundary, and promotion of the two aspirational template invariants to real regressions + a SimWorld case (N wedged-finalize→direct-commit cycles never leave >1 boundary in HEAD). It composes with `#fullboundary` (which reduces the wedge trigger) rather than replacing it.
+
+I did **not** hand-strip the markers or `make install`/recycle inline: the binary is stale relative to source and you've halted the queue to work these bugs, so a mid-session install would just re-trigger `live_prompt_drift`. This cycle's `finalize` runs the normal apply_patches pre-patch (strip-all + insert-one), so committing this response should itself collapse the three back to one — the immediate observable fix — and #boundaryaccum1 makes it stay that way regardless of write path.
+<!-- agent:boundary:a02a6cd7 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -133,6 +148,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#boundaryaccum1] [focused-cycle] #agent-doc-bug Scattered agent:boundary markers accumulate in committed content (3 in this doc: d0dd7c4e, qactsync1, ftimm0001) — violates the exactly-one-boundary invariant. Root cause: reposition_boundary_in_snapshot (git.rs:1613) hands the collapse to the finalize/IPC path via the active-run guard AND delegates the working-tree rewrite to the IDE plugin via the IPC-listener guard; when finalize wedges on stale_install and the response lands via direct commit (and the stale plugin never applies the IPC reposition signal), nothing re-enforces the single-boundary invariant on the binary's own staged/committed blob, so one boundary accretes per wedged cycle. Fix: always collapse boundaries in the binary-owned snapshot/staged blob independent of the guards (git stages a snapshot, not the live editor buffer, so it never races user text) and scope the guards to the working-tree disk rewrite only; add a post-commit invariant check that reconciles or fails loudly if HEAD carries >1 boundary; promote the aspirational reposition_boundary_removes_stale/apply_patches_boundary_invariant tests to real regressions + SimWorld coverage for N wedged-finalize→direct-commit cycles. Distinct from #fullboundary (convergence gate reduces the wedge trigger; this makes the invariant self-healing regardless of write path). Plan: tasks/agent-doc/plan-boundary-accumulation-committed-blob.md
 - [ ] [#qactsync] [focused-cycle] #agent-doc-feature Bidirectional realtime sync of queue-activation state: when the operator adds/removes go on agent:queue OR changes the queue: frontmatter value, the realtime system converges BOTH representations to the operator edit (operator-authoritative, never revert). Today explicit_queue_go_mode reads both but they are not synced, so halting needs editing both (go-marker churn). Define a canonical QueueActivation state + edit-provenance propagation; deterministic on two-sided conflict; fixed-point on synced input. SimWorld both directions + conflict; make tmux-ci + live editor proof. Plan: tasks/agent-doc/plan-queue-activation-state-sync.md
 - [ ] [#ftimmediate] #agent-doc-feature Free-text prompts begin work immediately: a free-text exchange/queue prompt is an executable directive that should start work at once; if the agent determines a dedicated/fresh session is needed (high accretion or focused-cycle scope), it should auto /clear or request a PCP restart and RUN the work, not park it as an operator-gated defer. Tighten the #drain-no-defer / #qfocsup boundary so focused-cycle free-text prompts get run-after-clear rather than left for the operator.
 - [ ] [#qeditrace] [focused-cycle] #agent-doc-bug Pre-run queue edits partially reverted: when the operator adds multiple queue heads before a run (or JB Run Agent Doc) with no active turn, only the FIRST added head survives and the rest revert to the pre-edit queue. Distinct from the during-turn race - the preflight queue-maintenance reconcile drops all-but-first operator addition. Investigate preflight/maintenance.rs: queue_journal record + record_live_buffer (#qftloss mode-6), #mirrorall backlog-to-queue mirror, #rz3a freshly-added hold-out, #7r2s manual-add pin, #qdedupsync dedup - hypothesis is convergence keeps the first new head (pin/anchor match) but journals-without-replaying the rest. Repro 2026-07-01 reitrades.md; live dup heads in bugs2 (do #tmuxsynccrashlog x2, do #60ev x2). Add SimWorld coverage for multi-line pre-run operator-add survival + fail-closed recoverable artifact. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md

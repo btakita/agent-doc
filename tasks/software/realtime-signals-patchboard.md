@@ -629,7 +629,16 @@ safe sandbox.
 
 This idea aligns with existing assets:
 
-- `lazily-*`: reactive computation substrate
+- `lazily-rs` / `lazily-dart` / `lazily-js`: the reactive computation substrate,
+  now real across three conforming runtimes — Rust (native/server), Dart
+  (Flutter: iOS, Android, desktop, web), and JavaScript (browser/editor) — all
+  sharing the `lazily-spec` wire protocol and Harel state-chart semantics
+- `signal-space`: the shared graph / timeline / inspector / intent surface that
+  sits on top of lazily; every product projects its runtime state into this
+  shape and validates mutations through its own authority boundary
+- `patchboard` (`btakita/patchboard`): the first product adapter over
+  signal-space — a Rust spike with one logistic learnable mixer, deterministic
+  gates, advisory agent triggers, timeline labels, and gated promote/rollback
 - `agent-doc`: git-native session interface, audit, promotion review, human-agent
   co-editing
 - `tsift`: bounded evidence packets, code/session graph context, digesting noisy
@@ -778,6 +787,22 @@ Why it is a good wedge:
 - Promotion ledger
 - Connector adapters
 
+The reactive graph runtime is `lazily`, now available across three conforming
+implementations, so one patchboard design runs on every frontend:
+
+| Runtime | Frontends | Role |
+|---------|-----------|------|
+| `lazily-rs` | native, server, CLI | reference implementation; backs the first patchboard adapter; heavy replay and batch training |
+| `lazily-dart` | Flutter (iOS, Android, desktop, web) | mobile and cross-platform UI runtime; pure Dart, no native binaries |
+| `lazily-js` | browser, editor extensions | web / dashboard / live-mode UI runtime |
+
+All three share `lazily-spec` (the wire protocol and state-chart behavior) and
+project through `signal-space`, so a patchboard's graph, timeline, inspectors,
+decisions, and intents mean the same thing on every device. The product stays
+local-first: raw signals stay on-device when possible, and only derived
+features, decisions, labels, and model metadata sync across runtimes when the
+user opts in.
+
 ### Model Options
 
 Start with simple models:
@@ -893,8 +918,6 @@ The clearest descriptive name is probably **Signal Loops**.
   detector?
 - What is the minimum connector set for the first wedge?
 - Can topology and promotion history live cleanly inside agent-doc documents?
-- Should the patchboard runtime be built on lazily-rs first, or prototyped in a
-  faster web stack before hardening?
 - What is the best visual language for typed realtime streams?
 - How much model detail should be hidden by default?
 - What is the right local/cloud boundary for connectors and model training?

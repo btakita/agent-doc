@@ -99,8 +99,7 @@ pub fn supervisor_recycle_action(
         return SupervisorRecycleAction::None;
     }
 
-    let cycle_wedged_on_stale_binary = stale && (explicit_admin || write_wedged || reexec_failed);
-    if cycle_open && !cycle_wedged_on_stale_binary {
+    if cycle_open {
         return SupervisorRecycleAction::DeferCycleOpen;
     }
 
@@ -205,7 +204,7 @@ mod tests {
     }
 
     #[test]
-    fn recycle_defers_while_cycle_open_unless_stale_cycle_is_wedged() {
+    fn recycle_defers_all_recycle_arms_while_cycle_open() {
         use SupervisorRecycleAction::*;
 
         assert_eq!(
@@ -218,14 +217,27 @@ mod tests {
         );
         assert_eq!(
             supervisor_recycle_action(true, false, true, false, true, false, false, true),
-            RecycleImmediate
+            DeferCycleOpen
         );
         assert_eq!(
             supervisor_recycle_action(true, false, true, false, false, true, false, true),
-            RecycleImmediate
+            DeferCycleOpen
         );
         assert_eq!(
             supervisor_recycle_action(true, true, true, true, false, false, true, true),
+            DeferCycleOpen
+        );
+
+        assert_eq!(
+            supervisor_recycle_action(true, false, true, false, true, false, false, false),
+            RecycleImmediate
+        );
+        assert_eq!(
+            supervisor_recycle_action(true, false, true, false, false, true, false, false),
+            RecycleImmediate
+        );
+        assert_eq!(
+            supervisor_recycle_action(true, true, true, true, false, false, true, false),
             EscalateKillRelaunch
         );
     }

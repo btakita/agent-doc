@@ -1210,15 +1210,10 @@ impl SimWorld {
             _ => {}
         }
 
-        // (3) Recycle policy. The operator `admin recycle` mark forces a recycle at
-        // the next idle boundary regardless of staleness; the auto path uses the
-        // production `supervisor_recycle_action` predicate (stale binary + opt-in).
-        // `explicit_admin=false` here: this model keeps the operator `admin recycle`
-        // mark as the separate `operator_recycle_marked` OR below (it forces a recycle
-        // regardless of staleness), so the policy predicate runs the auto path only.
-        // The `#supselfheal` Phase 1 explicit-admin override is unit-tested in
-        // `decisions.rs`; its SimWorld integration lands with the admin→supervisor IPC
-        // adapter (`#supselfheal-adminwire`).
+        // (3) Recycle policy. The operator `admin recycle` mark feeds the production
+        // `supervisor_recycle_action` predicate as `explicit_admin`, so it inherits
+        // the same cycle-open deferral and bounded escalation behavior as auto,
+        // write-wedged, and failed-reexec recycle arms.
         // `#midturn-recycle-resume` Phase B: track the consecutive cycle-open recycle
         // deferrals at a turn boundary and ESCALATE past `MAX_CYCLE_OPEN_DEFER_TICKS`,
         // forcing the recycle so a never-closing / wedged cycle cannot starve the
@@ -1257,7 +1252,7 @@ impl SimWorld {
             self.recycle_clear.auto_recycle,
             turn_boundary,
             head_pending,
-            false,
+            self.recycle_clear.operator_recycle_marked,
             self.recycle_clear.write_wedged,
             self.recycle_clear.reexec_failed,
             // `#midturn-recycle-resume`: an open agent-doc cycle defers the recycle so
@@ -1313,10 +1308,7 @@ impl SimWorld {
         // `#suprecyclestall`: once a self-`execve` recycle has failed the watch
         // disables further attempts and runs on the current binary, so a hopeless
         // recycle is not re-tried every idle boundary.
-        if turn_boundary
-            && !self.recycle_clear.recycle_disabled
-            && (self.recycle_clear.operator_recycle_marked || auto_recycle_now)
-        {
+        if turn_boundary && !self.recycle_clear.recycle_disabled && auto_recycle_now {
             self.recycle_clear.operator_recycle_marked = false;
             if self.recycle_clear.reexec_will_fail {
                 // `supervisor_perform_reexec` returned Err. The watch logs, surfaces

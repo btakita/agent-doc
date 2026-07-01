@@ -3234,6 +3234,49 @@ fn open_agent_doc_cycle_defers_self_recycle_until_finalize_commits() {
 }
 
 #[test]
+fn operator_recycle_mark_defers_while_agent_doc_cycle_open() {
+    // `#midturn-recycle-resume`: an explicit operator/admin recycle is still a
+    // recycle arm. While a preflight->finalize cycle is open, it must remain pending
+    // instead of bypassing the policy and execve-ing through the live checkpoint.
+    let mut world = SimWorld::new(8_202);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+
+    let gen_before = world.route.durable.generation;
+
+    world.apply(SimCommand::MarkSupervisorBinaryStale).unwrap();
+    world.apply(SimCommand::OperatorRecycleMark).unwrap();
+    world.apply(SimCommand::SetAgentDocCycleOpen(true)).unwrap();
+
+    for tick in 1..=3 {
+        world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+        assert_eq!(
+            world.coverage.supervisor_recycles, 0,
+            "operator recycle must defer while the agent-doc cycle is open (tick {tick})"
+        );
+        assert!(
+            world.recycle_clear.operator_recycle_marked,
+            "the operator recycle mark stays pending while deferred"
+        );
+    }
+
+    world
+        .apply(SimCommand::SetAgentDocCycleOpen(false))
+        .unwrap();
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+
+    assert_eq!(
+        world.coverage.supervisor_recycles, 1,
+        "the pending operator recycle fires after the cycle commits"
+    );
+    assert!(
+        !world.recycle_clear.operator_recycle_marked,
+        "the operator recycle mark is consumed only by an actual recycle"
+    );
+    assert_eq!(world.route.durable.generation, gen_before + 1);
+}
+
+#[test]
 fn never_closing_cycle_escalates_recycle_then_boot_redispatches_interrupted_turn() {
     // `#midturn-recycle-resume` Phase B: Phase A defers a stale-binary self-recycle
     // while a cycle is open, but a cycle that NEVER closes (a wedged finalize, a
@@ -3339,6 +3382,47 @@ fn recycle_boot_with_surviving_child_adopts_without_redispatch() {
     assert_eq!(
         world.coverage.recycle_resume_redispatches, 0,
         "a surviving child must NOT trigger a re-dispatch (no double-run)"
+    );
+}
+
+#[test]
+fn write_wedged_recycle_defers_while_agent_doc_cycle_open() {
+    // `#supselfheal` + `#midturn-recycle-resume`: the write-wedge recycle trigger is
+    // allowed to override an auto-recycle opt-out, but not the live-cycle interlock.
+    let mut world = SimWorld::new(8_203);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world
+        .apply(SimCommand::DisableSupervisorAutoRecycle)
+        .unwrap();
+
+    world.apply(SimCommand::MarkSupervisorBinaryStale).unwrap();
+    world.apply(SimCommand::MarkWriteWedged).unwrap();
+    world.apply(SimCommand::SetAgentDocCycleOpen(true)).unwrap();
+
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(
+        world.coverage.supervisor_recycles, 0,
+        "write-wedge recycle must defer while the agent-doc cycle is open"
+    );
+    assert!(
+        world.recycle_clear.write_wedged,
+        "the wedge latch stays pending while the recycle is deferred"
+    );
+
+    world
+        .apply(SimCommand::SetAgentDocCycleOpen(false))
+        .unwrap();
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+
+    assert_eq!(
+        world.coverage.wedge_triggered_recycles, 1,
+        "the write-wedge trigger fires after the cycle commits"
+    );
+    assert_eq!(world.coverage.supervisor_recycles, 1);
+    assert!(
+        !world.recycle_clear.write_wedged,
+        "the successful recycle clears the wedge latch"
     );
 }
 

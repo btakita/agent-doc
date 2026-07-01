@@ -31,26 +31,12 @@
 //! removes anything, and a missing/unreadable/unwritable journal degrades to a
 //! no-op (logged, never fatal) so a journal hiccup cannot wedge a session.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use agent_doc_queue::queue_journal as queue_journal_policy;
 use agent_doc_queue::queue_journal::QueueJournalEntry;
+use agent_doc_queue_io::queue_journal::queue_journal_path;
 use anyhow::Result;
-
-/// Directory (relative to the project root) holding per-document queue journals.
-/// Mirrors the sibling `.agent-doc/drain-owner` / `.agent-doc/live-buffer`
-/// sidecar layout.
-const QUEUE_JOURNAL_DIR: &str = ".agent-doc/queue-journal";
-
-/// Resolve the journal path for `file`, or `None` when the project root cannot be
-/// resolved (no `.agent-doc` ancestor). Best-effort: callers treat `None` as
-/// "no journal" rather than an error.
-fn journal_path(file: &Path) -> Option<PathBuf> {
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let root = agent_doc_fs::find_project_root(&canonical)?;
-    let hash = agent_doc_fs::document_state_hash(&canonical).ok()?;
-    Some(root.join(QUEUE_JOURNAL_DIR).join(format!("{hash}.jsonl")))
-}
 
 /// Read the journal entries for `file` (empty when absent/unreadable).
 fn read_journal(path: &Path) -> Vec<QueueJournalEntry> {
@@ -120,7 +106,7 @@ fn append_prompts(
     if prompts.is_empty() {
         return Ok(());
     }
-    let Some(path) = journal_path(file) else {
+    let Some(path) = queue_journal_path(file) else {
         return Ok(());
     };
     let existing = read_journal(&path);
@@ -191,7 +177,7 @@ fn append_prompts(
 /// Called at supervisor (re)start: the caller re-inserts the returned prompts so
 /// the crash+restart replays the pending queue edit instead of losing it.
 pub fn replay_missing(file: &Path, content: &str) -> Vec<QueueJournalEntry> {
-    let Some(path) = journal_path(file) else {
+    let Some(path) = queue_journal_path(file) else {
         return Vec::new();
     };
     let journal = read_journal(&path);
@@ -207,7 +193,7 @@ pub fn replay_missing(file: &Path, content: &str) -> Vec<QueueJournalEntry> {
 /// snapshot, so the journal must be emptied to bound the crash window to
 /// post-last-commit operator additions only.
 pub fn clear(file: &Path) {
-    let Some(path) = journal_path(file) else {
+    let Some(path) = queue_journal_path(file) else {
         return;
     };
     match std::fs::remove_file(&path) {
@@ -226,6 +212,7 @@ pub fn clear(file: &Path) {
 mod tests {
     use super::*;
     use agent_doc_queue::queue_journal::merge_missing_into_content;
+    use std::path::PathBuf;
 
     fn doc(dir: &Path, queue_lines: &[&str]) -> PathBuf {
         std::fs::create_dir_all(dir.join(".agent-doc")).unwrap();
@@ -321,7 +308,7 @@ mod tests {
         record(&path, &content_of(&path)).unwrap();
         record(&path, &content_of(&path)).unwrap();
 
-        let journal_file = journal_path(&path).unwrap();
+        let journal_file = queue_journal_path(&path).unwrap();
         assert_eq!(
             read_journal(&journal_file).len(),
             1,

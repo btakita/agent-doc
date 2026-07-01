@@ -24,9 +24,12 @@ use agent_doc_supervisor::startup_miss::{
     RecentSessionLossWindow, SessionLogStatus, StartupMiss, StartupMissOrigin,
     StartupMissSupersession,
 };
+use agent_doc_supervisor_io::startup_miss::{
+    startup_miss_project_root, startup_miss_state_path, supervisor_session_log_path,
+};
 use anyhow::Result;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 fn current_epoch_secs() -> u64 {
     std::time::SystemTime::now()
@@ -35,44 +38,8 @@ fn current_epoch_secs() -> u64 {
         .as_secs()
 }
 
-fn state_path(file: &Path) -> Result<Option<PathBuf>> {
-    let canonical = match file.canonicalize() {
-        Ok(p) => p,
-        Err(_) => return Ok(None),
-    };
-    let Some(root) = agent_doc_fs::find_project_root(&canonical) else {
-        return Ok(None);
-    };
-    let hash = agent_doc_fs::document_state_hash(&canonical)?;
-    Ok(Some(
-        root.join(".agent-doc/state/startup-miss")
-            .join(format!("{hash}.json")),
-    ))
-}
-
-fn log_path(file: &Path, session_id: &str) -> Result<Option<PathBuf>> {
-    let canonical = match file.canonicalize() {
-        Ok(p) => p,
-        Err(_) => return Ok(None),
-    };
-    let Some(root) = agent_doc_fs::find_project_root(&canonical) else {
-        return Ok(None);
-    };
-    Ok(Some(
-        root.join(".agent-doc/logs")
-            .join(format!("{session_id}.log")),
-    ))
-}
-
-fn project_root(file: &Path) -> Option<PathBuf> {
-    let canonical = std::fs::canonicalize(file)
-        .ok()
-        .unwrap_or_else(|| file.to_path_buf());
-    agent_doc_fs::find_project_root(&canonical)
-}
-
 pub fn append_session_log_event(file: &Path, session_id: &str, event: &str) -> Result<bool> {
-    let Some(path) = log_path(file, session_id)? else {
+    let Some(path) = supervisor_session_log_path(file, session_id)? else {
         return Ok(false);
     };
     if let Some(parent) = path.parent() {
@@ -100,7 +67,7 @@ pub fn record(
     origin: StartupMissOrigin,
     cycle_baseline_id: Option<&str>,
 ) -> Result<StartupMiss> {
-    let Some(path) = state_path(file)? else {
+    let Some(path) = startup_miss_state_path(file)? else {
         return Ok(StartupMiss {
             file: file.display().to_string(),
             pane_id: pane_id.to_string(),
@@ -136,7 +103,7 @@ pub fn record(
 }
 
 pub fn load(file: &Path) -> Result<Option<StartupMiss>> {
-    let Some(path) = state_path(file)? else {
+    let Some(path) = startup_miss_state_path(file)? else {
         return Ok(None);
     };
     let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
@@ -147,7 +114,7 @@ pub fn load(file: &Path) -> Result<Option<StartupMiss>> {
 }
 
 pub fn clear(file: &Path) -> Result<()> {
-    let Some(path) = state_path(file)? else {
+    let Some(path) = startup_miss_state_path(file)? else {
         return Ok(());
     };
     if path.exists() {
@@ -165,7 +132,7 @@ pub fn is_startup_miss_pane(file: &Path, pane_id: &str) -> bool {
 }
 
 pub fn session_log_status(file: &Path, session_id: &str) -> Result<Option<SessionLogStatus>> {
-    let Some(path) = log_path(file, session_id)? else {
+    let Some(path) = supervisor_session_log_path(file, session_id)? else {
         return Ok(None);
     };
     let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
@@ -199,7 +166,7 @@ fn session_log_has_event_after_latest_start_matching(
     event_prefix: &str,
     matches_event: impl Fn(&str) -> bool,
 ) -> Result<bool> {
-    let Some(path) = log_path(file, session_id)? else {
+    let Some(path) = supervisor_session_log_path(file, session_id)? else {
         return Ok(false);
     };
     let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
@@ -227,7 +194,7 @@ pub fn superseded_by_newer_registered_start(
     file: &Path,
     miss: &StartupMiss,
 ) -> Result<Option<StartupMissSupersession>> {
-    let Some(root) = project_root(file) else {
+    let Some(root) = startup_miss_project_root(file) else {
         return Ok(None);
     };
     let registry = crate::sessions::load_in(&root)?;
@@ -286,7 +253,7 @@ fn recent_session_loss_window_at(
     session_id: &str,
     now_epoch_secs: u64,
 ) -> Result<Option<RecentSessionLossWindow>> {
-    let Some(path) = log_path(file, session_id)? else {
+    let Some(path) = supervisor_session_log_path(file, session_id)? else {
         return Ok(None);
     };
     let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
@@ -323,6 +290,7 @@ pub fn record_session_loss(
 mod tests {
     use super::*;
     use std::fs;
+    use std::path::PathBuf;
 
     fn setup_project(tmp: &std::path::Path) -> PathBuf {
         let agent_doc_dir = tmp.join(".agent-doc/state/startup-miss");
@@ -797,7 +765,7 @@ mod tests {
             origin: StartupMissOrigin::RoutedTrigger,
             cycle_baseline_id: None,
         };
-        let state_path = state_path(&doc)
+        let state_path = startup_miss_state_path(&doc)
             .unwrap()
             .expect("startup-miss state path should exist");
         fs::write(&state_path, serde_json::to_string_pretty(&miss).unwrap()).unwrap();

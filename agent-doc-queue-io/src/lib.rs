@@ -3,4 +3,5 @@
 pub mod context_clear_in_flight;
 pub mod continuation_marker;
 pub mod drain_stall;
+pub mod queue_journal;
 pub mod write_queue;

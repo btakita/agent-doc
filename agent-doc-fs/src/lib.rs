@@ -5,6 +5,7 @@ const SNAPSHOT_DIR: &str = ".agent-doc/snapshots";
 const BASELINE_DIR: &str = ".agent-doc/baselines";
 const LOCK_DIR: &str = ".agent-doc/locks";
 const PENDING_DIR: &str = ".agent-doc/pending";
+const TURN_SCOPE_DIR: &str = ".agent-doc/turn-scope";
 const CRDT_DIR: &str = ".agent-doc/crdt";
 const PRE_RESPONSE_DIR: &str = ".agent-doc/pre-response";
 const BASELINE_OVERLAY_EXT: &str = "overlay.yrs";
@@ -68,6 +69,11 @@ pub fn state_lock_path_for(doc: &Path) -> Result<PathBuf> {
 /// Compute `<project_root>/.agent-doc/pending/<hash>.md` for a document.
 pub fn pending_response_path_for(doc: &Path) -> Result<PathBuf> {
     hashed_state_path(doc, PENDING_DIR, "md")
+}
+
+/// Compute `<project_root>/.agent-doc/turn-scope/<hash>.json` for a document.
+pub fn turn_scope_path_for(doc: &Path) -> Result<PathBuf> {
+    hashed_state_path(doc, TURN_SCOPE_DIR, "json")
 }
 
 /// Compute `<project_root>/.agent-doc/baselines/<hash>.md` for a document.
@@ -328,7 +334,7 @@ mod tests {
         document_state_hash, document_state_hash_from_str, multinode_crdt_path_for,
         overlay_crdt_path_for, pending_response_path_for, pre_response_path_for, read_optional,
         referenced_markdown_path, referenced_markdown_path_checked, rewrite_start_path,
-        snapshot_flock_path_for, snapshot_path_for, state_lock_path_for,
+        snapshot_flock_path_for, snapshot_path_for, state_lock_path_for, turn_scope_path_for,
     };
     use std::path::Path;
 
@@ -453,6 +459,10 @@ mod tests {
             agent_doc.join("pending").join(format!("{hash}.md"))
         );
         assert_eq!(
+            turn_scope_path_for(&doc).unwrap(),
+            agent_doc.join("turn-scope").join(format!("{hash}.json"))
+        );
+        assert_eq!(
             baseline_path_for(&doc).unwrap(),
             agent_doc.join("baselines").join(format!("{hash}.md"))
         );
@@ -477,6 +487,42 @@ mod tests {
         assert_eq!(
             multinode_crdt_path_for(&doc).unwrap(),
             agent_doc.join("crdt").join(format!("{hash}.nodes.yrs"))
+        );
+    }
+
+    #[test]
+    fn turn_scope_path_uses_project_root_and_document_hash() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("nested").join("doc.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "# doc\n").unwrap();
+        let hash = document_state_hash(&doc).unwrap();
+
+        assert_eq!(
+            turn_scope_path_for(&doc).unwrap(),
+            tmp.path()
+                .join(".agent-doc")
+                .join("turn-scope")
+                .join(format!("{hash}.json"))
+        );
+    }
+
+    #[test]
+    fn turn_scope_path_falls_back_to_document_parent_without_project_root() {
+        let Some(tmp) = temp_dir_without_agent_doc_ancestor() else {
+            return;
+        };
+        let doc = tmp.path().join("doc.md");
+        std::fs::write(&doc, "# doc\n").unwrap();
+        let hash = document_state_hash(&doc).unwrap();
+
+        assert_eq!(
+            turn_scope_path_for(&doc).unwrap(),
+            tmp.path()
+                .join(".agent-doc")
+                .join("turn-scope")
+                .join(format!("{hash}.json"))
         );
     }
 

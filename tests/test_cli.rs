@@ -2730,6 +2730,12 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
             "agent-doc-queue must own queue journal policy: {required_snippet}"
         );
     }
+    let queue_journal_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/queue_journal.rs")).unwrap();
+    assert!(
+        queue_journal_io.contains("pub fn queue_journal_path("),
+        "agent-doc-queue-io must own queue journal sidecar path derivation"
+    );
     let orchestration_queue_journal =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/queue_journal.rs"))
             .unwrap();
@@ -2750,6 +2756,8 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
         "fn durable_queue_texts(",
         "pub fn merge_missing_into_content(",
         "pub use agent_doc_queue::queue_journal",
+        "const QUEUE_JOURNAL_DIR",
+        "fn journal_path(",
     ] {
         assert!(
             !orchestration_queue_journal.contains(forbidden_snippet),
@@ -2764,8 +2772,9 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
             && orchestration_queue_journal
                 .contains("queue_journal_policy::unique_queue_prompts_from_contents(")
             && orchestration_queue_journal
-                .contains("queue_journal_policy::replay_missing_entries("),
-        "orchestration queue journal adapter should call focused queue policy directly"
+                .contains("queue_journal_policy::replay_missing_entries(")
+            && orchestration_queue_journal.contains("queue_journal_path("),
+        "orchestration queue journal adapter should call focused queue policy and IO directly"
     );
     let start_run_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/run.rs")).unwrap();
@@ -8263,6 +8272,7 @@ fn test_snapshot_state_paths_are_owned_by_agent_doc_fs() {
         "pub fn snapshot_path_for(",
         "pub fn state_lock_path_for(",
         "pub fn pending_response_path_for(",
+        "pub fn turn_scope_path_for(",
         "pub fn baseline_path_for(",
         "pub fn baseline_overlay_path_for(",
         "pub fn pre_response_path_for(",
@@ -8318,6 +8328,54 @@ fn test_snapshot_state_paths_are_owned_by_agent_doc_fs() {
             "snapshot.rs should call focused agent-doc-fs state helpers directly: {required_snippet}"
         );
     }
+
+    let graph_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/graph.rs")).unwrap();
+    for required_snippet in [
+        "agent_doc_fs::document_state_hash(",
+        "agent_doc_fs::document_state_hash_from_str(",
+        "agent_doc_fs::snapshot_path_for(",
+        "agent_doc_fs::state_lock_path_for(",
+        "agent_doc_fs::baseline_path_for(",
+        "agent_doc_fs::pending_response_path_for(",
+    ] {
+        assert!(
+            graph_source.contains(required_snippet),
+            "graph.rs should call focused agent-doc-fs state helpers directly: {required_snippet}"
+        );
+    }
+    for forbidden_snippet in [
+        "agent_doc_hash::path_string_hash",
+        ".join(\"locks\")",
+        ".join(\"baselines\")",
+        ".join(\"pending\")",
+        "format!(\"{}.lock\"",
+        "format!(\"{}.json\"",
+    ] {
+        assert!(
+            !graph_source.contains(forbidden_snippet),
+            "graph.rs must not re-own pure per-document state path/hash formulas: {forbidden_snippet}"
+        );
+    }
+
+    let turn_scope_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/turn_scope_store.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "pub fn path_for(",
+        "fn path_for(",
+        "document_state_hash(",
+        "find_project_root(",
+    ] {
+        assert!(
+            !turn_scope_source.contains(forbidden_snippet),
+            "turn_scope_store.rs must not keep a pure state path/hash wrapper or facade: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        turn_scope_source.contains("agent_doc_fs::turn_scope_path_for("),
+        "turn_scope_store.rs should call focused agent-doc-fs turn-scope path helper directly"
+    );
 
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
@@ -10382,9 +10440,16 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/reexec.rs")).unwrap();
     let supervisor_startup_miss =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/startup_miss.rs")).unwrap();
+    let supervisor_io_startup_miss =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/startup_miss.rs"))
+            .unwrap();
     let orchestration_startup_miss =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/startup_miss.rs"))
             .unwrap();
+    let orchestration_startup_miss_prod = orchestration_startup_miss
+        .split("\n#[cfg(test)]")
+        .next()
+        .unwrap_or(&orchestration_startup_miss);
     for required_snippet in [
         "pub struct OwnershipGeneration",
         "pub struct OwnershipTransitionEvent",
@@ -10427,22 +10492,41 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             "agent-doc-supervisor must own startup-miss/session-log policy: {required_snippet}"
         );
     }
+    for required_snippet in [
+        "pub fn startup_miss_state_path(",
+        "pub fn supervisor_session_log_path(",
+        "pub fn startup_miss_project_root(",
+    ] {
+        assert!(
+            supervisor_io_startup_miss.contains(required_snippet),
+            "agent-doc-supervisor-io must own startup-miss/session-log path IO: {required_snippet}"
+        );
+    }
     for forbidden_snippet in [
         "pub use agent_doc_supervisor::startup_miss",
         "pub struct SessionLogStatus",
         "pub struct RecentSessionLossWindow",
         "pub fn session_log_status_from_content(",
         "pub fn latest_log_anchor(",
+        "fn state_path(",
+        "fn log_path(",
+        "fn project_root(",
+        ".join(\".agent-doc/state/startup-miss\")",
+        ".join(\".agent-doc/logs\")",
     ] {
         assert!(
-            !orchestration_startup_miss.contains(forbidden_snippet),
+            !orchestration_startup_miss_prod.contains(forbidden_snippet),
             "orchestration startup_miss must stay a filesystem adapter, not a pure policy facade: {forbidden_snippet}"
         );
     }
     assert!(
         orchestration_startup_miss
-            .contains("agent_doc_supervisor::startup_miss::session_log_status_from_content"),
-        "orchestration startup_miss should call focused supervisor startup-miss policy directly"
+            .contains("agent_doc_supervisor::startup_miss::session_log_status_from_content")
+            && orchestration_startup_miss.contains("startup_miss_state_path(file)?")
+            && orchestration_startup_miss
+                .contains("supervisor_session_log_path(file, session_id)?")
+            && orchestration_startup_miss.contains("startup_miss_project_root(file)"),
+        "orchestration startup_miss should call focused supervisor policy and IO directly"
     );
     for required_snippet in [
         "pub struct AgentLaunchArgsSources",

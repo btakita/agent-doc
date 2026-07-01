@@ -207,7 +207,9 @@ impl RunContext {
             let cp = canonical_path;
             move |ctx: &Context| -> String {
                 let canonical: PathBuf = ctx.get(&cp);
-                agent_doc_hash::path_string_hash(&canonical.to_string_lossy())
+                agent_doc_fs::document_state_hash(&canonical).unwrap_or_else(|_| {
+                    agent_doc_fs::document_state_hash_from_str(canonical.to_string_lossy().as_ref())
+                })
             }
         });
 
@@ -567,43 +569,23 @@ impl RunContext {
     }
 
     pub fn snapshot_path_for(&self) -> Option<PathBuf> {
-        let root = self.project_root()?;
-        let hash = self.doc_hash();
-        Some(
-            root.join(".agent-doc")
-                .join("snapshots")
-                .join(format!("{}.md", hash)),
-        )
+        self.project_root()?;
+        agent_doc_fs::snapshot_path_for(&self.canonical_path()).ok()
     }
 
     pub fn lock_path_for(&self) -> Option<PathBuf> {
-        let root = self.project_root()?;
-        let hash = self.doc_hash();
-        Some(
-            root.join(".agent-doc")
-                .join("locks")
-                .join(format!("{}.lock", hash)),
-        )
+        self.project_root()?;
+        agent_doc_fs::state_lock_path_for(&self.canonical_path()).ok()
     }
 
     pub fn baseline_path_for(&self) -> Option<PathBuf> {
-        let root = self.project_root()?;
-        let hash = self.doc_hash();
-        Some(
-            root.join(".agent-doc")
-                .join("baselines")
-                .join(format!("{}.md", hash)),
-        )
+        self.project_root()?;
+        agent_doc_fs::baseline_path_for(&self.canonical_path()).ok()
     }
 
     pub fn pending_path_for(&self) -> Option<PathBuf> {
-        let root = self.project_root()?;
-        let hash = self.doc_hash();
-        Some(
-            root.join(".agent-doc")
-                .join("pending")
-                .join(format!("{}.json", hash)),
-        )
+        self.project_root()?;
+        agent_doc_fs::pending_response_path_for(&self.canonical_path()).ok()
     }
 }
 
@@ -1076,82 +1058,62 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_path_for_matches_expected_layout() {
+    fn snapshot_path_for_matches_agent_doc_fs() {
         let dir = TempDir::new().unwrap();
         setup_project(dir.path());
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = RunContext::new(doc);
+        let rc = RunContext::new(doc.clone());
 
-        let snap_path = rc.snapshot_path_for().unwrap();
-        let hash = rc.doc_hash();
         assert_eq!(
-            snap_path,
-            dir.path()
-                .join(".agent-doc")
-                .join("snapshots")
-                .join(format!("{}.md", hash))
+            rc.snapshot_path_for(),
+            agent_doc_fs::snapshot_path_for(&doc).ok()
         );
     }
 
     #[test]
-    fn lock_path_for_matches_expected_layout() {
+    fn lock_path_for_matches_agent_doc_fs() {
         let dir = TempDir::new().unwrap();
         setup_project(dir.path());
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = RunContext::new(doc);
+        let rc = RunContext::new(doc.clone());
 
-        let lock_path = rc.lock_path_for().unwrap();
-        let hash = rc.doc_hash();
         assert_eq!(
-            lock_path,
-            dir.path()
-                .join(".agent-doc")
-                .join("locks")
-                .join(format!("{}.lock", hash))
+            rc.lock_path_for(),
+            agent_doc_fs::state_lock_path_for(&doc).ok()
         );
     }
 
     #[test]
-    fn baseline_path_for_matches_expected_layout() {
+    fn baseline_path_for_matches_agent_doc_fs() {
         let dir = TempDir::new().unwrap();
         setup_project(dir.path());
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = RunContext::new(doc);
+        let rc = RunContext::new(doc.clone());
 
-        let baseline = rc.baseline_path_for().unwrap();
-        let hash = rc.doc_hash();
         assert_eq!(
-            baseline,
-            dir.path()
-                .join(".agent-doc")
-                .join("baselines")
-                .join(format!("{}.md", hash))
+            rc.baseline_path_for(),
+            agent_doc_fs::baseline_path_for(&doc).ok()
         );
     }
 
     #[test]
-    fn pending_path_for_matches_expected_layout() {
+    fn pending_path_for_matches_agent_doc_fs() {
         let dir = TempDir::new().unwrap();
         setup_project(dir.path());
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "").unwrap();
 
-        let rc = RunContext::new(doc);
+        let rc = RunContext::new(doc.clone());
 
-        let pending = rc.pending_path_for().unwrap();
-        let hash = rc.doc_hash();
         assert_eq!(
-            pending,
-            dir.path()
-                .join(".agent-doc")
-                .join("pending")
-                .join(format!("{}.json", hash))
+            rc.pending_path_for(),
+            agent_doc_fs::pending_response_path_for(&doc).ok()
         );
     }
 

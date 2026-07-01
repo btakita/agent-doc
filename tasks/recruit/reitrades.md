@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 pending_done_guard: warn
 agent_doc_lint_dialect: off
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -632,7 +632,32 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/recruit/reitrades.md source=ipc_visible_repair patch_id=57c0cf7e-4ab8-451c-98c8-888721358bd3 invariant=live_prompt_drift recovery=retry_without_disk_write redeliver_editor=true bad_len=59854 bad_hash=cba54f7950b14b2a7347de6c6ddd39f1a0b46842eec65157ca117980751624be repaired_len=63219 repaired_hash=b1a306203ab78e603deeace33da2995d5d32ca2305a0480c4b8ee8e91db6fe3f doc=reitrades session=62d195b8-b029-42a5-9c6c-836cb1b5b103 turn=cycle-1782922404840
 ```
-<!-- agent:boundary:9cff2629 -->
+"No document-extraction vendor is "100% accurate" on messy CRE source docs, so a vendor never replaces the deterministic core and the §3a/§3b verification path". Can we have confidence where low confidence readings prompt manual intervention? Should we have a manual review step by the user...is this an option from what you understand?
+
+### Re: Confidence-gated manual review for extraction — opus-4-8
+
+Yes — and it's not just an option, it's exactly the mechanism that makes the "100% accurate" claim honest. This is already the design in §3a/§3b of the proposal; here's how it directly answers your question.
+
+**Low-confidence readings prompt manual intervention — by construction.** Every extracted field gets two things: a **confidence score** and a **provenance grade (A–D)**. A threshold routes each field:
+- **Grade A (source-exact, high confidence)** → auto-fill, no review.
+- **Grade B (derived by a deterministic rule, reconciles)** → auto-fill, spot-check.
+- **Grade C (AI-inferred, no citable source / below the confidence threshold)** → **blocked from auto-publish and dropped into a manual review queue**, shown with its confidence and the model's rationale so a human can accept/fix/reject.
+- **Grade D (missing or very low confidence)** → manual entry required; never auto-published.
+
+So "low confidence → manual intervention" is the default path, not an exception.
+
+**Should there be a manual review step by the user? Yes — and you have two modes, which can coexist:**
+1. **Listing-owner review** (the seller/broker who uploaded the OM): they see the autofilled fields with low-confidence ones flagged, and confirm/correct before submitting the listing to *Under Review*. Best for scale — the review effort sits with the party who actually knows the property.
+2. **Admin/staff review** (REItrades side): nothing money-facing or buyer-facing goes external until an admin clears the flagged fields. Best for the strongest trust guarantee.
+
+My recommendation is **both, layered**: owner-review at data entry catches most of it cheaply, and an admin gate on anything financial or buyer-facing (asking price, cap rate, NOI, teaser/OM content) before external send is the backstop. That's already what §3b point 4 describes.
+
+**The one thing that makes this real instead of hand-wavy:** the confidence score has to be **calibrated** — a field the model reports at 0.9 confidence should actually be right ~90% of the time — or the threshold is meaningless. That calibration is exactly what the §3a **eval harness + labeled sample set** verifies: we measure confidence-vs-accuracy on real OMs and tune the review threshold to the accuracy bar. Without that, "confidence" is theater; with it, the review queue only surfaces the fields that genuinely need eyes.
+
+This is standard, proven practice (human-in-the-loop on low-confidence is how every serious document-extraction system works) and it's the **cheaper** path than chasing perfect extraction — you build the threshold + review queue once and it protects every field, which fits the bootstrapped budget.
+
+It's already covered in the proposal (§3a Grade C/D handling, §3b admin review, and the extraction line item lists "confidence flags, review UI"). If you'd like, I can pull the **user-facing review step** out into its own explicit callout so Artur sees it as a named feature rather than an implied part of the rubric — say the word and I'll add it + regenerate the PDF.
+<!-- agent:boundary:60ddffc8 -->
 <!-- /agent:exchange -->
 
 ## Queue

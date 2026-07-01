@@ -894,7 +894,48 @@ Short answer: only under specific conditions, and never as a plain discount. The
 **For the Arthur re-approach specifically:** he hasn't even said yes to paid work yet, so leading with an equity ask is premature and can read as desperation. Keep the re-engagement note as drafted — signal *openness* to a blended structure as a door, not a discount you're pre-offering. Let him come back first; negotiate structure only once there's a real conversation. If it does progress, anchor on full rate and let *him* propose equity to bring the cash number down — then you're evaluating his offer, not giving away margin up front.
 
 Bottom line: be willing to *discuss* a blend, don't be willing to *cut your rate* for it. Equity is a bonus you accept on top of fair pay, not a reason to work cheap.
-<!-- agent:boundary:5e6fd68a -->
+
+### Re: You're genuinely interested — reframe the note around fit + limited hours — opus-4-8
+
+Good — that changes the posture, and for the better. The earlier advice was written for "salvage a gig I half-lost on price." What you're describing is different: you actually *want* this one — real-estate domain plus a Rust stack is a rare combination you'd enjoy, and you're willing to be flexible to make it happen. That's a stronger hand than it sounds, and it's worth showing (a little), not hiding.
+
+The key unlock in what you said is **limited hours**. That solves Artur's real problem — bootstrapped, budget-tight — *without touching your rate*, which is exactly the line the prior note drew. A few focused senior hours a week is a small weekly number he can actually afford, and it's the highest-leverage way to sit on a live marketplace: review, production-safety, and the risky parts (cascade deletes, permissions/audit, buyer-facing AI extraction) rather than competing with his freelancer's cheap throughput. Limited hours = low weekly spend = fits his runway. That's the pitch.
+
+So: don't cut your rate. Lead with genuine interest in the domain/stack, and let **fewer hours** be the affordability answer.
+
+Revised note — plain-text, paste-ready into LinkedIn (replaces the prior draft; warmer, opens with real interest, and makes limited-hours the offer):
+
+```
+Hi Artur,
+
+Makes sense that affordability wins when you're bootstrapped — I hope the build's going well.
+
+I'll be honest: REItrades is a role I'd genuinely like to be part of. Commercial real estate plus a Rust backend is a combination I don't see often and would enjoy working on, so I'm keen to find a way in that actually fits your budget rather than fighting it.
+
+The way I'd make that work: a small, capped number of hours a week — not a full engagement. A few focused senior hours can cover the parts of a live marketplace that are easy to quietly break — cascade deletes on real buyer/seller data, permissions and audit trails, and the "100% accurate" AI extraction that faces buyers — working alongside whoever you've got on throughput, not replacing them. Low weekly spend, high leverage on the risky stuff.
+
+I'm open on structure — a weekly-capped retainer, and I'm happy to hear what you had in mind. If you can tell me roughly what you're working with for this phase, I'll shape something realistic around it.
+
+If it's useful, let's talk.
+
+Best,
+Brian
+```
+
+Why this version:
+- **Opens with the honest interest** — one line, not gushing. Founders respond to someone who actually wants to build *their* thing, and it explains why you're re-engaging after a "no."
+- **Limited hours is the whole offer**, not a footnote. It reframes the earlier "no" (too expensive for the full build) into a yes-sized ask.
+- **"Hear what you had in mind" + the budget question** invites his offer, which is what you asked for — you learn his number before you commit to anything.
+- **Rate is untouched.** Consistent with the last exchange: flexibility comes from *scope/hours*, not a discount. Equity stays off the table for now — premature on a re-approach; let him come back first, then negotiate structure if it's real.
+
+Two optional tweaks depending on how forward you want to be:
+- If you want to signal even more openness, add a line: *"I'm flexible on how we structure it, including a cash-plus-equity mix if that helps protect runway."* Keep it soft; don't lead with it.
+- If you'd rather keep it purely transactional, cut "a role I'd genuinely like to be part of" down to "a role I'm interested in." Slightly cooler, still warm enough.
+
+Say the word and I'll publish it via `corky`/LinkedIn as a draft (no auto-send), or adjust tone/length.
+
+*(Session note: exchange is large — 875 lines / 30 sections — but the queue is active, so I'm continuing rather than pausing to compact.)*
+<!-- agent:boundary:488b4b72 -->
 <!-- /agent:exchange -->
 
 ## Queue

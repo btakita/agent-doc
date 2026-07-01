@@ -388,7 +388,7 @@ fn turn_active_for_owned_pane(file: &Path, shared: &SupervisorShared) -> bool {
     let Some(root) = agent_doc_fs::find_project_root(file) else {
         return false;
     };
-    let Some(marker) = crate::turn_status::read_turn_active_marker(&root) else {
+    let Some(marker) = agent_doc_turn_status_io::read_turn_active_marker(&root) else {
         return false;
     };
     let owned_pane = shared.inject_pane.as_deref().or_else(|| {
@@ -2718,7 +2718,7 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("task.md");
         std::fs::write(&doc, "doc").unwrap();
-        crate::turn_status::write_turn_active_marker(dir.path(), "%other").unwrap();
+        agent_doc_turn_status_io::write_turn_active_marker(dir.path(), "%other").unwrap();
 
         let shared = SupervisorShared::with_actor_runtime(
             "test",
@@ -2730,7 +2730,7 @@ mod tests {
         );
         assert!(!turn_active_for_owned_pane(&doc, &shared));
 
-        crate::turn_status::write_turn_active_marker(dir.path(), "%owner").unwrap();
+        agent_doc_turn_status_io::write_turn_active_marker(dir.path(), "%owner").unwrap();
         assert!(turn_active_for_owned_pane(&doc, &shared));
     }
     #[test]

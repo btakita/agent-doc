@@ -4537,9 +4537,19 @@ fn test_agent_doc_turn_owns_turn_status_policy() {
         "agent-doc-turn should not add a turn_status root facade"
     );
 
-    let orchestration =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/turn_status.rs"))
-            .unwrap();
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    assert!(
+        workspace_manifest.contains("\"agent-doc-turn-status-io\""),
+        "agent-doc-turn-status-io should be a workspace member"
+    );
+    assert!(
+        workspace_manifest
+            .contains("agent-doc-turn-status-io = { path = \"agent-doc-turn-status-io\""),
+        "CLI shell should depend on turn-status IO directly"
+    );
+
+    let turn_status_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn-status-io/src/lib.rs")).unwrap();
     for forbidden in [
         "pub const TURN_ACTIVE_PANE_TITLE",
         "pub const STALE_SUPERVISOR_PANE_MARKER",
@@ -4552,8 +4562,8 @@ fn test_agent_doc_turn_owns_turn_status_policy() {
         "pub use agent_doc_turn::turn_status",
     ] {
         assert!(
-            !orchestration.contains(forbidden),
-            "orchestration turn_status must stay an effect adapter, not a facade: {forbidden}"
+            !turn_status_io.contains(forbidden),
+            "turn-status IO must stay an effect adapter, not a policy facade: {forbidden}"
         );
     }
     for required in [
@@ -4564,8 +4574,42 @@ fn test_agent_doc_turn_owns_turn_status_policy() {
         "turn_active_marker_matches_pane",
     ] {
         assert!(
-            orchestration.contains(required),
-            "orchestration turn_status should call focused turn-status policy directly: {required}"
+            turn_status_io.contains(required),
+            "turn-status IO should call focused turn-status policy directly: {required}"
+        );
+    }
+    assert!(
+        !turn_status_io.contains("agent_doc_orchestration::"),
+        "turn-status IO must not reach back through orchestration"
+    );
+
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod turn_status;"),
+        "orchestration must not expose a turn_status facade"
+    );
+
+    let main = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
+    assert!(
+        main.contains("agent_doc_turn_status_io::run(true)")
+            && main.contains("agent_doc_turn_status_io::run(false)"),
+        "turn-status command should call the focused IO crate directly"
+    );
+    let session_actor_cmd =
+        fs::read_to_string(manifest_dir.join("src/session_actor_cmd.rs")).unwrap();
+    assert!(
+        session_actor_cmd.contains("agent_doc_turn_status_io::read_turn_active_marker"),
+        "session actor command should read turn-active markers through the focused IO crate"
+    );
+    for relative_path in [
+        "agent-doc-orchestration/src/start.rs",
+        "agent-doc-orchestration/src/start/idle_watch.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
+        assert!(
+            source.contains("agent_doc_turn_status_io::"),
+            "{relative_path} should call turn-status IO directly"
         );
     }
 }

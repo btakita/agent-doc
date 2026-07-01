@@ -1438,7 +1438,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     .ok()
                     .map(|canonical| crate::write::resolve_ipc_project_root_pub(&canonical))
                     && let Err(e) =
-                        crate::turn_status::set_supervisor_stale_marker(&base, supervisor_stale)
+                        agent_doc_turn_status_io::set_supervisor_stale_marker(&base, supervisor_stale)
                 {
                     eprintln!(
                         "[idle-watch] warning: failed to update stale-supervisor marker: {e:#}"

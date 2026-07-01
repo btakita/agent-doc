@@ -50,6 +50,7 @@ members = [
     "agent-doc-turn",
     "agent-doc-turn-executor",
     "agent-doc-turn-executor-tmux",
+    "agent-doc-turn-status-io",
     "agent-doc-supervisor",
     "agent-doc-supervisor-process",
     "agent-doc-controller",
@@ -126,6 +127,7 @@ agent-doc-tmux-commands = { path = "agent-doc-tmux-commands", version = "0.34.65
 agent-doc-turn = { path = "agent-doc-turn", version = "0.34.65" }
 agent-doc-turn-executor = { path = "agent-doc-turn-executor", version = "0.34.65" }
 agent-doc-turn-executor-tmux = { path = "agent-doc-turn-executor-tmux", version = "0.34.65" }
+agent-doc-turn-status-io = { path = "agent-doc-turn-status-io", version = "0.34.65" }
 agent-doc-workflow = { path = "agent-doc-workflow", version = "0.34.65" }
 agent-doc-work-graph = { path = "agent-doc-work-graph", version = "0.34.65" }
 anyhow = "1"

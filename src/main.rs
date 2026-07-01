@@ -3168,8 +3168,8 @@ fn main() -> anyhow::Result<()> {
         Commands::Terminal { file, session } => terminal::run(&file, session.as_deref()),
         Commands::Autoclaim => autoclaim::run(),
         Commands::TurnStatus { action } => match action {
-            TurnStatusAction::Active => agent_doc_orchestration::turn_status::run(true),
-            TurnStatusAction::Idle => agent_doc_orchestration::turn_status::run(false),
+            TurnStatusAction::Active => agent_doc_turn_status_io::run(true),
+            TurnStatusAction::Idle => agent_doc_turn_status_io::run(false),
             TurnStatusAction::Install { dir, user, tmux } => {
                 skill::install_turn_status_hooks(dir.as_deref(), user, tmux)
             }

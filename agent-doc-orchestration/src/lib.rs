@@ -114,7 +114,6 @@ pub mod supervisor;
 pub mod supervisor_selfkill;
 pub mod sync;
 pub mod turn_scope_store;
-pub mod turn_status;
 pub mod watch;
 pub mod write;
 pub mod write_queue;

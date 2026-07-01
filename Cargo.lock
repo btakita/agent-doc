@@ -62,6 +62,7 @@ dependencies = [
  "agent-doc-turn",
  "agent-doc-turn-executor",
  "agent-doc-turn-executor-tmux",
+ "agent-doc-turn-status-io",
  "agent-doc-work-graph",
  "agent-doc-workflow",
  "agent-kit",
@@ -480,6 +481,7 @@ dependencies = [
  "agent-doc-turn",
  "agent-doc-turn-executor",
  "agent-doc-turn-executor-tmux",
+ "agent-doc-turn-status-io",
  "agent-doc-work-graph",
  "agent-doc-workflow",
  "agent-kit",
@@ -776,6 +778,18 @@ dependencies = [
  "agent-doc-tmux",
  "agent-doc-turn-executor",
  "serde",
+]
+
+[[package]]
+name = "agent-doc-turn-status-io"
+version = "0.34.65"
+dependencies = [
+ "agent-doc-fs",
+ "agent-doc-turn",
+ "anyhow",
+ "serde_json",
+ "tempfile",
+ "tmux-router",
 ]
 
 [[package]]

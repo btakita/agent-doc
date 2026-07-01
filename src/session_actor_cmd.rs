@@ -1237,8 +1237,7 @@ pub(crate) fn cancel_turn_action(turn_active: bool) -> CancelTurnAction {
 /// pane when one is known. When no owned pane can be resolved, any non-expired
 /// marker counts (the marker itself self-expires via its TTL).
 fn document_turn_active(ctx: &SessionContext) -> bool {
-    let Some(marker) = agent_doc_orchestration::turn_status::read_turn_active_marker(&ctx.base_dir)
-    else {
+    let Some(marker) = agent_doc_turn_status_io::read_turn_active_marker(&ctx.base_dir) else {
         return false;
     };
     let owned_pane = ctx

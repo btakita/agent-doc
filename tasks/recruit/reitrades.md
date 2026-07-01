@@ -954,7 +954,50 @@ And the asymmetry favors your read: equity from an unfunded, pre-revenue idea wh
 **So the move is unchanged from the last note:** limited hours at your rate is the affordability lever, not equity. Keep equity out of the re-approach entirely. If the relationship becomes real and he's the one who raises "could we do some equity to stretch the cash," *then* you evaluate his offer — full rate as the anchor, equity strictly on top, and only if it's a signed instrument with a legible cap table. Let him bring it up; don't you.
 
 The current draft already does this — no equity mention. I'd keep it that way. (Earlier I'd floated an optional "cash-plus-equity mix" tweak line — drop that idea; your reasoning is the better call.)
-<!-- agent:boundary:6ac487e3 -->
+### Re: LinkedIn note rewritten in your voice, less AI-sounding — opus-4-8
+
+> **Queue prompt:** rephrase the linkedin offer to look less like AI and use my voice instead.
+
+Rewrote it to sound like you, not like a polished template. I pulled your voice from how you actually write (the OneSynergee and Amulet "catching up" drafts): plain sentences, warm but not gushing, no em-dashes, no neat rule-of-three lists, and it gets to the ask without over-explaining. Those tidy parallel triads and dash-spliced clauses were the biggest "AI wrote this" tells, so they're gone.
+
+Paste-ready into LinkedIn:
+
+```
+Hi Artur,
+
+Totally get going with what fits the budget when you're bootstrapped. Hope the build's going well.
+
+I wanted to reach out anyway. REItrades is something I'd genuinely like to work on. Commercial real estate on a Rust backend isn't a combination I come across often, and it's the kind of problem I enjoy, so I'd rather find a way to fit your budget than let it go.
+
+What I had in mind is smaller than the original scope. Instead of a full engagement, just a few hours a week, focused on the parts of a live marketplace that tend to cause problems down the road. Things like cascade deletes on real buyer and seller data, permissions and audit trails, and the AI extraction that buyers actually see. I'd work alongside whoever you have building right now, not replace them. Low weekly cost, aimed at the risky parts.
+
+I'm flexible on how we structure it. If you can give me a rough idea of your budget for this phase, I'll put together something that fits.
+
+Let me know if it's worth a quick call.
+
+Brian
+```
+
+What changed and why:
+- **No em-dashes.** Your own emails don't use them; the AI draft leaned on them heavily. Swapped for plain sentences and commas.
+- **Broke the parallel lists.** "Low weekly spend, high leverage on the risky stuff" and the tight triad were rhythmically too clean. Kept the one list of risky areas because it's genuinely useful, but the rest reads like talking, not a pitch deck.
+- **Dropped the throat-clearing.** "I'll be honest:" and "The way I'd make that work:" are AI framing tics. Cut.
+- **Kept your substance intact:** real interest in the domain plus Rust, limited hours as the affordability answer, working alongside the freelancer on the risky parts, and the budget question. Rate and equity stay off the table, same as we landed last time.
+
+If you want it even more casual (or shorter), say so and I'll trim. Or I can drop it into `corky`/LinkedIn as a draft (no auto-send).
+<!-- agent:boundary:40606fa0 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/recruit/reitrades.md source=ipc_visible_repair patch_id=13ffea44-2bca-41f5-b000-98ac0ccbdf9e invariant=live_prompt_drift recovery=retry_without_disk_write redeliver_editor=true bad_len=91373 bad_hash=90593f611169aa4510c1d70bf26bfbcd2ddb3a3cbb5be1f9a26977098c62af77 repaired_len=93856 repaired_hash=361db1a89cfbde07f119cca06a2966386d02c825580cca0f4a9a9fc9bfc781e0 doc=reitrades session=62d195b8-b029-42a5-9c6c-836cb1b5b103 turn=cycle-1782945105834
+```
 <!-- /agent:exchange -->
 
 ## Queue

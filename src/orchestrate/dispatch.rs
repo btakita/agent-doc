@@ -462,10 +462,10 @@ mod tests {
         assert!(diff.contains("+Keep the work tree clean.\n"));
         assert!(diff.contains("+do #prep\n"));
         assert_eq!(
-            diff::extract_imperative_directives(&diff),
+            agent_doc_diff::extract_imperative_directives(&diff),
             vec!["do #prep".to_string()]
         );
-        assert!(diff::format_prompt_bearing_changes(&diff).is_some());
+        assert!(agent_doc_diff::format_prompt_bearing_changes(&diff).is_some());
     }
     #[test]
     fn render_streamed_exchange_inserts_response_before_boundary() {

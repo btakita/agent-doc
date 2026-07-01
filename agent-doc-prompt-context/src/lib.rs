@@ -49,6 +49,46 @@ pub struct DocumentSectionContext<'a> {
     pub remote_host_scope: &'a str,
 }
 
+pub struct AgentPromptContext<'a> {
+    pub template_mode: bool,
+    pub diff_text: &'a str,
+    pub doc: &'a str,
+    pub document_section: &'a str,
+}
+
+pub fn render_agent_prompt(input: AgentPromptContext<'_>) -> String {
+    let prompt_bearing = agent_doc_diff::format_prompt_bearing_changes(input.diff_text)
+        .map(|section| format!("\n\n{}\n", section))
+        .unwrap_or_default();
+    let active_format_requirements = format_active_format_requirements(input.doc)
+        .map(|section| format!("\n\n{}\n", section))
+        .unwrap_or_default();
+
+    if input.template_mode {
+        format!(
+            "The user edited the session document. Here is the diff since the last run:\n\n\
+             <diff>\n{}\n</diff>\n\n\
+             {}{}\
+             {}\
+             Respond to the user's new content. Write your response in markdown.\n\
+             Format your response as patch blocks targeting document components.\n\
+             Example: <!-- patch:exchange -->\\nYour response\\n<!-- /patch:exchange -->",
+            input.diff_text, prompt_bearing, active_format_requirements, input.document_section
+        )
+    } else {
+        format!(
+            "The user edited the session document. Here is the diff since the last run:\n\n\
+             <diff>\n{}\n</diff>\n\n\
+             {}{}\
+             {}\
+             Respond to the user's new content. Write your response in markdown.\n\
+             Do not include a ## Assistant heading — it will be added automatically.\n\
+             If the user inserted prompt-bearing edits inline, classify them as prompt targets vs content edits before responding.",
+            input.diff_text, prompt_bearing, active_format_requirements, input.document_section
+        )
+    }
+}
+
 pub fn render_full_document_section(doc: &str, remote_host_scope: &str) -> String {
     format!(
         "{}The full document is now:\n\n<document>\n{}\n</document>\n\n",
@@ -566,6 +606,33 @@ mod tests {
         );
 
         assert!(format_active_format_requirements(doc).is_none());
+    }
+
+    #[test]
+    fn render_agent_prompt_carries_forward_active_format_requirements() {
+        let doc = concat!(
+            "❯ Please organize the backlog into a 2-level list. ",
+            "Place the urgent-security matters at the top. ",
+            "Use a numeric list where appropriate.\n",
+            "### Re: backlog organization - gpt-5\n",
+            "Done.\n",
+        );
+
+        let prompt = render_agent_prompt(AgentPromptContext {
+            template_mode: true,
+            diff_text: "diff",
+            doc,
+            document_section: "<document>doc</document>",
+        });
+        assert!(
+            prompt.contains(
+                "Active document-level formatting / structure requirements carried forward"
+            )
+        );
+        assert!(prompt.contains(
+            "Please organize the backlog into a 2-level list. Place the urgent-security matters at the top. Use a numeric list where appropriate."
+        ));
+        assert!(prompt.contains("Format your response as patch blocks"));
     }
 
     #[test]

@@ -5118,6 +5118,8 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
     for required_snippet in [
         "pub struct BoundedResponseContext",
         "pub struct DocumentSectionContext",
+        "pub struct AgentPromptContext",
+        "pub fn render_agent_prompt(",
         "pub fn document_section_needs_response_toc(",
         "pub fn render_document_section(",
         "pub fn format_active_format_requirements(",
@@ -5177,16 +5179,16 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
         "orchestration must not keep prompt_contract as a facade for prompt-context rendering policy"
     );
 
+    let orchestrate_source = fs::read_to_string(manifest_dir.join("src/orchestrate.rs")).unwrap();
+    assert!(
+        orchestrate_source.contains("agent_doc_prompt_context::render_agent_prompt")
+            && orchestrate_source.contains("AgentPromptContext")
+            && !orchestrate_source.contains("format_prompt_bearing_changes")
+            && !orchestrate_source.contains("format_active_format_requirements"),
+        "src/orchestrate.rs should gather prompt inputs and delegate pure prompt rendering to agent-doc-prompt-context"
+    );
+
     for (path, required_snippet, forbidden_snippets) in [
-        (
-            "src/orchestrate.rs",
-            "agent_doc_prompt_context::format_active_format_requirements",
-            [
-                "agent_doc_orchestration::prompt_contract::format_active_format_requirements",
-                "prompt_contract::format_active_format_requirements",
-                "crate::prompt_contract::format_active_format_requirements",
-            ],
-        ),
         (
             "agent-doc-orchestration/src/run.rs",
             "agent_doc_prompt_context::format_active_format_requirements",
@@ -5233,6 +5235,7 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
     let parsed: toml::Value = toml::from_str(&focused_manifest).unwrap();
     let dependencies = parsed["dependencies"].as_table().unwrap();
     for required in [
+        "agent-doc-diff",
         "agent-doc-element",
         "agent-doc-element-backlog",
         "agent-doc-session-accretion",

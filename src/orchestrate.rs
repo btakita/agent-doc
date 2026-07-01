@@ -68,8 +68,8 @@ use crate::{
     parallel, queue_dispatch,
 };
 use agent_doc_config::{AgentConfig, Config};
-use agent_doc_diff as diff;
 use agent_doc_orchestration::{agent, preflight::PreflightOutput, snapshot, write};
+use agent_doc_prompt_context::AgentPromptContext;
 use agent_doc_queue::dispatch_item::{QueueItemKind, classify};
 #[cfg(test)]
 use agent_doc_template::patchback::child_template_finalize_text as orchestrate_finalize_text_for_template;
@@ -555,13 +555,6 @@ fn build_agent_prompt(
     session_accretion: Option<&SessionAccretionReport>,
 ) -> String {
     let diff_text = diff_text.unwrap_or_default();
-    let prompt_bearing = diff::format_prompt_bearing_changes(diff_text)
-        .map(|section| format!("\n\n{}\n", section))
-        .unwrap_or_default();
-    let active_format_requirements =
-        agent_doc_prompt_context::format_active_format_requirements(doc)
-            .map(|section| format!("\n\n{}\n", section))
-            .unwrap_or_default();
     let document_section = agent_doc_orchestration::prompt_context::build_document_section(
         file,
         diff_text,
@@ -569,29 +562,12 @@ fn build_agent_prompt(
         session_accretion,
     );
 
-    if mode.is_template() {
-        format!(
-            "The user edited the session document. Here is the diff since the last run:\n\n\
-             <diff>\n{}\n</diff>\n\n\
-             {}{}\
-             {}\
-             Respond to the user's new content. Write your response in markdown.\n\
-             Format your response as patch blocks targeting document components.\n\
-             Example: <!-- patch:exchange -->\\nYour response\\n<!-- /patch:exchange -->",
-            diff_text, prompt_bearing, active_format_requirements, document_section
-        )
-    } else {
-        format!(
-            "The user edited the session document. Here is the diff since the last run:\n\n\
-             <diff>\n{}\n</diff>\n\n\
-             {}{}\
-             {}\
-             Respond to the user's new content. Write your response in markdown.\n\
-             Do not include a ## Assistant heading — it will be added automatically.\n\
-             If the user inserted prompt-bearing edits inline, classify them as prompt targets vs content edits before responding.",
-            diff_text, prompt_bearing, active_format_requirements, document_section
-        )
-    }
+    agent_doc_prompt_context::render_agent_prompt(AgentPromptContext {
+        template_mode: mode.is_template(),
+        diff_text,
+        doc,
+        document_section: &document_section,
+    })
 }
 
 fn resolve_task_batch(file: &Path, config: &OrchestrateConfig) -> Result<ResolvedTaskBatch> {
@@ -677,7 +653,7 @@ fn canonicalize_prompt_preset_requests(
 
 fn extend_task_batch_from_text(batch: &mut ResolvedTaskBatch, text: &str) {
     batch.tasks.extend(extract_tasks_from_text(text));
-    for preset in diff::extract_prompt_preset_requests_from_text(text) {
+    for preset in agent_doc_diff::extract_prompt_preset_requests_from_text(text) {
         if !batch
             .requested_presets
             .iter()

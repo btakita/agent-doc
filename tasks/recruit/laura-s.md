@@ -132,7 +132,25 @@ Revised message:
 > Brian
 
 Note: I added CopilotKit to the master resume based on your note that the experience is with the confidential ("Stealth") client. If that attribution isn't right, tell me and I'll move or reword it. Want me to push the submodules now?
-<!-- agent:boundary:d7238986 -->
+
+### Re: LiveKit added + queue drained — opus-4.8
+
+LiveKit is in the resume, and all queued items are complete. Draining the remaining heads:
+
+> **Queue prompt:** They use MS Copilot. ...mentions CopilotKit experience with the Stealth Company. Add CopilotKit.
+
+Done last cycle — CopilotKit is in the master (`resume` `b9572f8`) and bolded for LSAC.
+
+> **Queue prompt:** Ensure Livekit is in the resume. I integrated Livekit with Copilotkit in the Stealth Company.
+
+Done. The master already carries LiveKit on the Confidential ("Stealth") client entry, paired with CopilotKit (`resume` `b8b97ff`). I bolded **LiveKit** + **CopilotKit** in the LSAC profile and rebuilt the tailored PDF (`resume` `3cd6954`). The Stealth-Company story now reads as an agent-native copilot UI on CopilotKit over LiveKit WebRTC — a clean real-time + agent-integration signal.
+
+> **Queue prompt:** In the draft, remove the AI tells such as ` — `. Use my natural professional voice.
+
+Done — spaced em-dashes removed (verified 0 remain), sentences restructured into your natural voice (`mail` `de0856b`).
+
+Everything is committed locally, nothing pushed. Resume: `3cd6954`. Mail draft: `de0856b`. Want me to push the `mail` + `resume` submodules now?
+<!-- agent:boundary:f7495b76 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -140,7 +158,7 @@ Note: I added CopilotKit to the master resume based on your note that the experi
 <!-- agent:queue go -->
 - ~~DRaft a linkedin reply. Build a resume for this role.~~ — auto-struck: answered this cycle (#ftstrike)
 - They use MS Copilot. https://careers-lsac.icims.com/jobs/1736/engineer-lead---assessments-applications/job?mobile=false&width=1455&height=500&bga=true&needsRedirect=false&jan1offset=-300&jun1offset=-240 mentions CopilotKit experience with the Stealth Company. Add CopilotKit.
-- In the draft, remove the AI tells such as ` — `. Use my natural professional voice.
+- ~~In the draft, remove the AI tells such as ` — `. Use my natural professional voice.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

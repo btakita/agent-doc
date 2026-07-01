@@ -838,6 +838,17 @@ should be deleted during extraction.
   snapshot, and normalization effects while importing the focused detector
   directly; the old `write.rs` helper cluster was deleted instead of preserved
   as a facade.
+- Facade cleanup now removes low-value re-export and deprecated-name surfaces:
+  `agent-doc-turn-executor-tmux` no longer re-exports tmux model types from
+  `agent-doc-tmux`; `agent-doc-element-registry` no longer re-exports base
+  element vocabulary from `agent-doc-element`; `agent-doc-document` imports base
+  element types directly; `agent-doc-diff` removed the
+  `extract_required_response_blocks` / `format_required_response_targets`
+  compatibility wrappers in favor of current prompt-bearing names; and
+  `agent-doc-element-backlog` removed the width-4 `generate_hash` wrapper in
+  favor of `generate_hash_n(..., 4)`. Static guards now reject these old Rust
+  API names so the no-shim policy applies to cleanup work as well as new
+  extractions.
 
 ### Earlier closure finding
 

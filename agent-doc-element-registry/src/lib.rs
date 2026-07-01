@@ -4,11 +4,7 @@
 //! loading belongs in a runtime crate; plugins should register additional
 //! `ElementRegistration` values against this shape.
 
-pub use agent_doc_element::{
-    ElementAuthority, ElementCompositionRole, ElementDescriptor, ElementPlugin,
-    ElementRealtimeModel, ElementRegistration, ElementSchedulingRole, ElementShape, ElementSource,
-    ElementWritePolicy,
-};
+use agent_doc_element::{ElementDescriptor, ElementRegistration};
 
 pub const BUILT_IN_ELEMENTS: &[ElementDescriptor] = &[
     agent_doc_element_exchange::DESCRIPTOR,
@@ -48,6 +44,10 @@ pub fn built_in_registrations() -> Vec<ElementRegistration> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_doc_element::{
+        ElementAuthority, ElementCompositionRole, ElementRealtimeModel, ElementSchedulingRole,
+        ElementWritePolicy,
+    };
 
     #[test]
     fn registry_finds_canonical_and_legacy_names() {

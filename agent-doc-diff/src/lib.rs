@@ -126,17 +126,12 @@
 //! - `first_unstarted_prompt_bearing_change_from_diff(diff, current_doc)`: selects
 //!   the first still-unanswered prompt-bearing change from an already-built diff,
 //!   including answered-prompt suppression against the current exchange body.
-//! - `extract_required_response_blocks_multiple_prompts`: changed exchange tail with two prompt
+//! - `extract_prompt_target_blocks_multiple_prompts`: changed exchange tail with two prompt
 //!   starts → both blocks returned oldest-first
-//! - `extract_required_response_blocks_preserves_code_fence_context`: prompt block followed by an
+//! - `extract_prompt_target_blocks_preserves_code_fence_context`: prompt block followed by an
 //!   added fenced code block → returned block keeps the fence content intact
 //! - `format_prompt_bearing_changes_mentions_turn_completeness`: rendered section includes the
 //!   "do not stop at the newest question" contract plus edit/artifact handling guidance
-//! - `extract_required_response_blocks(diff)`: extracts ordered user request blocks from added
-//!   diff lines (for example `❯` prompts, questions, or imperative directives) so prompt builders
-//!   can restate the full changed exchange tail instead of anchoring only on the newest question
-//! - `format_required_response_targets(diff)`: compatibility wrapper that returns only the
-//!   `prompt_target` blocks from `classify_prompt_bearing_changes`
 //! - `format_prompt_bearing_changes(diff)`: renders the typed change list into a prompt-ready
 //!   section with explicit turn-completeness and edit/artifact instructions
 //! - `text_line_looks_like_prompt_target("❯ **Verification:** passed")` → `false`;
@@ -2270,39 +2265,6 @@ pub fn detect_exchange_compaction_request(diff: &str) -> bool {
     }
 
     false
-}
-
-/// Extract ordered user-authored request blocks from added diff lines.
-///
-/// This is a prompt-building helper, not a semantic proof that every request
-/// was answered. It makes the changed exchange tail explicit so the agent is
-/// reminded to address the full oldest-first set of prompts instead of only the
-/// newest visible question.
-#[allow(dead_code)]
-pub fn extract_required_response_blocks(diff: &str) -> Vec<String> {
-    extract_prompt_target_blocks(diff)
-}
-
-/// Render extracted request blocks as a prompt-ready turn-completeness section.
-#[allow(dead_code)]
-pub fn format_required_response_targets(diff: &str) -> Option<String> {
-    let blocks = extract_required_response_blocks(diff);
-    if blocks.is_empty() {
-        return None;
-    }
-
-    let mut out = String::from(
-        "Required response targets (oldest first):\n\
-         Do not stop at the newest question. The turn is incomplete until each item below is answered or explicitly grouped into one response.\n\n",
-    );
-    for (idx, block) in blocks.iter().enumerate() {
-        out.push_str(&format!(
-            "<target index=\"{}\">\n{}\n</target>\n\n",
-            idx + 1,
-            block
-        ));
-    }
-    Some(out)
 }
 
 /// Render all prompt-bearing changes as a prompt-ready section.
@@ -4484,7 +4446,7 @@ Done.\n\
     }
 
     #[test]
-    fn extract_required_response_blocks_multiple_prompts() {
+    fn extract_prompt_target_blocks_multiple_prompts() {
         let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,9 @@\n\
             ctx\n\
             +❯ First question?\n\
@@ -4493,7 +4455,7 @@ Done.\n\
             +❯ Second question?\n\
             +do #n8q4. run tests. build + install. commit + push\n";
 
-        let blocks = extract_required_response_blocks(diff);
+        let blocks = extract_prompt_target_blocks(diff);
         assert_eq!(blocks.len(), 2);
         assert_eq!(blocks[0], "❯ First question?\nContext line.");
         assert_eq!(
@@ -4503,7 +4465,7 @@ Done.\n\
     }
 
     #[test]
-    fn extract_required_response_blocks_preserves_code_fence_context() {
+    fn extract_prompt_target_blocks_preserves_code_fence_context() {
         let diff = "--- snapshot\n+++ document\n@@ -1,2 +1,7 @@\n\
             ctx\n\
             +❯ In src/sample-app, why did patchback miss the prefix?\n\
@@ -4513,19 +4475,19 @@ Done.\n\
             +line two\n\
             +```\n";
 
-        let blocks = extract_required_response_blocks(diff);
+        let blocks = extract_prompt_target_blocks(diff);
         assert_eq!(blocks.len(), 1);
         assert!(blocks[0].contains("❯ In src/sample-app"));
         assert!(blocks[0].contains("```text\nline one\nline two\n```"));
     }
 
     #[test]
-    fn format_required_response_targets_mentions_turn_completeness() {
+    fn format_prompt_bearing_changes_mentions_turn_completeness() {
         let diff =
             "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n+❯ Why were two prompts left unresolved?\n";
-        let rendered = format_required_response_targets(diff).unwrap();
+        let rendered = format_prompt_bearing_changes(diff).unwrap();
         assert!(rendered.contains("Do not stop at the newest question"));
-        assert!(rendered.contains("<target index=\"1\">"));
+        assert!(rendered.contains("<change index=\"1\" kind=\"prompt_target\">"));
         assert!(rendered.contains("❯ Why were two prompts left unresolved?"));
     }
 

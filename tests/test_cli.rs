@@ -6602,6 +6602,32 @@ fn test_agent_doc_diff_owns_unstarted_prompt_bearing_policy() {
 }
 
 #[test]
+fn test_agent_doc_diff_uses_current_prompt_bearing_api_names() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let diff_source = fs::read_to_string(manifest_dir.join("agent-doc-diff/src/lib.rs")).unwrap();
+    for forbidden in [
+        "pub fn extract_required_response_blocks(",
+        "pub fn format_required_response_targets(",
+        "extract_required_response_blocks(",
+        "format_required_response_targets(",
+    ] {
+        assert!(
+            !diff_source.contains(forbidden),
+            "agent-doc-diff must use current prompt-bearing names, not deprecated compatibility wrappers: {forbidden}"
+        );
+    }
+    for required in [
+        "fn extract_prompt_target_blocks(",
+        "pub fn format_prompt_bearing_changes(",
+    ] {
+        assert!(
+            diff_source.contains(required),
+            "agent-doc-diff should expose current prompt-bearing policy names: {required}"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_diff_owns_post_exchange_comment_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let diff_source = fs::read_to_string(manifest_dir.join("agent-doc-diff/src/lib.rs")).unwrap();
@@ -9797,6 +9823,21 @@ fn test_agent_doc_element_backlog_owns_tracked_line_remove_and_prune_policy() {
 }
 
 #[test]
+fn test_agent_doc_element_backlog_uses_current_hash_api_name() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let backlog_model =
+        fs::read_to_string(manifest_dir.join("agent-doc-element-backlog/src/backlog.rs")).unwrap();
+    assert!(
+        !backlog_model.contains("pub fn generate_hash("),
+        "agent-doc-element-backlog must not preserve deprecated width-4 hash wrapper"
+    );
+    assert!(
+        backlog_model.contains("pub fn generate_hash_n("),
+        "agent-doc-element-backlog should expose the width-aware hash API directly"
+    );
+}
+
+#[test]
 fn test_agent_doc_element_backlog_owns_malformed_tracked_item_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let backlog_model =
@@ -10448,6 +10489,10 @@ fn test_agent_doc_turn_executor_tmux_owns_context_clear_submit_policy() {
     assert!(
         lib_source.contains("pub mod context_clear;"),
         "agent-doc-turn-executor-tmux must export context-clear submit policy directly"
+    );
+    assert!(
+        !lib_source.contains("pub use agent_doc_tmux::{"),
+        "agent-doc-turn-executor-tmux must not facade tmux model types; callers should use agent-doc-tmux directly"
     );
 
     let context_clear_source =
@@ -11708,6 +11753,44 @@ fn test_agent_doc_element_boundary_owns_boundary_id_lookup() {
             );
         }
     }
+}
+
+#[test]
+fn test_agent_doc_element_registry_has_no_base_type_facade() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let registry_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-element-registry/src/lib.rs")).unwrap();
+    for forbidden in [
+        "pub use agent_doc_element::{",
+        "pub use agent_doc_element::ElementAuthority",
+        "pub use agent_doc_element::ElementDescriptor",
+        "pub use agent_doc_element::ElementRegistration",
+    ] {
+        assert!(
+            !registry_source.contains(forbidden),
+            "agent-doc-element-registry should compose built-ins, not re-export base element types: {forbidden}"
+        );
+    }
+    for required in [
+        "pub const BUILT_IN_ELEMENTS",
+        "pub fn built_in_elements(",
+        "pub fn find_built_in(",
+        "pub fn descriptor_for(",
+        "pub fn built_in_registrations(",
+    ] {
+        assert!(
+            registry_source.contains(required),
+            "agent-doc-element-registry should still own built-in registry composition: {required}"
+        );
+    }
+
+    let document_models =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/element_models.rs")).unwrap();
+    assert!(
+        document_models.contains("use agent_doc_element::{")
+            && !document_models.contains("use agent_doc_element_registry::{"),
+        "agent-doc-document should import base element types directly and use registry only for built-in composition"
+    );
 }
 
 #[test]

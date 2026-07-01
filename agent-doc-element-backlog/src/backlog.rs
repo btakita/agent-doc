@@ -2539,18 +2539,6 @@ pub fn extract_done_item_own_ids(text: &str) -> HashSet<String> {
     ids
 }
 
-/// Generate a stable 4-char base32 hash from `(text, doc_id, counter)`.
-///
-/// Backward-compat thin wrapper over [`generate_hash_n`] at width 4. Existing
-/// docs keep their 4-char IDs on re-backfill because width-4 output is
-/// bit-identical to the original formula. Kept in the public API for
-/// backward compatibility and as the canonical entry point for width-4
-/// hashing in tests.
-#[allow(dead_code)]
-pub fn generate_hash(text: &str, doc_id: &str, counter: u64) -> String {
-    generate_hash_n(text, doc_id, counter, 4)
-}
-
 /// Generate a stable variable-width base32 hash. `width` is clamped to `[4, 8]`
 /// — the spec §1 ceiling on collision extension.
 ///
@@ -5436,25 +5424,25 @@ mod tests {
     }
 
     #[test]
-    fn generate_hash_deterministic_and_short() {
-        let h = generate_hash("text", "doc", 0);
+    fn generate_hash_n_width4_deterministic_and_short() {
+        let h = generate_hash_n("text", "doc", 0, 4);
         assert_eq!(h.len(), 4);
-        assert_eq!(h, generate_hash("text", "doc", 0));
-        assert_ne!(h, generate_hash("text", "doc", 1));
+        assert_eq!(h, generate_hash_n("text", "doc", 0, 4));
+        assert_ne!(h, generate_hash_n("text", "doc", 1, 4));
     }
 
     #[test]
-    fn generate_hash_n_width4_matches_generate_hash() {
+    fn generate_hash_n_width4_matches_pre_extension_formula() {
         // Width-4 output must be bit-identical to the pre-#14z4 formula so
         // existing docs don't churn their IDs on re-backfill.
         let cases = [
-            ("text", "doc", 0u64),
-            ("refactor preflight", "abc123", 7),
-            ("", "", 42),
-            ("long text with spaces", "doc_id_long", 99),
+            ("text", "doc", 0u64, "he5f"),
+            ("refactor preflight", "abc123", 7, "wkvb"),
+            ("", "", 42, "ywpk"),
+            ("long text with spaces", "doc_id_long", 99, "mpy2"),
         ];
-        for (t, d, c) in cases {
-            assert_eq!(generate_hash(t, d, c), generate_hash_n(t, d, c, 4));
+        for (t, d, c, expected) in cases {
+            assert_eq!(generate_hash_n(t, d, c, 4), expected);
         }
     }
 

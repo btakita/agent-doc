@@ -7,7 +7,7 @@
 pub mod context_clear;
 pub mod prompt;
 
-pub use agent_doc_tmux::{
+use agent_doc_tmux::{
     TmuxModelMachine, TmuxObservation, TmuxPaneActivity, TmuxRealtimeState, TmuxSupervisorHealth,
 };
 use agent_doc_turn_executor::{

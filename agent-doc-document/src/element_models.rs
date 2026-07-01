@@ -1,6 +1,6 @@
 //! Composition of per-element realtime models into the document model.
 
-use agent_doc_element_registry::{
+use agent_doc_element::{
     ElementCompositionRole, ElementDescriptor, ElementRealtimeModel, ElementSchedulingRole,
 };
 
@@ -72,7 +72,7 @@ impl DocumentElementModels {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_doc_element_registry::{ElementAuthority, ElementWritePolicy};
+    use agent_doc_element::{ElementAuthority, ElementWritePolicy};
 
     #[test]
     fn document_model_composes_built_in_element_models() {

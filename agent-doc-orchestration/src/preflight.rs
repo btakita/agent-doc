@@ -616,16 +616,6 @@ fn stale_install_warning(doc_git_root: &Path) -> Option<PreflightWarning> {
     })
 }
 
-fn component_attr_warning_for_file(file: &Path, content: &str) -> Option<PreflightWarning> {
-    let warning = agent_doc_queue::component_attrs::component_attr_warning(content)?;
-    Some(PreflightWarning {
-        code: "misplaced_component_attr".to_string(),
-        message: format!("{}: {}", file.display(), warning.message_body()),
-        document_agent: None,
-        active_harness: None,
-    })
-}
-
 /// Trigger an automatic `resync --fix` when session-drift has been detected
 /// on two consecutive preflights.
 ///
@@ -3174,20 +3164,6 @@ mod tests {
             .is_none(),
             "agent-owned queue directives remain executable state, not ordinary scratch comments"
         );
-    }
-    #[test]
-    fn component_attr_warning_for_file_formats_preflight_warning() {
-        let content = concat!(
-            "<!-- agent:backlog preset=\"#spec-test-build-install-commit-push\" -->\n",
-            "- [ ] [#x1] keep this\n",
-            "<!-- /agent:backlog -->\n",
-        );
-        let warning = component_attr_warning_for_file(Path::new("session.md"), content)
-            .expect("focused component-attr policy should feed a preflight warning");
-        assert_eq!(warning.code, "misplaced_component_attr");
-        assert!(warning.message.starts_with("session.md: "));
-        assert!(warning.message.contains("queue-only"));
-        assert!(warning.message.contains("no mutation"));
     }
     #[test]
     fn auto_on_backlog_does_not_activate_queue() {

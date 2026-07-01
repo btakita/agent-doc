@@ -63,6 +63,21 @@ pub fn decide_visible_write_after_typing(facts: VisibleWriteTypingFacts) -> Visi
     }
 }
 
+/// Decide whether a direct disk fallback must be refused after an editor IPC
+/// delivery attempt already failed.
+///
+/// A capable live-buffer sidecar is authoritative on its own because it may hold
+/// unsaved operator text. A plugin-owner lease is authoritative only when the IPC
+/// listener answers; stale lease pid state on a dead socket must not wedge the
+/// write forever.
+pub fn should_refuse_disk_fallback(
+    sidecar_live: bool,
+    owner_holds: bool,
+    listener_answering: bool,
+) -> bool {
+    sidecar_live || (owner_holds && listener_answering)
+}
+
 /// Apply `❯ ` prefix to lines in `content` that appear in `prefix_lines`.
 ///
 /// IPC patch content is normalized before delivery so newly-appended lines
@@ -1922,6 +1937,34 @@ pub fn stale_snapshot_reset_drift(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn direct_disk_fallback_refusal_tracks_live_editor_authority() {
+        assert!(
+            !should_refuse_disk_fallback(false, true, false),
+            "stale lease + dead socket + no sidecar must allow the disk fallback"
+        );
+        assert!(
+            !should_refuse_disk_fallback(false, false, false),
+            "no sidecar + no owner + dead socket must allow the disk fallback"
+        );
+        assert!(
+            should_refuse_disk_fallback(true, false, false),
+            "capable sidecar must fail closed even with a dead socket"
+        );
+        assert!(
+            should_refuse_disk_fallback(true, true, true),
+            "capable sidecar must fail closed even with a live listener"
+        );
+        assert!(
+            should_refuse_disk_fallback(false, true, true),
+            "lease + answering socket must refuse the disk fallback"
+        );
+        assert!(
+            !should_refuse_disk_fallback(false, false, true),
+            "answering socket with no owner/sidecar must allow the disk fallback"
+        );
+    }
 
     fn identity_normalize(text: &str) -> String {
         text.to_string()

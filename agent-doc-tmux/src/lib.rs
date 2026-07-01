@@ -231,6 +231,18 @@ pub fn select_pane_by_position(
         })
 }
 
+pub fn parse_session_window_line(line: &str) -> Option<(String, String, String)> {
+    let mut parts = line.splitn(3, ' ');
+    let index = parts.next()?.to_string();
+    let id = parts.next()?.to_string();
+    let name = parts.next()?.to_string();
+    Some((index, id, name))
+}
+
+pub fn parse_session_windows(text: &str) -> Vec<(String, String, String)> {
+    text.lines().filter_map(parse_session_window_line).collect()
+}
+
 /// Foreground program names tmux reports via `#{pane_current_command}` when a
 /// pane has fallen back to a bare interactive shell. Login shells can show a
 /// leading `-`, for example `-zsh`.
@@ -1044,6 +1056,22 @@ mod tests {
                 width: 80,
                 height: 0,
             }]
+        );
+    }
+
+    #[test]
+    fn session_window_parser_reads_tmux_list_windows_output() {
+        assert_eq!(
+            parse_session_windows("0 @1 agent-doc\n1 @2 stash\n2 @3 notes window\nbad\n"),
+            vec![
+                ("0".to_string(), "@1".to_string(), "agent-doc".to_string()),
+                ("1".to_string(), "@2".to_string(), "stash".to_string()),
+                (
+                    "2".to_string(),
+                    "@3".to_string(),
+                    "notes window".to_string()
+                ),
+            ]
         );
     }
 

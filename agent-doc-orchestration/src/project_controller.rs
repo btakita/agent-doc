@@ -16,6 +16,7 @@ use agent_doc_controller::status::{
     ControllerBootstrapStatusFacts, ControllerFreshnessFacts, ControllerFreshnessStatus,
     ControllerHandoffState, ControllerStatus, LaunchMode, controller_restart_recovery_needed,
     default_controller_generation, preparing_controller_is_stale,
+    resolve_controller_identity_version,
 };
 use agent_doc_sqlite::state_store;
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
@@ -113,16 +114,10 @@ pub fn set_binary_version(version: &str) {
 /// Resolve the version stamped into [`ControllerBinaryIdentity`]. Prefers the binary-injected
 /// value; falls back to the orchestration crate version only when unset.
 fn identity_version() -> String {
-    resolve_identity_version(BINARY_VERSION.get().map(String::as_str))
-}
-
-/// Pure resolution split out from [`identity_version`] so it is unit-testable without the
-/// process-global `OnceLock`. `injected` is the binary-provided version (`None` when the
-/// binary never called [`set_binary_version`], e.g. library-only callers / tests).
-fn resolve_identity_version(injected: Option<&str>) -> String {
-    injected
-        .map(str::to_string)
-        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
+    resolve_controller_identity_version(
+        BINARY_VERSION.get().map(String::as_str),
+        env!("CARGO_PKG_VERSION"),
+    )
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2431,22 +2426,6 @@ mod tests {
     use agent_doc_sqlite::state_store::{load_actor_transitions_from_db, sqlite_i64};
     use rusqlite::params;
     use std::collections::BTreeMap;
-
-    #[test]
-    fn identity_version_prefers_injected_binary_version() {
-        // `#orchver` — when the binary injects its real version, the identity stamps it.
-        assert_eq!(resolve_identity_version(Some("0.34.30")), "0.34.30");
-    }
-
-    #[test]
-    fn identity_version_falls_back_to_crate_version() {
-        // Library-only callers (no `set_binary_version`) fall back to the orchestration
-        // crate version. This is the path that historically produced "0.1.0".
-        assert_eq!(
-            resolve_identity_version(None),
-            env!("CARGO_PKG_VERSION").to_string()
-        );
-    }
 
     #[test]
     fn controller_paths_are_project_local() {

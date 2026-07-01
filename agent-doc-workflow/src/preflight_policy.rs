@@ -73,6 +73,17 @@ pub fn preset_item_id_collision_warning(content: &str) -> Option<PreflightPolicy
     })
 }
 
+pub fn component_attr_preflight_warning(
+    file_display: &str,
+    content: &str,
+) -> Option<PreflightPolicyWarning> {
+    let warning = agent_doc_queue::component_attrs::component_attr_warning(content)?;
+    Some(PreflightPolicyWarning {
+        code: "misplaced_component_attr".to_string(),
+        message: format!("{}: {}", file_display, warning.message_body()),
+    })
+}
+
 pub fn resolve_free_text_execution(
     requested: agent_doc_frontmatter::frontmatter::FreeTextExecutionMode,
     goal_available: bool,
@@ -261,6 +272,21 @@ mod tests {
         assert_eq!(warning.code, "preset_item_id_collision");
         assert!(warning.message.contains("#same"));
         assert!(warning.message.contains("Ambiguous identities"));
+    }
+
+    #[test]
+    fn component_attr_warning_formats_preflight_policy_warning() {
+        let content = concat!(
+            "<!-- agent:backlog preset=\"#spec-test-build-install-commit-push\" -->\n",
+            "- [ ] [#x1] keep this\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let warning = component_attr_preflight_warning("session.md", content)
+            .expect("focused component-attr policy should feed a preflight warning");
+        assert_eq!(warning.code, "misplaced_component_attr");
+        assert!(warning.message.starts_with("session.md: "));
+        assert!(warning.message.contains("queue-only"));
+        assert!(warning.message.contains("no mutation"));
     }
 
     #[test]

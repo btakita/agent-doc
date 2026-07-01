@@ -1508,16 +1508,7 @@ fn list_session_windows(tmux: &Tmux, session_name: &str) -> Vec<(String, String,
     ]) else {
         return Vec::new();
     };
-    output
-        .lines()
-        .filter_map(|line| {
-            let mut parts = line.splitn(3, ' ');
-            let index = parts.next()?.to_string();
-            let id = parts.next()?.to_string();
-            let name = parts.next()?.to_string();
-            Some((index, id, name))
-        })
-        .collect()
+    agent_doc_tmux::parse_session_windows(&output)
 }
 
 fn normalize_window_to_index(

@@ -86,6 +86,20 @@ pub const fn controller_restart_recovery_needed(
     controller_generation > default_controller_generation() || previous_controller_pid.is_some()
 }
 
+/// Resolve the version stamped into a controller binary identity.
+///
+/// Long-lived controllers prefer the top-level binary version injected by the
+/// process entrypoint. Library-only callers and tests fall back to the calling
+/// crate's package version supplied at the orchestration boundary.
+pub fn resolve_controller_identity_version(
+    injected_binary_version: Option<&str>,
+    fallback_crate_version: &str,
+) -> String {
+    injected_binary_version
+        .map(str::to_string)
+        .unwrap_or_else(|| fallback_crate_version.to_string())
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ControllerProcessFreshness {
     pub role: String,
@@ -702,6 +716,22 @@ mod tests {
             default_controller_generation(),
             Some(42)
         ));
+    }
+
+    #[test]
+    fn identity_version_prefers_injected_binary_version() {
+        assert_eq!(
+            resolve_controller_identity_version(Some("0.34.30"), "0.1.0"),
+            "0.34.30"
+        );
+    }
+
+    #[test]
+    fn identity_version_falls_back_to_crate_version() {
+        assert_eq!(
+            resolve_controller_identity_version(None, "0.34.66"),
+            "0.34.66"
+        );
     }
 
     #[test]

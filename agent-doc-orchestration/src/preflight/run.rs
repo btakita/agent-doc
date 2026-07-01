@@ -1157,7 +1157,13 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             eprintln!("[preflight] warning: {}", warning.message);
             warnings.push(warning);
         }
-        if let Some(warning) = component_attr_warning_for_file(file, &content) {
+        if let Some(warning) =
+            agent_doc_workflow::preflight_policy::component_attr_preflight_warning(
+                &file.display().to_string(),
+                &content,
+            )
+            .map(PreflightWarning::from)
+        {
             eprintln!("[preflight] warning: {}", warning.message);
             warnings.push(warning);
         }

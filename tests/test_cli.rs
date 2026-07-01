@@ -13328,6 +13328,9 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
     }
     let preflight_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let preflight_run_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
     for forbidden_snippet in [
         "QUEUE_ONLY_COMPONENT_ATTRS",
         "KNOWN_COMPONENT_ATTRS",
@@ -13340,10 +13343,18 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
         );
     }
     assert!(
-        preflight_source
+        preflight_run_source
+            .contains("agent_doc_workflow::preflight_policy::component_attr_preflight_warning"),
+        "preflight should delegate component-attr preflight warning adaptation to workflow policy"
+    );
+    let preflight_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/preflight_policy.rs"))
+            .unwrap();
+    assert!(
+        preflight_policy
             .contains("agent_doc_queue::component_attrs::component_attr_warning(content)")
-            && preflight_source.contains("fn component_attr_warning_for_file("),
-        "preflight should only adapt focused component-attr warning facts into PreflightWarning"
+            && preflight_policy.contains("pub fn component_attr_preflight_warning("),
+        "workflow preflight policy should adapt focused component-attr warning facts"
     );
 
     let queue_cmd =

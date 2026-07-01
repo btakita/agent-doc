@@ -787,7 +787,7 @@ Note I sent this straight through because you said "auto-send" — my default is
 
 Send an email to robert-ward containing the suggestions.
 
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc (HEAD)
 
 ```text
 **IPC proof issue dogfood log**
@@ -798,5 +798,18 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/personal/robert-ward.md source=socket_already_applied patch_id=cc19ef1d-5d3c-49c6-95a0-2ff22c046d93 invariant=disk_missing_response_probe recovery=content_ours_snapshot_visible_response_repair response_sha256=084cdf9f3f1c9e367788e3c712b64de7a647bb480b5ab82b67e4301867005974 current_len=48085 current_hash=a6ffafb12c644410a89604b93383584dec316e0dcfe8fd5d188570fc1c35391b repaired_len=53973 repaired_hash=05c31c3b45b4466eec4fa48fd22e4d63a62874cae55c3ca0327bf8c8121b1cb8 doc=robert-ward session=aaca1487-6409-4c94-88d6-97b579485190 turn=cycle-1782888231030
 ```
-<!-- agent:boundary:a13e6dd7 -->
+❯ There is no street view from July 2025. Can she ask for the officer to prove there was adequate signage?
+
+### Re: Proving adequate signage without Street View — opus-4-8
+
+Yes — and there are stronger, dated records than Street View. In rough order of strength:
+
+1. **Sign installation / work-order records (public records request).** PCH is Caltrans (state highway); the temporary post-fire 25 mph would have an install work order and a sign-placement log. File a **California Public Records Act** request to Caltrans District 7 (and Sheriff/CHP for the enforcement order) for: the emergency/temporary speed order authorizing 45→25, the engineering & traffic survey (if any), and the sign installation date + locations. This is *stronger* than Street View because it's the agency's own dated record of exactly how many signs went up and when. If the signs went up *after* her citation, or sparsely, that's dispositive.
+2. **Informal discovery request to the officer/agency before trial** (as in the prior draft): the authorizing order, the survey, and the radar/lidar **calibration + officer certification** records. No response / no paperwork = argue the limit was unenforceable and the radar inadmissible (CVC 40801–40802 speed-trap rules).
+3. **The officer's dash-cam / body-cam footage** from the stop — request it. It often shows the surrounding signage environment on the actual day, which is exactly what Street View would have given her.
+4. **Current photos of the signage.** The temporary post-fire signs are very likely *still* the same ones. Photograph spacing, count, visibility, and whether there's any "reduced speed ahead" warning. Circumstantial, but it corroborates her testimony.
+
+Bottom line: she doesn't need Street View to shift the burden. A CPRA/discovery request forces the agency to *produce* proof the limit was properly authorized and posted — and if they can't, that's her strongest argument for dismissal.
+
+<!-- agent:boundary:fca08505 -->
 <!-- /agent:exchange -->

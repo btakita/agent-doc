@@ -65,13 +65,38 @@ Their real stack — from an actual Qualia job posting — is **JavaScript / Nod
 Alana's exact current title/tenure and Qualia's precise headcount ($2.2B valuation figure) are third-party — verify live if it comes up. The confirmed valuation milestone is $1B+ (2020 Series D).
 
 Good luck — you've got this. Want a one-line "why Qualia" opener drafted, or a comp-range talking point?
+
+### Re: JD fit review — Senior Software Engineer I @ Qualia — opus-4-8
+
+Reviewed [the Greenhouse posting](https://job-boards.greenhouse.io/qualia/jobs/6001226) against your background. **This is a strong fit — the payments/fraud overlap is the bullseye.** One caveat on leveling.
+
+**The role:** Senior Software Engineer I — Austin or remote. 5+ yrs full-stack; build frontend + backend, extend core web apps, **software integrations, and payment-processing systems**; make architectural decisions on large projects; mentor juniors; work across teams. Stack: **JavaScript/Node.js, Semantic UI, MongoDB, microservices/Kubernetes, AWS**. No salary posted.
+
+**Strong matches (lead with these):**
+- **Payment-processing + fraud — your single best differentiator.** Stripe billing on the EFS platform; Stripe + PayPal checkout hardening at MonsterRodHolders, where you traced a sales dip to a card-testing bot (170+ fraudulent PayPal charges) and shipped Turnstile + WAF mitigation. Qualia *is* money movement (title/escrow) and runs **Shield** for wire-fraud — this maps almost perfectly.
+- **Node.js / full-stack** — Deloitte Node.js, Hono, Next.js, Bun, TypeScript-heavy. Solidly in their language.
+- **Architectural decisions on large projects** — EFS platform (Cloudflare Workers + D1, 741+ tests, 74 prod migrations); architected Presence AI's H100 real-time pipeline.
+- **Mentoring + multiple teams** — Pivotal Labs (mentored devs across 20+ startups), RSpec/BDD core. Exceeds the bar.
+- **AWS** — Lambda, CDK, Terraform. ✅
+- **20+ yrs** vs their 5+ minimum — well past tenure.
+
+**Gaps (all learn-on-the-job, none blocking — be upfront):**
+- **MongoDB** — your DB depth is Postgres/TimescaleDB/Supabase/Firebase/Convex/D1. No Mongo specifically, but Firebase/Convex are document stores, so the NoSQL model transfers. Frame it that way honestly.
+- **Semantic UI** — you're React/Svelte/Angular/Vue. It's just a component library; trivial pickup. Non-issue.
+- **Kubernetes** — you have Docker/Terraform/AWS/CI-CD and microservice experience; K8s specifically isn't on your resume. Learnable; frame the container/infra foundation.
+
+**Leveling caveat (raise with Alana):** "Senior Software Engineer I" reads as *entry* senior. Your depth — 20+ yrs, architecture ownership, mentoring across 20+ startups — arguably fits Senior II / Staff. Ask about the **leveling framework and comp band** so you're not slotted below your experience. This is also your natural "salary expectations" pivot.
+
+**One-liner for "why you":** *"You move money in high-stakes, high-liability closings — that's exactly the surface I've been hardening: Stripe/PayPal payments, fraud mitigation, and reliability under real financial risk."*
+
+Want me to spin up a tailored resume profile (`resume/profiles/qualia.toml`) emphasizing payments/fraud + Node, or draft an application note?
 <!-- agent:boundary:87926286 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue -->
-- https://job-boards.greenhouse.io/qualia/jobs/6001226
+- ~~https://job-boards.greenhouse.io/qualia/jobs/6001226~~ — reviewed (JD fit review above)
 <!-- /agent:queue -->
 
 ## Backlog

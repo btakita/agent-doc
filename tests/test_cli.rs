@@ -6392,6 +6392,7 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
     for required in [
         "pub mod invariants;",
         "pub mod doctor;",
+        "pub mod orchestrate_tasks;",
         "pub mod session_cycle;",
         "pub enum WorkflowEvidenceKind",
         "pub enum WorkflowProof",
@@ -6663,6 +6664,51 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         );
     }
 
+    let workflow_orchestrate_tasks =
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/orchestrate_tasks.rs"))
+            .unwrap();
+    for required in [
+        "pub struct ExecutionTask",
+        "pub struct DagTask",
+        "pub fn extract_tasks_from_text(",
+        "pub fn parse_list_item(",
+        "pub fn normalize_task(",
+        "pub fn parse_dag_task_line(",
+        "pub fn plan_dag_execution(",
+    ] {
+        assert!(
+            workflow_orchestrate_tasks.contains(required),
+            "agent-doc-workflow must own orchestrate task parsing/DAG policy: {required}"
+        );
+    }
+    let orchestrate_source = fs::read_to_string(manifest_dir.join("src/orchestrate.rs")).unwrap();
+    for forbidden in [
+        "struct ExecutionTask",
+        "struct DagTask",
+        "struct DagMetadata",
+        "fn extract_tasks_from_text(",
+        "fn collect_fenced_task_blocks(",
+        "fn collect_markdown_list_blocks(",
+        "fn parse_list_item(",
+        "fn normalize_task(",
+        "fn parse_dag_task_line(",
+        "fn plan_dag_execution(",
+        "pub use agent_doc_workflow::orchestrate_tasks",
+        "pub(crate) use agent_doc_workflow::orchestrate_tasks",
+    ] {
+        assert!(
+            !orchestrate_source.contains(forbidden),
+            "src/orchestrate.rs must not re-own or facade orchestrate task parsing/DAG policy: {forbidden}"
+        );
+    }
+    assert!(
+        orchestrate_source.contains("use agent_doc_workflow::orchestrate_tasks::{")
+            && orchestrate_source.contains("extract_tasks_from_text")
+            && orchestrate_source.contains("parse_dag_task_line")
+            && orchestrate_source.contains("plan_dag_execution"),
+        "src/orchestrate.rs should call focused orchestrate task policy directly"
+    );
+
     let workflow_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-workflow/Cargo.toml")).unwrap();
     let parsed: toml::Value = toml::from_str(&workflow_manifest).unwrap();
@@ -6677,6 +6723,7 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         "agent-doc-frontmatter",
         "agent-doc-markdown-ast",
         "agent-doc-turn",
+        "anyhow",
         "indexmap",
         "serde",
         "serde_json",
@@ -6694,6 +6741,7 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
                 | "agent-doc-frontmatter"
                 | "agent-doc-markdown-ast"
                 | "agent-doc-turn"
+                | "anyhow"
                 | "indexmap"
                 | "serde"
                 | "serde_json"

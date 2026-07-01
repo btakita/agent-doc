@@ -767,6 +767,7 @@ dependencies = [
  "agent-doc-frontmatter",
  "agent-doc-markdown-ast",
  "agent-doc-turn",
+ "anyhow",
  "indexmap",
  "serde",
  "serde_json",

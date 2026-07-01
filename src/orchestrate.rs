@@ -56,7 +56,6 @@ use agent_doc_session_accretion::SessionAccretionLevel;
 use agent_doc_session_accretion::SessionAccretionReport;
 use anyhow::{Context, Result};
 use clap::ValueEnum;
-use std::collections::HashSet;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -73,6 +72,10 @@ use agent_doc_diff as diff;
 use agent_doc_orchestration::{agent, preflight::PreflightOutput, snapshot, write};
 use agent_doc_queue::dispatch_item::{QueueItemKind, classify};
 use agent_doc_turn_executor::agent_stream::StreamChunk;
+use agent_doc_workflow::orchestrate_tasks::{
+    DagTask, ExecutionTask, extract_tasks_from_text, normalize_task, parse_dag_task_line,
+    parse_list_item, plan_dag_execution,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum OrchestrateMode {
@@ -96,25 +99,6 @@ pub struct OrchestrateConfig {
     pub timeout_secs: u64,
     pub dry_run: bool,
     pub plan: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ExecutionTask {
-    label: String,
-    prompt: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DagTask {
-    id: String,
-    prompt: String,
-    deps: Vec<String>,
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct DagMetadata {
-    id: Option<String>,
-    after: Vec<String>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -1254,291 +1238,6 @@ fn append_worker_result_line(
     out
 }
 
-fn extract_tasks_from_text(text: &str) -> Vec<String> {
-    let code_blocks = collect_fenced_task_blocks(text);
-    if let Some(block) = code_blocks.last()
-        && !block.is_empty()
-    {
-        return block.clone();
-    }
-
-    let list_blocks = collect_markdown_list_blocks(text);
-    if let Some(block) = list_blocks.last()
-        && !block.is_empty()
-    {
-        return block.clone();
-    }
-
-    text.lines()
-        .map(normalize_task)
-        .filter(|line| !line.is_empty())
-        .collect()
-}
-
-fn collect_fenced_task_blocks(text: &str) -> Vec<Vec<String>> {
-    let mut blocks = Vec::new();
-    let mut in_fence = false;
-    let mut fence_char = '\0';
-    let mut fence_len = 0usize;
-    let mut current = Vec::new();
-
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if !in_fence {
-            if let Some((fc, fl)) = fence_open(trimmed) {
-                in_fence = true;
-                fence_char = fc;
-                fence_len = fl;
-                current.clear();
-            }
-            continue;
-        }
-
-        if fence_close(trimmed, fence_char, fence_len) {
-            let tasks = collect_list_items(&current.join("\n"));
-            if !tasks.is_empty() {
-                blocks.push(tasks);
-            }
-            in_fence = false;
-            current.clear();
-            continue;
-        }
-
-        current.push(line.to_string());
-    }
-
-    blocks
-}
-
-fn collect_markdown_list_blocks(text: &str) -> Vec<Vec<String>> {
-    let mut blocks = Vec::new();
-    let mut current = Vec::new();
-
-    for line in text.lines() {
-        if let Some(task) = parse_list_item(line) {
-            current.push(task);
-        } else if !current.is_empty() {
-            blocks.push(std::mem::take(&mut current));
-        }
-    }
-
-    if !current.is_empty() {
-        blocks.push(current);
-    }
-
-    blocks
-}
-
-fn collect_list_items(text: &str) -> Vec<String> {
-    text.lines().filter_map(parse_list_item).collect()
-}
-
-fn parse_list_item(line: &str) -> Option<String> {
-    let trimmed = line.trim();
-    // Strip the binary-owned prompt prefix that write-back adds to user prompts
-    let trimmed = trimmed
-        .strip_prefix("❯ ")
-        .or_else(|| trimmed.strip_prefix("❯"))
-        .unwrap_or(trimmed);
-    if let Some(rest) = trimmed
-        .strip_prefix("- ")
-        .or_else(|| trimmed.strip_prefix("* "))
-    {
-        let task = normalize_task(rest);
-        return (!task.is_empty()).then_some(task);
-    }
-
-    let digit_count = trimmed.chars().take_while(|ch| ch.is_ascii_digit()).count();
-    if digit_count == 0 {
-        return None;
-    }
-
-    let rest = trimmed[digit_count..].trim_start();
-    let rest = rest
-        .strip_prefix(". ")
-        .or_else(|| rest.strip_prefix(") "))
-        .or_else(|| rest.strip_prefix(".\t"))
-        .or_else(|| rest.strip_prefix(")\t"))?;
-    let task = normalize_task(rest);
-    (!task.is_empty()).then_some(task)
-}
-
-fn fence_open(trimmed: &str) -> Option<(char, usize)> {
-    let fence_char = trimmed.chars().next()?;
-    if fence_char != '`' && fence_char != '~' {
-        return None;
-    }
-    let fence_len = trimmed.chars().take_while(|ch| *ch == fence_char).count();
-    (fence_len >= 3).then_some((fence_char, fence_len))
-}
-
-fn fence_close(trimmed: &str, fence_char: char, fence_len: usize) -> bool {
-    if !trimmed.starts_with(fence_char) {
-        return false;
-    }
-    let close_len = trimmed.chars().take_while(|ch| *ch == fence_char).count();
-    close_len >= fence_len && trimmed[close_len..].trim().is_empty()
-}
-
-fn normalize_task(task: &str) -> String {
-    task.trim().trim_start_matches('❯').trim().to_string()
-}
-
-fn parse_dag_task_line(task: &str, index: usize) -> Result<DagTask> {
-    let normalized = normalize_task(task);
-    if normalized.is_empty() {
-        anyhow::bail!("dag task {} is empty", index + 1);
-    }
-
-    let (metadata, prompt) = split_dag_metadata(&normalized)?;
-    if prompt.is_empty() {
-        anyhow::bail!("dag task {} is missing a prompt", index + 1);
-    }
-
-    let prompt_id = extract_prompt_task_id(&prompt);
-    let id = metadata
-        .id
-        .or(prompt_id)
-        .unwrap_or_else(|| format!("step-{}", index + 1));
-
-    Ok(DagTask {
-        id,
-        prompt,
-        deps: metadata.after,
-    })
-}
-
-fn split_dag_metadata(task: &str) -> Result<(DagMetadata, String)> {
-    let trimmed = task.trim();
-    let Some(rest) = trimmed.strip_prefix('[') else {
-        return Ok((DagMetadata::default(), trimmed.to_string()));
-    };
-
-    let closing = rest
-        .find(']')
-        .ok_or_else(|| anyhow::anyhow!("dag task metadata is missing closing `]`"))?;
-    let metadata_text = &rest[..closing];
-    let prompt = rest[closing + 1..].trim().to_string();
-    let metadata = parse_dag_metadata(metadata_text)?;
-    Ok((metadata, prompt))
-}
-
-fn parse_dag_metadata(metadata: &str) -> Result<DagMetadata> {
-    let mut parsed = DagMetadata::default();
-    for token in metadata.split_whitespace() {
-        if let Some(value) = token.strip_prefix("after=") {
-            parsed.after = parse_dependency_list(value);
-            continue;
-        }
-        if let Some(value) = token.strip_prefix("deps=") {
-            parsed.after = parse_dependency_list(value);
-            continue;
-        }
-        if let Some(value) = token.strip_prefix("id=") {
-            let value = value.trim();
-            if value.is_empty() {
-                anyhow::bail!("dag task metadata has empty `id=`");
-            }
-            parsed.id = Some(value.to_string());
-            continue;
-        }
-        if parsed.id.is_none() {
-            parsed.id = Some(token.to_string());
-            continue;
-        }
-        anyhow::bail!("unsupported dag task metadata token `{}`", token);
-    }
-    Ok(parsed)
-}
-
-fn parse_dependency_list(value: &str) -> Vec<String> {
-    value
-        .split(',')
-        .map(str::trim)
-        .filter(|dep| !dep.is_empty())
-        .map(str::to_string)
-        .collect()
-}
-
-fn extract_prompt_task_id(prompt: &str) -> Option<String> {
-    let bytes = prompt.as_bytes();
-    let mut idx = 0usize;
-    while idx < bytes.len() {
-        if bytes[idx] == b'#' {
-            let start = idx;
-            idx += 1;
-            while idx < bytes.len() {
-                let ch = bytes[idx] as char;
-                if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
-                    idx += 1;
-                } else {
-                    break;
-                }
-            }
-            if idx > start + 1 {
-                return Some(prompt[start..idx].to_string());
-            }
-            continue;
-        }
-        idx += 1;
-    }
-    None
-}
-
-fn plan_dag_execution(tasks: &[DagTask]) -> Result<Vec<ExecutionTask>> {
-    let mut ids = HashSet::new();
-    for task in tasks {
-        if !ids.insert(task.id.clone()) {
-            anyhow::bail!("duplicate dag task id `{}`", task.id);
-        }
-    }
-
-    for task in tasks {
-        for dep in &task.deps {
-            if !ids.contains(dep) {
-                anyhow::bail!("dag task `{}` depends on unknown task `{}`", task.id, dep);
-            }
-        }
-    }
-
-    let mut completed = HashSet::new();
-    let mut remaining = (0..tasks.len()).collect::<Vec<_>>();
-    let mut ordered = Vec::with_capacity(tasks.len());
-
-    while !remaining.is_empty() {
-        let mut advanced = false;
-        let mut cursor = 0usize;
-
-        while cursor < remaining.len() {
-            let idx = remaining[cursor];
-            let task = &tasks[idx];
-            if task.deps.iter().all(|dep| completed.contains(dep)) {
-                let task = tasks[idx].clone();
-                completed.insert(task.id.clone());
-                ordered.push(ExecutionTask {
-                    label: format!("[{}] {}", task.id, task.prompt),
-                    prompt: task.prompt,
-                });
-                remaining.remove(cursor);
-                advanced = true;
-            } else {
-                cursor += 1;
-            }
-        }
-
-        if !advanced {
-            let blocked = remaining
-                .iter()
-                .map(|idx| tasks[*idx].id.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            anyhow::bail!("dag dependency cycle detected among: {}", blocked);
-        }
-    }
-
-    Ok(ordered)
-}
-
 fn inject_prompt(file: &Path, task: &str) -> Result<()> {
     let doc =
         fs::read_to_string(file).with_context(|| format!("failed to read {}", file.display()))?;
@@ -2645,9 +2344,10 @@ mod tests {
     #[test]
     fn collect_markdown_list_blocks_with_prompt_prefix() {
         let text = "❯ - do #a\n❯ - do #b\n\nsome other text\n";
-        let blocks = collect_markdown_list_blocks(text);
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0], vec!["do #a".to_string(), "do #b".to_string()]);
+        assert_eq!(
+            extract_tasks_from_text(text),
+            vec!["do #a".to_string(), "do #b".to_string()]
+        );
     }
     #[test]
     fn from_exchange_scopes_to_tail_bare_directive() {

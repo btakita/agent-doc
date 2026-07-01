@@ -7,6 +7,7 @@
 
 pub mod doctor;
 pub mod invariants;
+pub mod orchestrate_tasks;
 pub mod session_cycle;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

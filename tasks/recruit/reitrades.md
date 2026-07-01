@@ -790,13 +790,30 @@ Two things:
 2. **If §5 still looks operator-facing on your end, you're likely viewing a stale PDF.** The JB IPC has been wedged all session, and the PDF viewer often holds the previously-opened file — so if you still see "(competitive bid)" in the §5 heading, that's the pre-rewrite copy. The current committed PDF (`REItrades V1.2 - Proposal & Estimate.pdf`, 12 pages) has the client-facing version. Close and reopen it to confirm.
 
 If there's a specific phrase in the *current* §5 that still reads wrong to you, point me at it and I'll fix that exact line — but as committed, §5 now addresses Artur throughout.
-<!-- agent:boundary:aacb5150 -->
+### Re: §5 heading was the tell — renamed it — opus-4-8
+
+> **Queue prompt:** "5. Recommended phasing": Still says Recommended phrasing. I refresh & reopened the pdf.
+>
+> **Queue prompt:** Say something other than "Recommended phrasing".
+
+You were right, and I'd been fixing the wrong layer. The *body* of §5 was already client-facing, but the **heading still said "Recommended phasing"** — "Recommended" is vendor-voice (it's *me* recommending *to* you). My earlier pass only stripped the "(competitive bid)" suffix and left "Recommended phasing" in place. That's what you kept seeing.
+
+Fixed now (committed `eb388f19b`, PDF regenerated, 12 pages):
+- **Heading:** "Recommended phasing" → **"Phasing & engagement options"** — describes the section instead of announcing a recommendation.
+- **Opening line:** "I'd suggest leading with a scoped first tranche..." → "The work is structured in phases so you're never committing to the whole list at once..." — states the approach rather than pitching it.
+
+The current committed §5 now opens:
+
+> **## 5. Phasing & engagement options**
+> The work is structured in phases so you're never committing to the whole list at once. That keeps your spend controlled and lets us validate the new code structure against your live data before you commit the full budget.
+
+Reopen the PDF once more — the §5 heading should read **"5. Phasing & engagement options."** If it still shows "Recommended phasing," the viewer is caching an old file (the committed PDF on disk has the new heading — verified). If a different phrase inside §5 reads wrong, quote it and I'll fix that exact line.
+<!-- agent:boundary:4d7a3649 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue go -->
-- "5. Recommended phasing": Still says Recommended phrasing. I refresh & reopened the pdf. 
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

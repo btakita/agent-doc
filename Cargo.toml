@@ -14,6 +14,7 @@ members = [
     "agent-doc-frontmatter",
     "agent-doc-frontmatter-io",
     "agent-doc-ffi",
+    "agent-doc-flow",
     "agent-doc-syntax",
     "agent-doc-topic",
     "agent-doc-fs",
@@ -115,6 +116,7 @@ agent-doc-element-boundary = { path = "agent-doc-element-boundary", version = "0
 agent-doc-element-exchange = { path = "agent-doc-element-exchange", version = "0.34.66" }
 agent-doc-element-review = { path = "agent-doc-element-review", version = "0.34.66" }
 agent-doc-ffi = { path = "agent-doc-ffi", version = "0.34.66" }
+agent-doc-flow = { path = "agent-doc-flow", version = "0.34.66" }
 agent-doc-frontmatter = { path = "agent-doc-frontmatter", version = "0.34.66" }
 agent-doc-frontmatter-io = { path = "agent-doc-frontmatter-io", version = "0.34.66" }
 agent-doc-fs = { path = "agent-doc-fs", version = "0.34.66" }

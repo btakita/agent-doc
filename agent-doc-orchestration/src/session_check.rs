@@ -243,8 +243,8 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
             // `execve` recycle fire and the drain resumes on the fresh binary. Never
             // force the Codex final-gate here — yielding is the desired outcome.
             if agent_doc_supervisor_io::recycle_yield::recycle_yield_pending(file) {
-                let outcome_fields = crate::flow::outcome::UserFacingOutcome::new(
-                    crate::flow::outcome::UserFacingOutcomeKind::NoDrainableWork,
+                let outcome_fields = agent_doc_flow::outcome::UserFacingOutcome::new(
+                    agent_doc_flow::outcome::UserFacingOutcomeKind::NoDrainableWork,
                 )
                 .expect("static no-drainable-work outcome is valid")
                 .log_fields();
@@ -264,8 +264,8 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                 // Codex final-gate) while such a prompt exists so the next cycle
                 // answers it instead of skipping to the queue head.
                 if let Some(unresolved) = unresolved_exchange_prompt(file)? {
-                    let outcome_fields = crate::flow::outcome::UserFacingOutcome::new(
-                        crate::flow::outcome::UserFacingOutcomeKind::DeferredForOperatorProof,
+                    let outcome_fields = agent_doc_flow::outcome::UserFacingOutcome::new(
+                        agent_doc_flow::outcome::UserFacingOutcomeKind::DeferredForOperatorProof,
                     )
                     .expect("static deferred operator-proof outcome is valid")
                     .log_fields();
@@ -395,8 +395,8 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                     )
                 });
                 if let Some(supervisor_head) = supervisor_head {
-                    let outcome_fields = crate::flow::outcome::UserFacingOutcome::new(
-                        crate::flow::outcome::UserFacingOutcomeKind::DeferredForSupervisorDrain,
+                    let outcome_fields = agent_doc_flow::outcome::UserFacingOutcome::new(
+                        agent_doc_flow::outcome::UserFacingOutcomeKind::DeferredForSupervisorDrain,
                     )
                     .expect("static deferred supervisor-drain outcome is valid")
                     .log_fields();
@@ -411,8 +411,8 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                         outcome_fields
                     );
                 } else if deferred > 0 || noise > 0 {
-                    let outcome_fields = crate::flow::outcome::UserFacingOutcome::new(
-                        crate::flow::outcome::UserFacingOutcomeKind::DeferredForOperatorProof,
+                    let outcome_fields = agent_doc_flow::outcome::UserFacingOutcome::new(
+                        agent_doc_flow::outcome::UserFacingOutcomeKind::DeferredForOperatorProof,
                     )
                     .expect("static deferred operator-proof outcome is valid")
                     .log_fields();
@@ -428,8 +428,8 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                         outcome_fields
                     );
                 } else {
-                    let outcome_fields = crate::flow::outcome::UserFacingOutcome::new(
-                        crate::flow::outcome::UserFacingOutcomeKind::NoDrainableWork,
+                    let outcome_fields = agent_doc_flow::outcome::UserFacingOutcome::new(
+                        agent_doc_flow::outcome::UserFacingOutcomeKind::NoDrainableWork,
                     )
                     .expect("static no-drainable-work outcome is valid")
                     .log_fields();
@@ -7937,8 +7937,8 @@ Body\n\
         let doc = root.join("doc.md");
         fs::write(&doc, "doc\n").unwrap();
 
-        let outcome_fields = crate::flow::outcome::UserFacingOutcome::new(
-            crate::flow::outcome::UserFacingOutcomeKind::DeferredForSupervisorDrain,
+        let outcome_fields = agent_doc_flow::outcome::UserFacingOutcome::new(
+            agent_doc_flow::outcome::UserFacingOutcomeKind::DeferredForSupervisorDrain,
         )
         .unwrap()
         .log_fields();

@@ -1,5 +1,5 @@
-use super::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
 use agent_doc_controller::operator_clear::{OperatorClearGuardOutcome, OperatorClearInputState};
+use agent_doc_flow::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
 use std::path::Path;
 
 fn clear_guard_flow_outcome(outcome: OperatorClearGuardOutcome) -> FlowOutcome {

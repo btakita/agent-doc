@@ -1,4 +1,4 @@
-use super::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
+use agent_doc_flow::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
 use agent_doc_turn::closeout_guard::CloseoutGuardReason;
 use agent_doc_turn::closeout_recovery::{
     CloseoutRecoveryCommandInput, CloseoutRecoveryCycleInput, CloseoutRecoveryDecision,

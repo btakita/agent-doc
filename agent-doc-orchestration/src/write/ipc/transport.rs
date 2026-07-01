@@ -286,8 +286,8 @@ pub fn try_ipc(
             );
             log_closeout_guard(
                 file,
-                crate::flow::types::FlowStage::TerminalGuard,
-                crate::flow::types::FlowOutcome::Blocked,
+                agent_doc_flow::types::FlowStage::TerminalGuard,
+                agent_doc_flow::types::FlowOutcome::Blocked,
                 agent_doc_turn::closeout_guard::CloseoutGuardReason::AlreadyCommitted,
             );
             crate::ops_log::log_op(
@@ -728,8 +728,8 @@ pub fn try_ipc(
                     );
                     log_closeout_guard(
                         file,
-                        crate::flow::types::FlowStage::TerminalGuard,
-                        crate::flow::types::FlowOutcome::Blocked,
+                        agent_doc_flow::types::FlowStage::TerminalGuard,
+                        agent_doc_flow::types::FlowOutcome::Blocked,
                         agent_doc_turn::closeout_guard::CloseoutGuardReason::AlreadyCommitted,
                     );
                     crate::ops_log::log_op(
@@ -853,8 +853,8 @@ pub fn try_ipc(
         );
         log_closeout_guard(
             file,
-            crate::flow::types::FlowStage::TerminalGuard,
-            crate::flow::types::FlowOutcome::Blocked,
+            agent_doc_flow::types::FlowStage::TerminalGuard,
+            agent_doc_flow::types::FlowOutcome::Blocked,
             agent_doc_turn::closeout_guard::CloseoutGuardReason::AlreadyCommitted,
         );
         crate::ops_log::log_op(
@@ -1252,8 +1252,8 @@ pub(crate) fn try_ipc_full_content_with_mode(
         );
         log_closeout_guard(
             file,
-            crate::flow::types::FlowStage::TerminalGuard,
-            crate::flow::types::FlowOutcome::Blocked,
+            agent_doc_flow::types::FlowStage::TerminalGuard,
+            agent_doc_flow::types::FlowOutcome::Blocked,
             agent_doc_turn::closeout_guard::CloseoutGuardReason::AlreadyCommitted,
         );
         crate::ops_log::log_op(
@@ -1551,8 +1551,8 @@ pub(crate) fn write_ipc_and_poll(
             );
             log_closeout_guard(
                 doc_file,
-                crate::flow::types::FlowStage::TerminalGuard,
-                crate::flow::types::FlowOutcome::Blocked,
+                agent_doc_flow::types::FlowStage::TerminalGuard,
+                agent_doc_flow::types::FlowOutcome::Blocked,
                 agent_doc_turn::closeout_guard::CloseoutGuardReason::AlreadyCommitted,
             );
             crate::ops_log::log_op(

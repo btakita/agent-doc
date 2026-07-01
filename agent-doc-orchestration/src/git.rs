@@ -1302,10 +1302,10 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             crate::ops_log::log_op(file, &format!("commit_success file={}", file.display()));
             crate::flow::proof::log_flow_event(
                 file,
-                crate::flow::types::FlowEvent::new(
-                    crate::flow::types::FlowName::Closeout,
-                    crate::flow::types::FlowStage::Commit,
-                    crate::flow::types::FlowOutcome::Completed,
+                agent_doc_flow::types::FlowEvent::new(
+                    agent_doc_flow::types::FlowName::Closeout,
+                    agent_doc_flow::types::FlowStage::Commit,
+                    agent_doc_flow::types::FlowOutcome::Completed,
                 )
                 .with_reason("commit_success"),
             );
@@ -2228,8 +2228,8 @@ fn ensure_active_capture_materialized_for_commit(
     );
     crate::flow::closeout::log_closeout_guard_event(
         file,
-        crate::flow::types::FlowStage::TerminalGuard,
-        crate::flow::types::FlowOutcome::FailedClosed,
+        agent_doc_flow::types::FlowStage::TerminalGuard,
+        agent_doc_flow::types::FlowOutcome::FailedClosed,
         agent_doc_turn::closeout_guard::CloseoutGuardReason::AlreadyCommitted,
     );
     anyhow::bail!(
@@ -2306,8 +2306,8 @@ fn ensure_no_live_editor_buffer_ahead_of_disk(
     );
     crate::flow::closeout::log_closeout_guard_event(
         file,
-        crate::flow::types::FlowStage::PreCommitGuard,
-        crate::flow::types::FlowOutcome::Blocked,
+        agent_doc_flow::types::FlowStage::PreCommitGuard,
+        agent_doc_flow::types::FlowOutcome::Blocked,
         agent_doc_turn::closeout_guard::CloseoutGuardReason::ReplicaDeliveryPending,
     );
     anyhow::bail!(
@@ -2392,10 +2392,10 @@ fn finalize_already_committed_noop(
     );
     crate::flow::proof::log_flow_event(
         file,
-        crate::flow::types::FlowEvent::new(
-            crate::flow::types::FlowName::Closeout,
-            crate::flow::types::FlowStage::Commit,
-            crate::flow::types::FlowOutcome::Completed,
+        agent_doc_flow::types::FlowEvent::new(
+            agent_doc_flow::types::FlowName::Closeout,
+            agent_doc_flow::types::FlowStage::Commit,
+            agent_doc_flow::types::FlowOutcome::Completed,
         )
         .with_reason(format!("already_current_{drift_kind}")),
     );

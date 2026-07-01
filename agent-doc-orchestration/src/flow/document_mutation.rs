@@ -1,4 +1,4 @@
-use super::types::{DocumentMutationKind, FlowEvent, FlowName, FlowOutcome, FlowStage};
+use agent_doc_flow::types::{DocumentMutationKind, FlowEvent, FlowName, FlowOutcome, FlowStage};
 use anyhow::{Context, Result};
 use std::path::Path;
 

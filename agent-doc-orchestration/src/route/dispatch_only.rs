@@ -356,7 +356,9 @@ pub(crate) fn dispatch_only_send_reopen(
                 queued.appended,
                 queued.already_present,
                 queued.superseded,
-                user_outcome_fields(crate::flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner)
+                user_outcome_fields(
+                    agent_doc_flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner
+                )
             );
             // #claude-busy-status-during-active-turn: this queued path previously
             // returned Ok silently, so the operator saw nothing and the session

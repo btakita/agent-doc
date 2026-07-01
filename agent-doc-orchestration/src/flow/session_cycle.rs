@@ -1,4 +1,4 @@
-use super::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
+use agent_doc_flow::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionCycleStep {

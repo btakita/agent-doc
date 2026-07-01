@@ -254,8 +254,8 @@ use agent_doc_workflow::session_cycle::{
 
 use crate::{
     flow::document_mutation::{TemplateStructureGuardReason, log_template_structure_guard_event},
-    flow::types::FlowOutcome,
 };
+use agent_doc_flow::types::FlowOutcome;
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_template as template;
 
@@ -690,8 +690,8 @@ fn enforce_review_done_guard(file: &Path, id: &str) -> Result<()> {
         agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict => {
             log_closeout_guard(
                 file,
-                crate::flow::types::FlowStage::PreWriteGuard,
-                crate::flow::types::FlowOutcome::Blocked,
+                agent_doc_flow::types::FlowStage::PreWriteGuard,
+                agent_doc_flow::types::FlowOutcome::Blocked,
                 agent_doc_turn::closeout_guard::CloseoutGuardReason::ReviewDoneSourceNotReviewed,
             );
             anyhow::bail!("{}", message)
@@ -1481,8 +1481,8 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
                 if !barrier_ready {
                     log_closeout_guard(
                         file,
-                        crate::flow::types::FlowStage::PreCommitGuard,
-                        crate::flow::types::FlowOutcome::Blocked,
+                        agent_doc_flow::types::FlowStage::PreCommitGuard,
+                        agent_doc_flow::types::FlowOutcome::Blocked,
                         agent_doc_turn::closeout_guard::CloseoutGuardReason::ReplicaDeliveryPending,
                     );
                     eprintln!(
@@ -1527,8 +1527,8 @@ pub fn complete_required_closeout(file: &Path) -> Result<bool> {
 
 fn log_closeout_guard(
     file: &Path,
-    stage: crate::flow::types::FlowStage,
-    outcome: crate::flow::types::FlowOutcome,
+    stage: agent_doc_flow::types::FlowStage,
+    outcome: agent_doc_flow::types::FlowOutcome,
     reason: agent_doc_turn::closeout_guard::CloseoutGuardReason,
 ) {
     crate::flow::closeout::log_closeout_guard_event(file, stage, outcome, reason);

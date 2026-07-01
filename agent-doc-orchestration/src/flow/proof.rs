@@ -1,4 +1,4 @@
-use super::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
+use agent_doc_flow::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
 use std::path::Path;
 
 pub fn flow_event_log_message(file: &Path, event: &FlowEvent) -> String {
@@ -49,7 +49,7 @@ fn sanitize_field_value(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::flow::types::{FlowName, FlowOutcome, FlowStage};
+    use agent_doc_flow::types::{FlowName, FlowOutcome, FlowStage};
 
     #[test]
     fn flow_event_log_message_is_field_parseable() {

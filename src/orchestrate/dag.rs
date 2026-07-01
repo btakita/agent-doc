@@ -291,7 +291,7 @@ pub(crate) fn run_ordered_tasks_internal(
                     Ok(()) => {
                         agent_doc_orchestration::flow::orchestration_batch::BatchChildResult {
                             label: task.label.clone(),
-                            outcome: agent_doc_orchestration::flow::types::FlowOutcome::Completed,
+                            outcome: agent_doc_flow::types::FlowOutcome::Completed,
                             proof: Some(
                                 graph_evidence
                                     .and_then(|evidence| {
@@ -305,8 +305,7 @@ pub(crate) fn run_ordered_tasks_internal(
                         let child =
                             agent_doc_orchestration::flow::orchestration_batch::BatchChildResult {
                                 label: task.label.clone(),
-                                outcome:
-                                    agent_doc_orchestration::flow::types::FlowOutcome::FailedClosed,
+                                outcome: agent_doc_flow::types::FlowOutcome::FailedClosed,
                                 proof: Some("child_step_error".to_string()),
                             };
                         agent_doc_orchestration::flow::orchestration_batch::log_child_closeout_event(file, &child);
@@ -324,8 +323,7 @@ pub(crate) fn run_ordered_tasks_internal(
                             .map(|source| exchange_task_source_changed(file, source))
                             .transpose()?
                             .unwrap_or(false),
-                        child_result.outcome
-                            == agent_doc_orchestration::flow::types::FlowOutcome::Completed,
+                        child_result.outcome == agent_doc_flow::types::FlowOutcome::Completed,
                     ) != agent_doc_work_graph::BatchProgressDecision::Continue
                 {
                     finalize_orchestration_batch_changed(file, idx + 1, tasks.len(), lifecycle)?;
@@ -548,7 +546,7 @@ pub(crate) fn run_scheduled_dag_tasks_internal(
                     let child =
                         agent_doc_orchestration::flow::orchestration_batch::BatchChildResult {
                             label: node.label.clone(),
-                            outcome: agent_doc_orchestration::flow::types::FlowOutcome::Completed,
+                            outcome: agent_doc_flow::types::FlowOutcome::Completed,
                             proof: Some(
                                 options
                                     .graph_evidence
@@ -572,8 +570,7 @@ pub(crate) fn run_scheduled_dag_tasks_internal(
                     let child =
                         agent_doc_orchestration::flow::orchestration_batch::BatchChildResult {
                             label: node.label.clone(),
-                            outcome:
-                                agent_doc_orchestration::flow::types::FlowOutcome::FailedClosed,
+                            outcome: agent_doc_flow::types::FlowOutcome::FailedClosed,
                             proof: Some("auto_dag_child_step_error".to_string()),
                         };
                     agent_doc_orchestration::flow::orchestration_batch::log_child_closeout_event(

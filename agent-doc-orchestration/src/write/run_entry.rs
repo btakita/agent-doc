@@ -1430,8 +1430,8 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
         );
         log_closeout_guard(
             file,
-            crate::flow::types::FlowStage::TerminalGuard,
-            crate::flow::types::FlowOutcome::Blocked,
+            agent_doc_flow::types::FlowStage::TerminalGuard,
+            agent_doc_flow::types::FlowOutcome::Blocked,
             agent_doc_turn::closeout_guard::CloseoutGuardReason::AlreadyCommitted,
         );
         crate::ops_log::log_op(

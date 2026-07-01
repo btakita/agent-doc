@@ -273,8 +273,8 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
         {
             crate::flow::closeout::log_closeout_guard_event(
                 file,
-                crate::flow::types::FlowStage::TerminalGuard,
-                crate::flow::types::FlowOutcome::FailedClosed,
+                agent_doc_flow::types::FlowStage::TerminalGuard,
+                agent_doc_flow::types::FlowOutcome::FailedClosed,
                 agent_doc_turn::closeout_guard::CloseoutGuardReason::ResponsePatchbackUncommitted,
             );
             anyhow::bail!(
@@ -302,8 +302,8 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
         );
         crate::flow::closeout::log_closeout_guard_event(
             file,
-            crate::flow::types::FlowStage::TerminalGuard,
-            crate::flow::types::FlowOutcome::Completed,
+            agent_doc_flow::types::FlowStage::TerminalGuard,
+            agent_doc_flow::types::FlowOutcome::Completed,
             agent_doc_turn::closeout_guard::CloseoutGuardReason::StalePreflightLockRepaired,
         );
         eprintln!(
@@ -334,8 +334,8 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
         );
         crate::flow::closeout::log_closeout_guard_event(
             file,
-            crate::flow::types::FlowStage::TerminalGuard,
-            crate::flow::types::FlowOutcome::Completed,
+            agent_doc_flow::types::FlowStage::TerminalGuard,
+            agent_doc_flow::types::FlowOutcome::Completed,
             agent_doc_turn::closeout_guard::CloseoutGuardReason::StalePreflightLockRepaired,
         );
         eprintln!(
@@ -350,8 +350,8 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
     if let Some(marker) = crate::session_check::detect_bypassed_response_write(file)? {
         crate::flow::closeout::log_closeout_guard_event(
             file,
-            crate::flow::types::FlowStage::TerminalGuard,
-            crate::flow::types::FlowOutcome::FailedClosed,
+            agent_doc_flow::types::FlowStage::TerminalGuard,
+            agent_doc_flow::types::FlowOutcome::FailedClosed,
             agent_doc_turn::closeout_guard::CloseoutGuardReason::OpenCycle,
         );
         anyhow::bail!(
@@ -392,8 +392,8 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
             );
             crate::flow::closeout::log_closeout_guard_event(
                 file,
-                crate::flow::types::FlowStage::TerminalGuard,
-                crate::flow::types::FlowOutcome::FailedClosed,
+                agent_doc_flow::types::FlowStage::TerminalGuard,
+                agent_doc_flow::types::FlowOutcome::FailedClosed,
                 agent_doc_turn::closeout_guard::CloseoutGuardReason::StalePreflightCycleAbandoned,
             );
             eprintln!(
@@ -406,8 +406,8 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
         }
         crate::flow::closeout::log_closeout_guard_event(
             file,
-            crate::flow::types::FlowStage::TerminalGuard,
-            crate::flow::types::FlowOutcome::Blocked,
+            agent_doc_flow::types::FlowStage::TerminalGuard,
+            agent_doc_flow::types::FlowOutcome::Blocked,
             agent_doc_turn::closeout_guard::CloseoutGuardReason::OpenCycle,
         );
         anyhow::bail!(
@@ -439,8 +439,8 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
         );
         crate::flow::closeout::log_closeout_guard_event(
             file,
-            crate::flow::types::FlowStage::TerminalGuard,
-            crate::flow::types::FlowOutcome::Completed,
+            agent_doc_flow::types::FlowStage::TerminalGuard,
+            agent_doc_flow::types::FlowOutcome::Completed,
             agent_doc_turn::closeout_guard::CloseoutGuardReason::StalePreflightLockRepaired,
         );
         eprintln!(
@@ -516,8 +516,8 @@ pub fn recover_missing_commit_boundary(file: &Path, event: &str) -> Result<Optio
     );
     crate::flow::closeout::log_closeout_guard_event(
         file,
-        crate::flow::types::FlowStage::TerminalGuard,
-        crate::flow::types::FlowOutcome::Completed,
+        agent_doc_flow::types::FlowStage::TerminalGuard,
+        agent_doc_flow::types::FlowOutcome::Completed,
         agent_doc_turn::closeout_guard::CloseoutGuardReason::CommitBoundaryRecovered,
     );
     Ok(Some(reason))
@@ -1662,8 +1662,8 @@ pub fn repair(file: &Path) -> Result<RepairOutcome> {
     {
         crate::flow::closeout::log_closeout_guard_event(
             file,
-            crate::flow::types::FlowStage::SessionCheck,
-            crate::flow::types::FlowOutcome::FailedClosed,
+            agent_doc_flow::types::FlowStage::SessionCheck,
+            agent_doc_flow::types::FlowOutcome::FailedClosed,
             agent_doc_turn::closeout_guard::CloseoutGuardReason::SessionCheckInterrupted,
         );
         anyhow::bail!(message);

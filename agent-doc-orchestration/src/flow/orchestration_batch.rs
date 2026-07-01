@@ -1,4 +1,4 @@
-use super::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
+use agent_doc_flow::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
 use agent_doc_template::patchback;
 use agent_doc_work_graph::BatchProgressDecision;
 use std::path::Path;

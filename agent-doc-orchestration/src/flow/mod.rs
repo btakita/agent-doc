@@ -10,16 +10,14 @@ pub mod closeout;
 pub mod document_mutation;
 pub mod operator_clear;
 pub mod orchestration_batch;
-pub mod outcome;
 pub mod proof;
 pub mod routed_reopen;
 pub mod session_cycle;
-pub mod types;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use types::{FlowName, FlowOutcome, FlowStage};
+    use agent_doc_flow::types::{FlowName, FlowOutcome, FlowStage};
 
     #[test]
     fn typed_flow_events_cover_route_write_closeout_session_check_and_child_patchback() {

@@ -3367,8 +3367,8 @@ pub(crate) fn handle_dispatch(
                     stale_pid,
                     DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER,
                     recovery.outcome.log_fields(),
-                    crate::flow::outcome::UserFacingOutcome::new(
-                        crate::flow::outcome::UserFacingOutcomeKind::RecoveredAndRetried,
+                    agent_doc_flow::outcome::UserFacingOutcome::new(
+                        agent_doc_flow::outcome::UserFacingOutcomeKind::RecoveredAndRetried,
                     )
                     .expect("static recovered-and-retried outcome is valid")
                     .log_fields(),

@@ -38,6 +38,7 @@ dependencies = [
  "agent-doc-element-queue",
  "agent-doc-element-review",
  "agent-doc-ffi",
+ "agent-doc-flow",
  "agent-doc-frontmatter",
  "agent-doc-frontmatter-io",
  "agent-doc-fs",
@@ -354,6 +355,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-doc-flow"
+version = "0.34.66"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "agent-doc-frontmatter"
 version = "0.34.66"
 dependencies = [
@@ -505,6 +514,7 @@ dependencies = [
  "agent-doc-element-exchange",
  "agent-doc-element-queue",
  "agent-doc-element-review",
+ "agent-doc-flow",
  "agent-doc-frontmatter",
  "agent-doc-frontmatter-io",
  "agent-doc-fs",

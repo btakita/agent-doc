@@ -349,10 +349,10 @@ pub fn try_auto_recover_live_prompt_drift(
                 );
                 crate::flow::proof::log_flow_event(
                     file,
-                    crate::flow::types::FlowEvent::new(
-                        crate::flow::types::FlowName::DocumentMutation,
-                        crate::flow::types::FlowStage::IpcSnapshotAdoption,
-                        crate::flow::types::FlowOutcome::Completed,
+                    agent_doc_flow::types::FlowEvent::new(
+                        agent_doc_flow::types::FlowName::DocumentMutation,
+                        agent_doc_flow::types::FlowStage::IpcSnapshotAdoption,
+                        agent_doc_flow::types::FlowOutcome::Completed,
                     )
                     .with_reason("live_prompt_drift_auto_recovered"),
                 );
@@ -407,10 +407,10 @@ pub fn try_auto_recover_live_prompt_drift(
     );
     crate::flow::proof::log_flow_event(
         file,
-        crate::flow::types::FlowEvent::new(
-            crate::flow::types::FlowName::DocumentMutation,
-            crate::flow::types::FlowStage::IpcSnapshotAdoption,
-            crate::flow::types::FlowOutcome::Completed,
+        agent_doc_flow::types::FlowEvent::new(
+            agent_doc_flow::types::FlowName::DocumentMutation,
+            agent_doc_flow::types::FlowStage::IpcSnapshotAdoption,
+            agent_doc_flow::types::FlowOutcome::Completed,
         )
         .with_reason("live_prompt_drift_auto_recovered"),
     );
@@ -570,7 +570,7 @@ pub(crate) fn schedule_stale_supervisor_pcp_recycle(file: &Path, source: &str) -
 pub(crate) fn stale_supervisor_write_short_circuit(
     file: &Path,
     source: &str,
-) -> Option<crate::flow::outcome::UserFacingOutcome> {
+) -> Option<agent_doc_flow::outcome::UserFacingOutcome> {
     let base = file
         .canonicalize()
         .ok()
@@ -591,8 +591,8 @@ pub(crate) fn stale_supervisor_write_short_circuit(
             file.display()
         );
     }
-    let binary = crate::flow::outcome::supervisor_stale_self_recycled_outcome();
-    let ui = crate::flow::outcome::deferred_for_recycle_outcome();
+    let binary = agent_doc_flow::outcome::supervisor_stale_self_recycled_outcome();
+    let ui = agent_doc_flow::outcome::deferred_for_recycle_outcome();
     crate::ops_log::log_op(
         file,
         &format!(
@@ -2092,7 +2092,7 @@ mod core_tests {
             .expect("stale marker must short-circuit the write");
         assert_eq!(
             outcome.outcome,
-            crate::flow::outcome::UserFacingOutcomeKind::DeferredForRecycle
+            agent_doc_flow::outcome::UserFacingOutcomeKind::DeferredForRecycle
         );
 
         agent_doc_turn_status_io::set_supervisor_stale_marker(&base, false).unwrap();

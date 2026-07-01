@@ -899,10 +899,10 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
     let prior_source = decision.snap_source.label();
     crate::flow::proof::log_flow_event(
         file,
-        crate::flow::types::FlowEvent::new(
-            crate::flow::types::FlowName::DocumentMutation,
-            crate::flow::types::FlowStage::IpcSnapshotAdoption,
-            crate::flow::types::FlowOutcome::Blocked,
+        agent_doc_flow::types::FlowEvent::new(
+            agent_doc_flow::types::FlowName::DocumentMutation,
+            agent_doc_flow::types::FlowStage::IpcSnapshotAdoption,
+            agent_doc_flow::types::FlowOutcome::Blocked,
         )
         .with_reason("live_prompt_drift_after_preflight"),
     );
@@ -1233,10 +1233,10 @@ pub(crate) fn guard_ipc_snapshot_adoption_against_prompt_duplication(
     let bad_state = decision.snapshot_content.clone();
     crate::flow::proof::log_flow_event(
         file,
-        crate::flow::types::FlowEvent::new(
-            crate::flow::types::FlowName::DocumentMutation,
-            crate::flow::types::FlowStage::IpcSnapshotAdoption,
-            crate::flow::types::FlowOutcome::Blocked,
+        agent_doc_flow::types::FlowEvent::new(
+            agent_doc_flow::types::FlowName::DocumentMutation,
+            agent_doc_flow::types::FlowStage::IpcSnapshotAdoption,
+            agent_doc_flow::types::FlowOutcome::Blocked,
         )
         .with_reason("prompt_duplication_in_ack_content"),
     );

@@ -1694,15 +1694,15 @@ fn emit_busy_route_diagnostic(tmux: &Tmux, pane_id: &str, file: &Path, harness: 
     }
 }
 
-fn user_outcome_fields(kind: crate::flow::outcome::UserFacingOutcomeKind) -> String {
-    crate::flow::outcome::UserFacingOutcome::new(kind)
+fn user_outcome_fields(kind: agent_doc_flow::outcome::UserFacingOutcomeKind) -> String {
+    agent_doc_flow::outcome::UserFacingOutcome::new(kind)
         .expect("static user-facing outcome is valid")
         .log_fields()
 }
 
 fn blocked_with_unblocker_fields(unblocker: &str) -> String {
-    crate::flow::outcome::UserFacingOutcome::with_unblocker(
-        crate::flow::outcome::UserFacingOutcomeKind::BlockedWithExactUnblocker,
+    agent_doc_flow::outcome::UserFacingOutcome::with_unblocker(
+        agent_doc_flow::outcome::UserFacingOutcomeKind::BlockedWithExactUnblocker,
         unblocker,
     )
     .expect("static user-facing unblocker is valid")
@@ -1717,7 +1717,7 @@ fn emit_busy_route_queued_diagnostic(
 ) {
     let file_display = file.display().to_string();
     let user_outcome =
-        user_outcome_fields(crate::flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner);
+        user_outcome_fields(agent_doc_flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner);
     let msg = route_busy_queued_diagnostic_message(RouteBusyQueuedDiagnosticFacts {
         file_display: &file_display,
         harness_binary: &harness.binary,
@@ -2234,12 +2234,12 @@ fn classify_route_closeout_block(
 /// keep the historical `QueuedBehindOwner` outcome — those really are "wait for
 /// the owner turn to drain" cases.
 fn route_closeout_user_outcome_fields(decision: &CloseoutRecoveryDecision) -> String {
-    use crate::flow::outcome::UserFacingOutcomeKind;
+    use agent_doc_flow::outcome::UserFacingOutcomeKind;
     use agent_doc_turn::closeout_recovery::CloseoutRecoveryDecision as Decision;
     if let Decision::Blocked { recommended, .. } = decision {
         let command = short_recovery_command_from_recommendation(recommended)
             .unwrap_or_else(|| recommended.clone());
-        if let Ok(outcome) = crate::flow::outcome::UserFacingOutcome::with_unblocker(
+        if let Ok(outcome) = agent_doc_flow::outcome::UserFacingOutcome::with_unblocker(
             UserFacingOutcomeKind::BlockedWithExactUnblocker,
             "run_recovery_command",
         ) {
@@ -3480,7 +3480,7 @@ fn route_via_authoritative_actor(
                         queued.already_present,
                         queued.activated,
                         user_outcome_fields(
-                            crate::flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner
+                            agent_doc_flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner
                         )
                     );
                     return Ok(dispatch_pane);
@@ -3517,7 +3517,7 @@ fn route_via_authoritative_actor(
                         dispatch_pane,
                         continuation.head_prompt,
                         user_outcome_fields(
-                            crate::flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner
+                            agent_doc_flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner
                         )
                     );
                     return Ok(dispatch_pane);
@@ -3618,7 +3618,7 @@ fn route_via_authoritative_actor(
                     queued.already_present,
                     queued.superseded,
                     user_outcome_fields(
-                        crate::flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner
+                        agent_doc_flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner
                     )
                 );
                 Ok(dispatch_pane)
@@ -3645,7 +3645,7 @@ fn route_via_authoritative_actor(
                     dispatch_pane,
                     continuation.head_prompt,
                     user_outcome_fields(
-                        crate::flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner
+                        agent_doc_flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner
                     )
                 );
                 Ok(dispatch_pane)

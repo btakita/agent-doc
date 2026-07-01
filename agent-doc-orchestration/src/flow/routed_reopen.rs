@@ -1,5 +1,5 @@
-use super::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
 use agent_doc_controller::dispatch::RoutedReopenGuardReason;
+use agent_doc_flow::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
 use std::path::Path;
 
 pub fn prompt_ready_barrier_failed_event(reason: RoutedReopenGuardReason) -> FlowEvent {

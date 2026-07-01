@@ -202,8 +202,8 @@ pub(crate) fn precommit_pending_capture_check(file: &Path) -> Result<()> {
     {
         log_closeout_guard(
             file,
-            crate::flow::types::FlowStage::PreCommitGuard,
-            crate::flow::types::FlowOutcome::Blocked,
+            agent_doc_flow::types::FlowStage::PreCommitGuard,
+            agent_doc_flow::types::FlowOutcome::Blocked,
             agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingCaptureTargetMissing,
         );
         anyhow::bail!(
@@ -222,8 +222,8 @@ pub(crate) fn precommit_pending_capture_check(file: &Path) -> Result<()> {
     {
         log_closeout_guard(
             file,
-            crate::flow::types::FlowStage::PreCommitGuard,
-            crate::flow::types::FlowOutcome::Blocked,
+            agent_doc_flow::types::FlowStage::PreCommitGuard,
+            agent_doc_flow::types::FlowOutcome::Blocked,
             agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingCaptureInventoryShortfall,
         );
         anyhow::bail!(
@@ -250,8 +250,8 @@ pub(crate) fn precommit_pending_capture_check(file: &Path) -> Result<()> {
     {
         log_closeout_guard(
             file,
-            crate::flow::types::FlowStage::PreCommitGuard,
-            crate::flow::types::FlowOutcome::Blocked,
+            agent_doc_flow::types::FlowStage::PreCommitGuard,
+            agent_doc_flow::types::FlowOutcome::Blocked,
             agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingCapturePlanShortfall,
         );
         anyhow::bail!(
@@ -272,8 +272,8 @@ pub(crate) fn precommit_pending_capture_check(file: &Path) -> Result<()> {
     {
         log_closeout_guard(
             file,
-            crate::flow::types::FlowStage::PreCommitGuard,
-            crate::flow::types::FlowOutcome::Blocked,
+            agent_doc_flow::types::FlowStage::PreCommitGuard,
+            agent_doc_flow::types::FlowOutcome::Blocked,
             agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingCapturePromisedIdsMissing,
         );
         anyhow::bail!(
@@ -298,8 +298,8 @@ pub(crate) fn precommit_pending_capture_check(file: &Path) -> Result<()> {
     {
         log_closeout_guard(
             file,
-            crate::flow::types::FlowStage::PreCommitGuard,
-            crate::flow::types::FlowOutcome::Blocked,
+            agent_doc_flow::types::FlowStage::PreCommitGuard,
+            agent_doc_flow::types::FlowOutcome::Blocked,
             agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingCaptureRequired,
         );
         anyhow::bail!(
@@ -333,8 +333,8 @@ pub(crate) fn precommit_pending_capture_check(file: &Path) -> Result<()> {
 
     log_closeout_guard(
         file,
-        crate::flow::types::FlowStage::PreCommitGuard,
-        crate::flow::types::FlowOutcome::Blocked,
+        agent_doc_flow::types::FlowStage::PreCommitGuard,
+        agent_doc_flow::types::FlowOutcome::Blocked,
         agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingCaptureRecommendations,
     );
     anyhow::bail!(
@@ -386,8 +386,8 @@ pub(crate) fn prewrite_pending_capture_check(
     {
         log_closeout_guard(
             file,
-            crate::flow::types::FlowStage::PreWriteGuard,
-            crate::flow::types::FlowOutcome::Blocked,
+            agent_doc_flow::types::FlowStage::PreWriteGuard,
+            agent_doc_flow::types::FlowOutcome::Blocked,
             agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingCaptureTargetMissing,
         );
         anyhow::bail!(
@@ -407,8 +407,8 @@ pub(crate) fn prewrite_pending_capture_check(
     {
         log_closeout_guard(
             file,
-            crate::flow::types::FlowStage::PreWriteGuard,
-            crate::flow::types::FlowOutcome::Blocked,
+            agent_doc_flow::types::FlowStage::PreWriteGuard,
+            agent_doc_flow::types::FlowOutcome::Blocked,
             agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingCaptureInventoryShortfall,
         );
         anyhow::bail!(
@@ -441,8 +441,8 @@ pub(crate) fn prewrite_pending_capture_check(
     {
         log_closeout_guard(
             file,
-            crate::flow::types::FlowStage::PreWriteGuard,
-            crate::flow::types::FlowOutcome::Blocked,
+            agent_doc_flow::types::FlowStage::PreWriteGuard,
+            agent_doc_flow::types::FlowOutcome::Blocked,
             agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingCapturePlanShortfall,
         );
         anyhow::bail!(
@@ -466,8 +466,8 @@ pub(crate) fn prewrite_pending_capture_check(
     {
         log_closeout_guard(
             file,
-            crate::flow::types::FlowStage::PreWriteGuard,
-            crate::flow::types::FlowOutcome::Blocked,
+            agent_doc_flow::types::FlowStage::PreWriteGuard,
+            agent_doc_flow::types::FlowOutcome::Blocked,
             agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingCapturePromisedIdsMissing,
         );
         anyhow::bail!(
@@ -497,8 +497,8 @@ pub(crate) fn prewrite_pending_capture_check(
     {
         log_closeout_guard(
             file,
-            crate::flow::types::FlowStage::PreWriteGuard,
-            crate::flow::types::FlowOutcome::Blocked,
+            agent_doc_flow::types::FlowStage::PreWriteGuard,
+            agent_doc_flow::types::FlowOutcome::Blocked,
             agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingCaptureRequired,
         );
         anyhow::bail!(
@@ -537,8 +537,8 @@ pub(crate) fn prewrite_pending_capture_check(
 
     log_closeout_guard(
         file,
-        crate::flow::types::FlowStage::PreWriteGuard,
-        crate::flow::types::FlowOutcome::Blocked,
+        agent_doc_flow::types::FlowStage::PreWriteGuard,
+        agent_doc_flow::types::FlowOutcome::Blocked,
         agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingCaptureRecommendations,
     );
     anyhow::bail!(
@@ -606,8 +606,8 @@ pub(crate) fn precommit_pending_done_check_with_options(
     if !malformed.is_empty() {
         log_closeout_guard(
             file,
-            crate::flow::types::FlowStage::PreCommitGuard,
-            crate::flow::types::FlowOutcome::Blocked,
+            agent_doc_flow::types::FlowStage::PreCommitGuard,
+            agent_doc_flow::types::FlowOutcome::Blocked,
             agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingDoneMalformedTrackedItem,
         );
         anyhow::bail!(
@@ -663,8 +663,8 @@ pub(crate) fn precommit_pending_done_check_with_options(
 
     log_closeout_guard(
         file,
-        crate::flow::types::FlowStage::PreCommitGuard,
-        crate::flow::types::FlowOutcome::Blocked,
+        agent_doc_flow::types::FlowStage::PreCommitGuard,
+        agent_doc_flow::types::FlowOutcome::Blocked,
         agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingDoneMissing,
     );
     anyhow::bail!(
@@ -712,8 +712,8 @@ pub(crate) fn prewrite_pending_done_check(
     if !malformed.is_empty() {
         log_closeout_guard(
             file,
-            crate::flow::types::FlowStage::PreWriteGuard,
-            crate::flow::types::FlowOutcome::Blocked,
+            agent_doc_flow::types::FlowStage::PreWriteGuard,
+            agent_doc_flow::types::FlowOutcome::Blocked,
             agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingDoneMalformedTrackedItem,
         );
         anyhow::bail!(
@@ -759,8 +759,8 @@ pub(crate) fn prewrite_pending_done_check(
 
     log_closeout_guard(
         file,
-        crate::flow::types::FlowStage::PreWriteGuard,
-        crate::flow::types::FlowOutcome::Blocked,
+        agent_doc_flow::types::FlowStage::PreWriteGuard,
+        agent_doc_flow::types::FlowOutcome::Blocked,
         agent_doc_turn::closeout_guard::CloseoutGuardReason::PendingDoneMissing,
     );
     anyhow::bail!(

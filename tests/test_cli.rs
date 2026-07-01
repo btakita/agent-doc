@@ -2264,6 +2264,7 @@ fn test_manifest_uses_publishable_dependency_contract() {
         "agent-doc-document-realtime",
         "agent-doc-markdown-ast",
         "agent-doc-ffi",
+        "agent-doc-flow",
         "agent-doc-frontmatter",
         "agent-doc-frontmatter-io",
         "agent-doc-fs",
@@ -4120,7 +4121,26 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/closeout.rs"))
             .unwrap();
     let flow_types_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/types.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-flow/src/types.rs")).unwrap();
+    let flow_outcome_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-flow/src/outcome.rs")).unwrap();
+    let flow_lib = fs::read_to_string(manifest_dir.join("agent-doc-flow/src/lib.rs")).unwrap();
+    let orchestration_flow_mod =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/mod.rs")).unwrap();
+    assert!(
+        flow_lib.contains("pub mod types;") && flow_lib.contains("pub mod outcome;"),
+        "agent-doc-flow should expose focused flow vocabulary and outcome contracts"
+    );
+    assert!(
+        !orchestration_flow_mod.contains("pub mod types")
+            && !orchestration_flow_mod.contains("pub mod outcome"),
+        "orchestration flow must not keep types/outcome shim modules"
+    );
+    assert!(
+        flow_outcome_source.contains("pub enum UserFacingOutcomeKind")
+            && flow_outcome_source.contains("pub struct BinaryOutcome"),
+        "agent-doc-flow must own typed user-facing and binary outcome contracts"
+    );
     let route_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
     for forbidden in [
@@ -4136,7 +4156,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     }
     assert!(
         !flow_types_source.contains("pub enum CloseoutState"),
-        "flow types must not keep a duplicate closeout state vocabulary"
+        "agent-doc-flow types must not keep a duplicate closeout state vocabulary"
     );
     assert!(
         closeout_source.contains("use agent_doc_turn::closeout_guard::CloseoutGuardReason;"),
@@ -10270,7 +10290,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/routed_reopen.rs"))
             .unwrap();
     let flow_types_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/types.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-flow/src/types.rs")).unwrap();
     assert!(
         authoritative_actor.contains("agent_doc_controller::dispatch::dispatch_error_is_coalesced"),
         "route authorization should call the focused controller dispatch classifier directly"
@@ -10572,7 +10592,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     }
     assert!(
         !flow_types_source.contains("pub enum RouteDecision"),
-        "flow::types must not keep route decision policy after it moves to agent-doc-controller"
+        "agent-doc-flow types must not keep route decision policy after it moves to agent-doc-controller"
     );
     assert!(
         route_source.contains("use agent_doc_controller::dispatch::{")
@@ -17019,8 +17039,7 @@ fn test_agent_doc_template_owns_patchback_policy() {
         "agent-doc-template should not add a patchback root facade"
     );
 
-    let flow_types =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/flow/types.rs")).unwrap();
+    let flow_types = fs::read_to_string(manifest_dir.join("agent-doc-flow/src/types.rs")).unwrap();
     let flow_document_mutation = fs::read_to_string(
         manifest_dir.join("agent-doc-orchestration/src/flow/document_mutation.rs"),
     )
@@ -17033,10 +17052,7 @@ fn test_agent_doc_template_owns_patchback_policy() {
     )
     .unwrap();
     let orchestration_sources = [
-        (
-            "agent-doc-orchestration/src/flow/types.rs",
-            flow_types.as_str(),
-        ),
+        ("agent-doc-flow/src/types.rs", flow_types.as_str()),
         (
             "agent-doc-orchestration/src/flow/document_mutation.rs",
             flow_document_mutation.as_str(),

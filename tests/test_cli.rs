@@ -2876,10 +2876,14 @@ fn test_agent_doc_queue_owns_do_directive_target_parsing() {
         "ordered tracked-work #id scanning should live with backlog/tracked-work parsing"
     );
 
-    let done_signals = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/done_signals.rs"),
-    )
-    .unwrap();
+    let done_signals_path =
+        manifest_dir.join("agent-doc-orchestration/src/session_check/done_signals.rs");
+    assert!(
+        !done_signals_path.exists(),
+        "session_check/done_signals.rs must stay deleted instead of becoming an orchestration facade"
+    );
+    let closeout_signal =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn/src/closeout_signal.rs")).unwrap();
     for forbidden in [
         "pub fn do_directive_target_ids",
         "pub(crate) fn do_directive_target_ids_in_line",
@@ -2887,12 +2891,10 @@ fn test_agent_doc_queue_owns_do_directive_target_parsing() {
         "pub(crate) fn leads_with_bare_id_token",
     ] {
         assert!(
-            !done_signals.contains(forbidden),
-            "session_check must not re-own queue directive parsing: {forbidden}"
+            !closeout_signal.contains(forbidden),
+            "closeout signal policy must not re-own queue directive parsing: {forbidden}"
         );
     }
-    let closeout_signal =
-        fs::read_to_string(manifest_dir.join("agent-doc-turn/src/closeout_signal.rs")).unwrap();
     assert!(
         closeout_signal.contains("agent_doc_element_backlog::backlog::extract_pending_hash_ids"),
         "done signal parsing should reuse the focused tracked-work #id scanner from agent-doc-turn"
@@ -4129,36 +4131,39 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         );
     }
 
-    let done_signals = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/session_check/done_signals.rs"),
-    )
-    .unwrap();
-    for forbidden in [
-        "pub(crate) fn response_clearly_completes_pending_id",
-        "pub(crate) fn response_heading_resolves_to_pending_id",
-        "pub(crate) fn explicit_done_signal_ids",
-        "pub(crate) fn plain_done_signal",
-        "pub(crate) fn normalize_done_signal_text",
+    let done_signals_path =
+        manifest_dir.join("agent-doc-orchestration/src/session_check/done_signals.rs");
+    assert!(
+        !done_signals_path.exists(),
+        "session_check/done_signals.rs must stay deleted instead of becoming a closeout-signal facade"
+    );
+    for required in [
+        "pub fn response_clearly_completes_pending_id",
+        "pub fn response_heading_resolves_to_pending_id",
+        "pub fn explicit_done_signal_ids",
+        "pub fn plain_done_signal",
+        "pub fn inline_done_signal_ids",
+        "fn normalize_done_signal_text",
         "fn leading_hash_id",
         "fn extract_bracket_ids",
         "fn contains_completion_marker",
-        "agent_doc_element_backlog::backlog::extract_pending_hash_ids",
-        "agent_doc_element_backlog::backlog::parse_items(component.content(&content))",
     ] {
         assert!(
-            !done_signals.contains(forbidden),
-            "session_check must not re-own closeout signal policy: {forbidden}"
+            turn_source.contains(required),
+            "agent-doc-turn should own closeout done-signal policy directly: {required}"
         );
     }
+    let tracked_work_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/tracked_work_projection.rs"))
+            .unwrap();
     for required in [
-        "agent_doc_turn::closeout_signal::explicit_done_signal_ids",
-        "agent_doc_turn::closeout_signal::plain_done_signal",
-        "agent_doc_element_backlog::backlog::open_tracked_work_ids_in_content",
-        "agent_doc_element_backlog::backlog::open_backlog_ids_in_content",
+        "pub fn open_tracked_work_ids",
+        "pub fn open_backlog_ids",
+        "pub fn open_review_ids",
     ] {
         assert!(
-            done_signals.contains(required),
-            "done_signals should call focused closeout signal policy directly: {required}"
+            tracked_work_source.contains(required),
+            "agent-doc-document should own open tracked-work projection policy directly: {required}"
         );
     }
 
@@ -6306,6 +6311,56 @@ fn test_agent_doc_supervisor_owns_route_submit_inflight_marker_policy() {
             && route_in_flight.contains("route_submit_inflight_marker_json")
             && route_in_flight.contains("route_submit_blocked_marker_json"),
         "route_in_flight adapter should import focused supervisor marker policy directly"
+    );
+}
+
+#[test]
+fn test_agent_doc_supervisor_owns_route_runtime_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let supervisor_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/lib.rs")).unwrap();
+    assert!(
+        supervisor_lib.contains("pub mod route_runtime;"),
+        "agent-doc-supervisor should expose route runtime policy through its owning module"
+    );
+
+    let route_runtime =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/route_runtime.rs")).unwrap();
+    for required in [
+        "pub enum RouteActorState",
+        "pub enum SupervisorHealth",
+        "pub struct SupervisorRuntime",
+        "pub struct AuthoritativeRuntimeFacts",
+        "pub fn effective_authoritative_actor_state",
+        "pub fn authoritative_actor_dispatch_guard_reason",
+        "pub fn authoritative_actor_dispatch_target_eligible",
+    ] {
+        assert!(
+            route_runtime.contains(required),
+            "agent-doc-supervisor must own route runtime policy: {required}"
+        );
+    }
+
+    let route =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+    for forbidden in [
+        "pub enum RouteActorState",
+        "enum SupervisorHealth",
+        "struct SupervisorRuntime",
+        "fn supervisor_health_label(",
+        "fn runtime_actor_state_label(",
+        "fn authoritative_actor_dispatch_target_eligible(",
+    ] {
+        assert!(
+            !route.contains(forbidden),
+            "route.rs must adapt runtime IO, not re-own or facade supervisor route policy: {forbidden}"
+        );
+    }
+    assert!(
+        route.contains("use agent_doc_supervisor::route_runtime::{")
+            && route.contains("effective_authoritative_actor_state")
+            && route.contains("supervisor_authoritative_actor_dispatch_target_eligible"),
+        "route.rs should call focused supervisor route runtime policy directly"
     );
 }
 
@@ -10451,6 +10506,9 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
         "pub fn collect_one_shot_backlog_queue_sync",
         "pub struct BacklogQueueSyncReport",
         "pub fn backlog_queue_sync_report",
+        "pub enum AutoBacklogQueueSyncPolicy",
+        "pub struct AutoBacklogQueueSyncPlan",
+        "pub fn plan_auto_backlog_queue_sync_ids",
         "pub fn reconcile_queue_tombstones",
         "pub fn format_queue_ids",
         "pub fn collect_backlog_priority_ranks",
@@ -10472,6 +10530,9 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
         "pub(crate) fn collect_backlog_queue_sync",
         "pub(crate) fn collect_backlog_priority_ranks",
         "pub(crate) fn collect_after_deps",
+        "let enqueue_ids: std::collections::HashSet<String>",
+        "let mut backlog_ids = sync_request.ids",
+        "existing_queue_ids.contains(&key) || enqueue_ids.contains(&key)",
     ] {
         assert!(
             !preflight_maintenance.contains(forbidden_snippet),
@@ -10482,7 +10543,9 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
         preflight_maintenance.contains("agent_doc_queue::backlog_sync::collect_backlog_queue_sync")
             && preflight_maintenance
                 .contains("agent_doc_queue::backlog_sync::collect_backlog_priority_ranks")
-            && preflight_maintenance.contains("agent_doc_queue::backlog_sync::collect_after_deps"),
+            && preflight_maintenance.contains("agent_doc_queue::backlog_sync::collect_after_deps")
+            && preflight_maintenance
+                .contains("agent_doc_queue::backlog_sync::plan_auto_backlog_queue_sync_ids"),
         "preflight maintenance should call backlog queue sync policy from agent-doc-queue directly"
     );
 
@@ -12503,6 +12566,105 @@ fn test_agent_doc_document_owns_tracked_work_projection_policy() {
                 "agent_doc_document::tracked_work_projection::TrackedWorkFingerprint::empty"
             ),
         "preflight should call focused tracked-work projection policy directly"
+    );
+}
+
+#[test]
+fn test_agent_doc_document_owns_claim_scaffold_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let claim_scaffold =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/claim_scaffold.rs")).unwrap();
+    for required in [
+        "pub fn should_scaffold_empty_markdown",
+        "pub fn render_empty_template_scaffold",
+        "pub fn default_format_and_write_content",
+        "pub fn uses_template_format",
+        "pub fn scaffold_default_template_components",
+        "pub fn merge_default_template_component_config",
+    ] {
+        assert!(
+            claim_scaffold.contains(required),
+            "agent-doc-document must own claim scaffold/defaulting policy: {required}"
+        );
+    }
+    let document_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/lib.rs")).unwrap();
+    assert!(
+        document_lib.contains("pub mod claim_scaffold;"),
+        "agent-doc-document should expose claim scaffold policy through its owning module"
+    );
+
+    let claim =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/claim.rs")).unwrap();
+    for forbidden in [
+        "project_config::ComponentConfig",
+        "frontmatter::set_format_and_write",
+        "agent_doc_element::element::parse(&content)",
+        "agent_doc_format: template\\nagent_doc_write: crdt",
+    ] {
+        assert!(
+            !claim.contains(forbidden),
+            "claim.rs must stay an IO adapter, not re-own claim scaffold policy: {forbidden}"
+        );
+    }
+    assert!(
+        claim.contains("use agent_doc_document::claim_scaffold::{")
+            && claim.contains("should_scaffold_empty_markdown")
+            && claim.contains("render_empty_template_scaffold")
+            && claim.contains("merge_default_template_component_config"),
+        "claim.rs should call focused document claim scaffold policy directly"
+    );
+}
+
+#[test]
+fn test_agent_doc_document_owns_compact_projection_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let compact_projection =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/compact_projection.rs"))
+            .unwrap();
+    for required in [
+        "pub struct CompactExchange",
+        "pub struct NonExchangeMarkerChange",
+        "pub fn parse_inline_exchanges",
+        "pub fn build_inline_compacted_document",
+        "pub fn split_component_content_at_boundary",
+        "pub fn malformed_compact_summary_lines",
+        "pub fn non_exchange_opening_markers",
+        "pub fn changed_non_exchange_opening_markers",
+    ] {
+        assert!(
+            compact_projection.contains(required),
+            "agent-doc-document must own compact projection policy: {required}"
+        );
+    }
+    let document_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/lib.rs")).unwrap();
+    assert!(
+        document_lib.contains("pub mod compact_projection;"),
+        "agent-doc-document should expose compact projection through its owning module"
+    );
+
+    let compact =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/compact.rs")).unwrap();
+    for forbidden in [
+        "fn parse_exchanges(",
+        "fn build_compacted(",
+        "fn split_component_content_at_boundary(",
+        "pub fn malformed_compact_summary_lines(",
+        "fn non_exchange_opening_markers(",
+        "fn changed_non_exchange_opening_markers(",
+    ] {
+        assert!(
+            !compact.contains(forbidden),
+            "compact.rs must stay an IO/archive adapter, not re-own compact projection policy: {forbidden}"
+        );
+    }
+    assert!(
+        compact.contains("use agent_doc_document::compact_projection::{")
+            && compact.contains("parse_inline_exchanges")
+            && compact.contains("build_inline_compacted_document")
+            && compact.contains("changed_non_exchange_opening_markers"),
+        "compact.rs should call focused compact projection policy directly"
     );
 }
 

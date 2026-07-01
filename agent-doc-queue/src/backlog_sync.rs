@@ -37,6 +37,100 @@ pub struct BacklogQueueSyncReport {
     pub newly_materialized: Vec<String>,
 }
 
+/// Active-queue policy branch applied while planning automatic backlog sync.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoBacklogQueueSyncPolicy {
+    FreshActivation,
+    ExplicitlyStopped,
+    HoldFreshIds,
+    GoModeAppend,
+}
+
+/// Pure id-selection result for automatic backlog-to-queue sync.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutoBacklogQueueSyncPlan {
+    pub ids: Vec<String>,
+    pub completed_excluded_count: usize,
+    pub tombstone_suppressed_count: usize,
+    pub active_policy: AutoBacklogQueueSyncPolicy,
+    pub active_held_count: usize,
+}
+
+/// Select which tracked-work ids may be mirrored into the queue this pass.
+///
+/// Callers provide IO-derived facts such as done ids, tombstones, and persisted
+/// queue state. This function owns the queue policy: completed ids and
+/// operator-deleted tombstones never remirror; a plain already-active queue
+/// holds fresh backlog ids out of the loop unless they were explicitly
+/// enqueued; explicit `go` mode opts into appending fresh backlog ids.
+pub fn plan_auto_backlog_queue_sync_ids(
+    requested_ids: &[String],
+    enqueue_ids: &[String],
+    done_ids: &HashSet<String>,
+    tombstones: &HashSet<String>,
+    entries: &[QueueEntry],
+    persisted_active_incoming: bool,
+    persisted_active_before_binding: bool,
+    queue_go_mode: bool,
+    queue_explicitly_stopped: bool,
+) -> AutoBacklogQueueSyncPlan {
+    let mut ids = requested_ids.to_vec();
+
+    let done_lower: HashSet<String> = done_ids
+        .iter()
+        .map(|id| id.trim().to_ascii_lowercase())
+        .collect();
+    let before_done = ids.len();
+    ids.retain(|id| !done_lower.contains(&normalize_id(id)));
+    let completed_excluded_count = before_done - ids.len();
+
+    let tombstone_lower: HashSet<String> = tombstones
+        .iter()
+        .map(|id| id.trim().to_ascii_lowercase())
+        .collect();
+    let before_tombstones = ids.len();
+    ids.retain(|id| !tombstone_lower.contains(&normalize_id(id)));
+    let tombstone_suppressed_count = before_tombstones - ids.len();
+
+    let (active_policy, active_held_count) = if queue_explicitly_stopped {
+        let held = ids.len();
+        ids.clear();
+        (AutoBacklogQueueSyncPolicy::ExplicitlyStopped, held)
+    } else if persisted_active_incoming && persisted_active_before_binding && !queue_go_mode {
+        let existing_queue_ids: HashSet<String> = entries
+            .iter()
+            .filter_map(crate::queue_projection::queue_entry_do_id)
+            .map(|id| id.to_ascii_lowercase())
+            .collect();
+        let enqueue_ids: HashSet<String> = enqueue_ids.iter().map(|id| normalize_id(id)).collect();
+        let before_hold = ids.len();
+        ids.retain(|id| {
+            let key = normalize_id(id);
+            existing_queue_ids.contains(&key) || enqueue_ids.contains(&key)
+        });
+        (
+            AutoBacklogQueueSyncPolicy::HoldFreshIds,
+            before_hold - ids.len(),
+        )
+    } else if persisted_active_incoming && queue_go_mode {
+        (AutoBacklogQueueSyncPolicy::GoModeAppend, 0)
+    } else {
+        (AutoBacklogQueueSyncPolicy::FreshActivation, 0)
+    };
+
+    AutoBacklogQueueSyncPlan {
+        ids,
+        completed_excluded_count,
+        tombstone_suppressed_count,
+        active_policy,
+        active_held_count,
+    }
+}
+
+fn normalize_id(id: &str) -> String {
+    id.trim().to_ascii_lowercase()
+}
+
 /// Collect queue sync source ids from tracked-work components.
 ///
 /// `backlog` and the legacy `pending` alias can opt into component-level sync
@@ -238,6 +332,121 @@ mod tests {
 
     fn set(items: &[&str]) -> HashSet<String> {
         items.iter().map(|item| item.to_string()).collect()
+    }
+
+    fn prompt(text: &str) -> QueueEntry {
+        QueueEntry::Prompt(crate::document_queue::QueuePrompt {
+            text: text.to_string(),
+            multiline: false,
+        })
+    }
+
+    #[test]
+    fn plan_auto_backlog_queue_sync_filters_done_and_tombstoned_ids() {
+        let requested_ids = vec![
+            "done".to_string(),
+            "open".to_string(),
+            "deleted".to_string(),
+            "mixedcase".to_string(),
+        ];
+        let done_ids = set(&["DONE"]);
+        let tombstones = set(&["Deleted"]);
+
+        let plan = plan_auto_backlog_queue_sync_ids(
+            &requested_ids,
+            &[],
+            &done_ids,
+            &tombstones,
+            &[],
+            false,
+            false,
+            false,
+            false,
+        );
+
+        assert_eq!(
+            plan,
+            AutoBacklogQueueSyncPlan {
+                ids: vec!["open".to_string(), "mixedcase".to_string()],
+                completed_excluded_count: 1,
+                tombstone_suppressed_count: 1,
+                active_policy: AutoBacklogQueueSyncPolicy::FreshActivation,
+                active_held_count: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn plan_auto_backlog_queue_sync_holds_fresh_ids_in_plain_active_queue() {
+        let requested_ids = vec![
+            "existing".to_string(),
+            "fresh".to_string(),
+            "manual".to_string(),
+        ];
+        let enqueue_ids = vec!["manual".to_string()];
+        let entries = vec![prompt("do [#existing]")];
+
+        let plan = plan_auto_backlog_queue_sync_ids(
+            &requested_ids,
+            &enqueue_ids,
+            &HashSet::new(),
+            &HashSet::new(),
+            &entries,
+            true,
+            true,
+            false,
+            false,
+        );
+
+        assert_eq!(plan.ids, vec!["existing".to_string(), "manual".to_string()]);
+        assert_eq!(plan.active_policy, AutoBacklogQueueSyncPolicy::HoldFreshIds);
+        assert_eq!(plan.active_held_count, 1);
+    }
+
+    #[test]
+    fn plan_auto_backlog_queue_sync_go_mode_keeps_fresh_ids() {
+        let requested_ids = vec!["existing".to_string(), "fresh".to_string()];
+        let entries = vec![prompt("do [#existing]")];
+
+        let plan = plan_auto_backlog_queue_sync_ids(
+            &requested_ids,
+            &[],
+            &HashSet::new(),
+            &HashSet::new(),
+            &entries,
+            true,
+            true,
+            true,
+            false,
+        );
+
+        assert_eq!(plan.ids, requested_ids);
+        assert_eq!(plan.active_policy, AutoBacklogQueueSyncPolicy::GoModeAppend);
+        assert_eq!(plan.active_held_count, 0);
+    }
+
+    #[test]
+    fn plan_auto_backlog_queue_sync_explicit_stop_clears_remaining_ids() {
+        let requested_ids = vec!["a".to_string(), "b".to_string()];
+
+        let plan = plan_auto_backlog_queue_sync_ids(
+            &requested_ids,
+            &[],
+            &HashSet::new(),
+            &HashSet::new(),
+            &[],
+            false,
+            false,
+            false,
+            true,
+        );
+
+        assert!(plan.ids.is_empty());
+        assert_eq!(
+            plan.active_policy,
+            AutoBacklogQueueSyncPolicy::ExplicitlyStopped
+        );
+        assert_eq!(plan.active_held_count, 2);
     }
 
     #[test]

@@ -12,7 +12,8 @@ pub(crate) fn check_partial_closeout_state_guard(file: &Path) -> Result<GuardRes
         return Ok(GuardResult::None);
     };
 
-    let open_backlog_ids = open_backlog_ids(file)?;
+    let content = std::fs::read_to_string(file)?;
+    let open_backlog_ids = agent_doc_document::tracked_work_projection::open_backlog_ids(&content);
     let candidates = match agent_doc_turn::closeout_signal::partial_closeout_state_decision(
         agent_doc_turn::closeout_signal::PartialCloseoutStateEvidence {
             cycle_open: state.is_open(),

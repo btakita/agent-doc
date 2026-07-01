@@ -162,9 +162,8 @@ use std::time::{Duration, Instant};
 use crate::flow::routed_reopen::{log_dispatch_proof_failed, log_prompt_ready_barrier_failed};
 use crate::supervisor::ipc::IpcMethod;
 use agent_doc_controller::dispatch::{
-    ActorDispatchState, ActorLifecycleState, AuthoritativeActorDispatchAction,
-    AuthoritativeActorDispatchActionFacts, AuthoritativeActorReadyFacts,
-    AuthoritativePromptReadyBarrierFacts, AuthoritativeRuntimeFacts, BusyPaneAutoFixFacts,
+    ActorDispatchState, AuthoritativeActorDispatchAction, AuthoritativeActorDispatchActionFacts,
+    AuthoritativeActorReadyFacts, AuthoritativePromptReadyBarrierFacts, BusyPaneAutoFixFacts,
     BusyPaneAutoFixOutcome, CloseoutBlockDispatchDecision, CloseoutBlockDispatchFacts,
     DegradedAuthoritativeActorDirectSubmit, DegradedAuthoritativeActorFacts,
     DirectPaneAcceptancePollState, DirectPaneDispatchStartProofFacts,
@@ -181,9 +180,7 @@ use agent_doc_controller::dispatch::{
     RoutedTriggerPayloadFacts, STARTING_ACTOR_TIMEOUT_REASON, StartingActorLogFacts,
     StartingTimeoutActorFacts, StartupMissRouteFacts, accepted_only_dispatch_start_log_message,
     accepted_only_dispatch_start_refusal_message, actor_blocked_by_starting_timeout,
-    actor_dispatch_blocker_reason, actor_recovery_hint,
-    authoritative_actor_dispatch_guard_reason as controller_authoritative_actor_dispatch_guard_reason,
-    authoritative_actor_ready_retry_budget,
+    actor_dispatch_blocker_reason, actor_recovery_hint, authoritative_actor_ready_retry_budget,
     busy_existing_pane_auto_fix_outcome as controller_busy_existing_pane_auto_fix_outcome,
     busy_projection_repaired_by_ready_prompt, can_use_degraded_authoritative_actor,
     classify_authoritative_actor_dispatch_action, classify_authoritative_prompt_ready_barrier,
@@ -203,10 +200,10 @@ use agent_doc_controller::dispatch::{
     dispatch_only_starting_pane_ready_timeout_for_binary,
     dispatch_only_starting_pane_recovery_retry_budget,
     dispatch_only_starting_pane_recovery_timeout_for_binary, duplicate_pane_policy_error_message,
-    effective_authoritative_actor_state, existing_pane_ready_timeout,
-    fresh_route_start_ack_timeout, recent_lines_contain_trigger, route_busy_diagnostic_message,
-    route_busy_queued_diagnostic_message, route_dispatch_bug_report_item, route_latency_message,
-    route_latency_status, route_startup_miss_diagnostic_message, route_submit_issue_message,
+    existing_pane_ready_timeout, fresh_route_start_ack_timeout, recent_lines_contain_trigger,
+    route_busy_diagnostic_message, route_busy_queued_diagnostic_message,
+    route_dispatch_bug_report_item, route_latency_message, route_latency_status,
+    route_startup_miss_diagnostic_message, route_submit_issue_message,
     route_submit_observation_message, routed_cycle_ack_timeout,
     routed_dispatch_start_timeout_for_binary, routed_trigger_payload_rejection,
     should_optimistically_accept_missing_cycle_ack, should_require_routed_cycle_ack,
@@ -219,6 +216,12 @@ use agent_doc_controller::dispatch::{
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_harness::HarnessConfig;
 use agent_doc_hash::short_content_hash;
+use agent_doc_supervisor::route_runtime::{
+    RouteActorState, SupervisorHealth, SupervisorRuntime,
+    authoritative_actor_dispatch_guard_reason as supervisor_authoritative_actor_dispatch_guard_reason,
+    authoritative_actor_dispatch_target_eligible as supervisor_authoritative_actor_dispatch_target_eligible,
+    effective_authoritative_actor_state,
+};
 use agent_doc_tmux::is_first_column;
 use agent_doc_turn::closeout_recovery::{
     CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput,
@@ -351,21 +354,6 @@ pub(crate) enum BusyPaneInterruptRecoveryOutcome {
     Skipped,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SupervisorHealth {
-    Healthy,
-    Restartable,
-    Halted { restart_count: u32 },
-    Unreachable,
-    NoSocket,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SupervisorRuntime {
-    health: SupervisorHealth,
-    actor_state: Option<agent_doc_sqlite::state_store::ActorState>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AuthoritativeActorDispatchTarget {
     record: agent_doc_sqlite::state_store::ActorRecord,
@@ -374,42 +362,36 @@ pub(crate) struct AuthoritativeActorDispatchTarget {
 
 impl AuthoritativeActorDispatchTarget {
     fn actor_state(&self) -> agent_doc_sqlite::state_store::ActorState {
-        sqlite_actor_state_from_controller(effective_authoritative_actor_state(
-            controller_actor_lifecycle_state(self.record.state),
-            self.runtime
-                .actor_state
-                .map(controller_actor_lifecycle_state),
+        sqlite_actor_state_from_route(effective_authoritative_actor_state(
+            route_actor_state_from_sqlite(self.record.state),
+            self.runtime.actor_state,
         ))
     }
 }
 
-fn controller_actor_lifecycle_state(
+fn route_actor_state_from_sqlite(
     state: agent_doc_sqlite::state_store::ActorState,
-) -> ActorLifecycleState {
+) -> RouteActorState {
     match state {
-        agent_doc_sqlite::state_store::ActorState::Starting => ActorLifecycleState::Starting,
-        agent_doc_sqlite::state_store::ActorState::Ready => ActorLifecycleState::Ready,
-        agent_doc_sqlite::state_store::ActorState::Busy => ActorLifecycleState::Busy,
-        agent_doc_sqlite::state_store::ActorState::WaitingInput => {
-            ActorLifecycleState::WaitingInput
-        }
-        agent_doc_sqlite::state_store::ActorState::Closed => ActorLifecycleState::Closed,
-        agent_doc_sqlite::state_store::ActorState::Blocked => ActorLifecycleState::Blocked,
+        agent_doc_sqlite::state_store::ActorState::Starting => RouteActorState::Starting,
+        agent_doc_sqlite::state_store::ActorState::Ready => RouteActorState::Ready,
+        agent_doc_sqlite::state_store::ActorState::Busy => RouteActorState::Busy,
+        agent_doc_sqlite::state_store::ActorState::WaitingInput => RouteActorState::WaitingInput,
+        agent_doc_sqlite::state_store::ActorState::Closed => RouteActorState::Closed,
+        agent_doc_sqlite::state_store::ActorState::Blocked => RouteActorState::Blocked,
     }
 }
 
-fn sqlite_actor_state_from_controller(
-    state: ActorLifecycleState,
+fn sqlite_actor_state_from_route(
+    state: RouteActorState,
 ) -> agent_doc_sqlite::state_store::ActorState {
     match state {
-        ActorLifecycleState::Starting => agent_doc_sqlite::state_store::ActorState::Starting,
-        ActorLifecycleState::Ready => agent_doc_sqlite::state_store::ActorState::Ready,
-        ActorLifecycleState::Busy => agent_doc_sqlite::state_store::ActorState::Busy,
-        ActorLifecycleState::WaitingInput => {
-            agent_doc_sqlite::state_store::ActorState::WaitingInput
-        }
-        ActorLifecycleState::Closed => agent_doc_sqlite::state_store::ActorState::Closed,
-        ActorLifecycleState::Blocked => agent_doc_sqlite::state_store::ActorState::Blocked,
+        RouteActorState::Starting => agent_doc_sqlite::state_store::ActorState::Starting,
+        RouteActorState::Ready => agent_doc_sqlite::state_store::ActorState::Ready,
+        RouteActorState::Busy => agent_doc_sqlite::state_store::ActorState::Busy,
+        RouteActorState::WaitingInput => agent_doc_sqlite::state_store::ActorState::WaitingInput,
+        RouteActorState::Closed => agent_doc_sqlite::state_store::ActorState::Closed,
+        RouteActorState::Blocked => agent_doc_sqlite::state_store::ActorState::Blocked,
     }
 }
 
@@ -1160,18 +1142,6 @@ fn format_associated_pane_selected_error(
     lines.join("\n")
 }
 
-fn parse_actor_state(raw: &str) -> Option<agent_doc_sqlite::state_store::ActorState> {
-    match raw.trim() {
-        "starting" => Some(agent_doc_sqlite::state_store::ActorState::Starting),
-        "ready" => Some(agent_doc_sqlite::state_store::ActorState::Ready),
-        "busy" => Some(agent_doc_sqlite::state_store::ActorState::Busy),
-        "waiting_input" => Some(agent_doc_sqlite::state_store::ActorState::WaitingInput),
-        "closed" => Some(agent_doc_sqlite::state_store::ActorState::Closed),
-        "blocked" => Some(agent_doc_sqlite::state_store::ActorState::Blocked),
-        _ => None,
-    }
-}
-
 fn actor_dispatch_state(state: agent_doc_sqlite::state_store::ActorState) -> ActorDispatchState {
     match state {
         agent_doc_sqlite::state_store::ActorState::Ready => ActorDispatchState::Ready,
@@ -1195,17 +1165,6 @@ fn dispatch_runtime_health(health: SupervisorHealth) -> DispatchRuntimeHealth {
     }
 }
 
-fn supervisor_health_label(health: SupervisorHealth) -> String {
-    dispatch_runtime_health(health).label()
-}
-
-fn runtime_actor_state_label(runtime: &SupervisorRuntime) -> &'static str {
-    runtime
-        .actor_state
-        .map(agent_doc_sqlite::state_store::ActorState::as_str)
-        .unwrap_or("missing")
-}
-
 fn authoritative_actor_ready_facts_from_target(
     target: &AuthoritativeActorDispatchTarget,
     prompt_ready: bool,
@@ -1214,26 +1173,12 @@ fn authoritative_actor_ready_facts_from_target(
         pane_id: target.record.pane_id.clone(),
         generation: target.record.generation,
         actor_state: actor_dispatch_state(target.actor_state()),
-        supervisor_health: supervisor_health_label(target.runtime.health),
-        runtime_state: runtime_actor_state_label(&target.runtime).to_string(),
+        supervisor_health: target.runtime.health.label(),
+        runtime_state: target.runtime.actor_state_label().to_string(),
         prompt_ready,
         last_transition_reason: target.record.last_transition.reason.clone(),
         last_transition_caller: target.record.last_transition.caller.clone(),
     }
-}
-
-fn authoritative_runtime_facts(runtime: &SupervisorRuntime) -> AuthoritativeRuntimeFacts {
-    AuthoritativeRuntimeFacts {
-        health: dispatch_runtime_health(runtime.health),
-        actor_state_present: runtime.actor_state.is_some(),
-    }
-}
-
-fn authoritative_actor_dispatch_target_eligible(actor: &AuthoritativeActorDispatchTarget) -> bool {
-    controller_authoritative_actor_dispatch_guard_reason(authoritative_runtime_facts(
-        &actor.runtime,
-    ))
-    .is_none()
 }
 
 fn supervisor_socket_path(file: &Path, session_id: &str) -> Option<std::path::PathBuf> {
@@ -1274,7 +1219,7 @@ fn query_supervisor_runtime(file: &Path, session_id: &str) -> SupervisorRuntime 
                 let actor_state = data
                     .get("actor_state")
                     .and_then(|v| v.as_str())
-                    .and_then(parse_actor_state);
+                    .and_then(RouteActorState::parse);
                 let health = if running && state == "healthy" {
                     SupervisorHealth::Healthy
                 } else if state == "halted" {
@@ -2845,7 +2790,9 @@ fn wait_for_authoritative_actor_ready(
             match classify_authoritative_prompt_ready_barrier(
                 AuthoritativePromptReadyBarrierFacts {
                     ready_facts: &last_facts,
-                    dispatch_eligible: authoritative_actor_dispatch_target_eligible(&refreshed),
+                    dispatch_eligible: supervisor_authoritative_actor_dispatch_target_eligible(
+                        &refreshed.runtime,
+                    ),
                 },
             ) {
                 PromptReadyBarrierDecision::Ready => {
@@ -3487,7 +3434,7 @@ fn route_via_authoritative_actor(
         has_prompt_bearing_work: prompt_bearing_marker.is_some(),
         mode: reopen_mode,
         degraded_authority: false,
-        dispatch_eligible: authoritative_actor_dispatch_target_eligible(&actor),
+        dispatch_eligible: supervisor_authoritative_actor_dispatch_target_eligible(&actor.runtime),
     });
     let action =
         classify_authoritative_actor_dispatch_action(AuthoritativeActorDispatchActionFacts {
@@ -7321,7 +7268,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
             record: blocked_record,
             runtime: SupervisorRuntime {
                 health: SupervisorHealth::Healthy,
-                actor_state: Some(agent_doc_sqlite::state_store::ActorState::Starting),
+                actor_state: Some(RouteActorState::Starting),
             },
         };
         assert_eq!(
@@ -7345,7 +7292,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
             record: starting_record,
             runtime: SupervisorRuntime {
                 health: SupervisorHealth::Healthy,
-                actor_state: Some(agent_doc_sqlite::state_store::ActorState::Ready),
+                actor_state: Some(RouteActorState::Ready),
             },
         };
         assert_eq!(
@@ -7363,7 +7310,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
             record: blocked_record,
             runtime: SupervisorRuntime {
                 health: SupervisorHealth::Healthy,
-                actor_state: Some(agent_doc_sqlite::state_store::ActorState::Starting),
+                actor_state: Some(RouteActorState::Starting),
             },
         };
 
@@ -7402,10 +7349,12 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
             record: test_actor_record("%1"),
             runtime: SupervisorRuntime {
                 health: SupervisorHealth::Healthy,
-                actor_state: Some(agent_doc_sqlite::state_store::ActorState::Ready),
+                actor_state: Some(RouteActorState::Ready),
             },
         };
-        assert!(authoritative_actor_dispatch_target_eligible(&healthy));
+        assert!(supervisor_authoritative_actor_dispatch_target_eligible(
+            &healthy.runtime
+        ));
 
         let degraded = AuthoritativeActorDispatchTarget {
             record: test_actor_record("%1"),
@@ -7414,7 +7363,9 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
                 actor_state: None,
             },
         };
-        assert!(!authoritative_actor_dispatch_target_eligible(&degraded));
+        assert!(!supervisor_authoritative_actor_dispatch_target_eligible(
+            &degraded.runtime
+        ));
 
         let no_state = AuthoritativeActorDispatchTarget {
             record: test_actor_record("%1"),
@@ -7423,7 +7374,9 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
                 actor_state: None,
             },
         };
-        assert!(!authoritative_actor_dispatch_target_eligible(&no_state));
+        assert!(!supervisor_authoritative_actor_dispatch_target_eligible(
+            &no_state.runtime
+        ));
     }
     #[test]
     fn dispatch_only_starting_pane_ready_timeout_production_values() {

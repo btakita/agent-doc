@@ -11,6 +11,7 @@ use agent_doc_element_backlog::backlog::{
     should_reap_ops_proof_completions, tracked_body_for_reorder,
 };
 use agent_doc_queue::{
+    backlog_sync::AutoBacklogQueueSyncPolicy,
     control_binding::{
         converge_queue_control_binding_content, explicit_queue_go_mode, explicit_queue_start_mode,
         explicit_queue_stop_mode, strip_queue_activation_tokens_in_content,
@@ -1469,28 +1470,6 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     {
         let mode = sync_request.mode;
         source_queue_priority = sync_request.priority;
-        let enqueue_ids: std::collections::HashSet<String> = sync_request
-            .enqueue_ids
-            .iter()
-            .map(|id| id.trim().to_ascii_lowercase())
-            .collect();
-        let mut backlog_ids = sync_request.ids;
-        // Drop ids already in `agent:done` so completed refs are never
-        // re-injected into the queue (#ynra). A lingering active backlog `[ ]`
-        // bullet whose id is also archived in `agent:done` would otherwise be
-        // minted → struck → minted on every cycle.
-        if !done_ids.is_empty() {
-            let done_lower: std::collections::HashSet<String> =
-                done_ids.iter().map(|id| id.to_ascii_lowercase()).collect();
-            let before = backlog_ids.len();
-            backlog_ids.retain(|id| !done_lower.contains(&id.trim().to_ascii_lowercase()));
-            let excluded = before - backlog_ids.len();
-            if excluded > 0 {
-                eprintln!(
-                    "[preflight] queue: excluded {excluded} completed id(s) from backlog→queue sync (already in agent:done; #ynra)"
-                );
-            }
-        }
         // #provauth2: honor operator queue deletes. An id the operator deleted
         // from the live queue (active in the committed snapshot, now entirely
         // gone — not merely struck/consumed) is tombstoned so the backlog→queue
@@ -1498,7 +1477,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         // The tombstone self-clears when the operator re-adds the id as an active
         // head. This makes an operator delete authoritative, the same way #ynra
         // keeps *completed* ids out — but for *operator-deleted* uncompleted ids.
-        {
+        let tombstones = {
             let snapshot_active_ids: std::collections::HashSet<String> =
                 crate::snapshot::load(file)
                     .ok()
@@ -1531,32 +1510,102 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 .filter(|e| matches!(e, agent_doc_queue::document_queue::QueueEntry::Prompt(_)))
                 .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
                 .collect();
-            let tombstones = super::queue_tombstone::reconcile_for_file(
+            super::queue_tombstone::reconcile_for_file(
                 file,
                 &snapshot_active_ids,
                 &current_all_ids,
                 &current_active_ids,
+            )
+        };
+        // #backlog-queue-sync-pending-add-amplification (decision B/C): while the
+        // queue is already running (persisted-active auto-loop), do NOT promote
+        // freshly-added backlog items into the live queue. Re-mirroring on every
+        // cycle injected each new `--pending-add` as a `do [#id]` head, growing
+        // the queue unboundedly and tripping pending_done_guard on each finalize.
+        // Restrict the sync to ids already present as queue heads so captured
+        // follow-ups wait for the NEXT activation instead of joining mid-loop. A
+        // fresh activation (queue not yet active) still mirrors the full backlog.
+        let incoming_frontmatter = frontmatter::parse(&content).ok().map(|(fm, _)| fm);
+        let persisted_active_incoming = incoming_frontmatter
+            .as_ref()
+            .and_then(|fm| fm.queue_active)
+            .unwrap_or(false);
+        // `#backlog-queue-empty-active-repopulate`: gate the empty-active-queue
+        // repopulation on the queue's explicit `go` control. `go` (frontmatter
+        // `queue: go` or a marker-side `go` token) opts
+        // into continuous-backlog-loop: when the live queue is fully drained (0
+        // un-struck prompts), repopulate from the full active backlog instead of
+        // holding. Without `go` (including a plain `queue: start` activation or
+        // persisted-active queue), keep the drain-then-stop hold.
+        let queue_go_mode = explicit_queue_go_mode(
+            &comp.attrs,
+            incoming_frontmatter
+                .as_ref()
+                .and_then(|fm| fm.queue.as_deref()),
+        );
+        let queue_explicitly_stopped = explicit_queue_stop_mode(
+            &comp.attrs,
+            incoming_frontmatter
+                .as_ref()
+                .and_then(|fm| fm.queue.as_deref()),
+        );
+        let sync_plan = agent_doc_queue::backlog_sync::plan_auto_backlog_queue_sync_ids(
+            &sync_request.ids,
+            &sync_request.enqueue_ids,
+            &done_ids,
+            &tombstones,
+            &entries,
+            persisted_active_incoming,
+            persisted_active_before_binding,
+            queue_go_mode,
+            queue_explicitly_stopped,
+        );
+        if sync_plan.completed_excluded_count > 0 {
+            eprintln!(
+                "[preflight] queue: excluded {} completed id(s) from backlog→queue sync (already in agent:done; #ynra)",
+                sync_plan.completed_excluded_count
             );
-            if !tombstones.is_empty() {
-                let before = backlog_ids.len();
-                backlog_ids.retain(|id| !tombstones.contains(&id.trim().to_ascii_lowercase()));
-                let suppressed = before - backlog_ids.len();
-                if suppressed > 0 {
-                    eprintln!(
-                        "[preflight] queue: suppressed {suppressed} operator-deleted id(s) \
-                         from backlog→queue mirror (#provauth2 tombstone)"
-                    );
-                    crate::ops_log::log_op(
-                        file,
-                        &format!(
-                            "queue_mirror_tombstone_suppressed file={} count={} (#provauth2)",
-                            file.display(),
-                            suppressed
-                        ),
-                    );
-                }
-            }
         }
+        if sync_plan.tombstone_suppressed_count > 0 {
+            eprintln!(
+                "[preflight] queue: suppressed {} operator-deleted id(s) \
+                 from backlog→queue mirror (#provauth2 tombstone)",
+                sync_plan.tombstone_suppressed_count
+            );
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "queue_mirror_tombstone_suppressed file={} count={} (#provauth2)",
+                    file.display(),
+                    sync_plan.tombstone_suppressed_count
+                ),
+            );
+        }
+        match sync_plan.active_policy {
+            AutoBacklogQueueSyncPolicy::ExplicitlyStopped if sync_plan.active_held_count > 0 => {
+                eprintln!(
+                    "[preflight] queue: held {} backlog id(s) out of explicitly stopped queue binding",
+                    sync_plan.active_held_count
+                );
+            }
+            AutoBacklogQueueSyncPolicy::HoldFreshIds if sync_plan.active_held_count > 0 => {
+                eprintln!(
+                    "[preflight] queue: held {} freshly-added backlog id(s) out of the active auto-loop \
+                     (they sync at the next activation; #backlog-queue-sync-pending-add-amplification)",
+                    sync_plan.active_held_count
+                );
+            }
+            AutoBacklogQueueSyncPolicy::GoModeAppend => {
+                eprintln!(
+                    "[preflight] queue: go-mode active queue — appending fresh backlog `queue`-attr id(s) \
+                     (continuous-backlog-loop; #backlog-queue-attr-populates-in-go-mode)"
+                );
+            }
+            AutoBacklogQueueSyncPolicy::FreshActivation
+            | AutoBacklogQueueSyncPolicy::ExplicitlyStopped
+            | AutoBacklogQueueSyncPolicy::HoldFreshIds => {}
+        }
+        let backlog_ids = sync_plan.ids;
         // #goqueuestall: keep agent-undrainable heads out of the auto-drain queue
         // so a `go`-mode queue does not perpetually re-mirror items it cannot run
         // in the current session type. `[operator-verify]` items are always
@@ -1609,83 +1658,6 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                     );
                 }
             }
-        }
-        // #backlog-queue-sync-pending-add-amplification (decision B/C): while the
-        // queue is already running (persisted-active auto-loop), do NOT promote
-        // freshly-added backlog items into the live queue. Re-mirroring on every
-        // cycle injected each new `--pending-add` as a `do [#id]` head, growing
-        // the queue unboundedly and tripping pending_done_guard on each finalize.
-        // Restrict the sync to ids already present as queue heads so captured
-        // follow-ups wait for the NEXT activation instead of joining mid-loop. A
-        // fresh activation (queue not yet active) still mirrors the full backlog.
-        let incoming_frontmatter = frontmatter::parse(&content).ok().map(|(fm, _)| fm);
-        let persisted_active_incoming = incoming_frontmatter
-            .as_ref()
-            .and_then(|fm| fm.queue_active)
-            .unwrap_or(false);
-        // `#backlog-queue-empty-active-repopulate`: gate the empty-active-queue
-        // repopulation on the queue's explicit `go` control. `go` (frontmatter
-        // `queue: go` or a marker-side `go` token) opts
-        // into continuous-backlog-loop: when the live queue is fully drained (0
-        // un-struck prompts), repopulate from the full active backlog instead of
-        // holding. Without `go` (including a plain `queue: start` activation or
-        // persisted-active queue), keep the
-        // drain-then-stop hold. Amplification can't occur with 0 live prompts, and
-        // `active_item_ids` returns only Open `[ ]` items, so processed items
-        // (marked `[/]`/`[x]` per the `do #id` closeout rule) drop out and the
-        // loop converges when no Open backlog item remains.
-        let queue_go_mode = explicit_queue_go_mode(
-            &comp.attrs,
-            incoming_frontmatter
-                .as_ref()
-                .and_then(|fm| fm.queue.as_deref()),
-        );
-        let queue_explicitly_stopped = explicit_queue_stop_mode(
-            &comp.attrs,
-            incoming_frontmatter
-                .as_ref()
-                .and_then(|fm| fm.queue.as_deref()),
-        );
-        // `#backlog-queue-attr-populates-in-go-mode`: a plain persisted-active
-        // queue (no explicit `go`) still holds freshly-added backlog ids out of the
-        // running loop to avoid mid-loop amplification. But a `go`-mode queue
-        // (`queue: go` or marker-side `go`) is an explicit continuous-backlog-loop opt-in: the
-        // `queue` backlog attribute is *supposed* to populate the queue, so fresh
-        // backlog ids append immediately (not only when the queue fully drains).
-        // Append/Prepend stay idempotent (existing + struck `Completed` ids are
-        // never re-added) and processed items drop out of `active_item_ids` once
-        // marked `[/]`/`[x]`, so the queue stays bounded by the open backlog.
-        if queue_explicitly_stopped {
-            let held = backlog_ids.len();
-            backlog_ids.clear();
-            if held > 0 {
-                eprintln!(
-                    "[preflight] queue: held {held} backlog id(s) out of explicitly stopped queue binding"
-                );
-            }
-        } else if persisted_active_incoming && persisted_active_before_binding && !queue_go_mode {
-            let existing_queue_ids: std::collections::HashSet<String> = entries
-                .iter()
-                .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
-                .map(|id| id.to_ascii_lowercase())
-                .collect();
-            let before = backlog_ids.len();
-            backlog_ids.retain(|id| {
-                let key = id.trim().to_ascii_lowercase();
-                existing_queue_ids.contains(&key) || enqueue_ids.contains(&key)
-            });
-            let held = before - backlog_ids.len();
-            if held > 0 {
-                eprintln!(
-                    "[preflight] queue: held {held} freshly-added backlog id(s) out of the active auto-loop \
-                     (they sync at the next activation; #backlog-queue-sync-pending-add-amplification)"
-                );
-            }
-        } else if persisted_active_incoming && queue_go_mode {
-            eprintln!(
-                "[preflight] queue: go-mode active queue — appending fresh backlog `queue`-attr id(s) \
-                 (continuous-backlog-loop; #backlog-queue-attr-populates-in-go-mode)"
-            );
         }
         if let Some(synced) =
             agent_doc_queue::document_queue::sync_backlog_into_queue(&entries, &backlog_ids, mode)

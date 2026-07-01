@@ -3,7 +3,9 @@
 //! This crate owns rules that can be evaluated from document text and typed
 //! facts without touching disk, git, editors, tmux, snapshots, or turn state.
 
+pub mod claim_scaffold;
 pub mod commit_normalization;
+pub mod compact_projection;
 pub mod element_models;
 pub mod model_projection;
 pub mod outline_projection;

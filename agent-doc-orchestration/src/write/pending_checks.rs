@@ -638,7 +638,9 @@ pub(crate) fn precommit_pending_done_check_with_options(
             )
         );
     }
-    let open_tracked_work_ids = crate::session_check::open_tracked_work_ids(file)?;
+    let content = std::fs::read_to_string(file)?;
+    let open_tracked_work_ids =
+        agent_doc_document::tracked_work_projection::open_tracked_work_ids(&content);
     let missing = agent_doc_turn::closeout_signal::tracked_work_completion_missing_done_ids(
         &response_text,
         &state.pending_done_ids,
@@ -742,7 +744,9 @@ pub(crate) fn prewrite_pending_done_check(
             )
         );
     }
-    let open_tracked_work_ids = crate::session_check::open_tracked_work_ids(file)?;
+    let content = std::fs::read_to_string(file)?;
+    let open_tracked_work_ids =
+        agent_doc_document::tracked_work_projection::open_tracked_work_ids(&content);
     let missing = agent_doc_turn::closeout_signal::tracked_work_completion_missing_done_ids(
         &response_text,
         &recorded_done_ids,
@@ -817,7 +821,9 @@ pub(crate) fn auto_apply_pending_done_if_enabled(
         .unwrap_or_default();
     kept_open_ids.extend(flags.pending_kept_open_ids.clone());
 
-    let open_tracked_work_ids = crate::session_check::open_tracked_work_ids(file)?;
+    let content = std::fs::read_to_string(file)?;
+    let open_tracked_work_ids =
+        agent_doc_document::tracked_work_projection::open_tracked_work_ids(&content);
     let missing = agent_doc_turn::closeout_signal::tracked_work_completion_decision(
         agent_doc_turn::closeout_signal::TrackedWorkCompletionEvidence {
             response_body,

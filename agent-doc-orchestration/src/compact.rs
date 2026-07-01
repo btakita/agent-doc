@@ -94,25 +94,19 @@
 //! - message_dash_reads_stdin: `--message -` reads from stdin instead of using literal "-"
 
 use anyhow::{Context, Result};
-use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
 
+use agent_doc_document::compact_projection::{
+    CompactExchange, build_inline_compacted_document, changed_non_exchange_opening_markers,
+    malformed_compact_summary_lines, parse_inline_exchanges, split_component_content_at_boundary,
+};
 use agent_doc_element::element;
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_sqlite::archive_index;
 
 use crate::snapshot;
 use agent_doc_topic::{parse_topic_sections_with_tail, summarize_compacted_exchange};
-
-/// A parsed exchange pair (User prompt + Assistant response).
-#[derive(Debug)]
-struct Exchange {
-    /// The user's content (without the `## User` heading)
-    user: String,
-    /// The assistant's content (without the `## Assistant` heading)
-    assistant: String,
-}
 
 /// Run the compact command.
 ///
@@ -196,7 +190,7 @@ pub fn run(
         let keep_n = keep.unwrap_or(2);
 
         // Parse exchanges from the body
-        let exchanges = parse_exchanges(body);
+        let exchanges = parse_inline_exchanges(body);
 
         if exchanges.len() <= keep_n {
             eprintln!(
@@ -217,8 +211,13 @@ pub fn run(
         let archive_path = save_archive(file, &archive_content)?;
 
         // Build compacted document
-        let mut compacted =
-            build_compacted(&content, body, to_keep, &archive_path, to_archive.len());
+        let mut compacted = build_inline_compacted_document(
+            &content,
+            body,
+            to_keep,
+            &archive_path.display().to_string(),
+            to_archive.len(),
+        );
         if let Some(reconciled) =
             agent_doc_document::status_projection::reconcile_top_backlog_status_content(&compacted)?
         {
@@ -506,36 +505,6 @@ fn discard_archived_captures(file: &Path, archived_text: &str) {
     }
 }
 
-/// `#jb-compact-malformed-response-commit`: a compact summary line must never be
-/// rendered as a user prompt. The live repro committed
-/// `❯ *Compacted. Content archived ...*` — the summary inheriting the `❯ ` user
-/// prompt marker from an archived prompt tail. Detect that malformed shape in
-/// the rebuilt `agent:exchange` so the compact commit fails closed before it
-/// reaches disk/HEAD instead of persisting a corrupt exchange structure.
-pub fn malformed_compact_summary_lines(compacted: &str) -> Vec<String> {
-    let Ok(components) = element::parse(compacted) else {
-        return Vec::new();
-    };
-    let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
-        return Vec::new();
-    };
-    exchange
-        .content(compacted)
-        .lines()
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            let rest = trimmed.strip_prefix('❯')?.trim_start();
-            // A compact summary line carries the `*Compacted` / archive pointer
-            // text. Prefixed with `❯`, it is a malformed summary-as-prompt line.
-            if rest.starts_with("*Compacted") || rest.contains("Content archived to") {
-                Some(trimmed.to_string())
-            } else {
-                None
-            }
-        })
-        .collect()
-}
-
 fn validate_compacted_exchange(file: &Path, compacted: &str) -> Result<()> {
     let malformed = malformed_compact_summary_lines(compacted);
     if malformed.is_empty() {
@@ -599,27 +568,6 @@ fn assert_non_exchange_items_preserved(
     )
 }
 
-/// Verbatim opening marker line (e.g. `<!-- agent:queue priority preset="#x" go -->`)
-/// for every non-exchange component, keyed by component name.
-fn non_exchange_opening_markers(content: &str) -> BTreeMap<String, String> {
-    let mut markers = BTreeMap::new();
-    let Ok(components) = element::parse(content) else {
-        return markers;
-    };
-    for comp in &components {
-        if comp.name == "exchange" {
-            continue;
-        }
-        // `open_start..open_end` is the verbatim opening marker span, including
-        // all inline attributes — captured directly from the source bytes.
-        markers.insert(
-            comp.name.clone(),
-            content[comp.open_start..comp.open_end].to_string(),
-        );
-    }
-    markers
-}
-
 /// `#compactqattr`: fail closed if a compaction rewrite altered any non-exchange
 /// component's opening marker — most importantly dropping inline attributes
 /// (`priority`, `preset="..."`, `go`) from an `agent:queue` marker. Operator
@@ -640,20 +588,10 @@ fn assert_non_exchange_markers_preserved(
     after: &str,
     stage: &str,
 ) -> Result<()> {
-    let before_markers = non_exchange_opening_markers(before);
-    let after_markers = non_exchange_opening_markers(after);
-
-    let mut changed: Vec<String> = Vec::new();
-    for (name, before_marker) in &before_markers {
-        // A component legitimately absent after compaction is covered by the
-        // item-count guard (#compactdropitem); only flag a surviving component
-        // whose opening marker text changed.
-        if let Some(after_marker) = after_markers.get(name)
-            && after_marker != before_marker
-        {
-            changed.push(format!("{name}: `{before_marker}` -> `{after_marker}`"));
-        }
-    }
+    let changed = changed_non_exchange_opening_markers(before, after)
+        .into_iter()
+        .map(|change| change.describe())
+        .collect::<Vec<_>>();
 
     if changed.is_empty() {
         return Ok(());
@@ -999,34 +937,6 @@ fn run_component_compact_partial(
     Ok(snapshot_compacted)
 }
 
-/// Parse a component's content into a preamble and a list of `### Re:` topic sections.
-///
-/// The preamble is everything before the first `### Re:` heading.
-/// Each section is the `### Re:` heading line + its content until the next `### Re:` (or end).
-/// Boundary markers (`<!-- agent:boundary:... -->`) are stripped from the final section
-/// so they are not archived.
-fn split_component_content_at_boundary(content: &str) -> (String, String) {
-    let mut before = String::new();
-    let mut after = String::new();
-    let mut after_boundary = false;
-
-    for line in content.lines() {
-        if line.starts_with("<!-- agent:boundary:") {
-            after_boundary = true;
-            continue;
-        }
-        if after_boundary {
-            after.push_str(line);
-            after.push('\n');
-        } else {
-            before.push_str(line);
-            before.push('\n');
-        }
-    }
-
-    (before, after)
-}
-
 /// Build archive content from a component.
 fn build_component_archive(
     doc: &Path,
@@ -1090,76 +1000,8 @@ fn append_compact_summary_section(summary: &mut String, title: &str, items: &[St
     }
 }
 
-/// Parse the document body into User/Assistant exchange pairs.
-fn parse_exchanges(body: &str) -> Vec<Exchange> {
-    let mut exchanges = Vec::new();
-    let mut sections: Vec<(&str, String)> = Vec::new(); // (type, content)
-
-    // Split by ## User and ## Assistant headings
-    let mut current_type = "";
-    let mut current_content = String::new();
-    let mut in_code_block = false;
-
-    for line in body.lines() {
-        // Track code blocks to avoid matching headings inside them
-        if line.starts_with("```") {
-            in_code_block = !in_code_block;
-        }
-
-        if !in_code_block {
-            if line == "## User" {
-                if !current_type.is_empty() {
-                    sections.push((current_type, current_content.clone()));
-                }
-                current_type = "user";
-                current_content.clear();
-                continue;
-            } else if line == "## Assistant" {
-                if !current_type.is_empty() {
-                    sections.push((current_type, current_content.clone()));
-                }
-                current_type = "assistant";
-                current_content.clear();
-                continue;
-            }
-        }
-
-        if !current_type.is_empty() {
-            current_content.push_str(line);
-            current_content.push('\n');
-        }
-    }
-
-    // Push last section
-    if !current_type.is_empty() {
-        sections.push((current_type, current_content));
-    }
-
-    // Pair up User + Assistant sections into exchanges
-    let mut i = 0;
-    while i < sections.len() {
-        if sections[i].0 == "user" {
-            let user = sections[i].1.trim().to_string();
-            let assistant = if i + 1 < sections.len() && sections[i + 1].0 == "assistant" {
-                i += 1;
-                sections[i].1.trim().to_string()
-            } else {
-                String::new()
-            };
-            // Only include complete exchanges (with assistant response)
-            if !assistant.is_empty() {
-                exchanges.push(Exchange { user, assistant });
-            }
-            // If no assistant response, this is the active/pending user block — skip it
-        }
-        i += 1;
-    }
-
-    exchanges
-}
-
 /// Build archive file content from exchanges.
-fn build_archive(doc: &Path, original_header: &str, exchanges: &[Exchange]) -> String {
+fn build_archive(doc: &Path, original_header: &str, exchanges: &[CompactExchange]) -> String {
     let mut archive = String::new();
 
     // Add a header noting the source
@@ -1237,42 +1079,6 @@ fn archive_document_value(doc: &Path) -> Result<String> {
         .unwrap_or(&canonical)
         .to_string_lossy()
         .replace('\\', "/"))
-}
-
-/// Build the compacted document content.
-fn build_compacted(
-    original: &str,
-    body: &str,
-    kept_exchanges: &[Exchange],
-    archive_path: &Path,
-    archived_count: usize,
-) -> String {
-    // Extract frontmatter (everything before the body)
-    let body_start = original.len() - body.len();
-    let header = &original[..body_start];
-
-    let mut result = header.to_string();
-
-    // Add archive summary
-    result.push_str(&format!(
-        "*{} earlier exchange(s) archived to `{}`*\n\n",
-        archived_count,
-        archive_path.display()
-    ));
-
-    // Add kept exchanges
-    for exchange in kept_exchanges {
-        result.push_str("## User\n\n");
-        result.push_str(&exchange.user);
-        result.push_str("\n\n## Assistant\n\n");
-        result.push_str(&exchange.assistant);
-        result.push_str("\n\n");
-    }
-
-    // Add trailing ## User for next prompt
-    result.push_str("## User\n\n");
-
-    result
 }
 
 /// Create a lightweight git tag at the current HEAD to mark the pre-compact state.
@@ -1544,40 +1350,12 @@ mod tests {
     }
 
     #[test]
-    fn parse_exchanges_basic() {
-        let body = "## User\n\nHello\n\n## Assistant\n\nHi there\n\n## User\n\nBye\n\n## Assistant\n\nGoodbye\n\n## User\n\n";
-        let exchanges = parse_exchanges(body);
-        assert_eq!(exchanges.len(), 2);
-        assert_eq!(exchanges[0].user, "Hello");
-        assert_eq!(exchanges[0].assistant, "Hi there");
-        assert_eq!(exchanges[1].user, "Bye");
-        assert_eq!(exchanges[1].assistant, "Goodbye");
-    }
-
-    #[test]
-    fn parse_exchanges_with_code_blocks() {
-        let body = "## User\n\nHere's code:\n\n```\n## User\n## Assistant\n```\n\n## Assistant\n\nNice code\n\n## User\n\n";
-        let exchanges = parse_exchanges(body);
-        assert_eq!(exchanges.len(), 1);
-        assert!(exchanges[0].user.contains("```"));
-        assert!(exchanges[0].user.contains("## User"));
-    }
-
-    #[test]
-    fn parse_exchanges_trailing_user_not_counted() {
-        let body = "## User\n\nHello\n\n## Assistant\n\nHi\n\n## User\n\nPending question\n";
-        let exchanges = parse_exchanges(body);
-        // Only the complete exchange is counted, not the trailing User block
-        assert_eq!(exchanges.len(), 1);
-    }
-
-    #[test]
     fn build_archive_format() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc_path = dir.path().join("session.md");
         std::fs::write(&doc_path, "---\nsession: test\n---\n").unwrap();
-        let exchanges = vec![Exchange {
+        let exchanges = vec![CompactExchange {
             user: "Hello".to_string(),
             assistant: "Hi there".to_string(),
         }];
@@ -1587,25 +1365,6 @@ mod tests {
         assert!(archive.contains("session: test"));
         assert!(archive.contains("## User\n\nHello"));
         assert!(archive.contains("## Assistant\n\nHi there"));
-    }
-
-    #[test]
-    fn build_compacted_format() {
-        let kept = vec![Exchange {
-            user: "Recent question".to_string(),
-            assistant: "Recent answer".to_string(),
-        }];
-        let compacted = build_compacted(
-            "---\ntest: true\n---\n\n",
-            "\n",
-            &kept,
-            Path::new("archive.md"),
-            3,
-        );
-        assert!(compacted.contains("3 earlier exchange(s) archived"));
-        assert!(compacted.contains("## User\n\nRecent question"));
-        assert!(compacted.contains("## Assistant\n\nRecent answer"));
-        assert!(compacted.ends_with("## User\n\n"));
     }
 
     #[test]
@@ -3196,36 +2955,6 @@ mod tests {
                 && !ops_log.contains("typed_component_drift")
                 && !ops_log.contains("refusing to auto-adopt committed historical response"),
             "clean exchange-only compact must not trip the historical response drift guard:\n{ops_log}"
-        );
-    }
-
-    #[test]
-    fn malformed_compact_summary_detects_prompt_prefixed_summary() {
-        // #jb-compact-malformed-response-commit: the live repro shape.
-        let doc = concat!(
-            "---\nagent_doc_session: test\n---\n\n",
-            "<!-- agent:exchange -->\n",
-            "❯ *Compacted. Content archived to `.agent-doc/archives/x.md`*\n",
-            "### Re: #next-steps-2 — gpt-5\n\nLeftover archived body.\n",
-            "<!-- /agent:exchange -->\n",
-        );
-        let malformed = malformed_compact_summary_lines(doc);
-        assert_eq!(malformed.len(), 1, "{malformed:?}");
-        assert!(malformed[0].contains("Compacted"), "{malformed:?}");
-    }
-
-    #[test]
-    fn malformed_compact_summary_accepts_clean_summary() {
-        let doc = concat!(
-            "---\nagent_doc_session: test\n---\n\n",
-            "<!-- agent:exchange -->\n",
-            "### Session Summary\n\n",
-            "*Compacted. Content archived to `.agent-doc/archives/x.md`*\n",
-            "<!-- /agent:exchange -->\n",
-        );
-        assert!(
-            malformed_compact_summary_lines(doc).is_empty(),
-            "clean compact summary must not be flagged"
         );
     }
 

@@ -238,7 +238,9 @@ pub(crate) fn check_pending_done_guard(
         return Ok(GuardResult::None);
     }
 
-    let open_tracked_work_ids = open_tracked_work_ids(file)?;
+    let content = std::fs::read_to_string(file)?;
+    let open_tracked_work_ids =
+        agent_doc_document::tracked_work_projection::open_tracked_work_ids(&content);
     let missing = match agent_doc_turn::closeout_signal::tracked_work_completion_decision(
         agent_doc_turn::closeout_signal::TrackedWorkCompletionEvidence {
             response_body: &capture.response_body,

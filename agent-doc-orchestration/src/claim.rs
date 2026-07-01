@@ -101,7 +101,12 @@ use std::path::Path;
 use agent_doc_controller::claim::{
     CrossSessionDecision, cross_session_decision_with_lease, cross_session_reject_marker,
 };
-use agent_doc_frontmatter::{frontmatter, project_config};
+use agent_doc_document::claim_scaffold::{
+    default_format_and_write_content, merge_default_template_component_config,
+    render_empty_template_scaffold, scaffold_default_template_components,
+    should_scaffold_empty_markdown, uses_template_format,
+};
+use agent_doc_frontmatter::frontmatter;
 
 use crate::{resync, route, sessions};
 use agent_doc_project_config_io as project_config_io;
@@ -301,13 +306,11 @@ pub fn run(
     // or add components. Empty files need the full template in one step.
     {
         let raw = std::fs::read_to_string(file).unwrap_or_default();
-        if raw.trim().is_empty() && file.extension() == Some(std::ffi::OsStr::new("md")) {
+        let extension = file.extension().and_then(std::ffi::OsStr::to_str);
+        if should_scaffold_empty_markdown(&raw, extension) {
             eprintln!("[claim] auto-scaffolding empty file: {}", file.display());
             let session_id = uuid::Uuid::new_v4();
-            let scaffold = format!(
-                "---\nagent_doc_session: {}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\n## Backlog\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n\n## Icebox\n\n<!-- agent:icebox -->\n<!-- /agent:icebox -->\n",
-                session_id
-            );
+            let scaffold = render_empty_template_scaffold(&session_id.to_string());
             std::fs::write(file, &scaffold)?;
             crate::snapshot::save(file, &scaffold)?;
             crate::git::commit(file).ok(); // best-effort commit
@@ -389,25 +392,17 @@ pub fn run(
     {
         let content = std::fs::read_to_string(file)
             .with_context(|| format!("failed to read {}", file.display()))?;
-        let (fm, _) = frontmatter::parse(&content)?;
-        if fm.format.is_none() && fm.write_mode.is_none() && fm.mode.is_none() {
-            let updated = frontmatter::set_format_and_write(
-                &content,
-                frontmatter::AgentDocFormat::Template,
-                frontmatter::AgentDocWrite::Crdt,
-            )?;
-            if updated != content {
-                std::fs::write(file, &updated).with_context(|| {
-                    format!(
-                        "failed to write agent_doc_format/write to {}",
-                        file.display()
-                    )
-                })?;
-                eprintln!(
-                    "set agent_doc_format=template, agent_doc_write=crdt in {}",
+        if let Some(updated) = default_format_and_write_content(&content)? {
+            std::fs::write(file, &updated).with_context(|| {
+                format!(
+                    "failed to write agent_doc_format/write to {}",
                     file.display()
-                );
-            }
+                )
+            })?;
+            eprintln!(
+                "set agent_doc_format=template, agent_doc_write=crdt in {}",
+                file.display()
+            );
         }
     }
 
@@ -415,20 +410,8 @@ pub fn run(
     {
         let content = std::fs::read_to_string(file)
             .with_context(|| format!("failed to read {}", file.display()))?;
-        let (fm, _) = frontmatter::parse(&content)?;
-        let resolved = fm.resolve_mode();
-        let has_components = agent_doc_element::element::parse(&content)
-            .map(|comps| {
-                comps
-                    .iter()
-                    .any(|c| c.name == "status" || c.name == "exchange")
-            })
-            .unwrap_or(false);
-        if resolved.format == frontmatter::AgentDocFormat::Template && !has_components {
-            let scaffolded = format!(
-                "{}\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\n## Backlog\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n\n## Icebox\n\n<!-- agent:icebox -->\n<!-- /agent:icebox -->\n",
-                content.trim_end()
-            );
+        let is_template = uses_template_format(&content)?;
+        if let Some(scaffolded) = scaffold_default_template_components(&content)? {
             std::fs::write(file, &scaffolded).with_context(|| {
                 format!(
                     "failed to write component scaffolding to {}",
@@ -439,31 +422,10 @@ pub fn run(
         }
 
         // Merge default components into .agent-doc/config.toml if template format
-        if resolved.format == frontmatter::AgentDocFormat::Template {
+        if is_template {
             let mut proj_cfg = project_config_io::load_project();
 
-            // Add default components if not already present
-            proj_cfg
-                .components
-                .entry("exchange".to_string())
-                .or_insert_with(|| project_config::ComponentConfig {
-                    patch: "append".to_string(),
-                    ..Default::default()
-                });
-            proj_cfg
-                .components
-                .entry("findings".to_string())
-                .or_insert_with(|| project_config::ComponentConfig {
-                    patch: "append".to_string(),
-                    ..Default::default()
-                });
-            proj_cfg
-                .components
-                .entry("status".to_string())
-                .or_insert_with(|| project_config::ComponentConfig {
-                    patch: "replace".to_string(),
-                    ..Default::default()
-                });
+            merge_default_template_component_config(&mut proj_cfg);
 
             if let Err(e) = project_config_io::save_project(&proj_cfg) {
                 eprintln!("warning: failed to save config with components: {}", e);

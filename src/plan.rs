@@ -815,11 +815,16 @@ fn pending_mutations_for_doc(
 
     let project_config = agent_doc_project_config_io::load_project_for_doc(file);
     let auto_done = agent_doc_frontmatter::project_config::resolve_auto_done(&fm, &project_config);
-    for id in agent_doc_orchestration::session_check::inline_done_signal_ids(
-        file,
+    let open_tracked_work_ids =
+        agent_doc_document::tracked_work_projection::open_tracked_work_ids(content);
+    let single_open_review_item_id =
+        agent_doc_document::tracked_work_projection::single_open_review_item_id(content);
+    for id in agent_doc_turn::closeout_signal::inline_done_signal_ids(
         prompt_targets,
+        &open_tracked_work_ids,
+        single_open_review_item_id.as_deref(),
         auto_done,
-    )? {
+    ) {
         push_resolve_existing_mutation(&mut pending_mutations, &items, &id);
     }
 

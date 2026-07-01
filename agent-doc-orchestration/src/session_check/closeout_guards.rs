@@ -26,7 +26,10 @@ pub(crate) fn check_blocked_closeout_followup_guard(
     let Some(capture) = crate::capture::load_by_id(file, capture_id)? else {
         return Ok(GuardResult::None);
     };
-    let mut still_gated = open_review_ids(file)?.into_iter().collect::<Vec<_>>();
+    let content = std::fs::read_to_string(file)?;
+    let mut still_gated = agent_doc_document::tracked_work_projection::open_review_ids(&content)
+        .into_iter()
+        .collect::<Vec<_>>();
     still_gated.sort();
 
     let unresolved = match agent_doc_turn::closeout_signal::blocked_closeout_followup_decision(
@@ -261,29 +264,6 @@ pub(crate) fn check_queue_audit_partial_completion_guard(file: &Path) -> Result<
             agent_doc_turn::closeout_signal::QUEUE_AUDIT_GUARD_SUPPRESS_MARKER
         ),
     ]))
-}
-
-pub(crate) fn single_open_review_item_id(file: &Path) -> Result<Option<String>> {
-    let content = std::fs::read_to_string(file)?;
-    let Ok(components) = agent_doc_element::element::parse(&content) else {
-        return Ok(None);
-    };
-    let ids = components
-        .into_iter()
-        .filter(|component| agent_doc_element::element::is_review_component(&component.name))
-        .flat_map(|component| {
-            let (_, items, _) =
-                agent_doc_element_backlog::backlog::parse_items(component.content(&content));
-            items
-        })
-        .filter(|item| !item.is_done())
-        .map(|item| item.id)
-        .collect::<Vec<_>>();
-    if ids.len() == 1 {
-        Ok(ids.into_iter().next())
-    } else {
-        Ok(None)
-    }
 }
 
 pub(crate) fn detect_active_session_post_commit_drift(file: &Path) -> Result<Option<String>> {

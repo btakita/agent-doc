@@ -57,6 +57,58 @@ pub fn tracked_work_fingerprint(content: &str) -> Result<TrackedWorkFingerprint>
     })
 }
 
+pub fn open_tracked_work_ids(content: &str) -> Vec<String> {
+    agent_doc_element_backlog::backlog::open_tracked_work_ids_in_content(content)
+}
+
+/// Open (`[ ]`/gated, not done) ids that live specifically in the live
+/// `agent:backlog` component.
+pub fn open_backlog_ids(content: &str) -> Vec<String> {
+    agent_doc_element_backlog::backlog::open_backlog_ids_in_content(content)
+}
+
+/// Open (`[ ]`/gated, not done) ids that currently live in a `review`/gated
+/// component.
+pub fn open_review_ids(content: &str) -> std::collections::HashSet<String> {
+    let Ok(components) = element::parse(content) else {
+        return std::collections::HashSet::new();
+    };
+    components
+        .into_iter()
+        .filter(|component| agent_doc_element::element::is_review_component(&component.name))
+        .flat_map(|component| {
+            let (_, items, _) =
+                agent_doc_element_backlog::backlog::parse_items(component.content(content));
+            items
+        })
+        .filter(|item| !item.is_done())
+        .map(|item| agent_doc_element_backlog::backlog::normalize_pending_id(&item.id))
+        .filter(|id| !id.is_empty())
+        .collect()
+}
+
+pub fn single_open_review_item_id(content: &str) -> Option<String> {
+    let Ok(components) = element::parse(content) else {
+        return None;
+    };
+    let ids = components
+        .into_iter()
+        .filter(|component| agent_doc_element::element::is_review_component(&component.name))
+        .flat_map(|component| {
+            let (_, items, _) =
+                agent_doc_element_backlog::backlog::parse_items(component.content(content));
+            items
+        })
+        .filter(|item| !item.is_done())
+        .map(|item| item.id)
+        .collect::<Vec<_>>();
+    if ids.len() == 1 {
+        ids.into_iter().next()
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -102,5 +154,41 @@ mod tests {
         let fingerprint = tracked_work_fingerprint("# Notes\n").unwrap();
 
         assert_eq!(fingerprint, TrackedWorkFingerprint::empty());
+    }
+
+    #[test]
+    fn projects_open_ids_by_tracked_work_surface() {
+        let doc = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#Backlog-1] Backlog item\n",
+            "- [x] [#done] Done item\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:review -->\n",
+            "- [/] [#Review-1] Review item\n",
+            "<!-- /agent:review -->\n"
+        );
+
+        assert_eq!(
+            open_tracked_work_ids(doc),
+            vec!["backlog-1".to_string(), "review-1".to_string()]
+        );
+        assert_eq!(open_backlog_ids(doc), vec!["backlog-1".to_string()]);
+        assert_eq!(
+            open_review_ids(doc),
+            std::collections::HashSet::from(["review-1".to_string()])
+        );
+        assert_eq!(single_open_review_item_id(doc).as_deref(), Some("review-1"));
+    }
+
+    #[test]
+    fn single_open_review_item_requires_exactly_one_open_review_item() {
+        let doc = concat!(
+            "<!-- agent:review -->\n",
+            "- [ ] [#one] One\n",
+            "- [ ] [#two] Two\n",
+            "<!-- /agent:review -->\n"
+        );
+
+        assert_eq!(single_open_review_item_id(doc), None);
     }
 }

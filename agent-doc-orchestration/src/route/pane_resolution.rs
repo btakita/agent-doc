@@ -110,7 +110,7 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
     };
     if let Some(actor) = authoritative_actor
         .as_ref()
-        .filter(|actor| authoritative_actor_dispatch_target_eligible(actor))
+        .filter(|actor| supervisor_authoritative_actor_dispatch_target_eligible(&actor.runtime))
     {
         return route_via_authoritative_actor(
             tmux,
@@ -151,9 +151,8 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
 
     let degraded_authoritative_actor = authoritative_actor.as_ref().or(registered_actor.as_ref());
     if let Some(actor) = degraded_authoritative_actor
-        && let Some(reason) = controller_authoritative_actor_dispatch_guard_reason(
-            authoritative_runtime_facts(&actor.runtime),
-        )
+        && let Some(reason) =
+            supervisor_authoritative_actor_dispatch_guard_reason(actor.runtime.facts())
     {
         if dispatch_only_can_use_degraded_authoritative_actor(
             actor,
@@ -162,7 +161,7 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
         ) {
             let dispatch_pane = actor.record.pane_id.clone();
             let file_display = file.display().to_string();
-            let supervisor_health = supervisor_health_label(actor.runtime.health);
+            let supervisor_health = actor.runtime.health.label();
             crate::ops_log::log_op(
                 file,
                 &degraded_authoritative_actor_direct_submit_log_message(
@@ -173,7 +172,7 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
                         generation: actor.record.generation,
                         record_state: actor.record.state.as_str(),
                         supervisor_health: supervisor_health.as_str(),
-                        runtime_actor_state: runtime_actor_state_label(&actor.runtime),
+                        runtime_actor_state: actor.runtime.actor_state_label(),
                         reason: reason.as_str(),
                     },
                 ),
@@ -236,8 +235,8 @@ pub(crate) fn resolve_or_create_pane_dispatch_only(
                 harness.binary,
                 actor.record.generation,
                 actor.record.state.as_str(),
-                supervisor_health_label(actor.runtime.health),
-                runtime_actor_state_label(&actor.runtime),
+                actor.runtime.health.label(),
+                actor.runtime.actor_state_label(),
                 registered.as_deref().unwrap_or("none"),
                 live_owner.as_deref().unwrap_or("none"),
                 reason

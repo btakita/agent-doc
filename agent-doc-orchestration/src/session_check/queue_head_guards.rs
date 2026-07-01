@@ -28,7 +28,9 @@ pub(crate) fn check_no_response_active_queue_head(
     }
     let content = rc.doc_content();
     let open_backlog: std::collections::HashSet<String> =
-        open_backlog_ids(file)?.into_iter().collect();
+        agent_doc_document::tracked_work_projection::open_backlog_ids(&content)
+            .into_iter()
+            .collect();
     let mut resolved_or_deferred = crate::cycle_state::resolved_pending_ids(file)?;
     resolved_or_deferred.extend(
         state

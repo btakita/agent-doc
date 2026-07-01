@@ -42,7 +42,10 @@ pub(crate) fn load_authoritative_actor_binding(
         && record.harness != expected_harness
     {
         let runtime = query_supervisor_runtime(file, session_id);
-        let effective_state = runtime.actor_state.unwrap_or(record.state);
+        let effective_state = effective_authoritative_actor_state(
+            route_actor_state_from_sqlite(record.state),
+            runtime.actor_state,
+        );
         let frontmatter_harness_changed =
             document_declares_expected_harness(file, &expected_harness);
         if mismatched_authoritative_actor_can_be_replaced(
@@ -59,7 +62,7 @@ pub(crate) fn load_authoritative_actor_binding(
                     record.harness,
                     expected_harness,
                     record.generation,
-                    supervisor_health_label(runtime.health),
+                    runtime.health.label(),
                     effective_state.as_str(),
                     frontmatter_harness_changed
                 ),
@@ -89,7 +92,7 @@ pub(crate) fn load_authoritative_actor_binding(
                         record.harness,
                         expected_harness,
                         record.generation,
-                        supervisor_health_label(runtime.health),
+                        runtime.health.label(),
                         effective_state.as_str(),
                         queue_paused,
                     ),
@@ -111,7 +114,7 @@ pub(crate) fn load_authoritative_actor_binding(
                     record.harness,
                     expected_harness,
                     record.generation,
-                    supervisor_health_label(runtime.health),
+                    runtime.health.label(),
                     effective_state.as_str(),
                     queue_paused,
                 ),
@@ -178,11 +181,10 @@ pub(crate) fn load_authoritative_actor_binding(
 
 pub(crate) fn mismatched_authoritative_actor_can_be_replaced(
     runtime: &SupervisorRuntime,
-    actor_state: agent_doc_sqlite::state_store::ActorState,
+    actor_state: RouteActorState,
     _frontmatter_harness_changed: bool,
 ) -> bool {
-    runtime.health != SupervisorHealth::Healthy
-        || actor_state == agent_doc_sqlite::state_store::ActorState::Closed
+    runtime.health != SupervisorHealth::Healthy || actor_state == RouteActorState::Closed
 }
 
 /// Build the operator-actionable recovery suffix for the `defer_to_boundary_restart`
@@ -190,7 +192,7 @@ pub(crate) fn mismatched_authoritative_actor_can_be_replaced(
 /// and actor state to produce the correct recovery path instead of a dead-end bail.
 fn defer_recovery_hint(
     runtime: &SupervisorRuntime,
-    actor_state: agent_doc_sqlite::state_store::ActorState,
+    actor_state: RouteActorState,
     queue_paused: bool,
     file: &Path,
 ) -> String {
@@ -208,9 +210,7 @@ fn defer_recovery_hint(
             ". {} — the boundary restart will not fire until it is healthy and resumed. Run: {}",
             blocker, recovery_cmd
         )
-    } else if actor_state == agent_doc_sqlite::state_store::ActorState::Busy
-        || actor_state == agent_doc_sqlite::state_store::ActorState::Starting
-    {
+    } else if actor_state == RouteActorState::Busy || actor_state == RouteActorState::Starting {
         format!(
             ". pane is {} (not dispatch-ready) — run: {} --force",
             actor_state.as_str(),
@@ -248,10 +248,11 @@ pub(crate) fn promote_starting_authoritative_actor_if_dispatch_ready(
     agent_doc_sqlite::state_store::ActorRecord,
     SupervisorRuntime,
 ) {
-    let effective_state = runtime.actor_state.unwrap_or(record.state);
-    if runtime.health != SupervisorHealth::Healthy
-        || effective_state != agent_doc_sqlite::state_store::ActorState::Starting
-    {
+    let effective_state = effective_authoritative_actor_state(
+        route_actor_state_from_sqlite(record.state),
+        runtime.actor_state,
+    );
+    if runtime.health != SupervisorHealth::Healthy || effective_state != RouteActorState::Starting {
         return (record, runtime);
     }
 
@@ -279,7 +280,7 @@ pub(crate) fn promote_starting_authoritative_actor_if_dispatch_ready(
         },
     ) {
         Ok(updated) => {
-            runtime.actor_state = Some(agent_doc_sqlite::state_store::ActorState::Ready);
+            runtime.actor_state = Some(RouteActorState::Ready);
             crate::ops_log::log_op(
                 file,
                 &format!(
@@ -372,7 +373,7 @@ pub(crate) fn recover_starting_timeout_blocked_actor_if_dispatch_ready(
         Ok(updated) => {
             clear_starting_actor_timeout_record(file_path);
             let mut runtime = actor.runtime.clone();
-            runtime.actor_state = Some(agent_doc_sqlite::state_store::ActorState::Ready);
+            runtime.actor_state = Some(RouteActorState::Ready);
             crate::ops_log::log_op(
                 file,
                 &format!(
@@ -606,7 +607,7 @@ pub(crate) fn load_authoritative_actor_dispatch_target(
         respect_tracked_clear_restart,
         enforce_capability_proof,
     )?
-    .filter(authoritative_actor_dispatch_target_eligible))
+    .filter(|target| supervisor_authoritative_actor_dispatch_target_eligible(&target.runtime)))
 }
 
 pub(crate) fn load_authoritative_actor_for_registered_pane(
@@ -943,12 +944,12 @@ mod tests {
     fn mismatched_authoritative_actor_can_be_replaced_only_when_not_live_authority() {
         let healthy_ready = SupervisorRuntime {
             health: SupervisorHealth::Healthy,
-            actor_state: Some(agent_doc_sqlite::state_store::ActorState::Ready),
+            actor_state: Some(RouteActorState::Ready),
         };
         assert!(
             !mismatched_authoritative_actor_can_be_replaced(
                 &healthy_ready,
-                agent_doc_sqlite::state_store::ActorState::Ready,
+                RouteActorState::Ready,
                 false,
             ),
             "a healthy ready actor from another harness is still authoritative and must block"
@@ -956,7 +957,7 @@ mod tests {
         assert!(
             !mismatched_authoritative_actor_can_be_replaced(
                 &healthy_ready,
-                agent_doc_sqlite::state_store::ActorState::Ready,
+                RouteActorState::Ready,
                 true,
             ),
             "an explicit frontmatter harness switch must defer to the boundary restart guard while the old-harness actor is healthy"
@@ -964,12 +965,12 @@ mod tests {
 
         let healthy_closed = SupervisorRuntime {
             health: SupervisorHealth::Healthy,
-            actor_state: Some(agent_doc_sqlite::state_store::ActorState::Closed),
+            actor_state: Some(RouteActorState::Closed),
         };
         assert!(
             mismatched_authoritative_actor_can_be_replaced(
                 &healthy_closed,
-                agent_doc_sqlite::state_store::ActorState::Closed,
+                RouteActorState::Closed,
                 false,
             ),
             "a closed actor from another harness should not strand a fresh harness start"
@@ -982,7 +983,7 @@ mod tests {
         assert!(
             mismatched_authoritative_actor_can_be_replaced(
                 &unreachable,
-                agent_doc_sqlite::state_store::ActorState::Ready,
+                RouteActorState::Ready,
                 false,
             ),
             "an unreachable supervisor cannot prove live cross-harness ownership"
@@ -1018,7 +1019,7 @@ mod tests {
             },
             runtime: SupervisorRuntime {
                 health: SupervisorHealth::Healthy,
-                actor_state: Some(agent_doc_sqlite::state_store::ActorState::Ready),
+                actor_state: Some(RouteActorState::Ready),
             },
         }
     }
@@ -1066,7 +1067,7 @@ mod tests {
     fn transition_proves_ready_rejects_non_ready_actor() {
         let mut target = ready_target_with_reason("idle_pane_reconcile");
         target.record.state = agent_doc_sqlite::state_store::ActorState::Busy;
-        target.runtime.actor_state = Some(agent_doc_sqlite::state_store::ActorState::Busy);
+        target.runtime.actor_state = Some(RouteActorState::Busy);
         assert!(
             !transition_proves_current_generation_ready(&target),
             "a non-Ready actor must not satisfy the ready barrier even with a matching reason"

@@ -1185,8 +1185,6 @@ fn detect_duplicate_response_patchback(file: &Path) -> Result<Option<String>> {
 mod pending_guards;
 pub(crate) use pending_guards::*;
 
-mod done_signals;
-pub use done_signals::*;
 /// `#do-id-closeout-open-backlog`: a resolved `do [#id]` directive must end with
 /// an explicit lifecycle outcome for its target id. If the cycle committed a
 /// response (queue cleared, status updated) but the target id is still open in

@@ -23,7 +23,8 @@ pub(crate) fn check_expect_done_or_gate_guard(
         return Ok(GuardResult::None);
     };
 
-    let open_backlog_ids = open_backlog_ids(file)?;
+    let content = std::fs::read_to_string(file)?;
+    let open_backlog_ids = agent_doc_document::tracked_work_projection::open_backlog_ids(&content);
     let unresolved = match agent_doc_turn::closeout_signal::expect_done_or_gate_decision(
         agent_doc_turn::closeout_signal::ExpectDoneOrGateEvidence {
             cycle_open: state.is_open(),
@@ -131,8 +132,11 @@ pub(crate) fn check_queue_head_removal_guard(
         return Ok(GuardResult::None);
     }
 
+    let content = std::fs::read_to_string(file)?;
     let open_backlog: std::collections::HashSet<String> =
-        open_backlog_ids(file)?.into_iter().collect();
+        agent_doc_document::tracked_work_projection::open_backlog_ids(&content)
+            .into_iter()
+            .collect();
     // Lifecycle proof: ids the cycle explicitly resolved (done/reaped/gated) or
     // chose to keep open via an explicit edit. A done/gate/reap also removes the
     // id from `open_backlog`, so this set is a defensive superset.
@@ -345,29 +349,6 @@ pub(crate) fn check_free_text_queue_head_provenance(
         }
         agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
     })
-}
-
-/// Open (`[ ]`/gated, not done) ids that currently live in a `review`/gated
-/// component. Used to confirm a directed id gated this cycle is still gated
-/// (not subsequently un-gated or completed) before the blocked-closeout guard
-/// fires.
-pub(crate) fn open_review_ids(file: &Path) -> Result<std::collections::HashSet<String>> {
-    let content = std::fs::read_to_string(file)?;
-    let Ok(components) = agent_doc_element::element::parse(&content) else {
-        return Ok(std::collections::HashSet::new());
-    };
-    Ok(components
-        .into_iter()
-        .filter(|component| agent_doc_element::element::is_review_component(&component.name))
-        .flat_map(|component| {
-            let (_, items, _) =
-                agent_doc_element_backlog::backlog::parse_items(component.content(&content));
-            items
-        })
-        .filter(|item| !item.is_done())
-        .map(|item| agent_doc_element_backlog::backlog::normalize_pending_id(&item.id))
-        .filter(|id| !id.is_empty())
-        .collect())
 }
 
 #[cfg(test)]

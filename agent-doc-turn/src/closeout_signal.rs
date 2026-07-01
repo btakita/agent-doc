@@ -438,6 +438,50 @@ pub fn pending_done_suppressed(response_body: &str) -> bool {
     response_body.contains(PENDING_DONE_GUARD_SUPPRESS_MARKER)
 }
 
+/// Done-signal ids implied by prompt text, restricted to ids that are still open
+/// in tracked work. `auto_done` lets a plain "done" resolve the single open
+/// review item when the document has exactly one such id.
+pub fn inline_done_signal_ids(
+    prompt_texts: &[String],
+    open_tracked_work_ids: &[String],
+    single_open_review_item_id: Option<&str>,
+    auto_done: bool,
+) -> Vec<String> {
+    if prompt_texts.is_empty() || open_tracked_work_ids.is_empty() {
+        return Vec::new();
+    }
+
+    let open_ids = normalized_id_set(open_tracked_work_ids.iter().map(String::as_str));
+    if open_ids.is_empty() {
+        return Vec::new();
+    }
+    let single_review_id = single_open_review_item_id
+        .filter(|_| auto_done)
+        .map(agent_doc_element_backlog::backlog::normalize_pending_id)
+        .filter(|id| !id.is_empty());
+
+    let mut ids = Vec::new();
+    for prompt in prompt_texts {
+        for id in explicit_done_signal_ids(prompt) {
+            let id = agent_doc_element_backlog::backlog::normalize_pending_id(&id);
+            if open_ids.contains(&id) && !ids.iter().any(|existing| existing == &id) {
+                ids.push(id);
+            }
+        }
+
+        if auto_done
+            && plain_done_signal(prompt)
+            && let Some(id) = single_review_id.as_deref()
+            && open_ids.contains(id)
+            && !ids.iter().any(|existing| existing == id)
+        {
+            ids.push(id.to_string());
+        }
+    }
+
+    ids
+}
+
 pub fn tracked_work_completion_decision(
     evidence: TrackedWorkCompletionEvidence<'_>,
 ) -> TrackedWorkCompletionDecision {
@@ -1931,5 +1975,37 @@ mod tests {
         assert!(plain_done_signal("❯ done."));
         assert!(!plain_done_signal("done #abc"));
         assert!(explicit_done_signal_ids("look at #abc").is_empty());
+    }
+
+    #[test]
+    fn inline_done_signal_ids_filters_to_open_tracked_work() {
+        let prompts = vec![
+            "❯ #Alpha done".to_string(),
+            "- complete #missing and #Beta".to_string(),
+            "done".to_string(),
+        ];
+        let open = vec![
+            "alpha".to_string(),
+            "beta".to_string(),
+            "review".to_string(),
+        ];
+
+        assert_eq!(
+            inline_done_signal_ids(&prompts, &open, Some("review"), true),
+            vec![
+                "alpha".to_string(),
+                "beta".to_string(),
+                "review".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn inline_done_signal_ids_requires_auto_done_for_plain_done() {
+        let prompts = vec!["done".to_string()];
+        let open = vec!["review".to_string()];
+
+        assert!(inline_done_signal_ids(&prompts, &open, Some("review"), false).is_empty());
+        assert!(inline_done_signal_ids(&prompts, &open, None, true).is_empty());
     }
 }

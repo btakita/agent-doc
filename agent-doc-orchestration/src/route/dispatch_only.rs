@@ -56,7 +56,9 @@ fn dispatch_only_starting_pane_actor_ready_gate(
     matches!(
         classify_authoritative_prompt_ready_barrier(AuthoritativePromptReadyBarrierFacts {
             ready_facts: &authoritative_actor_ready_facts_from_target(actor, prompt_ready),
-            dispatch_eligible: authoritative_actor_dispatch_target_eligible(actor),
+            dispatch_eligible: supervisor_authoritative_actor_dispatch_target_eligible(
+                &actor.runtime,
+            ),
         }),
         PromptReadyBarrierDecision::Ready
     )
@@ -102,7 +104,7 @@ fn dispatch_only_starting_pane_ready_via_authoritative_actor(
             dispatch_pane,
             harness.binary,
             actor.record.generation,
-            runtime_actor_state_label(&actor.runtime),
+            actor.runtime.actor_state_label(),
             actor.record.last_transition.reason,
             prompt_ready
         ),
@@ -941,7 +943,7 @@ mod tests {
             record,
             runtime: SupervisorRuntime {
                 health: SupervisorHealth::Healthy,
-                actor_state: Some(agent_doc_sqlite::state_store::ActorState::Ready),
+                actor_state: Some(RouteActorState::Ready),
             },
         };
 
@@ -959,7 +961,7 @@ mod tests {
         );
 
         let mut busy_actor = ready_actor.clone();
-        busy_actor.runtime.actor_state = Some(agent_doc_sqlite::state_store::ActorState::Busy);
+        busy_actor.runtime.actor_state = Some(RouteActorState::Busy);
         assert!(
             !dispatch_only_starting_pane_actor_ready_gate(&busy_actor, "%42", true),
             "non-Ready runtime state must not bypass the startup probe"

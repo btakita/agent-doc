@@ -910,6 +910,9 @@ should be deleted during extraction.
   `agent-doc-model-tier` now owns Codex `session_meta.cwd` JSONL parsing for
   transcript/project matching. Orchestration still walks the Codex transcript
   tree and reads candidate files, but it no longer owns the JSON shape.
+- Drain-stall sidecar ownership was tightened as well: `agent-doc-turn` now
+  owns continuation-pending marker construction, while orchestration keeps only
+  path lookup, current-time capture, serialization, and sidecar file IO.
 
 ### Earlier closure finding
 

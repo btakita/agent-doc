@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -39,16 +39,16 @@ done
 Compacted content:
 - Archived 1 response topic(s): JB Run Agent Doc dispatch hang (#kjw0)
 - Prior summary/context: prior compacted content: Archived 1 response topic(s): Claim for Tmux Pane should open a NEW pane in the same session
-<!-- agent:boundary:98b92039 -->
+<!-- agent:boundary:ae8a40de -->
 <!-- /agent:exchange -->
 ## Queue
 
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - [#claimnewpane]
 - [#boundaryaccum1]
 - [#qactsync]
-- [#ftimmediate]
+- 🚧 [#ftimmediate]
 - :pushpin: do [#restartstderrbleed]
 Error: timed out waiting for project controller at /home/brian/work/btakita/agent-loop/.agent-doc/controller.sock`
 - I saw serious bleeding into Claude Code during a previous restart. Also, a split pane was opened with Claude Code `/usage` somehow called.
@@ -70,6 +70,10 @@ Error: timed out waiting for project controller at /home/brian/work/btakita/agen
 - :pushpin: do [#skillharnessplugin]
 - :pushpin: do [#elementgraphprd]
 - :pushpin: do [#60ev]
+- do [#r4gq]
+- do [#af88]
+- do [#qeditrace]
+- do [#falsetyping-guard]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

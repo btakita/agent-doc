@@ -9,7 +9,7 @@
 //! process so the session actor (`#pcpc1`) can serialize writes against it.
 //!
 //! This module is the adapter itself: the lifecycle state machine, restart
-//! policy, stdin injection, heartbeat, and heartbeat-loss/reattach logic,
+//! policy, stdin injection, heartbeat, and reattach logic,
 //! decoupled from any specific child via the [`SupervisedChild`] trait. A real
 //! PTY child plugs in through [`PtySupervisedChild`] (a thin wrapper over
 //! `supervisor::pty`); SimWorld tests plug in a deterministic fake child so the
@@ -30,7 +30,7 @@
 //!
 //! ## Evals
 //! - `in_process_supervisor_heartbeat_advances_on_tick`
-//! - `in_process_supervisor_reattaches_live_child_without_restart`
+//! - `in_process_supervisor_heartbeat_lost_reattaches_live_child_without_restart`
 //! - `in_process_supervisor_restarts_after_transient_exit`
 //! - `in_process_supervisor_halts_after_flap_storm`
 //! - `in_process_supervisor_prompts_on_clean_exit`
@@ -299,13 +299,6 @@ impl InProcessSupervisor {
     }
 }
 
-/// Compare a previously-observed heartbeat against the current value to decide
-/// whether the supervisor task looks wedged. `min_advance` is the number of
-/// beats the controller expected to see in the elapsed interval.
-pub fn heartbeat_lost(previous: u64, current: u64, min_advance: u64) -> bool {
-    current.saturating_sub(previous) < min_advance
-}
-
 // ---------------------------------------------------------------------------
 // Production child: owns the `portable-pty` child handle taken from a
 // `PtySession` via `PtySession::take_child` (`#pcpc5e1` authority rung).
@@ -495,7 +488,7 @@ mod tests {
     }
 
     #[test]
-    fn in_process_supervisor_reattaches_live_child_without_restart() {
+    fn in_process_supervisor_heartbeat_lost_reattaches_live_child_without_restart() {
         let ctrl = ChildController::default();
         let mut sup = InProcessSupervisor::spawn(fake_factory(ctrl)).unwrap();
         let now = t0();
@@ -507,7 +500,11 @@ mod tests {
 
         // Simulate observed heartbeat loss: the controller saw `before`, then a
         // gap with no advance. heartbeat_lost flags it...
-        assert!(heartbeat_lost(before, sup.heartbeat(), 1));
+        assert!(agent_doc_supervisor::heartbeat::heartbeat_lost(
+            before,
+            sup.heartbeat(),
+            1
+        ));
         // ...but the child is alive, so reattach resumes WITHOUT a restart.
         assert_eq!(
             sup.reattach(),

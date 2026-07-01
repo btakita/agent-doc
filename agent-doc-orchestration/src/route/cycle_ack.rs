@@ -443,8 +443,9 @@ pub(crate) fn require_routed_cycle_ack(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
+    use crate::supervisor::ipc::SupervisorIpc;
     use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
+    use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
     #[test]
     fn route_enqueue_exchange_slash_command_keeps_literal_head_for_idle_drain() {
         let dir = tempfile::TempDir::new().unwrap();

@@ -160,7 +160,6 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::flow::routed_reopen::{log_dispatch_proof_failed, log_prompt_ready_barrier_failed};
-use crate::supervisor::ipc::IpcMethod;
 use agent_doc_controller::dispatch::{
     ActorDispatchState, AuthoritativeActorDispatchAction, AuthoritativeActorDispatchActionFacts,
     AuthoritativeActorReadyFacts, AuthoritativePromptReadyBarrierFacts, BusyPaneAutoFixFacts,
@@ -216,6 +215,7 @@ use agent_doc_controller::dispatch::{
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_harness::HarnessConfig;
 use agent_doc_hash::short_content_hash;
+use agent_doc_supervisor::ipc_protocol::IpcMethod;
 use agent_doc_supervisor::route_runtime::{
     RouteActorState, SupervisorHealth, SupervisorRuntime,
     authoritative_actor_dispatch_guard_reason as supervisor_authoritative_actor_dispatch_guard_reason,
@@ -4540,8 +4540,9 @@ pub(crate) fn test_degraded_actor(pane_id: &str) -> AuthoritativeActorDispatchTa
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
+    use crate::supervisor::ipc::SupervisorIpc;
     use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
+    use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
     use agent_doc_turn::closeout_recovery::CloseoutRecoveryState;
 
     #[test]

@@ -11905,6 +11905,24 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "agent-doc-supervisor must own pure supervisor PTY terminal filtering policy"
     );
     assert!(
+        manifest_dir
+            .join("agent-doc-supervisor/src/heartbeat.rs")
+            .exists(),
+        "agent-doc-supervisor must own pure supervisor heartbeat-loss policy"
+    );
+    assert!(
+        manifest_dir
+            .join("agent-doc-supervisor/src/ipc_protocol.rs")
+            .exists(),
+        "agent-doc-supervisor must own supervisor IPC protocol vocabulary"
+    );
+    assert!(
+        manifest_dir
+            .join("agent-doc-supervisor-io/src/cwd.rs")
+            .exists(),
+        "agent-doc-supervisor-io must own supervisor CWD resolution IO"
+    );
+    assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/start/decisions.rs")
             .exists(),
@@ -11916,6 +11934,12 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             .exists(),
         "orchestration must not keep a supervisor::state facade over crash policy"
     );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/supervisor/cwd.rs")
+            .exists(),
+        "orchestration must not keep a supervisor::cwd facade over supervisor-io CWD resolution"
+    );
 
     let supervisor_mod =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/supervisor/mod.rs"))
@@ -11925,6 +11949,10 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     assert!(
         !supervisor_mod.contains("pub mod state"),
         "orchestration supervisor module must not re-export crash policy state"
+    );
+    assert!(
+        !supervisor_mod.contains("pub mod cwd"),
+        "orchestration supervisor module must not expose a CWD resolver facade"
     );
     let rpc_source = fs::read_to_string(
         manifest_dir.join("agent-doc-orchestration/src/project_controller/rpc.rs"),
@@ -11953,12 +11981,29 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     let supervisor_terminal_filter =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/terminal_filter.rs"))
             .unwrap();
+    let supervisor_heartbeat =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/heartbeat.rs")).unwrap();
+    let supervisor_ipc_protocol =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/ipc_protocol.rs")).unwrap();
     let supervisor_io_startup_miss =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/startup_miss.rs"))
             .unwrap();
+    let supervisor_io_cwd =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/cwd.rs")).unwrap();
     let supervisor_pty =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/supervisor/pty.rs"))
             .unwrap();
+    let supervisor_in_process = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/supervisor/in_process.rs"),
+    )
+    .unwrap();
+    let supervisor_ipc =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/supervisor/ipc.rs"))
+            .unwrap();
+    let orchestration_start =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
+    let orchestration_start_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/run.rs")).unwrap();
     let orchestration_startup_miss =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/startup_miss.rs"))
             .unwrap();
@@ -12027,6 +12072,75 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         supervisor_pty.contains("TerminalFilter::with_config")
             && supervisor_pty.contains("log_terminal_filter_trace("),
         "supervisor pty adapter should configure the focused filter and keep only trace logging effects"
+    );
+    assert!(
+        supervisor_heartbeat.contains("pub fn heartbeat_lost("),
+        "agent-doc-supervisor must own pure heartbeat-loss policy"
+    );
+    assert!(
+        !supervisor_in_process.contains("pub fn heartbeat_lost(")
+            && supervisor_in_process.contains("agent_doc_supervisor::heartbeat::heartbeat_lost("),
+        "in-process supervisor adapter must call focused heartbeat-loss policy directly"
+    );
+    for required_snippet in [
+        "pub enum IpcMethod",
+        "pub struct IpcResponse",
+        "pub fn submit_bytes(",
+        "fn default_restart_mode(",
+    ] {
+        assert!(
+            supervisor_ipc_protocol.contains(required_snippet),
+            "agent-doc-supervisor must own supervisor IPC protocol vocabulary: {required_snippet}"
+        );
+    }
+    for forbidden_snippet in [
+        "pub enum IpcMethod",
+        "pub struct IpcResponse",
+        "pub fn submit_bytes(",
+        "pub use agent_doc_supervisor::ipc_protocol",
+    ] {
+        assert!(
+            !supervisor_ipc.contains(forbidden_snippet),
+            "orchestration supervisor IPC transport must not re-own/facade protocol vocabulary: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        supervisor_ipc
+            .contains("use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};"),
+        "orchestration supervisor IPC transport should import focused protocol types directly"
+    );
+    for relative in [
+        "agent-doc-orchestration/src/project_controller/rpc.rs",
+        "agent-doc-orchestration/src/route.rs",
+        "agent-doc-orchestration/src/start.rs",
+        "agent-doc-orchestration/src/sync.rs",
+        "src/queue_dispatch.rs",
+        "src/session_actor_cmd.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            !source.contains("agent_doc_orchestration::supervisor::ipc::IpcMethod")
+                && !source.contains("agent_doc_orchestration::supervisor::ipc::IpcResponse")
+                && !source.contains("crate::supervisor::ipc::IpcMethod")
+                && !source.contains("crate::supervisor::ipc::IpcResponse"),
+            "{relative} must call focused supervisor IPC protocol vocabulary directly"
+        );
+    }
+    for required_snippet in [
+        "pub enum CwdSource",
+        "pub struct ResolvedCwd",
+        "pub fn resolve(",
+    ] {
+        assert!(
+            supervisor_io_cwd.contains(required_snippet),
+            "agent-doc-supervisor-io must own supervisor CWD resolution IO: {required_snippet}"
+        );
+    }
+    assert!(
+        orchestration_start.contains("use agent_doc_supervisor_io::cwd;")
+            && orchestration_start_run
+                .contains("cwd::resolve(None, fm.cwd.as_deref(), &canonical)?"),
+        "start should call supervisor-io CWD resolution directly"
     );
     for required_snippet in [
         "pub fn session_log_status_from_content(",
@@ -14742,13 +14856,12 @@ fn test_agent_doc_tmux_commands_owns_submit_profile_policy() {
             && route_dispatch_source.contains("tmux_submit_key_for_harness("),
         "route dispatch should call focused tmux submit diagnostics directly, without a local wrapper"
     );
-    let supervisor_ipc_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/supervisor/ipc.rs"))
-            .unwrap();
+    let supervisor_ipc_protocol_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/ipc_protocol.rs")).unwrap();
     let route_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
     for source in [
-        &supervisor_ipc_source,
+        &supervisor_ipc_protocol_source,
         &route_dispatch_source,
         &route_source,
         &start_source,
@@ -14762,7 +14875,7 @@ fn test_agent_doc_tmux_commands_owns_submit_profile_policy() {
         );
     }
     assert!(
-        supervisor_ipc_source.contains("submitted_text_without_trailing_line_endings(")
+        supervisor_ipc_protocol_source.contains("submitted_text_without_trailing_line_endings(")
             && route_dispatch_source.contains("submitted_text_without_trailing_line_endings(")
             && start_source.contains("submitted_text_without_trailing_line_endings(")
             && queue_dispatch_source.contains("submitted_text_without_trailing_line_endings(")

@@ -717,10 +717,7 @@ mod tests {
     /// Send a `#crdtauth5` replica IPC method over a REAL supervisor socket and
     /// return the parsed response — the production handler routes it through the
     /// per-document `crdt_relay_host` hub.
-    fn crdt_send(
-        sock: &std::path::Path,
-        method: &IpcMethod,
-    ) -> crate::supervisor::ipc::IpcResponse {
+    fn crdt_send(sock: &std::path::Path, method: &IpcMethod) -> IpcResponse {
         crate::supervisor::ipc::send_command(sock, method).expect("send crdt ipc")
     }
 

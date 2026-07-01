@@ -977,9 +977,10 @@ pub(crate) fn await_idle_with_max_wait(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
+    use crate::supervisor::ipc::SupervisorIpc;
     use agent_doc_controller::dispatch::is_codex_shell_search_blocker;
     use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
+    use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
     #[test]
     fn codex_busy_ctrl_g_gate_only_fires_for_shell_search_blocker() {
         // C-g is allowed only for the two shell-search blocker reasons that

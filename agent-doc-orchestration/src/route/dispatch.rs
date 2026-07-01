@@ -1612,8 +1612,9 @@ pub(crate) struct DirectPaneDispatchOptions {
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
+    use crate::supervisor::ipc::SupervisorIpc;
     use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
+    use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
     #[test]
     fn authoritative_actor_starting_hint_names_reroute_and_restart() {
         let file = std::path::Path::new("/tmp/session.md");

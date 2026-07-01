@@ -7,14 +7,12 @@
 //! See `src/agent-doc/specs/supervisor.md` for the full design.
 //!
 //! ## Submodules
-//! - `cwd` — CWD resolution priority chain (CLI flag > frontmatter > project root > doc parent).
 //! - `env` — parent-env cascade + frontmatter overlay + unset, resolved once
 //!   per supervisor lifetime and reused across every restart.
 //! - `pty` — pty allocation, child spawn, stdin/stdout forwarding threads.
 //! - `screen` — alacritty_terminal-backed screen state for owned PTY output.
 //! - `ipc` — per-session Unix-domain socket for lifecycle control.
 
-pub mod cwd;
 pub mod env;
 pub mod in_process;
 pub mod ipc;

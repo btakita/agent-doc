@@ -1,4 +1,4 @@
-//! # Module: supervisor::cwd
+//! # Module: supervisor_io::cwd
 //!
 //! Deterministic CWD resolution for the supervised claude child process.
 //!
@@ -6,17 +6,17 @@
 //! Resolution priority (first match wins):
 //! 1. `--cwd <path>` CLI flag (resolved relative to the supervisor's invocation CWD)
 //! 2. Frontmatter `agent_doc_cwd: <path>` (resolved relative to the document's parent directory)
-//! 3. Project root — walk up from the document until a directory containing `.agent-doc/` is found
+//! 3. Project root - walk up from the document until a directory containing `.agent-doc/` is found
 //! 4. The document's parent directory (ultimate fallback)
 //!
 //! Every candidate is canonicalized. If a candidate path does not exist or is not a
-//! directory, the resolver returns a hard error — it does **not** silently fall through
+//! directory, the resolver returns a hard error - it does **not** silently fall through
 //! to a lower priority. Misconfiguration should surface immediately, not drift.
 //!
 //! The resolved CWD is returned alongside its `CwdSource` so the supervisor can log
-//! which rule fired (see `specs/supervisor.md` § Logging: `cwd_resolved source=...`).
+//! which rule fired (see `specs/supervisor.md` Logging: `cwd_resolved source=...`).
 //!
-//! See `src/agent-doc/specs/supervisor.md` § Core Invariants / CWD determinism.
+//! See `src/agent-doc/specs/supervisor.md` Core Invariants / CWD determinism.
 
 use std::path::{Path, PathBuf};
 
@@ -56,12 +56,12 @@ pub struct ResolvedCwd {
 
 /// Resolve the supervisor's working directory for a given document.
 ///
-/// - `cli_cwd` — value of `--cwd` if the user passed it on the command line.
+/// - `cli_cwd` - value of `--cwd` if the user passed it on the command line.
 ///   Resolved relative to the process's current working directory.
-/// - `frontmatter_cwd` — value of `agent_doc_cwd` frontmatter if set.
+/// - `frontmatter_cwd` - value of `agent_doc_cwd` frontmatter if set.
 ///   Resolved relative to the document's parent directory, so `..` means
 ///   "parent of the document's parent."
-/// - `document` — path to the session document. Must exist on disk; the
+/// - `document` - path to the session document. Must exist on disk; the
 ///   function canonicalizes it to derive the parent directory and walk for
 ///   project root detection.
 ///
@@ -252,7 +252,7 @@ mod tests {
     fn frontmatter_nonexistent_does_not_fall_through_to_project_root() {
         let (_tmp, _root, doc) = make_layout();
         // Frontmatter points at a path that doesn't exist. We must NOT silently
-        // fall through to the project-root walk — misconfiguration should surface.
+        // fall through to the project-root walk - misconfiguration should surface.
         let err = resolve(None, Some("nowhere-zzzqx"), &doc).unwrap_err();
         let msg = format!("{:#}", err);
         assert!(msg.contains("agent_doc_cwd"), "error message: {}", msg);

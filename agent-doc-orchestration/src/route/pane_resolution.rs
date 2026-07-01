@@ -1468,8 +1468,9 @@ pub(crate) fn rescue_from_stash(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
+    use crate::supervisor::ipc::SupervisorIpc;
     use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
+    use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_waits_longer_for_live_child_cycle_ack() {

@@ -39,6 +39,9 @@ use agent_doc_queue::dispatch_item::{
     InlineDispatchCommand, QueueItem, inline_dispatch_command, is_session_clear_command,
     item_fingerprint, sanitize_progress_field,
 };
+use agent_doc_supervisor::ipc_protocol::IpcMethod;
+#[cfg(test)]
+use agent_doc_supervisor::ipc_protocol::IpcResponse;
 
 /// Result of dispatching a command.
 #[derive(Debug)]
@@ -244,7 +247,7 @@ fn try_supervisor_dispatch(
         "supervisor_ipc_inject",
         "Inject",
     );
-    let method = supervisor_ipc::IpcMethod::Inject { bytes };
+    let method = IpcMethod::Inject { bytes };
     let resp =
         supervisor_ipc::send_command(&sock, &method).context("supervisor IPC dispatch failed")?;
 
@@ -429,26 +432,21 @@ mod tests {
             dir.path(),
             "queue-session",
             move |method| match method {
-                agent_doc_orchestration::supervisor::ipc::IpcMethod::Inject { bytes }
-                | agent_doc_orchestration::supervisor::ipc::IpcMethod::Clear { bytes } => {
+                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                     captured_for_ipc.lock().unwrap().push(bytes);
-                    agent_doc_orchestration::supervisor::ipc::IpcResponse::ok_empty()
+                    IpcResponse::ok_empty()
                 }
-                agent_doc_orchestration::supervisor::ipc::IpcMethod::State
-                | agent_doc_orchestration::supervisor::ipc::IpcMethod::Pid
-                | agent_doc_orchestration::supervisor::ipc::IpcMethod::Restart { .. }
-                | agent_doc_orchestration::supervisor::ipc::IpcMethod::Stop { .. }
-                | agent_doc_orchestration::supervisor::ipc::IpcMethod::StopAgent { .. }
-                | agent_doc_orchestration::supervisor::ipc::IpcMethod::ReplicaRegister { .. }
-                | agent_doc_orchestration::supervisor::ipc::IpcMethod::ReplicaDeregister {
-                    ..
-                }
-                | agent_doc_orchestration::supervisor::ipc::IpcMethod::ReplicaUpdate { .. }
-                | agent_doc_orchestration::supervisor::ipc::IpcMethod::ReplicaPull { .. }
-                | agent_doc_orchestration::supervisor::ipc::IpcMethod::ReplicaAck { .. }
-                | agent_doc_orchestration::supervisor::ipc::IpcMethod::ReplicaAwareness {
-                    ..
-                } => agent_doc_orchestration::supervisor::ipc::IpcResponse::ok_empty(),
+                IpcMethod::State
+                | IpcMethod::Pid
+                | IpcMethod::Restart { .. }
+                | IpcMethod::Stop { .. }
+                | IpcMethod::StopAgent { .. }
+                | IpcMethod::ReplicaRegister { .. }
+                | IpcMethod::ReplicaDeregister { .. }
+                | IpcMethod::ReplicaUpdate { .. }
+                | IpcMethod::ReplicaPull { .. }
+                | IpcMethod::ReplicaAck { .. }
+                | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
             },
         )
         .unwrap();
@@ -500,26 +498,21 @@ mod tests {
             dir.path(),
             "queue-session",
             move |method| match method {
-                agent_doc_orchestration::supervisor::ipc::IpcMethod::Inject { bytes }
-                | agent_doc_orchestration::supervisor::ipc::IpcMethod::Clear { bytes } => {
+                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                     captured_for_ipc.lock().unwrap().push(bytes);
-                    agent_doc_orchestration::supervisor::ipc::IpcResponse::ok_empty()
+                    IpcResponse::ok_empty()
                 }
-                agent_doc_orchestration::supervisor::ipc::IpcMethod::State
-                | agent_doc_orchestration::supervisor::ipc::IpcMethod::Pid
-                | agent_doc_orchestration::supervisor::ipc::IpcMethod::Restart { .. }
-                | agent_doc_orchestration::supervisor::ipc::IpcMethod::Stop { .. }
-                | agent_doc_orchestration::supervisor::ipc::IpcMethod::StopAgent { .. }
-                | agent_doc_orchestration::supervisor::ipc::IpcMethod::ReplicaRegister { .. }
-                | agent_doc_orchestration::supervisor::ipc::IpcMethod::ReplicaDeregister {
-                    ..
-                }
-                | agent_doc_orchestration::supervisor::ipc::IpcMethod::ReplicaUpdate { .. }
-                | agent_doc_orchestration::supervisor::ipc::IpcMethod::ReplicaPull { .. }
-                | agent_doc_orchestration::supervisor::ipc::IpcMethod::ReplicaAck { .. }
-                | agent_doc_orchestration::supervisor::ipc::IpcMethod::ReplicaAwareness {
-                    ..
-                } => agent_doc_orchestration::supervisor::ipc::IpcResponse::ok_empty(),
+                IpcMethod::State
+                | IpcMethod::Pid
+                | IpcMethod::Restart { .. }
+                | IpcMethod::Stop { .. }
+                | IpcMethod::StopAgent { .. }
+                | IpcMethod::ReplicaRegister { .. }
+                | IpcMethod::ReplicaDeregister { .. }
+                | IpcMethod::ReplicaUpdate { .. }
+                | IpcMethod::ReplicaPull { .. }
+                | IpcMethod::ReplicaAck { .. }
+                | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
             },
         )
         .unwrap();

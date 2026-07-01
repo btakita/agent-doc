@@ -128,10 +128,9 @@ use std::sync::{Arc, Mutex, TryLockError};
 use std::time::{Duration, Instant};
 
 use crate::supervisor::{
-    cwd,
     env::EnvSpec,
     in_process::{InProcessSupervisor, PtySupervisedChild, TickOutcome},
-    ipc::{IpcMethod, IpcResponse, SupervisorIpc},
+    ipc::SupervisorIpc,
     pty::PtySpawnConfig,
 };
 use agent_doc_frontmatter::frontmatter;
@@ -152,10 +151,12 @@ use agent_doc_supervisor::idle_reconcile::ready_busy_conflict_reconcile_decision
 use agent_doc_supervisor::input::{
     normalize_supervisor_inject_bytes, prompt_input_summary, strip_stale_ctrl_d_before_prompt,
 };
+use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse, submit_bytes};
 use agent_doc_supervisor::route_owned::{
     RouteOwnedLivenessReason, RouteOwnedReapDecision, RouteOwnedReapPolicy,
     route_owned_liveness_reason_for_content, route_owned_reap_decision,
 };
+use agent_doc_supervisor_io::cwd;
 #[cfg(unix)]
 use agent_doc_supervisor_process::ReexecState;
 use agent_doc_turn_executor::auto_trigger::{
@@ -1055,7 +1056,7 @@ fn auto_trigger_inject_command(
         return AutoTriggerOutcome::Cancelled;
     }
 
-    let payload = crate::supervisor::ipc::submit_bytes(&submitted_text).into_bytes();
+    let payload = submit_bytes(&submitted_text).into_bytes();
     agent_doc_tmux_io::input_diag::log_text_submit(
         agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
         "supervisor.auto_trigger",
@@ -1123,7 +1124,7 @@ fn auto_trigger_clear_command(
         return AutoTriggerOutcome::Cancelled;
     }
 
-    let payload = crate::supervisor::ipc::submit_bytes(&submitted_text).into_bytes();
+    let payload = submit_bytes(&submitted_text).into_bytes();
     agent_doc_tmux_io::input_diag::log_text_submit(
         agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
         "supervisor.auto_trigger_clear",

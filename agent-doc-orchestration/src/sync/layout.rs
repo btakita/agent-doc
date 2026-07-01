@@ -235,18 +235,14 @@ mod tests {
             crate::supervisor::ipc::SupervisorIpc::start(tmp.path(), "associated-supervisor", {
                 let supervisor_instance_id = supervisor_instance_id.clone();
                 move |method| match method {
-                    crate::supervisor::ipc::IpcMethod::Pid => {
-                        crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({
-                            "pid": pane_pid
-                        }))
-                    }
-                    crate::supervisor::ipc::IpcMethod::State => {
-                        crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({
-                            "supervisor_pid": pane_pid,
-                            "supervisor_instance_id": supervisor_instance_id,
-                        }))
-                    }
-                    _ => crate::supervisor::ipc::IpcResponse::ok_empty(),
+                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({
+                        "pid": pane_pid
+                    })),
+                    IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                        "supervisor_pid": pane_pid,
+                        "supervisor_instance_id": supervisor_instance_id,
+                    })),
+                    _ => IpcResponse::ok_empty(),
                 }
             })
             .unwrap();

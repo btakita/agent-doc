@@ -814,6 +814,7 @@ dependencies = [
  "agent-doc-log-time",
  "agent-doc-prompt-lines",
  "agent-doc-queue",
+ "agent-doc-tmux-commands",
  "lazily 0.13.1",
  "serde",
  "serde_json",

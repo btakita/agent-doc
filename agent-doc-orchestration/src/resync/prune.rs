@@ -1,6 +1,8 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+#[cfg(test)]
+use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
 
 pub(crate) fn prune_dead_entries_for_target_in_registry<F>(
     registry: &mut tmux_router::Registry,
@@ -602,33 +604,20 @@ mod tests {
         let mut ipc =
             crate::supervisor::ipc::SupervisorIpc::start(dir.path(), "super-live", move |method| {
                 match method {
-                    crate::supervisor::ipc::IpcMethod::Pid => {
-                        crate::supervisor::ipc::IpcResponse::ok(
-                            serde_json::json!({ "pid": live_pid }),
-                        )
+                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": live_pid })),
+                    IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
+                    IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                        IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                     }
-                    crate::supervisor::ipc::IpcMethod::State => {
-                        crate::supervisor::ipc::IpcResponse::ok(
-                            serde_json::json!({ "running": true }),
-                        )
-                    }
-                    crate::supervisor::ipc::IpcMethod::Inject { bytes }
-                    | crate::supervisor::ipc::IpcMethod::Clear { bytes } => {
-                        crate::supervisor::ipc::IpcResponse::ok(
-                            serde_json::json!({ "n": bytes.len() }),
-                        )
-                    }
-                    crate::supervisor::ipc::IpcMethod::Restart { .. }
-                    | crate::supervisor::ipc::IpcMethod::Stop { .. }
-                    | crate::supervisor::ipc::IpcMethod::StopAgent { .. }
-                    | crate::supervisor::ipc::IpcMethod::ReplicaRegister { .. }
-                    | crate::supervisor::ipc::IpcMethod::ReplicaDeregister { .. }
-                    | crate::supervisor::ipc::IpcMethod::ReplicaUpdate { .. }
-                    | crate::supervisor::ipc::IpcMethod::ReplicaPull { .. }
-                    | crate::supervisor::ipc::IpcMethod::ReplicaAck { .. }
-                    | crate::supervisor::ipc::IpcMethod::ReplicaAwareness { .. } => {
-                        crate::supervisor::ipc::IpcResponse::ok_empty()
-                    }
+                    IpcMethod::Restart { .. }
+                    | IpcMethod::Stop { .. }
+                    | IpcMethod::StopAgent { .. }
+                    | IpcMethod::ReplicaRegister { .. }
+                    | IpcMethod::ReplicaDeregister { .. }
+                    | IpcMethod::ReplicaUpdate { .. }
+                    | IpcMethod::ReplicaPull { .. }
+                    | IpcMethod::ReplicaAck { .. }
+                    | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
                 }
             })
             .unwrap();
@@ -670,33 +659,20 @@ mod tests {
         let mut ipc =
             crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
                 match method {
-                    crate::supervisor::ipc::IpcMethod::Pid => {
-                        crate::supervisor::ipc::IpcResponse::ok(
-                            serde_json::json!({ "pid": live_pid }),
-                        )
+                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": live_pid })),
+                    IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
+                    IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                        IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                     }
-                    crate::supervisor::ipc::IpcMethod::State => {
-                        crate::supervisor::ipc::IpcResponse::ok(
-                            serde_json::json!({ "running": true }),
-                        )
-                    }
-                    crate::supervisor::ipc::IpcMethod::Inject { bytes }
-                    | crate::supervisor::ipc::IpcMethod::Clear { bytes } => {
-                        crate::supervisor::ipc::IpcResponse::ok(
-                            serde_json::json!({ "n": bytes.len() }),
-                        )
-                    }
-                    crate::supervisor::ipc::IpcMethod::Restart { .. }
-                    | crate::supervisor::ipc::IpcMethod::Stop { .. }
-                    | crate::supervisor::ipc::IpcMethod::StopAgent { .. }
-                    | crate::supervisor::ipc::IpcMethod::ReplicaRegister { .. }
-                    | crate::supervisor::ipc::IpcMethod::ReplicaDeregister { .. }
-                    | crate::supervisor::ipc::IpcMethod::ReplicaUpdate { .. }
-                    | crate::supervisor::ipc::IpcMethod::ReplicaPull { .. }
-                    | crate::supervisor::ipc::IpcMethod::ReplicaAck { .. }
-                    | crate::supervisor::ipc::IpcMethod::ReplicaAwareness { .. } => {
-                        crate::supervisor::ipc::IpcResponse::ok_empty()
-                    }
+                    IpcMethod::Restart { .. }
+                    | IpcMethod::Stop { .. }
+                    | IpcMethod::StopAgent { .. }
+                    | IpcMethod::ReplicaRegister { .. }
+                    | IpcMethod::ReplicaDeregister { .. }
+                    | IpcMethod::ReplicaUpdate { .. }
+                    | IpcMethod::ReplicaPull { .. }
+                    | IpcMethod::ReplicaAck { .. }
+                    | IpcMethod::ReplicaAwareness { .. } => IpcResponse::ok_empty(),
                 }
             })
             .unwrap();

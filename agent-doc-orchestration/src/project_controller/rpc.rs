@@ -4423,7 +4423,7 @@ fn request_supervisor_replacement_ipc(
     }
     match crate::supervisor::ipc::send_command(
         socket,
-        &crate::supervisor::ipc::IpcMethod::Restart {
+        &agent_doc_supervisor::ipc_protocol::IpcMethod::Restart {
             mode: work.mode.clone(),
         },
     ) {

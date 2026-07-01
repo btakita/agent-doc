@@ -198,6 +198,9 @@ use agent_doc_controller::command_line::{
 };
 use agent_doc_controller::dispatch::is_stash_window_name;
 use agent_doc_element::element;
+use agent_doc_supervisor::ipc_protocol::IpcMethod;
+#[cfg(test)]
+use agent_doc_supervisor::ipc_protocol::IpcResponse;
 use agent_doc_sync::{
     AutoStartMode, WindowIndexNormalizationPlan, auto_started_panes_summary,
     effective_sync_columns, epoch_millis_now, is_file_rename, last_visible_excerpt,
@@ -3853,9 +3856,7 @@ fn query_supervisor_identity(file: &Path, session_id: &str) -> Option<Supervisor
     if !sock.exists() {
         return None;
     }
-    let response =
-        crate::supervisor::ipc::send_command(&sock, &crate::supervisor::ipc::IpcMethod::State)
-            .ok()?;
+    let response = crate::supervisor::ipc::send_command(&sock, &IpcMethod::State).ok()?;
     if !response.ok {
         return None;
     }
@@ -4082,9 +4083,7 @@ fn find_alive_pane_via_supervisor_pid(
         return None;
     }
 
-    let response =
-        crate::supervisor::ipc::send_command(&sock, &crate::supervisor::ipc::IpcMethod::Pid)
-            .ok()?;
+    let response = crate::supervisor::ipc::send_command(&sock, &IpcMethod::Pid).ok()?;
     if !response.ok {
         return None;
     }
@@ -7476,18 +7475,14 @@ mod tests {
             "claudescore-session",
             {
                 move |method| match method {
-                    crate::supervisor::ipc::IpcMethod::Pid => {
-                        crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({
-                            "pid": dev_pane_pid
-                        }))
-                    }
-                    crate::supervisor::ipc::IpcMethod::State => {
-                        crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({
-                            "supervisor_pid": dev_pane_pid,
-                            "supervisor_instance_id": "dev-instance",
-                        }))
-                    }
-                    _ => crate::supervisor::ipc::IpcResponse::ok_empty(),
+                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({
+                        "pid": dev_pane_pid
+                    })),
+                    IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                        "supervisor_pid": dev_pane_pid,
+                        "supervisor_instance_id": "dev-instance",
+                    })),
+                    _ => IpcResponse::ok_empty(),
                 }
             },
         )
@@ -7881,18 +7876,14 @@ mod tests {
         let _ipc =
             crate::supervisor::ipc::SupervisorIpc::start(subroot.path(), "claudescore-session", {
                 move |method| match method {
-                    crate::supervisor::ipc::IpcMethod::Pid => {
-                        crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({
-                            "pid": dev_pane_pid
-                        }))
-                    }
-                    crate::supervisor::ipc::IpcMethod::State => {
-                        crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({
-                            "supervisor_pid": dev_pane_pid,
-                            "supervisor_instance_id": "dev-instance",
-                        }))
-                    }
-                    _ => crate::supervisor::ipc::IpcResponse::ok_empty(),
+                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({
+                        "pid": dev_pane_pid
+                    })),
+                    IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                        "supervisor_pid": dev_pane_pid,
+                        "supervisor_instance_id": "dev-instance",
+                    })),
+                    _ => IpcResponse::ok_empty(),
                 }
             })
             .unwrap();

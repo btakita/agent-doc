@@ -923,8 +923,9 @@ pub(crate) fn dispatch_blocker_recovery_hint(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
+    use crate::supervisor::ipc::SupervisorIpc;
     use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
+    use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
     #[test]
     fn dispatch_only_starting_pane_not_ready_error_matches_sampleportal_active_turn() {
         let file = std::path::Path::new("tasks/professional/sampleportal.md");

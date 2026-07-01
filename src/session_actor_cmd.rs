@@ -6,12 +6,14 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 #[cfg(test)]
 use agent_doc_controller::operator_clear::OperatorClearGuardOutcome;
 use agent_doc_controller::operator_clear::OperatorClearInputState;
-use agent_doc_orchestration::supervisor::ipc::IpcMethod;
 #[cfg(test)]
 use agent_doc_sqlite::state_store::SupervisorLeaseStatus;
 use agent_doc_sqlite::state_store::{
     ActorRecord, ActorState, ActorTransitionStatus, SessionOperatorStatus,
 };
+use agent_doc_supervisor::ipc_protocol::IpcMethod;
+#[cfg(test)]
+use agent_doc_supervisor::ipc_protocol::IpcResponse;
 use agent_doc_supervisor::startup_miss::{SessionLogStatus, StartupMiss, format_timestamp};
 use agent_doc_tmux_commands::tmux_submit_mode_for_harness;
 use agent_doc_turn_executor_tmux::context_clear::{
@@ -4520,22 +4522,20 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             "session-status",
             {
                 move |method| match method {
-                    IpcMethod::State => agent_doc_orchestration::supervisor::ipc::IpcResponse::ok(
-                        serde_json::json!({
-                            "running": true,
-                            "state": "healthy",
-                            "actor_state": "ready",
-                            "actor_session_id": "session-status",
-                            "actor_pane_id": "%41",
-                            "actor_generation": 1,
-                            "restart_count": 0,
-                            "supervisor_pid": 1001,
-                            "supervisor_instance_id": "sup-status",
-                            "child_pid": 1002,
-                            "cwd_source": "config",
-                        }),
-                    ),
-                    _ => agent_doc_orchestration::supervisor::ipc::IpcResponse::ok_empty(),
+                    IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                        "running": true,
+                        "state": "healthy",
+                        "actor_state": "ready",
+                        "actor_session_id": "session-status",
+                        "actor_pane_id": "%41",
+                        "actor_generation": 1,
+                        "restart_count": 0,
+                        "supervisor_pid": 1001,
+                        "supervisor_instance_id": "sup-status",
+                        "child_pid": 1002,
+                        "cwd_source": "config",
+                    })),
+                    _ => IpcResponse::ok_empty(),
                 }
             },
         )
@@ -4671,17 +4671,15 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
                 move |method| match method {
                     IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                         captured_for_ipc.lock().unwrap().push(bytes);
-                        agent_doc_orchestration::supervisor::ipc::IpcResponse::ok_empty()
+                        IpcResponse::ok_empty()
                     }
-                    IpcMethod::State => agent_doc_orchestration::supervisor::ipc::IpcResponse::ok(
-                        serde_json::json!({
-                            "running": true,
-                            "state": "healthy",
-                            "actor_state": "ready",
-                            "restart_count": 0,
-                        }),
-                    ),
-                    _ => agent_doc_orchestration::supervisor::ipc::IpcResponse::ok_empty(),
+                    IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                        "running": true,
+                        "state": "healthy",
+                        "actor_state": "ready",
+                        "restart_count": 0,
+                    })),
+                    _ => IpcResponse::ok_empty(),
                 }
             },
         )

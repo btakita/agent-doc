@@ -9,6 +9,7 @@ use agent_doc_document_realtime::write_policy::{
     normalize_visible_recovery_compare, prompt_bearing_user_changes_between,
     snapshot_contains_dropped_prompt, stale_snapshot_reset_drift,
 };
+use agent_doc_ipc_protocol::{is_socket_ack_timeout_error, is_socket_status_error};
 use std::collections::HashSet;
 
 pub fn guard_no_stale_snapshot_reset_drift(
@@ -1774,7 +1775,7 @@ pub fn try_editor_converge(
             // permission to raw-write the file, but the plugin-owned file-IPC
             // watcher may be able to apply the exact same patch and prove the
             // resulting buffer through ack-content in this same cycle.
-            if is_socket_status_error(&err)
+            if is_socket_status_error(err.to_string())
                 && try_editor_converge_file_ipc(
                     file,
                     &project_root,
@@ -1792,7 +1793,7 @@ pub fn try_editor_converge(
             // degraded and subsequent converges skip the doomed socket up front.
             // (Recovery targets a live editor; an editor-less session disk-falls
             // back below, but recording the socket failure is still harmless.)
-            if is_socket_ack_timeout_error(&err) {
+            if is_socket_ack_timeout_error(err.to_string()) {
                 match record_ipc_socket_ack_timeout(&project_root, file, Some(&patch_id), source) {
                     Ok(true) => {
                         eprintln!(

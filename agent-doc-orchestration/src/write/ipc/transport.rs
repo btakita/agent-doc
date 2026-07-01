@@ -7,7 +7,10 @@ use agent_doc_document_realtime::write_policy::{
 };
 use agent_doc_element_boundary::boundary::find_boundary_id;
 use agent_doc_element_exchange::extract_post_commit_normalization_targets;
-use agent_doc_ipc_protocol::{FullContentIpcMode, is_already_applied_ack_error_message};
+use agent_doc_ipc_protocol::{
+    FullContentIpcMode, existing_patch_is_reposition_only, is_already_applied_ack_error_message,
+    is_socket_ack_timeout_error,
+};
 
 fn live_editor_delivery_target(file: &Path) -> Option<String> {
     let mut file_keys = Vec::new();
@@ -805,7 +808,7 @@ pub fn try_ipc(
                     "[write] socket IPC failed: {} — falling back to file IPC",
                     e
                 );
-                if is_socket_ack_timeout_error(&e) {
+                if is_socket_ack_timeout_error(e.to_string()) {
                     let degraded = record_ipc_socket_ack_timeout(
                         &project_root,
                         file,
@@ -1476,7 +1479,7 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
         }
         Err(e) => {
             eprintln!("[commit] IPC reposition failed (non-fatal): {}", e);
-            if is_socket_ack_timeout_error(&e) {
+            if is_socket_ack_timeout_error(e.to_string()) {
                 match record_ipc_socket_ack_timeout(&project_root, file, None, "reposition") {
                     Ok(true) => {
                         eprintln!(

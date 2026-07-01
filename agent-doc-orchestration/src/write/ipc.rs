@@ -235,17 +235,6 @@ pub(crate) fn record_ipc_socket_ack_timeout(
     Ok(degraded)
 }
 
-pub(crate) fn is_socket_ack_timeout_error(err: &anyhow::Error) -> bool {
-    // Duration-agnostic: the sender's ack timeout budget is configurable
-    // (`IPC_ACK_TIMEOUT_SECS` in ipc_socket.rs), so match the stable prefix
-    // rather than a hard-coded "(2s)".
-    err.to_string().contains("IPC ack timeout")
-}
-
-pub(crate) fn is_socket_status_error(err: &anyhow::Error) -> bool {
-    err.to_string().contains("IPC ack status error")
-}
-
 pub(crate) fn remove_ipc_dewedge_marker(
     project_root: &Path,
     file: &Path,
@@ -2863,25 +2852,6 @@ pub(crate) fn cycle_already_committed(file: &Path) -> Option<String> {
 
 pub(crate) fn write_claimed_patch_sentinel(project_root: &Path, patch_id: &str) {
     crate::flow::closeout::write_claimed_patch_sentinel(project_root, patch_id);
-}
-
-pub(crate) fn existing_patch_is_reposition_only(payload: &serde_json::Value) -> bool {
-    payload
-        .get("reposition_boundary")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false)
-        && payload
-            .get("patches")
-            .and_then(|value| value.as_array())
-            .is_none_or(|patches| patches.is_empty())
-        && payload
-            .get("unmatched")
-            .and_then(|value| value.as_str())
-            .is_none_or(|unmatched| unmatched.trim().is_empty())
-        && payload
-            .get("fullContent")
-            .and_then(|value| value.as_str())
-            .is_none_or(|content| content.is_empty())
 }
 
 mod transport;
@@ -5619,37 +5589,6 @@ mod core_tests {
             "a new session id must not inherit the old session's degraded marker"
         );
     }
-    #[test]
-    fn is_socket_ack_timeout_error_is_duration_agnostic() {
-        // `#ipc-ack-timeout-align`: the sender's ack budget is configurable, so
-        // the degrade-vote classifier must match the stable prefix, not a
-        // hard-coded "(2s)".
-        assert!(is_socket_ack_timeout_error(&anyhow::anyhow!(
-            "IPC ack timeout (2s)"
-        )));
-        assert!(is_socket_ack_timeout_error(&anyhow::anyhow!(
-            "IPC ack timeout (6s)"
-        )));
-        assert!(!is_socket_ack_timeout_error(&anyhow::anyhow!(
-            "IPC ack status error: something else"
-        )));
-    }
-
-    #[test]
-    fn is_socket_status_error_matches_terminal_apply_rejection() {
-        assert!(is_socket_status_error(&anyhow::anyhow!(
-            "{}",
-            r#"IPC ack status error: {"type":"ack","status":"error"}"#
-        )));
-        assert!(!is_socket_status_error(&anyhow::anyhow!(
-            "IPC ack timeout (6s)"
-        )));
-        assert!(!is_socket_status_error(&anyhow::anyhow!(
-            "{}",
-            r#"IPC ack already_applied: {"type":"ack","status":"error","reason":"already_applied"}"#
-        )));
-    }
-
     #[test]
     fn degraded_latch_self_heals_when_listener_recovers() {
         // `#ipc-degrade-self-heal`: the degrade latch is a circuit breaker, not

@@ -269,12 +269,13 @@ fn build_harness_launch_spec(
             anyhow::bail!(err);
         }
     }
-    let capability_proof_required = crate::agent::codex::managed_capability_contract_required(
-        &base_args,
-        fm,
-        global_config,
-        &harness.binary,
-    );
+    let capability_proof_required =
+        agent_doc_harness::managed_capability::managed_capability_contract_required(
+            &base_args,
+            fm,
+            global_config,
+            &harness.binary,
+        );
     if !capability_proof_required {
         log_event(
             session_log,

@@ -159,6 +159,35 @@ pub fn is_already_applied_ack_error_message(message: &str) -> bool {
     message.starts_with("IPC ack already_applied")
 }
 
+pub fn is_socket_ack_timeout_error(message: impl AsRef<str>) -> bool {
+    // Duration-agnostic: the sender's ack timeout budget is configurable, so
+    // match the stable prefix rather than a hard-coded "(2s)".
+    message.as_ref().contains("IPC ack timeout")
+}
+
+pub fn is_socket_status_error(message: impl AsRef<str>) -> bool {
+    message.as_ref().contains("IPC ack status error")
+}
+
+pub fn existing_patch_is_reposition_only(payload: &serde_json::Value) -> bool {
+    payload
+        .get("reposition_boundary")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+        && payload
+            .get("patches")
+            .and_then(|value| value.as_array())
+            .is_none_or(|patches| patches.is_empty())
+        && payload
+            .get("unmatched")
+            .and_then(|value| value.as_str())
+            .is_none_or(|unmatched| unmatched.trim().is_empty())
+        && payload
+            .get("fullContent")
+            .and_then(|value| value.as_str())
+            .is_none_or(|content| content.is_empty())
+}
+
 /// Tag a `patch` message with the `early_ack` opt-in when enabled.
 ///
 /// Non-patch traffic is returned unchanged so queue convergence, VCS refreshes,
@@ -369,7 +398,8 @@ mod tests {
         AckClassification, FullContentIpcMode, callback_request, callback_request_is_expired,
         callback_response, callback_response_matches_request, callback_urgency_for_elapsed,
         classify_ack, early_ack_line, early_ack_ops_marker, early_ack_tagged_message,
-        ipc_accept_thread_ops_marker, is_already_applied_ack_error_message,
+        existing_patch_is_reposition_only, ipc_accept_thread_ops_marker,
+        is_already_applied_ack_error_message, is_socket_ack_timeout_error, is_socket_status_error,
         message_requests_early_ack, normalization_repair_patch_message, patch_message,
         pending_callback_from_request, publish_live_buffer_message, queue_convergence_message,
         refresh_content_message, reposition_message, save_document_message, vcs_refresh_message,
@@ -449,6 +479,26 @@ mod tests {
         ));
         assert!(!is_already_applied_ack_error_message(
             r#"{"type":"ack","status":"error","reason":"already_applied"}"#
+        ));
+    }
+
+    #[test]
+    fn is_socket_ack_timeout_error_is_duration_agnostic() {
+        assert!(is_socket_ack_timeout_error("IPC ack timeout (2s)"));
+        assert!(is_socket_ack_timeout_error("IPC ack timeout (6s)"));
+        assert!(!is_socket_ack_timeout_error(
+            "IPC ack status error: something else"
+        ));
+    }
+
+    #[test]
+    fn is_socket_status_error_matches_terminal_apply_rejection() {
+        assert!(is_socket_status_error(
+            r#"IPC ack status error: {"type":"ack","status":"error"}"#
+        ));
+        assert!(!is_socket_status_error("IPC ack timeout (6s)"));
+        assert!(!is_socket_status_error(
+            r#"IPC ack already_applied: {"type":"ack","status":"error","reason":"already_applied"}"#
         ));
     }
 
@@ -534,6 +584,45 @@ mod tests {
         let full = reposition_message("/tmp/plan.md", Some("boundary-1"), true);
         assert_eq!(full["boundary_id"], "boundary-1");
         assert_eq!(full["preserve_head"], true);
+    }
+
+    #[test]
+    fn existing_patch_is_reposition_only_classifies_empty_reposition_payload() {
+        let payload = serde_json::json!({
+            "reposition_boundary": true,
+            "patches": [],
+            "unmatched": "   ",
+            "fullContent": "",
+        });
+
+        assert!(existing_patch_is_reposition_only(&payload));
+    }
+
+    #[test]
+    fn existing_patch_is_reposition_only_rejects_response_body_payloads() {
+        assert!(!existing_patch_is_reposition_only(&serde_json::json!({
+            "reposition_boundary": true,
+            "patches": [{"component": "response", "content": "body"}],
+            "unmatched": "",
+            "fullContent": "",
+        })));
+        assert!(!existing_patch_is_reposition_only(&serde_json::json!({
+            "reposition_boundary": true,
+            "patches": [],
+            "unmatched": "body",
+            "fullContent": "",
+        })));
+        assert!(!existing_patch_is_reposition_only(&serde_json::json!({
+            "reposition_boundary": true,
+            "patches": [],
+            "unmatched": "",
+            "fullContent": "body",
+        })));
+        assert!(!existing_patch_is_reposition_only(&serde_json::json!({
+            "patches": [],
+            "unmatched": "",
+            "fullContent": "",
+        })));
     }
 
     #[test]

@@ -3110,7 +3110,9 @@ mod tests {
         assert_eq!(payload["patches"], serde_json::json!([]));
         assert_eq!(payload["unmatched"], serde_json::json!(""));
         assert_eq!(payload["reposition_boundary"], serde_json::json!(true));
-        assert!(existing_patch_is_reposition_only(&payload));
+        assert!(agent_doc_ipc_protocol::existing_patch_is_reposition_only(
+            &payload
+        ));
     }
     #[test]
     fn write_appends_response() {

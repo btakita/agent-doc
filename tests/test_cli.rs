@@ -11473,6 +11473,9 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
     );
     let harness_crate =
         fs::read_to_string(manifest_dir.join("agent-doc-harness/src/lib.rs")).unwrap();
+    let harness_managed_capability =
+        fs::read_to_string(manifest_dir.join("agent-doc-harness/src/managed_capability.rs"))
+            .unwrap();
     assert!(
         members
             .iter()
@@ -11557,6 +11560,20 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
             "agent-doc-harness should own harness prompt/chrome policy directly: {required_snippet}"
         );
     }
+    assert!(
+        harness_crate.contains("pub mod managed_capability;"),
+        "agent-doc-harness must expose managed capability policy directly"
+    );
+    for required_snippet in [
+        "pub fn managed_capability_contract_required(",
+        "resolve_codex_network_access(",
+        "add_dirs_from_args(args)",
+    ] {
+        assert!(
+            harness_managed_capability.contains(required_snippet),
+            "agent-doc-harness must own pure managed capability contract policy: {required_snippet}"
+        );
+    }
     for forbidden_snippet in [
         "fn parse_sandbox_mode_config(",
         "fn record_codex_resume_sandbox_mode(",
@@ -11617,6 +11634,7 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         "fn transcript_has_required_ssh_failure(",
         "fn transcript_proves_required_ssh_success(",
         "fn format_required_ssh_failure(",
+        "pub fn managed_capability_contract_required(",
     ] {
         assert!(
             !codex.contains(forbidden_snippet),
@@ -11655,6 +11673,12 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
             && codex.contains("transcript_proves_required_ssh_success")
             && codex.contains("format_required_ssh_failure"),
         "agent::codex should call focused Codex launch/transport policy directly"
+    );
+    assert!(
+        codex.contains(
+            "agent_doc_harness::managed_capability::managed_capability_contract_required("
+        ),
+        "agent::codex should call focused managed capability contract policy directly"
     );
     assert!(
         !codex.contains("super::resolve_codex_network_access("),
@@ -14918,6 +14942,9 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "pub fn publish_live_buffer_message(",
         "pub fn vcs_refresh_message(",
         "pub fn vcs_refresh_probe_message(",
+        "pub fn is_socket_ack_timeout_error(",
+        "pub fn is_socket_status_error(",
+        "pub fn existing_patch_is_reposition_only(",
         "pub enum FullContentIpcMode",
         "pub const fn source_label(",
     ] {
@@ -15059,25 +15086,60 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "root callers should use the focused IPC protocol crate instead of the old orchestration path"
     );
 
+    let write_ipc_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+    for forbidden in [
+        "fn is_socket_ack_timeout_error(",
+        "fn is_socket_status_error(",
+        "fn existing_patch_is_reposition_only(",
+    ] {
+        assert!(
+            !write_ipc_source.contains(forbidden),
+            "write IPC must not re-own socket/reposition protocol helpers after extraction: {forbidden}"
+        );
+    }
+
     let write_ipc_transport_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc/transport.rs"))
             .unwrap();
     assert!(
-        write_ipc_transport_source.contains(
-            "use agent_doc_ipc_protocol::{FullContentIpcMode, is_already_applied_ack_error_message};"
-        ),
-        "write IPC transport should import full-content IPC mode vocabulary from the focused protocol crate"
+        write_ipc_transport_source.contains("use agent_doc_ipc_protocol::{")
+            && write_ipc_transport_source.contains("FullContentIpcMode")
+            && write_ipc_transport_source.contains("is_already_applied_ack_error_message")
+            && write_ipc_transport_source.contains("is_socket_ack_timeout_error")
+            && write_ipc_transport_source.contains("existing_patch_is_reposition_only"),
+        "write IPC transport should import IPC protocol vocabulary from the focused protocol crate"
     );
     for forbidden in [
         "pub enum FullContentIpcMode",
         "fn full_content_source_label(",
         "pub(crate) fn full_content_source_label(",
+        "fn is_socket_ack_timeout_error(",
+        "fn existing_patch_is_reposition_only(",
         "crate::ipc_socket::is_already_applied_error",
         "pub use agent_doc_ipc_protocol",
     ] {
         assert!(
             !write_ipc_transport_source.contains(forbidden),
             "write IPC transport must not re-own or facade full-content IPC protocol vocabulary: {forbidden}"
+        );
+    }
+    let write_converge_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/converge.rs"))
+            .unwrap();
+    assert!(
+        write_converge_source.contains(
+            "use agent_doc_ipc_protocol::{is_socket_ack_timeout_error, is_socket_status_error};"
+        ),
+        "write convergence should import socket error classifiers from the focused protocol crate"
+    );
+    for forbidden in [
+        "fn is_socket_ack_timeout_error(",
+        "fn is_socket_status_error(",
+    ] {
+        assert!(
+            !write_converge_source.contains(forbidden),
+            "write convergence must not re-own socket error classifiers after extraction: {forbidden}"
         );
     }
 

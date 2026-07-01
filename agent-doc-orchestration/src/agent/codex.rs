@@ -505,52 +505,26 @@ pub fn managed_capability_contract_required_for_doc_and_harness(
     global_config: &agent_doc_config::Config,
     harness: &str,
 ) -> bool {
-    if harness == "opencode" {
-        return resolve_codex_network_access(
-            fm.codex_network_access,
-            global_config.codex_network_access,
-        ) == CodexNetworkAccess::Enabled
-            || !fm.required_ssh_targets.is_empty();
+    if agent_doc_harness::managed_capability::managed_capability_contract_required(
+        &[],
+        fm,
+        global_config,
+        harness,
+    ) {
+        return true;
     }
-    if harness != "codex" {
-        return false;
-    }
-    resolve_codex_network_access(fm.codex_network_access, global_config.codex_network_access)
-        == CodexNetworkAccess::Enabled
-        || !fm.required_ssh_targets.is_empty()
-        || !workspace_access_dirs_for_doc(file).is_empty()
-        || fm.agent_args.as_deref().is_some_and(args_contain_add_dir)
-        || fm.codex_args.as_deref().is_some_and(args_contain_add_dir)
-        || global_config
-            .agent_args
-            .as_deref()
-            .is_some_and(args_contain_add_dir)
-        || global_config
-            .codex_args
-            .as_deref()
-            .is_some_and(args_contain_add_dir)
-}
-
-pub fn managed_capability_contract_required(
-    args: &[String],
-    fm: &Frontmatter,
-    global_config: &agent_doc_config::Config,
-    harness: &str,
-) -> bool {
-    if harness == "opencode" {
-        return resolve_codex_network_access(
-            fm.codex_network_access,
-            global_config.codex_network_access,
-        ) == CodexNetworkAccess::Enabled
-            || !fm.required_ssh_targets.is_empty();
-    }
-    if harness != "codex" {
-        return false;
-    }
-    resolve_codex_network_access(fm.codex_network_access, global_config.codex_network_access)
-        == CodexNetworkAccess::Enabled
-        || !fm.required_ssh_targets.is_empty()
-        || !add_dirs_from_args(args).is_empty()
+    harness == "codex"
+        && (!workspace_access_dirs_for_doc(file).is_empty()
+            || fm.agent_args.as_deref().is_some_and(args_contain_add_dir)
+            || fm.codex_args.as_deref().is_some_and(args_contain_add_dir)
+            || global_config
+                .agent_args
+                .as_deref()
+                .is_some_and(args_contain_add_dir)
+            || global_config
+                .codex_args
+                .as_deref()
+                .is_some_and(args_contain_add_dir))
 }
 
 pub fn prove_managed_session_capabilities(
@@ -562,7 +536,12 @@ pub fn prove_managed_session_capabilities(
     harness: &str,
     probe_timeout: Duration,
 ) -> Result<Option<String>> {
-    if !managed_capability_contract_required(args, fm, global_config, harness) {
+    if !agent_doc_harness::managed_capability::managed_capability_contract_required(
+        args,
+        fm,
+        global_config,
+        harness,
+    ) {
         return Ok(None);
     }
 
@@ -1880,77 +1859,6 @@ mod tests {
                 "sandbox_mode=\"workspace-write\"",
             ]
         );
-    }
-
-    #[test]
-    fn managed_capability_contract_requires_network_ssh_or_writable_roots() {
-        let config = agent_doc_config::Config::default();
-        let mut fm = Frontmatter::default();
-        assert!(!managed_capability_contract_required(
-            &[],
-            &fm,
-            &config,
-            "codex"
-        ));
-        assert!(!managed_capability_contract_required(
-            &[],
-            &fm,
-            &config,
-            "opencode"
-        ));
-
-        fm.codex_network_access = Some(CodexNetworkAccess::Enabled);
-        assert!(managed_capability_contract_required(
-            &[],
-            &fm,
-            &config,
-            "codex"
-        ));
-        assert!(managed_capability_contract_required(
-            &[],
-            &fm,
-            &config,
-            "opencode"
-        ));
-
-        fm.codex_network_access = None;
-        fm.required_ssh_targets = vec!["example-host".to_string()];
-        assert!(managed_capability_contract_required(
-            &[],
-            &fm,
-            &config,
-            "codex"
-        ));
-        assert!(managed_capability_contract_required(
-            &[],
-            &fm,
-            &config,
-            "opencode"
-        ));
-
-        fm.required_ssh_targets.clear();
-        assert!(managed_capability_contract_required(
-            &[
-                "exec".to_string(),
-                "--json".to_string(),
-                "--add-dir".to_string(),
-                "/tmp/example".to_string()
-            ],
-            &fm,
-            &config,
-            "codex"
-        ));
-        assert!(!managed_capability_contract_required(
-            &[
-                "exec".to_string(),
-                "--json".to_string(),
-                "--add-dir".to_string(),
-                "/tmp/example".to_string()
-            ],
-            &fm,
-            &config,
-            "opencode"
-        ));
     }
 
     #[test]

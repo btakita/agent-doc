@@ -123,7 +123,7 @@ impl SupervisorStderrRedirect {
         let logs_dir = stderr_path
             .parent()
             .context("supervisor stderr path must include logs directory")?;
-        std::fs::create_dir_all(&logs_dir)
+        std::fs::create_dir_all(logs_dir)
             .with_context(|| format!("failed to create {}", logs_dir.display()))?;
         let log_file = std::fs::OpenOptions::new()
             .create(true)

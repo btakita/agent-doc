@@ -935,12 +935,13 @@ Two optional tweaks depending on how forward you want to be:
 Say the word and I'll publish it via `corky`/LinkedIn as a draft (no auto-send), or adjust tone/length.
 
 *(Session note: exchange is large — 875 lines / 30 sections — but the queue is active, so I'm continuing rather than pausing to compact.)*
-<!-- agent:boundary:488b4b72 -->
+<!-- agent:boundary:6ac487e3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue stop -->
+<!-- agent:queue go -->
+/goal Implement backlog item(s): #hm0k
 <!-- /agent:queue -->
 
 ## Backlog

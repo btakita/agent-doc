@@ -80,11 +80,13 @@ use agent_doc_turn_executor::{
     binary::{current_agent_doc_binary, internal_command_spawn_context},
 };
 #[cfg(test)]
-use agent_doc_workflow::orchestrate_tasks::parse_list_item;
 use agent_doc_workflow::orchestrate_tasks::{
-    DagTask, ExchangeTaskSourceFingerprint, ExecutionTask, append_worker_result_line,
-    apply_prompt_preset_block, extract_tasks_from_text, find_exchange_task_source, normalize_task,
-    parse_dag_task_line, plan_dag_execution, scope_exchange_tail,
+    DagTask, extract_tasks_from_text, parse_dag_task_line, parse_list_item,
+};
+use agent_doc_workflow::orchestrate_tasks::{
+    ExchangeTaskSourceFingerprint, ExecutionTask, ResolvedTaskBatch, append_worker_result_line,
+    apply_prompt_preset_block, extend_task_batch_from_text, find_exchange_task_source,
+    merge_task_batch, normalize_task, plan_dag_execution, resolve_dag_tasks, scope_exchange_tail,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -109,13 +111,6 @@ pub struct OrchestrateConfig {
     pub timeout_secs: u64,
     pub dry_run: bool,
     pub plan: bool,
-}
-
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub(crate) struct ResolvedTaskBatch {
-    tasks: Vec<String>,
-    requested_presets: Vec<String>,
-    exchange_source: Option<ExchangeTaskSourceFingerprint>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -533,19 +528,6 @@ fn resolve_task_batch(file: &Path, config: &OrchestrateConfig) -> Result<Resolve
     Ok(batch)
 }
 
-fn merge_task_batch(target: &mut ResolvedTaskBatch, source: ResolvedTaskBatch) {
-    target.tasks.extend(source.tasks);
-    for preset in source.requested_presets {
-        if !target
-            .requested_presets
-            .iter()
-            .any(|existing| existing == &preset)
-        {
-            target.requested_presets.push(preset);
-        }
-    }
-}
-
 fn canonicalize_prompt_preset_requests(
     file: &Path,
     requested_presets: &mut Vec<String>,
@@ -566,19 +548,6 @@ fn canonicalize_prompt_preset_requests(
     }
     *requested_presets = canonical;
     Ok(())
-}
-
-fn extend_task_batch_from_text(batch: &mut ResolvedTaskBatch, text: &str) {
-    batch.tasks.extend(extract_tasks_from_text(text));
-    for preset in agent_doc_diff::extract_prompt_preset_requests_from_text(text) {
-        if !batch
-            .requested_presets
-            .iter()
-            .any(|existing| existing == &preset)
-        {
-            batch.requested_presets.push(preset);
-        }
-    }
 }
 
 fn exchange_text(doc: &str) -> Result<&str> {
@@ -713,15 +682,6 @@ fn scope_exchange_for_tasks(exchange: &str, file: &Path) -> String {
     };
 
     scope_exchange_tail(exchange, &snap_exchange)
-}
-
-fn resolve_dag_tasks(batch: &ResolvedTaskBatch) -> Result<Vec<DagTask>> {
-    batch
-        .tasks
-        .iter()
-        .enumerate()
-        .map(|(idx, line)| parse_dag_task_line(line, idx))
-        .collect()
 }
 
 fn load_prompt_preset_block(file: &Path, requested_presets: &[String]) -> Result<Option<String>> {

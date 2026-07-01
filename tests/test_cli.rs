@@ -6672,13 +6672,17 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
             .unwrap();
     for required in [
         "pub struct ExchangeTaskSourceFingerprint",
+        "pub struct ResolvedTaskBatch",
         "pub struct ExecutionTask",
         "pub struct DagTask",
         "pub fn extract_tasks_from_text(",
+        "pub fn merge_task_batch(",
+        "pub fn extend_task_batch_from_text(",
         "pub fn find_exchange_task_source(",
         "pub fn parse_list_item(",
         "pub fn normalize_task(",
         "pub fn parse_dag_task_line(",
+        "pub fn resolve_dag_tasks(",
         "pub fn plan_dag_execution(",
         "pub fn scope_exchange_tail(",
         "pub fn apply_prompt_preset_block(",
@@ -6692,11 +6696,14 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
     let orchestrate_source = fs::read_to_string(manifest_dir.join("src/orchestrate.rs")).unwrap();
     for forbidden in [
         "struct ExchangeTaskSourceFingerprint",
+        "struct ResolvedTaskBatch",
         "struct ExchangeTaskSourceBlock",
         "struct ExecutionTask",
         "struct DagTask",
         "struct DagMetadata",
         "fn extract_tasks_from_text(",
+        "fn merge_task_batch(",
+        "fn extend_task_batch_from_text(",
         "fn collect_fenced_task_blocks(",
         "fn collect_markdown_list_blocks(",
         "fn collect_markdown_list_source_blocks(",
@@ -6705,6 +6712,7 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         "fn parse_list_item(",
         "fn normalize_task(",
         "fn parse_dag_task_line(",
+        "fn resolve_dag_tasks(",
         "fn plan_dag_execution(",
         "fn scope_exchange_tail(",
         "fn apply_prompt_preset_block(",
@@ -6720,8 +6728,11 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
     assert!(
         orchestrate_source.contains("use agent_doc_workflow::orchestrate_tasks::{")
             && orchestrate_source.contains("extract_tasks_from_text")
+            && orchestrate_source.contains("merge_task_batch")
+            && orchestrate_source.contains("extend_task_batch_from_text")
             && orchestrate_source.contains("find_exchange_task_source")
             && orchestrate_source.contains("parse_dag_task_line")
+            && orchestrate_source.contains("resolve_dag_tasks")
             && orchestrate_source.contains("plan_dag_execution")
             && orchestrate_source.contains("scope_exchange_tail")
             && orchestrate_source.contains("apply_prompt_preset_block")

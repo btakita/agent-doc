@@ -11,6 +11,13 @@ pub struct ExchangeTaskSourceFingerprint {
     pub requested_presets: Vec<String>,
 }
 
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ResolvedTaskBatch {
+    pub tasks: Vec<String>,
+    pub requested_presets: Vec<String>,
+    pub exchange_source: Option<ExchangeTaskSourceFingerprint>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ExchangeTaskSourceBlock {
     tasks: Vec<String>,
@@ -55,6 +62,32 @@ pub fn extract_tasks_from_text(text: &str) -> Vec<String> {
         .map(normalize_task)
         .filter(|line| !line.is_empty())
         .collect()
+}
+
+pub fn merge_task_batch(target: &mut ResolvedTaskBatch, source: ResolvedTaskBatch) {
+    target.tasks.extend(source.tasks);
+    for preset in source.requested_presets {
+        if !target
+            .requested_presets
+            .iter()
+            .any(|existing| existing == &preset)
+        {
+            target.requested_presets.push(preset);
+        }
+    }
+}
+
+pub fn extend_task_batch_from_text(batch: &mut ResolvedTaskBatch, text: &str) {
+    batch.tasks.extend(extract_tasks_from_text(text));
+    for preset in agent_doc_diff::extract_prompt_preset_requests_from_text(text) {
+        if !batch
+            .requested_presets
+            .iter()
+            .any(|existing| existing == &preset)
+        {
+            batch.requested_presets.push(preset);
+        }
+    }
 }
 
 pub fn find_exchange_task_source(
@@ -217,6 +250,15 @@ pub fn append_worker_result_line(
     out.push_str(worker_result_line);
     out.push('\n');
     out
+}
+
+pub fn resolve_dag_tasks(batch: &ResolvedTaskBatch) -> Result<Vec<DagTask>> {
+    batch
+        .tasks
+        .iter()
+        .enumerate()
+        .map(|(idx, line)| parse_dag_task_line(line, idx))
+        .collect()
 }
 
 fn collect_fenced_task_blocks(text: &str) -> Vec<Vec<String>> {

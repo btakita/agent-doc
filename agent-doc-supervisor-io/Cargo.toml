@@ -10,10 +10,13 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_supervisor_io"
 
 [dependencies]
+agent-doc-config = { path = "../agent-doc-config", version = "0.34.66" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.66" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.66" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.66" }
 agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.34.66" }
 anyhow = "1"
+indexmap = { version = "2", features = ["serde"] }
 libc = "0.2"
 serde_json = "1"
 

@@ -1,5 +1,6 @@
 //! Pure controller dispatch admission helpers.
 
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::time::Duration;
 
@@ -10,6 +11,60 @@ pub const STALE_QUEUE_PAUSE_INVARIANT_ID: &str = "stale_queue_pause";
 pub const STALE_QUEUE_PAUSE_NEXT_ACTION: &str = "restart_supervisor_once_and_retry";
 pub const DISPATCH_RECOVERY_OUTCOME_CONTRACT_VERSION: &str = "binary-outcome-v1";
 const DISPATCH_BLOCKED_USER_FACING_OUTCOME_CONTRACT_VERSION: &str = "ui-outcome-v1";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ControllerDispatchResultStatus {
+    Rejected,
+    Accepted,
+    Queued,
+    Running,
+    Completed,
+    Blocked,
+}
+
+impl ControllerDispatchResultStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Rejected => "rejected",
+            Self::Accepted => "accepted",
+            Self::Queued => "queued",
+            Self::Running => "running",
+            Self::Completed => "completed",
+            Self::Blocked => "blocked",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ControllerDispatchProofScope {
+    AcceptedOnly,
+    DispatchStart,
+}
+
+impl ControllerDispatchProofScope {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::AcceptedOnly => "accepted_only",
+            Self::DispatchStart => "dispatch_start",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControllerDispatchReceipt {
+    pub receipt_id: u64,
+    pub command_kind: String,
+    pub status: ControllerDispatchResultStatus,
+    pub stage: String,
+    #[serde(default)]
+    pub accepted_stage: Option<String>,
+    #[serde(default)]
+    pub failed_stage: Option<String>,
+    pub proof_scope: ControllerDispatchProofScope,
+    pub dispatch_start_proven: bool,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum DispatchRecoveryOutcomeClass {
@@ -2339,6 +2394,46 @@ fn valid_preset_pause_id(candidate: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn controller_dispatch_receipt_vocabulary_has_stable_labels() {
+        assert_eq!(
+            ControllerDispatchResultStatus::Rejected.as_str(),
+            "rejected"
+        );
+        assert_eq!(
+            ControllerDispatchResultStatus::Accepted.as_str(),
+            "accepted"
+        );
+        assert_eq!(ControllerDispatchResultStatus::Queued.as_str(), "queued");
+        assert_eq!(ControllerDispatchResultStatus::Running.as_str(), "running");
+        assert_eq!(
+            ControllerDispatchResultStatus::Completed.as_str(),
+            "completed"
+        );
+        assert_eq!(ControllerDispatchResultStatus::Blocked.as_str(), "blocked");
+        assert_eq!(
+            ControllerDispatchProofScope::AcceptedOnly.as_str(),
+            "accepted_only"
+        );
+        assert_eq!(
+            ControllerDispatchProofScope::DispatchStart.as_str(),
+            "dispatch_start"
+        );
+
+        let receipt = ControllerDispatchReceipt {
+            receipt_id: 7,
+            command_kind: "managed_reopen".to_string(),
+            status: ControllerDispatchResultStatus::Accepted,
+            stage: "authorized".to_string(),
+            accepted_stage: Some("authorized".to_string()),
+            failed_stage: None,
+            proof_scope: ControllerDispatchProofScope::AcceptedOnly,
+            dispatch_start_proven: false,
+        };
+        assert_eq!(receipt.status.as_str(), "accepted");
+        assert_eq!(receipt.proof_scope.as_str(), "accepted_only");
+    }
 
     #[test]
     fn recent_lines_contain_trigger_matches_claude_trigger() {

@@ -128,7 +128,6 @@ use std::sync::{Arc, Mutex, TryLockError};
 use std::time::{Duration, Instant};
 
 use crate::supervisor::{
-    env::EnvSpec,
     in_process::{InProcessSupervisor, PtySupervisedChild, TickOutcome},
     ipc::SupervisorIpc,
     pty::PtySpawnConfig,
@@ -159,6 +158,7 @@ use agent_doc_supervisor::route_owned::{
 use agent_doc_supervisor_io::cwd;
 #[cfg(unix)]
 use agent_doc_supervisor_process::ReexecState;
+use agent_doc_supervisor_process::screen::OwnedPtyScreen;
 use agent_doc_turn_executor::auto_trigger::{
     AutoTriggerCooldownAction, AutoTriggerMonitor, AutoTriggerNoPromptAction,
     AutoTriggerStopOutcome, auto_trigger_clear_cooldown_action, auto_trigger_no_prompt_action,
@@ -2006,7 +2006,7 @@ pub(crate) struct SupervisorShared {
     /// Filtered output emitted by the current child process.
     recent_output: Mutex<Vec<u8>>,
     /// Alacritty-backed visible screen for the current child process.
-    terminal_screen: Mutex<crate::supervisor::screen::OwnedPtyScreen>,
+    terminal_screen: Mutex<OwnedPtyScreen>,
     /// Child PID for IPC `pid` queries and `kill` on restart/stop.
     child_pid: AtomicU32,
     /// `#ctlrecycle` R3 — a dup of the live pty master fd for the current child, so
@@ -2085,7 +2085,7 @@ impl SupervisorShared {
             inject_writer: Mutex::new(None),
             inject_pane,
             recent_output: Mutex::new(Vec::new()),
-            terminal_screen: Mutex::new(crate::supervisor::screen::OwnedPtyScreen::default()),
+            terminal_screen: Mutex::new(OwnedPtyScreen::default()),
             child_pid: AtomicU32::new(0),
             master_fd: AtomicI32::new(-1),
             restart_requested: AtomicBool::new(false),

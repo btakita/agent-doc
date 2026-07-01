@@ -10302,6 +10302,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         );
     }
     for required_snippet in [
+        "pub enum ControllerDispatchResultStatus",
+        "pub enum ControllerDispatchProofScope",
+        "pub struct ControllerDispatchReceipt",
+        "pub const fn as_str(self) -> &'static str",
         "pub fn dispatch_diagnostic_field",
         "pub fn append_dispatch_proof_payload(",
         "pub fn dispatch_blocked_user_facing_outcome_fields(",
@@ -10371,6 +10375,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         );
     }
     for forbidden_snippet in [
+        "pub enum ControllerDispatchResultStatus",
+        "pub enum ControllerDispatchProofScope",
+        "pub struct ControllerDispatchReceipt",
         "pub struct ControllerProcessFreshness",
         "pub struct ControllerFreshnessStatus",
         "pub struct ControlPlaneStatus",
@@ -10398,8 +10405,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         );
     }
     assert!(
-        rpc_source.contains("use agent_doc_controller::dispatch::{"),
-        "project_controller::rpc should import focused controller dispatch helpers privately"
+        project_controller_source.contains("use agent_doc_controller::dispatch::{")
+            && project_controller_source.contains("ControllerDispatchReceipt")
+            && rpc_source.contains("use agent_doc_controller::dispatch::{"),
+        "orchestration should import focused controller dispatch vocabulary/helpers directly"
     );
     assert!(
         rpc_source.contains("dispatch_diagnostic_field(&diagnostic_payload,")
@@ -12956,6 +12965,116 @@ fn test_agent_doc_supervisor_process_owns_resize_effects() {
                 "{relative} must not re-own supervisor start-binary resolution: {forbidden}"
             );
         }
+    }
+}
+
+#[test]
+fn test_agent_doc_supervisor_launch_env_and_owned_screen_are_extracted() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    assert!(
+        manifest_dir
+            .join("agent-doc-supervisor-io/src/env.rs")
+            .exists(),
+        "agent-doc-supervisor-io must own supervisor launch env resolution"
+    );
+    assert!(
+        manifest_dir
+            .join("agent-doc-supervisor-process/src/screen.rs")
+            .exists(),
+        "agent-doc-supervisor-process must own supervised PTY screen state"
+    );
+    for removed in [
+        "agent-doc-orchestration/src/supervisor/env.rs",
+        "agent-doc-orchestration/src/supervisor/screen.rs",
+    ] {
+        assert!(
+            !manifest_dir.join(removed).exists(),
+            "orchestration must not retain removed supervisor seam module: {removed}"
+        );
+    }
+
+    let supervisor_io_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/lib.rs")).unwrap();
+    assert!(
+        supervisor_io_lib.contains("pub mod env;"),
+        "agent-doc-supervisor-io must expose EnvSpec through its owning env module"
+    );
+    let supervisor_process_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-process/src/lib.rs")).unwrap();
+    assert!(
+        supervisor_process_lib.contains("pub mod screen;"),
+        "agent-doc-supervisor-process must expose OwnedPtyScreen through its owning screen module"
+    );
+
+    let supervisor_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/Cargo.toml")).unwrap();
+    let supervisor_io: toml::Value = toml::from_str(&supervisor_io_manifest).unwrap();
+    let supervisor_io_dependencies = supervisor_io["dependencies"].as_table().unwrap();
+    for required in ["agent-doc-config", "agent-doc-frontmatter", "indexmap"] {
+        assert!(
+            supervisor_io_dependencies.contains_key(required),
+            "agent-doc-supervisor-io env module must own its dependency: {required}"
+        );
+    }
+    let supervisor_process_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-process/Cargo.toml")).unwrap();
+    let supervisor_process: toml::Value = toml::from_str(&supervisor_process_manifest).unwrap();
+    let supervisor_process_dependencies = supervisor_process["dependencies"].as_table().unwrap();
+    for required in ["alacritty_terminal", "portable-pty"] {
+        assert!(
+            supervisor_process_dependencies.contains_key(required),
+            "agent-doc-supervisor-process screen module must own its dependency: {required}"
+        );
+    }
+
+    let supervisor_mod =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/supervisor/mod.rs"))
+            .unwrap();
+    for forbidden in [
+        "pub mod env;",
+        "pub mod screen;",
+        "pub use agent_doc_supervisor_io::env",
+        "pub use agent_doc_supervisor_process::screen",
+    ] {
+        assert!(
+            !supervisor_mod.contains(forbidden),
+            "orchestration supervisor module must not expose an env/screen facade: {forbidden}"
+        );
+    }
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
+    assert!(
+        !orchestration_dependencies.contains_key("alacritty_terminal"),
+        "agent-doc-orchestration must not depend on the screen emulator after screen extraction"
+    );
+
+    let start_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/run.rs")).unwrap();
+    assert!(
+        start_run.contains("use agent_doc_supervisor_io::env::EnvSpec;")
+            && start_run.contains("EnvSpec::from_frontmatter(fm)"),
+        "start/run.rs should import EnvSpec from agent-doc-supervisor-io directly"
+    );
+    let start_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
+    assert!(
+        start_source.contains("use agent_doc_supervisor_process::screen::OwnedPtyScreen;")
+            && start_source.contains("terminal_screen: Mutex<OwnedPtyScreen>")
+            && start_source.contains("terminal_screen: Mutex::new(OwnedPtyScreen::default())"),
+        "start.rs should import OwnedPtyScreen from agent-doc-supervisor-process directly"
+    );
+    for forbidden in [
+        "crate::supervisor::env",
+        "crate::supervisor::screen",
+        "supervisor::env::EnvSpec",
+        "supervisor::screen::OwnedPtyScreen",
+    ] {
+        assert!(
+            !start_source.contains(forbidden) && !start_run.contains(forbidden),
+            "start call sites must not route through old orchestration supervisor seams: {forbidden}"
+        );
     }
 }
 
@@ -18724,6 +18843,7 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         "pub fn plan_window_index_normalization",
         "pub fn effective_sync_columns",
         "pub fn is_file_rename",
+        "pub fn superseded_candidates",
         "pub struct ResyncTargetMatcher",
         "pub fn same_document_path",
         "pub fn candidate_matches_target",
@@ -18803,6 +18923,7 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         "fn same_document_path",
         "fn candidate_matches_target",
         "fn registry_file_for_target",
+        "fn superseded_candidates",
     ] {
         assert!(
             !resync_source.contains(forbidden_snippet) && !resync_prune.contains(forbidden_snippet),
@@ -18837,10 +18958,13 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         "orchestration should call sync scope policy through agent-doc-sync directly"
     );
     assert!(
-        resync_source.contains("use agent_doc_sync::ResyncTargetMatcher")
+        resync_source.contains("use agent_doc_sync::{")
+            && resync_source.contains("ResyncTargetMatcher")
+            && resync_source.contains("superseded_candidates")
             && resync_source.contains("ResyncTargetMatcher::new")
+            && resync_source.contains("superseded_candidates(canonical, drift_sessions)")
             && resync_prune.contains("ResyncTargetMatcher::new"),
-        "orchestration resync should call focused target matching policy directly"
+        "orchestration resync should call focused target matching/planner policy directly"
     );
 }
 

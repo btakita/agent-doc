@@ -99,7 +99,7 @@ use std::time::{Duration, Instant};
 use crate::sessions;
 use agent_doc_controller::dispatch::is_stash_window_name;
 use agent_doc_frontmatter::frontmatter;
-use agent_doc_sync::ResyncTargetMatcher;
+use agent_doc_sync::{ResyncTargetMatcher, superseded_candidates};
 use agent_doc_tmux::{
     PruneCleanupMode, StashTtlCandidate, TmuxPaneProcessKind,
     pane_process_kind_from_current_command, pane_process_kind_from_current_command_samples,
@@ -927,20 +927,6 @@ pub fn canonical_session_for_document(
             _ => None,
         }
     })
-}
-
-/// The drift sessions that should be closed: every candidate except the
-/// canonical one, deduped, order-stable. Pure — the destructive close is
-/// delegated to `close_superseded_session`.
-pub fn superseded_candidates(canonical: &str, drift_sessions: &[String]) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    for session in drift_sessions {
-        if session == canonical || out.iter().any(|s| s == session) {
-            continue;
-        }
-        out.push(session.clone());
-    }
-    out
 }
 
 /// Close superseded tmux sessions on the auto-resync drift path: every session
@@ -2653,28 +2639,6 @@ mod tests {
             new_session, "correct",
             "agent pane should be relocated to the correct session"
         );
-    }
-    #[test]
-    fn superseded_candidates_excludes_canonical_and_dedupes() {
-        // The canonical (active agent-doc window) session is never a close target;
-        // the rest are closed once each, order-stable.
-        let drift = vec![
-            "0".to_string(),
-            "5".to_string(),
-            "5".to_string(),
-            "8".to_string(),
-        ];
-        assert_eq!(
-            superseded_candidates("0", &drift),
-            vec!["5".to_string(), "8".to_string()]
-        );
-        // Canonical absent from the drift set → all are candidates.
-        assert_eq!(
-            superseded_candidates("9", &["0".to_string(), "5".to_string()]),
-            vec!["0".to_string(), "5".to_string()]
-        );
-        // Single session (no drift) → nothing to close.
-        assert!(superseded_candidates("0", &["0".to_string()]).is_empty());
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]

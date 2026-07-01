@@ -324,6 +324,19 @@ pub fn sync_prune_state_update(
     }
 }
 
+/// Return drift sessions that should be closed, excluding the canonical session
+/// and preserving first-seen order.
+pub fn superseded_candidates(canonical: &str, drift_sessions: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for session in drift_sessions {
+        if session == canonical || out.iter().any(|s| s == session) {
+            continue;
+        }
+        out.push(session.clone());
+    }
+    out
+}
+
 pub fn planned_stash_window_indices(
     windows: &[(String, String, String)],
     is_stash_window_name: fn(&str) -> bool,
@@ -801,6 +814,25 @@ mod tests {
         let expired = sync_prune_state_update(Some(&raw), &cols, Some("@1"), 3_000, 2_000);
         assert!(expired.should_write);
         assert_eq!(expired.state.last_full_cleanup_ms, 3_000);
+    }
+
+    #[test]
+    fn superseded_candidates_excludes_canonical_and_dedupes() {
+        let drift = vec![
+            "0".to_string(),
+            "5".to_string(),
+            "5".to_string(),
+            "8".to_string(),
+        ];
+        assert_eq!(
+            superseded_candidates("0", &drift),
+            vec!["5".to_string(), "8".to_string()]
+        );
+        assert_eq!(
+            superseded_candidates("9", &["0".to_string(), "5".to_string()]),
+            vec!["0".to_string(), "5".to_string()]
+        );
+        assert!(superseded_candidates("0", &["0".to_string()]).is_empty());
     }
 
     #[test]

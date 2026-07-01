@@ -570,7 +570,6 @@ dependencies = [
  "agent-doc-workflow",
  "agent-doc-workflow-io",
  "agent-kit",
- "alacritty_terminal",
  "anyhow",
  "base64 0.22.1",
  "clap",
@@ -824,10 +823,13 @@ dependencies = [
 name = "agent-doc-supervisor-io"
 version = "0.34.66"
 dependencies = [
+ "agent-doc-config",
+ "agent-doc-frontmatter",
  "agent-doc-fs",
  "agent-doc-hash",
  "agent-doc-supervisor",
  "anyhow",
+ "indexmap",
  "libc",
  "serde_json",
  "tempfile",
@@ -838,6 +840,7 @@ name = "agent-doc-supervisor-process"
 version = "0.34.66"
 dependencies = [
  "agent-doc-supervisor",
+ "alacritty_terminal",
  "anyhow",
  "libc",
  "portable-pty",

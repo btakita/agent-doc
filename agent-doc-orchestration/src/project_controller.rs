@@ -4,6 +4,9 @@
 //! generation changes, lifecycle reports, and routed dispatch acceptance.
 //! `sessions.json` and tmux state remain projections and layout inputs.
 
+use agent_doc_controller::dispatch::{
+    ControllerDispatchProofScope, ControllerDispatchReceipt, ControllerDispatchResultStatus,
+};
 use agent_doc_controller::paths::{
     ACTOR_PROJECTION_FILE, LAYOUT_PROJECTION_FILE, actor_projection_path, launch_lock_path,
     layout_projection_path, socket_path, state_path,
@@ -625,60 +628,6 @@ pub struct DispatchRequest {
     pub generation: u64,
     pub command_kind: String,
     pub diagnostic_payload: String,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ControllerDispatchResultStatus {
-    Rejected,
-    Accepted,
-    Queued,
-    Running,
-    Completed,
-    Blocked,
-}
-
-impl ControllerDispatchResultStatus {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Rejected => "rejected",
-            Self::Accepted => "accepted",
-            Self::Queued => "queued",
-            Self::Running => "running",
-            Self::Completed => "completed",
-            Self::Blocked => "blocked",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ControllerDispatchProofScope {
-    AcceptedOnly,
-    DispatchStart,
-}
-
-impl ControllerDispatchProofScope {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::AcceptedOnly => "accepted_only",
-            Self::DispatchStart => "dispatch_start",
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ControllerDispatchReceipt {
-    pub receipt_id: u64,
-    pub command_kind: String,
-    pub status: ControllerDispatchResultStatus,
-    pub stage: String,
-    #[serde(default)]
-    pub accepted_stage: Option<String>,
-    #[serde(default)]
-    pub failed_stage: Option<String>,
-    pub proof_scope: ControllerDispatchProofScope,
-    pub dispatch_start_proven: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

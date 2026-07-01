@@ -1,9 +1,9 @@
-//! # Module: supervisor::env
+//! # Module: env
 //!
 //! Resolves the complete environment for a supervised child process. Sits
-//! **above** [`crate::supervisor::pty`] — `pty.rs` takes a pre-resolved
+//! above the PTY spawn boundary: process spawning takes a pre-resolved
 //! `HashMap<String, String>` and never reaches into the parent env, so every
-//! restart under `state.rs` will reuse the exact same map that `start.rs`
+//! restart can reuse the exact same map that startup
 //! computed at supervisor startup.
 //!
 //! ## Spec
@@ -14,7 +14,7 @@
 //! - [`EnvSpec::from_frontmatter`] reads the two frontmatter fields
 //!   (`agent_doc_env_inherit`, default `true`; and `env`) and returns the spec.
 //! - [`EnvSpec::resolve`] walks: capture base env → apply overrides in order
-//!   → return the final `HashMap` for [`PtySpawnConfig::env`].
+//!   → return the final `HashMap` for the PTY spawn config's env.
 //! - Set values are shell-expanded via [`agent_doc_config::env::expand_values`] so
 //!   `$(passage ...)` / `$VAR` / `${HOME}/x` work the way a shell user expects.
 //!   Expansion runs exactly once per `resolve()` call.
@@ -26,10 +26,10 @@
 //!   every `state.rs` restart. A parent-env mutation mid-run **must not**
 //!   silently reshape the child — that is the primary reason the resolver
 //!   lives here and not inside `pty.rs`.
-//! - **`pty.rs` invariant preserved.** `pty.rs` still calls `env_clear()` and
-//!   sets everything from `cfg.env`; the `env_is_not_inherited_from_parent`
-//!   test stays load-bearing. This module is where "inherit parent env" is
-//!   deliberately re-introduced, under the control of a frontmatter flag.
+//! - **PTY spawn invariant preserved.** Process spawning still clears the
+//!   inherited env and sets everything from the resolved map. This module is
+//!   where "inherit parent env" is deliberately re-introduced, under the
+//!   control of a frontmatter flag.
 //! - **Unset wins over set.** Document order: the last operation targeting a
 //!   key is what the child sees. A later `KEY: null` removes an earlier
 //!   `KEY: value`. (In practice YAML maps cannot have duplicate keys, so this
@@ -60,8 +60,7 @@ use agent_doc_frontmatter::frontmatter::Frontmatter;
 ///
 /// Constructed once per supervisor lifetime — typically via
 /// [`EnvSpec::from_frontmatter`] at startup — and then consumed by
-/// [`EnvSpec::resolve`] to produce the `HashMap` fed to
-/// [`crate::supervisor::pty::PtySpawnConfig::env`].
+/// [`EnvSpec::resolve`] to produce the `HashMap` fed to process spawning.
 #[derive(Debug, Clone)]
 pub struct EnvSpec {
     /// Whether to start from `std::env::vars()` (the parent shell) before
@@ -95,8 +94,7 @@ impl EnvSpec {
         }
     }
 
-    /// Resolve to the final `HashMap<String, String>` passed to
-    /// [`crate::supervisor::pty::PtySpawnConfig::env`].
+    /// Resolve to the final `HashMap<String, String>` passed to process spawning.
     ///
     /// This is the **one** call that reads `std::env::vars()`. Callers should
     /// invoke it once at supervisor startup and reuse the returned map across
@@ -141,10 +139,13 @@ impl Default for EnvSpec {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     /// Guard to set and restore a parent env var within a single test.
     /// Tests share process state, so mutations are serialized through the
-    /// crate-wide test env lock even when callers pick unique variable names.
+    /// module-wide test env lock even when callers pick unique variable names.
     struct EnvGuard {
         key: &'static str,
         prior: Option<String>,
@@ -153,7 +154,7 @@ mod tests {
         fn set(key: &'static str, value: &str) -> Self {
             let prior = std::env::var(key).ok();
             // SAFETY: test-only process-local env mutation, serialized by
-            // the caller's test_support::env_lock and restored in Drop.
+            // the caller's ENV_LOCK guard and restored in Drop.
             unsafe {
                 std::env::set_var(key, value);
             }
@@ -218,7 +219,7 @@ mod tests {
 
     #[test]
     fn resolve_inherit_plus_overlay() {
-        let _env_lock = crate::test_support::env_lock();
+        let _env_lock = ENV_LOCK.lock().unwrap();
         let _g_keep = EnvGuard::set("AGENT_DOC_ENV_TEST_KEEP", "parent_value");
         let _g_over = EnvGuard::set("AGENT_DOC_ENV_TEST_OVERRIDE", "parent");
 
@@ -241,7 +242,7 @@ mod tests {
 
     #[test]
     fn resolve_unset_removes_parent_key() {
-        let _env_lock = crate::test_support::env_lock();
+        let _env_lock = ENV_LOCK.lock().unwrap();
         let _g = EnvGuard::set("AGENT_DOC_ENV_TEST_DROP", "parent");
         let spec = EnvSpec {
             inherit_parent: true,
@@ -256,7 +257,7 @@ mod tests {
 
     #[test]
     fn resolve_expansion_uses_parent_env() {
-        let _env_lock = crate::test_support::env_lock();
+        let _env_lock = ENV_LOCK.lock().unwrap();
         let _g = EnvGuard::set("AGENT_DOC_ENV_TEST_BASE", "/parent/base");
         let spec = EnvSpec {
             inherit_parent: true,
@@ -273,7 +274,7 @@ mod tests {
     #[test]
     fn resolve_sealed_drops_parent() {
         // Pick a key that is effectively always present in any test env.
-        let _env_lock = crate::test_support::env_lock();
+        let _env_lock = ENV_LOCK.lock().unwrap();
         let _g = EnvGuard::set("AGENT_DOC_ENV_TEST_SEAL_WITNESS", "present");
         let spec = EnvSpec {
             inherit_parent: false,
@@ -293,7 +294,7 @@ mod tests {
         // Demonstrate that once resolve() has returned, the caller's map is
         // frozen — later parent-env mutations do not leak into it. This is
         // why state.rs should cache the resolved map across restarts.
-        let _env_lock = crate::test_support::env_lock();
+        let _env_lock = ENV_LOCK.lock().unwrap();
         let _env_guard = EnvGuard::unset("AGENT_DOC_ENV_TEST_POSTRESOLVE");
         let spec = EnvSpec {
             inherit_parent: true,

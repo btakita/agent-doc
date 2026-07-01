@@ -8,6 +8,7 @@ use agent_doc_supervisor::{
     lifecycle::{BootResumeAction, boot_resume_action, start_session_retryable_during_recycle},
     run_loop::{PostChildExitAction, child_launch_plan, post_child_exit_action},
 };
+use agent_doc_supervisor_io::env::EnvSpec;
 use agent_doc_supervisor_process::{
     REEXEC_CHILD_PID_ENV, REEXEC_MASTER_FD_ENV, ReexecState, resize,
 };

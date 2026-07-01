@@ -30,7 +30,9 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   file IO, cleanup, and ops-log reporting. Deferred operator-clear marker
   payload construction and JSON parsing now lives with queue preemption policy in
   `agent-doc-queue`, while orchestration keeps marker path resolution,
-  read/write/remove effects, and idle-watch delivery.
+  read/write/remove effects, and idle-watch delivery. Editor column split
+  classification now lives in `agent-doc-tmux`; route orchestration only passes
+  file/column facts into the focused tmux layout policy.
 
 - **Pure helper layer extracted from orchestration.** Exchange shrink/ack retry
   and prompt-dedupe helpers now live in `agent-doc-element-exchange`; preflight

@@ -219,6 +219,7 @@ use agent_doc_controller::dispatch::{
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_harness::HarnessConfig;
 use agent_doc_hash::short_content_hash;
+use agent_doc_tmux::is_first_column;
 use agent_doc_turn::closeout_recovery::{
     CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput,
     short_recovery_command_from_recommendation,
@@ -1825,22 +1826,6 @@ fn is_agent_process(tmux: &Tmux, pane_id: &str, harness: &HarnessConfig) -> bool
             harness.is_agent_process_name(&cmd)
         }
         _ => true, // can't inspect → treat conservatively
-    }
-}
-
-/// Determine if the file is in the first column of the editor layout.
-/// When true, the new pane should be split BEFORE (left of) the existing pane.
-/// Returns false when col_args is empty (no layout context — default to split right).
-pub fn is_first_column(file: &Path, col_args: &[String]) -> bool {
-    if col_args.len() < 2 {
-        return false;
-    }
-    let file_str = file.to_string_lossy();
-    // Check if file appears in the first --col arg
-    if let Some(first_col) = col_args.first() {
-        first_col.split(',').any(|f| f.trim() == file_str.as_ref())
-    } else {
-        false
     }
 }
 
@@ -6105,45 +6090,6 @@ mod tests {
             err.to_string().contains("refusing cross-file dispatch"),
             "error should explain the rejected cross-file dispatch: {err}"
         );
-    }
-    #[test]
-    fn is_first_column_empty_cols() {
-        let file = Path::new("tasks/agent-doc.md");
-        assert!(!is_first_column(file, &[]));
-    }
-    #[test]
-    fn is_first_column_single_col() {
-        let file = Path::new("tasks/agent-doc.md");
-        let cols = vec!["tasks/agent-doc.md".to_string()];
-        // Single column — no need to split before
-        assert!(!is_first_column(file, &cols));
-    }
-    #[test]
-    fn is_first_column_in_first_col() {
-        let file = Path::new("tasks/agent-doc.md");
-        let cols = vec![
-            "tasks/agent-doc.md".to_string(),
-            "tasks/email.md".to_string(),
-        ];
-        assert!(is_first_column(file, &cols));
-    }
-    #[test]
-    fn is_first_column_in_second_col() {
-        let file = Path::new("tasks/email.md");
-        let cols = vec![
-            "tasks/agent-doc.md".to_string(),
-            "tasks/email.md".to_string(),
-        ];
-        assert!(!is_first_column(file, &cols));
-    }
-    #[test]
-    fn is_first_column_comma_separated() {
-        let file = Path::new("tasks/agent-doc.md");
-        let cols = vec![
-            "tasks/agent-doc.md,tasks/corky.md".to_string(),
-            "tasks/email.md".to_string(),
-        ];
-        assert!(is_first_column(file, &cols));
     }
     #[test]
     fn detects_unicode_prompt() {

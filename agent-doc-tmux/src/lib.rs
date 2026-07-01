@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     fmt,
+    path::Path,
 };
 
 pub const TMUX_PANE_GEOMETRY_FORMAT: &str =
@@ -88,6 +89,21 @@ pub fn decide_focus_pane(candidate: &str, live_owner: Option<&str>) -> FocusPane
         }
         _ => FocusPaneDecision::UseCandidate,
     }
+}
+
+/// Determine if the file is in the first column of the editor layout.
+///
+/// When true, a new agent pane should be split before the existing pane. Returns
+/// false when there are fewer than two columns, because there is no meaningful
+/// split-before decision to make.
+pub fn is_first_column(file: &Path, col_args: &[String]) -> bool {
+    if col_args.len() < 2 {
+        return false;
+    }
+    let file_str = file.to_string_lossy();
+    col_args
+        .first()
+        .is_some_and(|first_col| first_col.split(',').any(|f| f.trim() == file_str.as_ref()))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -862,6 +878,33 @@ mod tests {
             decide_focus_pane("%36", Some("")),
             FocusPaneDecision::UseCandidate
         );
+    }
+
+    #[test]
+    fn first_column_requires_layout_context() {
+        let file = Path::new("tasks/agent-doc.md");
+        assert!(!is_first_column(file, &[]));
+        assert!(!is_first_column(file, &["tasks/agent-doc.md".to_string()]));
+    }
+
+    #[test]
+    fn first_column_detects_first_and_second_columns() {
+        let cols = vec![
+            "tasks/agent-doc.md".to_string(),
+            "tasks/email.md".to_string(),
+        ];
+        assert!(is_first_column(Path::new("tasks/agent-doc.md"), &cols));
+        assert!(!is_first_column(Path::new("tasks/email.md"), &cols));
+    }
+
+    #[test]
+    fn first_column_accepts_comma_separated_entries() {
+        let cols = vec![
+            "tasks/agent-doc.md,tasks/corky.md".to_string(),
+            "tasks/email.md".to_string(),
+        ];
+        assert!(is_first_column(Path::new("tasks/agent-doc.md"), &cols));
+        assert!(is_first_column(Path::new("tasks/corky.md"), &cols));
     }
 
     #[test]

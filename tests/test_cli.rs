@@ -10389,6 +10389,29 @@ fn test_agent_doc_tmux_owns_focus_pane_decision() {
 }
 
 #[test]
+fn test_agent_doc_tmux_owns_editor_column_split_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let tmux_source = fs::read_to_string(manifest_dir.join("agent-doc-tmux/src/lib.rs")).unwrap();
+    assert!(
+        tmux_source.contains("pub fn is_first_column("),
+        "agent-doc-tmux should own editor column split policy"
+    );
+
+    let route_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+    for forbidden in ["pub fn is_first_column(", "fn is_first_column("] {
+        assert!(
+            !route_source.contains(forbidden),
+            "route.rs must not re-own editor column split policy: {forbidden}"
+        );
+    }
+    assert!(
+        route_source.contains("use agent_doc_tmux::is_first_column;"),
+        "route.rs should import editor column split policy from agent-doc-tmux directly"
+    );
+}
+
+#[test]
 fn test_agent_doc_tmux_owns_destructive_repair_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let tmux_manifest = fs::read_to_string(manifest_dir.join("agent-doc-tmux/Cargo.toml")).unwrap();

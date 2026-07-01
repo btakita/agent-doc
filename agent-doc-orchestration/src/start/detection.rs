@@ -87,7 +87,7 @@ pub(crate) fn idle_queue_prompt_visible(
     // Enter never submits), and each idle tick stacks another un-submitted copy
     // (the operator-observed ~7 duplicate triggers with no submit). Before the
     // weak pty-buffer signal is trusted off the `Ready` fast path, re-verify
-    // against a *fresh* tmux capture using the same `ready_prompt_candidate`
+    // against a *fresh* tmux capture using the same `agent_doc_harness::ready_prompt_candidate`
     // dispatch-ready predicate the route gate uses. A fresh capture that cannot
     // prove a submit-ready prompt fails closed (defers the drain this tick); a
     // failed/absent capture (`None`) falls back to the pty-buffer signal so an
@@ -124,7 +124,7 @@ pub(crate) fn ready_busy_blocker_reason(
 /// [`supervisor_pane_has_busy_cue`], not the edge-triggered pty `terminal_screen`
 /// buffer that can miss a restarted composer's redraw) and reports whether it
 /// proves a harness dispatch-ready prompt via the same
-/// [`crate::route::ready_prompt_candidate`] predicate the route /
+/// [`agent_doc_harness::ready_prompt_candidate`] predicate the route /
 /// cold-start gates use (latest prompt is `is_dispatch_ready_prompt_line` — a
 /// genuinely empty, submit-ready composer — with no busy cue). `Some(true)` =
 /// submit-ready; `Some(false)` = a prompt glyph but not yet submit-ready (still
@@ -140,7 +140,7 @@ pub(crate) fn supervisor_pane_dispatch_ready(
         .or_else(|| shared.actor_runtime.as_ref().map(|r| r.pane_id.clone()))?;
     let tmux = tmux_router::Tmux::default_server();
     let content = crate::sessions::capture_pane(&tmux, &pane).ok()?;
-    Some(crate::route::ready_prompt_candidate(&content, harness).is_some())
+    Some(agent_doc_harness::ready_prompt_candidate(&content, harness).is_some())
 }
 
 /// Whether the authoritative in-memory actor state is `busy` or `starting` —

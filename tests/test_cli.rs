@@ -8415,9 +8415,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     assert!(
         route_startup_source.contains(
             "use agent_doc_controller::dispatch::{FreshStartAckOutcome, fresh_start_ack_outcome};"
-        ) && route_startup_source.contains(
-            "fresh_start_ack_outcome(false, ready_prompt_candidate(&content, harness).is_some())"
-        ),
+        ) && route_startup_source
+            .contains("agent_doc_harness::ready_prompt_candidate(&content, harness).is_some()"),
         "route/startup.rs should adapt pane prompt detection into focused fresh-start ack policy"
     );
     for forbidden_snippet in [

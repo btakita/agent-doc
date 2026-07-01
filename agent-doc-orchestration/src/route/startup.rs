@@ -789,7 +789,7 @@ pub(crate) fn wait_for_agent_ready_outcome(
                 last_blocker = None;
             }
 
-            match ready_prompt_candidate(&content, harness) {
+            match agent_doc_harness::ready_prompt_candidate(&content, harness) {
                 Some(line) => {
                     if last_ready_line.as_deref() == Some(line.as_str()) {
                         ready_streak += 1;
@@ -834,38 +834,6 @@ pub(crate) fn wait_for_agent_ready_outcome(
     AgentReadyWaitOutcome::TimedOut
 }
 
-pub(crate) fn ready_prompt_candidate(content: &str, harness: &HarnessConfig) -> Option<String> {
-    let latest_dispatch_ready_prompt = harness
-        .last_prompt_candidate(content)
-        .filter(|line| harness.is_dispatch_ready_prompt_line(line));
-    if harness.binary == "claude" && latest_dispatch_ready_prompt.is_some() {
-        return latest_dispatch_ready_prompt;
-    }
-    if harness.has_busy_cue(content) {
-        return None;
-    }
-    if harness.binary == "opencode" && harness.is_idle_chrome_only_output(content) {
-        return Some("opencode idle status chrome".to_string());
-    }
-    // OpenCode and Codex can both render an idle composer as bottom status/footer
-    // chrome only after startup, clear, or redraw. Busy/protected states are
-    // filtered above by the harness busy cue and prompt-input classifiers.
-    if harness.binary == "codex" && harness.is_bottom_idle_chrome(content, 12) {
-        return latest_dispatch_ready_prompt
-            .or_else(|| Some("codex idle status chrome".to_string()));
-    }
-    if harness.binary == "opencode" && harness.is_bottom_idle_chrome(content, 12) {
-        return latest_dispatch_ready_prompt.or_else(|| Some("bottom idle chrome".to_string()));
-    }
-    if harness.binary == "codex"
-        && latest_dispatch_ready_prompt.is_some()
-        && harness.is_bottom_idle_chrome(content, 12)
-    {
-        return latest_dispatch_ready_prompt;
-    }
-    latest_dispatch_ready_prompt
-}
-
 /// (`#route-reaps-idle-fresh-start`) How a fresh start's first cycle resolved.
 ///
 /// A fresh start whose trigger was already proven dispatched can end three ways:
@@ -874,7 +842,7 @@ pub(crate) fn ready_prompt_candidate(content: &str, harness: &HarnessConfig) -> 
 /// cycle (empty/halted queue, `preflight` `no_changes`) which must be KEPT as a
 /// live idle session; or it produced no cycle and the pane is not dispatch-ready
 /// — a genuine startup miss that must be REAPED. Keying the idle decision on the
-/// already-tested [`ready_prompt_candidate`] discriminator avoids reaping a
+/// already-tested [`agent_doc_harness::ready_prompt_candidate`] discriminator avoids reaping a
 /// healthy session just because it had nothing to do ("I cannot start
 /// lazily-rs.md, killed immediately").
 /// Best-effort: capture `pane` and report whether a no-cycle fresh start should
@@ -888,7 +856,10 @@ pub(crate) fn fresh_start_pane_idle_ready(
 ) -> bool {
     match sessions::capture_pane(tmux, pane) {
         Ok(content) => matches!(
-            fresh_start_ack_outcome(false, ready_prompt_candidate(&content, harness).is_some()),
+            fresh_start_ack_outcome(
+                false,
+                agent_doc_harness::ready_prompt_candidate(&content, harness).is_some(),
+            ),
             FreshStartAckOutcome::IdleNoOpKeep
         ),
         Err(_) => false,
@@ -1531,7 +1502,7 @@ Starting codex...
 gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
 ";
         assert!(
-            ready_prompt_candidate(content, &harness).is_some(),
+            agent_doc_harness::ready_prompt_candidate(content, &harness).is_some(),
             "known idle Codex placeholder suggestions must count as a ready dispatch target"
         );
     }
@@ -1544,7 +1515,7 @@ Starting codex...
 gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
 ";
         assert!(
-            ready_prompt_candidate(content, &harness).is_some(),
+            agent_doc_harness::ready_prompt_candidate(content, &harness).is_some(),
             "structurally-valid Codex idle placeholder suggestions must count as ready"
         );
     }
@@ -1555,7 +1526,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
 gpt-5.5 high · ~/work/btakita/agent-loop · Context 70% used
 ";
         assert!(
-            ready_prompt_candidate(content, &harness).is_some(),
+            agent_doc_harness::ready_prompt_candidate(content, &harness).is_some(),
             "a bottom Codex status/footer line is idle dispatch-ready chrome when no busy cue or draft is visible"
         );
     }
@@ -1566,7 +1537,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 70% used
 gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% use
 ";
         assert!(
-            ready_prompt_candidate(content, &harness).is_some(),
+            agent_doc_harness::ready_prompt_candidate(content, &harness).is_some(),
             "Codex route startup readiness must accept the shorter `Context N% use` status footer"
         );
     }
@@ -1578,7 +1549,7 @@ Waiting for background terminal (esc to interrupt)
 gpt-5.5 high · ~/work/btakita/agent-loop · Context 70% used
 ";
         assert!(
-            ready_prompt_candidate(content, &harness).is_none(),
+            agent_doc_harness::ready_prompt_candidate(content, &harness).is_none(),
             "Codex footer-only idle recovery must still reject active-turn busy cues"
         );
     }
@@ -1592,7 +1563,7 @@ Starting codex...
 › [start] managed codex capability proof: codex_capability_proof status=proven network=proven network_probe=child_dns_https ssh_targets=0 writable_roots=0 timings_ms=network_host_dns:8,network_child:9806,ssh:not_required,writable_launcher:not_required,writable_child:not_required,total:9815
 ";
         assert!(
-            ready_prompt_candidate(content, &harness).is_none(),
+            agent_doc_harness::ready_prompt_candidate(content, &harness).is_none(),
             "Codex hook-review chrome requires operator approval before route can dispatch"
         );
     }
@@ -1613,7 +1584,7 @@ Starting codex...
   ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents
 ";
         assert!(
-            ready_prompt_candidate(content, &harness).is_some(),
+            agent_doc_harness::ready_prompt_candidate(content, &harness).is_some(),
             "a later Claude dispatch-ready footer should supersede stale busy scrollback"
         );
     }
@@ -1627,7 +1598,7 @@ Starting codex...
   ⏵⏵ bypass permissions on · 1 shell
 ";
         assert!(
-            ready_prompt_candidate(content, &harness).is_none(),
+            agent_doc_harness::ready_prompt_candidate(content, &harness).is_none(),
             "an active Claude turn must remain blocked when the latest footer is not dispatch-ready"
         );
     }
@@ -1638,7 +1609,7 @@ Starting codex...
 zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
 ";
         assert!(
-            ready_prompt_candidate(content, &harness).is_some(),
+            agent_doc_harness::ready_prompt_candidate(content, &harness).is_some(),
             "OpenCode can render an idle composer as status chrome with proof output kept out of the pane"
         );
     }
@@ -1657,7 +1628,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
   ~/work/btakita/agent-loop:main                                                                                                                                                                                                       1.14.48
 ";
         assert!(
-            ready_prompt_candidate(content, &harness).is_some(),
+            agent_doc_harness::ready_prompt_candidate(content, &harness).is_some(),
             "OpenCode 1.14 can render the idle composer as splash chrome without a prompt glyph"
         );
     }
@@ -3451,7 +3422,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let ready_output =
             wait_for_pane_contains(&iso, &actor_pane, "Context", Duration::from_secs(3));
         assert!(
-            ready_prompt_candidate(&ready_output, &HarnessConfig::codex()).is_some(),
+            agent_doc_harness::ready_prompt_candidate(&ready_output, &HarnessConfig::codex())
+                .is_some(),
             "actor pane should show a Codex dispatch-ready prompt before the ready wait: {ready_output}"
         );
 
@@ -4025,7 +3997,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let ready = wait_for_agent_ready(&iso, &pane, std::time::Duration::from_secs(10), &harness);
         let content = sessions::capture_pane(&iso, &pane).unwrap_or_default();
         assert!(
-            ready && ready_prompt_candidate(&content, &harness).is_some(),
+            ready && agent_doc_harness::ready_prompt_candidate(&content, &harness).is_some(),
             "should detect ❯ in pane content, got: {}",
             content
         );

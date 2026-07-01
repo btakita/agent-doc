@@ -376,7 +376,7 @@ pub(crate) fn auto_start_dispatch_ready_block(
     // let the send proceed.
     let pane_shows_dispatch_ready_prompt = sessions::capture_pane(tmux, pane)
         .ok()
-        .and_then(|content| super::startup::ready_prompt_candidate(&content, harness))
+        .and_then(|content| agent_doc_harness::ready_prompt_candidate(&content, harness))
         .is_some();
     if pane_shows_dispatch_ready_prompt {
         return None;

@@ -259,7 +259,7 @@ pub(crate) fn promote_starting_authoritative_actor_if_dispatch_ready(
     let pane_ready = tmux
         .capture_pane(&record.pane_id, Some(80))
         .ok()
-        .map(|content| ready_prompt_candidate(&content, harness).is_some())
+        .map(|content| agent_doc_harness::ready_prompt_candidate(&content, harness).is_some())
         .unwrap_or(false);
     if !pane_ready {
         return (record, runtime);
@@ -409,7 +409,7 @@ pub(crate) fn current_generation_ready_prompt_proven(
     if tmux
         .capture_pane(&target.record.pane_id, Some(80))
         .ok()
-        .map(|content| ready_prompt_candidate(&content, harness).is_some())
+        .map(|content| agent_doc_harness::ready_prompt_candidate(&content, harness).is_some())
         .unwrap_or(false)
     {
         return true;

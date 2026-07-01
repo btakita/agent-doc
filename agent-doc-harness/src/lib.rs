@@ -677,6 +677,37 @@ impl HarnessConfig {
     }
 }
 
+/// Return the latest captured prompt/chrome segment that proves the harness can
+/// accept routed input.
+pub fn ready_prompt_candidate(content: &str, harness: &HarnessConfig) -> Option<String> {
+    let latest_dispatch_ready_prompt = harness
+        .last_prompt_candidate(content)
+        .filter(|line| harness.is_dispatch_ready_prompt_line(line));
+    if harness.binary == "claude" && latest_dispatch_ready_prompt.is_some() {
+        return latest_dispatch_ready_prompt;
+    }
+    if harness.has_busy_cue(content) {
+        return None;
+    }
+    if harness.binary == "opencode" && harness.is_idle_chrome_only_output(content) {
+        return Some("opencode idle status chrome".to_string());
+    }
+    if harness.binary == "codex" && harness.is_bottom_idle_chrome(content, 12) {
+        return latest_dispatch_ready_prompt
+            .or_else(|| Some("codex idle status chrome".to_string()));
+    }
+    if harness.binary == "opencode" && harness.is_bottom_idle_chrome(content, 12) {
+        return latest_dispatch_ready_prompt.or_else(|| Some("bottom idle chrome".to_string()));
+    }
+    if harness.binary == "codex"
+        && latest_dispatch_ready_prompt.is_some()
+        && harness.is_bottom_idle_chrome(content, 12)
+    {
+        return latest_dispatch_ready_prompt;
+    }
+    latest_dispatch_ready_prompt
+}
+
 fn is_opencode_help_screen(output: &str) -> bool {
     let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(output);
     let subcommand_lines = stripped
@@ -1735,6 +1766,53 @@ Working (45s - esc to interrupt)
         assert!(
             !h.is_bottom_idle_chrome(output, 12),
             "active Codex turn must fail idle detection"
+        );
+    }
+
+    #[test]
+    fn ready_prompt_candidate_accepts_codex_bottom_idle_chrome() {
+        let h = HarnessConfig::codex();
+        let output = "\
+Previous turn output
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 45% used
+";
+
+        assert_eq!(
+            ready_prompt_candidate(output, &h),
+            Some("codex idle status chrome".to_string())
+        );
+    }
+
+    #[test]
+    fn ready_prompt_candidate_rejects_codex_busy_footer() {
+        let h = HarnessConfig::codex();
+        let output = "\
+Working (12s - esc to interrupt)
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 45% used
+";
+
+        assert_eq!(ready_prompt_candidate(output, &h), None);
+    }
+
+    #[test]
+    fn ready_prompt_candidate_accepts_opencode_idle_splash() {
+        let h = HarnessConfig::opencode();
+        let output = "\
+▄
+▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▄ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀
+┃
+┃  Ask anything... \"What is the tech stack of this project?\"
+┃
+┃  Build · GLM-5.1 Z.AI Coding Plan
+╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+tab agents  ctrl+p commands
+● Tip Toggle username display in chat via command palette (Ctrl+P)
+~/work/btakita/agent-loop:main                                                                                                                               1.14.48
+";
+
+        assert_eq!(
+            ready_prompt_candidate(output, &h),
+            Some("opencode idle status chrome".to_string())
         );
     }
 

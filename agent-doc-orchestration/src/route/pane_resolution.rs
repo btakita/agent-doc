@@ -3368,7 +3368,8 @@ mod tests {
             "fixture command should execute before split setup: {ready_output}"
         );
         assert!(
-            ready_prompt_candidate(&ready_output, &HarnessConfig::codex()).is_some(),
+            agent_doc_harness::ready_prompt_candidate(&ready_output, &HarnessConfig::codex())
+                .is_some(),
             "fixture should show a Codex dispatch-ready prompt before split setup: {ready_output}"
         );
         let sibling_one = iso.split_window(&actor_pane, dir.path(), "-dh").unwrap();

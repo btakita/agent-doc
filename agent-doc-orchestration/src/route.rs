@@ -1002,7 +1002,7 @@ fn opencode_pane_state_changed_from_idle(
     {
         return false;
     }
-    if ready_prompt_candidate(current_content, harness).is_some()
+    if agent_doc_harness::ready_prompt_candidate(current_content, harness).is_some()
         || harness.is_idle_chrome_only_output(current_content)
     {
         return false;
@@ -2946,7 +2946,7 @@ fn wait_for_authoritative_actor_ready(
         // Diagnostic: capture the pane content at timeout so we can analyze
         // why ready_prompt_candidate never matched.
         if let Ok(content) = tmux.capture_pane(&initial.record.pane_id, Some(80)) {
-            let candidate = ready_prompt_candidate(&content, harness);
+            let candidate = agent_doc_harness::ready_prompt_candidate(&content, harness);
             crate::ops_log::log_op(
                 file,
                 &format!(

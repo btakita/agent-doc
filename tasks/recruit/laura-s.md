@@ -100,13 +100,45 @@ Warm, no apology (cold inbound, nothing owed on timing), from mild scarcity. The
 - Built clean via `make PROFILE=law-school-admission-council` (no filter warnings).
 
 Want me to push these submodules, or refine either the draft tone or the resume emphasis first?
-<!-- agent:boundary:5b63922a -->
+
+### Re: CopilotKit added + draft revised (natural voice) — opus-4.8
+
+Both new queue items done and committed (item 1 was already complete last cycle).
+
+**Add CopilotKit** → `resume` `b9572f8`
+- Added to the **master** resume (`BrianTakita.md`), so it flows to every profile: the Confidential AI startup entry now notes an "agent-native copilot UI built on CopilotKit," and `CopilotKit` is in the Skills list.
+- **Bolded** in the LSAC profile (highlights + skills), plus added `Azure` to the profile skills since it's already in your master and matches their stack.
+- Rebuilt clean: `BrianTakita-law-school-admission-council.pdf` (43K), no warnings.
+
+**Revise the draft (remove AI tells, natural voice)** → `mail` `de0856b`
+- Removed every spaced em-dash (` — `) from the message; verified 0 remain.
+- Restructured the sentences into your natural professional voice rather than the em-dash-heavy cadence.
+- Wove in the CopilotKit / agent-native copilot experience, since it maps to their Copilot direction.
+
+Revised message:
+
+> Hi Laura,
+>
+> Thanks for reaching out. The Engineer Lead role caught my eye, especially the shift from Copilot into LLMs, RAG, and agentic workflows. That's the work I've been focused on lately. I've built an agentic document-editing system and a code-RAG engine (graph plus BM25 over SQLite), shipped an agent-native copilot UI on CopilotKit for a client, and led the real-time AI pipeline at Presence AI.
+>
+> Before we talk, a few things would help me gauge fit:
+> - Is the role fully remote, or is there an onsite or hybrid expectation near Newtown?
+> - What's the compensation range at the Engineer Lead level?
+> - The stack leans Azure, Cosmos DB, and Oracle. My recent work is Rust, TypeScript, and Python on Postgres and SQLite, so I'd want to walk through how that carries over.
+>
+> Happy to set up a call. What does your calendar look like next week?
+>
+> Best,
+> Brian
+
+Note: I added CopilotKit to the master resume based on your note that the experience is with the confidential ("Stealth") client. If that attribution isn't right, tell me and I'll move or reword it. Want me to push the submodules now?
+<!-- agent:boundary:d7238986 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- 🚧 DRaft a linkedin reply. Build a resume for this role.
+- ~~DRaft a linkedin reply. Build a resume for this role.~~ — auto-struck: answered this cycle (#ftstrike)
 - They use MS Copilot. https://careers-lsac.icims.com/jobs/1736/engineer-lead---assessments-applications/job?mobile=false&width=1455&height=500&bga=true&needsRedirect=false&jan1offset=-300&jun1offset=-240 mentions CopilotKit experience with the Stealth Company. Add CopilotKit.
 - In the draft, remove the AI tells such as ` — `. Use my natural professional voice.
 <!-- /agent:queue -->

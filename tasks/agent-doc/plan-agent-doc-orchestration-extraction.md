@@ -930,6 +930,14 @@ should be deleted during extraction.
 - Tmux layout policy gained the editor-column split classifier:
   `agent-doc-tmux` now owns `is_first_column`, while route orchestration only
   forwards file/column facts to decide split-before placement.
+- Startup path normalization for narrowed pane cwd now belongs to `agent-doc-fs`:
+  `rewrite_start_path` rewrites super-root-relative document paths to cwd-relative
+  paths for submodule panes, while route startup only provides the resolved cwd
+  and original CLI path.
+- Supervisor reexec ladder policy now belongs to `agent-doc-supervisor`:
+  `build_reexec_candidates` owns the ordered, de-duplicated fresh/current/PATH
+  candidate list, while `start.rs` only gathers current-exe and installed-binary
+  facts before running the Unix `execve` adapter.
 
 ### Earlier closure finding
 

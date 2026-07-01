@@ -906,6 +906,10 @@ should be deleted during extraction.
   marker body and head hash/length derivation; orchestration only resolves the
   project-scoped marker path, reads/writes JSON, and removes stale sidecar files.
   Static guards reject moving the payload fields back into the storage adapter.
+- The transcript context adapter also shed one more parser seam:
+  `agent-doc-model-tier` now owns Codex `session_meta.cwd` JSONL parsing for
+  transcript/project matching. Orchestration still walks the Codex transcript
+  tree and reads candidate files, but it no longer owns the JSON shape.
 
 ### Earlier closure finding
 

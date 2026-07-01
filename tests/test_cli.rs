@@ -13552,6 +13552,7 @@ fn test_agent_doc_template_owns_response_materialization_policy() {
         "pub fn serialize_template_response",
         "pub fn response_materialization_probe",
         "pub fn response_materialization_probe_from_response",
+        "pub fn extract_response_headings_from_patches",
         "pub fn strip_partial_response_materialization_from_exchange",
         "pub fn materialized_template_response",
         "pub fn push_materialization_segment",
@@ -13613,6 +13614,17 @@ fn test_agent_doc_template_owns_response_materialization_policy() {
     assert!(
         write_materialize.contains("use agent_doc_template::response_materialization::{"),
         "write materialization adapters should import the focused response materialization API directly"
+    );
+
+    let write_ipc =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+    assert!(
+        !write_ipc.contains("fn extract_response_headings_from_patches("),
+        "write IPC must not re-own or facade response heading extraction"
+    );
+    assert!(
+        write_ipc.contains("extract_response_headings_from_patches"),
+        "write IPC should call the focused response heading extractor directly"
     );
 
     let focused_callers = [

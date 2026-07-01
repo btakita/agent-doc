@@ -146,6 +146,28 @@ pub fn response_text_has_heading(text: &str) -> bool {
     })
 }
 
+/// Extract `### Re:` response headings from a slice of template patch blocks.
+///
+/// Used by late-fallback gates to decide whether an "already committed"
+/// cycle's state belongs to the incoming response or to a different operation
+/// that landed mid-turn. Only the leading `### Re: ...` line of each patch's
+/// content is considered. Section bodies and subheadings are ignored so callers
+/// can compare against HEAD content without false positives from common
+/// boilerplate.
+pub fn extract_response_headings_from_patches(patches: &[PatchBlock]) -> Vec<String> {
+    let mut out = Vec::new();
+    for patch in patches {
+        for line in patch.content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("### Re:") {
+                out.push(trimmed.to_string());
+                break;
+            }
+        }
+    }
+    out
+}
+
 pub fn same_ignoring_trailing_newlines(left: &str, right: &str) -> bool {
     left.trim_end_matches('\n') == right.trim_end_matches('\n')
 }
@@ -429,6 +451,37 @@ mod tests {
             err.to_string()
                 .contains("strict template closeout response")
         );
+    }
+
+    #[test]
+    fn extract_response_headings_returns_re_lines_in_order() {
+        let patches = vec![
+            PatchBlock::new("exchange", "### Re: first topic - gpt-5\n\nDone.\n"),
+            PatchBlock::new("exchange", "### Re: second topic - gpt-5\n\nDone.\n"),
+            PatchBlock::new("status", "Just a status update.\n"),
+        ];
+
+        let headings = extract_response_headings_from_patches(&patches);
+
+        assert_eq!(
+            headings,
+            vec![
+                "### Re: first topic - gpt-5".to_string(),
+                "### Re: second topic - gpt-5".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn extract_response_headings_picks_first_re_per_patch() {
+        let patch = PatchBlock::new(
+            "exchange",
+            "### Re: outer - gpt-5\n\nbody mentioning ### Re: inner - gpt-5 elsewhere\n",
+        );
+
+        let headings = extract_response_headings_from_patches(&[patch]);
+
+        assert_eq!(headings, vec!["### Re: outer - gpt-5".to_string()]);
     }
 
     #[test]

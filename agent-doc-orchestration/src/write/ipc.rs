@@ -16,7 +16,9 @@ use agent_doc_element_exchange::{
     normalize_exchange_prefixes_for_targets, user_prompt_count_growth,
     verify_sidecar_normalization,
 };
-use agent_doc_template::response_materialization::response_materialization_probe_from_response;
+use agent_doc_template::response_materialization::{
+    extract_response_headings_from_patches, response_materialization_probe_from_response,
+};
 
 /// Read the ack-content sidecar file written by the plugin after apply.
 /// Keyed by `patch_id` (same UUID the binary embedded in the patch payload).
@@ -35,34 +37,6 @@ pub(crate) fn read_ack_content_sidecar(
         .with_context(|| format!("failed to read ack-content sidecar {sidecar:?}"))?;
     let _ = std::fs::remove_file(&sidecar);
     Ok(Some(content))
-}
-
-/// Remove any stale ipc-degraded marker left by older versions.
-/// Extract `### Re:` response headings from a slice of `PatchBlock`s.
-///
-/// Used by the late-fallback gate to decide whether an "already committed"
-/// cycle's state belongs to the incoming response (skip the apply) or to a
-/// different operation that landed mid-turn (rotate the cycle and apply).
-///
-/// Only the leading `### Re: ...` line of each patch's content is considered.
-/// Section bodies and subheadings are ignored so callers can compare against
-/// HEAD content via a substring check without false positives from common
-/// boilerplate. Returns the trimmed heading lines (without the trailing
-/// newline) in order of appearance.
-pub(crate) fn extract_response_headings_from_patches(
-    patches: &[agent_doc_template::PatchBlock],
-) -> Vec<String> {
-    let mut out = Vec::new();
-    for patch in patches {
-        for line in patch.content.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with("### Re:") {
-                out.push(trimmed.to_string());
-                break;
-            }
-        }
-    }
-    out
 }
 
 /// Return `true` when every `### Re:` response heading carried in the
@@ -5850,32 +5824,6 @@ mod core_tests {
                 && log.contains("dropped_queue_prompt_recorded"),
             "queue deletion must be ignored while queue additions still leave dropped-edit proof:\n{log}"
         );
-    }
-    #[test]
-    fn extract_response_headings_returns_re_lines_in_order() {
-        let patches = vec![
-            crate::test_support::patch_with_heading("### Re: first topic — opus-4-7"),
-            crate::test_support::patch_with_heading("### Re: second topic — opus-4-7"),
-            // Patch with no Re: heading should be skipped.
-            agent_doc_template::PatchBlock::new("status", "Just a status update.\n"),
-        ];
-        let headings = extract_response_headings_from_patches(&patches);
-        assert_eq!(
-            headings,
-            vec![
-                "### Re: first topic — opus-4-7".to_string(),
-                "### Re: second topic — opus-4-7".to_string(),
-            ]
-        );
-    }
-    #[test]
-    fn extract_response_headings_picks_first_re_per_patch() {
-        let patch = agent_doc_template::PatchBlock::new(
-            "exchange",
-            "### Re: outer — opus-4-7\n\nbody mentioning ### Re: inner — opus-4-7 elsewhere\n",
-        );
-        let headings = extract_response_headings_from_patches(&[patch]);
-        assert_eq!(headings, vec!["### Re: outer — opus-4-7".to_string()]);
     }
     #[test]
     fn patch_response_headings_already_in_head_true_when_no_patches() {

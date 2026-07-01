@@ -232,7 +232,15 @@ What happened:
 - A follow-up preflight found another stale `preflight_started` cycle, `cycle-1782882671249`, appended the IPC proof diagnostic for the already-applied socket response, and committed that repair as `2b93bd940`. The remaining issue was live-buffer exchange drift beyond the committed snapshot, which this finalize closes through the normal binary-owned path.
 
 No source files needed changes in this recovery pass. The prior verification evidence for `#suptmuxstaleverify` remains the authoritative completion proof, and this closeout preserves the diagnostic text instead of manually rewriting the session document.
-<!-- agent:boundary:c15949ba -->
+
+### Re: IPC queue binding recovery — gpt-5
+
+I fixed the queue/IP converger issue in `src/agent-doc`: continuation now requires an explicit `go`, route activation writes `go`, and marker/frontmatter control stays bound both ways. Removing `go` from `agent:queue` is treated as a stop and synchronizes frontmatter to `queue: stop`; frontmatter `queue: go/start/stop` also synchronizes back to the queue marker.
+
+The live interrupted closeout was recovered through preflight. It normalized this document to an inactive queue state with `queue_continuation_required=false`, converged the editor buffer over IPC, installed the rebuilt binary and cdylib with `make install`, and requested supervisor recycle/replacement so the stale process does not keep running pre-fix code.
+
+Verification: `make check` passed locally, including clippy, 6252 nextest tests, doctests, the ignored SimWorld budget test, and the Lean build. Latest GitHub CI run `28497705469` was still in progress when checked.
+<!-- agent:boundary:b2f0c098 -->
 <!-- /agent:exchange -->
 ## Queue
 

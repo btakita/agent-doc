@@ -1094,7 +1094,7 @@ pub fn run_stream(
                 plan.remaining
             );
         }
-        if let Err(err) = crate::owner_pane_wedge_counter::clear(file) {
+        if let Err(err) = agent_doc_owner_pane_io::clear(file) {
             eprintln!(
                 "[recguard-wedge] WARNING: failed to clear wedge counter for {}: {}",
                 file.display(),

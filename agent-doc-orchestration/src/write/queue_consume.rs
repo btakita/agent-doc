@@ -139,7 +139,7 @@ pub(crate) fn consume_queue_prompts_with_outcome(
     // #recguard-wedge-escape: a consumed head means the loop advanced, so reset
     // any owner-pane self-invocation wedge counter. Otherwise a future re-add of
     // the same head text could inherit a stale count and halt prematurely.
-    if let Err(err) = crate::owner_pane_wedge_counter::clear(file) {
+    if let Err(err) = agent_doc_owner_pane_io::clear(file) {
         eprintln!(
             "[recguard-wedge] WARNING: failed to clear wedge counter for {}: {}",
             file.display(),

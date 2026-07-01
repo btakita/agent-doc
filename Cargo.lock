@@ -49,6 +49,7 @@ dependencies = [
  "agent-doc-merge",
  "agent-doc-model-tier",
  "agent-doc-orchestration",
+ "agent-doc-owner-pane-io",
  "agent-doc-plugin-owner",
  "agent-doc-project-config-io",
  "agent-doc-prompt-context",
@@ -506,6 +507,7 @@ dependencies = [
  "agent-doc-memory",
  "agent-doc-merge",
  "agent-doc-model-tier",
+ "agent-doc-owner-pane-io",
  "agent-doc-plugin-owner",
  "agent-doc-project-config-io",
  "agent-doc-prompt-cache",
@@ -571,6 +573,17 @@ dependencies = [
  "uuid",
  "yrs",
  "zip",
+]
+
+[[package]]
+name = "agent-doc-owner-pane-io"
+version = "0.34.66"
+dependencies = [
+ "agent-doc-fs",
+ "agent-doc-turn",
+ "anyhow",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

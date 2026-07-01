@@ -638,7 +638,7 @@ fn run_once(
         // `agent:queue auto` dead-loop with no operator watching — it would re-fire forever. Break
         // it: halt the runaway auto-queue (`queue: stop`) so the loop stops
         // burning cycles, and hand the operator one clear recovery action.
-        let wedge_count = crate::owner_pane_wedge_counter::record(file, &continuation.head_prompt)?;
+        let wedge_count = agent_doc_owner_pane_io::record(file, &continuation.head_prompt)?;
         if owner_pane_wedge_threshold_reached(wedge_count) {
             if let Ok(content) = std::fs::read_to_string(file)
                 && let Ok(stopped) = frontmatter::merge_queue_state(&content, false)
@@ -650,7 +650,7 @@ fn run_once(
                     err
                 );
             }
-            crate::owner_pane_wedge_counter::clear(file)?;
+            agent_doc_owner_pane_io::clear(file)?;
             crate::ops_log::log_op(
                 file,
                 &format!(

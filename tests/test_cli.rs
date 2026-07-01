@@ -2264,6 +2264,7 @@ fn test_manifest_uses_publishable_dependency_contract() {
         "agent-doc-fs",
         "agent-doc-merge",
         "agent-doc-model-tier",
+        "agent-doc-owner-pane-io",
         "agent-doc-orchestration",
         "agent-doc-project-config-io",
         "agent-doc-prompt-contract",
@@ -5265,12 +5266,81 @@ fn test_agent_doc_turn_owns_owner_pane_recursion_diagnostics() {
         "agent-doc-turn should not add an owner_pane_recursion root facade"
     );
 
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let package_version = workspace["package"]["version"].as_str();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-owner-pane-io")),
+        "agent-doc-owner-pane-io must stay a first-class workspace crate"
+    );
+    let root_dependencies = workspace["dependencies"].as_table().unwrap();
+    let root_dependency = root_dependencies["agent-doc-owner-pane-io"]
+        .as_table()
+        .unwrap();
+    assert_eq!(
+        root_dependency.get("path").and_then(toml::Value::as_str),
+        Some("agent-doc-owner-pane-io")
+    );
+    assert_eq!(
+        root_dependency.get("version").and_then(toml::Value::as_str),
+        package_version
+    );
+
+    let owner_pane_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-owner-pane-io/Cargo.toml")).unwrap();
+    let owner_pane_io_crate: toml::Value = toml::from_str(&owner_pane_io_manifest).unwrap();
+    let owner_pane_io_dependencies = owner_pane_io_crate["dependencies"].as_table().unwrap();
+    assert!(
+        owner_pane_io_dependencies.contains_key("agent-doc-turn")
+            && owner_pane_io_dependencies.contains_key("agent-doc-fs"),
+        "owner-pane IO must depend on turn policy and filesystem path helpers directly"
+    );
+    for forbidden_dependency in ["agent-doc-core", "agent-doc-orchestration"] {
+        assert!(
+            !owner_pane_io_dependencies.contains_key(forbidden_dependency),
+            "owner-pane IO must not depend on core/orchestration facades: {forbidden_dependency}"
+        );
+    }
+
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    let orchestration_dependency = orchestration["dependencies"]["agent-doc-owner-pane-io"]
+        .as_table()
+        .unwrap();
+    assert_eq!(
+        orchestration_dependency
+            .get("path")
+            .and_then(toml::Value::as_str),
+        Some("../agent-doc-owner-pane-io")
+    );
+    assert_eq!(
+        orchestration_dependency
+            .get("version")
+            .and_then(toml::Value::as_str),
+        package_version
+    );
+
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/owner_pane_wedge_counter.rs")
+            .exists(),
+        "orchestration must not keep an owner_pane_wedge_counter source module facade"
+    );
+    assert!(
+        !orchestration_lib.contains("pub mod owner_pane_wedge_counter;"),
+        "orchestration must not expose an owner-pane wedge-counter IO facade"
+    );
+
     let run_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/run.rs")).unwrap();
-    let wedge_counter_source = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/owner_pane_wedge_counter.rs"),
-    )
-    .unwrap();
+    let owner_pane_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-owner-pane-io/src/lib.rs")).unwrap();
     assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/recguard_wedge.rs")
@@ -5300,8 +5370,8 @@ fn test_agent_doc_turn_owns_owner_pane_recursion_diagnostics() {
         "pub fn threshold_reached(",
     ] {
         assert!(
-            !wedge_counter_source.contains(forbidden),
-            "orchestration wedge-counter adapter must not re-own extracted owner-pane wedge policy: {forbidden}"
+            !owner_pane_io.contains(forbidden),
+            "owner-pane IO must not re-own extracted owner-pane wedge policy: {forbidden}"
         );
     }
     for required in [
@@ -5321,8 +5391,23 @@ fn test_agent_doc_turn_owns_owner_pane_recursion_diagnostics() {
     }
     for required in ["OwnerPaneWedgeRecord", "record_owner_pane_wedge_fire"] {
         assert!(
-            wedge_counter_source.contains(required),
-            "orchestration wedge-counter adapter should persist focused owner-pane wedge records directly: {required}"
+            owner_pane_io.contains(required),
+            "owner-pane IO should persist focused owner-pane wedge records directly: {required}"
+        );
+    }
+    for relative_path in [
+        "agent-doc-orchestration/src/run.rs",
+        "agent-doc-orchestration/src/write/queue_consume.rs",
+        "agent-doc-orchestration/src/write/run_entry.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
+        assert!(
+            source.contains("agent_doc_owner_pane_io::"),
+            "{relative_path} should call owner-pane IO directly"
+        );
+        assert!(
+            !source.contains("crate::owner_pane_wedge_counter"),
+            "{relative_path} must not call an orchestration owner-pane wedge-counter facade"
         );
     }
 }

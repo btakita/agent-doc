@@ -75,7 +75,6 @@ pub mod harness_prompt;
 pub mod hooks;
 pub mod lint_gate;
 pub mod memory_cmd;
-pub mod owner_pane_wedge_counter;
 pub mod preflight;
 pub mod project_controller;
 pub mod prompt;

@@ -19,6 +19,7 @@ members = [
     "agent-doc-git",
     "agent-doc-git-io",
     "agent-doc-model-tier",
+    "agent-doc-owner-pane-io",
     "agent-doc-ipc-protocol",
     "agent-doc-plugin-owner",
     "agent-doc-project-config-io",
@@ -121,6 +122,7 @@ agent-doc-markdown-ast = { path = "agent-doc-markdown-ast", version = "0.34.66" 
 agent-doc-memory = { path = "agent-doc-memory", version = "0.34.66" }
 agent-doc-merge = { path = "agent-doc-merge", version = "0.34.66" }
 agent-doc-model-tier = { path = "agent-doc-model-tier", version = "0.34.66" }
+agent-doc-owner-pane-io = { path = "agent-doc-owner-pane-io", version = "0.34.66" }
 agent-doc-orchestration = { path = "agent-doc-orchestration", version = "0.34.66" }
 agent-doc-plugin-owner = { path = "agent-doc-plugin-owner", version = "0.34.66" }
 agent-doc-project-config-io = { path = "agent-doc-project-config-io", version = "0.34.66" }

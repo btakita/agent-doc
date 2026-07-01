@@ -1,16 +1,16 @@
-//! # Module: owner_pane_wedge_counter
+//! Owner-pane wedge sidecar I/O.
 //!
-//! `#recguard-wedge-escape`: detect a *wedged* owner-pane self-invocation loop
-//! and break it.
+//! `#recguard-wedge-escape`: persist a small counter for a *wedged*
+//! owner-pane self-invocation loop and let orchestration break it.
 //!
-//! The recursive-direct-invocation guard ([`crate::run`]) correctly refuses to
-//! dispatch when `agent-doc <FILE>` runs inside the Codex pane that already owns
-//! the document (re-entering the pane would deadlock). The Stop-hook redirect
+//! The recursive-direct-invocation guard refuses to dispatch when
+//! `agent-doc <FILE>` runs inside the Codex pane that already owns the document
+//! because re-entering the pane would deadlock. The Stop-hook redirect
 //! (`#codex-self-reinvoke-prevent`, Option B) keeps the *end-of-turn*
 //! continuation in-pane, but a busy agent that re-invokes the CLI **mid-turn**
 //! still trips the guard. In a self-driving `agent:queue auto` loop with no
 //! operator watching, the same active queue head can trip the guard every cycle
-//! — the loop burns cycles re-invoking and failing without ever advancing.
+//! because the loop re-invokes and fails without ever advancing.
 //!
 //! This module tracks the count of *consecutive* self-invocation guard fires for
 //! the same head. A single transient self-invoke is normal; the same head

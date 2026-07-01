@@ -5,6 +5,7 @@
 
 pub mod claim_scaffold;
 pub mod commit_normalization;
+pub mod compact_archive;
 pub mod compact_projection;
 pub mod element_models;
 pub mod model_projection;

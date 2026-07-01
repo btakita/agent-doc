@@ -61,6 +61,33 @@ pub fn doc_stem(file: &Path) -> String {
         .to_string()
 }
 
+pub fn short_oid(value: Option<&str>) -> String {
+    value
+        .map(|oid| oid.chars().take(12).collect::<String>())
+        .filter(|oid| !oid.is_empty())
+        .unwrap_or_else(|| "<missing>".to_string())
+}
+
+pub fn parent_pointer_recovery_hint(file_display: &str) -> String {
+    format!(
+        "Use `agent-doc commit {file_display}` to finish the missing parent pointer commit, then re-run `agent-doc session-check {file_display}`."
+    )
+}
+
+pub fn parent_submodule_pointer_message(
+    relative_path: &str,
+    parent_head: Option<&str>,
+    submodule_head: &str,
+    file_display: &str,
+) -> String {
+    format!(
+        "parent submodule pointer is not committed for {relative_path} (parent HEAD {}, submodule HEAD {}). The response patchback crossed the submodule repo but not the parent commit boundary. {}",
+        short_oid(parent_head),
+        short_oid(Some(submodule_head)),
+        parent_pointer_recovery_hint(file_display)
+    )
+}
+
 /// Parse checkpoint tag lines into `RecoveryTag`s, newest-first.
 ///
 /// `tag_lines` is raw `git tag -l agent-doc/<stem>/*` output; `meta` resolves
@@ -114,8 +141,9 @@ fn render_git_streams(stderr: &[u8], stdout: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        doc_stem, is_index_lock_contention_text, parse_porcelain_path, parse_recovery_tags,
-        relative_to_root, render_git_streams,
+        doc_stem, is_index_lock_contention_text, parent_pointer_recovery_hint,
+        parent_submodule_pointer_message, parse_porcelain_path, parse_recovery_tags,
+        relative_to_root, render_git_streams, short_oid,
     };
     use std::path::{Path, PathBuf};
 
@@ -223,6 +251,30 @@ mod tests {
     fn doc_stem_uses_file_stem_or_doc_fallback() {
         assert_eq!(doc_stem(Path::new("tasks/plan.md")), "plan");
         assert_eq!(doc_stem(Path::new(".")), "doc");
+    }
+
+    #[test]
+    fn short_oid_truncates_and_labels_missing_values() {
+        assert_eq!(short_oid(Some("0123456789abcdef")), "0123456789ab");
+        assert_eq!(short_oid(Some("")), "<missing>");
+        assert_eq!(short_oid(None), "<missing>");
+    }
+
+    #[test]
+    fn parent_submodule_pointer_message_renders_recovery_hint() {
+        let message = parent_submodule_pointer_message(
+            "src/agent-doc",
+            Some("aaaaaaaaaaaabbbb"),
+            "bbbbbbbbbbbbcccc",
+            "tasks/doc.md",
+        );
+        assert!(message.contains("parent submodule pointer is not committed for src/agent-doc"));
+        assert!(message.contains("parent HEAD aaaaaaaaaaaa"));
+        assert!(message.contains("submodule HEAD bbbbbbbbbbbb"));
+        assert_eq!(
+            parent_pointer_recovery_hint("tasks/doc.md"),
+            "Use `agent-doc commit tasks/doc.md` to finish the missing parent pointer commit, then re-run `agent-doc session-check tasks/doc.md`."
+        );
     }
 
     #[test]

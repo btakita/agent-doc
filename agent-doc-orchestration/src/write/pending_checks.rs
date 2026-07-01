@@ -1,6 +1,7 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use agent_doc_workflow::pending_capture;
 use std::collections::HashSet;
 
 pub fn unresolved_backlog_capture_targets(
@@ -57,55 +58,35 @@ pub(crate) fn promised_backlog_item_ids_from_response(
     response_text: &str,
     state: &crate::cycle_state::CycleState,
 ) -> Vec<String> {
-    let baseline_ids: HashSet<String> = state
-        .required_backlog_targets
-        .iter()
-        .flat_map(|target| target.baseline_item_ids.iter())
-        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
-        .collect();
-    let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(response_text);
-    let mut promised = Vec::new();
-    for item in items.into_iter().filter(|item| !item.is_done()) {
-        let id = agent_doc_element_backlog::backlog::normalize_pending_id(&item.id);
-        if id.is_empty()
-            || baseline_ids.contains(&id)
-            || promised.iter().any(|existing| existing == &id)
-        {
-            continue;
-        }
-        promised.push(id);
-    }
-    promised
+    pending_capture::promised_backlog_item_ids_from_response(
+        response_text,
+        state
+            .required_backlog_targets
+            .iter()
+            .flat_map(|target| target.baseline_item_ids.iter()),
+    )
 }
 
 pub fn promised_backlog_item_inventory_shortfall(
     state: &crate::cycle_state::CycleState,
     response_text: &str,
 ) -> Option<(usize, usize)> {
-    if state.required_backlog_targets.is_empty() || state.required_explicit_backlog_item_count == 0
-    {
-        return None;
-    }
-
-    let promised_count = promised_backlog_item_ids_from_response(response_text, state).len();
-    if promised_count >= state.required_explicit_backlog_item_count {
-        None
-    } else {
-        Some((state.required_explicit_backlog_item_count, promised_count))
-    }
+    pending_capture::promised_backlog_item_inventory_shortfall(
+        response_text,
+        state
+            .required_backlog_targets
+            .iter()
+            .flat_map(|target| target.baseline_item_ids.iter()),
+        state.required_backlog_targets.len(),
+        state.required_explicit_backlog_item_count,
+    )
+    .map(|shortfall| shortfall.as_tuple())
 }
 
 pub(crate) fn promised_plan_reference_paths(file: &Path, response_text: &str) -> Vec<String> {
     let mut promised = Vec::new();
-    for raw_line in response_text.lines() {
-        let trimmed = raw_line.trim();
-        if trimmed.is_empty() || trimmed.starts_with("<!--") || trimmed.starts_with('>') {
-            continue;
-        }
-        if !trimmed.to_ascii_lowercase().contains("plan") {
-            continue;
-        }
-        let Some(path) = agent_doc_fs::referenced_markdown_path(file, trimmed) else {
+    for trimmed in pending_capture::promised_plan_reference_candidate_lines(response_text) {
+        let Some(path) = agent_doc_fs::referenced_markdown_path(file, &trimmed) else {
             continue;
         };
         if !path.exists() {
@@ -135,16 +116,12 @@ pub fn promised_plan_reference_shortfall(
     state: &crate::cycle_state::CycleState,
     response_text: &str,
 ) -> Option<(usize, usize)> {
-    if state.required_plan_reference_count == 0 {
-        return None;
-    }
-
     let promised_count = promised_plan_reference_paths(file, response_text).len();
-    if promised_count >= state.required_plan_reference_count {
-        None
-    } else {
-        Some((state.required_plan_reference_count, promised_count))
-    }
+    pending_capture::promised_plan_reference_shortfall(
+        state.required_plan_reference_count,
+        promised_count,
+    )
+    .map(|shortfall| shortfall.as_tuple())
 }
 
 pub fn unresolved_promised_backlog_item_ids(
@@ -187,11 +164,13 @@ pub fn unresolved_promised_backlog_item_ids(
         current_target_ids.extend(ids);
     }
 
-    promised_ids
-        .into_iter()
-        .filter(|id| !current_target_ids.contains(id))
-        .map(|id| format!("#{}", id))
-        .collect()
+    pending_capture::missing_promised_backlog_item_ids(
+        promised_ids.iter().map(String::as_str),
+        current_target_ids.iter().map(String::as_str),
+    )
+    .into_iter()
+    .map(|id| format!("#{}", id))
+    .collect()
 }
 
 pub(crate) fn precommit_pending_capture_check(file: &Path) -> Result<()> {

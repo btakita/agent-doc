@@ -6,8 +6,8 @@ use agent_doc_document::queue_projection::{
     sync_in_progress_marker_regions,
 };
 use agent_doc_element_backlog::backlog::{
-    component_matches_tracked_surface, ensure_no_completed_tracked_items,
-    maintenance_surface_label, review_counts, should_reap_already_done_mirrors,
+    component_matches_tracked_surface, ensure_no_completed_tracked_items, format_dropped_refs,
+    format_shadow_refs, maintenance_surface_label, review_counts, should_reap_already_done_mirrors,
     should_reap_ops_proof_completions, tracked_body_for_reorder,
 };
 use agent_doc_queue::{
@@ -725,16 +725,6 @@ pub(crate) fn enforce_no_shadow_open_backlog(file: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn format_shadow_refs(
-    items: &[agent_doc_element_backlog::backlog::ShadowPendingItem],
-) -> String {
-    items
-        .iter()
-        .map(agent_doc_element_backlog::backlog::ShadowPendingItem::reference)
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
 pub(crate) fn enforce_no_dropped_backlog(file: &Path, rc: &crate::graph::RunContext) -> Result<()> {
     let head_content = match rc.head_content() {
         Some(content) => content,
@@ -757,15 +747,9 @@ pub(crate) fn enforce_no_dropped_backlog(file: &Path, rc: &crate::graph::RunCont
             &external_done_ids,
         )?;
     if !report.dropped.is_empty() {
-        let refs = report
-            .dropped
-            .iter()
-            .map(agent_doc_element_backlog::backlog::DroppedBacklogItem::reference)
-            .collect::<Vec<_>>()
-            .join(", ");
         anyhow::bail!(
             "open backlog item(s) from recent committed history are completely absent from the document: {}. Restore them to the live backlog, move them to icebox, or mark them done before continuing",
-            refs
+            format_dropped_refs(&report.dropped)
         );
     }
     Ok(())

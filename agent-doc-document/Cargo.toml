@@ -18,6 +18,7 @@ agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.66"
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.66" }
 agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.66" }
 agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.34.66" }
+agent-doc-topic = { path = "../agent-doc-topic", version = "0.34.66" }
 anyhow = "1"
 pulldown-cmark = "0.13"
 serde = { version = "1", features = ["derive"] }

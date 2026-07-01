@@ -107,6 +107,10 @@ use agent_doc_document::claim_scaffold::{
     should_scaffold_empty_markdown, uses_template_format,
 };
 use agent_doc_frontmatter::frontmatter;
+use agent_doc_supervisor::claim_binding::{
+    ClaimRegistryEntry, claimed_session_label, find_alive_window_in_registry,
+    registry_entry_matches_claimed_document,
+};
 
 use crate::{resync, route, sessions};
 use agent_doc_project_config_io as project_config_io;
@@ -158,33 +162,6 @@ fn enforce_cross_session_claim(
 fn normalize_claim_path(path: &Path) -> std::path::PathBuf {
     let resolved = crate::git::resolve_absolute_file_path(path);
     resolved.canonicalize().unwrap_or(resolved)
-}
-
-fn registry_entry_matches_claimed_document(
-    file: &Path,
-    registry_key: &str,
-    entry: &tmux_router::RegistryEntry,
-    session_id: &str,
-) -> bool {
-    if entry.session_id == session_id {
-        return true;
-    }
-    if normalize_claim_path(Path::new(registry_key)) == file {
-        return true;
-    }
-    if entry.file.is_empty() {
-        return false;
-    }
-    normalize_claim_path(Path::new(&entry.file)) == file
-}
-
-fn claimed_session_label(registry_key: &str, entry: &tmux_router::RegistryEntry) -> String {
-    let owner = if entry.session_id.is_empty() {
-        registry_key
-    } else {
-        entry.session_id.as_str()
-    };
-    owner.chars().take(8).collect()
 }
 
 pub fn run(
@@ -332,13 +309,29 @@ pub fn run(
     {
         let registry = sessions::load().unwrap_or_default();
         for (registry_key, entry) in &registry {
-            let same_document =
-                registry_entry_matches_claimed_document(file, registry_key, entry, &session_id);
+            let same_document = registry_entry_matches_claimed_document(
+                file,
+                &session_id,
+                ClaimRegistryEntry {
+                    registry_key,
+                    session_id: &entry.session_id,
+                    file: &entry.file,
+                    cwd: &entry.cwd,
+                    window: &entry.window,
+                },
+                normalize_claim_path,
+            );
             if entry.pane == pane_id
                 && !same_document
                 && sessions::Multiplexer::pane_alive(&tmux, &pane_id)
             {
-                let existing_label = claimed_session_label(registry_key, entry);
+                let existing_label = claimed_session_label(ClaimRegistryEntry {
+                    registry_key,
+                    session_id: &entry.session_id,
+                    file: &entry.file,
+                    cwd: &entry.cwd,
+                    window: &entry.window,
+                });
                 if force {
                     eprintln!(
                         "warning: overwriting claim on pane {} (was {} → {})",
@@ -543,8 +536,18 @@ fn validate_file_claim(file: &Path) {
     let stale_keys: Vec<(String, String)> = registry
         .iter()
         .filter(|(registry_key, entry)| {
-            registry_entry_matches_claimed_document(file, registry_key, entry, "")
-                && !sessions::Multiplexer::pane_alive(&tmux, &entry.pane)
+            registry_entry_matches_claimed_document(
+                file,
+                "",
+                ClaimRegistryEntry {
+                    registry_key,
+                    session_id: &entry.session_id,
+                    file: &entry.file,
+                    cwd: &entry.cwd,
+                    window: &entry.window,
+                },
+                normalize_claim_path,
+            ) && !sessions::Multiplexer::pane_alive(&tmux, &entry.pane)
         })
         .map(|(k, e)| (k.clone(), e.pane.clone()))
         .collect();
@@ -582,7 +585,23 @@ fn is_window_alive(window: &str) -> bool {
 fn find_alive_project_window() -> Option<String> {
     let registry = sessions::load().ok()?;
     let cwd = std::env::current_dir().ok()?.to_string_lossy().to_string();
-    find_alive_window_in_registry(&registry, &cwd, is_window_alive)
+    let result = find_alive_window_in_registry(
+        registry
+            .iter()
+            .map(|(registry_key, entry)| ClaimRegistryEntry {
+                registry_key,
+                session_id: &entry.session_id,
+                file: &entry.file,
+                cwd: &entry.cwd,
+                window: &entry.window,
+            }),
+        &cwd,
+        is_window_alive,
+    );
+    if let Some(window) = &result {
+        eprintln!("found alive window {} from registry", window);
+    }
+    result
 }
 
 /// Spawn a fresh Claude Code session in a new tmux window, with cwd set to the
@@ -642,158 +661,9 @@ fn run_isolate(file: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Pure logic for finding an alive window in a registry.
-/// Separated from I/O for testability.
-fn find_alive_window_in_registry(
-    registry: &tmux_router::Registry,
-    cwd: &str,
-    check_alive: impl Fn(&str) -> bool,
-) -> Option<String> {
-    for entry in registry.values() {
-        if entry.cwd != cwd || entry.window.is_empty() {
-            continue;
-        }
-        if check_alive(&entry.window) {
-            eprintln!("found alive window {} from registry", entry.window);
-            return Some(entry.window.clone());
-        }
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
-    use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry};
-
-    fn make_entry(cwd: &str, window: &str) -> SessionEntry {
-        SessionEntry {
-            pane: "%0".to_string(),
-            pid: 1,
-            cwd: cwd.to_string(),
-            started: "2026-01-01".to_string(),
-            session_id: "test-session".to_string(),
-            file: "test.md".to_string(),
-            window: window.to_string(),
-            supervisor_instance_id: String::new(),
-        }
-    }
-
-    #[test]
-    fn find_alive_window_returns_first_alive_match() {
-        let mut registry = SessionRegistry::new();
-        registry.insert("s1".into(), make_entry("/project", "@1"));
-        registry.insert("s2".into(), make_entry("/project", "@2"));
-        registry.insert("s3".into(), make_entry("/project", "@3"));
-
-        // @1 dead, @2 alive, @3 alive → returns @2 or @3 (HashMap order)
-        // Use deterministic check: only @3 is alive
-        let result = find_alive_window_in_registry(&registry, "/project", |w| w == "@3");
-        assert_eq!(result, Some("@3".to_string()));
-    }
-
-    #[test]
-    fn find_alive_window_skips_wrong_cwd() {
-        let mut registry = SessionRegistry::new();
-        registry.insert("s1".into(), make_entry("/other-project", "@5"));
-        registry.insert("s2".into(), make_entry("/project", "@6"));
-
-        let result =
-            find_alive_window_in_registry(&registry, "/project", |w| w == "@5" || w == "@6");
-        assert_eq!(result, Some("@6".to_string()));
-    }
-
-    #[test]
-    fn find_alive_window_skips_empty_window() {
-        let mut registry = SessionRegistry::new();
-        registry.insert("s1".into(), make_entry("/project", "")); // legacy entry
-        registry.insert("s2".into(), make_entry("/project", "@7"));
-
-        let result = find_alive_window_in_registry(&registry, "/project", |_| true);
-        assert_eq!(result, Some("@7".to_string()));
-    }
-
-    #[test]
-    fn find_alive_window_returns_none_when_all_dead() {
-        let mut registry = SessionRegistry::new();
-        registry.insert("s1".into(), make_entry("/project", "@1"));
-        registry.insert("s2".into(), make_entry("/project", "@2"));
-
-        let result = find_alive_window_in_registry(&registry, "/project", |_| false);
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn find_alive_window_returns_none_for_empty_registry() {
-        let registry = SessionRegistry::new();
-        let result = find_alive_window_in_registry(&registry, "/project", |_| true);
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn find_alive_window_returns_none_when_no_cwd_match() {
-        let mut registry = SessionRegistry::new();
-        registry.insert("s1".into(), make_entry("/other", "@1"));
-
-        let result = find_alive_window_in_registry(&registry, "/project", |_| true);
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn registry_entry_matches_claimed_document_for_normalized_registry_key() {
-        let tmp = tempdir().unwrap();
-        let file = tmp.path().join("sampleorders.md");
-        std::fs::write(&file, "# test\n").unwrap();
-        let file = file.canonicalize().unwrap();
-        let entry = SessionEntry {
-            pane: "%75".to_string(),
-            pid: 1,
-            cwd: tmp.path().to_string_lossy().to_string(),
-            started: "2026-05-02T23:44:31Z".to_string(),
-            session_id: "a9421282-fd96-4943-9af5-3561ed5cb799".to_string(),
-            file: "tasks/sampleorders.md".to_string(),
-            window: "@73".to_string(),
-            supervisor_instance_id: String::new(),
-        };
-
-        assert!(registry_entry_matches_claimed_document(
-            &file,
-            file.to_string_lossy().as_ref(),
-            &entry,
-            "different-session-id",
-        ));
-    }
-
-    #[test]
-    fn registry_entry_matches_claimed_document_for_relative_entry_file() {
-        let tmp = tempdir().unwrap();
-        let _cwd = crate::test_support::ScopedCurrentDir::set(tmp.path());
-
-        let file = tmp.path().join("tasks/sampleorders.md");
-        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-        std::fs::write(&file, "# test\n").unwrap();
-        let file = file.canonicalize().unwrap();
-        let entry = SessionEntry {
-            pane: "%75".to_string(),
-            pid: 1,
-            cwd: tmp.path().to_string_lossy().to_string(),
-            started: "2026-05-02T23:44:31Z".to_string(),
-            session_id: "a9421282-fd96-4943-9af5-3561ed5cb799".to_string(),
-            file: "tasks/sampleorders.md".to_string(),
-            window: "@73".to_string(),
-            supervisor_instance_id: String::new(),
-        };
-
-        let result = registry_entry_matches_claimed_document(
-            &file,
-            "legacy-registry-key",
-            &entry,
-            "different-session-id",
-        );
-
-        assert!(result);
-    }
 
     #[test]
     fn enforce_cross_session_claim_errors_on_reject() {

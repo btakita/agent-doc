@@ -414,6 +414,14 @@ impl ShadowPendingItem {
     }
 }
 
+pub fn format_shadow_refs(items: &[ShadowPendingItem]) -> String {
+    items
+        .iter()
+        .map(ShadowPendingItem::reference)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ShadowPendingReport {
     pub duplicated_in_live_backlog: Vec<ShadowPendingItem>,
@@ -2003,6 +2011,14 @@ impl DroppedBacklogItem {
     pub fn reference(&self) -> String {
         format!("#{}", self.id)
     }
+}
+
+pub fn format_dropped_refs(items: &[DroppedBacklogItem]) -> String {
+    items
+        .iter()
+        .map(DroppedBacklogItem::reference)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

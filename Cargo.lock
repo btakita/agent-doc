@@ -182,6 +182,7 @@ dependencies = [
  "agent-doc-hash",
  "agent-doc-markdown-ast",
  "agent-doc-prompt-lines",
+ "agent-doc-topic",
  "anyhow",
  "pulldown-cmark",
  "serde",

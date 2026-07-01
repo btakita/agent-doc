@@ -4236,10 +4236,15 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         manifest_dir.join("agent-doc-orchestration/src/session_check/backlog_guards.rs"),
     )
     .unwrap();
+    let backlog_guard_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-element-backlog/src/guard_policy.rs"))
+            .unwrap();
     assert!(
-        backlog_guards
-            .contains("agent_doc_turn::closeout_signal::response_clearly_completes_pending_id"),
-        "backlog_guards should call focused closeout signal policy directly"
+        !backlog_guards
+            .contains("agent_doc_turn::closeout_signal::response_clearly_completes_pending_id")
+            && !backlog_guard_policy
+                .contains("agent_doc_turn::closeout_signal::response_clearly_completes_pending_id"),
+        "document-only backlog guards should not retain unused response-aware closeout filtering"
     );
     assert!(
         !backlog_guards.contains("session_check::response_clearly_completes_pending_id"),
@@ -4250,6 +4255,8 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         manifest_dir.join("agent-doc-orchestration/src/write/pending_checks.rs"),
     )
     .unwrap();
+    let pending_capture =
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/pending_capture.rs")).unwrap();
     let cycle_state =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/cycle_state.rs"))
             .unwrap();
@@ -4293,7 +4300,6 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         );
     }
     for required in [
-        "agent_doc_element_backlog::backlog::normalize_pending_id",
         "agent_doc_element_backlog::backlog::tracked_work_ids_for_target",
         "agent_doc_turn::closeout_signal::pending_done_suppressed",
         "agent_doc_turn::closeout_signal::tracked_work_completion_missing_done_ids",
@@ -4306,6 +4312,11 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
             "write pending checks should call focused tracked-work completion policy directly: {required}"
         );
     }
+    assert!(
+        pending_capture.contains("backlog::normalize_pending_id")
+            && pending_checks.contains("pending_capture::missing_promised_backlog_item_ids"),
+        "write pending checks should route promised-id normalization through agent-doc-workflow pending-capture policy"
+    );
 
     let turn_response_text =
         fs::read_to_string(manifest_dir.join("agent-doc-turn/src/response_text.rs")).unwrap();
@@ -5507,6 +5518,8 @@ fn test_agent_doc_topic_owns_compact_summary_policy() {
         );
     }
 
+    let compact_archive =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/compact_archive.rs")).unwrap();
     let compact_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/compact.rs")).unwrap();
     for forbidden_snippet in [
@@ -5523,9 +5536,15 @@ fn test_agent_doc_topic_owns_compact_summary_policy() {
         );
     }
     assert!(
-        compact_source.contains("agent_doc_topic::{")
-            && compact_source.contains("summarize_compacted_exchange"),
-        "compact.rs should call focused topic compact-summary policy directly"
+        compact_archive.contains("use agent_doc_topic::summarize_compacted_exchange;")
+            && compact_archive.contains("summarize_compacted_exchange(exchange.content(content))"),
+        "agent-doc-document compact archive rendering should call focused topic compact-summary policy directly"
+    );
+    assert!(
+        compact_source.contains("agent_doc_document::compact_archive::{")
+            && compact_source.contains("build_exchange_compact_summary(")
+            && !compact_source.contains("summarize_compacted_exchange"),
+        "compact.rs should call document archive rendering instead of reaching into topic policy"
     );
 }
 
@@ -11026,6 +11045,9 @@ fn test_agent_doc_element_backlog_owns_malformed_tracked_item_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let backlog_model =
         fs::read_to_string(manifest_dir.join("agent-doc-element-backlog/src/backlog.rs")).unwrap();
+    let guard_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-element-backlog/src/guard_policy.rs"))
+            .unwrap();
     for required in [
         "pub struct MalformedPendingItemLine",
         "pub struct MalformedTrackedItemRef",
@@ -11033,10 +11055,23 @@ fn test_agent_doc_element_backlog_owns_malformed_tracked_item_policy() {
         "pub fn malformed_tracked_item_refs_in_components",
         "pub fn malformed_tracked_item_refs",
         "pub fn malformed_tracked_item_interruption_message",
+        "pub fn format_shadow_refs",
+        "pub fn format_dropped_refs",
     ] {
         assert!(
             backlog_model.contains(required),
             "agent-doc-element-backlog must own malformed tracked checklist policy: {required}"
+        );
+    }
+    for required in [
+        "pub enum BacklogGuardOutcome",
+        "pub fn shadow_backlog_guard",
+        "pub fn malformed_tracked_item_guard",
+        "pub fn dropped_from_history_guard",
+    ] {
+        assert!(
+            guard_policy.contains(required),
+            "agent-doc-element-backlog guard policy must own session-check backlog guard projection: {required}"
         );
     }
 
@@ -11049,6 +11084,10 @@ fn test_agent_doc_element_backlog_owns_malformed_tracked_item_policy() {
         "pub(crate) fn malformed_tracked_item_refs_in",
         "pub fn malformed_tracked_item_message",
         "detect_malformed_item_lines(",
+        "detect_shadow_open_items(",
+        "detect_dropped_from_history_with_extra_current_ids(",
+        "malformed_tracked_item_refs_in_components(",
+        "malformed_tracked_item_interruption_message(",
     ] {
         assert!(
             !backlog_guards.contains(forbidden),
@@ -11056,9 +11095,11 @@ fn test_agent_doc_element_backlog_owns_malformed_tracked_item_policy() {
         );
     }
     assert!(
-        backlog_guards.contains("malformed_tracked_item_refs_in_components")
-            && backlog_guards.contains("malformed_tracked_item_interruption_message"),
-        "session_check backlog guards should call malformed tracked checklist policy from agent-doc-element-backlog"
+        backlog_guards.contains("agent_doc_element_backlog::guard_policy::{")
+            && backlog_guards.contains("malformed_tracked_item_guard")
+            && backlog_guards.contains("shadow_backlog_guard")
+            && backlog_guards.contains("dropped_from_history_guard"),
+        "session_check backlog guards should call focused guard policy from agent-doc-element-backlog"
     );
 
     let pending_checks = fs::read_to_string(
@@ -11075,6 +11116,145 @@ fn test_agent_doc_element_backlog_owns_malformed_tracked_item_policy() {
                 "agent_doc_element_backlog::backlog::malformed_tracked_item_interruption_message"
             ),
         "write pending checks should call malformed tracked checklist policy directly"
+    );
+}
+
+#[test]
+fn test_extracted_pure_layers_keep_focused_owners() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+
+    let git = fs::read_to_string(manifest_dir.join("agent-doc-git/src/lib.rs")).unwrap();
+    for required in [
+        "pub fn short_oid(",
+        "pub fn parent_pointer_recovery_hint(",
+        "pub fn parent_submodule_pointer_message(",
+    ] {
+        assert!(
+            git.contains(required),
+            "agent-doc-git must own parent submodule pointer messaging policy: {required}"
+        );
+    }
+    let detect = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/detect.rs"),
+    )
+    .unwrap();
+    for forbidden in [
+        "fn short_oid(",
+        "fn parent_pointer_recovery_hint(",
+        "fn parent_submodule_pointer_message(",
+    ] {
+        assert!(
+            !detect.contains(forbidden),
+            "session_check detect must not keep git messaging shims: {forbidden}"
+        );
+    }
+    assert!(
+        detect.contains("agent_doc_git::parent_submodule_pointer_message(")
+            && detect.contains("agent_doc_git::short_oid("),
+        "session_check detect should call agent-doc-git messaging helpers directly"
+    );
+
+    let compact_archive =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/compact_archive.rs")).unwrap();
+    for required in [
+        "pub struct CompactArchiveMetadata",
+        "pub fn compact_archive_session(",
+        "pub fn build_component_archive_content(",
+        "pub fn build_inline_exchange_archive_content(",
+        "pub fn build_exchange_compact_summary(",
+        "pub fn format_compact_timestamp_from_unix_secs(",
+    ] {
+        assert!(
+            compact_archive.contains(required),
+            "agent-doc-document must own compact archive rendering policy: {required}"
+        );
+    }
+    let compact =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/compact.rs")).unwrap();
+    for forbidden in [
+        "fn append_compact_summary_section(",
+        "fn format_compact_timestamp_from_unix_secs(",
+        "fn is_leap_year(",
+    ] {
+        assert!(
+            !compact.contains(forbidden),
+            "compact.rs must not re-own pure compact archive rendering policy: {forbidden}"
+        );
+    }
+    assert!(
+        compact.contains("agent_doc_document::compact_archive::{")
+            && compact.contains("build_component_archive_content(")
+            && compact.contains("build_inline_exchange_archive_content(")
+            && compact.contains("build_exchange_compact_summary("),
+        "compact.rs should call compact archive renderers from agent-doc-document directly"
+    );
+
+    let workflow_capture =
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/pending_capture.rs")).unwrap();
+    for required in [
+        "pub struct InventoryShortfall",
+        "pub fn promised_backlog_item_ids_from_response",
+        "pub fn promised_backlog_item_inventory_shortfall",
+        "pub fn promised_plan_reference_candidate_lines",
+        "pub fn promised_plan_reference_shortfall",
+        "pub fn missing_promised_backlog_item_ids",
+    ] {
+        assert!(
+            workflow_capture.contains(required),
+            "agent-doc-workflow must own pending-capture pure policy: {required}"
+        );
+    }
+    let pending_checks = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/write/pending_checks.rs"),
+    )
+    .unwrap();
+    for forbidden in [
+        "backlog::parse_items(response_text)",
+        "fn inventory_shortfall(",
+        ".lines()\n        .map(str::trim)",
+    ] {
+        assert!(
+            !pending_checks.contains(forbidden),
+            "write pending checks must not re-own pure pending-capture policy: {forbidden}"
+        );
+    }
+    assert!(
+        pending_checks.contains("use agent_doc_workflow::pending_capture;")
+            && pending_checks.contains("pending_capture::promised_backlog_item_ids_from_response")
+            && pending_checks.contains("pending_capture::missing_promised_backlog_item_ids"),
+        "write pending checks should call focused pending-capture policy directly"
+    );
+
+    let claim_binding =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/claim_binding.rs")).unwrap();
+    for required in [
+        "pub struct ClaimRegistryEntry",
+        "pub fn registry_entry_matches_claimed_document",
+        "pub fn claimed_session_label",
+        "pub fn find_alive_window_in_registry",
+    ] {
+        assert!(
+            claim_binding.contains(required),
+            "agent-doc-supervisor must own pure claim binding policy: {required}"
+        );
+    }
+    let claim =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/claim.rs")).unwrap();
+    for forbidden in [
+        "fn registry_entry_matches_claimed_document(",
+        "fn claimed_session_label(",
+        "fn find_alive_window_in_registry(",
+    ] {
+        assert!(
+            !claim.contains(forbidden),
+            "claim.rs must not keep claim-binding policy shims: {forbidden}"
+        );
+    }
+    assert!(
+        claim.contains("agent_doc_supervisor::claim_binding::{")
+            && claim.contains("ClaimRegistryEntry")
+            && claim.contains("registry_entry_matches_claimed_document("),
+        "claim.rs should call focused claim-binding policy directly"
     );
 }
 

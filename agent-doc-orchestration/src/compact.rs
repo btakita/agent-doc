@@ -97,6 +97,11 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use std::process::Command;
 
+use agent_doc_document::compact_archive::{
+    CompactArchiveMetadata, build_component_archive_content, build_exchange_compact_summary,
+    build_inline_exchange_archive_content, compact_archive_session,
+    format_compact_timestamp_from_unix_secs,
+};
 use agent_doc_document::compact_projection::{
     CompactExchange, build_inline_compacted_document, changed_non_exchange_opening_markers,
     malformed_compact_summary_lines, parse_inline_exchanges, split_component_content_at_boundary,
@@ -106,7 +111,7 @@ use agent_doc_frontmatter::frontmatter;
 use agent_doc_sqlite::archive_index;
 
 use crate::snapshot;
-use agent_doc_topic::{parse_topic_sections_with_tail, summarize_compacted_exchange};
+use agent_doc_topic::parse_topic_sections_with_tail;
 
 /// Run the compact command.
 ///
@@ -735,7 +740,7 @@ fn run_component_compact_with_options(
         Some(msg) => format!("{}\n", msg),
         None if target == "exchange" => {
             let summary_source = comp.replace_content(content, &archive_content);
-            build_exchange_compact_summary(&summary_source, &archive_path)
+            build_exchange_compact_summary(&summary_source, &archive_path.display().to_string())
         }
         None => format!(
             "*Compacted. Content archived to `{}`*\n",
@@ -944,98 +949,33 @@ fn build_component_archive(
     component_name: &str,
     content: &str,
 ) -> String {
-    let mut archive = String::new();
-
-    archive.push_str("---\n");
-    archive.push_str("archived_from: compact\n");
-    archive.push_str(&format!("archived_at: {}\n", chrono_timestamp()));
-    archive.push_str(&format!("component: {}\n", component_name));
-    if let Ok(document) = archive_document_value(doc) {
-        archive.push_str(&format!("document: {}\n", document));
-    }
-
-    if let Ok((fm, _)) = frontmatter::parse(original)
-        && let Some(session) = &fm.session
-    {
-        archive.push_str(&format!("session: {}\n", session));
-    }
-
-    archive.push_str("---\n\n");
-    archive.push_str(content.trim());
-    archive.push('\n');
-
-    archive
-}
-
-fn build_exchange_compact_summary(content: &str, archive_path: &Path) -> String {
-    let mut summary = String::from("### Session Summary\n\n");
-    summary.push_str(&format!(
-        "*Compacted. Content archived to `{}`*\n",
-        archive_path.display()
-    ));
-
-    let Ok(components) = element::parse(content) else {
-        return summary;
-    };
-
-    if let Some(exchange) = components.iter().find(|c| c.name == "exchange") {
-        let digest = summarize_compacted_exchange(exchange.content(content));
-        append_compact_summary_section(&mut summary, "Compacted content", &digest);
-    }
-
-    summary
-}
-
-fn append_compact_summary_section(summary: &mut String, title: &str, items: &[String]) {
-    if items.is_empty() {
-        return;
-    }
-    summary.push('\n');
-    summary.push_str(title);
-    summary.push_str(":\n");
-    for item in items {
-        summary.push_str("- ");
-        summary.push_str(item);
-        summary.push('\n');
-    }
+    build_component_archive_content(
+        &compact_archive_metadata(doc, original, component_name, None),
+        content,
+    )
 }
 
 /// Build archive file content from exchanges.
-fn build_archive(doc: &Path, original_header: &str, exchanges: &[CompactExchange]) -> String {
-    let mut archive = String::new();
+fn build_archive(doc: &Path, original: &str, exchanges: &[CompactExchange]) -> String {
+    build_inline_exchange_archive_content(
+        &compact_archive_metadata(doc, original, "exchange", Some(exchanges.len())),
+        exchanges,
+    )
+}
 
-    // Add a header noting the source
-    archive.push_str("---\n");
-    archive.push_str("archived_from: compact\n");
-    archive.push_str(&format!("archived_at: {}\n", chrono_timestamp()));
-    archive.push_str("component: exchange\n");
-    archive.push_str(&format!("exchange_count: {}\n", exchanges.len()));
-    if let Ok(document) = archive_document_value(doc) {
-        archive.push_str(&format!("document: {}\n", document));
+fn compact_archive_metadata(
+    doc: &Path,
+    original: &str,
+    component_name: &str,
+    exchange_count: Option<usize>,
+) -> CompactArchiveMetadata {
+    let mut metadata = CompactArchiveMetadata::component(chrono_timestamp(), component_name)
+        .with_document(archive_document_value(doc).ok())
+        .with_session(compact_archive_session(original));
+    if let Some(exchange_count) = exchange_count {
+        metadata = metadata.with_exchange_count(exchange_count);
     }
-
-    // Preserve original frontmatter session ID if present
-    if let Ok((fm, _)) = frontmatter::parse(original_header)
-        && let Some(session) = &fm.session
-    {
-        archive.push_str(&format!("session: {}\n", session));
-    }
-
-    archive.push_str("---\n\n");
-
-    for (i, exchange) in exchanges.iter().enumerate() {
-        archive.push_str("## User\n\n");
-        archive.push_str(&exchange.user);
-        archive.push('\n');
-        archive.push_str("\n## Assistant\n\n");
-        archive.push_str(&exchange.assistant);
-        archive.push('\n');
-        if i < exchanges.len() - 1 {
-            archive.push('\n');
-        }
-    }
-
-    archive
+    metadata
 }
 
 /// Save archive to `.agent-doc/archives/<hash>-<timestamp>.md`.
@@ -1184,53 +1124,7 @@ fn chrono_timestamp() -> String {
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default();
-    // Format as YYYYMMDD-HHMMSS
-    let secs = now.as_secs();
-    // Simple UTC timestamp without chrono dependency
-    let days = secs / 86400;
-    let time_of_day = secs % 86400;
-    let hours = time_of_day / 3600;
-    let minutes = (time_of_day % 3600) / 60;
-    let seconds = time_of_day % 60;
-
-    // Days since epoch to date (simplified)
-    let mut y = 1970i64;
-    let mut remaining_days = days as i64;
-    loop {
-        let days_in_year = if is_leap_year(y) { 366 } else { 365 };
-        if remaining_days < days_in_year {
-            break;
-        }
-        remaining_days -= days_in_year;
-        y += 1;
-    }
-    let month_days: &[i64] = if is_leap_year(y) {
-        &[31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    } else {
-        &[31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    };
-    let mut m = 0;
-    for &md in month_days {
-        if remaining_days < md {
-            break;
-        }
-        remaining_days -= md;
-        m += 1;
-    }
-
-    format!(
-        "{:04}{:02}{:02}-{:02}{:02}{:02}",
-        y,
-        m + 1,
-        remaining_days + 1,
-        hours,
-        minutes,
-        seconds
-    )
-}
-
-fn is_leap_year(y: i64) -> bool {
-    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+    format_compact_timestamp_from_unix_secs(now.as_secs())
 }
 
 #[cfg(test)]

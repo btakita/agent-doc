@@ -109,41 +109,18 @@ pub fn detect_late_ipc_response_overapplication_with_context(
     Ok(None)
 }
 
-pub(crate) fn parent_pointer_recovery_hint(file: &Path) -> String {
-    format!(
-        "Use `agent-doc commit {}` to finish the missing parent pointer commit, then re-run `agent-doc session-check {}`.",
-        file.display(),
-        file.display()
-    )
-}
-
-pub(crate) fn short_oid(value: Option<&str>) -> String {
-    value
-        .map(|oid| oid.chars().take(12).collect::<String>())
-        .filter(|oid| !oid.is_empty())
-        .unwrap_or_else(|| "<missing>".to_string())
-}
-
-pub(crate) fn parent_submodule_pointer_message(
-    drift: &crate::git::SubmodulePointerDrift,
-    file: &Path,
-) -> String {
-    format!(
-        "parent submodule pointer is not committed for {} (parent HEAD {}, submodule HEAD {}). The response patchback crossed the submodule repo but not the parent commit boundary. {}",
-        drift.relative_path,
-        short_oid(drift.parent_head.as_deref()),
-        short_oid(Some(&drift.submodule_head)),
-        parent_pointer_recovery_hint(file)
-    )
-}
-
 pub(crate) fn check_parent_submodule_pointer_guard(file: &Path) -> Result<GuardResult> {
     let Some(drift) = crate::git::submodule_pointer_drift(file)? else {
         return Ok(GuardResult::None);
     };
     let msg = format!(
         "[session-check] INTERRUPTED: {}",
-        parent_submodule_pointer_message(&drift, file)
+        agent_doc_git::parent_submodule_pointer_message(
+            &drift.relative_path,
+            drift.parent_head.as_deref(),
+            &drift.submodule_head,
+            &file.display().to_string(),
+        )
     );
     eprintln!("{}", msg);
     crate::ops_log::log_op(
@@ -152,8 +129,8 @@ pub(crate) fn check_parent_submodule_pointer_guard(file: &Path) -> Result<GuardR
             "parent_submodule_pointer_guard_failed file={} submodule={} parent_head={} submodule_head={}",
             file.display(),
             drift.relative_path,
-            short_oid(drift.parent_head.as_deref()),
-            short_oid(Some(&drift.submodule_head))
+            agent_doc_git::short_oid(drift.parent_head.as_deref()),
+            agent_doc_git::short_oid(Some(&drift.submodule_head))
         ),
     );
     Ok(GuardResult::Error(msg))
@@ -265,7 +242,12 @@ pub fn detect_uncommitted_closeout_drift_with_context(
         return Ok(None);
     }
     if let Some(drift) = crate::git::submodule_pointer_drift(file)? {
-        return Ok(Some(parent_submodule_pointer_message(&drift, file)));
+        return Ok(Some(agent_doc_git::parent_submodule_pointer_message(
+            &drift.relative_path,
+            drift.parent_head.as_deref(),
+            &drift.submodule_head,
+            &file.display().to_string(),
+        )));
     }
     // Phase 3 (#jbccc3): jb_cache_conflict_cancel is auto-recoverable through
     // `git::commit`. Skip the lower-precision `detect_bypassed_response_write`

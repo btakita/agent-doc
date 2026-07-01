@@ -581,7 +581,7 @@ Yes — keep both; they're differentiators, not filler. "Agentic hours" explains
 
 24-44h is the cheapest insurance in the bid, not padding. REItrades is a **live** marketplace with real seller/buyer data, and every expensive downstream item — the teaser/OM production migration (30-65h), cascade deletes, the listing rebuild — depends on mapping an unfamiliar codebase + data model *before* touching it. The hours buy two things: (1) a repo/route/data-model map so the rest of the estimate firms up and agents work against real structure, and (2) a production-safety plan (migrations, rollback, delete policy) that prevents a live-data incident. It's ~4-5% of the full 545-850h engagement, it's **credited forward** into Phase 1, and it compresses toward the 16h low end if the codebase is clean. If you want a leaner headline, I can split it so only the ~16h audit is upfront and the safety plan rolls into Phase 1 — say the word.
 
-### Re: Phase-1 credit noted in §0 Setup — opus-4-8
+### Re: Phase-1 credit noted in §0 Setup — opus-4-8 (HEAD)
 
 > **Queue prompt:** In "0. Setup / technical audit", mention again that this work is credited to Phase 1.
 
@@ -591,14 +591,40 @@ Done. Added a note directly under the §0 Setup / technical audit table:
 
 So the credit-forward now appears both at the line item (§0) and in the phasing section (§5 Phase 0) — a reader who lands on either one sees that the 24-44h isn't additive to the build. Report + regenerated PDF committed (`2e7f9521a`).
 
-<!-- agent:boundary:163f2fe7 -->
+### Re: Is the delete-listing estimate (and the bid overall) too high? — opus-4-8
+
+> **Queue prompt:** Why is "Delete listing from action dropdown; cascade related data" estimated 16-28 hours? This seems more like 4-8 hours. The time estimates seem high overall.
+
+Fair pressure-test. Short answer: **a bare delete is 4-8h and you're right** — but the line item isn't a bare delete, it's *"cascade related data"* on a **live** marketplace, and that clause is the whole cost. I clarified it in the report (committed `a179c4709`) so the driver is explicit.
+
+**Why 16-28h for this specific row**
+
+The button + one soft-delete flag is ~4-8h — I agree. The 16-28h covers what "cascade related data" actually means on REItrades:
+- Deciding and implementing **soft-delete/archive vs. hard delete** (you don't hard-delete a listing that has signed NDAs/LOIs — that's a retention/legal problem).
+- Cascading (or safely orphaning) **related records**: NDAs, LOIs, uploaded files/OMs, buyer engagement analytics, saved/accessed-by-code references, teaser send history.
+- **Audit trail** (who deleted what, when — required on a transaction platform) and **permission gating**.
+- **Tests against production-shaped data** so a delete doesn't silently orphan or over-delete live records.
+
+On a live system, a cascade delete that gets this wrong corrupts real buyer/seller data — that's the risk the hours buy down. If Artur only wants a simple archive with no cascade cleanup, the row drops to the 4-8h low end, and I noted exactly that in the report.
+
+**On "high overall" — the honest version**
+
+The estimates are **agentic hours that already include review, integration, targeted tests, and production QA on a live marketplace** — each row's note describes the safe/thorough version, not the happy-path code. So yes, several rows read high if you picture the bare-minimum version; trimmed to the simplest interpretation, many land at or below the low end.
+
+I deliberately did **not** bid them lower across the board, and I'd caution against it, because the rows that read "high" are mostly the ones that protect you from **underbidding**: production migrations, cascade deletes, NDA/LOI regression, and AI-extraction validation don't compress with agents, and a fixed bid that underprices them is where contract work bleeds. That's the no-underbid half of "competitive without overbidding."
+
+**What I'd do instead of slashing numbers** (pick any, or all):
+1. **Keep the thorough numbers but lead with the phased / weekly-cap structure** (already in §5) — Artur only pays for what's actually needed as scope firms up, so a "high" full-scope number never becomes a commitment.
+2. **A "lean scope" pass** — a second column showing each row at its simplest interpretation (bare CRUD, no cascade/audit extras), so Artur sees both the floor and the safe number and chooses per item. Most transparent way to answer "seems high" without you underbidding the risky work.
+3. **Trim specific rows now** if you've already decided the simple version is fine (e.g. archive-only deletes, no bulk-import audit trail).
+
+My recommendation: option 1 as the default framing, and I'll build option 2 (the lean-scope column) if you want a lower headline entry number to put in front of a bootstrapped buyer. Say which and I'll apply it + regenerate the PDF.
+<!-- agent:boundary:bd18db84 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue go -->
-- ~~In "0. Setup / technical audit", mention again that this work is credited to Phase 1.~~
-- Why is "Delete listing from action dropdown; cascade related data" estimated 16-28 hours? This seems more like 4-8 hours. The time estimates seem high overall.
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

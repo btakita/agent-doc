@@ -16,7 +16,7 @@
   - Admin table/UI work: ~25-40% faster.
   - Rust/Postgres permission & data-model work: ~15-30% faster.
   - External integrations, production migrations, PDF/OM output, AI extraction accuracy: **least** — validation dominates.
-- **"100% accurate" AI content is scoped as** source-backed extraction + validation + confidence scoring + admin review, **not** a pure-AI promise. I will not present AI extraction as inherently 100% accurate without a verification path, especially for buyer-facing materials.
+- **"100% accurate" is scoped as a deterministic core with an AI assist** (see §3b), **not** a pure-AI promise. Deterministic code owns every number, validation rule, structured-data lookup, and document assembly — those are *provably* correct. The model only *proposes* values for the genuinely fuzzy work (extraction from messy source docs, generated narrative), and every proposal passes deterministic validators + confidence scoring + the A–D provenance rubric (§3a) + admin review before it ships. I will not present AI extraction as inherently 100% accurate without that verification path, especially for buyer-facing materials.
 
 ---
 
@@ -173,6 +173,28 @@ Every AI-touched field — extracted from an uploaded OM/flyer, or generated (de
 | Narrative/marketing copy | Human-approved before external send | Graded for factual claims only, not style |
 
 The harness runs on a labeled ground-truth set (a handful of representative OMs per asset class), scores each release of the extraction/generation code, and **gates merge** on the thresholds above. That turns Artur's "100% accurate" request into a concrete, auditable acceptance test instead of an open-ended promise — and gives admin review a queue driven by grade, not guesswork.
+
+### 3b. Deterministic core vs. AI assist (where "100%" is honest)
+
+The strongest, most defensible version of the accuracy story is to split the pipeline into a **deterministic layer** and a **generative layer**, and let deterministic code own everything it possibly can. Then "100% accurate" attaches to the parts that can actually carry it, and the fuzzy parts are described as *validated + reviewed* — a claim that holds up on a call and in a contract.
+
+**Deterministic software is provably correct — this is where "100%" is literal:**
+
+| Concern | Why it's deterministic (100%) |
+|---|---|
+| **Calculations** — cap rate, NOI, price/unit, price/SF, GRM, loan sizing, LTV | Formulas, not predictions. Computed in code from validated inputs; the model never does arithmetic. |
+| **Schema / field validation** — types, ranges, required fields, unit normalization, enum membership (asset class, state, zoning) | A validator passes or fails; correct by construction. |
+| **Structured data retrieval** — reading a known field (year built, SF, ownership) from BatchData / rent rolls / structured listing fields | Deterministic lookup. Only *locating* a value inside a messy source doc is fuzzy. |
+| **Template / OM rendering** — Tera templates | Identical inputs produce identical output. Document assembly is deterministic; only the prose inside is generated. |
+
+**The AI layer only proposes — it never publishes unchecked.** For the genuinely probabilistic work — extraction from unstructured source (old OM PDFs, flyers, scanned rent rolls) and generated narrative (listing copy, market/demographic write-ups) — the model *proposes* values, and every proposal runs the gauntlet already defined above:
+
+1. Deterministic code owns every number, validation rule, and document assembly — provably correct and auditable.
+2. The model only proposes values for fuzzy extraction/generation.
+3. Every model output passes deterministic validators + confidence scoring + the A–D provenance rubric (§3a) before it is shown.
+4. Anything money-facing or buyer-facing gets admin review before it goes out.
+
+**Why lead with this:** it is the strongest trust argument, it is cheaper and more testable than trying to make the AI itself infallible, and it fits a bootstrapped budget — deterministic checks are hours of code, not an open-ended model-tuning bill. If a *learned prediction* on tabular data is wanted later (valuation/cap-rate estimate, lead scoring, asset-class classification), that is a phase-2, data-dependent option requiring a labeled outcome set — and the right tool there is gradient-boosted trees (XGBoost/LightGBM), which beat plain neural nets on tabular data. It is out of scope for V1.2.
 
 ---
 

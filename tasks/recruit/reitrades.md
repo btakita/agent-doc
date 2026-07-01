@@ -845,7 +845,7 @@ Notes:
 - No markdown left — `•` and the line breaks paste as-is into LinkedIn.
 - Blank line between each bullet so it stays scannable in the narrow message pane.
 - If you'd rather send it more compact (no blank lines between bullets), say so and I'll tighten it. Or I can publish it via `corky`/LinkedIn as a draft (no auto-send).
-<!-- agent:boundary:9facdeb5 -->
+<!-- agent:boundary:ad109039 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -856,6 +856,7 @@ Notes:
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#reirengagenote] [recommended] Draft a short no-pressure re-engagement note to Arthur/REItrades: respect the overseas-Upwork decision, leave the door open if it stalls, and optionally signal openness to a blended cash+equity structure.
 <!-- /agent:backlog -->
 
 ## Icebox

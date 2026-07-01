@@ -78,6 +78,56 @@ export function libMtimeChanged(filePath: string, storedMtime: number): boolean 
     }
 }
 
+/**
+ * Copy the freshly-installed shared library to a unique, per-mtime path so
+ * `koffi.load` (and the underlying `dlopen`) actually maps the NEW native code.
+ *
+ * Loading the canonical install path in place does NOT pick up a new build:
+ * `dlopen` returns the already-mapped handle for an unchanged path, so the
+ * extension host keeps running stale native code after `make install` /
+ * `agent-doc lib-install` until a full window reload. Copying to
+ * `libagent_doc-<mtime><ext>` under `cacheRoot` gives each install a distinct
+ * inode, forcing a real load so hot-reload works without reloading the window.
+ * Prunes stale copies from earlier installs. Returns the shadow path, or null on
+ * failure so the caller can fall back to the canonical path (never worse).
+ */
+export function nativeShadowCopyPath(canonicalPath: string, mtime: number, cacheRoot: string): string | null {
+    try {
+        const ext = path.extname(canonicalPath) || '.so';
+        fs.mkdirSync(cacheRoot, { recursive: true });
+        const dest = path.join(cacheRoot, `libagent_doc-${Math.floor(mtime)}${ext}`);
+        const srcSize = fs.statSync(canonicalPath).size;
+        let needCopy = true;
+        try {
+            needCopy = fs.statSync(dest).size !== srcSize;
+        } catch {
+            needCopy = true;
+        }
+        if (needCopy) {
+            fs.copyFileSync(canonicalPath, dest);
+            for (const name of fs.readdirSync(cacheRoot)) {
+                const full = path.join(cacheRoot, name);
+                if (name.startsWith('libagent_doc-') && full !== dest) {
+                    try { fs.unlinkSync(full); } catch { /* best-effort prune */ }
+                }
+            }
+        }
+        return dest;
+    } catch {
+        return null;
+    }
+}
+
+function shadowCopyForLoad(canonicalPath: string, mtime: number): string {
+    const cacheRoot = path.join(os.tmpdir(), `agent-doc-native-${process.pid}`);
+    const shadow = nativeShadowCopyPath(canonicalPath, mtime, cacheRoot);
+    if (!shadow) {
+        console.log('[agent-doc/native] shadow copy failed; loading canonical path in place (may keep stale native code until window reload)');
+        return canonicalPath;
+    }
+    return shadow;
+}
+
 export function writePidLock(libPath: string): void {
     try {
         const resolved = fs.realpathSync(libPath);
@@ -181,8 +231,9 @@ function ensureLoaded(projectRoot?: string): boolean {
             removePidLock();
             resetBindings();
             try {
-                lib = koffi.load(loadedPath);
-                loadedMtime = fs.statSync(loadedPath).mtimeMs;
+                const currentMtime = fs.statSync(loadedPath).mtimeMs;
+                lib = koffi.load(shadowCopyForLoad(loadedPath, currentMtime));
+                loadedMtime = currentMtime;
                 writePidLock(loadedPath);
                 verifyVersion(loadedPath);
             } catch (e: any) {
@@ -208,10 +259,10 @@ function ensureLoaded(projectRoot?: string): boolean {
     }
 
     try {
-        lib = koffi.load(libPath);
-        loaded = true;
         loadedPath = libPath;
         loadedMtime = fs.statSync(libPath).mtimeMs;
+        lib = koffi.load(shadowCopyForLoad(libPath, loadedMtime));
+        loaded = true;
         writePidLock(libPath);
         process.on('exit', removePidLock);
         verifyVersion(libPath);

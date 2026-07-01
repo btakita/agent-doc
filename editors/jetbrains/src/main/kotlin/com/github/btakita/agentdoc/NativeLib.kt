@@ -6,10 +6,46 @@ import com.sun.jna.Native
 import com.sun.jna.Pointer
 import com.sun.jna.Structure
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 internal fun libMtimeChanged(path: String, storedMtime: Long): Boolean {
     val currentMtime = File(path).lastModified()
     return currentMtime != storedMtime && currentMtime != 0L
+}
+
+/**
+ * Copy the freshly-installed shared library to a unique, per-mtime path so
+ * `Native.load` (and the underlying `dlopen`) actually maps the NEW native code.
+ *
+ * Loading the canonical install path in place does NOT pick up a new build:
+ * `dlopen` returns the already-mapped handle for an unchanged path, so the live
+ * JVM keeps running stale native code after `make install` /
+ * `agent-doc lib-install` until a full IDE restart. Copying to
+ * `libagent_doc-<mtime>.<ext>` under [cacheRoot] gives each install a distinct
+ * inode, forcing a real load and enabling hot-reload without restarting the IDE.
+ * Stale shadow copies from earlier installs in this JVM are pruned. Returns the
+ * shadow path, or null on failure so the caller can fall back to the canonical
+ * path (never worse than today).
+ */
+internal fun nativeShadowCopyPath(canonicalPath: String, mtime: Long, cacheRoot: File): String? {
+    return try {
+        val src = File(canonicalPath)
+        val ext = src.name.substringAfterLast('.', "so")
+        cacheRoot.mkdirs()
+        val dest = File(cacheRoot, "libagent_doc-$mtime.$ext")
+        if (!dest.exists() || dest.length() != src.length()) {
+            Files.copy(src.toPath(), dest.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            cacheRoot.listFiles()?.forEach {
+                if (it.absolutePath != dest.absolutePath && it.name.startsWith("libagent_doc-")) {
+                    it.delete()
+                }
+            }
+        }
+        dest.absolutePath
+    } catch (e: Exception) {
+        null
+    }
 }
 
 /**
@@ -610,7 +646,8 @@ interface AgentDocLib : Library {
             if (currentMtime == loadedMtime || currentMtime == 0L) return instance
             return try {
                 removePidLock()
-                val newLib = Native.load(path, AgentDocLib::class.java)
+                val loadTarget = shadowCopyForLoad(path, currentMtime)
+                val newLib = Native.load(loadTarget, AgentDocLib::class.java)
                 instance = newLib
                 loadedMtime = currentMtime
                 loadError = null
@@ -626,10 +663,11 @@ interface AgentDocLib : Library {
         @Synchronized
         private fun loadFrom(path: String): AgentDocLib? {
             return try {
-                val newLib = Native.load(path, AgentDocLib::class.java)
-                instance = newLib
                 loadedPath = path
                 loadedMtime = File(path).lastModified()
+                val loadTarget = shadowCopyForLoad(path, loadedMtime)
+                val newLib = Native.load(loadTarget, AgentDocLib::class.java)
+                instance = newLib
                 writePidLock(path)
                 registerShutdownHook()
                 verifyVersion(newLib, path)
@@ -654,6 +692,22 @@ interface AgentDocLib : Library {
             } catch (e: Exception) {
                 LOG.warn("[native] agent_doc_version() failed — ABI mismatch at $path: ${e.message}")
             }
+        }
+
+        /**
+         * Resolve the load target for [canonicalPath]: a per-mtime shadow copy so
+         * a new install actually reloads (see [nativeShadowCopyPath]). Falls back
+         * to the canonical path in place if the copy fails.
+         */
+        private fun shadowCopyForLoad(canonicalPath: String, mtime: Long): String {
+            val pid = ProcessHandle.current().pid()
+            val cacheRoot = File(System.getProperty("java.io.tmpdir"), "agent-doc-native-$pid")
+            val shadow = nativeShadowCopyPath(canonicalPath, mtime, cacheRoot)
+            if (shadow == null) {
+                LOG.warn("[native] shadow copy failed; loading canonical path in place (may keep stale native code until restart)")
+                return canonicalPath
+            }
+            return shadow
         }
 
         private fun writePidLock(libPath: String) {

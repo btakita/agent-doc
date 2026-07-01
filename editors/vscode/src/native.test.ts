@@ -10,6 +10,7 @@ import {
   compactProjectionSummary,
   documentHash,
   libMtimeChanged,
+  nativeShadowCopyPath,
   projectionSummary,
   writePidLock,
   removePidLock,
@@ -246,5 +247,58 @@ describe('pidLock', () => {
 
     it('removePidLock is safe to call without prior write', () => {
         assert.doesNotThrow(() => removePidLock());
+    });
+});
+
+describe('nativeShadowCopyPath (#nativehotreload — dlopen-fresh-inode reload)', () => {
+    it('copies to a distinct per-mtime path with matching contents', () => {
+        const root = path.join(os.tmpdir(), `agent-doc-native-test-${crypto.randomUUID()}`);
+        const src = path.join(os.tmpdir(), `libagent_doc_src_${crypto.randomUUID()}.so`);
+        try {
+            fs.writeFileSync(src, 'native-code-v1');
+            const mtime = fs.statSync(src).mtimeMs;
+            const shadow = nativeShadowCopyPath(src, mtime, root);
+            assert.ok(shadow);
+            assert.notStrictEqual(shadow, src);
+            assert.ok(shadow!.includes(`libagent_doc-${Math.floor(mtime)}`));
+            assert.strictEqual(fs.readFileSync(shadow!, 'utf8'), 'native-code-v1');
+        } finally {
+            fs.rmSync(root, { recursive: true, force: true });
+            fs.rmSync(src, { force: true });
+        }
+    });
+
+    it('prunes the prior stale copy on a new install', () => {
+        const root = path.join(os.tmpdir(), `agent-doc-native-test-${crypto.randomUUID()}`);
+        const src = path.join(os.tmpdir(), `libagent_doc_src_${crypto.randomUUID()}.so`);
+        try {
+            fs.writeFileSync(src, 'native-code-v1');
+            const first = nativeShadowCopyPath(src, 1000000, root);
+            assert.ok(first);
+            fs.writeFileSync(src, 'native-code-v2-longer');
+            const second = nativeShadowCopyPath(src, 2000000, root);
+            assert.ok(second);
+            assert.notStrictEqual(first, second);
+            assert.strictEqual(fs.readFileSync(second!, 'utf8'), 'native-code-v2-longer');
+            assert.strictEqual(fs.existsSync(first!), false);
+        } finally {
+            fs.rmSync(root, { recursive: true, force: true });
+            fs.rmSync(src, { force: true });
+        }
+    });
+
+    it('reuses the same path for an unchanged install', () => {
+        const root = path.join(os.tmpdir(), `agent-doc-native-test-${crypto.randomUUID()}`);
+        const src = path.join(os.tmpdir(), `libagent_doc_src_${crypto.randomUUID()}.so`);
+        try {
+            fs.writeFileSync(src, 'native-code-v1');
+            const mtime = fs.statSync(src).mtimeMs;
+            const a = nativeShadowCopyPath(src, mtime, root);
+            const b = nativeShadowCopyPath(src, mtime, root);
+            assert.strictEqual(a, b);
+        } finally {
+            fs.rmSync(root, { recursive: true, force: true });
+            fs.rmSync(src, { force: true });
+        }
     });
 });

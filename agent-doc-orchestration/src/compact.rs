@@ -55,12 +55,13 @@
 //!   re-asserts the compacted snapshot immediately before the commit and then FAILS CLOSED (with a
 //!   `reset --from-current` recovery command) if the post-commit HEAD did not actually land the
 //!   compacted content, so `--commit` can never silently leave uncommitted compaction drift.
-//! - After an editor-IPC `--commit` closeout, `flush_editor_buffer_to_disk_after_compact` asks the
+//! - Before an editor-IPC `--commit` closeout, `flush_editor_buffer_to_disk_after_compact` asks the
 //!   live editor to save its converged buffer to disk (`save_document` IPC) so the working-tree file
-//!   converges to HEAD. The plugin applies convergence patches to the in-memory Document and never
-//!   saves, so without this flush HEAD holds the summary while the disk file still holds the
-//!   pre-compact content — the "JB Compact Exchange left an uncommitted summary" defect
-//!   (`#jb-compact-editor-buffer-flush`). Fail-open: HEAD is already authoritative.
+//!   converges to the compacted content. The plugin applies convergence patches to the in-memory
+//!   Document and never saves, so without this flush HEAD can hold the summary while the disk file
+//!   still holds the pre-compact content — the "JB Compact Exchange left an uncommitted summary"
+//!   defect (`#jb-compact-editor-buffer-flush`). Fail-open: the authoritative snapshot is still
+//!   committed and verified.
 //! - `apply_compacted_document` is the single replacement boundary used by inline, full component,
 //!   and partial component compaction.
 //!
@@ -255,7 +256,7 @@ pub fn run(
             .map(|disk| disk == content)
             .unwrap_or(false);
         if disk_is_pre_compact {
-            flush_editor_buffer_to_disk_after_compact(file, &content);
+            flush_editor_buffer_to_disk_after_compact(file, &authoritative);
         }
     }
 
@@ -390,7 +391,7 @@ fn verify_compact_head_landed(file: &Path, authoritative_snapshot: &str) -> Resu
 }
 
 /// `#jb-compact-editor-buffer-flush`: converge the working-tree disk file with
-/// the just-committed HEAD after an editor-IPC compaction.
+/// the compacted editor buffer before an editor-IPC compaction commit.
 ///
 /// The editor-IPC convergence in `apply_compacted_document` replaces the live
 /// editor's in-memory buffer through the plugin's Document API; the plugin does
@@ -405,10 +406,10 @@ fn verify_compact_head_landed(file: &Path, authoritative_snapshot: &str) -> Resu
 /// IPC that `preflight` uses to resolve `live_prompt_drift`, then wait (bounded)
 /// for the working-tree file to stop matching `pre_compact`. The plugin saves the
 /// buffer it already converged, so disk converges before the commit stages it.
-/// Returns `true` once disk no longer holds the pre-compact content. Fail-open:
+/// Returns `true` once disk matches the compacted content. Fail-open:
 /// `commit_compacted_authoritative` still verifies HEAD after the commit and fails
 /// closed if the compacted content did not land.
-fn flush_editor_buffer_to_disk_after_compact(file: &Path, pre_compact: &str) -> bool {
+fn flush_editor_buffer_to_disk_after_compact(file: &Path, expected_content: &str) -> bool {
     let canonical = match file.canonicalize() {
         Ok(canonical) => canonical,
         Err(e) => {
@@ -447,7 +448,7 @@ fn flush_editor_buffer_to_disk_after_compact(file: &Path, pre_compact: &str) -> 
     // asynchronously, so poll the working tree until the flush lands (or time out).
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1000);
     loop {
-        if std::fs::read_to_string(&canonical).is_ok_and(|disk| disk != pre_compact) {
+        if compact_disk_matches_expected(&canonical, expected_content) {
             crate::ops_log::log_op(
                 file,
                 &format!(
@@ -467,6 +468,15 @@ fn flush_editor_buffer_to_disk_after_compact(file: &Path, pre_compact: &str) -> 
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
+}
+
+fn compact_disk_matches_expected(file: &Path, expected_content: &str) -> bool {
+    std::fs::read_to_string(file).is_ok_and(|disk| {
+        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(&disk)
+            == agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+                expected_content,
+            )
+    })
 }
 
 fn closeout_compact_with_commit(file: &Path) -> Result<()> {
@@ -3390,7 +3400,8 @@ mod tests {
                                 components.iter().find(|component| component.name == name)?;
                             content = target.replace_content(&content, replacement);
                         }
-                        if let Some(file_path) = payload.get("file").and_then(|value| value.as_str())
+                        if let Some(file_path) =
+                            payload.get("file").and_then(|value| value.as_str())
                         {
                             buffers
                                 .lock()

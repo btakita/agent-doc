@@ -1629,7 +1629,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `reason=stale_source_buffer` when a live operator-authoritative editor
         // buffer has moved past the ACK sidecar. This is the same realtime
         // policy-table reason as other whole-buffer source-proof rejections.
-        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 25,
+        // 25 -> 26 (#ipcvisredeliver-incycle): in-cycle live-prompt visible
+        // repair logs the existing disk-repair reason on successful editor IPC
+        // convergence. This is diagnostic context for the existing recovery
+        // path, not a new flow branch.
+        ("agent-doc-orchestration/src/write/ipc.rs", "reason=") => 26,
         // +1 `guard_` (#fcc0-degraded-file-ipc): `IpcPollOptions::convergence`
         // centralizes the existing committed-cycle file-IPC poll guard for
         // convergence callers; this is a constructor for the existing guard, not

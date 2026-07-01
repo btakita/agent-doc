@@ -4358,6 +4358,7 @@ mod late_fallback_patch_guard_tests {
         try_ipc_full_content_operator_mutation_from_source,
     };
     use crate::snapshot;
+    use crate::write::ipc::EditorBadStateFingerprint;
     use std::fs;
     use std::path::Path;
     use tempfile::TempDir;
@@ -5578,6 +5579,172 @@ Implemented.
             head_count(root),
             head_before,
             "non-strict path should not produce a commit"
+        );
+    }
+
+    /// #ipcvisredeliver-incycle: a `live_prompt_drift` repair whose disk-keyed
+    /// redelivery is skipped as `stale_bad_state` (disk lags the live editor
+    /// buffer) must now converge IN-CYCLE via the editor IPC listener instead of
+    /// bailing with `retry_without_disk_write` and only recovering on a later
+    /// commit-path cycle. A component-patch listener that publishes the
+    /// ack-content sidecar proves the editor reached the repaired target.
+    #[test]
+    fn live_prompt_drift_repair_converges_in_cycle_via_editor_ipc() {
+        // Disk lags the editor: the on-disk buffer equals neither the stale
+        // candidate (`bad_state`) nor the repaired target, so the disk-keyed
+        // redelivery is skipped and the new in-cycle convergence branch runs.
+        let disk_lag = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "do the thing\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let repaired = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "do the thing\n",
+            "### Re: the thing — gpt-5\nDone.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let bad_state = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "stale candidate\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let tmp = TempDir::new().unwrap();
+        let doc = doc_in_agent_doc_project(&tmp, disk_lag);
+        let agent_doc_dir = tmp.path().join(".agent-doc");
+
+        // Editor listener: apply the component patch to the payload baseline and
+        // publish the converged buffer as the ack-content sidecar, exactly like
+        // the JetBrains plugin's Document-API convergence.
+        let listener_root = tmp.path().to_path_buf();
+        let server = std::thread::spawn(move || {
+            let root = listener_root.clone();
+            let _ = crate::ipc_socket::start_listener(&listener_root, move |msg| {
+                let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
+                let patch_id = payload
+                    .get("patch_id")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let mut content = payload.get("baseline")?.as_str()?.to_string();
+                for patch in payload.get("patches")?.as_array()? {
+                    let name = patch.get("component")?.as_str()?;
+                    let replacement = patch.get("content")?.as_str()?;
+                    let comps = agent_doc_element::element::parse(&content).ok()?;
+                    let target = comps.iter().find(|component| component.name == name)?;
+                    content = target.replace_content(&content, replacement);
+                }
+                if let Some(file_path) = payload.get("file").and_then(|value| value.as_str()) {
+                    let _ = std::fs::write(file_path, &content);
+                }
+                let ack_dir = root.join(".agent-doc/ack-content");
+                let _ = std::fs::create_dir_all(&ack_dir);
+                let _ = std::fs::write(ack_dir.join(format!("{patch_id}.md")), &content);
+                Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
+            });
+        });
+        for _ in 0..100 {
+            if crate::ipc_socket::is_listener_active(tmp.path()) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(
+            crate::ipc_socket::is_listener_active(tmp.path()),
+            "fake socket listener did not start"
+        );
+
+        // The finalize path records the adoption block before repair; the
+        // in-cycle auto-recovery is gated on that flag, so mirror it here (a
+        // cycle must exist first, exactly as preflight seeds it in production).
+        crate::cycle_state::start_preflight(&doc, Some(repaired), Some(disk_lag)).unwrap();
+        crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
+
+        let decision = IpcRepairDecision {
+            snapshot_content: repaired.to_string(),
+            snap_source: IpcSnapshotSource::ContentOurs,
+            disk_repair_reason: Some(IpcDiskRepairReason::LivePromptDrift),
+            editor_bad_state: Some(EditorBadStateFingerprint::new(bad_state.to_string())),
+            normalize_prefix_lines: Vec::new(),
+            redeliver_editor: true,
+        };
+
+        repair_ipc_decision_visible_state(&doc, &decision, Some("live-drift-1"))
+            .expect("in-cycle editor-IPC convergence should prove visible state and succeed");
+
+        let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("ipc_visible_repair_incycle_editor_converged"),
+            "in-cycle convergence marker should be logged:\n{ops_log}"
+        );
+        assert!(
+            !ops_log.contains("ipc_visible_repair_retry_required_no_disk_write"),
+            "successful in-cycle convergence must not emit the retry_without_disk_write bail:\n{ops_log}"
+        );
+
+        let _ = fs::remove_file(crate::ipc_socket::socket_path(tmp.path()));
+        drop(server);
+    }
+
+    /// The in-cycle convergence must stay fail-closed: with NO editor IPC
+    /// listener active, a stale `live_prompt_drift` repair still refuses a direct
+    /// disk write and bails with `retry_without_disk_write` (the no-disk-write
+    /// invariant is preserved unchanged).
+    #[test]
+    fn live_prompt_drift_repair_without_listener_still_fails_closed() {
+        let disk_lag = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "do the thing\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let repaired = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "do the thing\n",
+            "### Re: the thing — gpt-5\nDone.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let bad_state = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "stale candidate\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let tmp = TempDir::new().unwrap();
+        let doc = doc_in_agent_doc_project(&tmp, disk_lag);
+        let agent_doc_dir = tmp.path().join(".agent-doc");
+
+        crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
+
+        let decision = IpcRepairDecision {
+            snapshot_content: repaired.to_string(),
+            snap_source: IpcSnapshotSource::ContentOurs,
+            disk_repair_reason: Some(IpcDiskRepairReason::LivePromptDrift),
+            editor_bad_state: Some(EditorBadStateFingerprint::new(bad_state.to_string())),
+            normalize_prefix_lines: Vec::new(),
+            redeliver_editor: true,
+        };
+
+        let err = repair_ipc_decision_visible_state(&doc, &decision, Some("live-drift-2"))
+            .expect_err("without a listener the stale live_prompt_drift repair must fail closed");
+        assert!(
+            err.to_string().contains("refusing direct document write"),
+            "fail-closed bail expected: {err}"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            disk_lag,
+            "fail-closed repair must not mutate the on-disk buffer"
+        );
+        let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("ipc_visible_repair_retry_required_no_disk_write")
+                && !ops_log.contains("ipc_visible_repair_incycle_editor_converged"),
+            "no-listener path must bail with retry_without_disk_write and no in-cycle marker:\n{ops_log}"
         );
     }
 }

@@ -6,6 +6,16 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.34.65
 
+- **Editor prompt pollers removed.** The JetBrains plugin no longer starts the
+  defensive `agent-doc prompt --all` timer, no longer registers submitted files
+  for prompt polling, and no longer ships the bottom prompt panel. The VS Code
+  extension now has parity: it no longer imports the prompt-polling helper, no
+  longer starts a prompt QuickPick poller after Run, and no longer calls
+  `prompt --answer` from the extension. This removes the timer-based tracked-file
+  prompt path that could mutate or gate a live editor buffer outside an explicit
+  agent-doc write. JetBrains plugin `0.2.202` and VS Code extension `0.2.36`
+  include the removal.
+
 - **Editor IPC conflict replay is fail-closed across JetBrains and VS Code.**
   JetBrains no longer keeps conflict-deferred patch ids or replays old IPC
   payloads after an IntelliJ File Cache Conflict resolves; conflict detection now

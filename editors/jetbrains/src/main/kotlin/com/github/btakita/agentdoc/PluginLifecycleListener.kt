@@ -9,8 +9,8 @@ import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.VirtualFileManager
 
 /**
- * Disposes per-project resources (PromptPoller, PromptPanel) when a project closes
- * or when the plugin is dynamically unloaded.
+ * Disposes per-project resources when a project closes or when the plugin is
+ * dynamically unloaded.
  *
  * Registered in plugin.xml as a projectListener so IntelliJ manages the lifecycle.
  * This enables `require-restart="false"` (dynamic plugin install/update/unload).
@@ -95,13 +95,6 @@ class PluginLifecycleListener : ProjectManagerListener {
             } catch (e: Exception) {
                 LOG.info("[resync] agent-doc not available: ${e.message}")
             }
-
-            // Auto-start prompt polling after resync cleans up stale sessions
-            val sessionsFile = java.io.File(basePath, ".agent-doc/sessions.json")
-            if (sessionsFile.exists()) {
-                LOG.info("[lifecycle] auto-starting prompt poller for ${project.name}")
-                PromptPoller.getInstance(project).startPolling()
-            }
         }, "agent-doc-resync-fix").apply {
             isDaemon = true
             start()
@@ -113,8 +106,6 @@ class PluginLifecycleListener : ProjectManagerListener {
     }
 
     override fun projectClosed(project: Project) {
-        PromptPanel.dismiss(project)
-        PromptPoller.disposeProject(project)
         CrdtReplicaManager.disposeProject(project)
         PatchWatcher.disposeProject(project)
         LayoutChangeDetector.disposeProject(project)

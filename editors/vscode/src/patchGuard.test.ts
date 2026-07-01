@@ -178,6 +178,23 @@ describe('patchGuard', () => {
         assert.strictEqual(/\.save\(/.test(source), false);
     });
 
+    it('does not ship prompt polling in the VS Code extension', () => {
+        const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
+        const packageJson = fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8');
+        const promptPollingSource = path.join(__dirname, '..', 'src', 'promptPolling.ts');
+        const promptPollingTest = path.join(__dirname, '..', 'src', 'promptPolling.test.ts');
+
+        assert.strictEqual(fs.existsSync(promptPollingSource), false);
+        assert.strictEqual(fs.existsSync(promptPollingTest), false);
+        assert.strictEqual(source.includes("from './promptPolling'"), false);
+        assert.strictEqual(source.includes('ensurePromptPolling'), false);
+        assert.strictEqual(source.includes('pollPrompts'), false);
+        assert.strictEqual(source.includes("['prompt', '--all']"), false);
+        assert.strictEqual(source.includes("'prompt', '--answer'"), false);
+        assert.strictEqual(source.includes('Agent Doc Prompt'), false);
+        assert.strictEqual(packageJson.includes('promptPolling.test.js'), false);
+    });
+
     it('rejects stale editor apply proofs when content or version changed', () => {
         const proof = createEditorApplyProof('before', 7);
 

@@ -31,11 +31,6 @@ import {
     buildPrimaryPopupMenuItems,
 } from './popupMenu';
 import {
-    buildPromptQuickPickItems,
-    normalizePromptEntries,
-    type PromptAllEntry,
-} from './promptPolling';
-import {
     analyzeTabSyncCommandResult,
     buildImmediateFocusCommandArgs,
     buildSyncCommandArgs,
@@ -740,7 +735,6 @@ function buildRunRouteCommandArgs(
 // Feature 1: Run (Submit)
 // ---------------------------------------------------------------------------
 
-const trackedFiles = new Set<string>();
 const editorCommandRegistry = new EditorCommandRegistry();
 interface ActiveRoute {
     controller: AbortController;
@@ -832,8 +826,6 @@ async function executeRunForDocument(
             );
         }
         showHint(output || `Routed ${rel}`);
-        trackedFiles.add(filePath);
-        ensurePromptPolling(cwd);
     } catch (err: any) {
         if (isCliCancelled(err)) {
             showHint(`Run cancelled before Clear Session Context for ${rel}`);
@@ -1632,119 +1624,6 @@ function onTabChanged(): void {
     if (execution === null) return;
     const generation = requestTabSync();
     focusExistingPaneForTabChange(execution, generation);
-}
-
-// ---------------------------------------------------------------------------
-// Feature 5: Prompt Polling
-// ---------------------------------------------------------------------------
-
-let promptPollInterval: ReturnType<typeof setInterval> | undefined;
-let promptPollRoot: string | undefined;
-let currentPromptKey: string | undefined;
-let answeredPromptKey: string | undefined;
-
-function ensurePromptPolling(root: string): void {
-    if (promptPollInterval && promptPollRoot === root) return;
-
-    // If root changed, stop previous poller
-    if (promptPollInterval) {
-        clearInterval(promptPollInterval);
-    }
-
-    promptPollRoot = root;
-    currentPromptKey = undefined;
-    answeredPromptKey = undefined;
-
-    promptPollInterval = setInterval(() => pollPrompts(root), 1500);
-}
-
-function stopPromptPolling(): void {
-    if (promptPollInterval) {
-        clearInterval(promptPollInterval);
-        promptPollInterval = undefined;
-    }
-    promptPollRoot = undefined;
-    currentPromptKey = undefined;
-    answeredPromptKey = undefined;
-    trackedFiles.clear();
-}
-
-async function pollPrompts(root: string): Promise<void> {
-    for (const fsPath of trackedFiles) {
-        const doc = vscode.workspace.textDocuments.find(d => d.uri.fsPath === fsPath);
-        if (doc && doc.isDirty) {
-            return;
-        }
-    }
-
-    let stdout: string;
-    try {
-        stdout = await runCli(['prompt', '--all'], root);
-    } catch {
-        return; // silently ignore poll errors
-    }
-
-    let entries: PromptAllEntry[];
-    try {
-        entries = JSON.parse(stdout);
-        if (!Array.isArray(entries)) return;
-    } catch {
-        return;
-    }
-
-    const normalized = normalizePromptEntries(entries);
-
-    // Clear answered key if it's no longer in the active set
-    if (answeredPromptKey && !normalized.some(e => e.key === answeredPromptKey)) {
-        answeredPromptKey = undefined;
-    }
-
-    // Filter out recently answered
-    const active = answeredPromptKey
-        ? normalized.filter(e => e.key !== answeredPromptKey)
-        : normalized;
-
-    if (active.length === 0) {
-        currentPromptKey = undefined;
-        return;
-    }
-
-    // Stick with current prompt if it's still active
-    if (currentPromptKey && active.some(e => e.key === currentPromptKey)) {
-        return;
-    }
-
-    // Pick next prompt
-    const next = active[0];
-    currentPromptKey = next.key;
-
-    const fileName = next.file.split('/').pop() || next.file;
-    const totalActive = active.length;
-    const prefix = `[${fileName}] `;
-    const suffix = totalActive > 1 ? `  (${totalActive} prompts pending)` : '';
-    const question = `${prefix}${next.info.question || 'Permission required'}${suffix}`;
-
-    const options = next.info.options!;
-    const items = buildPromptQuickPickItems(options, next.info.selected);
-
-    const selected = await vscode.window.showQuickPick(items, {
-        title: 'Agent Doc Prompt',
-        placeHolder: question,
-    });
-
-    if (selected) {
-        answeredPromptKey = currentPromptKey;
-        currentPromptKey = undefined;
-        try {
-            await runCli(['prompt', '--answer', selected.answerIndex.toString(), next.file], next.cwd ?? root);
-        } catch (err: any) {
-            answeredPromptKey = undefined;
-            showError(`prompt --answer failed: ${err.message}`);
-        }
-    } else {
-        // User dismissed — don't re-show the same prompt until it changes
-        currentPromptKey = undefined;
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3154,9 +3033,6 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): void {
-    // Clean up prompt polling
-    stopPromptPolling();
-
     // Clean up tab sync debounce
     if (tabSyncDebounceTimer) {
         clearTimeout(tabSyncDebounceTimer);

@@ -10,7 +10,6 @@ Interactive document sessions with AI agents. Edit markdown documents in your ed
 - **Run/Clear coordination** matching the JetBrains plugin: repeated Run clicks dedupe, Clear Session Context cancels only the plugin-spawned route process before invoking binary-owned clear, and Run waits behind an active Clear
 - **Preserve split columns** by sending one `--col` per visible editor group instead of flattening every visible markdown tab into one stack
 - **Highlight agent-doc markdown structures** including component comments, boundaries, prompts, `### Re:` headings, tracked ids, and scratch HTML comments
-- **Answer active permission prompts** from flat `agent-doc prompt --all` JSON, preserving the owning cwd and TUI-selected option state while sending the one-based option position required by `agent-doc prompt --answer`; OpenCode horizontal prompts use the CLI-normalized `Permission required` label when no explicit question line is present
 - **IPC patch watcher** applies agent responses directly via Document API (no external file change dialogs)
 - **Component patching** with inline attribute support (`patch=append`, `patch=replace`; `mode=` accepted as backward-compatible alias)
 

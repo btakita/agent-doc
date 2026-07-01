@@ -62,7 +62,6 @@ class SubmitAction : AnAction() {
                 attempt.recordIfCurrent("documents_saved")
                 LOG.warn("[run] invoking sendToTerminal after typing idle: ${file.name}")
                 TerminalUtil.sendToTerminal(project, file, attempt = attempt)
-                PromptPoller.getInstance(project).addFile(file)
             }
         }.start()
     }

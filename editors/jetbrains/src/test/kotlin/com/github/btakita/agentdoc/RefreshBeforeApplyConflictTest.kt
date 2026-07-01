@@ -57,36 +57,37 @@ class RefreshBeforeApplyConflictTest {
         assertEveryRefreshGated(patchWatcher, refreshToken, gateToken)
     }
 
-    /**
-     * `#p2j4` / realtime cutover phase 0 — PromptPoller's poll timer must not
-     * auto-save dirty editor buffers. It may still notice external disk changes,
-     * but every content-bearing refresh remains gated so it never runs against an
-     * unsaved buffer.
-     */
     @Test
-    fun `prompt-poller timer does not auto-save and refresh sites are gated`() {
-        val pollerPath = listOf(
+    fun `jetbrains prompt poller is removed`() {
+        val promptPollerPaths = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PromptPoller.kt"),
             Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PromptPoller.kt"),
-        ).first { Files.exists(it) }
-        val poller = Files.readString(pollerPath)
-
-        assertFalse(poller.contains("autoSaveTrackedFiles"))
-        assertFalse(poller.contains("saveDocument(doc)"))
-
-        val gateToken = "shouldRefreshVfsBeforeApplyUtil"
-        // PromptPoller refreshes `file`, not `targetFile`.
-        val refreshTokens = listOf(
-            "file.refresh(false, false)",
         )
-        val refreshCount = refreshTokens.sumOf { token -> poller.split(token).size - 1 }
-        assertTrue(
-            "expected at least 1 poll-timer refresh site, found $refreshCount",
-            refreshCount >= 1,
+        val promptPanelPaths = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PromptPanel.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PromptPanel.kt"),
         )
-        for (token in refreshTokens) {
-            assertEveryRefreshGated(poller, token, gateToken)
-        }
+
+        assertTrue(promptPollerPaths.none { Files.exists(it) })
+        assertTrue(promptPanelPaths.none { Files.exists(it) })
+
+        val submitAction = Files.readString(
+            listOf(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/SubmitAction.kt"),
+                Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/SubmitAction.kt"),
+            ).first { Files.exists(it) }
+        )
+        val lifecycle = Files.readString(
+            listOf(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt"),
+                Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt"),
+            ).first { Files.exists(it) }
+        )
+
+        assertFalse(submitAction.contains("PromptPoller"))
+        assertFalse(lifecycle.contains("PromptPoller"))
+        assertFalse(lifecycle.contains("PromptPanel"))
+        assertFalse(lifecycle.contains("prompt poller"))
     }
 
     private fun assertEveryRefreshGated(source: String, refreshToken: String, gateToken: String) {

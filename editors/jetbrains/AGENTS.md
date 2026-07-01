@@ -45,4 +45,4 @@ Enable debug output: IDEA → `Help > Diagnostic Tools > Debug Log Settings` →
 - Repeating `Run Agent Doc` should supersede any stale plugin-spawned route process and dispatch again immediately.
 - Error feedback is routed to the IDE Event Log / notification tool window instead of bottom-right balloon popups.
 - `plugin.xml` action IDs are stable — only change `text` attributes for renames.
-- **One tracking entry per file (PromptPoller):** every registration path must key `trackedFiles` by the canonical `trackingKey(VirtualFile.path)` so a file is tracked exactly once. `refreshTrackedFiles`/`autoSaveTrackedFiles` iterate all entries and call `mergeOrReload` per entry — duplicate keys mean two divergent baselines merge-applied twice, a full-document duplication path (#ipcfullprompt). Do not reintroduce per-call key schemes like `"$cwd:$file"`.
+- **No prompt poller:** do not reintroduce the defensive `PromptPoller` / `PromptPanel` path. JetBrains must not poll `agent-doc prompt --all`, auto-save tracked documents, refresh tracked files, or merge/reload editor buffers from a prompt UI timer.

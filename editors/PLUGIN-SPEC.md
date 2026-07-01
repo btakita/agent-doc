@@ -123,20 +123,13 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
 - **Behavior:** Same as Section 2.4, but runs silently (no user notification) with `--no-autostart --exact-visible` when the plugin has captured the full visible markdown projection. Automatic tab-to-pane sync must dispatch `agent-doc sync`, not `agent-doc focus`, even when only one markdown file is visible; the passive sync path owns stash rescue, protected-closeout attach/focus behavior, and safe pane replacement. `--exact-visible` prevents a one-file editor snapshot from expanding through remembered column memory and reintroducing a stale sibling pane. If output from an older binary reports preserve-layout output, keep the selection pending and retry unless the output also includes `[sync] safe_passive_layout_preserved_reselected_focus`, which proves the already-visible focus pane was selected. Do not update the automatic dedup state for a legacy preserved-layout noop without that marker. Errors are silently ignored.
 - **Safety:** Startup audits must be report-only (`agent-doc resync`), not `resync --fix`, unless the user explicitly invoked a repair action.
 
-### 2.6 Prompt Polling
+### 2.6 Prompt Polling Removed
 
-- **Trigger:** Starts after a Submit action registers a file. Polls every 1.5 seconds.
-- **Behavior:**
-  1. Auto-save all tracked documents before each poll cycle.
-  2. Run `agent-doc prompt --all` and parse JSON array response, including each prompt entry's owning `cwd`.
-  3. Filter for entries with `active: true` and non-empty `options[]`.
-  4. Show one prompt at a time. Stick with the current prompt until it resolves before advancing to the next.
-  5. Display prompt UI with question text, option buttons, and keyboard hints.
-- **Answer:** Run `agent-doc prompt --answer <index> <file>` from the prompt entry's `cwd` when the user selects an option.
-- **Dedup:** Track `answeredPromptKey` to suppress re-showing a prompt until the answer takes effect (prompt disappears from poll results).
-- **UI requirements:**
-  - JetBrains: Bottom-anchored `JPanel` overlay with `Alt+Esc` focus toggle, `Alt+1..9` direct selection, `1-9` selection when focused, `Esc` dismiss, auto-focus after 1s inactivity.
-  - VSCode: `QuickPick` dialog with numbered options.
+- **Removed from first-party editor plugins.** JetBrains and VS Code must not
+  start a defensive `agent-doc prompt --all` poller, call `agent-doc prompt
+  --answer`, auto-save tracked documents, or run timer-based merge/reload logic
+  from prompt handling. Permission prompts remain in the owning agent/tmux
+  surface.
 
 ### 2.7 Popup Menu
 

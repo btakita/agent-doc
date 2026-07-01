@@ -48,10 +48,10 @@ Two strategies for detecting the file's position in the editor split:
 - The structural layout-change detector owns the editor-side sync guard for the lifetime of its background CLI process; it must build and run the exact-visible `agent-doc sync --no-autostart` command directly instead of calling a helper that reacquires the same guard and self-skips. If a newer generation arrives while that guarded command is running, the detector replays the newest structural snapshot after unlock.
 - JetBrains must bound every plugin-spawned sync subprocess. On timeout, it terminates the process, releases the plugin-local sync guard, logs the timeout, and leaves automatic tab-sync dedup state unchanged so the latest queued selection or a manual retry can run `agent-doc sync` again. A dead or externally killed tmux pane may make one sync attempt stall, but it must not leave the IDE permanently reporting `Sync deferred: another tmux layout sync is already running`.
 
-### Auto-Save Before Poll
+### Prompt Poller Removed
 
-- `PromptPoller` saves tracked files via `FileDocumentManager` before each poll cycle.
-- 3-way merge via `git merge-file` when both disk and editor have changed.
+- JetBrains must not start a defensive `PromptPoller` / `PromptPanel`, poll `agent-doc prompt --all`, auto-save tracked documents, or run timer-based merge/reload logic from prompt handling.
+- Permission prompts remain in the owning agent/tmux surface.
 
 ### Run Feedback
 
@@ -118,8 +118,7 @@ Binary auto-start forensics also land in `/tmp/agent-doc-sync.log` and the per-d
 ### Dynamic Lifecycle
 
 - `PluginLifecycleListener` handles `projectOpened`/`projectClosing`.
-- `disposeAll()` cleans up prompt panels and pollers on project close or plugin unload.
-- `PromptPoller` accepts the flat `agent-doc prompt --all` entry shape, including the owning `cwd` and optional 0-based `selected` field, and answers prompts from that cwd with the one-based option position expected by `agent-doc prompt --answer`. It renders the CLI-normalized question verbatim; OpenCode horizontal prompts that lack an explicit question line must surface the CLI fallback `Permission required` rather than captured shell command text.
+- Project close and plugin unload dispose CRDT replica, patch watcher, layout detector, and visual highlighter resources.
 
 ## Keybindings
 

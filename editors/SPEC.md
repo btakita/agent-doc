@@ -36,12 +36,9 @@ Common behavior required of all `agent-doc` editor plugins.
 - **Sync contention:** Automatic `agent-doc sync --no-autostart ...` output containing `[sync] safe_passive_sync_lock_contention_retry` is retryable, not applied. Editors must leave the dedup state unchanged and replay only the latest pending selection/layout request. Manual `Sync Tmux Layout` must share the editor-side sync guard with automatic sync; if another editor sync is already running, it should show a concise deferred warning instead of launching a second CLI process that waits on the project lock.
 - **Sync subprocess timeout:** Editor-owned sync subprocesses must be bounded. If a manual or automatic sync process does not exit within the editor timeout budget, the plugin must terminate that subprocess, release its local sync guard, leave automatic dedup state unsynchronized, and allow the latest manual retry or queued automatic request to invoke the binary recovery path again. A stuck sync spawned before a pane crash must not permanently turn later `Sync Tmux Layout` actions into local "already running" warnings.
 
-## 5. Prompt Polling
+## 5. Prompt Polling Removed
 
-- **Trigger:** After a Run action, poll `agent-doc prompt --all` every 1.5s.
-- **Behavior:** Detect numbered-option Claude Code permission prompts and OpenCode horizontal permission prompts. Display a bottom-anchored panel with buttons for each option. Support keyboard selection (Alt+1..9, Alt+Esc toggle, Esc dismiss). The prompt label comes from the CLI's normalized `question`; OpenCode horizontal prompts with controls but no explicit `← ...` question must display `Permission required`, never raw shell command text captured before the controls.
-- **Answer:** Call `agent-doc prompt --answer <N> <file>` from the prompt entry's owning cwd when user selects an option.
-- **Auto-save:** Save tracked files before each poll cycle to capture user edits.
+- **First-party editor plugins:** No prompt-polling timer. JetBrains and VS Code must not poll `agent-doc prompt --all`, call `agent-doc prompt --answer`, auto-save tracked documents, refresh tracked files, or mutate editor buffers from a defensive prompt UI loop. Permission prompts stay in the owning agent/tmux surface.
 
 ## 6. Popup Menu
 
@@ -65,7 +62,7 @@ Common behavior required of all `agent-doc` editor plugins.
 ## 8. File Filtering
 
 - All actions are only enabled/visible when a `.md` file is active or selected.
-- Non-`.md` files are ignored by tab sync and prompt polling.
+- Non-`.md` files are ignored by tab sync.
 
 ## 9. Boundary Marker Management
 

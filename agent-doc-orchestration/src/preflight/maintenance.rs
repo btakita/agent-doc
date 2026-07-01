@@ -1288,7 +1288,12 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         Err(_) => return Ok(QueueState::default()),
     };
     if components.iter().all(|c| c.name != "queue")
-        && collect_actionable_free_text_prompts(&current_content, &[], false).has_work()
+        && collect_actionable_free_text_prompts(
+            &current_content,
+            &[],
+            &QueueFreeTextAdmissionScope::None,
+        )
+        .has_work()
     {
         current_content = append_empty_agent_component(&current_content, "queue");
         content = current_content.clone();
@@ -1364,14 +1369,17 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         agent_doc_fs::find_project_root(&canonical)
             .or_else(|| canonical.parent().map(std::path::Path::to_path_buf))
     });
-    let include_queue_free_text =
-        queue_origin_free_text_admission_allowed(&current_content, &comp.attrs);
+    let queue_active_for_free_text =
+        queue_currently_active_for_free_text_admission(&current_content, &comp.attrs);
+    let queue_free_text_scope =
+        queue_origin_free_text_admission_scope(file, &current_content, &comp.attrs, &entries);
     if let Some(admission) = admit_free_text_work(
         file,
         &current_content,
         &entries,
         project_root.as_deref(),
-        include_queue_free_text,
+        &queue_free_text_scope,
+        !queue_active_for_free_text,
     )? {
         current_content = admission.content;
         content = current_content.clone();
@@ -3163,10 +3171,36 @@ struct FreeTextAdmission {
     execution_label: &'static str,
 }
 
+#[derive(Debug, Clone, Default)]
+enum QueueFreeTextAdmissionScope {
+    #[default]
+    None,
+    All,
+    NormalizedKeys(std::collections::HashSet<String>),
+}
+
+impl QueueFreeTextAdmissionScope {
+    fn allows_prompt(&self, content: &str, text: &str) -> bool {
+        if !free_text_prompt_is_backlog_task(content, text) {
+            return false;
+        }
+        match self {
+            Self::None => false,
+            Self::All => true,
+            Self::NormalizedKeys(keys) => {
+                let key = agent_doc_queue::queue_response::normalize_for_answer_match(
+                    &normalize_admitted_free_text(text),
+                );
+                keys.contains(&key)
+            }
+        }
+    }
+}
+
 fn collect_actionable_free_text_prompts(
     content: &str,
     entries: &[agent_doc_queue::document_queue::QueueEntry],
-    include_queue_prompts: bool,
+    queue_scope: &QueueFreeTextAdmissionScope,
 ) -> ActionableFreeTextPrompts {
     let mut prompts = Vec::new();
     if let Some(exchange_prompt) =
@@ -3177,15 +3211,13 @@ fn collect_actionable_free_text_prompts(
             text: normalize_admitted_free_text(&exchange_prompt),
         });
     }
-    if include_queue_prompts {
-        for entry in entries {
-            if let agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) = entry
-                && free_text_prompt_is_backlog_task(content, &prompt.text)
-            {
-                prompts.push(FreeTextWorkPrompt {
-                    text: normalize_admitted_free_text(&prompt.text),
-                });
-            }
+    for entry in entries {
+        if let agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) = entry
+            && queue_scope.allows_prompt(content, &prompt.text)
+        {
+            prompts.push(FreeTextWorkPrompt {
+                text: normalize_admitted_free_text(&prompt.text),
+            });
         }
     }
     let mut seen = std::collections::HashSet::new();
@@ -3196,17 +3228,16 @@ fn collect_actionable_free_text_prompts(
     ActionableFreeTextPrompts { prompts }
 }
 
-fn free_text_prompt_is_backlog_task(content: &str, text: &str) -> bool {
+fn free_text_prompt_is_backlog_task(_content: &str, text: &str) -> bool {
     let trimmed = normalize_admitted_free_text(text);
     !trimmed.is_empty()
         && !trimmed.starts_with('/')
         && !trimmed.starts_with('#')
         && !agent_doc_queue::queue_heads::is_do_directive(&trimmed)
         && agent_doc_prompt_lines::text_line_looks_like_prompt_target(&trimmed)
-        && queue_prompt_text_is_free_text(content, &trimmed)
 }
 
-fn queue_origin_free_text_admission_allowed(
+fn queue_currently_active_for_free_text_admission(
     content: &str,
     queue_attrs: &std::collections::HashMap<String, String>,
 ) -> bool {
@@ -3225,7 +3256,74 @@ fn queue_origin_free_text_admission_allowed(
             agent_doc_queue::document_queue::marker_control(queue_attrs),
             Some(agent_doc_frontmatter::frontmatter::QueueControl::Start)
         );
-    !frontmatter_active && !marker_active
+    frontmatter_active || marker_active
+}
+
+fn queue_origin_free_text_admission_scope(
+    file: &Path,
+    content: &str,
+    queue_attrs: &std::collections::HashMap<String, String>,
+    entries: &[agent_doc_queue::document_queue::QueueEntry],
+) -> QueueFreeTextAdmissionScope {
+    if !queue_currently_active_for_free_text_admission(content, queue_attrs) {
+        return QueueFreeTextAdmissionScope::All;
+    }
+
+    let Ok(Some(snapshot_content)) = snapshot::load(file) else {
+        return QueueFreeTextAdmissionScope::None;
+    };
+    let snapshot_keys = snapshot_queue_free_text_prompt_keys(&snapshot_content);
+    let mut new_keys = std::collections::HashSet::new();
+    for entry in entries {
+        let agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) = entry else {
+            continue;
+        };
+        if !free_text_prompt_is_backlog_task(content, &prompt.text) {
+            continue;
+        }
+        let key = agent_doc_queue::queue_response::normalize_for_answer_match(
+            &normalize_admitted_free_text(&prompt.text),
+        );
+        if !key.is_empty() && !snapshot_keys.contains(&key) {
+            new_keys.insert(key);
+        }
+    }
+    if new_keys.is_empty() {
+        QueueFreeTextAdmissionScope::None
+    } else {
+        QueueFreeTextAdmissionScope::NormalizedKeys(new_keys)
+    }
+}
+
+fn snapshot_queue_free_text_prompt_keys(content: &str) -> std::collections::HashSet<String> {
+    let mut keys = std::collections::HashSet::new();
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return keys;
+    };
+    let Some(queue) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return keys;
+    };
+    let body = &content[queue.open_end..queue.close_start];
+    let Ok(entries) = agent_doc_queue::document_queue::parse(body) else {
+        return keys;
+    };
+    for entry in entries {
+        let agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) = entry else {
+            continue;
+        };
+        if free_text_prompt_is_backlog_task(content, &prompt.text) {
+            let key = agent_doc_queue::queue_response::normalize_for_answer_match(
+                &normalize_admitted_free_text(&prompt.text),
+            );
+            if !key.is_empty() {
+                keys.insert(key);
+            }
+        }
+    }
+    keys
 }
 
 fn normalize_admitted_free_text(text: &str) -> String {
@@ -3250,9 +3348,10 @@ fn admit_free_text_work(
     content: &str,
     entries: &[agent_doc_queue::document_queue::QueueEntry],
     project_root: Option<&Path>,
-    include_queue_prompts: bool,
+    queue_scope: &QueueFreeTextAdmissionScope,
+    queue_start_required: bool,
 ) -> Result<Option<FreeTextAdmission>> {
-    let prompts = collect_actionable_free_text_prompts(content, entries, include_queue_prompts);
+    let prompts = collect_actionable_free_text_prompts(content, entries, queue_scope);
     if !prompts.has_work() {
         return Ok(None);
     }
@@ -3330,9 +3429,7 @@ fn admit_free_text_work(
         .clone();
     let mut queue_entries: Vec<agent_doc_queue::document_queue::QueueEntry> = entries
         .iter()
-        .filter(|entry| {
-            !include_queue_prompts || !queue_entry_is_admitted_free_text(content, entry)
-        })
+        .filter(|entry| !queue_entry_is_admitted_free_text(content, entry, queue_scope))
         .cloned()
         .collect();
 
@@ -3351,10 +3448,12 @@ fn admit_free_text_work(
                         },
                     ),
                 );
-                queue_entries.insert(
-                    0,
-                    agent_doc_queue::document_queue::QueueEntry::StartFence(None),
-                );
+                if queue_start_required {
+                    queue_entries.insert(
+                        0,
+                        agent_doc_queue::document_queue::QueueEntry::StartFence(None),
+                    );
+                }
             }
             Vec::new()
         }
@@ -3370,10 +3469,12 @@ fn admit_free_text_work(
             )
             .unwrap_or_else(|| queue_entries.clone());
             queue_entries = synced;
-            if !matches!(
-                queue_entries.first(),
-                Some(agent_doc_queue::document_queue::QueueEntry::StartFence(_))
-            ) {
+            if queue_start_required
+                && !matches!(
+                    queue_entries.first(),
+                    Some(agent_doc_queue::document_queue::QueueEntry::StartFence(_))
+                )
+            {
                 queue_entries.insert(
                     0,
                     agent_doc_queue::document_queue::QueueEntry::StartFence(None),
@@ -3389,6 +3490,9 @@ fn admit_free_text_work(
 
     let new_queue_body = agent_doc_queue::document_queue::render(&queue_entries);
     current = queue.replace_content(&current, &new_queue_body);
+    if execution == ResolvedFreeTextExecution::Queue {
+        current = ensure_queue_priority_attr(&current)?;
+    }
     Ok(Some(FreeTextAdmission {
         content: current,
         queued_ids,
@@ -3401,12 +3505,40 @@ fn admit_free_text_work(
 fn queue_entry_is_admitted_free_text(
     content: &str,
     entry: &agent_doc_queue::document_queue::QueueEntry,
+    queue_scope: &QueueFreeTextAdmissionScope,
 ) -> bool {
     matches!(
         entry,
         agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
-            if free_text_prompt_is_backlog_task(content, &prompt.text)
+            if queue_scope.allows_prompt(content, &prompt.text)
     )
+}
+
+fn ensure_queue_priority_attr(content: &str) -> Result<String> {
+    let components = agent_doc_element::element::parse(content)?;
+    let Some(queue) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return Ok(content.to_string());
+    };
+    if queue.attrs.contains_key("priority") {
+        return Ok(content.to_string());
+    }
+    let raw_tag = &content[queue.open_start..queue.open_end];
+    let Some(close_idx) = raw_tag.rfind("-->") else {
+        return Ok(content.to_string());
+    };
+    let (head, tail) = raw_tag.split_at(close_idx);
+    let mut new_tag = head.trim_end().to_string();
+    new_tag.push_str(" priority ");
+    new_tag.push_str(tail);
+
+    let mut rebuilt = String::with_capacity(content.len() + " priority".len());
+    rebuilt.push_str(&content[..queue.open_start]);
+    rebuilt.push_str(&new_tag);
+    rebuilt.push_str(&content[queue.open_end..]);
+    Ok(rebuilt)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3944,6 +4076,58 @@ mod tests {
     }
 
     #[test]
+    fn run_queue_maintenance_admits_new_active_queue_free_text_to_native_goal() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let snapshot_content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "agent: codex\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#existing]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#existing] existing work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let content = snapshot_content.replace(
+            "- do [#existing]\n",
+            "- do [#existing]\n- Implement active queue addition\n",
+        );
+        std::fs::write(&doc, &content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        let id = backlog_id_for_text(&updated, "Implement active queue addition");
+        let queue = component_body(&updated, "queue");
+
+        assert!(
+            queue.contains(&format!("/goal Implement backlog item(s): #{id}")),
+            "new active queue free text should become a native goal:\n{updated}"
+        );
+        assert!(
+            !queue.contains("Implement active queue addition"),
+            "admitted free-text source line should be removed from the active queue:\n{updated}"
+        );
+        assert!(
+            !queue.contains("--- start"),
+            "an already-active queue must not receive a redundant start fence:\n{updated}"
+        );
+        assert_eq!(
+            state.selected_queue_prompts.first(),
+            Some(&format!("/goal Implement backlog item(s): #{id}"))
+        );
+    }
+
+    #[test]
     fn run_queue_maintenance_ignores_response_tail_for_free_text_admission() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
@@ -4090,6 +4274,100 @@ mod tests {
             "frontmatter queue mode must not create a /goal command:\n{updated}"
         );
         assert!(state.synced_queue_ids.contains(&id));
+    }
+
+    #[test]
+    fn run_queue_maintenance_queue_fallback_uses_auto_dag_priority_order() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "agent: opencode\n",
+            "agent_doc_free_text_execution: goal\n",
+            "---\n\n",
+            "<!-- agent:queue -->\n",
+            "- Implement checkout shipping after=#setup\n",
+            "- Implement checkout setup\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#ship] Implement checkout shipping after=#setup\n",
+            "- [ ] [#setup] Implement checkout setup\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        let queue = component_body(&updated, "queue");
+
+        assert!(
+            updated.contains("<!-- agent:queue priority -->"),
+            "queue fallback must opt into the existing priority/auto-DAG path:\n{updated}"
+        );
+        assert!(
+            queue.contains("- 🚧 :round_pushpin: do [#setup]\n- do [#ship]"),
+            "auto-DAG fallback must run prerequisites before dependents:\n{updated}"
+        );
+        assert!(!queue.contains("/goal"), "{updated}");
+        assert_eq!(state.queue_active, Some(true));
+        assert!(
+            state
+                .warnings
+                .iter()
+                .any(|warning| warning.code == "free_text_goal_unavailable"),
+            "OpenCode without /goal support must warn about queue fallback: {:?}",
+            state.warnings
+        );
+    }
+
+    #[test]
+    fn run_queue_maintenance_opencode_goal_extension_uses_native_goal() {
+        let dir = setup_project();
+        std::fs::create_dir_all(dir.path().join(".opencode/commands")).unwrap();
+        std::fs::write(
+            dir.path().join(".opencode/commands/goal.md"),
+            "goal command",
+        )
+        .unwrap();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "agent: opencode\n",
+            "---\n\n",
+            "<!-- agent:queue -->\n",
+            "- Implement OpenCode goal extension flow\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        let id = backlog_id_for_text(&updated, "Implement OpenCode goal extension flow");
+        let queue = component_body(&updated, "queue");
+
+        assert!(
+            queue.contains(&format!("/goal Implement backlog item(s): #{id}")),
+            "OpenCode with a goal extension should use native /goal:\n{updated}"
+        );
+        assert!(!queue.contains("do [#"), "{updated}");
+        assert!(
+            state
+                .warnings
+                .iter()
+                .all(|warning| warning.code != "free_text_goal_unavailable"),
+            "goal-capable OpenCode should not warn about fallback: {:?}",
+            state.warnings
+        );
     }
 
     #[test]

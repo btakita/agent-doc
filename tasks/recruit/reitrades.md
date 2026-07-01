@@ -326,7 +326,36 @@ The competitive lever is *not* cutting the hour ranges further — it is that yo
 **My recommendation for the bid:** lead with Phase 0 + Phase 1 as the headline number (**~$28k-$40k including discovery**), mention the full V1.2 envelope ($52k-$80k) as the phased total so Artur isn't surprised later, and offer the weekly-cap hourly structure as the default. That wins on price and de-risks the live-system work without leaving money on the table.
 
 One thing to verify before sending a fixed quote: the **PDF listing-creation-steps screenshots** (the markdown brief only has the heading). If those screens define extra fields/steps, the asset-class rebuild numbers move. I can extract them if you want a tighter Phase-1 fixed price — I queued that as a follow-up.
-<!-- agent:boundary:e71e4b7a -->
+Analyze at the PDF listing-creation-steps screenshots and synthesize into the proposal.
+
+### Re: PDF listing-creation-steps synthesized into the proposal — opus-4-8
+
+Read all 10 PDF pages and folded the "Listing Creation Steps" screenshots (pages 9-10) into the report at [`rei-trades/reitrades-v1.2-estimate-report.md`](rei-trades/reitrades-v1.2-estimate-report.md) (committed). Here's what the screens actually show and how it moves the estimate.
+
+**What the wizard actually is** — a **5-step flow** with a **separate 5-state lifecycle** running alongside it:
+
+1. **Location** — asset class, address, city, state/province, postal code, entrance-location details
+2. **Property Overview** — building name, asset-class sub-category, main use, submarket, brand/flag, year built/renovated, total sq ft + asset-class-specific fields (hotel example: Number of Keys, Room size, Parking, Amenities)
+3. **Financials** — an "Investment Snapshot" of ~16 fields: Asking Price, Cap Rate, Historical Occupancy, ADR, RevPAR, Gross Income, Vacancy, Effective Gross Income, Opex, NOI, LTV, Interest Rate, Amortization Period, Annual Debt Service
+4. **Attachments** — categorized uploads (Expenses Breakdown, CapEx, Rent Roll, Property Video) + additional docs + property-photo gallery, all drag-and-drop
+5. **Marketing Materials** — generated teaser/OM output
+
+Alongside it: a **listing status machine** — Draft → Under Review → Active → Pending → Closed — where the seller can only submit to Under Review until REItrades approves. Every step also has an "+ Add Attribute" control (confirms the per-step custom-attribute requirement).
+
+**How it moves the numbers**
+
+The screenshots **confirm** the estimate rather than break it — good news for a competitive bid, because I can now say "I've seen the actual wizard and my numbers hold." Three concrete adjustments:
+
+- The example is clearly **hospitality/hotel** (Keys, RevPAR, ADR, Brand/Flag). That density is real and asset-class-specific, so the per-asset-class schema work sits at the **mid-to-high end** of its range, not the low end.
+- I **broke out the Attachments/media step** (categorized upload + gallery + drag-drop) that the markdown-only pass under-counted: **+14-24h**.
+- The **3-tier pricing step** inserts *before* Location, so it also shifts the wizard's step-index/gating logic — noted in that line item.
+
+Roll-up effect: the listing workstream rose ~15-20h. Full V1.2 moves **520-800h → 530-820h** ($53k-$82k) and the first tranche **260-380h → 265-390h** ($26.5k-$39k). The prior **$52k-$80k / $26k-$38k** headline still holds as the round-number bid — I'd keep leading with those.
+
+**One question this raises for Artur:** the pilot asset class. The screenshots demo a hotel; the "one asset class at a time" instruction means whichever class ships first sets the first-tranche field schema. Worth confirming hotel vs. (say) multifamily/office/industrial before locking the Phase-1 fixed price, since field sets differ per class.
+
+Open question #7 in the report is now marked resolved; the pilot-asset-class sub-question is the only piece left on the listing/OM front.
+<!-- agent:boundary:0ae0b624 -->
 <!-- /agent:exchange -->
 
 ## Queue

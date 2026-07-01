@@ -176,6 +176,15 @@ Every AI-touched field — extracted from an uploaded OM/flyer, or generated (de
 
 The harness runs on a labeled ground-truth set (a handful of representative OMs per asset class), scores each release of the extraction/generation code, and **gates merge** on the thresholds above. That turns Artur's "100% accurate" request into a concrete, auditable acceptance test instead of an open-ended promise — and gives admin review a queue driven by grade, not guesswork.
 
+**Manual review workflow (the human-in-the-loop step).** This is a first-class feature, not an implied side effect of the rubric: every AI-touched field carries a **confidence score**, and low-confidence readings (Grade C/D, or any value below its calibrated threshold) are **flagged and routed to a review queue instead of auto-publishing**. There are two review points, and they layer:
+
+| Review step | Who does it | What it catches |
+|---|---|---|
+| **Listing-owner review** | The seller/broker who uploaded the OM, at data-entry time, before submitting the listing to *Under Review* | Confirms/corrects autofilled fields — flagged low-confidence ones surfaced first — by the party who actually knows the property. Scales, because the effort sits with the owner. |
+| **Admin review gate** | REItrades staff, before anything goes external | Nothing money-facing or buyer-facing (asking price, cap rate, NOI, teaser/OM content) ships until a flagged field is cleared. The trust backstop. |
+
+The flag is only trustworthy if the confidence score is **calibrated** — a value reported at 0.9 confidence should be right ~90% of the time — which is exactly what the eval harness above measures and tunes. Calibrated confidence + a graded review queue is what lets the platform show buyers "verified" data while keeping a human in the loop precisely where the model is unsure, and no wider.
+
 ### 3b. Deterministic core vs. AI assist (where "100%" is honest)
 
 The strongest, most defensible version of the accuracy story is to split the pipeline into a **deterministic layer** and a **generative layer**, and let deterministic code own everything it possibly can. Then "100% accurate" attaches to the parts that can actually carry it, and the fuzzy parts are described as *validated + reviewed* — a claim that holds up on a call and in a contract.

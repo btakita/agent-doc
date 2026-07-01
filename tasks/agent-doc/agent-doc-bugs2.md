@@ -94,7 +94,26 @@ The chain that stranded three: over the last cycles the JB plugin was **stale** 
 **Fix direction** (filed as **#boundaryaccum1**, focused-cycle, plan `tasks/agent-doc/plan-boundary-accumulation-committed-blob.md`): the staged git blob and snapshot are *binary-owned* artifacts — collapsing their boundaries never races the live editor buffer (git stages a snapshot, not the live file), so the single-boundary collapse should run there **unconditionally**, with the active-run and listener guards scoped only to the working-tree disk rewrite that actually races the editor. Plus a post-commit invariant check that reconciles or fails loudly if HEAD ever carries >1 boundary, and promotion of the two aspirational template invariants to real regressions + a SimWorld case (N wedged-finalize→direct-commit cycles never leave >1 boundary in HEAD). It composes with `#fullboundary` (which reduces the wedge trigger) rather than replacing it.
 
 I did **not** hand-strip the markers or `make install`/recycle inline: the binary is stale relative to source and you've halted the queue to work these bugs, so a mid-session install would just re-trigger `live_prompt_drift`. This cycle's `finalize` runs the normal apply_patches pre-patch (strip-all + insert-one), so committing this response should itself collapse the three back to one — the immediate observable fix — and #boundaryaccum1 makes it stay that way regardless of write path.
-<!-- agent:boundary:a02a6cd7 -->
+❯ I restarted JB. Please ensure the editor plugins hot-reload when a new install occurs.
+
+### Re: Ensure editor plugins hot-reload on a new install — opus-4-8
+
+Done for the native layer, where the actual staleness lived. Root cause of why your restart was needed: both plugins detected the new cdylib by mtime but reloaded it **in place** —
+
+- JB `NativeLib.reload()` called `Native.load(path)` on the same canonical path;
+- VSCode `native.ts` called `koffi.load(loadedPath)` on the same path.
+
+`dlopen` returns the already-mapped handle for an unchanged path, so the mtime check fired and `loadedMtime` advanced, but the live JVM / extension host kept running the **old** native code until a full restart. When a concurrent `make install` bumped the on-disk cdylib, the fresh finalize client then spoke a newer protocol than the stale in-memory cdylib → the `no_ack` / `ack status=error` wedge you hit.
+
+**Fix (shipped):** watch the canonical install path for mtime as before, but `Native.load` / `koffi.load` a **unique per-mtime shadow copy** (`libagent_doc-<mtime>.<ext>` under a per-pid tmp dir). A new inode forces a real load, so `make install` / `agent-doc lib-install` hot-reloads the native code without an IDE restart. Stale shadow copies are pruned; on any copy failure it falls back to the canonical path (never worse than before).
+
+- JB: `editors/jetbrains/.../NativeLib.kt` (`nativeShadowCopyPath` + `shadowCopyForLoad`, wired into `reload`/`loadFrom`), 4 tests green, plugin **0.2.204** built (signed + unsigned).
+- VSCode: `editors/vscode/src/native.ts` (same helper, wired into `ensureLoaded`), 3 tests green, extension **0.2.37** (`npm test`: 141/141, `tsc` clean).
+
+**Two honest limits:**
+1. This is a native-code reload. **Structural plugin-code changes** (new Kotlin/TS methods — including *this* update) still need a reinstall + restart to land, because updating the JAR/JS bytecode isn't the same as reloading the .so. Filed **#jarhotreload** for the dynamic-plugin-unload path; lower priority since most logic lives in the shared Rust core that now hot-reloads.
+2. I did **not** `make install` or install the new plugin zips mid-session — that would re-stale the JB session you just restarted and re-trigger `live_prompt_drift`. So the live proof (install the plugin + `make install` the cdylib + watch it reload with no restart) is the one operator-gated step: **#nativehotreloadverify**.
+<!-- agent:boundary:e16ad7ea -->
 <!-- /agent:exchange -->
 ## Queue
 

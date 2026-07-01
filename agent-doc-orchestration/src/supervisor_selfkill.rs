@@ -22,7 +22,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 
-use crate::snapshot::doc_hash;
+use agent_doc_fs::document_state_hash;
 use agent_doc_fs::find_project_root;
 
 const CONTROL_DIR: &str = ".agent-doc/control";
@@ -52,7 +52,7 @@ fn now_secs() -> u64 {
 
 /// Per-document sentinel path: `<project_root>/.agent-doc/control/<hash>.supervisor-selfkill`.
 pub fn self_kill_sentinel_path(file: &Path) -> Result<PathBuf> {
-    let hash = doc_hash(file)?;
+    let hash = document_state_hash(file)?;
     let canonical = file.canonicalize()?;
     let project_root = find_project_root(&canonical)
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());

@@ -89,7 +89,7 @@ pub(crate) fn ipc_dewedge_session_id(file: &Path) -> String {
 }
 
 pub(crate) fn ipc_dewedge_marker_path(project_root: &Path, file: &Path) -> Result<PathBuf> {
-    let hash = snapshot::doc_hash(file)?;
+    let hash = agent_doc_fs::document_state_hash(file)?;
     Ok(project_root
         .join(".agent-doc/ipc-degraded")
         .join(format!("{hash}.json")))
@@ -2684,7 +2684,7 @@ pub(crate) fn try_ipc_normalization_repair_patch(
         return Ok(false);
     }
 
-    let hash = snapshot::doc_hash(file)?;
+    let hash = agent_doc_fs::document_state_hash(file)?;
     let patch_file = patches_dir.join(format!("{hash}.json"));
     let payload = normalization_repair_payload(
         &canonical,
@@ -4509,7 +4509,7 @@ agent response
         std::fs::write(&doc, bad_state).unwrap();
         let normalize_prefix_lines =
             vec!["do #sidecar-file. spec-test-build-install-commit-push".to_string()];
-        let patch_hash = snapshot::doc_hash(&doc).unwrap();
+        let patch_hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         let patch_file = agent_doc_dir
             .join("patches")
             .join(format!("{patch_hash}.json"));
@@ -5894,10 +5894,10 @@ mod core_tests {
             !ipc_direct_disk_degraded(dir.path(), &doc).unwrap(),
             "a recovered live listener must self-heal the degrade latch"
         );
-        let marker = dir
-            .path()
-            .join(".agent-doc/ipc-degraded")
-            .join(format!("{}.json", snapshot::doc_hash(&doc).unwrap()));
+        let marker = dir.path().join(".agent-doc/ipc-degraded").join(format!(
+            "{}.json",
+            agent_doc_fs::document_state_hash(&doc).unwrap()
+        ));
         assert!(
             !marker.exists(),
             "self-heal must remove the degraded marker"
@@ -5930,10 +5930,10 @@ mod core_tests {
             ipc_direct_disk_degraded(dir.path(), &doc).unwrap(),
             "connectable but non-acking listener must remain degraded"
         );
-        let marker = dir
-            .path()
-            .join(".agent-doc/ipc-degraded")
-            .join(format!("{}.json", snapshot::doc_hash(&doc).unwrap()));
+        let marker = dir.path().join(".agent-doc/ipc-degraded").join(format!(
+            "{}.json",
+            agent_doc_fs::document_state_hash(&doc).unwrap()
+        ));
         assert!(
             marker.exists(),
             "non-acking listener must not clear the degraded marker"

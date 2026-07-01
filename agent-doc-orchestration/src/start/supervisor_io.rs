@@ -916,7 +916,7 @@ mod tests {
             "{reg:?}"
         );
         // No hub was allocated for the detached document.
-        let hash = crate::snapshot::doc_hash(&doc).unwrap();
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         let allocated = crate::crdt_relay_host::hub_is_allocated_for_test(&hash);
         assert!(
             !allocated,

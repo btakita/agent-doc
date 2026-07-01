@@ -2334,7 +2334,7 @@ fn check_linked_docs(file: &Path) -> Vec<RelatedDocChange> {
     }
 
     // Get our snapshot mtime as the baseline for comparison.
-    let our_snapshot_mtime = snapshot::path_for(file)
+    let our_snapshot_mtime = agent_doc_fs::snapshot_path_for(file)
         .ok()
         .and_then(|p| std::fs::metadata(&p).ok())
         .and_then(|m| m.modified().ok());
@@ -2447,7 +2447,7 @@ fn recent_commit_summary(file: &Path, since: Option<std::time::SystemTime>) -> S
 }
 
 fn save_baseline_content(file: &Path, content: &str) -> Option<String> {
-    let baseline_path = match snapshot::baseline_path_for(file) {
+    let baseline_path = match agent_doc_fs::baseline_path_for(file) {
         Ok(path) => path,
         Err(e) => {
             eprintln!("[preflight] failed to resolve baseline path: {}", e);
@@ -2607,7 +2607,7 @@ mod th {
     pub(crate) fn age_cycle_state(file: &Path, age_secs: u64) {
         let canonical = file.canonicalize().unwrap();
         let root = agent_doc_fs::find_project_root(&canonical).unwrap();
-        let hash = crate::snapshot::doc_hash(&canonical).unwrap();
+        let hash = agent_doc_fs::document_state_hash(&canonical).unwrap();
         let path = root
             .join(".agent-doc/state/cycles")
             .join(format!("{hash}.json"));

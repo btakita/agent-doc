@@ -1210,7 +1210,7 @@ pub(crate) fn run_with_queue_completion_ids(
         .canonicalize()
         .map_err(|_| anyhow::anyhow!("file not found: {}", file.display()))?;
 
-    let pending_path = snapshot::pending_path_for(&canonical)?;
+    let pending_path = agent_doc_fs::pending_response_path_for(&canonical)?;
     let capture = crate::capture::load_active(&canonical)?.filter(capture_is_repairable);
     let doc_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read document for repair {}", file.display()))?;
@@ -1675,7 +1675,7 @@ pub fn repair(file: &Path) -> Result<RepairOutcome> {
 pub fn save_pending(file: &Path, response: &str) -> Result<()> {
     let response = write::canonicalize_response_for_capture(file, response)?;
     crate::capture::capture_response(file, &response)?;
-    let pending_path = snapshot::pending_path_for(file)?;
+    let pending_path = agent_doc_fs::pending_response_path_for(file)?;
     if let Some(parent) = pending_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -1686,7 +1686,7 @@ pub fn save_pending(file: &Path, response: &str) -> Result<()> {
 
 /// Remove the pending file after a successful write-back.
 pub fn clear_pending(file: &Path) -> Result<()> {
-    let pending_path = snapshot::pending_path_for(file)?;
+    let pending_path = agent_doc_fs::pending_response_path_for(file)?;
     if pending_path.exists() {
         std::fs::remove_file(&pending_path)?;
     }
@@ -1748,7 +1748,7 @@ mod tests {
     fn age_cycle_state(file: &Path, age_secs: u64) {
         let canonical = file.canonicalize().unwrap();
         let root = agent_doc_fs::find_project_root(&canonical).unwrap();
-        let hash = crate::snapshot::doc_hash(&canonical).unwrap();
+        let hash = agent_doc_fs::document_state_hash(&canonical).unwrap();
         let path = root
             .join(".agent-doc/state/cycles")
             .join(format!("{hash}.json"));
@@ -1981,7 +1981,7 @@ mod tests {
         std::fs::write(&doc, "content").unwrap();
 
         save_pending(&doc, "response text").unwrap();
-        let pending = snapshot::pending_path_for(&doc).unwrap();
+        let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
         assert!(pending.exists());
 
         clear_pending(&doc).unwrap();
@@ -2177,7 +2177,7 @@ mod tests {
         assert!(result.contains("## Assistant"));
 
         // Pending file should be cleaned up
-        let pending = snapshot::pending_path_for(&doc).unwrap();
+        let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
         assert!(!pending.exists());
     }
 
@@ -2388,7 +2388,7 @@ mod tests {
         let recovered = run(&doc).unwrap();
         assert_eq!(recovered, RepairOutcome::Noop);
 
-        let pending = snapshot::pending_path_for(&doc).unwrap();
+        let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
         assert!(!pending.exists());
     }
 
@@ -2416,7 +2416,7 @@ mod tests {
         assert_eq!(result, content);
 
         // Pending file should be cleaned up
-        let pending = snapshot::pending_path_for(&doc).unwrap();
+        let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
         assert!(!pending.exists());
     }
 
@@ -2431,7 +2431,7 @@ mod tests {
 
         save_pending(&doc, "Recovered from capture.").unwrap();
         clear_pending(&doc).unwrap();
-        let pending = snapshot::pending_path_for(&doc).unwrap();
+        let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
         assert!(!pending.exists());
         // Re-arm capture as if the write never happened.
         crate::capture::capture_response(&doc, "Recovered from capture.").unwrap();
@@ -2645,7 +2645,7 @@ mod tests {
         snapshot::save(&doc, content).unwrap();
 
         save_pending(&doc, "Recovered from capture.").unwrap();
-        let pending = snapshot::pending_path_for(&doc).unwrap();
+        let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
         std::fs::remove_file(&pending).unwrap();
         std::fs::write(&doc, "---\nsession: test\n---\n\n## User\n\nHello again\n").unwrap();
 
@@ -2883,7 +2883,7 @@ mod tests {
             "stale assistant tail must not be re-added:\n{result}"
         );
 
-        let pending = snapshot::pending_path_for(&doc).unwrap();
+        let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
         assert!(!pending.exists(), "pending file should be cleared");
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();

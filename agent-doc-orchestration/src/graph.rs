@@ -1071,7 +1071,7 @@ mod tests {
 
         let graph_hash = rc.doc_hash();
         let canonical = doc.canonicalize().unwrap();
-        let snap_hash = snapshot::doc_hash(&canonical).unwrap();
+        let snap_hash = agent_doc_fs::document_state_hash(&canonical).unwrap();
         assert_eq!(graph_hash, snap_hash);
     }
 

@@ -667,7 +667,7 @@ fn make_session(
 ) -> Result<ServeSession> {
     let absolute = canonicalize_or_normalize(path);
     let absolute_str = absolute.display().to_string();
-    let hash = agent_doc_orchestration::snapshot::doc_hash_from_str(&absolute_str);
+    let hash = agent_doc_fs::document_state_hash_from_str(&absolute_str);
     let id = hash.chars().take(12).collect();
     let path = relative_path(root, &absolute).unwrap_or_else(|_| absolute_str.clone());
     let title = absolute

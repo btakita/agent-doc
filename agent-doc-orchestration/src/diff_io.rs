@@ -1,8 +1,8 @@
 //! Diff I/O — snapshot-backed half of the original `diff.rs`. The pure half
 //! lives in [`agent_doc_diff`].
 //!
-//! These functions all touch `snapshot::{load, save, resolve, path_for}` and
-//! must stay in the orchestration crate.
+//! These functions touch effectful snapshot IO plus `agent_doc_fs` state paths
+//! and must stay in the orchestration crate.
 
 use anyhow::Result;
 use std::path::Path;
@@ -28,7 +28,7 @@ pub fn compute_with_current(doc: &Path) -> Result<ComputeResult> {
     let t_total = std::time::Instant::now();
 
     let previous = snapshot::resolve(doc)?.unwrap_or_default();
-    let snap_path = snapshot::path_for(doc)?;
+    let snap_path = agent_doc_fs::snapshot_path_for(doc)?;
 
     // Copy-on-read: capture snapshot mtime at read time so we can detect
     // external modifications before any stale-snapshot recovery write.
@@ -335,7 +335,7 @@ mod tests {
         std::fs::write(&doc, doc_content).unwrap();
 
         // Create .agent-doc/snapshots/ and write the snapshot
-        let snap_path = snapshot::path_for(&doc).unwrap();
+        let snap_path = agent_doc_fs::snapshot_path_for(&doc).unwrap();
         std::fs::create_dir_all(snap_path.parent().unwrap()).unwrap();
         std::fs::write(&snap_path, snap_content).unwrap();
 

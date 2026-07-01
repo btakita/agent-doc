@@ -13,8 +13,9 @@
 //!   old path's hash to the new path's hash. Updates `sessions.json` entries
 //!   whose `file` field matches the old path.
 //! - The old path may no longer exist on disk (rename already happened). In
-//!   that case, `doc_hash_from_str` is used with the absolute path string
-//!   instead of `doc_hash` (which requires `canonicalize`).
+//!   that case, `agent_doc_fs::document_state_hash_from_str` is used with the
+//!   absolute path string instead of `agent_doc_fs::document_state_hash` (which
+//!   requires `canonicalize`).
 //! - Limitation: if the old path contained symlinks, the computed hash may not
 //!   match the original because `canonicalize` resolves symlinks but our
 //!   fallback does not.
@@ -30,7 +31,7 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use agent_doc_orchestration::{sessions, snapshot};
+use agent_doc_orchestration::sessions;
 
 /// State file types to migrate, with their subdirectory and extension.
 const STATE_FILES: &[(&str, &str)] = &[
@@ -51,7 +52,7 @@ pub fn run(old_path: &Path, new_path: &Path) -> Result<()> {
 
     // Compute old hash
     let old_hash = if old_path.exists() {
-        snapshot::doc_hash(old_path)?
+        agent_doc_fs::document_state_hash(old_path)?
     } else {
         // Old path no longer exists — resolve to absolute without canonicalize
         let abs = if old_path.is_absolute() {
@@ -60,11 +61,11 @@ pub fn run(old_path: &Path, new_path: &Path) -> Result<()> {
             let cwd = std::env::current_dir().context("failed to get current directory")?;
             cwd.join(old_path).to_string_lossy().to_string()
         };
-        snapshot::doc_hash_from_str(&abs)
+        agent_doc_fs::document_state_hash_from_str(&abs)
     };
 
     // Compute new hash (file exists, canonicalize works)
-    let new_hash = snapshot::doc_hash(new_path)?;
+    let new_hash = agent_doc_fs::document_state_hash(new_path)?;
 
     if old_hash == new_hash {
         eprintln!("[rename] hashes match — nothing to migrate");

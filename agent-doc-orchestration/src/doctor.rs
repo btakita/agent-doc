@@ -63,7 +63,7 @@ fn gather_facts(
         .canonicalize()
         .with_context(|| format!("failed to canonicalize {}", file.display()))?;
     let project_root = agent_doc_fs::find_project_root(&canonical);
-    let document_hash = crate::snapshot::doc_hash(&canonical).ok();
+    let document_hash = agent_doc_fs::document_state_hash(&canonical).ok();
     let preflight = read_preflight_facts(options.preflight_json.as_deref())?;
     let mut session_check = read_session_check_json_facts(options.session_check_json.as_deref())?;
     merge_live_session_check(file, &mut session_check, &mut warnings);

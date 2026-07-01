@@ -22,7 +22,6 @@ use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::plan;
-use agent_doc_orchestration::snapshot;
 use agent_doc_work_graph::schedule::{AutoDagNode, AutoDagSchedule};
 
 const JOB_PACKET_CONTRACT_VERSION: &str = "agent-doc-job-packet-v1";
@@ -1476,7 +1475,7 @@ fn project_root(file: &Path) -> Result<PathBuf> {
 }
 
 fn cycle_id(file: &Path, created_at: u64) -> Result<String> {
-    let hash = snapshot::doc_hash(file)?;
+    let hash = agent_doc_fs::document_state_hash(file)?;
     Ok(format!("cycle-{created_at}-{}", &hash[..8]))
 }
 

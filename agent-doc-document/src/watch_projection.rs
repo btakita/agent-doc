@@ -27,6 +27,11 @@ pub fn watch_content_hash(content: &str) -> String {
     agent_doc_hash::content_hash(&strip_boundaries_for_watch_hash(content))
 }
 
+/// Stable state event id for a delivered file-watch change.
+pub fn file_watch_event_id(doc_id: &str, generation: u64, content_hash: &str) -> String {
+    format!("file-watch:{doc_id}:{generation}:{content_hash}")
+}
+
 /// Project a previous/current document pair into node-keyed watcher events.
 pub fn project_watch_node_events(previous: Option<&str>, current: &str) -> Vec<DocumentNodeEvent> {
     previous
@@ -81,6 +86,14 @@ mod tests {
         assert_ne!(
             watch_content_hash("version 1"),
             watch_content_hash("version 2")
+        );
+    }
+
+    #[test]
+    fn file_watch_event_id_includes_document_generation_and_content_hash() {
+        assert_eq!(
+            file_watch_event_id("doc-abc", 42, "hash-123"),
+            "file-watch:doc-abc:42:hash-123"
         );
     }
 

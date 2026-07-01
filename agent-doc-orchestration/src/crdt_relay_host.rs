@@ -29,7 +29,7 @@
 //! ## Per-document isolation (`#xdocsuper1/3`)
 //!
 //! The hub registry is keyed by the document hash
-//! ([`crate::snapshot::doc_hash`]). Each document gets its own independent
+//! ([`agent_doc_fs::document_state_hash`]). Each document gets its own independent
 //! [`RelayHub`]; a hub for one document can never observe or flush another
 //! document's replicas. This is the same per-document isolation the hosting-epoch
 //! backbone enforces, applied to the live relay layer.
@@ -86,7 +86,7 @@ fn hub_registry() -> &'static Mutex<HashMap<String, RelayHub>> {
 /// gate on `EditorAttached` should resolve [`authority_for_file`] first (the
 /// finalize/disk entry points below do).
 pub fn with_hub<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T) -> Result<T> {
-    let hash = crate::snapshot::doc_hash(file)?;
+    let hash = agent_doc_fs::document_state_hash(file)?;
     let mut registry = hub_registry()
         .lock()
         .map_err(|e| anyhow::anyhow!("relay hub registry poisoned: {e}"))?;
@@ -100,7 +100,7 @@ pub fn with_hub<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T) -> Result<T>
 /// start from the current document text, not an empty CRDT, or the first editor
 /// delta can be applied at a clamped offset and later overwrite the buffer.
 fn with_hub_seeded_from_file<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T) -> Result<T> {
-    let hash = crate::snapshot::doc_hash(file)?;
+    let hash = agent_doc_fs::document_state_hash(file)?;
     {
         let mut registry = hub_registry()
             .lock()
@@ -233,7 +233,7 @@ pub fn deregister_replica_for_file(file: &Path, identity: &str) -> Result<bool> 
 ///   out over the socket to the peers' FFI nodes.
 ///
 /// Per-document isolation is structural: the update only ever reaches THIS
-/// document's hub (keyed by [`crate::snapshot::doc_hash`]) — `#xdocsuper1/3`.
+/// document's hub (keyed by [`agent_doc_fs::document_state_hash`]) — `#xdocsuper1/3`.
 pub fn relay_replica_update_for_file(
     file: &Path,
     identity: &str,
@@ -360,7 +360,7 @@ pub fn set_replica_awareness_for_file(
 /// the stale disk projection is reconciled into it (in-memory wins) rather than
 /// replacing it.
 pub fn recover_hub_from_disk(file: &Path, projection: &[u8]) -> Result<()> {
-    let hash = crate::snapshot::doc_hash(file)?;
+    let hash = agent_doc_fs::document_state_hash(file)?;
     let mut registry = hub_registry()
         .lock()
         .map_err(|e| anyhow::anyhow!("relay hub registry poisoned: {e}"))?;
@@ -529,7 +529,7 @@ pub fn record_committed_baseline_for_file(file: &Path) {
             return;
         }
     };
-    let hash = match crate::snapshot::doc_hash(file) {
+    let hash = match agent_doc_fs::document_state_hash(file) {
         Ok(h) => h,
         Err(e) => {
             crate::ops_log::log_op(
@@ -841,7 +841,7 @@ mod tests {
         // Detached / GitAuthoritative: the barrier is trivially ready and NO hub is
         // allocated for the document — the headless commit path is untouched.
         let (_dir, doc) = temp_doc("detached.md");
-        let hash = crate::snapshot::doc_hash(&doc).unwrap();
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         assert!(commit_barrier_for_file_with_authority(
             &doc,
             CrdtAuthority::GitAuthoritative
@@ -1139,7 +1139,7 @@ mod tests {
         // skipped (the baseline-wins snapshot load path runs unchanged) and no hub
         // is allocated.
         let (_dir, doc) = temp_doc("headless-demotion.md");
-        let hash = crate::snapshot::doc_hash(&doc).unwrap();
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         let result = reconcile_disk_projection_for_file_with_authority(
             &doc,
             b"any-bytes-are-ignored",

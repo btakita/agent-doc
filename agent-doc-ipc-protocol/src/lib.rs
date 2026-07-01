@@ -154,6 +154,11 @@ pub fn classify_ack(ack: &str) -> AckClassification {
     }
 }
 
+/// True when a socket-send error message reports an `already_applied` ack.
+pub fn is_already_applied_ack_error_message(message: &str) -> bool {
+    message.starts_with("IPC ack already_applied")
+}
+
 /// Tag a `patch` message with the `early_ack` opt-in when enabled.
 ///
 /// Non-patch traffic is returned unchanged so queue convergence, VCS refreshes,
@@ -336,10 +341,10 @@ mod tests {
         AckClassification, FullContentIpcMode, callback_request, callback_request_is_expired,
         callback_response, callback_response_matches_request, callback_urgency_for_elapsed,
         classify_ack, early_ack_line, early_ack_ops_marker, early_ack_tagged_message,
-        ipc_accept_thread_ops_marker, message_requests_early_ack, patch_message,
-        pending_callback_from_request, publish_live_buffer_message, queue_convergence_message,
-        refresh_content_message, reposition_message, save_document_message, vcs_refresh_message,
-        vcs_refresh_probe_message,
+        ipc_accept_thread_ops_marker, is_already_applied_ack_error_message,
+        message_requests_early_ack, patch_message, pending_callback_from_request,
+        publish_live_buffer_message, queue_convergence_message, refresh_content_message,
+        reposition_message, save_document_message, vcs_refresh_message, vcs_refresh_probe_message,
     };
 
     #[test]
@@ -395,6 +400,27 @@ mod tests {
     fn classify_ack_treats_malformed_json_as_ok() {
         let ack = "not json at all";
         assert_eq!(classify_ack(ack), AckClassification::Ok);
+    }
+
+    #[test]
+    fn already_applied_ack_error_message_matches_socket_send_error_shape() {
+        assert!(is_already_applied_ack_error_message(concat!(
+            "IPC ack already_applied: ",
+            r#"{"type":"ack","status":"error","reason":"already_applied"}"#
+        )));
+    }
+
+    #[test]
+    fn already_applied_ack_error_message_rejects_other_socket_errors() {
+        assert!(!is_already_applied_ack_error_message(
+            "IPC ack status error: something else"
+        ));
+        assert!(!is_already_applied_ack_error_message(
+            "IPC ack timeout (2s)"
+        ));
+        assert!(!is_already_applied_ack_error_message(
+            r#"{"type":"ack","status":"error","reason":"already_applied"}"#
+        ));
     }
 
     #[test]

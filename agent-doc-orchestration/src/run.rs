@@ -911,7 +911,7 @@ fn active_queue_prompt_state(file: &Path) -> Result<ActiveQueuePromptState> {
 fn typed_queue_prompt_state(file: &Path, content: &str) -> Option<ActiveQueuePromptState> {
     let canonical = file.canonicalize().ok()?;
     let project_root = agent_doc_fs::find_project_root(&canonical)?;
-    let document_hash = snapshot::doc_hash(&canonical).ok()?;
+    let document_hash = agent_doc_fs::document_state_hash(&canonical).ok()?;
     let ledger = crate::project_controller::load_state_event_ledger(&project_root).ok()?;
     let projection = ledger.project_document(&document_hash)?;
     let current_nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue").ok()?;
@@ -1849,7 +1849,7 @@ fn update_resume_id(file: &Path, session_id: &str) -> Result<()> {
 /// Acquire an advisory flock on a document file for agent-doc-vs-agent-doc
 /// coordination. Lock file is `.agent-doc/locks/<hash>.lock`. Released on drop.
 fn acquire_doc_lock(path: &Path) -> Result<std::fs::File> {
-    let lock_path = crate::snapshot::lock_path_for(path)?;
+    let lock_path = agent_doc_fs::state_lock_path_for(path)?;
     if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -1913,7 +1913,8 @@ mod tests {
         prompt_text: &str,
         drainable: bool,
     ) {
-        let document_hash = snapshot::doc_hash(&doc.canonicalize().unwrap()).unwrap();
+        let document_hash =
+            agent_doc_fs::document_state_hash(&doc.canonicalize().unwrap()).unwrap();
         let prompt_hash = agent_doc_hash::content_hash(prompt_text);
         let event = crate::state_backbone::StateEvent::new(
             format!("test-typed-selected-head:{node_key}:{prompt_hash}"),

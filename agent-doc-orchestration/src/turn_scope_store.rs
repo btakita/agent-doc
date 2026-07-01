@@ -5,7 +5,7 @@
 //!
 //! ## Spec
 //! - `path_for(doc)`: compute `<project_root>/.agent-doc/turn-scope/<hash>.json`,
-//!   keyed by the same `snapshot::doc_hash` as every other per-doc state file so
+//!   keyed by the same `agent_doc_fs::document_state_hash` as every other per-doc state file so
 //!   the scope colocates with the document's snapshot/baseline tree.
 //! - `save(doc, scope)`: atomically persist the JSON-encoded scope (tempfile +
 //!   rename), creating the parent directory on demand.
@@ -32,7 +32,7 @@ const TURN_SCOPE_DIR: &str = ".agent-doc/turn-scope";
 /// Returns `<project_root>/.agent-doc/turn-scope/<hash>.json`.
 /// Falls back to the document's parent directory when no project root is found.
 pub fn path_for(doc: &Path) -> Result<PathBuf> {
-    let hash = crate::snapshot::doc_hash(doc)?;
+    let hash = agent_doc_fs::document_state_hash(doc)?;
     let canonical = doc.canonicalize()?;
     let project_root = agent_doc_fs::find_project_root(&canonical)
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());

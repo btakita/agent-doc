@@ -5728,7 +5728,8 @@ fn finalize_with_typing_in_post_exchange_comment_and_already_applied_ack_does_no
     //   3. The plugin's retry ack is the protocol's dedupe signal:
     //      `{"type":"ack","status":"error","reason":"already_applied"}`.
     //   4. The binary recognizes that signal through
-    //      `agent_doc_ipc_protocol::classify_ack` and skips the file-IPC
+    //      `agent_doc_ipc_protocol::is_already_applied_ack_error_message`
+    //      and skips the file-IPC
     //      fallback so it does not re-apply the same response on top of the
     //      live buffer (which would land a duplicate `### Re:` heading and
     //      collide with the user's in-flight typing inside the scratch
@@ -5754,9 +5755,9 @@ fn finalize_with_typing_in_post_exchange_comment_and_already_applied_ack_does_no
         agent_doc_ipc_protocol::AckClassification::AlreadyApplied,
         "protocol contract: status=error + reason=already_applied is the dedupe signal"
     );
-    let send_err = anyhow!("IPC ack already_applied: {}", already_applied_ack);
+    let send_err = format!("IPC ack already_applied: {already_applied_ack}");
     assert!(
-        agent_doc_orchestration::ipc_socket::is_already_applied_error(&send_err),
+        agent_doc_ipc_protocol::is_already_applied_ack_error_message(&send_err),
         "send_message wraps already_applied acks in an error the write path can recognize"
     );
 
@@ -8118,7 +8119,7 @@ mod crdt_relay_host_sim {
     use std::path::PathBuf;
 
     /// A throwaway tracked document under its own temp project root, so the live
-    /// `crdt_relay_host` registry keys per-document via `snapshot::doc_hash`.
+    /// `crdt_relay_host` registry keys per-document via `agent_doc_fs::document_state_hash`.
     fn temp_doc(name: &str) -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -8158,7 +8159,7 @@ mod crdt_relay_host_sim {
         // DETACHED doc (a SEPARATE document): the live barrier is a trivial no-op
         // that allocates no hub — per-document isolation + headless path unchanged.
         let (_detached_dir, detached) = temp_doc("live-detached.md");
-        let hash = agent_doc_orchestration::snapshot::doc_hash(&detached).unwrap();
+        let hash = agent_doc_fs::document_state_hash(&detached).unwrap();
         assert!(commit_barrier_for_file_with_authority(
             &detached,
             CrdtAuthority::GitAuthoritative

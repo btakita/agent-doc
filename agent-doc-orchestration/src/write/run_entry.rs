@@ -813,7 +813,7 @@ pub fn run_stream(
     if force_disk && let Ok(canonical) = file.canonicalize() {
         let project_root = resolve_ipc_project_root(&canonical);
         let patches_dir = project_root.join(".agent-doc/patches");
-        if let Ok(hash) = snapshot::doc_hash(file) {
+        if let Ok(hash) = agent_doc_fs::document_state_hash(file) {
             let patch_file = patches_dir.join(format!("{}.json", hash));
             if patch_file.exists() {
                 eprintln!("[write] cleaning stale IPC patch file to prevent double-write");
@@ -1244,7 +1244,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
 
     // Build IPC patch file
     let canonical = file.canonicalize()?;
-    let hash = snapshot::doc_hash(file)?;
+    let hash = agent_doc_fs::document_state_hash(file)?;
     let project_root = resolve_ipc_project_root(&canonical);
     let patches_dir = project_root.join(".agent-doc/patches");
     std::fs::create_dir_all(&patches_dir)?;

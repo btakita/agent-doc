@@ -24,7 +24,7 @@
 //! - `project_binding_advances_generation_on_new_pane`
 //! - `record_session_start_persists_authoritative_record`
 
-use agent_doc_harness::normalize_harness_name;
+use agent_doc_harness::{document_harness_from_content, normalize_harness_name};
 use agent_doc_supervisor::{OwnershipGeneration, infer_latest_generation_from_content};
 use anyhow::Result;
 use std::path::{Path, PathBuf};
@@ -65,13 +65,6 @@ fn timestamp_secs() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
-}
-
-fn document_harness_from_content(content: &str) -> Option<String> {
-    agent_doc_frontmatter::frontmatter::parse(content)
-        .ok()
-        .and_then(|(fm, _)| fm.agent)
-        .map(|value| normalize_harness_name(&value))
 }
 
 fn document_path_from_base_dir(base_dir: &Path, file: &str) -> PathBuf {

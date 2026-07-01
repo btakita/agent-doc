@@ -400,7 +400,7 @@ pub fn broadcast_editor_change(
         );
     }
     let targets = compute_broadcast_plan(&disk, originator_editor_id, originator_content, &peers)?;
-    let doc_hash = crate::snapshot::doc_hash(&canonical)?;
+    let doc_hash = agent_doc_fs::document_state_hash(&canonical)?;
     let mut deliveries = Vec::new();
     for target in targets {
         let Some(delta) =

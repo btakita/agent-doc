@@ -406,7 +406,7 @@ pub fn cleanup_fallback_patch_files(file: &Path) {
     if !patches_dir.exists() {
         return;
     }
-    let Ok(hash) = crate::snapshot::doc_hash(file) else {
+    let Ok(hash) = agent_doc_fs::document_state_hash(file) else {
         return;
     };
     let patch_file = patches_dir.join(format!("{hash}.json"));
@@ -1001,7 +1001,7 @@ pub fn apply_closeout_recovery_mutation(
             reason,
         } => {
             if clear_pending_response {
-                let pending_path = crate::snapshot::pending_path_for(file)?;
+                let pending_path = agent_doc_fs::pending_response_path_for(file)?;
                 if pending_path.exists() {
                     std::fs::remove_file(&pending_path).with_context(|| {
                         format!(

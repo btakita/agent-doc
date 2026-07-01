@@ -97,7 +97,8 @@ fn run_pending_maintenance_with_options(
     }
 
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-    let doc_id = snapshot::doc_hash(&canonical).unwrap_or_else(|_| file.display().to_string());
+    let doc_id = agent_doc_fs::document_state_hash(&canonical)
+        .unwrap_or_else(|_| file.display().to_string());
 
     let mut current_content = content.clone();
     let mut snapshot_content = snapshot::load(file)?;

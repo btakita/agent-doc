@@ -1268,7 +1268,7 @@ fn state_path(file: &Path) -> Result<Option<PathBuf>> {
     let Some(root) = agent_doc_fs::find_project_root(&canonical) else {
         return Ok(None);
     };
-    let hash = crate::snapshot::doc_hash(&canonical)?;
+    let hash = agent_doc_fs::document_state_hash(&canonical)?;
     Ok(Some(
         root.join(".agent-doc/state/cycles")
             .join(format!("{hash}.json")),

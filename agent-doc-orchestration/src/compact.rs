@@ -980,7 +980,7 @@ fn compact_archive_metadata(
 
 /// Save archive to `.agent-doc/archives/<hash>-<timestamp>.md`.
 fn save_archive(doc: &Path, content: &str) -> Result<std::path::PathBuf> {
-    let snap_path = snapshot::path_for(doc)?;
+    let snap_path = agent_doc_fs::snapshot_path_for(doc)?;
     // Extract the hash from snapshot path (filename without .md)
     let hash = snap_path
         .file_stem()
@@ -2443,9 +2443,10 @@ mod tests {
 
         // The post-compact CRDT refresh must also preserve the marker verbatim:
         // a later stale-supervisor merge bootstraps from this CRDT state.
-        let crdt_path = agent_doc_dir
-            .join("crdt")
-            .join(format!("{}.yrs", snapshot::doc_hash(&file).unwrap()));
+        let crdt_path = agent_doc_dir.join("crdt").join(format!(
+            "{}.yrs",
+            agent_doc_fs::document_state_hash(&file).unwrap()
+        ));
         if let Ok(bytes) = std::fs::read(&crdt_path) {
             let round_tripped = agent_doc_merge::crdt::CrdtDoc::decode_state(&bytes)
                 .unwrap()
@@ -2515,7 +2516,7 @@ mod tests {
 
         // After compact: file and snapshot should match
         let file_after = std::fs::read_to_string(&file).unwrap();
-        let snap_path = snapshot::path_for(&file).unwrap();
+        let snap_path = agent_doc_fs::snapshot_path_for(&file).unwrap();
         let snapshot_content = std::fs::read_to_string(&snap_path).unwrap();
 
         assert_eq!(

@@ -255,14 +255,6 @@ pub fn inflight_connection_handlers() -> u64 {
     INFLIGHT_CONNECTION_HANDLERS.load(std::sync::atomic::Ordering::SeqCst)
 }
 
-/// True when a `send_message` error string indicates the plugin reported
-/// `already_applied` rather than a genuine apply failure. Callers should use
-/// this to short-circuit the file-IPC fallback so they do not re-write a
-/// response the plugin already has in the live buffer.
-pub fn is_already_applied_error(err: &anyhow::Error) -> bool {
-    err.to_string().starts_with("IPC ack already_applied")
-}
-
 /// Send a patch message to the plugin.
 pub fn send_patch(
     project_root: &Path,
@@ -859,22 +851,5 @@ mod tests {
 
         let _ = std::fs::remove_file(socket_path(&root));
         drop(server);
-    }
-
-    #[test]
-    fn is_already_applied_error_matches_classifier_output() {
-        let err = anyhow::anyhow!(
-            "IPC ack already_applied: {}",
-            r#"{"type":"ack","status":"error","reason":"already_applied"}"#
-        );
-        assert!(super::is_already_applied_error(&err));
-    }
-
-    #[test]
-    fn is_already_applied_error_rejects_other_errors() {
-        let err = anyhow::anyhow!("IPC ack status error: something else");
-        assert!(!super::is_already_applied_error(&err));
-        let err = anyhow::anyhow!("IPC ack timeout (2s)");
-        assert!(!super::is_already_applied_error(&err));
     }
 }

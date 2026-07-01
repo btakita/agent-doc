@@ -471,7 +471,7 @@ fn read_explicit_baseline_md(file: &Path, baseline_file: Option<&Path>) -> Resul
         eprintln!("[write] warning: rename migration before baseline fallback failed: {e}");
     }
 
-    let migrated_path = crate::snapshot::baseline_path_for(file).with_context(|| {
+    let migrated_path = agent_doc_fs::baseline_path_for(file).with_context(|| {
         format!(
             "failed to resolve migrated baseline path for {}",
             file.display()
@@ -2568,7 +2568,7 @@ pub use ipc::*;
 // ---------------------------------------------------------------------------
 
 fn acquire_doc_lock(path: &Path) -> Result<std::fs::File> {
-    let lock_path = crate::snapshot::lock_path_for(path)?;
+    let lock_path = agent_doc_fs::state_lock_path_for(path)?;
     if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -3088,7 +3088,7 @@ mod tests {
         let result = queue_file_ipc_reposition_boundary(&doc, Some("abc123"), &[]).unwrap();
         assert!(matches!(result, FileIpcRepositionResult::Queued));
 
-        let hash = snapshot::doc_hash(&doc).unwrap();
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         let patch_file = root.join(".agent-doc/patches").join(format!("{hash}.json"));
         let payload: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&patch_file).unwrap()).unwrap();
@@ -3139,14 +3139,14 @@ mod tests {
     fn write_updates_snapshot() {
         // Use a direct snapshot write/read to avoid CWD dependency.
         // The snapshot module uses relative paths (.agent-doc/snapshots/),
-        // so we verify the pattern works via snapshot::path_for + direct I/O.
+        // so we verify the pattern works via agent_doc_fs::snapshot_path_for + direct I/O.
         let dir = TempDir::new().unwrap();
         let doc = dir.path().join("test.md");
         let content = "---\nsession: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nResponse\n\n## User\n\n";
         fs::write(&doc, content).unwrap();
 
         // Verify snapshot path computation works
-        let snap_path = snapshot::path_for(&doc).unwrap();
+        let snap_path = agent_doc_fs::snapshot_path_for(&doc).unwrap();
         assert!(
             snap_path
                 .to_string_lossy()
@@ -3754,7 +3754,7 @@ scratch
         let doc = dir.path().join("test.md");
         fs::write(&doc, "original\n").unwrap();
 
-        let lock_path = snapshot::lock_path_for(&doc).unwrap();
+        let lock_path = agent_doc_fs::state_lock_path_for(&doc).unwrap();
         fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
         let held_lock = OpenOptions::new()
             .create(true)
@@ -3802,7 +3802,7 @@ scratch
         );
         fs::write(&old_doc, &doc_content).unwrap();
 
-        let old_hash = snapshot::doc_hash(&old_doc).unwrap();
+        let old_hash = agent_doc_fs::document_state_hash(&old_doc).unwrap();
         let old_snapshot = dir
             .path()
             .join(".agent-doc/snapshots")
@@ -3819,7 +3819,7 @@ scratch
 
         assert!(snapshot::try_migrate_renamed(&new_doc).unwrap());
         assert!(!old_baseline.exists());
-        let migrated_baseline = snapshot::baseline_path_for(&new_doc).unwrap();
+        let migrated_baseline = agent_doc_fs::baseline_path_for(&new_doc).unwrap();
         assert!(migrated_baseline.exists());
 
         let baseline = read_explicit_baseline(&new_doc, Some(&old_baseline))

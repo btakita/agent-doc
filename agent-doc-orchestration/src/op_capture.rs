@@ -119,7 +119,7 @@ pub struct OpCaptureSidecar {
 /// `<project_root>/.agent-doc/op-capture/<doc-hash>.json`.
 fn op_capture_path_for(doc: &Path) -> Result<PathBuf> {
     let canonical = doc.canonicalize()?;
-    let hash = crate::snapshot::doc_hash(&canonical)?;
+    let hash = agent_doc_fs::document_state_hash(&canonical)?;
     let project_root = agent_doc_fs::find_project_root(&canonical)
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
     Ok(project_root
@@ -200,8 +200,8 @@ pub fn record_editor_op(doc: &Path, base_hash: &str, op: EditorOp) -> Result<()>
 /// `to_text` → `content_hash`. With no snapshot/CRDT state yet this is the
 /// empty-text hash, matching the merge's `None => String::new()` base.
 pub fn current_base_hash(doc: &Path) -> Result<String> {
-    let snapshot_path = crate::snapshot::path_for(doc)?;
-    let overlay_path = crate::snapshot::overlay_crdt_path_for(doc)?;
+    let snapshot_path = agent_doc_fs::snapshot_path_for(doc)?;
+    let overlay_path = agent_doc_fs::overlay_crdt_path_for(doc)?;
 
     // The base hash depends only on the snapshot + overlay contents, and neither
     // changes while the user is typing. Memoize on their fingerprints so a typing
@@ -362,7 +362,7 @@ mod tests {
         .unwrap();
 
         // Resolve the SAME base text `merge::merge_contents_crdt_with_ops` resolves.
-        let snapshot = crate::snapshot::path_for(&doc).unwrap();
+        let snapshot = agent_doc_fs::snapshot_path_for(&doc).unwrap();
         let baseline = read_optional_text(&snapshot).unwrap().unwrap_or_default();
         let base = crate::snapshot::crdt_merge_base_state(&doc, &baseline).unwrap();
         let base_text = agent_doc_merge::crdt::CrdtDoc::decode_state(&base.state)

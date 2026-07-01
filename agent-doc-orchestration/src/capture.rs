@@ -351,7 +351,7 @@ pub fn load_partial_by_cycle(file: &Path, cycle_id: &str) -> Result<Option<Parti
 #[allow(dead_code)]
 pub fn latest_partial_checkpoint(file: &Path) -> Result<Option<PartialCaptureRecord>> {
     let canonical = file.canonicalize()?;
-    let hash = crate::snapshot::doc_hash(&canonical)?;
+    let hash = agent_doc_fs::document_state_hash(&canonical)?;
     let project_root = agent_doc_fs::find_project_root(&canonical)
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
     let dir = project_root.join(".agent-doc/captures").join(hash);
@@ -390,7 +390,7 @@ pub fn latest_partial_checkpoint(file: &Path) -> Result<Option<PartialCaptureRec
 
 pub fn latest_committed(file: &Path) -> Result<Option<CaptureRecord>> {
     let canonical = file.canonicalize()?;
-    let hash = crate::snapshot::doc_hash(&canonical)?;
+    let hash = agent_doc_fs::document_state_hash(&canonical)?;
     let project_root = agent_doc_fs::find_project_root(&canonical)
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
     let dir = project_root.join(".agent-doc/captures").join(hash);
@@ -687,7 +687,7 @@ pub fn discard_captures_for_archived_responses(file: &Path, archived_text: &str)
         return Ok(0);
     }
     let canonical = file.canonicalize()?;
-    let hash = crate::snapshot::doc_hash(&canonical)?;
+    let hash = agent_doc_fs::document_state_hash(&canonical)?;
     let project_root = agent_doc_fs::find_project_root(&canonical)
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
     let dir = project_root.join(".agent-doc/captures").join(hash);
@@ -874,7 +874,7 @@ fn write_partial_record(file: &Path, record: &PartialCaptureRecord) -> Result<()
 
 fn capture_path_for(file: &Path, capture_id: &str) -> Result<PathBuf> {
     let canonical = file.canonicalize()?;
-    let hash = crate::snapshot::doc_hash(&canonical)?;
+    let hash = agent_doc_fs::document_state_hash(&canonical)?;
     let project_root = agent_doc_fs::find_project_root(&canonical)
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
     Ok(project_root
@@ -885,7 +885,7 @@ fn capture_path_for(file: &Path, capture_id: &str) -> Result<PathBuf> {
 
 fn partial_capture_path_for(file: &Path, cycle_id: &str) -> Result<PathBuf> {
     let canonical = file.canonicalize()?;
-    let hash = crate::snapshot::doc_hash(&canonical)?;
+    let hash = agent_doc_fs::document_state_hash(&canonical)?;
     let project_root = agent_doc_fs::find_project_root(&canonical)
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
     Ok(project_root

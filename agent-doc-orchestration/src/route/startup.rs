@@ -172,7 +172,7 @@ pub(crate) fn starting_dir_for(file: &Path) -> Option<std::path::PathBuf> {
 }
 
 pub(crate) fn session_start_lock_name(session_name: &str) -> String {
-    let hash = crate::snapshot::doc_hash_from_str(&format!("session:{session_name}"));
+    let hash = agent_doc_fs::document_state_hash_from_str(&format!("session:{session_name}"));
     format!("session-{hash}.lock")
 }
 
@@ -218,10 +218,10 @@ pub(crate) fn acquire_startup_locks(
         return Ok(StartupLockAcquire::Acquired(None));
     };
 
-    let doc_lock_path = if let Ok(hash) = snapshot::doc_hash(file) {
+    let doc_lock_path = if let Ok(hash) = agent_doc_fs::document_state_hash(file) {
         starting_dir.join(format!("{hash}.lock"))
     } else {
-        let fallback = crate::snapshot::doc_hash_from_str(&file.to_string_lossy());
+        let fallback = agent_doc_fs::document_state_hash_from_str(&file.to_string_lossy());
         starting_dir.join(format!("{fallback}.lock"))
     };
     let session_lock_path = starting_dir.join(session_start_lock_name(session_name));
@@ -1056,7 +1056,7 @@ mod tests {
 
         let starting_dir = starting_dir_for(&doc).expect("project root should resolve");
         std::fs::create_dir_all(&starting_dir).unwrap();
-        let hash = snapshot::doc_hash(&doc).unwrap();
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         let lock_path = starting_dir.join(format!("{hash}.lock"));
         let held_doc_lock = open_start_lock(&lock_path).unwrap();
         fs2::FileExt::lock_exclusive(&held_doc_lock).unwrap();

@@ -30,7 +30,7 @@ const TOMBSTONE_DIR: &str = ".agent-doc/queue-tombstones";
 /// directory when no `.agent-doc/` project root is found.
 pub(crate) fn tombstone_path_for(doc: &Path) -> Option<PathBuf> {
     let canonical = doc.canonicalize().ok()?;
-    let hash = crate::snapshot::doc_hash_from_str(&canonical.to_string_lossy());
+    let hash = agent_doc_fs::document_state_hash_from_str(&canonical.to_string_lossy());
     let project_root = agent_doc_fs::find_project_root(&canonical)
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
     Some(

@@ -530,7 +530,9 @@ mod tests {
         )
         .unwrap();
 
-        let snap_path = dir.path().join(snapshot::path_for(&doc).unwrap());
+        let snap_path = dir
+            .path()
+            .join(agent_doc_fs::snapshot_path_for(&doc).unwrap());
         let snap = std::fs::read_to_string(snap_path).unwrap();
         assert!(snap.contains("> Snapshot test"));
     }
@@ -704,7 +706,9 @@ mod tests {
         let items = vec!["snapshot item".to_string()];
         run(&doc, None, None, None, false, &items, &[], false).unwrap();
 
-        let snap_path = dir.path().join(snapshot::path_for(&doc).unwrap());
+        let snap_path = dir
+            .path()
+            .join(agent_doc_fs::snapshot_path_for(&doc).unwrap());
         let snap = std::fs::read_to_string(snap_path).unwrap();
         assert!(snap.contains("snapshot item"));
     }

@@ -368,7 +368,9 @@ mod tests {
         run(&doc, "s", PatchMode::Replace, Some("new\n")).unwrap();
 
         // Snapshot should be readable from the project's .agent-doc/snapshots/
-        let snap_path = dir.path().join(snapshot::path_for(&doc).unwrap());
+        let snap_path = dir
+            .path()
+            .join(agent_doc_fs::snapshot_path_for(&doc).unwrap());
         let snap = std::fs::read_to_string(snap_path).unwrap();
         assert!(snap.contains("new"));
         assert!(!snap.contains("old"));

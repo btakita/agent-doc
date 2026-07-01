@@ -31,7 +31,6 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::sessions;
-use crate::snapshot;
 use crate::supervisor::ipc;
 use tmux_router::RegistryLock;
 
@@ -425,7 +424,7 @@ fn walk_for_docs(dir: &Path, hashes: &mut HashSet<String>) -> Result<()> {
         if path.is_dir() {
             walk_for_docs(&path, hashes)?;
         } else if path.extension().is_some_and(|e| e == "md")
-            && let Ok(hash) = snapshot::doc_hash(&path)
+            && let Ok(hash) = agent_doc_fs::document_state_hash(&path)
         {
             hashes.insert(hash);
         }
@@ -776,7 +775,7 @@ mod tests {
         // Create a document and its snapshot
         let doc = root.join("test.md");
         std::fs::write(&doc, "# Test\n").unwrap();
-        let hash = snapshot::doc_hash(&doc).unwrap();
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         std::fs::write(
             root.join(format!(".agent-doc/snapshots/{}.md", hash)),
             "snapshot",

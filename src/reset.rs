@@ -130,7 +130,7 @@ fn rebuild_sidecars_from_current(file: &Path, content: &str, save_baseline: bool
 }
 
 fn save_baseline_from_current(file: &Path, content: &str) -> Result<()> {
-    let baseline_path = snapshot::baseline_path_for(file)?;
+    let baseline_path = agent_doc_fs::baseline_path_for(file)?;
     if let Some(parent) = baseline_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -230,9 +230,13 @@ mod tests {
         std::fs::write(&doc, current).unwrap();
         snapshot::save(&doc, "stale snapshot").unwrap();
         snapshot::save_crdt(&doc, b"stale crdt").unwrap();
-        std::fs::write(snapshot::baseline_path_for(&doc).unwrap(), "stale baseline").unwrap();
+        std::fs::write(
+            agent_doc_fs::baseline_path_for(&doc).unwrap(),
+            "stale baseline",
+        )
+        .unwrap();
 
-        let hash = snapshot::doc_hash(&doc).unwrap();
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         let cycle_path = dir
             .path()
             .join(".agent-doc/state/cycles")
@@ -252,7 +256,7 @@ mod tests {
         assert!(updated.contains("resume: keep-me"));
         assert_eq!(snapshot::load(&doc).unwrap().unwrap(), current);
         assert_eq!(
-            std::fs::read_to_string(snapshot::baseline_path_for(&doc).unwrap()).unwrap(),
+            std::fs::read_to_string(agent_doc_fs::baseline_path_for(&doc).unwrap()).unwrap(),
             current
         );
         let crdt_state = snapshot::load_crdt(&doc).unwrap().unwrap();
@@ -301,10 +305,14 @@ mod tests {
         std::fs::write(&doc, only_a).unwrap();
         snapshot::save(&doc, "stale snapshot").unwrap();
         snapshot::save_crdt(&doc, b"stale crdt").unwrap();
-        std::fs::write(snapshot::baseline_path_for(&doc).unwrap(), "stale baseline").unwrap();
+        std::fs::write(
+            agent_doc_fs::baseline_path_for(&doc).unwrap(),
+            "stale baseline",
+        )
+        .unwrap();
 
         // Preserved continuity: cycle state + capture.
-        let hash = snapshot::doc_hash(&doc).unwrap();
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         let cycle_path = dir
             .path()
             .join(".agent-doc/state/cycles")
@@ -335,7 +343,7 @@ mod tests {
         );
         assert_eq!(snapshot::load(&doc).unwrap().unwrap(), only_a);
         assert_eq!(
-            std::fs::read_to_string(snapshot::baseline_path_for(&doc).unwrap()).unwrap(),
+            std::fs::read_to_string(agent_doc_fs::baseline_path_for(&doc).unwrap()).unwrap(),
             only_a
         );
         assert_eq!(std::fs::read_to_string(&cycle_path).unwrap(), cycle_state);

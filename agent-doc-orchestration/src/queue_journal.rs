@@ -48,7 +48,7 @@ const QUEUE_JOURNAL_DIR: &str = ".agent-doc/queue-journal";
 fn journal_path(file: &Path) -> Option<PathBuf> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let root = agent_doc_fs::find_project_root(&canonical)?;
-    let hash = crate::snapshot::doc_hash(&canonical).ok()?;
+    let hash = agent_doc_fs::document_state_hash(&canonical).ok()?;
     Some(root.join(QUEUE_JOURNAL_DIR).join(format!("{hash}.jsonl")))
 }
 

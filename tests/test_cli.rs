@@ -716,7 +716,7 @@ fn mcp_finalize_close_after_capture_recovers_on_next_preflight_once() {
         "recovery should commit the captured response exactly once:\n{head_doc}"
     );
     assert!(
-        !agent_doc_orchestration::snapshot::pending_path_for(&doc)
+        !agent_doc_fs::pending_response_path_for(&doc)
             .unwrap()
             .exists(),
         "pending response should be cleared after recovery"
@@ -8254,18 +8254,70 @@ fn test_agent_doc_frontmatter_owns_lint_mode_policy() {
 }
 
 #[test]
-fn test_snapshot_has_no_find_project_root_facade() {
+fn test_snapshot_state_paths_are_owned_by_agent_doc_fs() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fs_source = fs::read_to_string(manifest_dir.join("agent-doc-fs/src/lib.rs")).unwrap();
+    for required_snippet in [
+        "pub fn document_state_hash(",
+        "pub fn document_state_hash_from_str(",
+        "pub fn snapshot_path_for(",
+        "pub fn state_lock_path_for(",
+        "pub fn pending_response_path_for(",
+        "pub fn baseline_path_for(",
+        "pub fn baseline_overlay_path_for(",
+        "pub fn pre_response_path_for(",
+        "pub fn crdt_path_for(",
+        "pub fn overlay_crdt_path_for(",
+        "pub fn multinode_crdt_path_for(",
+        "pub fn snapshot_flock_path_for(",
+        "pub fn crdt_flock_path_for(",
+    ] {
+        assert!(
+            fs_source.contains(required_snippet),
+            "agent-doc-fs must own per-document state path/hash helper: {required_snippet}"
+        );
+    }
+
     let snapshot_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/snapshot.rs")).unwrap();
-    assert!(
-        !snapshot_source.contains("pub use agent_doc_fs::find_project_root"),
-        "snapshot.rs must not re-export the agent-doc-fs project-root helper"
-    );
-    assert!(
-        snapshot_source.contains("use agent_doc_fs::find_project_root;"),
-        "snapshot.rs should import the agent-doc-fs project-root helper privately"
-    );
+    for forbidden_snippet in [
+        "pub fn doc_hash(",
+        "pub fn doc_hash_from_str(",
+        "pub fn path_for(",
+        "pub fn lock_path_for(",
+        "pub fn pending_path_for(",
+        "pub fn baseline_path_for(",
+        "pub fn baseline_overlay_path_for(",
+        "pub fn pre_response_path_for(",
+        "pub fn crdt_path_for(",
+        "pub fn overlay_crdt_path_for(",
+        "pub fn multinode_crdt_path_for(",
+        "fn crdt_path_for_filename(",
+        "pub use agent_doc_fs",
+        "agent_doc_hash::path_hash",
+        "agent_doc_hash::path_string_hash",
+    ] {
+        assert!(
+            !snapshot_source.contains(forbidden_snippet),
+            "snapshot.rs must not keep a pure state path/hash wrapper or facade: {forbidden_snippet}"
+        );
+    }
+    for required_snippet in [
+        "agent_doc_fs::document_state_hash(",
+        "agent_doc_fs::snapshot_path_for(",
+        "agent_doc_fs::snapshot_flock_path_for(",
+        "agent_doc_fs::baseline_overlay_path_for(",
+        "agent_doc_fs::pre_response_path_for(",
+        "agent_doc_fs::crdt_path_for(",
+        "agent_doc_fs::overlay_crdt_path_for(",
+        "agent_doc_fs::multinode_crdt_path_for(",
+        "agent_doc_fs::crdt_flock_path_for(",
+    ] {
+        assert!(
+            snapshot_source.contains(required_snippet),
+            "snapshot.rs should call focused agent-doc-fs state helpers directly: {required_snippet}"
+        );
+    }
 
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
@@ -8291,7 +8343,11 @@ fn test_snapshot_has_no_find_project_root_facade() {
         &mut source_files,
     );
     collect_rs_files(&manifest_dir.join("src"), &mut source_files);
+    collect_rs_files(&manifest_dir.join("tests"), &mut source_files);
     for path in source_files {
+        if path.ends_with("tests/test_cli.rs") {
+            continue;
+        }
         let source = fs::read_to_string(&path).unwrap();
         let relative = path.strip_prefix(manifest_dir).unwrap().display();
         for forbidden_snippet in [
@@ -8300,10 +8356,43 @@ fn test_snapshot_has_no_find_project_root_facade() {
             "agent_doc_orchestration::snapshot::find_project_root",
             "crate::fs_util::find_project_root",
             "agent_doc_orchestration::fs_util::find_project_root",
+            "snapshot::doc_hash",
+            "crate::snapshot::doc_hash",
+            "agent_doc_orchestration::snapshot::doc_hash",
+            "snapshot::doc_hash_from_str",
+            "crate::snapshot::doc_hash_from_str",
+            "agent_doc_orchestration::snapshot::doc_hash_from_str",
+            "snapshot::path_for",
+            "crate::snapshot::path_for",
+            "agent_doc_orchestration::snapshot::path_for",
+            "snapshot::lock_path_for",
+            "crate::snapshot::lock_path_for",
+            "agent_doc_orchestration::snapshot::lock_path_for",
+            "snapshot::pending_path_for",
+            "crate::snapshot::pending_path_for",
+            "agent_doc_orchestration::snapshot::pending_path_for",
+            "snapshot::baseline_path_for",
+            "crate::snapshot::baseline_path_for",
+            "agent_doc_orchestration::snapshot::baseline_path_for",
+            "snapshot::baseline_overlay_path_for",
+            "crate::snapshot::baseline_overlay_path_for",
+            "agent_doc_orchestration::snapshot::baseline_overlay_path_for",
+            "snapshot::pre_response_path_for",
+            "crate::snapshot::pre_response_path_for",
+            "agent_doc_orchestration::snapshot::pre_response_path_for",
+            "snapshot::crdt_path_for",
+            "crate::snapshot::crdt_path_for",
+            "agent_doc_orchestration::snapshot::crdt_path_for",
+            "snapshot::overlay_crdt_path_for",
+            "crate::snapshot::overlay_crdt_path_for",
+            "agent_doc_orchestration::snapshot::overlay_crdt_path_for",
+            "snapshot::multinode_crdt_path_for",
+            "crate::snapshot::multinode_crdt_path_for",
+            "agent_doc_orchestration::snapshot::multinode_crdt_path_for",
         ] {
             assert!(
                 !source.contains(forbidden_snippet),
-                "{relative} must call agent_doc_fs::find_project_root directly: {forbidden_snippet}"
+                "{relative} must call focused agent_doc_fs helpers directly: {forbidden_snippet}"
             );
         }
     }
@@ -9929,6 +10018,7 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         "fn protected_prompt_draft_preview(",
         "fn pane_idle_dispatch_ready(",
         "fn apply_plain_trigger_override(",
+        "fn document_harness_from_content(",
     ] {
         for source_path in &orchestration_sources {
             let source = fs::read_to_string(source_path).unwrap();
@@ -9947,6 +10037,7 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         "pub fn dispatch_blocker_reason(",
         "pub fn protected_prompt_input_reason(",
         "pub fn normalize_harness_name(",
+        "pub fn document_harness_from_content(",
         "pub fn apply_plain_trigger_override(",
         "pub fn protected_prompt_draft_preview(",
         "pub fn pane_idle_dispatch_ready(",
@@ -12804,7 +12895,8 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         fs::read_to_string(manifest_dir.join("agent-doc-ipc-protocol/src/lib.rs")).unwrap();
     assert!(
         protocol_source.contains("pub enum AckClassification")
-            && protocol_source.contains("pub fn classify_ack("),
+            && protocol_source.contains("pub fn classify_ack(")
+            && protocol_source.contains("pub fn is_already_applied_ack_error_message("),
         "agent-doc-ipc-protocol must own plugin IPC ack classification"
     );
     for required in [
@@ -12876,6 +12968,7 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
     for forbidden in [
         "pub enum AckClassification",
         "pub fn classify_ack(",
+        "pub fn is_already_applied_error(",
         "fn early_ack_tagged_message(",
         "pub fn message_requests_early_ack(",
         "pub fn early_ack_line(",
@@ -12952,8 +13045,12 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
     let sim_world_source = fs::read_to_string(manifest_dir.join("src/sim_world.rs")).unwrap();
     assert!(
         sim_world_source.contains("agent_doc_ipc_protocol::classify_ack(")
+            && sim_world_source
+                .contains("agent_doc_ipc_protocol::is_already_applied_ack_error_message(")
             && !sim_world_source.contains("ipc_socket::classify_ack")
-            && !sim_world_source.contains("ipc_socket::AckClassification"),
+            && !sim_world_source.contains("ipc_socket::AckClassification")
+            && !sim_world_source
+                .contains("agent_doc_orchestration::ipc_socket::is_already_applied_error"),
         "root callers should use the focused IPC protocol crate instead of the old orchestration path"
     );
 
@@ -12961,13 +13058,16 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc/transport.rs"))
             .unwrap();
     assert!(
-        write_ipc_transport_source.contains("use agent_doc_ipc_protocol::FullContentIpcMode;"),
+        write_ipc_transport_source.contains(
+            "use agent_doc_ipc_protocol::{FullContentIpcMode, is_already_applied_ack_error_message};"
+        ),
         "write IPC transport should import full-content IPC mode vocabulary from the focused protocol crate"
     );
     for forbidden in [
         "pub enum FullContentIpcMode",
         "fn full_content_source_label(",
         "pub(crate) fn full_content_source_label(",
+        "crate::ipc_socket::is_already_applied_error",
         "pub use agent_doc_ipc_protocol",
     ] {
         assert!(
@@ -14440,6 +14540,7 @@ fn test_agent_doc_document_owns_watch_projection_policy() {
     for required in [
         "pub fn strip_boundaries_for_watch_hash(",
         "pub fn watch_content_hash(",
+        "pub fn file_watch_event_id(",
         "pub fn project_watch_node_events(",
         "pub fn document_node_event_json(",
         "pub fn document_node_events_payload(",
@@ -14480,11 +14581,30 @@ fn test_agent_doc_document_owns_watch_projection_policy() {
         "fn hash_content(",
         "fn strip_boundaries_for_hash(",
         "fn node_event_json(",
+        "fn file_watch_event_id(",
         "pub use agent_doc_document::watch_projection",
     ] {
         assert!(
             !watch_adapter.contains(forbidden),
             "watch.rs must stay an adapter, not re-own or facade watch projection: {forbidden}"
+        );
+    }
+
+    let document_watcher =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/document_watcher.rs"))
+            .unwrap();
+    assert!(
+        document_watcher.contains("use agent_doc_document::watch_projection::file_watch_event_id;")
+            && document_watcher.contains("file_watch_event_id(doc_id, generation, &content_hash)"),
+        "document_watcher should call the focused watch event id projection directly"
+    );
+    for forbidden in [
+        "fn file_watch_event_id(",
+        "pub use agent_doc_document::watch_projection",
+    ] {
+        assert!(
+            !document_watcher.contains(forbidden),
+            "document_watcher must not re-own or facade watch projection: {forbidden}"
         );
     }
 }

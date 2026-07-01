@@ -543,7 +543,7 @@ pub fn flush_to_document(file: &Path, text: &str, target: &str, _baseline: &str)
     mode_overrides.insert(target.to_string(), "replace".to_string());
 
     // Acquire lock
-    let lock_path = snapshot::lock_path_for(file)?;
+    let lock_path = agent_doc_fs::state_lock_path_for(file)?;
     if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent)?;
     }

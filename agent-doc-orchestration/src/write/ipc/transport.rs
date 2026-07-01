@@ -9,7 +9,7 @@ use agent_doc_element_boundary::boundary::find_boundary_id;
 use agent_doc_element_exchange::{
     extract_post_commit_normalization_targets, normalization_target_counts,
 };
-use agent_doc_ipc_protocol::FullContentIpcMode;
+use agent_doc_ipc_protocol::{FullContentIpcMode, is_already_applied_ack_error_message};
 use agent_doc_prompt_lines::line_looks_like_plain_response_after_prompt;
 
 fn live_editor_delivery_target(file: &Path) -> Option<String> {
@@ -112,7 +112,7 @@ pub fn queue_file_ipc_reposition_boundary(
         return Ok(FileIpcRepositionResult::Unavailable);
     }
 
-    let hash = snapshot::doc_hash(file)?;
+    let hash = agent_doc_fs::document_state_hash(file)?;
     let patch_file = patches_dir.join(format!("{hash}.json"));
     if patch_file.exists() {
         let existing = std::fs::read_to_string(&patch_file).unwrap_or_default();
@@ -220,7 +220,7 @@ pub fn try_ipc(
     reuse_patch_id: Option<&str>,
 ) -> Result<IpcResult> {
     let canonical = file.canonicalize()?;
-    let hash = snapshot::doc_hash(file)?;
+    let hash = agent_doc_fs::document_state_hash(file)?;
     let project_root = resolve_ipc_project_root(&canonical);
     let patch_id = reuse_patch_id
         .map(|s| s.to_string())
@@ -738,7 +738,7 @@ pub fn try_ipc(
             Ok(None) => {
                 eprintln!("[write] socket IPC sent but no ack — falling back to file IPC");
             }
-            Err(e) if crate::ipc_socket::is_already_applied_error(&e) => {
+            Err(e) if is_already_applied_ack_error_message(&e.to_string()) => {
                 // The plugin detected the response body is already present
                 // in the live buffer and chose not to re-apply it. Re-writing
                 // through the file-IPC fallback would create a duplicate
@@ -977,8 +977,9 @@ pub fn try_ipc(
     // patch through file IPC would land a duplicate `### Re:` heading on top
     // of the live buffer.
     //
-    // The socket-IPC path catches this via `ipc_socket::is_already_applied_error`
-    // when the plugin sends `{"type":"ack","status":"error","reason":"already_applied"}`.
+    // The socket-IPC path catches this via
+    // `agent_doc_ipc_protocol::is_already_applied_ack_error_message` when the
+    // plugin sends `{"type":"ack","status":"error","reason":"already_applied"}`.
     // Until every plugin emits that ack (`#ipcpluginalready`), the file-IPC
     // fallback hash-compares response-patch outcomes against the current file:
     // if applying the response patches to the current file is a structural
@@ -4571,7 +4572,7 @@ mod late_fallback_patch_guard_tests {
         let tmp = TempDir::new().unwrap();
         let doc =
             doc_in_agent_doc_project(&tmp, "---\nagent_doc_session: test\n---\n\n## Exchange\n");
-        let hash = crate::snapshot::doc_hash(&doc).unwrap();
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         let patch_path = tmp
             .path()
             .join(".agent-doc/patches")
@@ -4627,7 +4628,7 @@ mod late_fallback_patch_guard_tests {
         crate::cycle_state::mark_write_applied(&doc, "test", Some(content), Some(content)).unwrap();
         crate::cycle_state::mark_committed(&doc, "test", Some(content), Some(content)).unwrap();
 
-        let hash = crate::snapshot::doc_hash(&doc).unwrap();
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         let stale_patch_path = tmp
             .path()
             .join(".agent-doc/patches")
@@ -4702,7 +4703,7 @@ mod late_fallback_patch_guard_tests {
         crate::cycle_state::mark_write_applied(&doc, "test", Some(content), Some(content)).unwrap();
         crate::cycle_state::mark_committed(&doc, "test", Some(content), Some(content)).unwrap();
 
-        let hash = crate::snapshot::doc_hash(&doc).unwrap();
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         let stale_patch_path = tmp
             .path()
             .join(".agent-doc/patches")

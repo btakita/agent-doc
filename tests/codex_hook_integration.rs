@@ -327,7 +327,7 @@ fn codex_hook_cli_does_not_replay_over_editor_convergence_block() {
         .stdout(predicate::str::contains("operator_text_authority_v1"))
         .stdout(predicate::str::contains("Do not send the final answer yet"));
 
-    let pending_path = agent_doc_orchestration::snapshot::pending_path_for(&doc).unwrap();
+    let pending_path = agent_doc_fs::pending_response_path_for(&doc).unwrap();
     let pending = fs::read_to_string(&pending_path).unwrap();
     assert!(
         pending.contains("### Re: retained — gpt-5"),

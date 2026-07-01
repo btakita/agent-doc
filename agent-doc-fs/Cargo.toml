@@ -10,6 +10,7 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_fs"
 
 [dependencies]
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.66" }
 anyhow = "1"
 
 [dev-dependencies]

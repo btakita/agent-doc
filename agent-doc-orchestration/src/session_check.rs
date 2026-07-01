@@ -4584,7 +4584,10 @@ Body\n\
         let miss_path = tmp
             .path()
             .join(".agent-doc/state/startup-miss")
-            .join(format!("{}.json", crate::snapshot::doc_hash(&doc).unwrap()));
+            .join(format!(
+                "{}.json",
+                agent_doc_fs::document_state_hash(&doc).unwrap()
+            ));
         fs::write(&miss_path, serde_json::to_string_pretty(&miss).unwrap()).unwrap();
         let mut registry = tmux_router::Registry::new();
         registry.insert(
@@ -5043,7 +5046,7 @@ Body\n\
         let baseline = tmp.path().join(".agent-doc/baselines");
         std::fs::create_dir_all(&baseline).unwrap();
         let canonical = std::fs::canonicalize(&doc).unwrap();
-        let hash = crate::snapshot::doc_hash(&canonical).unwrap();
+        let hash = agent_doc_fs::document_state_hash(&canonical).unwrap();
         std::fs::write(
             baseline.join(format!("{hash}.md")),
             concat!(

@@ -42,7 +42,7 @@ pub(crate) fn check_backlog_replay_guard(
     let current_content = rc.doc_content();
 
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-    let hash = crate::snapshot::doc_hash(&canonical).unwrap_or_default();
+    let hash = agent_doc_fs::document_state_hash(&canonical).unwrap_or_default();
     let baseline_content = agent_doc_fs::find_project_root(&canonical)
         .map(|root| root.join(format!(".agent-doc/baselines/{}.md", hash)))
         .and_then(|p| std::fs::read_to_string(p).ok());

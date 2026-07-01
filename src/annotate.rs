@@ -78,7 +78,7 @@ pub struct AnnotationSidecar {
 fn sidecar_path(doc: &Path) -> Result<PathBuf> {
     let canonical = std::fs::canonicalize(doc)
         .with_context(|| format!("failed to canonicalize {}", doc.display()))?;
-    let hash = snapshot::doc_hash(&canonical)?;
+    let hash = agent_doc_fs::document_state_hash(&canonical)?;
     let root = agent_doc_fs::find_project_root(&canonical)
         .unwrap_or_else(|| doc.parent().unwrap_or(Path::new(".")).to_path_buf());
     let dir = root.join(ANNOTATION_DIR);
@@ -92,7 +92,7 @@ fn sidecar_path(doc: &Path) -> Result<PathBuf> {
 pub fn generate(doc: &Path, force: bool) -> Result<PathBuf> {
     let path = sidecar_path(doc)?;
     let canonical = std::fs::canonicalize(doc)?;
-    let hash = snapshot::doc_hash(&canonical)?;
+    let hash = agent_doc_fs::document_state_hash(&canonical)?;
 
     // Load current file content.
     let file_content = std::fs::read_to_string(doc)

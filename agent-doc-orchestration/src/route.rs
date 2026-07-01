@@ -229,7 +229,7 @@ use agent_doc_turn::closeout_recovery::{
 };
 use tmux_router::Tmux;
 
-use crate::{frontmatter_io, resync, sessions, snapshot, sync};
+use crate::{frontmatter_io, resync, sessions, sync};
 use std::cell::Cell;
 
 thread_local! {
@@ -2453,7 +2453,7 @@ fn route_queue_lock_path(file: &Path) -> Result<PathBuf> {
         .ok_or_else(|| {
             anyhow::anyhow!("failed to resolve queue lock root for {}", file.display())
         })?;
-    let hash = crate::snapshot::doc_hash_from_str(&canonical.to_string_lossy());
+    let hash = agent_doc_fs::document_state_hash_from_str(&canonical.to_string_lossy());
     Ok(base
         .join(".agent-doc/route-queue")
         .join(format!("{hash}.lock")))

@@ -19,7 +19,6 @@ use tsift_memory::{
     read_memory_events,
 };
 
-use crate::snapshot;
 use agent_doc_element::element;
 use agent_doc_element_backlog::backlog::{self, PendingItem, PendingListMarker, PendingState};
 
@@ -494,7 +493,10 @@ fn collect_completion_candidates(file: &Path) -> Result<Vec<CompletionCandidate>
                 }
                 let item_id = (!item.id.is_empty()).then_some(item.id.clone());
                 let id_ref = item_id.clone().unwrap_or_else(|| {
-                    format!("anon:{}", snapshot::doc_hash_from_str(item.text.trim()))
+                    format!(
+                        "anon:{}",
+                        agent_doc_fs::document_state_hash_from_str(item.text.trim())
+                    )
                 });
                 let mut text = item.text.trim().to_string();
                 if !item.continuation.trim().is_empty() {
@@ -568,8 +570,9 @@ fn collect_session_events(file: &Path) -> Result<SessionEvents> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read session document {}", file.display()))?;
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let doc_hash = snapshot::doc_hash(&canonical)
-        .unwrap_or_else(|_| snapshot::doc_hash_from_str(&canonical.to_string_lossy()));
+    let doc_hash = agent_doc_fs::document_state_hash(&canonical).unwrap_or_else(|_| {
+        agent_doc_fs::document_state_hash_from_str(&canonical.to_string_lossy())
+    });
     let session_ref = display_path(&canonical);
     let components = element::parse(&content).context("failed to parse session components")?;
     let mut events = Vec::new();
@@ -748,11 +751,11 @@ fn tracked_work_event(
         text.push_str(item.continuation.trim());
     }
     let item_id = if item.id.is_empty() {
-        format!("anon:{}", snapshot::doc_hash_from_str(&text))
+        format!("anon:{}", agent_doc_fs::document_state_hash_from_str(&text))
     } else {
         item.id.clone()
     };
-    let text_hash = snapshot::doc_hash_from_str(&text);
+    let text_hash = agent_doc_fs::document_state_hash_from_str(&text);
     let source_ref = format!("{session_ref}#{component}:{item_id}");
     MemoryEvent::new(MemoryEventKind::ImportedObservation, source_ref, text)
         .with_session_id(session_ref.to_string())
@@ -771,7 +774,7 @@ fn response_summary_events(session_ref: &str, doc_hash: &str, body: &str) -> Vec
         .into_iter()
         .map(|(index, heading, text)| {
             let event_text = trim_chars(&format!("{heading}\n{text}"), MAX_RESPONSE_BODY_CHARS);
-            let text_hash = snapshot::doc_hash_from_str(&event_text);
+            let text_hash = agent_doc_fs::document_state_hash_from_str(&event_text);
             MemoryEvent::new(
                 MemoryEventKind::ResponseSummary,
                 format!("{session_ref}#exchange:{index}"),

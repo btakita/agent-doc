@@ -672,7 +672,11 @@ mod tests {
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::ResponseCaptured);
-        assert!(snapshot::pending_path_for(&doc).unwrap().exists());
+        assert!(
+            agent_doc_fs::pending_response_path_for(&doc)
+                .unwrap()
+                .exists()
+        );
     }
     #[test]
     fn repair_missing_registered_pane_recovers_response_captured_closeout() {
@@ -737,7 +741,11 @@ mod tests {
             crate::git::verify_snapshot_committed(&doc).unwrap(),
             crate::git::SnapshotCommitStatus::Committed
         );
-        assert!(!snapshot::pending_path_for(&doc).unwrap().exists());
+        assert!(
+            !agent_doc_fs::pending_response_path_for(&doc)
+                .unwrap()
+                .exists()
+        );
         assert!(
             std::fs::read_to_string(&doc)
                 .unwrap()
@@ -831,7 +839,11 @@ mod tests {
             crate::git::verify_snapshot_committed(&doc).unwrap(),
             crate::git::SnapshotCommitStatus::Committed
         );
-        assert!(!snapshot::pending_path_for(&doc).unwrap().exists());
+        assert!(
+            !agent_doc_fs::pending_response_path_for(&doc)
+                .unwrap()
+                .exists()
+        );
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
@@ -953,7 +965,7 @@ mod tests {
             "<!-- /patch:backlog -->\n"
         );
         crate::capture::capture_response(&doc, response).unwrap();
-        let pending_path = snapshot::pending_path_for(&doc).unwrap();
+        let pending_path = agent_doc_fs::pending_response_path_for(&doc).unwrap();
         std::fs::create_dir_all(pending_path.parent().unwrap()).unwrap();
         std::fs::write(&pending_path, response).unwrap();
 

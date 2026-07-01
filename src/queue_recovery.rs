@@ -252,7 +252,7 @@ fn collect_snapshot_sources(file: &Path, sources: &mut Vec<QueueSource>) {
             content,
         });
     }
-    if let Ok(path) = snapshot::baseline_path_for(file)
+    if let Ok(path) = agent_doc_fs::baseline_path_for(file)
         && let Ok(content) = fs::read_to_string(&path)
     {
         sources.push(QueueSource {
@@ -263,7 +263,7 @@ fn collect_snapshot_sources(file: &Path, sources: &mut Vec<QueueSource>) {
 }
 
 fn collect_patch_sources(file: &Path, sources: &mut Vec<QueueSource>) {
-    let Ok(hash) = snapshot::doc_hash(file) else {
+    let Ok(hash) = agent_doc_fs::document_state_hash(file) else {
         return;
     };
     let Some(project_root) = agent_doc_fs::find_project_root(file) else {
@@ -557,7 +557,7 @@ mod tests {
         fs::create_dir_all(dir.path().join(".agent-doc/patches")).unwrap();
         let file = dir.path().join("session.md");
         fs::write(&file, doc_with_queue("", "")).unwrap();
-        let hash = snapshot::doc_hash(&file).unwrap();
+        let hash = agent_doc_fs::document_state_hash(&file).unwrap();
         let patch = serde_json::json!({
             "baseline": doc_with_queue("- do [#lost]\n", "")
         });
@@ -582,7 +582,7 @@ mod tests {
         fs::create_dir_all(dir.path().join(".agent-doc/patches")).unwrap();
         let file = dir.path().join("session.md");
         fs::write(&file, doc_with_queue("", "### Re: #lost\n\nDone.")).unwrap();
-        let hash = snapshot::doc_hash(&file).unwrap();
+        let hash = agent_doc_fs::document_state_hash(&file).unwrap();
         let patch = serde_json::json!({
             "baseline": doc_with_queue("- do [#lost]\n", "")
         });

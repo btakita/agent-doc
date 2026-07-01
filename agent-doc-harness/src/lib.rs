@@ -76,6 +76,13 @@ pub fn normalize_harness_name(raw: &str) -> String {
     }
 }
 
+pub fn document_harness_from_content(content: &str) -> Option<String> {
+    agent_doc_frontmatter::frontmatter::parse(content)
+        .ok()
+        .and_then(|(fm, _)| fm.agent)
+        .map(|value| normalize_harness_name(&value))
+}
+
 impl HarnessConfig {
     pub fn claude() -> Self {
         Self {
@@ -1027,6 +1034,20 @@ mod tests {
         assert_eq!(normalize_harness_name("   "), "default");
         assert_eq!(normalize_harness_name("claude"), "claude-code");
         assert_eq!(normalize_harness_name(" codex "), "codex");
+    }
+
+    #[test]
+    fn document_harness_from_content_reads_and_normalizes_agent_frontmatter() {
+        let content = "---\nagent: claude\n---\n# Plan\n";
+        assert_eq!(
+            document_harness_from_content(content),
+            Some("claude-code".to_string())
+        );
+        assert_eq!(
+            document_harness_from_content("---\nagent: codex\n---\n# Plan\n"),
+            Some("codex".to_string())
+        );
+        assert_eq!(document_harness_from_content("# No frontmatter\n"), None);
     }
 
     #[test]

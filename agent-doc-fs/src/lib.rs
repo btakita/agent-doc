@@ -1,5 +1,13 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::path::{Component, Path, PathBuf};
+
+const SNAPSHOT_DIR: &str = ".agent-doc/snapshots";
+const BASELINE_DIR: &str = ".agent-doc/baselines";
+const LOCK_DIR: &str = ".agent-doc/locks";
+const PENDING_DIR: &str = ".agent-doc/pending";
+const CRDT_DIR: &str = ".agent-doc/crdt";
+const PRE_RESPONSE_DIR: &str = ".agent-doc/pre-response";
+const BASELINE_OVERLAY_EXT: &str = "overlay.yrs";
 
 /// Walk up the directory tree from `path` to find the directory containing
 /// `.agent-doc` (the project root). Returns `None` if no such ancestor exists.
@@ -18,6 +26,91 @@ pub fn find_project_root(path: &Path) -> Option<PathBuf> {
 pub fn find_project_root_canonical(path: &Path) -> Option<PathBuf> {
     let canonical = path.canonicalize().ok()?;
     find_project_root(&canonical)
+}
+
+/// Compute the SHA-256 hex hash used to key per-document state sidecars.
+pub fn document_state_hash(doc: &Path) -> Result<String> {
+    let canonical = canonical_document_path(doc)?;
+    Ok(agent_doc_hash::path_string_hash(
+        &canonical.to_string_lossy(),
+    ))
+}
+
+/// Compute the per-document state hash from an already-resolved path string.
+///
+/// This avoids filesystem access for paths that no longer exist, such as the
+/// old document path during rename recovery.
+pub fn document_state_hash_from_str(absolute_path: &str) -> String {
+    agent_doc_hash::path_string_hash(absolute_path)
+}
+
+/// Compute `<project_root>/.agent-doc/snapshots/<hash>.md` for a document.
+///
+/// If no `.agent-doc` project root exists, this preserves the historical
+/// relative fallback `.agent-doc/snapshots/<hash>.md`.
+pub fn snapshot_path_for(doc: &Path) -> Result<PathBuf> {
+    let canonical = canonical_document_path(doc)?;
+    let filename = format!(
+        "{}.md",
+        agent_doc_hash::path_string_hash(&canonical.to_string_lossy())
+    );
+    if let Some(root) = find_project_root(&canonical) {
+        return Ok(root.join(SNAPSHOT_DIR).join(filename));
+    }
+    Ok(PathBuf::from(SNAPSHOT_DIR).join(filename))
+}
+
+/// Compute `<project_root>/.agent-doc/locks/<hash>.lock` for a document.
+pub fn state_lock_path_for(doc: &Path) -> Result<PathBuf> {
+    hashed_state_path(doc, LOCK_DIR, "lock")
+}
+
+/// Compute `<project_root>/.agent-doc/pending/<hash>.md` for a document.
+pub fn pending_response_path_for(doc: &Path) -> Result<PathBuf> {
+    hashed_state_path(doc, PENDING_DIR, "md")
+}
+
+/// Compute `<project_root>/.agent-doc/baselines/<hash>.md` for a document.
+pub fn baseline_path_for(doc: &Path) -> Result<PathBuf> {
+    hashed_state_path(doc, BASELINE_DIR, "md")
+}
+
+/// Compute `<project_root>/.agent-doc/baselines/<hash>.overlay.yrs`.
+pub fn baseline_overlay_path_for(doc: &Path) -> Result<PathBuf> {
+    let (root, hash) = state_root_and_hash(doc)?;
+    Ok(root
+        .join(BASELINE_DIR)
+        .join(format!("{}.{}", hash, BASELINE_OVERLAY_EXT)))
+}
+
+/// Compute `<project_root>/.agent-doc/pre-response/<hash>.md`.
+pub fn pre_response_path_for(doc: &Path) -> Result<PathBuf> {
+    hashed_state_path(doc, PRE_RESPONSE_DIR, "md")
+}
+
+/// Compute `<project_root>/.agent-doc/crdt/<hash>.yrs`.
+pub fn crdt_path_for(doc: &Path) -> Result<PathBuf> {
+    hashed_state_path(doc, CRDT_DIR, "yrs")
+}
+
+/// Compute `<project_root>/.agent-doc/crdt/<hash>.overlay.yrs`.
+pub fn overlay_crdt_path_for(doc: &Path) -> Result<PathBuf> {
+    hashed_state_path_with_suffix(doc, CRDT_DIR, "overlay.yrs")
+}
+
+/// Compute `<project_root>/.agent-doc/crdt/<hash>.nodes.yrs`.
+pub fn multinode_crdt_path_for(doc: &Path) -> Result<PathBuf> {
+    hashed_state_path_with_suffix(doc, CRDT_DIR, "nodes.yrs")
+}
+
+/// Compute the snapshot flock path adjacent to the snapshot sidecar.
+pub fn snapshot_flock_path_for(doc: &Path) -> Result<PathBuf> {
+    Ok(snapshot_path_for(doc)?.with_extension("md.lock"))
+}
+
+/// Compute the CRDT flock path adjacent to the legacy CRDT sidecar.
+pub fn crdt_flock_path_for(doc: &Path) -> Result<PathBuf> {
+    Ok(crdt_path_for(doc)?.with_extension("yrs.lock"))
 }
 
 /// Rewrite `file_path` to be relative to `cwd` so a spawned command resolves
@@ -186,6 +279,28 @@ fn normalize_path(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
+fn canonical_document_path(doc: &Path) -> Result<PathBuf> {
+    doc.canonicalize()
+        .with_context(|| format!("canonicalize document path for hash: {}", doc.display()))
+}
+
+fn state_root_and_hash(doc: &Path) -> Result<(PathBuf, String)> {
+    let canonical = canonical_document_path(doc)?;
+    let hash = agent_doc_hash::path_string_hash(&canonical.to_string_lossy());
+    let root = find_project_root(&canonical)
+        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+    Ok((root, hash))
+}
+
+fn hashed_state_path(doc: &Path, dir: &str, extension: &str) -> Result<PathBuf> {
+    hashed_state_path_with_suffix(doc, dir, extension)
+}
+
+fn hashed_state_path_with_suffix(doc: &Path, dir: &str, suffix: &str) -> Result<PathBuf> {
+    let (root, hash) = state_root_and_hash(doc)?;
+    Ok(root.join(dir).join(format!("{}.{}", hash, suffix)))
+}
+
 fn project_roots_for(path: &Path) -> Vec<PathBuf> {
     let mut current = if path.is_dir() {
         path.to_path_buf()
@@ -209,8 +324,11 @@ fn project_roots_for(path: &Path) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{
-        read_optional, referenced_markdown_path, referenced_markdown_path_checked,
-        rewrite_start_path,
+        baseline_overlay_path_for, baseline_path_for, crdt_flock_path_for, crdt_path_for,
+        document_state_hash, document_state_hash_from_str, multinode_crdt_path_for,
+        overlay_crdt_path_for, pending_response_path_for, pre_response_path_for, read_optional,
+        referenced_markdown_path, referenced_markdown_path_checked, rewrite_start_path,
+        snapshot_flock_path_for, snapshot_path_for, state_lock_path_for,
     };
     use std::path::Path;
 
@@ -233,6 +351,149 @@ mod tests {
         assert!(
             message.contains("permission denied"),
             "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn document_state_hash_uses_canonical_path_string() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = tmp.path().join("doc.md");
+        std::fs::write(&doc, "# doc\n").unwrap();
+        let canonical = doc.canonicalize().unwrap();
+
+        assert_eq!(
+            document_state_hash(&doc).unwrap(),
+            document_state_hash_from_str(&canonical.to_string_lossy())
+        );
+    }
+
+    #[test]
+    fn snapshot_path_uses_project_root_when_available() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("nested").join("doc.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "# doc\n").unwrap();
+        let hash = document_state_hash(&doc).unwrap();
+
+        assert_eq!(
+            snapshot_path_for(&doc).unwrap(),
+            tmp.path()
+                .join(".agent-doc")
+                .join("snapshots")
+                .join(format!("{hash}.md"))
+        );
+    }
+
+    #[test]
+    fn snapshot_path_preserves_relative_fallback_without_project_root() {
+        let Some(tmp) = temp_dir_without_agent_doc_ancestor() else {
+            return;
+        };
+        let doc = tmp.path().join("doc.md");
+        std::fs::write(&doc, "# doc\n").unwrap();
+        let hash = document_state_hash(&doc).unwrap();
+
+        assert_eq!(
+            snapshot_path_for(&doc).unwrap(),
+            Path::new(".agent-doc")
+                .join("snapshots")
+                .join(format!("{hash}.md"))
+        );
+    }
+
+    fn temp_dir_without_agent_doc_ancestor() -> Option<tempfile::TempDir> {
+        for base in [
+            std::path::PathBuf::from("/var/tmp"),
+            std::path::PathBuf::from("/dev/shm"),
+            std::env::temp_dir(),
+        ] {
+            if !base.is_dir() || has_agent_doc_ancestor(&base) {
+                continue;
+            }
+            if let Ok(dir) = tempfile::Builder::new()
+                .prefix("agent-doc-fs-no-root")
+                .tempdir_in(base)
+            {
+                return Some(dir);
+            }
+        }
+        None
+    }
+
+    fn has_agent_doc_ancestor(path: &Path) -> bool {
+        let Ok(mut current) = path.canonicalize() else {
+            return false;
+        };
+        loop {
+            if current.join(".agent-doc").is_dir() {
+                return true;
+            }
+            if !current.pop() {
+                return false;
+            }
+        }
+    }
+
+    #[test]
+    fn document_state_sidecar_paths_share_hash_and_project_root() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("doc.md");
+        std::fs::write(&doc, "# doc\n").unwrap();
+        let hash = document_state_hash(&doc).unwrap();
+        let agent_doc = tmp.path().join(".agent-doc");
+
+        assert_eq!(
+            state_lock_path_for(&doc).unwrap(),
+            agent_doc.join("locks").join(format!("{hash}.lock"))
+        );
+        assert_eq!(
+            pending_response_path_for(&doc).unwrap(),
+            agent_doc.join("pending").join(format!("{hash}.md"))
+        );
+        assert_eq!(
+            baseline_path_for(&doc).unwrap(),
+            agent_doc.join("baselines").join(format!("{hash}.md"))
+        );
+        assert_eq!(
+            baseline_overlay_path_for(&doc).unwrap(),
+            agent_doc
+                .join("baselines")
+                .join(format!("{hash}.overlay.yrs"))
+        );
+        assert_eq!(
+            pre_response_path_for(&doc).unwrap(),
+            agent_doc.join("pre-response").join(format!("{hash}.md"))
+        );
+        assert_eq!(
+            crdt_path_for(&doc).unwrap(),
+            agent_doc.join("crdt").join(format!("{hash}.yrs"))
+        );
+        assert_eq!(
+            overlay_crdt_path_for(&doc).unwrap(),
+            agent_doc.join("crdt").join(format!("{hash}.overlay.yrs"))
+        );
+        assert_eq!(
+            multinode_crdt_path_for(&doc).unwrap(),
+            agent_doc.join("crdt").join(format!("{hash}.nodes.yrs"))
+        );
+    }
+
+    #[test]
+    fn flock_paths_are_adjacent_to_snapshot_and_crdt_sidecars() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("doc.md");
+        std::fs::write(&doc, "# doc\n").unwrap();
+
+        assert_eq!(
+            snapshot_flock_path_for(&doc).unwrap(),
+            snapshot_path_for(&doc).unwrap().with_extension("md.lock")
+        );
+        assert_eq!(
+            crdt_flock_path_for(&doc).unwrap(),
+            crdt_path_for(&doc).unwrap().with_extension("yrs.lock")
         );
     }
 

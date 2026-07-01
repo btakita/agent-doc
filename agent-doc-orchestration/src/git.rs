@@ -1614,7 +1614,7 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
     // Check for active run — don't reposition if a run is in progress.
     // The in-flight `agent-doc write` owns the transition via IPC.
     if let Ok(canonical) = file.canonicalize()
-        && let Ok(pending_path) = crate::snapshot::pending_path_for(&canonical)
+        && let Ok(pending_path) = agent_doc_fs::pending_response_path_for(&canonical)
         && pending_path.exists()
     {
         eprintln!("[commit] skipping boundary reposition — active run detected");
@@ -3669,7 +3669,7 @@ Duplicate replay should stay live.
         let post_response = "---\nagent_doc_session: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nResponse\n\n## User\n\n";
         fs::write(&doc, post_response).unwrap();
 
-        let snap_path = crate::snapshot::path_for(&doc).unwrap();
+        let snap_path = agent_doc_fs::snapshot_path_for(&doc).unwrap();
         let snap_abs = root.join(&snap_path);
         fs::create_dir_all(snap_abs.parent().unwrap()).unwrap();
         fs::write(&snap_abs, post_response).unwrap();
@@ -3802,7 +3802,7 @@ Duplicate replay should stay live.
         let content =
             "---\nagent_doc_session: test\n---\n\n## Assistant\n\nResponse\n\n## User\n\n";
         fs::write(&doc, content).unwrap();
-        let snap_path = crate::snapshot::path_for(&doc).unwrap();
+        let snap_path = agent_doc_fs::snapshot_path_for(&doc).unwrap();
         let snap_abs = root.join(&snap_path);
         fs::create_dir_all(snap_abs.parent().unwrap()).unwrap();
         fs::write(&snap_abs, content).unwrap();
@@ -3867,7 +3867,7 @@ Duplicate replay should stay live.
         let doc = root.join("session.md");
         let initial = "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         fs::write(&doc, initial).unwrap();
-        let snap_path = crate::snapshot::path_for(&doc).unwrap();
+        let snap_path = agent_doc_fs::snapshot_path_for(&doc).unwrap();
         let snap_abs = root.join(&snap_path);
         fs::create_dir_all(snap_abs.parent().unwrap()).unwrap();
         fs::write(&snap_abs, initial).unwrap();
@@ -3950,7 +3950,7 @@ Duplicate replay should stay live.
         let content = "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange -->\n### Re: ignored\nbody\n<!-- /agent:exchange -->\n";
         fs::create_dir_all(doc.parent().unwrap()).unwrap();
         fs::write(&doc, content).unwrap();
-        let snap_path = crate::snapshot::path_for(&doc).unwrap();
+        let snap_path = agent_doc_fs::snapshot_path_for(&doc).unwrap();
         let snap_abs = root.join(&snap_path);
         fs::create_dir_all(snap_abs.parent().unwrap()).unwrap();
         fs::write(&snap_abs, content).unwrap();
@@ -4018,7 +4018,7 @@ Duplicate replay should stay live.
         let doc = root.join("session.md");
         let initial = "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         fs::write(&doc, initial).unwrap();
-        let snap_path = crate::snapshot::path_for(&doc).unwrap();
+        let snap_path = agent_doc_fs::snapshot_path_for(&doc).unwrap();
         let snap_abs = root.join(&snap_path);
         fs::create_dir_all(snap_abs.parent().unwrap()).unwrap();
         fs::write(&snap_abs, initial).unwrap();
@@ -4104,7 +4104,7 @@ Duplicate replay should stay live.
         let doc = root.join("session.md");
         let cycle = "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange -->\n### Re: prior — gpt-5\n\nCommit / push:\n- `src/agent-doc`: `abc1234` pushed to `origin/main`\n\nI did not create a superproject gitlink commit because the workspace root already had unrelated dirty changes outside this fix.\n\nThere were no actionable follow-up items to capture.\ndo [#tailpatch]. spec-test-build-install-commit-push\n### Re: `#tailpatch` closeout-gap plan — gpt-5\n\nPlan refreshed.\n<!-- /agent:exchange -->\n";
         fs::write(&doc, cycle).unwrap();
-        let snap_path = crate::snapshot::path_for(&doc).unwrap();
+        let snap_path = agent_doc_fs::snapshot_path_for(&doc).unwrap();
         let snap_abs = root.join(&snap_path);
         fs::create_dir_all(snap_abs.parent().unwrap()).unwrap();
         fs::write(&snap_abs, cycle).unwrap();
@@ -5061,7 +5061,7 @@ Duplicate replay should stay live.
         crate::snapshot::save(&doc, content).unwrap();
         // The `#qstrikeexplain` gate only strikes heads present in the pre-turn
         // baseline, so seed it.
-        let baseline = crate::snapshot::baseline_path_for(&doc).unwrap();
+        let baseline = agent_doc_fs::baseline_path_for(&doc).unwrap();
         fs::create_dir_all(baseline.parent().unwrap()).unwrap();
         fs::write(&baseline, content).unwrap();
 
@@ -7650,7 +7650,7 @@ Compacted content:\n\
         fs::write(&doc_real, new_content).unwrap();
         let project_root = agent_doc_fs::find_project_root(&doc_real.canonicalize().unwrap())
             .unwrap_or_else(|| outer.to_path_buf());
-        let snap_rel = crate::snapshot::path_for(&doc_real).unwrap();
+        let snap_rel = agent_doc_fs::snapshot_path_for(&doc_real).unwrap();
         let snap_abs = project_root.join(&snap_rel);
         fs::create_dir_all(snap_abs.parent().unwrap()).unwrap();
         fs::write(&snap_abs, new_content).unwrap();
@@ -7911,9 +7911,10 @@ Compacted content:\n\
             "working tree should retain exactly one (HEAD) marker; got:\n{working}"
         );
 
-        let patch_file = root
-            .join(".agent-doc/patches")
-            .join(format!("{}.json", crate::snapshot::doc_hash(&doc).unwrap()));
+        let patch_file = root.join(".agent-doc/patches").join(format!(
+            "{}.json",
+            agent_doc_fs::document_state_hash(&doc).unwrap()
+        ));
         assert!(
             patch_file.exists(),
             "reposition should be queued for file IPC"

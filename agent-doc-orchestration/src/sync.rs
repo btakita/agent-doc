@@ -459,7 +459,7 @@ pub fn write_rename_debounce(file_path: &str) {
     if std::fs::create_dir_all(debounce_dir).is_err() {
         return;
     }
-    let hash = crate::snapshot::doc_hash(Path::new(file_path)).unwrap_or_default();
+    let hash = agent_doc_fs::document_state_hash(Path::new(file_path)).unwrap_or_default();
     if hash.is_empty() {
         return;
     }
@@ -477,7 +477,7 @@ pub fn write_rename_debounce(file_path: &str) {
 
 /// Check if a file has an active rename debounce marker (within TTL).
 fn has_rename_debounce(file_path: &Path) -> bool {
-    let hash = match crate::snapshot::doc_hash(file_path) {
+    let hash = match agent_doc_fs::document_state_hash(file_path) {
         Ok(h) => h,
         Err(_) => return false,
     };
@@ -6630,7 +6630,7 @@ mod tests {
         std::fs::write(&file, "---\nagent_doc_session: abc123\n---\n").unwrap();
 
         // Write marker using the same hash function
-        let hash = crate::snapshot::doc_hash(&file).unwrap();
+        let hash = agent_doc_fs::document_state_hash(&file).unwrap();
         let marker = debounce_dir.join(format!("{}.marker", hash));
         std::fs::write(&marker, file.to_string_lossy().as_ref()).unwrap();
 
@@ -6661,12 +6661,12 @@ mod tests {
         std::fs::write(&file_b, "---\nagent_doc_session: bbb\n---\n").unwrap();
 
         // Only write marker for file_a
-        let hash_a = crate::snapshot::doc_hash(&file_a).unwrap();
+        let hash_a = agent_doc_fs::document_state_hash(&file_a).unwrap();
         let marker_a = debounce_dir.join(format!("{}.marker", hash_a));
         std::fs::write(&marker_a, file_a.to_string_lossy().as_ref()).unwrap();
 
         // file_b should have a different hash, no marker
-        let hash_b = crate::snapshot::doc_hash(&file_b).unwrap();
+        let hash_b = agent_doc_fs::document_state_hash(&file_b).unwrap();
         let marker_b = debounce_dir.join(format!("{}.marker", hash_b));
         assert_ne!(
             hash_a, hash_b,

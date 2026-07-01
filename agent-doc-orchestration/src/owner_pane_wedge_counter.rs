@@ -33,7 +33,7 @@ fn wedge_path(file: &Path) -> Result<Option<PathBuf>> {
     let Some(root) = agent_doc_fs::find_project_root(file) else {
         return Ok(None);
     };
-    let hash = crate::snapshot::doc_hash(file)?;
+    let hash = agent_doc_fs::document_state_hash(file)?;
     Ok(Some(
         root.join(".agent-doc/owner-pane-wedge-counter")
             .join(format!("{hash}.json")),

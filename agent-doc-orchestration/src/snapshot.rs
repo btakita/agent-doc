@@ -1,20 +1,7 @@
 //! # Module: snapshot
 //!
 //! ## Spec
-//! - `doc_hash(doc)`: compute SHA-256 hex of the document's canonical absolute path.
-//!   Used as a stable, collision-resistant filename key for all per-doc state files.
-//! - `path_for(doc)`: compute snapshot path `<project_root>/.agent-doc/snapshots/<hash>.md`.
-//!   Falls back to a relative path when no project root is found.
-//! - `lock_path_for(doc)`: compute advisory lock path `<project_root>/.agent-doc/locks/<hash>.lock`.
-//! - `pending_path_for(doc)`: compute pending response path `<project_root>/.agent-doc/pending/<hash>.md`.
-//! - `crdt_path_for(doc)`: compute legacy text CRDT state path
-//!   `<project_root>/.agent-doc/crdt/<hash>.yrs`.
-//! - `overlay_crdt_path_for(doc)`: compute structured markdown-overlay CRDT
-//!   state path `<project_root>/.agent-doc/crdt/<hash>.overlay.yrs`.
-//! - `multinode_crdt_path_for(doc)`: compute per-node CRDT state path
-//!   `<project_root>/.agent-doc/crdt/<hash>.nodes.yrs` (`#qnodemerge2`).
-//! - `pre_response_path_for(doc)`: compute pre-response snapshot path
-//!   `<project_root>/.agent-doc/pre-response/<hash>.md`.
+//! - Per-document state hashes and sidecar names are owned by `agent_doc_fs`.
 //! - `SnapshotLock::acquire(doc)`: acquire an exclusive advisory flock on the snapshot lock
 //!   file. Blocks until available. Released on drop.
 //! - `load(doc)`: acquire snapshot lock, return snapshot content or `None` if absent.
@@ -46,11 +33,8 @@
 //!   document.
 //! - `resolve` prefers the snapshot file unconditionally when it exists. Git is only used
 //!   as a recovery fallback. This prevents false baselines after a step-0b commit.
-//! - `doc_hash` is deterministic and stable: same canonical path → same hash across runs.
-//! - `path_for`, `lock_path_for`, `pending_path_for`, `crdt_path_for`,
-//!   `overlay_crdt_path_for`, and `pre_response_path_for` all use the same
-//!   `doc_hash`, so files for the same document always colocate under the same
-//!   project root `.agent-doc/` tree.
+//! - `agent_doc_fs::document_state_hash` is deterministic and stable: same canonical
+//!   path → same hash across runs. All per-document state paths use that same key.
 //! - `delete` and `delete_crdt` are idempotent: calling them on an absent file is not an error.
 //! - Pre-response snapshots are not flock-protected (single-writer assumption: only the
 //!   active write path saves them).
@@ -101,50 +85,6 @@ use agent_doc_document::model_projection::{
     resolve_model_baseline_projection,
 };
 use agent_doc_element_exchange::strip_exchange_content;
-use agent_doc_fs::find_project_root;
-
-const SNAP_DIR: &str = ".agent-doc/snapshots";
-const BASELINE_DIR: &str = ".agent-doc/baselines";
-const LOCK_DIR: &str = ".agent-doc/locks";
-const PENDING_DIR: &str = ".agent-doc/pending";
-const CRDT_DIR: &str = ".agent-doc/crdt";
-
-/// Compute the SHA256 hex hash of a document's canonical path.
-/// Used for both snapshot filenames and lock filenames.
-pub fn doc_hash(doc: &Path) -> Result<String> {
-    agent_doc_hash::path_hash(doc)
-        .with_context(|| format!("canonicalize document path for hash: {}", doc.display()))
-}
-
-/// Compute the SHA256 hex hash from an absolute path string.
-///
-/// Unlike [`doc_hash`], this does not call `canonicalize()` and therefore works
-/// for paths that no longer exist on disk (e.g., the old path after a rename).
-pub fn doc_hash_from_str(absolute_path: &str) -> String {
-    agent_doc_hash::path_string_hash(absolute_path)
-}
-
-/// Compute the advisory lock file path for a given document.
-/// Walks up from the document to find the `.agent-doc/` project root.
-/// Returns `<project_root>/.agent-doc/locks/<sha256_hash>.lock`.
-/// Falls back to the document's parent directory if no project root found.
-pub fn lock_path_for(doc: &Path) -> Result<PathBuf> {
-    let hash = doc_hash(doc)?;
-    let canonical = doc.canonicalize()?;
-    let project_root = find_project_root(&canonical)
-        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
-    Ok(project_root.join(LOCK_DIR).join(format!("{}.lock", hash)))
-}
-
-/// Compute the pending response file path for a given document.
-/// Returns `<project_root>/.agent-doc/pending/<sha256_hash>.md`.
-pub fn pending_path_for(doc: &Path) -> Result<PathBuf> {
-    let hash = doc_hash(doc)?;
-    let canonical = doc.canonicalize()?;
-    let project_root = find_project_root(&canonical)
-        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
-    Ok(project_root.join(PENDING_DIR).join(format!("{}.md", hash)))
-}
 
 // ---------------------------------------------------------------------------
 // Advisory file lock for snapshot operations
@@ -164,8 +104,7 @@ impl SnapshotLock {
     /// Acquire an exclusive advisory lock for the snapshot of the given document.
     /// Blocks until the lock is available.
     pub fn acquire(doc: &Path) -> Result<Self> {
-        let snap = path_for(doc)?;
-        let lock_path = snap.with_extension("md.lock");
+        let lock_path = agent_doc_fs::snapshot_flock_path_for(doc)?;
         if let Some(parent) = lock_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -193,35 +132,9 @@ impl Drop for SnapshotLock {
     }
 }
 
-/// Compute the snapshot file path for a given document.
-/// Returns an absolute path: `<project_root>/.agent-doc/snapshots/<hash>.md`.
-/// Falls back to relative path if no project root found (e.g., tests without `.agent-doc/`).
-pub fn path_for(doc: &Path) -> Result<PathBuf> {
-    let hash = doc_hash(doc)?;
-    let filename = format!("{}.md", hash);
-    // Try to find project root for absolute path (consistent with lock_path_for/pending_path_for)
-    if let Ok(canonical) = doc.canonicalize()
-        && let Some(root) = find_project_root(&canonical)
-    {
-        return Ok(root.join(SNAP_DIR).join(filename));
-    }
-    // Fallback: relative path (legacy behavior for tests without .agent-doc/)
-    Ok(PathBuf::from(SNAP_DIR).join(filename))
-}
-
-/// Compute the preflight baseline file path for a given document.
-/// Returns `<project_root>/.agent-doc/baselines/<hash>.md`.
-pub fn baseline_path_for(doc: &Path) -> Result<PathBuf> {
-    let hash = doc_hash(doc)?;
-    let canonical = doc.canonicalize()?;
-    let project_root = find_project_root(&canonical)
-        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
-    Ok(project_root.join(BASELINE_DIR).join(format!("{}.md", hash)))
-}
-
 /// Load the snapshot content under an exclusive lock.
 pub fn load(doc: &Path) -> Result<Option<String>> {
-    let snap = path_for(doc)?;
+    let snap = agent_doc_fs::snapshot_path_for(doc)?;
     if !snap.exists() {
         return Ok(None);
     }
@@ -328,8 +241,6 @@ fn probe_overlay_projection(doc: &Path, content: &str) {
 // match the existing un-redacted `.md` baseline (`save_baseline_content`) so the
 // cross-check stays byte-exact; the redacted snapshot path is unaffected.
 
-const BASELINE_OVERLAY_EXT: &str = "overlay.yrs";
-
 /// Whether the `#mps` model-projected-baseline cutover (rungs 2-4) is enabled.
 ///
 /// **Default ON.** Opt out with `AGENT_DOC_MPS` set to `0` / `false` / `no` /
@@ -348,24 +259,12 @@ pub fn mps_enabled() -> bool {
     }
 }
 
-/// Path of the structured-overlay baseline sidecar:
-/// `<project_root>/.agent-doc/baselines/<hash>.overlay.yrs`.
-pub fn baseline_overlay_path_for(doc: &Path) -> Result<PathBuf> {
-    let hash = doc_hash(doc)?;
-    let canonical = doc.canonicalize()?;
-    let project_root = find_project_root(&canonical)
-        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
-    Ok(project_root
-        .join(BASELINE_DIR)
-        .join(format!("{}.{}", hash, BASELINE_OVERLAY_EXT)))
-}
-
 /// `#mps` Rung 2 (pin): persist `content` as the model baseline (overlay sidecar)
 /// for this cycle, overwriting any prior cycle's. Emits `mps_baseline_pin`. The
 /// caller keeps the `.md` baseline; a failure here is returned (and logged by the
 /// caller) but does not by itself break the cycle.
 pub fn save_baseline_model(doc: &Path, content: &str) -> Result<()> {
-    let path = baseline_overlay_path_for(doc)?;
+    let path = agent_doc_fs::baseline_overlay_path_for(doc)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -405,7 +304,7 @@ pub fn save_baseline_model(doc: &Path, content: &str) -> Result<()> {
 /// can never change a merge outcome while the `.md` exists: it returns the model
 /// projection only when it is byte-identical to the legacy base.
 pub fn load_baseline_model(doc: &Path, md_baseline: Option<&str>) -> Result<Option<String>> {
-    let path = baseline_overlay_path_for(doc)?;
+    let path = agent_doc_fs::baseline_overlay_path_for(doc)?;
     let bytes = match agent_doc_fs::read_optional_bytes(&path)
         .with_context(|| format!("failed to read baseline overlay {}", path.display()))?
     {
@@ -458,7 +357,7 @@ pub fn load_baseline_model(doc: &Path, md_baseline: Option<&str>) -> Result<Opti
 
 /// Delete the model baseline sidecar for a document, if present. Idempotent.
 pub fn delete_baseline_model(doc: &Path) -> Result<()> {
-    let path = baseline_overlay_path_for(doc)?;
+    let path = agent_doc_fs::baseline_overlay_path_for(doc)?;
     if path.exists() {
         std::fs::remove_file(&path)?;
     }
@@ -467,7 +366,7 @@ pub fn delete_baseline_model(doc: &Path) -> Result<()> {
 
 /// Delete the snapshot for a document.
 pub fn delete(doc: &Path) -> Result<()> {
-    let snap = path_for(doc)?;
+    let snap = agent_doc_fs::snapshot_path_for(doc)?;
     if !snap.exists() {
         return Ok(());
     }
@@ -485,7 +384,7 @@ pub fn delete(doc: &Path) -> Result<()> {
 /// user edits. Git is only used as a recovery fallback when no snapshot file
 /// exists (e.g., first submit after cloning, or snapshot was deleted).
 pub fn resolve(doc: &Path) -> Result<Option<String>> {
-    let snap_path = path_for(doc)?;
+    let snap_path = agent_doc_fs::snapshot_path_for(doc)?;
     if snap_path.exists() {
         // Snapshot file exists — always use it (authoritative baseline)
         return load(doc);
@@ -534,7 +433,7 @@ pub fn resolve(doc: &Path) -> Result<Option<String>> {
 /// If found, migrates all state files from old hash to new hash and updates
 /// the sessions registry. Returns `true` if migration occurred.
 pub fn try_migrate_renamed(doc: &Path) -> Result<bool> {
-    let snap = path_for(doc)?;
+    let snap = agent_doc_fs::snapshot_path_for(doc)?;
     if snap.exists() {
         return Ok(false);
     }
@@ -553,12 +452,12 @@ pub fn try_migrate_renamed(doc: &Path) -> Result<bool> {
     };
 
     let canonical = doc.canonicalize()?;
-    let project_root = match find_project_root(&canonical) {
+    let project_root = match agent_doc_fs::find_project_root(&canonical) {
         Some(root) => root,
         None => return Ok(false),
     };
 
-    let snap_dir = project_root.join(SNAP_DIR);
+    let snap_dir = snap.parent().unwrap_or(Path::new(".")).to_path_buf();
     if !snap_dir.is_dir() {
         return Ok(false);
     }
@@ -576,7 +475,7 @@ pub fn try_migrate_renamed(doc: &Path) -> Result<bool> {
             None => continue,
         };
         // Skip if this is the current hash (shouldn't exist, but guard)
-        let new_hash = doc_hash(doc)?;
+        let new_hash = agent_doc_fs::document_state_hash(doc)?;
         if stem == new_hash {
             continue;
         }
@@ -595,7 +494,7 @@ pub fn try_migrate_renamed(doc: &Path) -> Result<bool> {
         None => return Ok(false),
     };
 
-    let new_hash = doc_hash(doc)?;
+    let new_hash = agent_doc_fs::document_state_hash(doc)?;
     eprintln!(
         "[init] detected rename — migrating state files from {}.. to {}..",
         &old_hash[..8.min(old_hash.len())],
@@ -756,7 +655,7 @@ pub fn ensure_session_uuid(doc: &Path) -> Result<bool> {
 ///
 /// Returns `true` if a snapshot was created, `false` if one already existed.
 pub fn ensure_snapshot(doc: &Path) -> Result<bool> {
-    let snap = path_for(doc)?;
+    let snap = agent_doc_fs::snapshot_path_for(doc)?;
     if snap.exists() {
         return Ok(false);
     }
@@ -774,7 +673,7 @@ pub fn ensure_snapshot(doc: &Path) -> Result<bool> {
 /// Stage an untracked file and commit to establish a git baseline.
 pub fn ensure_git_tracked(doc: &Path) -> Result<()> {
     let canonical = std::fs::canonicalize(doc).unwrap_or_else(|_| doc.to_path_buf());
-    let project_root = find_project_root(&canonical)
+    let project_root = agent_doc_fs::find_project_root(&canonical)
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
 
     let is_tracked = std::process::Command::new("git")
@@ -807,7 +706,7 @@ pub fn ensure_git_tracked(doc: &Path) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 fn load_unlocked(doc: &Path) -> Result<Option<String>> {
-    let snap = path_for(doc)?;
+    let snap = agent_doc_fs::snapshot_path_for(doc)?;
     if snap.exists() {
         Ok(Some(std::fs::read_to_string(&snap)?))
     } else {
@@ -816,7 +715,7 @@ fn load_unlocked(doc: &Path) -> Result<Option<String>> {
 }
 
 fn save_unlocked(doc: &Path, content: &str) -> Result<()> {
-    let snap = path_for(doc)?;
+    let snap = agent_doc_fs::snapshot_path_for(doc)?;
     if let Some(parent) = snap.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -839,24 +738,10 @@ fn save_unlocked(doc: &Path, content: &str) -> Result<()> {
 // Pre-response snapshot (for undo/extract)
 // ---------------------------------------------------------------------------
 
-const PRE_RESPONSE_DIR: &str = ".agent-doc/pre-response";
-
-/// Compute the pre-response snapshot path for a given document.
-/// Returns `<project_root>/.agent-doc/pre-response/<hash>.md`.
-pub fn pre_response_path_for(doc: &Path) -> Result<PathBuf> {
-    let hash = doc_hash(doc)?;
-    let canonical = doc.canonicalize()?;
-    let project_root = find_project_root(&canonical)
-        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
-    Ok(project_root
-        .join(PRE_RESPONSE_DIR)
-        .join(format!("{}.md", hash)))
-}
-
 /// Save the pre-response snapshot (the document content before the agent's response).
 /// Called by write paths before applying patches/appending response.
 pub fn save_pre_response(doc: &Path, content: &str) -> Result<()> {
-    let path = pre_response_path_for(doc)?;
+    let path = agent_doc_fs::pre_response_path_for(doc)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -877,13 +762,13 @@ pub fn save_pre_response(doc: &Path, content: &str) -> Result<()> {
 
 /// Load the pre-response snapshot for a document.
 pub fn load_pre_response(doc: &Path) -> Result<Option<String>> {
-    let path = pre_response_path_for(doc)?;
+    let path = agent_doc_fs::pre_response_path_for(doc)?;
     agent_doc_fs::read_optional_text(&path)
 }
 
 /// Delete the pre-response snapshot for a document.
 pub fn delete_pre_response(doc: &Path) -> Result<()> {
-    let path = pre_response_path_for(doc)?;
+    let path = agent_doc_fs::pre_response_path_for(doc)?;
     if path.exists() {
         std::fs::remove_file(&path)?;
     }
@@ -908,45 +793,9 @@ pub fn delete_pre_response(doc: &Path) -> Result<()> {
 // `crdt_authority::CrdtAuthority::disk_is_durable_projection`.
 // ---------------------------------------------------------------------------
 
-/// Compute the legacy text CRDT state file path for a given document.
-/// Returns `<project_root>/.agent-doc/crdt/<hash>.yrs`.
-/// Falls back to doc's parent directory if no project root found.
-pub fn crdt_path_for(doc: &Path) -> Result<PathBuf> {
-    let hash = doc_hash(doc)?;
-    let filename = format!("{}.yrs", hash);
-    crdt_path_for_filename(doc, filename)
-}
-
-/// Compute the structured markdown-overlay CRDT state file path for a document.
-/// Returns `<project_root>/.agent-doc/crdt/<hash>.overlay.yrs`.
-pub fn overlay_crdt_path_for(doc: &Path) -> Result<PathBuf> {
-    let hash = doc_hash(doc)?;
-    let filename = format!("{}.overlay.yrs", hash);
-    crdt_path_for_filename(doc, filename)
-}
-
-/// Compute the per-node CRDT state file path for a document (`#qnodemerge2`).
-/// Returns `<project_root>/.agent-doc/crdt/<hash>.nodes.yrs`.
-///
-/// This is the per-component successor to the whole-doc `<hash>.yrs` blob: it
-/// persists one independent Yrs state per top-level node so each node's base
-/// advances independently across cycles.
-pub fn multinode_crdt_path_for(doc: &Path) -> Result<PathBuf> {
-    let hash = doc_hash(doc)?;
-    let filename = format!("{}.nodes.yrs", hash);
-    crdt_path_for_filename(doc, filename)
-}
-
-fn crdt_path_for_filename(doc: &Path, filename: String) -> Result<PathBuf> {
-    let canonical = doc.canonicalize()?;
-    let project_root = find_project_root(&canonical)
-        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
-    Ok(project_root.join(CRDT_DIR).join(filename))
-}
-
 /// Load CRDT state bytes for a document (if any).
 pub fn load_crdt(doc: &Path) -> Result<Option<Vec<u8>>> {
-    let path = crdt_path_for(doc)?;
+    let path = agent_doc_fs::crdt_path_for(doc)?;
     let _lock = acquire_crdt_lock(doc)?;
     agent_doc_fs::read_optional_bytes(&path)
         .with_context(|| format!("failed to read CRDT state {}", path.display()))
@@ -954,7 +803,7 @@ pub fn load_crdt(doc: &Path) -> Result<Option<Vec<u8>>> {
 
 /// Load structured markdown-overlay CRDT state bytes for a document (if any).
 pub fn load_overlay_crdt(doc: &Path) -> Result<Option<Vec<u8>>> {
-    let path = overlay_crdt_path_for(doc)?;
+    let path = agent_doc_fs::overlay_crdt_path_for(doc)?;
     let _lock = acquire_crdt_lock(doc)?;
     agent_doc_fs::read_optional_bytes(&path)
         .with_context(|| format!("failed to read overlay CRDT state {}", path.display()))
@@ -962,14 +811,14 @@ pub fn load_overlay_crdt(doc: &Path) -> Result<Option<Vec<u8>>> {
 
 /// Save CRDT state bytes for a document.
 pub fn save_crdt(doc: &Path, state: &[u8]) -> Result<()> {
-    let path = crdt_path_for(doc)?;
+    let path = agent_doc_fs::crdt_path_for(doc)?;
     let _lock = acquire_crdt_lock(doc)?;
     write_crdt_state(&path, state)
 }
 
 /// Save structured markdown-overlay CRDT state bytes for a document.
 pub fn save_overlay_crdt(doc: &Path, state: &[u8]) -> Result<()> {
-    let path = overlay_crdt_path_for(doc)?;
+    let path = agent_doc_fs::overlay_crdt_path_for(doc)?;
     let _lock = acquire_crdt_lock(doc)?;
     write_crdt_state(&path, state)
 }
@@ -982,7 +831,7 @@ fn rebuild_overlay_crdt_locked(path: &Path, markdown: &str) -> Result<usize> {
 
 /// Load raw per-node CRDT container bytes for a document (`#qnodemerge2`), if any.
 pub fn load_multinode_crdt(doc: &Path) -> Result<Option<Vec<u8>>> {
-    let path = multinode_crdt_path_for(doc)?;
+    let path = agent_doc_fs::multinode_crdt_path_for(doc)?;
     let _lock = acquire_crdt_lock(doc)?;
     agent_doc_fs::read_optional_bytes(&path)
         .with_context(|| format!("failed to read per-node CRDT state {}", path.display()))
@@ -990,7 +839,7 @@ pub fn load_multinode_crdt(doc: &Path) -> Result<Option<Vec<u8>>> {
 
 /// Save per-node CRDT container bytes for a document (`#qnodemerge2`).
 pub fn save_multinode_crdt(doc: &Path, state: &[u8]) -> Result<()> {
-    let path = multinode_crdt_path_for(doc)?;
+    let path = agent_doc_fs::multinode_crdt_path_for(doc)?;
     let _lock = acquire_crdt_lock(doc)?;
     write_crdt_state(&path, state)
 }
@@ -1007,7 +856,7 @@ pub fn multinode_crdt_state(
     fallback_markdown: &str,
 ) -> Result<agent_doc_merge::crdt::MultiNodeState> {
     let _lock = acquire_crdt_lock(doc)?;
-    let nodes_path = multinode_crdt_path_for(doc)?;
+    let nodes_path = agent_doc_fs::multinode_crdt_path_for(doc)?;
     if let Some(bytes) = agent_doc_fs::read_optional_bytes(&nodes_path).with_context(|| {
         format!(
             "failed to read per-node CRDT state {}",
@@ -1020,7 +869,7 @@ pub fn multinode_crdt_state(
         ));
     }
     // No per-node sidecar yet — migrate the legacy whole-doc blob if present.
-    let legacy_path = crdt_path_for(doc)?;
+    let legacy_path = agent_doc_fs::crdt_path_for(doc)?;
     if let Some(bytes) = agent_doc_fs::read_optional_bytes(&legacy_path)
         .with_context(|| format!("failed to read CRDT state {}", legacy_path.display()))?
     {
@@ -1145,7 +994,7 @@ fn rebuild_overlay_to_baseline(doc: &Path, path: &Path, baseline: &str) {
 ///   baseline, so the keystrokes survive in the op-capture / next-cycle base
 ///   instead of being wiped (`#crdtlivedrop`).
 pub fn crdt_merge_base_state(doc: &Path, fallback_markdown: &str) -> Result<CrdtMergeBase> {
-    let path = overlay_crdt_path_for(doc)?;
+    let path = agent_doc_fs::overlay_crdt_path_for(doc)?;
     let _lock = acquire_crdt_lock(doc)?;
     let overlay_bytes = agent_doc_fs::read_optional_bytes(&path)
         .with_context(|| format!("failed to read overlay CRDT state {}", path.display()))?;
@@ -1298,9 +1147,9 @@ fn write_crdt_state(path: &Path, state: &[u8]) -> Result<()> {
 
 /// Delete CRDT state for a document.
 pub fn delete_crdt(doc: &Path) -> Result<()> {
-    let path = crdt_path_for(doc)?;
-    let overlay_path = overlay_crdt_path_for(doc)?;
-    let nodes_path = multinode_crdt_path_for(doc)?;
+    let path = agent_doc_fs::crdt_path_for(doc)?;
+    let overlay_path = agent_doc_fs::overlay_crdt_path_for(doc)?;
+    let nodes_path = agent_doc_fs::multinode_crdt_path_for(doc)?;
     if path.exists() || overlay_path.exists() || nodes_path.exists() {
         let _lock = acquire_crdt_lock(doc)?;
         if path.exists() {
@@ -1320,8 +1169,7 @@ pub fn delete_crdt(doc: &Path) -> Result<()> {
 /// Uses a lock file adjacent to the CRDT state file.
 /// Stale lock files (>1 hour old) are cleaned before acquiring.
 fn acquire_crdt_lock(doc: &Path) -> Result<File> {
-    let crdt_path = crdt_path_for(doc)?;
-    let lock_path = crdt_path.with_extension("yrs.lock");
+    let lock_path = agent_doc_fs::crdt_flock_path_for(doc)?;
     if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -1377,15 +1225,15 @@ mod tests {
     /// If path_for returns absolute (project root found), use it directly.
     /// Otherwise, join relative path with dir.
     fn snapshot_path_in(dir: &Path, doc: &Path) -> PathBuf {
-        let p = path_for(doc).unwrap();
+        let p = agent_doc_fs::snapshot_path_for(doc).unwrap();
         if p.is_absolute() { p } else { dir.join(&p) }
     }
 
     #[test]
     fn path_for_consistent_hash() {
         let (_dir, doc) = setup();
-        let p1 = path_for(&doc).unwrap();
-        let p2 = path_for(&doc).unwrap();
+        let p1 = agent_doc_fs::snapshot_path_for(&doc).unwrap();
+        let p2 = agent_doc_fs::snapshot_path_for(&doc).unwrap();
         assert_eq!(p1, p2);
     }
 
@@ -1396,15 +1244,15 @@ mod tests {
         let doc_b = dir.path().join("b.md");
         fs::write(&doc_a, "a").unwrap();
         fs::write(&doc_b, "b").unwrap();
-        let pa = path_for(&doc_a).unwrap();
-        let pb = path_for(&doc_b).unwrap();
+        let pa = agent_doc_fs::snapshot_path_for(&doc_a).unwrap();
+        let pb = agent_doc_fs::snapshot_path_for(&doc_b).unwrap();
         assert_ne!(pa, pb);
     }
 
     #[test]
     fn path_for_has_correct_structure() {
         let (_dir, doc) = setup();
-        let p = path_for(&doc).unwrap();
+        let p = agent_doc_fs::snapshot_path_for(&doc).unwrap();
         assert!(p.to_string_lossy().contains(".agent-doc/snapshots/"));
         assert!(p.to_string_lossy().ends_with(".md"));
         // Hash is 64 hex chars
@@ -1571,7 +1419,7 @@ mod tests {
     #[test]
     fn crdt_path_has_correct_extension() {
         let (_dir, doc) = setup();
-        let p = crdt_path_for(&doc).unwrap();
+        let p = agent_doc_fs::crdt_path_for(&doc).unwrap();
         assert!(p.to_string_lossy().contains(".agent-doc/crdt/"));
         assert!(p.to_string_lossy().ends_with(".yrs"));
     }
@@ -1579,7 +1427,7 @@ mod tests {
     #[test]
     fn overlay_crdt_path_has_correct_extension() {
         let (_dir, doc) = setup();
-        let p = overlay_crdt_path_for(&doc).unwrap();
+        let p = agent_doc_fs::overlay_crdt_path_for(&doc).unwrap();
         assert!(p.to_string_lossy().contains(".agent-doc/crdt/"));
         assert!(p.to_string_lossy().ends_with(".overlay.yrs"));
     }
@@ -2236,7 +2084,11 @@ Steps to take:
         save_document_crdt(&doc, &legacy, &markdown).unwrap();
 
         // The per-node sidecar exists and round-trips through decode → text.
-        assert!(multinode_crdt_path_for(&doc).unwrap().exists());
+        assert!(
+            agent_doc_fs::multinode_crdt_path_for(&doc)
+                .unwrap()
+                .exists()
+        );
         let bytes = load_multinode_crdt(&doc)
             .unwrap()
             .expect("nodes sidecar present");
@@ -2251,7 +2103,11 @@ Steps to take:
         // Only the legacy whole-doc blob exists (older binary).
         let legacy = agent_doc_merge::crdt::CrdtDoc::from_text(&markdown).encode_state();
         save_crdt(&doc, &legacy).unwrap();
-        assert!(!multinode_crdt_path_for(&doc).unwrap().exists());
+        assert!(
+            !agent_doc_fs::multinode_crdt_path_for(&doc)
+                .unwrap()
+                .exists()
+        );
 
         let state = multinode_crdt_state(&doc, "fallback").unwrap();
         assert_eq!(
@@ -2503,7 +2359,7 @@ Steps to take:
         let (dir, old_doc) = setup_project_with_session(session_uuid);
 
         // Save a snapshot for the old path
-        let old_hash = doc_hash(&old_doc).unwrap();
+        let old_hash = agent_doc_fs::document_state_hash(&old_doc).unwrap();
         let snap_dir = dir.path().join(".agent-doc/snapshots");
         let old_snap_content = format!(
             "---\nagent_doc_session: {}\nagent_doc_format: template\n---\n\nStripped exchange\n",
@@ -2530,7 +2386,7 @@ Steps to take:
         fs::rename(&old_doc, &new_doc).unwrap();
 
         // Verify new hash differs
-        let new_hash = doc_hash(&new_doc).unwrap();
+        let new_hash = agent_doc_fs::document_state_hash(&new_doc).unwrap();
         assert_ne!(old_hash, new_hash);
 
         // Run migration
@@ -2556,7 +2412,7 @@ Steps to take:
         let (dir, doc) = setup_project_with_session(session_uuid);
 
         // Save a snapshot for the current path
-        let hash = doc_hash(&doc).unwrap();
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         let snap_dir = dir.path().join(".agent-doc/snapshots");
         fs::write(snap_dir.join(format!("{}.md", hash)), "existing snapshot").unwrap();
 
@@ -2623,7 +2479,7 @@ Steps to take:
         let (dir, old_doc) = setup_project_with_session(session_uuid);
 
         // Create snapshot + CRDT state for old path (simulates prior session)
-        let old_hash = doc_hash(&old_doc).unwrap();
+        let old_hash = agent_doc_fs::document_state_hash(&old_doc).unwrap();
         let snap_dir = dir.path().join(".agent-doc/snapshots");
         let crdt_dir = dir.path().join(".agent-doc/crdt");
         let old_snap = format!(
@@ -2641,7 +2497,7 @@ Steps to take:
         // Move the file (simulates JB plugin respawn after rename)
         let new_doc = dir.path().join("moved-doc.md");
         fs::rename(&old_doc, &new_doc).unwrap();
-        let new_hash = doc_hash(&new_doc).unwrap();
+        let new_hash = agent_doc_fs::document_state_hash(&new_doc).unwrap();
         assert_ne!(old_hash, new_hash);
 
         // Call ensure_initialized — the path start.rs now takes
@@ -2671,7 +2527,7 @@ Steps to take:
         assert!(initialized, "should create snapshot for fresh file");
 
         // Verify snapshot was created
-        let hash = doc_hash(&doc).unwrap();
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         let snap_dir = dir.path().join(".agent-doc/snapshots");
         assert!(
             snap_dir.join(format!("{}.md", hash)).exists(),
@@ -2738,9 +2594,17 @@ Steps to take:
         // Delete-before-create is a no-op, not an error.
         delete_baseline_model(&doc).unwrap();
         save_baseline_model(&doc, "x\n").unwrap();
-        assert!(baseline_overlay_path_for(&doc).unwrap().exists());
+        assert!(
+            agent_doc_fs::baseline_overlay_path_for(&doc)
+                .unwrap()
+                .exists()
+        );
         delete_baseline_model(&doc).unwrap();
-        assert!(!baseline_overlay_path_for(&doc).unwrap().exists());
+        assert!(
+            !agent_doc_fs::baseline_overlay_path_for(&doc)
+                .unwrap()
+                .exists()
+        );
         delete_baseline_model(&doc).unwrap();
     }
 }

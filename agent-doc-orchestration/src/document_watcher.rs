@@ -39,6 +39,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 
+use agent_doc_document::watch_projection::file_watch_event_id;
 use agent_doc_document_realtime::session_ops::SessionOpKind;
 
 use crate::session_actor::document_actor_in;
@@ -237,10 +238,6 @@ pub fn route_event(
         })??;
     }
     Ok(delivery)
-}
-
-fn file_watch_event_id(doc_id: &str, generation: u64, content_hash: &str) -> String {
-    format!("file-watch:{doc_id}:{generation}:{content_hash}")
 }
 
 #[cfg(test)]

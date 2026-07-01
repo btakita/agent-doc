@@ -2129,7 +2129,7 @@ agent-doc {}\n",
 
         assert_eq!(response, StopResponse::Continue { continue_: true });
 
-        let pending = crate::snapshot::pending_path_for(&doc).unwrap();
+        let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
         assert!(
             !pending.exists(),
             "pending capture should be cleared after recovery"
@@ -2236,7 +2236,7 @@ agent-doc {}\n",
             !content.contains("counting characters"),
             "chat-only answer must not be treated as document closeout"
         );
-        let pending = crate::snapshot::pending_path_for(&doc).unwrap();
+        let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
         assert!(
             fs::read_to_string(&pending)
                 .unwrap()
@@ -2302,7 +2302,7 @@ agent-doc {}\n",
             }
             other => panic!("expected second direct-chat writeback block, got {other:?}"),
         }
-        let pending = crate::snapshot::pending_path_for(&doc).unwrap();
+        let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
         let pending_body = fs::read_to_string(&pending).unwrap();
         assert!(pending_body.contains("Second direct-chat answer."));
         assert!(!pending_body.contains("First direct-chat answer."));
@@ -2897,7 +2897,7 @@ agent-doc {}\n",
             other => panic!("expected block response, got {other:?}"),
         }
 
-        let pending = crate::snapshot::pending_path_for(&doc).unwrap();
+        let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
         assert!(
             !pending.exists(),
             "transcript-shaped payload should not be stored as replayable pending content"
@@ -2936,7 +2936,7 @@ agent-doc {}\n",
         .unwrap();
 
         assert_eq!(response, StopResponse::Continue { continue_: true });
-        let pending = crate::snapshot::pending_path_for(&doc).unwrap();
+        let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
         assert!(!pending.exists());
     }
 

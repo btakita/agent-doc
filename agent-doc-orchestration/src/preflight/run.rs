@@ -474,7 +474,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                     continue;
                 }
                 // snapshot mtime > last commit? Call commit (idempotent — git skips if clean).
-                let snap_rel = match snapshot::path_for(&doc_path) {
+                let snap_rel = match agent_doc_fs::snapshot_path_for(&doc_path) {
                     Ok(rel) => rel,
                     Err(_) => continue,
                 };
@@ -2128,7 +2128,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
         let snapshot_before = crate::snapshot::load(&doc).unwrap();
-        let baseline_path = crate::snapshot::baseline_path_for(&doc).unwrap();
+        let baseline_path = agent_doc_fs::baseline_path_for(&doc).unwrap();
         let claims_log = dir.path().join(".agent-doc/claims.log");
         std::fs::write(&claims_log, "claim-one\n").unwrap();
 
@@ -2215,7 +2215,7 @@ mod tests {
             .expect("queue convergence delta must produce a re-aligned baseline");
         save_baseline_content(&doc, &realigned);
         let baseline_after =
-            std::fs::read_to_string(snapshot::baseline_path_for(&doc).unwrap()).unwrap();
+            std::fs::read_to_string(agent_doc_fs::baseline_path_for(&doc).unwrap()).unwrap();
         assert!(
             baseline_after.contains("[#alpha]"),
             "re-aligned baseline must carry the converged queue shape"
@@ -2761,7 +2761,7 @@ mod tests {
         );
         crate::repair::save_pending(&doc, response).unwrap();
         let capture = crate::capture::load_active(&doc).unwrap().unwrap();
-        let pending_path = snapshot::pending_path_for(&doc).unwrap();
+        let pending_path = agent_doc_fs::pending_response_path_for(&doc).unwrap();
         assert!(
             pending_path.exists(),
             "precondition: orphaned pending response"
@@ -4550,7 +4550,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
         crate::repair::save_pending(&doc, "Recovered answer.").unwrap();
-        let pending = snapshot::pending_path_for(&doc).unwrap();
+        let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
         std::fs::remove_file(&pending).unwrap();
 
         run(&doc).unwrap();
@@ -4642,7 +4642,7 @@ mod tests {
             .unwrap();
 
         // Touch snapshot to make it newer than the file (simulates agent write without commit)
-        let snap_rel = snapshot::path_for(&secondary).unwrap();
+        let snap_rel = agent_doc_fs::snapshot_path_for(&secondary).unwrap();
         let snap_abs = root.join(&snap_rel);
         let new_snap = format!("{}\n<!-- agent updated -->", secondary_content);
         fs::write(&snap_abs, &new_snap).unwrap();
@@ -4737,7 +4737,7 @@ mod tests {
             .unwrap();
 
         // Touch snapshot to make it newer than the file
-        let snap_rel = snapshot::path_for(&secondary).unwrap();
+        let snap_rel = agent_doc_fs::snapshot_path_for(&secondary).unwrap();
         let snap_abs = root.join(&snap_rel);
         std::thread::sleep(std::time::Duration::from_millis(50));
         fs::write(&snap_abs, snap_content).unwrap();
@@ -4809,7 +4809,7 @@ mod tests {
             Some("2026-01-01T00:00:00Z"),
         );
 
-        let snap_rel = snapshot::path_for(&secondary).unwrap();
+        let snap_rel = agent_doc_fs::snapshot_path_for(&secondary).unwrap();
         let snap_abs = root.join(&snap_rel);
         std::thread::sleep(std::time::Duration::from_millis(50));
         fs::write(
@@ -4897,7 +4897,7 @@ mod tests {
             Some("2026-01-01T00:00:00Z"),
         );
 
-        let snap_rel = snapshot::path_for(&secondary).unwrap();
+        let snap_rel = agent_doc_fs::snapshot_path_for(&secondary).unwrap();
         let snap_abs = root.join(&snap_rel);
         std::thread::sleep(std::time::Duration::from_millis(50));
         fs::write(

@@ -842,7 +842,7 @@ pub fn strike_answered_free_text_queue_heads(
     // be struck — a head absent from it is an in-flight operator edit and must not
     // be struck this cycle. A missing baseline (rare; preflight writes it each
     // cycle) skips the gate so legacy strike behavior is preserved.
-    let baseline = match snapshot::baseline_path_for(file) {
+    let baseline = match agent_doc_fs::baseline_path_for(file) {
         Ok(path) => std::fs::read_to_string(&path).ok(),
         Err(_) => None,
     };

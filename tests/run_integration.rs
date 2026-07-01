@@ -1,7 +1,5 @@
 use agent_doc_hash::content_hash;
-use agent_doc_orchestration::{
-    cycle_state, project_controller, snapshot, state_backbone, turn_scope_store,
-};
+use agent_doc_orchestration::{cycle_state, project_controller, state_backbone, turn_scope_store};
 use agent_doc_turn::turn_scope::{Address, TurnScope};
 use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
@@ -316,7 +314,7 @@ fn record_selected_queue_head(root: &Path, doc: &Path, content: &str, prompt_tex
         .find(|node| !node.item.struck)
         .expect("queue head should have a node key")
         .node_key;
-    let document_hash = snapshot::doc_hash(&doc.canonicalize().unwrap()).unwrap();
+    let document_hash = agent_doc_fs::document_state_hash(&doc.canonicalize().unwrap()).unwrap();
     let event = state_backbone::StateEvent::new(
         format!("test-selected-queue-head:{node_key}"),
         state_backbone::StateFact::QueueHeadSelected {

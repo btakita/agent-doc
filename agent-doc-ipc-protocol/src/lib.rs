@@ -292,6 +292,34 @@ pub fn refresh_content_message(
     })
 }
 
+/// Build a narrow patch payload that asks the editor to repair only exchange
+/// prompt-prefix normalization against an expected source buffer.
+pub fn normalization_repair_patch_message(
+    file: &str,
+    patch_id: &str,
+    normalize_prefix_lines: &[String],
+    expected_content_hash: &str,
+    expected_content_len: usize,
+    include_type: bool,
+) -> serde_json::Value {
+    let mut message = serde_json::json!({
+        "file": file,
+        "patches": [],
+        "unmatched": "",
+        "baseline": "",
+        "patch_id": patch_id,
+        "reposition_boundary": true,
+        "preserve_head": true,
+        "normalize_prefix_lines": normalize_prefix_lines,
+        "expected_content_hash": expected_content_hash,
+        "expected_content_len": expected_content_len,
+    });
+    if include_type {
+        message["type"] = serde_json::Value::String("patch".to_string());
+    }
+    message
+}
+
 /// Build a read-only live-buffer publication request payload.
 pub fn publish_live_buffer_message(file: &str) -> serde_json::Value {
     serde_json::json!({
@@ -342,9 +370,10 @@ mod tests {
         callback_response, callback_response_matches_request, callback_urgency_for_elapsed,
         classify_ack, early_ack_line, early_ack_ops_marker, early_ack_tagged_message,
         ipc_accept_thread_ops_marker, is_already_applied_ack_error_message,
-        message_requests_early_ack, patch_message, pending_callback_from_request,
-        publish_live_buffer_message, queue_convergence_message, refresh_content_message,
-        reposition_message, save_document_message, vcs_refresh_message, vcs_refresh_probe_message,
+        message_requests_early_ack, normalization_repair_patch_message, patch_message,
+        pending_callback_from_request, publish_live_buffer_message, queue_convergence_message,
+        refresh_content_message, reposition_message, save_document_message, vcs_refresh_message,
+        vcs_refresh_probe_message,
     };
 
     #[test]
@@ -527,6 +556,41 @@ mod tests {
         assert_eq!(message["content"], "content");
         assert_eq!(message["expected_content_hash"], "hash-1");
         assert_eq!(message["expected_content_len"], 7);
+    }
+
+    #[test]
+    fn normalization_repair_patch_message_is_narrow_and_source_proven() {
+        let message = normalization_repair_patch_message(
+            "/tmp/plan.md",
+            "repair-1",
+            &["do #norm".to_string()],
+            "hash-1",
+            42,
+            true,
+        );
+
+        assert_eq!(message["type"], "patch");
+        assert_eq!(message["file"], "/tmp/plan.md");
+        assert_eq!(message["patch_id"], "repair-1");
+        assert_eq!(message["patches"], serde_json::json!([]));
+        assert_eq!(message["unmatched"], "");
+        assert_eq!(message["baseline"], "");
+        assert_eq!(message["reposition_boundary"], true);
+        assert_eq!(message["preserve_head"], true);
+        assert_eq!(message["normalize_prefix_lines"][0], "do #norm");
+        assert_eq!(message["expected_content_hash"], "hash-1");
+        assert_eq!(message["expected_content_len"], 42);
+        assert!(message.get("fullContent").is_none());
+
+        let file_ipc_message = normalization_repair_patch_message(
+            "/tmp/plan.md",
+            "repair-1",
+            &["do #norm".to_string()],
+            "hash-1",
+            42,
+            false,
+        );
+        assert!(file_ipc_message.get("type").is_none());
     }
 
     #[test]

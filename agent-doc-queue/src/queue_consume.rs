@@ -4,6 +4,7 @@
 //! file IO, snapshots, IPC node operations, and editor convergence.
 
 use std::collections::HashSet;
+use std::path::Path;
 
 use agent_doc_document::queue_projection::{
     IN_PROGRESS_MARKER, strip_in_progress_marker, strip_priority_markers,
@@ -63,6 +64,213 @@ pub fn queue_consume_count_for_done_ids(entries: &[QueueEntry], done_ids: &[Stri
 
 pub fn queue_prompt_texts_match_for_consumption(left: &str, right: &str) -> bool {
     strip_priority_markers(left) == strip_priority_markers(right)
+}
+
+/// Resolve whether this cycle's committed response should consume (strike) the
+/// active queue head. The `file` argument is retained for the orchestration
+/// call shape; this crate makes the decision from the supplied document content.
+pub fn queue_consumption_allowed_for_response(
+    file: &Path,
+    baseline: Option<&str>,
+    current_content: &str,
+    response_body: &str,
+    completion_ids: &[String],
+) -> Result<bool> {
+    if should_consume_queue_prompt_for_write(file, baseline, current_content, completion_ids)? {
+        return Ok(true);
+    }
+    if crate::queue_heads::queue_head_has_explicit_completion_signal(
+        current_content,
+        completion_ids,
+    )? {
+        return Ok(true);
+    }
+    let has_response = !response_body.trim().is_empty();
+    if has_response && response_targets_synthetic_queue_head_id(current_content, response_body)? {
+        return Ok(true);
+    }
+    if has_response
+        && crate::queue_response::queue_head_is_free_text_prompt(current_content)?
+        && let Some(head_text) = crate::queue_heads::active_queue_head_text(current_content)?
+    {
+        return Ok(crate::queue_response::free_text_head_answered_by_response(
+            response_body,
+            &head_text,
+        ) && !cycle_answered_foreign_exchange_prompt(
+            baseline,
+            current_content,
+            &head_text,
+        ));
+    }
+    Ok(false)
+}
+
+pub fn should_consume_queue_prompt_for_write(
+    _file: &Path,
+    baseline: Option<&str>,
+    current_content: &str,
+    completion_ids: &[String],
+) -> Result<bool> {
+    // An explicit closeout signal naming the queue head authorizes consumption
+    // regardless of any pending mutations bundled into the same diff
+    // (#pending-add-suppresses-queue-consume).
+    if crate::queue_heads::queue_head_matches_done_ids(current_content, completion_ids)? {
+        return Ok(true);
+    }
+    let Some(base) = baseline else {
+        return Ok(false);
+    };
+    let base_norm = agent_doc_diff::strip_comments(&strip_boundary_for_dedup(base));
+    let current_norm = agent_doc_diff::strip_comments(&strip_boundary_for_dedup(current_content));
+    let diff_text = agent_doc_diff::unified_diff_from_contents(&base_norm, &current_norm);
+    should_consume_queue_prompt_for_diff_content(_file, current_content, diff_text.as_deref())
+}
+
+pub fn should_consume_queue_prompt_for_diff_content(
+    _file: &Path,
+    content: &str,
+    diff_text: Option<&str>,
+) -> Result<bool> {
+    let Some(queue_head) = crate::queue_heads::active_queue_head_text(content)? else {
+        return Ok(true);
+    };
+    let Some(diff_text) = diff_text else {
+        return Ok(false);
+    };
+    let prompt_changes: Vec<_> = agent_doc_diff::classify_prompt_bearing_changes(diff_text)
+        .into_iter()
+        .filter(|change| {
+            matches!(
+                change.kind,
+                agent_doc_diff::PromptBearingChangeKind::PromptTarget
+                    | agent_doc_diff::PromptBearingChangeKind::ContentEdit
+            )
+        })
+        .collect();
+    if agent_doc_diff::detect_queue_trigger(diff_text) {
+        return Ok(true);
+    }
+    if prompt_changes
+        .iter()
+        .any(|change| crate::queue_response::queue_prompt_text_matches(&change.text, &queue_head))
+    {
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+/// Return the id of the pre-commit queue head when this turn targeted that
+/// exact head through the prompt diff or response heading.
+pub fn queue_targeted_completion_id_for_current_head(
+    file: &Path,
+    baseline: Option<&str>,
+    current_content: &str,
+    response_body: &str,
+    pending_done: &[String],
+) -> Result<Option<String>> {
+    if crate::queue_response::queue_head_is_free_text_prompt(current_content)? {
+        return Ok(None);
+    }
+    let Some(queue_head) = crate::queue_heads::active_queue_head_text(current_content)? else {
+        return Ok(None);
+    };
+    let Some(head_id) = crate::queue_response::queue_prompt_done_id(&queue_head) else {
+        return Ok(None);
+    };
+    if !response_body.trim().is_empty()
+        && crate::queue_response::response_explicitly_targets_queue_head(response_body, &queue_head)
+    {
+        return Ok(Some(head_id));
+    }
+    if should_consume_queue_prompt_for_write(file, baseline, current_content, pending_done)? {
+        return Ok(Some(head_id));
+    }
+    Ok(None)
+}
+
+pub fn queue_diff_completion_id_for_current_head(
+    file: &Path,
+    current_content: &str,
+    diff_text: &str,
+) -> Result<Option<String>> {
+    if crate::queue_response::queue_head_is_free_text_prompt(current_content)? {
+        return Ok(None);
+    }
+    let Some(queue_head) = crate::queue_heads::active_queue_head_text(current_content)? else {
+        return Ok(None);
+    };
+    let Some(head_id) = crate::queue_response::queue_prompt_done_id(&queue_head) else {
+        return Ok(None);
+    };
+    if should_consume_queue_prompt_for_diff_content(file, current_content, Some(diff_text))? {
+        return Ok(Some(head_id));
+    }
+    Ok(None)
+}
+
+fn response_targets_synthetic_queue_head_id(content: &str, response: &str) -> Result<bool> {
+    let Some(queue_head) = crate::queue_heads::active_queue_head_text(content)? else {
+        return Ok(false);
+    };
+    if crate::queue_response::queue_head_is_bare_do_directive(&queue_head) {
+        return Ok(false);
+    }
+    let Some(head_id) = crate::queue_response::queue_prompt_done_id(&queue_head) else {
+        return Ok(false);
+    };
+    // #zwn5: an operator-pinned bare id head that resolves to exactly its own id
+    // and names a tracked backlog/review item is an id-backed directive, not a
+    // synthetic/preset prompt. Leave it pinned for an explicit closeout flag.
+    let normalized_head = crate::queue_response::normalize_queue_prompt_text(&queue_head);
+    if crate::queue_directive::topic_resolves_to_exact_id(&normalized_head, &head_id)
+        && crate::queue_response::head_id_names_tracked_directive_item(content, &head_id)
+    {
+        return Ok(false);
+    }
+    Ok(response
+        .lines()
+        .filter_map(crate::queue_response::response_heading_topic)
+        .any(|topic| crate::queue_directive::topic_resolves_to_exact_id(topic, &head_id)))
+}
+
+/// Node keys of every non-struck free-text queue head that this cycle answered,
+/// at any position in the queue.
+pub fn answered_free_text_head_node_keys(
+    content: &str,
+    response_body: &str,
+    baseline: Option<&str>,
+) -> Result<Vec<String>> {
+    if response_body.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue").map_err(|err| {
+        anyhow::anyhow!("free-text strike: failed to derive queue node keys: {err}")
+    })?;
+    let mut keys = Vec::new();
+    for node in nodes {
+        if node.item.struck {
+            continue;
+        }
+        let text = node.item.text.trim();
+        if text.is_empty() || !crate::queue_response::queue_prompt_text_is_free_text(content, text)
+        {
+            continue;
+        }
+        let is_drain_target_marker_head =
+            crate::queue_response::head_carries_in_progress_marker(text);
+        if !is_drain_target_marker_head
+            && !crate::queue_response::free_text_head_answered_by_response(response_body, text)
+        {
+            continue;
+        }
+        if let Some(baseline) = baseline
+            && !crate::queue_response::free_text_head_present_in_baseline(baseline, text)
+        {
+            continue;
+        }
+        keys.push(node.node_key);
+    }
+    Ok(keys)
 }
 
 /// True when this cycle's diff introduced a prompt-bearing exchange change (a

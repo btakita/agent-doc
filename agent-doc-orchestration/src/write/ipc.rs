@@ -2389,47 +2389,6 @@ pub(crate) fn redeliver_full_content_repair_to_editor(
     }
 }
 
-pub(crate) fn normalization_repair_candidate_matches(
-    expected_bad_state: &str,
-    repaired_content: &str,
-    normalize_prefix_lines: &[String],
-) -> bool {
-    if normalize_prefix_lines.is_empty() {
-        return false;
-    }
-    let normalized =
-        normalize_exchange_prefixes_for_targets(expected_bad_state, normalize_prefix_lines);
-    strip_boundary_for_dedup(&normalized) == strip_boundary_for_dedup(repaired_content)
-}
-
-pub(crate) fn normalization_repair_payload(
-    canonical: &Path,
-    patch_id: &str,
-    normalize_prefix_lines: &[String],
-    expected_bad_state: &str,
-    include_type: bool,
-) -> serde_json::Value {
-    let proof = agent_doc_document_realtime::write_policy::FullContentSourceProof::from_content(
-        expected_bad_state,
-    );
-    let mut payload = serde_json::json!({
-        "file": canonical.to_string_lossy(),
-        "patches": [],
-        "unmatched": "",
-        "baseline": "",
-        "patch_id": patch_id,
-        "reposition_boundary": true,
-        "preserve_head": true,
-        "normalize_prefix_lines": normalize_prefix_lines,
-        "expected_content_hash": proof.expected_content_hash,
-        "expected_content_len": proof.expected_content_len,
-    });
-    if include_type {
-        payload["type"] = serde_json::Value::String("patch".to_string());
-    }
-    payload
-}
-
 pub(crate) fn verify_normalization_repair_observed(
     file: &Path,
     project_root: &Path,
@@ -2486,7 +2445,7 @@ pub(crate) fn try_ipc_normalization_repair_patch(
     normalize_prefix_lines: &[String],
     source_patch_id: Option<&str>,
 ) -> Result<bool> {
-    if !normalization_repair_candidate_matches(
+    if !agent_doc_document_realtime::write_policy::normalization_repair_candidate_matches(
         expected_bad_state,
         repaired_content,
         normalize_prefix_lines,
@@ -2537,11 +2496,16 @@ pub(crate) fn try_ipc_normalization_repair_patch(
     let canonical = file.canonicalize()?;
     let project_root = resolve_ipc_project_root(&canonical);
     let patch_id = uuid::Uuid::new_v4().to_string();
-    let payload = normalization_repair_payload(
-        &canonical,
+    let canonical_path = canonical.to_string_lossy();
+    let proof = agent_doc_document_realtime::write_policy::FullContentSourceProof::from_content(
+        expected_bad_state,
+    );
+    let payload = agent_doc_ipc_protocol::normalization_repair_patch_message(
+        canonical_path.as_ref(),
         &patch_id,
         normalize_prefix_lines,
-        expected_bad_state,
+        &proof.expected_content_hash,
+        proof.expected_content_len,
         true,
     );
     crate::ops_log::log_op(
@@ -2612,11 +2576,12 @@ pub(crate) fn try_ipc_normalization_repair_patch(
 
     let hash = agent_doc_fs::document_state_hash(file)?;
     let patch_file = patches_dir.join(format!("{hash}.json"));
-    let payload = normalization_repair_payload(
-        &canonical,
+    let payload = agent_doc_ipc_protocol::normalization_repair_patch_message(
+        canonical_path.as_ref(),
         &patch_id,
         normalize_prefix_lines,
-        expected_bad_state,
+        &proof.expected_content_hash,
+        proof.expected_content_len,
         false,
     );
     atomic_write(&patch_file, &serde_json::to_string_pretty(&payload)?)?;

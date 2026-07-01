@@ -164,18 +164,6 @@ pub(crate) enum StartupLockAcquire {
     Busy,
 }
 
-pub(crate) fn starting_dir_for(file: &Path) -> Option<std::path::PathBuf> {
-    let canonical = std::fs::canonicalize(file).ok()?;
-    let base = agent_doc_fs::find_project_root(&canonical)
-        .or_else(|| canonical.parent().map(|p| p.to_path_buf()))?;
-    Some(base.join(".agent-doc/starting"))
-}
-
-pub(crate) fn session_start_lock_name(session_name: &str) -> String {
-    let hash = agent_doc_fs::document_state_hash_from_str(&format!("session:{session_name}"));
-    format!("session-{hash}.lock")
-}
-
 pub(crate) fn open_start_lock(path: &Path) -> Result<File> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -214,17 +202,13 @@ pub(crate) fn acquire_startup_locks(
     session_name: &str,
     mode: StartupLockMode,
 ) -> Result<StartupLockAcquire> {
-    let Some(starting_dir) = starting_dir_for(file) else {
+    let Some(doc_lock_path) = agent_doc_fs::startup_document_lock_path_for(file) else {
         return Ok(StartupLockAcquire::Acquired(None));
     };
-
-    let doc_lock_path = if let Ok(hash) = agent_doc_fs::document_state_hash(file) {
-        starting_dir.join(format!("{hash}.lock"))
-    } else {
-        let fallback = agent_doc_fs::document_state_hash_from_str(&file.to_string_lossy());
-        starting_dir.join(format!("{fallback}.lock"))
+    let Some(session_lock_path) = agent_doc_fs::startup_session_lock_path_for(file, session_name)
+    else {
+        return Ok(StartupLockAcquire::Acquired(None));
     };
-    let session_lock_path = starting_dir.join(session_start_lock_name(session_name));
 
     let doc_lock = open_start_lock(&doc_lock_path)?;
     if !lock_startup_file(&doc_lock, &doc_lock_path, mode)? {
@@ -341,7 +325,7 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
     let registry_base_dir = registry_base_dir_for_file(file, &cwd);
 
     // Resolve the agent-doc binary path (same binary that's currently running)
-    let agent_doc_bin = agent_doc_start_bin();
+    let agent_doc_bin = agent_doc_supervisor_process::agent_doc_start_bin();
 
     // Try to split directly in an existing pane.
     // When skip_wait=true (sync path), prefer panes in the target window (agent-doc window)
@@ -697,19 +681,6 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
     Ok(Some(final_pane))
 }
 
-pub(crate) fn agent_doc_start_bin() -> String {
-    if let Ok(override_bin) = std::env::var("AGENT_DOC_ROUTE_BIN")
-        && !override_bin.trim().is_empty()
-    {
-        return override_bin;
-    }
-
-    std::env::current_exe()
-        .unwrap_or_else(|_| "agent-doc".into())
-        .to_string_lossy()
-        .to_string()
-}
-
 /// Poll a tmux pane until the agent is ready to accept input.
 ///
 /// Uses the harness's prompt patterns for detection.
@@ -1050,10 +1021,11 @@ mod tests {
         let doc = tmp.path().join("session.md");
         std::fs::write(&doc, "---\nagent_doc_session: startup-lock-test\n---\n").unwrap();
 
-        let starting_dir = starting_dir_for(&doc).expect("project root should resolve");
+        let starting_dir =
+            agent_doc_fs::startup_starting_dir_for(&doc).expect("project root should resolve");
         std::fs::create_dir_all(&starting_dir).unwrap();
-        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
-        let lock_path = starting_dir.join(format!("{hash}.lock"));
+        let lock_path = agent_doc_fs::startup_document_lock_path_for(&doc)
+            .expect("document startup lock path should resolve");
         let held_doc_lock = open_start_lock(&lock_path).unwrap();
         fs2::FileExt::lock_exclusive(&held_doc_lock).unwrap();
 

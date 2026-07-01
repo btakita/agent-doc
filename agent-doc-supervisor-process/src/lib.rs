@@ -29,6 +29,30 @@ impl SupervisorProcessCommand {
 
 pub const REEXEC_CHILD_PID_ENV: &str = "AGENT_DOC_REEXEC_CHILD_PID";
 pub const REEXEC_MASTER_FD_ENV: &str = "AGENT_DOC_REEXEC_MASTER_FD";
+pub const ROUTE_BIN_ENV: &str = "AGENT_DOC_ROUTE_BIN";
+
+pub fn agent_doc_start_bin() -> String {
+    resolve_agent_doc_start_bin(
+        std::env::var(ROUTE_BIN_ENV).ok(),
+        std::env::current_exe().ok(),
+    )
+}
+
+fn resolve_agent_doc_start_bin(
+    route_bin_override: Option<String>,
+    current_exe: Option<std::path::PathBuf>,
+) -> String {
+    if let Some(override_bin) = route_bin_override
+        && !override_bin.trim().is_empty()
+    {
+        return override_bin;
+    }
+
+    current_exe
+        .unwrap_or_else(|| "agent-doc".into())
+        .to_string_lossy()
+        .to_string()
+}
 
 /// State handed from a stale supervisor to its freshly-execed replacement.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -135,6 +159,33 @@ mod tests {
         assert_eq!(env[1].0, REEXEC_MASTER_FD_ENV);
         assert_eq!(env[1].1, "7");
         assert_eq!(ReexecState::parse(&env[0].1, &env[1].1), Some(state));
+    }
+
+    #[test]
+    fn agent_doc_start_bin_respects_nonblank_route_override() {
+        assert_eq!(
+            resolve_agent_doc_start_bin(
+                Some("/tmp/custom-agent-doc".to_string()),
+                Some("/usr/bin/agent-doc".into())
+            ),
+            "/tmp/custom-agent-doc"
+        );
+    }
+
+    #[test]
+    fn agent_doc_start_bin_ignores_blank_route_override() {
+        assert_eq!(
+            resolve_agent_doc_start_bin(
+                Some(" \t ".to_string()),
+                Some("/usr/bin/agent-doc".into())
+            ),
+            "/usr/bin/agent-doc"
+        );
+    }
+
+    #[test]
+    fn agent_doc_start_bin_falls_back_to_agent_doc_when_current_exe_is_unavailable() {
+        assert_eq!(resolve_agent_doc_start_bin(None, None), "agent-doc");
     }
 
     #[cfg(unix)]

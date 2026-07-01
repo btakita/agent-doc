@@ -486,7 +486,11 @@ fn run_once(
     }
     content_original = normalize_direct_run_prompt_prefixes(file, &content_original, &the_diff)?;
     let queue_diff_completion_id =
-        write::queue_diff_completion_id_for_current_head(file, &content_original, &the_diff)?;
+        agent_doc_queue::queue_consume::queue_diff_completion_id_for_current_head(
+            file,
+            &content_original,
+            &the_diff,
+        )?;
     let owned_rc;
     let rc: &crate::graph::RunContext = if let Some(provided) = run_context {
         provided.set_file_path(file.to_path_buf());

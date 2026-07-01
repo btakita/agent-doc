@@ -87,8 +87,6 @@ use crate::{
     sessions, stream,
 };
 
-const PID_FILE: &str = ".agent-doc/watch.pid";
-
 /// Default idle timeout before daemon auto-exits (seconds).
 const IDLE_TIMEOUT_SECS: u64 = 60;
 
@@ -168,51 +166,9 @@ fn log_node_events(path: &Path, events: &[DocumentNodeEvent]) {
     crate::ops_log::log_op(path, &format!("document_node_events {payload}"));
 }
 
-/// Check if a PID is alive via /proc.
-fn pid_alive(pid: u32) -> bool {
-    Path::new(&format!("/proc/{}", pid)).exists()
-}
-
-/// Read the PID from the PID file.
-fn read_pid() -> Option<u32> {
-    read_pid_in(&std::env::current_dir().ok()?)
-}
-
-/// Read the PID from the PID file under `base_dir`.
-fn read_pid_in(base_dir: &Path) -> Option<u32> {
-    let content = std::fs::read_to_string(base_dir.join(PID_FILE)).ok()?;
-    content.trim().parse().ok()
-}
-
-/// Write our PID to the PID file.
-fn write_pid() -> Result<()> {
-    write_pid_in(&std::env::current_dir()?)
-}
-
-/// Write our PID to the PID file under `base_dir`.
-fn write_pid_in(base_dir: &Path) -> Result<()> {
-    let pid_path = base_dir.join(PID_FILE);
-    if let Some(parent) = pid_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(pid_path, format!("{}", std::process::id()))?;
-    Ok(())
-}
-
-/// Remove the PID file.
-fn remove_pid() {
-    let _ = std::fs::remove_file(PID_FILE);
-}
-
-/// Remove the PID file under `base_dir`.
-#[cfg(test)]
-fn remove_pid_in(base_dir: &Path) {
-    let _ = std::fs::remove_file(base_dir.join(PID_FILE));
-}
-
 /// Check if the watch daemon is currently running.
 pub fn is_running() -> bool {
-    read_pid().is_some_and(pid_alive)
+    agent_doc_watch_io::read_pid().is_some_and(agent_doc_watch_io::pid_alive)
 }
 
 /// Ensure the watch daemon is running. If not, spawn it in the background.
@@ -279,15 +235,15 @@ pub fn start(config: &Config, watch_config: WatchConfig) -> Result<()> {
     }
 
     // Check if already running
-    if let Some(pid) = read_pid() {
-        if pid_alive(pid) {
+    if let Some(pid) = agent_doc_watch_io::read_pid() {
+        if agent_doc_watch_io::pid_alive(pid) {
             bail!("watch daemon already running (PID {})", pid);
         }
         // Stale PID file — clean up
-        remove_pid();
+        agent_doc_watch_io::remove_pid();
     }
 
-    write_pid()?;
+    agent_doc_watch_io::write_current_pid()?;
     eprintln!("Watch daemon started (PID {})", std::process::id());
 
     // Install signal handler for clean shutdown
@@ -301,7 +257,7 @@ pub fn start(config: &Config, watch_config: WatchConfig) -> Result<()> {
 
     let result = run_event_loop(config, &watch_config, &running);
 
-    remove_pid();
+    agent_doc_watch_io::remove_pid();
     eprintln!("Watch daemon stopped.");
     result
 }
@@ -427,7 +383,7 @@ fn run_event_loop(
 
     while running.load(std::sync::atomic::Ordering::Relaxed) {
         // Check PID file still exists (external stop)
-        if !Path::new(PID_FILE).exists() {
+        if !Path::new(agent_doc_watch_io::PID_FILE).exists() {
             eprintln!("PID file removed — shutting down.");
             break;
         }
@@ -810,13 +766,13 @@ fn discover_entries_in(base_dir: &Path) -> Result<Vec<WatchEntry>> {
 
 /// Stop the watch daemon by removing the PID file.
 pub fn stop() -> Result<()> {
-    match read_pid() {
+    match agent_doc_watch_io::read_pid() {
         Some(pid) => {
-            if pid_alive(pid) {
-                remove_pid();
+            if agent_doc_watch_io::pid_alive(pid) {
+                agent_doc_watch_io::remove_pid();
                 eprintln!("Signaled watch daemon (PID {}) to stop.", pid);
             } else {
-                remove_pid();
+                agent_doc_watch_io::remove_pid();
                 eprintln!(
                     "Watch daemon (PID {}) was not running. Cleaned up PID file.",
                     pid
@@ -832,9 +788,9 @@ pub fn stop() -> Result<()> {
 
 /// Check the status of the watch daemon.
 pub fn status() -> Result<()> {
-    match read_pid() {
+    match agent_doc_watch_io::read_pid() {
         Some(pid) => {
-            if pid_alive(pid) {
+            if agent_doc_watch_io::pid_alive(pid) {
                 println!("Watch daemon running (PID {})", pid);
             } else {
                 println!("Watch daemon not running (stale PID file: {})", pid);
@@ -910,22 +866,22 @@ mod tests {
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
 
-        write_pid_in(dir.path()).unwrap();
-        let pid = read_pid_in(dir.path()).unwrap();
+        agent_doc_watch_io::write_current_pid_in(dir.path()).unwrap();
+        let pid = agent_doc_watch_io::read_pid_in(dir.path()).unwrap();
         assert_eq!(pid, std::process::id());
 
-        remove_pid_in(dir.path());
-        assert!(read_pid_in(dir.path()).is_none());
+        agent_doc_watch_io::remove_pid_in(dir.path());
+        assert!(agent_doc_watch_io::read_pid_in(dir.path()).is_none());
     }
 
     #[test]
     fn pid_alive_self() {
-        assert!(pid_alive(std::process::id()));
+        assert!(agent_doc_watch_io::pid_alive(std::process::id()));
     }
 
     #[test]
     fn pid_alive_nonexistent() {
-        assert!(!pid_alive(4_294_967_295));
+        assert!(!agent_doc_watch_io::pid_alive(4_294_967_295));
     }
 
     #[test]

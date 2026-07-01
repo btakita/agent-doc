@@ -240,6 +240,9 @@ use agent_doc_element_exchange::{
     response_precedes_prompt_in_exchange, strip_prompt_prefix_from_response_body_first_lines,
 };
 use agent_doc_fs::find_project_root;
+use agent_doc_queue::queue_consume::{
+    queue_consumption_allowed_for_response, queue_targeted_completion_id_for_current_head,
+};
 use agent_doc_queue::queue_prompt_drift::{
     dropped_queue_prompt_lines_after_content_ours, preserve_content_ours_over_live_queue_deletions,
 };

@@ -8,7 +8,9 @@ use agent_doc_document::commit_normalization::{
     normalize_component_content_for_absorb, redact_component_contents_for_absorb,
 };
 use agent_doc_document::transient_markers::strip_boundary_markers;
+use agent_doc_document::write_normalization::strip_boundary_for_dedup;
 use agent_doc_element::element;
+use agent_doc_element_exchange::normalize_exchange_prefixes_for_targets;
 use agent_doc_prompt_lines::text_line_looks_like_prompt_target;
 use agent_doc_queue::queue_prompt_drift::queue_prompt_deletions_between;
 use agent_doc_turn::closeout_signal::line_is_carry_forward_signal;
@@ -199,6 +201,21 @@ pub fn response_already_in_current(base: &str, content_ours: &str, content_curre
     response_hunks
         .iter()
         .all(|hunk| contains_contiguous_hunk(&current_lines, hunk))
+}
+
+/// True when a rejected editor state can be repaired by applying only exchange
+/// prompt-prefix normalization to the targeted lines.
+pub fn normalization_repair_candidate_matches(
+    expected_bad_state: &str,
+    repaired_content: &str,
+    normalize_prefix_lines: &[String],
+) -> bool {
+    if normalize_prefix_lines.is_empty() {
+        return false;
+    }
+    let normalized =
+        normalize_exchange_prefixes_for_targets(expected_bad_state, normalize_prefix_lines);
+    strip_boundary_for_dedup(&normalized) == strip_boundary_for_dedup(repaired_content)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1955,6 +1972,43 @@ Same content.
             !response_already_in_current(base, base, base),
             "should return false when ours equals base"
         );
+    }
+
+    #[test]
+    fn normalization_repair_candidate_matches_prefix_only_boundary_equivalent_repair() {
+        let bad_state = "\
+<!-- agent:exchange patch=append -->
+do #norm
+<!-- agent:boundary: old -->
+### Re: do #norm — gpt-5
+
+Working.
+<!-- /agent:exchange -->
+";
+        let repaired = "\
+<!-- agent:exchange patch=append -->
+❯ do #norm
+<!-- agent:boundary: new -->
+### Re: do #norm — gpt-5
+
+Working.
+<!-- /agent:exchange -->
+";
+        let targets = vec!["do #norm".to_string()];
+
+        assert!(normalization_repair_candidate_matches(
+            bad_state, repaired, &targets
+        ));
+        assert!(!normalization_repair_candidate_matches(
+            bad_state,
+            repaired,
+            &[]
+        ));
+        assert!(!normalization_repair_candidate_matches(
+            bad_state,
+            &repaired.replace("Working.", "Changed."),
+            &targets
+        ));
     }
 
     #[test]

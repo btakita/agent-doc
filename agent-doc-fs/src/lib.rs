@@ -9,6 +9,7 @@ const TURN_SCOPE_DIR: &str = ".agent-doc/turn-scope";
 const CRDT_DIR: &str = ".agent-doc/crdt";
 const PRE_RESPONSE_DIR: &str = ".agent-doc/pre-response";
 const CYCLE_STATE_DIR: &str = ".agent-doc/state/cycles";
+const STARTING_DIR: &str = ".agent-doc/starting";
 const BASELINE_OVERLAY_EXT: &str = "overlay.yrs";
 
 /// Walk up the directory tree from `path` to find the directory containing
@@ -93,6 +94,40 @@ pub fn cycle_state_path_for(doc: &Path) -> Result<Option<PathBuf>> {
     Ok(Some(
         root.join(CYCLE_STATE_DIR).join(format!("{hash}.json")),
     ))
+}
+
+/// Compute `<project_root>/.agent-doc/starting` for a document.
+///
+/// Returns `None` when `doc` cannot be canonicalized or a root/fallback parent
+/// cannot be resolved.
+pub fn startup_starting_dir_for(doc: &Path) -> Option<PathBuf> {
+    let canonical = doc.canonicalize().ok()?;
+    let base =
+        find_project_root(&canonical).or_else(|| canonical.parent().map(Path::to_path_buf))?;
+    Some(base.join(STARTING_DIR))
+}
+
+/// Compute the startup lock filename for a tmux session.
+pub fn startup_session_lock_name(session_name: &str) -> String {
+    let hash = document_state_hash_from_str(&format!("session:{session_name}"));
+    format!("session-{hash}.lock")
+}
+
+/// Compute `<project_root>/.agent-doc/starting/<hash>.lock` for a document.
+///
+/// Returns `None` when the startup directory cannot be resolved. Falls back to
+/// hashing the input path text when the document hash cannot be derived from the
+/// filesystem.
+pub fn startup_document_lock_path_for(doc: &Path) -> Option<PathBuf> {
+    let starting_dir = startup_starting_dir_for(doc)?;
+    let hash = document_state_hash(doc)
+        .unwrap_or_else(|_| document_state_hash_from_str(&doc.to_string_lossy()));
+    Some(starting_dir.join(format!("{hash}.lock")))
+}
+
+/// Compute `<project_root>/.agent-doc/starting/session-<hash>.lock`.
+pub fn startup_session_lock_path_for(doc: &Path, session_name: &str) -> Option<PathBuf> {
+    Some(startup_starting_dir_for(doc)?.join(startup_session_lock_name(session_name)))
 }
 
 /// Compute `<project_root>/.agent-doc/baselines/<hash>.md` for a document.
@@ -354,7 +389,9 @@ mod tests {
         multinode_crdt_path_for, overlay_crdt_path_for, pending_response_path_for,
         pre_response_path_for, read_optional, referenced_markdown_path,
         referenced_markdown_path_checked, rewrite_start_path, snapshot_flock_path_for,
-        snapshot_path_for, state_lock_path_for, turn_scope_path_for,
+        snapshot_path_for, startup_document_lock_path_for, startup_session_lock_name,
+        startup_session_lock_path_for, startup_starting_dir_for, state_lock_path_for,
+        turn_scope_path_for,
     };
     use std::path::Path;
 
@@ -558,6 +595,27 @@ mod tests {
         std::fs::write(&doc, "# doc\n").unwrap();
 
         assert_eq!(cycle_state_path_for(&doc).unwrap(), None);
+    }
+
+    #[test]
+    fn startup_lock_paths_use_project_starting_dir() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        std::fs::write(&doc, "content").unwrap();
+
+        let starting_dir = startup_starting_dir_for(&doc).unwrap();
+        assert_eq!(starting_dir, tmp.path().join(".agent-doc/starting"));
+
+        let doc_hash = document_state_hash(&doc).unwrap();
+        assert_eq!(
+            startup_document_lock_path_for(&doc).unwrap(),
+            starting_dir.join(format!("{doc_hash}.lock"))
+        );
+        assert_eq!(
+            startup_session_lock_path_for(&doc, "session-a").unwrap(),
+            starting_dir.join(startup_session_lock_name("session-a"))
+        );
     }
 
     #[test]

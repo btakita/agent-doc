@@ -744,15 +744,16 @@ fn try_recover_repeated_queue_head_response(
         };
     let content_before_repair = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    let queue_completion_ids = crate::write::queue_targeted_completion_id_for_current_head(
-        file,
-        None,
-        &content_before_repair,
-        &response_to_write,
-        &[],
-    )?
-    .into_iter()
-    .collect::<Vec<_>>();
+    let queue_completion_ids =
+        agent_doc_queue::queue_consume::queue_targeted_completion_id_for_current_head(
+            file,
+            None,
+            &content_before_repair,
+            &response_to_write,
+            &[],
+        )?
+        .into_iter()
+        .collect::<Vec<_>>();
 
     crate::repair::save_pending(file, &response_to_write)?;
     crate::ops_log::log_op(file, "codex_stop_repeated_queue_response_saved");
@@ -1170,7 +1171,7 @@ fn attempt_stop_closeout(
             agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(response) => {
                 let content_before_repair = std::fs::read_to_string(file)
                     .with_context(|| format!("failed to read {}", file.display()))?;
-                crate::write::queue_targeted_completion_id_for_current_head(
+                agent_doc_queue::queue_consume::queue_targeted_completion_id_for_current_head(
                     file,
                     None,
                     &content_before_repair,

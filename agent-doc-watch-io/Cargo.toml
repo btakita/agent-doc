@@ -1,0 +1,16 @@
+[package]
+name = "agent-doc-watch-io"
+version = "0.34.66"
+edition = "2024"
+description = "Watch daemon process IO boundary for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_watch_io"
+
+[dependencies]
+anyhow = "1"
+
+[dev-dependencies]
+tempfile = "3"

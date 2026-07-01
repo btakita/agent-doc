@@ -4,27 +4,29 @@ use super::*;
 use agent_doc_document::queue_projection::strip_priority_markers;
 use agent_doc_queue::{
     queue_consume::{
-        annotate_newly_struck_free_text_heads, consume_queue_nodes_by_key,
-        cycle_answered_foreign_exchange_prompt, first_n_queue_prompt_texts,
-        head_id_names_open_backlog_item, id_backed_head_node_keys,
-        mark_entries_completed_by_done_ids, mark_first_matching_prompts_completed_by_texts,
-        normalized_done_id_bag, queue_consume_count_for_done_ids, queue_prompt_node_keys_for_count,
+        annotate_newly_struck_free_text_heads, answered_free_text_head_node_keys,
+        consume_queue_nodes_by_key, first_n_queue_prompt_texts, head_id_names_open_backlog_item,
+        id_backed_head_node_keys, mark_entries_completed_by_done_ids,
+        mark_first_matching_prompts_completed_by_texts, normalized_done_id_bag,
+        queue_consume_count_for_done_ids, queue_prompt_node_keys_for_count,
         queue_prompt_node_keys_for_done_ids, queue_prompt_node_keys_for_texts,
-        strike_all_noise_queue_heads,
+        should_consume_queue_prompt_for_diff_content, strike_all_noise_queue_heads,
     },
-    queue_directive::topic_resolves_to_exact_id,
-    queue_heads::{
-        active_queue_head_text, queue_head_has_explicit_completion_signal,
-        queue_head_matches_done_ids,
-    },
+    queue_heads::active_queue_head_text,
     queue_response::{
-        embed_consumed_prompt_in_response, first_nonempty_line,
-        free_text_head_answered_by_response, free_text_head_present_in_baseline,
-        head_carries_in_progress_marker, head_id_names_tracked_directive_item,
-        normalize_queue_prompt_text, queue_head_is_bare_do_directive,
-        queue_head_is_free_text_prompt, queue_prompt_done_id, queue_prompt_text_is_free_text,
-        queue_prompt_text_matches, response_explicitly_targets_queue_head, response_heading_topic,
+        embed_consumed_prompt_in_response, first_nonempty_line, queue_head_is_free_text_prompt,
+        queue_prompt_done_id, queue_prompt_text_is_free_text,
+        response_explicitly_targets_queue_head,
     },
+};
+
+#[cfg(test)]
+use agent_doc_queue::{
+    queue_consume::{
+        cycle_answered_foreign_exchange_prompt, queue_consumption_allowed_for_response,
+        should_consume_queue_prompt_for_write,
+    },
+    queue_response::queue_head_is_bare_do_directive,
 };
 
 pub(crate) struct QueueConsumptionPlan {
@@ -459,140 +461,10 @@ pub fn should_consume_queue_prompt_for_diff(file: &Path, diff_text: Option<&str>
     should_consume_queue_prompt_for_diff_content(file, &content, diff_text)
 }
 
-pub(crate) fn should_consume_queue_prompt_for_write(
-    file: &Path,
-    baseline: Option<&str>,
-    current_content: &str,
-    completion_ids: &[String],
-) -> Result<bool> {
-    // An explicit closeout signal naming the queue head authorizes consumption
-    // regardless of any pending mutations bundled into the same diff
-    // (#pending-add-suppresses-queue-consume). Check it FIRST so a bundled
-    // `--pending-add` cannot make the diff-based check below emit a misleading
-    // "active prompt differs from queue head" diagnostic for a turn that does
-    // in fact complete the head.
-    if queue_head_matches_done_ids(current_content, completion_ids)? {
-        return Ok(true);
-    }
-    let Some(base) = baseline else {
-        return Ok(false);
-    };
-    let base_norm = agent_doc_diff::strip_comments(&strip_boundary_for_dedup(base));
-    let current_norm = agent_doc_diff::strip_comments(&strip_boundary_for_dedup(current_content));
-    let diff_text = agent_doc_diff::unified_diff_from_contents(&base_norm, &current_norm);
-    should_consume_queue_prompt_for_diff_content(file, current_content, diff_text.as_deref())
-}
-
 pub(crate) fn queue_skip_diagnostic_for_file(file: &Path) -> Result<String> {
     let content =
         std::fs::read_to_string(file).context("queue skip diagnostic: failed to read document")?;
     agent_doc_queue::queue_heads::queue_skip_diagnostic_for_content(&content)
-}
-
-pub(crate) fn should_consume_queue_prompt_for_diff_content(
-    file: &Path,
-    content: &str,
-    diff_text: Option<&str>,
-) -> Result<bool> {
-    let Some(queue_head) = active_queue_head_text(content)? else {
-        return Ok(true);
-    };
-    let Some(diff_text) = diff_text else {
-        return Ok(false);
-    };
-    let prompt_changes: Vec<_> = agent_doc_diff::classify_prompt_bearing_changes(diff_text)
-        .into_iter()
-        .filter(|change| {
-            matches!(
-                change.kind,
-                agent_doc_diff::PromptBearingChangeKind::PromptTarget
-                    | agent_doc_diff::PromptBearingChangeKind::ContentEdit
-            )
-        })
-        .collect();
-    if agent_doc_diff::detect_queue_trigger(diff_text) {
-        return Ok(true);
-    }
-    if prompt_changes
-        .iter()
-        .any(|change| queue_prompt_text_matches(&change.text, &queue_head))
-    {
-        return Ok(true);
-    }
-
-    // Not a user-facing failure on its own: the caller still has explicit
-    // completion-signal fallbacks (`--done`/`--pending-gate`/`--review-resolve`/
-    // `--pending-edit`, synthetic-head heading match). Only the caller's final
-    // "skipped consumption" line is the authoritative skip signal, so record this
-    // detail to ops_log instead of stderr to avoid a false-alarm during a turn
-    // that ultimately consumes the head (#pending-add-suppresses-queue-consume).
-    // The {:?} quoting on prompt_changes/queue_head is load-bearing: the
-    // gate-verify scan excludes double-quoted spans so this embedded document
-    // prose cannot prove a gated review item (#gng8).
-    crate::ops_log::log_op(
-        file,
-        &format!(
-            "queue_diff_active_prompt_differs file={} prompt_changes={:?} queue_head={:?}",
-            file.display(),
-            prompt_changes
-                .iter()
-                .map(|change| change.text.as_str())
-                .collect::<Vec<_>>(),
-            queue_head
-        ),
-    );
-    Ok(false)
-}
-
-/// Return the id of the pre-commit queue head when this turn targeted that
-/// exact head through the prompt diff or response heading. The queue-consume
-/// planner rechecks the live head later, so this id cannot authorize striking a
-/// different head that was reordered into first position after the decision.
-pub(crate) fn queue_targeted_completion_id_for_current_head(
-    file: &Path,
-    baseline: Option<&str>,
-    current_content: &str,
-    response_body: &str,
-    pending_done: &[String],
-) -> Result<Option<String>> {
-    if queue_head_is_free_text_prompt(current_content)? {
-        return Ok(None);
-    }
-    let Some(queue_head) = active_queue_head_text(current_content)? else {
-        return Ok(None);
-    };
-    let Some(head_id) = queue_prompt_done_id(&queue_head) else {
-        return Ok(None);
-    };
-    if !response_body.trim().is_empty()
-        && response_explicitly_targets_queue_head(response_body, &queue_head)
-    {
-        return Ok(Some(head_id));
-    }
-    if should_consume_queue_prompt_for_write(file, baseline, current_content, pending_done)? {
-        return Ok(Some(head_id));
-    }
-    Ok(None)
-}
-
-pub(crate) fn queue_diff_completion_id_for_current_head(
-    file: &Path,
-    current_content: &str,
-    diff_text: &str,
-) -> Result<Option<String>> {
-    if queue_head_is_free_text_prompt(current_content)? {
-        return Ok(None);
-    }
-    let Some(queue_head) = active_queue_head_text(current_content)? else {
-        return Ok(None);
-    };
-    let Some(head_id) = queue_prompt_done_id(&queue_head) else {
-        return Ok(None);
-    };
-    if should_consume_queue_prompt_for_diff_content(file, current_content, Some(diff_text))? {
-        return Ok(Some(head_id));
-    }
-    Ok(None)
 }
 
 pub fn response_explicitly_targets_active_queue_head(file: &Path, response: &str) -> Result<bool> {
@@ -605,134 +477,6 @@ pub fn response_explicitly_targets_active_queue_head(file: &Path, response: &str
         response,
         &queue_head,
     ))
-}
-
-/// True when this cycle's captured response heading targets EXACTLY the active
-/// queue head's id and that head is a *synthetic/preset* prompt rather than an
-/// id-backed directive (#queue-head-consume-on-topic-id-regression / #zwn5).
-///
-/// Synthetic queue prompts — a preset expansion or a natural-language prompt
-/// carrying a trailing `#preset` id — are completed by the response itself, so a
-/// `### Re: #<id>` heading that resolves to exactly that id is a genuine
-/// completion signal. Id-backed directives still require an explicit closeout
-/// flag (#queue-strike-on-halt) because a halt/refusal/log-check response names
-/// the head to explain why it is *not* being done. A heading topic that merely
-/// contains the id with trailing modifiers — `#id halt`, `#id deferred` — never
-/// counts, for either head shape.
-///
-/// Two head shapes are id-backed directives, never heading-consumable:
-///  1. A bare `do [#id]` / `do #id` directive (`queue_head_is_bare_do_directive`).
-///  2. An operator-pinned bare id head (`[#id]` / `#id`, with or without a
-///     priority pin) that resolves to exactly its own id AND whose id names a
-///     tracked `agent:backlog` / `agent:review` item (#zwn5). Such a head is a
-///     directive referencing a tracked item — e.g. an operator-drive live-verify
-///     item the agent answers with a log-check but can never close itself — so a
-///     `### Re: #id` heading must leave it pinned for an explicit
-///     `--done`/`--pending-gate`/`--pending-edit` close. A registered prompt
-///     preset id (e.g. `#spec-...`) is NOT a tracked item, so it stays synthetic
-///     and still consumes on a matching heading.
-pub(crate) fn response_targets_synthetic_queue_head_id(
-    file: &Path,
-    response: &str,
-) -> Result<bool> {
-    let content =
-        std::fs::read_to_string(file).context("queue consume guard: failed to read document")?;
-    let Some(queue_head) = active_queue_head_text(&content)? else {
-        return Ok(false);
-    };
-    if queue_head_is_bare_do_directive(&queue_head) {
-        return Ok(false);
-    }
-    let Some(head_id) = queue_prompt_done_id(&queue_head) else {
-        return Ok(false);
-    };
-    // #zwn5: an operator-pinned bare id head that resolves to exactly its own id
-    // and names a tracked backlog/review item is an id-backed directive, not a
-    // synthetic/preset prompt. Leave it pinned for an explicit closeout flag
-    // instead of striking it on a log-check/halt `### Re: #id` heading.
-    let normalized_head = normalize_queue_prompt_text(&queue_head);
-    if topic_resolves_to_exact_id(&normalized_head, &head_id)
-        && head_id_names_tracked_directive_item(&content, &head_id)
-    {
-        return Ok(false);
-    }
-    Ok(response
-        .lines()
-        .filter_map(response_heading_topic)
-        .any(|topic| topic_resolves_to_exact_id(topic, &head_id)))
-}
-
-/// Node keys of every non-struck free-text queue head that this cycle answered,
-/// at ANY position in the queue (#ftstrike). Two signals mark a head answered:
-///
-/// 1. **Drain-target marker (`#qheadstrikeauto`).** The free-text head carrying
-///    the in-progress `🚧` marker IS the head the binary dispatched this cycle, so
-///    a committed (non-empty) response answers it by definition — struck without
-///    requiring the agent to quote it as a `> **Queue prompt:**` blockquote
-///    (operator: "the binary should do this automatically...not the agent").
-/// 2. **Prose/blockquote answer-match (`#ftstrike`).** A non-marker free-text head
-///    is struck when `response_body` quotes it, mirroring how
-///    `mark_entries_completed_by_done_ids` marks id-backed heads regardless of
-///    position, but keyed to the answering response instead of a tracked id.
-///
-/// `baseline` is the stable pre-turn document (the preflight baseline). When
-/// supplied, a candidate head is struck only if it was already present in that
-/// baseline (`#qstrikeexplain` Phase 2 — conservative strike): a head that first
-/// appeared in the live buffer this turn defers to the cycle that actually
-/// answers it. `None` skips the gate (legacy behavior / no baseline available).
-pub(crate) fn answered_free_text_head_node_keys(
-    content: &str,
-    response_body: &str,
-    baseline: Option<&str>,
-) -> Result<Vec<String>> {
-    if response_body.trim().is_empty() {
-        return Ok(Vec::new());
-    }
-    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue").map_err(|err| {
-        anyhow::anyhow!("free-text strike: failed to derive queue node keys: {err}")
-    })?;
-    let mut keys = Vec::new();
-    for node in nodes {
-        if node.item.struck {
-            continue;
-        }
-        let text = node.item.text.trim();
-        if text.is_empty() || !queue_prompt_text_is_free_text(content, text) {
-            continue;
-        }
-        // `#qheadstrikeauto`: the binary stamps the cycle's drain target with the
-        // in-progress `🚧` marker at preflight (`set_first_prompt_in_progress`). A
-        // free-text head carrying that marker IS the head this cycle was dispatched
-        // to drain — so on a committed (non-empty) response it is answered by
-        // definition, regardless of whether the agent quoted it as a
-        // `> **Queue prompt:**` blockquote. Operator: "the binary should do this
-        // automatically...not the agent." The prose/blockquote answer-match remains
-        // as the secondary signal that strikes non-marker free-text heads answered
-        // at any position (`#ftstrike`). The baseline gate below still applies, so a
-        // marker on an in-flight operator edit (head absent from the pre-turn
-        // baseline) is never struck.
-        let is_drain_target_marker_head = head_carries_in_progress_marker(text);
-        if !is_drain_target_marker_head && !free_text_head_answered_by_response(response_body, text)
-        {
-            continue;
-        }
-        // `#qstrikeexplain` Phase 2 — never strike a head still being authored this
-        // turn. A free-text head that is NOT in the stable pre-turn baseline first
-        // appeared in the live buffer during this turn (an in-flight operator edit);
-        // defer it to the cycle that actually answers it (editor-wins, consistent
-        // with #queue-user-edit-overwrite) instead of striking the line the operator
-        // is typing.
-        if let Some(baseline) = baseline
-            && !free_text_head_present_in_baseline(baseline, text)
-        {
-            eprintln!(
-                "[queue] #qstrikeexplain: deferring free-text head strike — head not in pre-turn baseline (in-flight operator edit)"
-            );
-            continue;
-        }
-        keys.push(node.node_key);
-    }
-    Ok(keys)
 }
 
 /// Strike every free-text queue head that the committed `response_body` answers,
@@ -1067,47 +811,6 @@ pub fn acknowledge_open_id_backed_queue_head(file: &Path, id: &str) -> Result<bo
         ),
     );
     Ok(true)
-}
-
-/// Resolve whether this cycle's committed response should consume (strike) the
-/// active queue head. Single source of truth for the strict-closeout decision so
-/// successful closeouts advance the queue identically and never leave an answered
-/// head queued to treadmill the auto-loop on the next preflight. Unproven IPC
-/// attempts fail before queue consumption and must be retried.
-///
-/// Mirrors the layered signals: explicit `do queue` / prompt-target / `--done`
-/// triggers, explicit `--done`/`--pending-gate`/`--review-resolve`/
-/// `--pending-edit` completion of an id-backed head, a response heading that
-/// resolves to a synthetic/preset head id, and a free-text head answered by this
-/// cycle's response (unless the cycle answered a foreign `agent:exchange` prompt
-/// instead).
-pub(crate) fn queue_consumption_allowed_for_response(
-    file: &Path,
-    baseline: Option<&str>,
-    current_content: &str,
-    response_body: &str,
-    completion_ids: &[String],
-) -> Result<bool> {
-    if should_consume_queue_prompt_for_write(file, baseline, current_content, completion_ids)? {
-        return Ok(true);
-    }
-    if queue_head_has_explicit_completion_signal(current_content, completion_ids)? {
-        return Ok(true);
-    }
-    let has_response = !response_body.trim().is_empty();
-    if has_response && response_targets_synthetic_queue_head_id(file, response_body)? {
-        return Ok(true);
-    }
-    if has_response
-        && queue_head_is_free_text_prompt(current_content)?
-        && let Some(head_text) = active_queue_head_text(current_content)?
-    {
-        return Ok(
-            free_text_head_answered_by_response(response_body, &head_text)
-                && !cycle_answered_foreign_exchange_prompt(baseline, current_content, &head_text),
-        );
-    }
-    Ok(false)
 }
 
 pub(crate) fn mark_completed_queue_prompts_for_done_ids(
@@ -2894,7 +2597,7 @@ mod core_tests {
         // prose/blockquote answer-match returns false for this head...
         let prose_only = "### Re: fixed it — opus\n\nI addressed the queue-strike behavior and shipped the fix.\n";
         assert!(
-            !free_text_head_answered_by_response(
+            !agent_doc_queue::queue_response::free_text_head_answered_by_response(
                 prose_only,
                 "🚧 My free-text queue items are not immediately struck as if they are addressed."
             ),

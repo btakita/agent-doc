@@ -54,6 +54,7 @@ members = [
     "agent-doc-turn-executor",
     "agent-doc-turn-executor-tmux",
     "agent-doc-turn-status-io",
+    "agent-doc-watch-io",
     "agent-doc-supervisor",
     "agent-doc-supervisor-io",
     "agent-doc-supervisor-process",

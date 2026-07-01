@@ -4619,7 +4619,7 @@ fn reap_dead_supervisor_socket(file: &Path, socket: &Path) {
 fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result<String> {
     let tmux = tmux_router::Tmux::default_server();
     if !work.pane_id.trim().is_empty() && tmux.pane_alive(&work.pane_id) {
-        let agent_doc_bin = agent_doc_start_bin_for_supervisor_replacement();
+        let agent_doc_bin = agent_doc_supervisor_process::agent_doc_start_bin();
         let start_cmd = supervisor_replacement_start_command(&agent_doc_bin, &work.file);
         crate::input_diag::log_text_submit(
             Some(&work.file),
@@ -4649,19 +4649,6 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
             )
         },
     )
-}
-
-#[cfg(not(any(test, feature = "test-support")))]
-fn agent_doc_start_bin_for_supervisor_replacement() -> String {
-    if let Ok(override_bin) = std::env::var("AGENT_DOC_ROUTE_BIN")
-        && !override_bin.trim().is_empty()
-    {
-        return override_bin;
-    }
-    std::env::current_exe()
-        .unwrap_or_else(|_| "agent-doc".into())
-        .to_string_lossy()
-        .to_string()
 }
 
 #[cfg(not(any(test, feature = "test-support")))]

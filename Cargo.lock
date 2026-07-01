@@ -200,6 +200,7 @@ dependencies = [
  "agent-doc-document",
  "agent-doc-element",
  "agent-doc-element-backlog",
+ "agent-doc-element-exchange",
  "agent-doc-frontmatter",
  "agent-doc-merge",
  "agent-doc-prompt-lines",
@@ -519,6 +520,7 @@ dependencies = [
  "agent-doc-turn-executor",
  "agent-doc-turn-executor-tmux",
  "agent-doc-turn-status-io",
+ "agent-doc-watch-io",
  "agent-doc-work-graph",
  "agent-doc-workflow",
  "agent-kit",
@@ -860,6 +862,14 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tmux-router",
+]
+
+[[package]]
+name = "agent-doc-watch-io"
+version = "0.34.66"
+dependencies = [
+ "anyhow",
+ "tempfile",
 ]
 
 [[package]]

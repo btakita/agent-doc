@@ -3277,16 +3277,26 @@ fn test_agent_doc_queue_owns_free_text_response_proof_policy() {
         }
     }
 
-    let queue_consume =
+    let queue_consume_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_consume.rs")).unwrap();
+    assert!(
+        queue_consume_policy.contains("free_text_head_answered_by_response")
+            && queue_consume_policy.contains("free_text_head_present_in_baseline")
+            && queue_consume_policy.contains("head_carries_in_progress_marker")
+            && !queue_consume_policy.contains("free_text_head_match_prose")
+            && !queue_consume_policy.contains("normalize_for_answer_match"),
+        "agent-doc-queue::queue_consume should call focused free-text queue response proof policy directly"
+    );
+
+    let orchestration_queue_consume =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/queue_consume.rs"))
             .unwrap();
     assert!(
-        queue_consume.contains("free_text_head_answered_by_response")
-            && queue_consume.contains("free_text_head_present_in_baseline")
-            && queue_consume.contains("head_carries_in_progress_marker")
-            && !queue_consume.contains("free_text_head_match_prose")
-            && !queue_consume.contains("normalize_for_answer_match"),
-        "queue_consume should import focused free-text queue response proof policy directly"
+        !orchestration_queue_consume.contains("free_text_head_present_in_baseline")
+            && !orchestration_queue_consume.contains("head_carries_in_progress_marker")
+            && !orchestration_queue_consume.contains("free_text_head_match_prose")
+            && !orchestration_queue_consume.contains("normalize_for_answer_match"),
+        "orchestration write/queue_consume.rs should not re-own free-text response proof policy"
     );
 }
 
@@ -8383,6 +8393,10 @@ fn test_snapshot_state_paths_are_owned_by_agent_doc_fs() {
         "pub fn pending_response_path_for(",
         "pub fn turn_scope_path_for(",
         "pub fn cycle_state_path_for(",
+        "pub fn startup_starting_dir_for(",
+        "pub fn startup_session_lock_name(",
+        "pub fn startup_document_lock_path_for(",
+        "pub fn startup_session_lock_path_for(",
         "pub fn baseline_path_for(",
         "pub fn baseline_overlay_path_for(",
         "pub fn pre_response_path_for(",
@@ -8509,6 +8523,31 @@ fn test_snapshot_state_paths_are_owned_by_agent_doc_fs() {
         cycle_state_production.contains("agent_doc_fs::cycle_state_path_for(file)?"),
         "cycle_state.rs should call focused agent-doc-fs cycle-state path helper directly"
     );
+
+    let route_startup_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/startup.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "fn starting_dir_for(",
+        "fn session_start_lock_name(",
+        "find_project_root(",
+        "format!(\"session-{hash}.lock\")",
+        ".join(\".agent-doc/starting\")",
+    ] {
+        assert!(
+            !route_startup_source.contains(forbidden_snippet),
+            "route/startup.rs must not re-own startup lock path/hash policy: {forbidden_snippet}"
+        );
+    }
+    for required_snippet in [
+        "agent_doc_fs::startup_document_lock_path_for(file)",
+        "agent_doc_fs::startup_session_lock_path_for(file, session_name)",
+    ] {
+        assert!(
+            route_startup_source.contains(required_snippet),
+            "route/startup.rs should call focused startup lock path helpers directly: {required_snippet}"
+        );
+    }
 
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
@@ -11248,6 +11287,101 @@ fn test_agent_doc_supervisor_process_owns_resize_effects() {
         start_run.contains("agent_doc_supervisor_process::{") && start_run.contains("resize,"),
         "supervisor run loop should import resize from agent-doc-supervisor-process directly"
     );
+
+    let supervisor_process =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-process/src/lib.rs")).unwrap();
+    for required in [
+        "pub const ROUTE_BIN_ENV: &str = \"AGENT_DOC_ROUTE_BIN\";",
+        "pub fn agent_doc_start_bin() -> String",
+    ] {
+        assert!(
+            supervisor_process.contains(required),
+            "agent-doc-supervisor-process should own supervisor start-binary resolution: {required}"
+        );
+    }
+    for (relative, required) in [
+        (
+            "agent-doc-orchestration/src/route/startup.rs",
+            "agent_doc_supervisor_process::agent_doc_start_bin()",
+        ),
+        (
+            "agent-doc-orchestration/src/project_controller/rpc.rs",
+            "agent_doc_supervisor_process::agent_doc_start_bin()",
+        ),
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains(required),
+            "{relative} should call focused supervisor-process start-binary resolution directly"
+        );
+        for forbidden in [
+            "fn agent_doc_start_bin(",
+            "fn agent_doc_start_bin_for_supervisor_replacement(",
+            "std::env::var(\"AGENT_DOC_ROUTE_BIN\")",
+            "std::env::current_exe()",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{relative} must not re-own supervisor start-binary resolution: {forbidden}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_agent_doc_watch_io_owns_pid_effects() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    assert!(
+        manifest_dir.join("agent-doc-watch-io/src/lib.rs").exists(),
+        "agent-doc-watch-io must own watch daemon PID file effects"
+    );
+
+    let watch_io = fs::read_to_string(manifest_dir.join("agent-doc-watch-io/src/lib.rs")).unwrap();
+    for required in [
+        "pub const PID_FILE: &str = \".agent-doc/watch.pid\";",
+        "pub fn pid_alive(",
+        "pub fn read_pid()",
+        "pub fn read_pid_in(",
+        "pub fn write_current_pid()",
+        "pub fn write_current_pid_in(",
+        "pub fn remove_pid()",
+        "pub fn remove_pid_in(",
+    ] {
+        assert!(
+            watch_io.contains(required),
+            "agent-doc-watch-io should own watch PID IO: {required}"
+        );
+    }
+
+    let watch =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/watch.rs")).unwrap();
+    for forbidden in [
+        "const PID_FILE",
+        "fn pid_alive(",
+        "fn read_pid(",
+        "fn read_pid_in(",
+        "fn write_pid(",
+        "fn write_pid_in(",
+        "fn remove_pid(",
+        "fn remove_pid_in(",
+    ] {
+        assert!(
+            !watch.contains(forbidden),
+            "orchestration watch.rs must not re-own watch PID IO: {forbidden}"
+        );
+    }
+    for required in [
+        "agent_doc_watch_io::read_pid()",
+        "agent_doc_watch_io::pid_alive",
+        "agent_doc_watch_io::write_current_pid()",
+        "agent_doc_watch_io::remove_pid()",
+        "agent_doc_watch_io::PID_FILE",
+    ] {
+        assert!(
+            watch.contains(required),
+            "orchestration watch.rs should call watch IO directly: {required}"
+        );
+    }
 }
 
 #[test]
@@ -15181,6 +15315,7 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         "pub enum VisibleWriteDecision",
         "pub fn decide_visible_write_after_typing",
         "pub struct FullContentSourceProof",
+        "pub fn normalization_repair_candidate_matches",
         "pub fn decide_full_content_visible_replacement",
         "pub enum FullContentScopeRejection",
         "pub fn full_content_scope_rejection_reason",
@@ -15275,11 +15410,33 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
     );
     let write_ipc_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+    let ipc_protocol_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-ipc-protocol/src/lib.rs")).unwrap();
+    assert!(
+        ipc_protocol_source.contains("pub fn normalization_repair_patch_message("),
+        "agent-doc-ipc-protocol must own normalization-repair IPC payload construction"
+    );
     assert!(
         write_ipc_source
             .contains("agent_doc_document_realtime::write_policy::FullContentSourceProof"),
         "normalization repair payloads should use the focused source-proof type directly"
     );
+    assert!(
+        write_ipc_source.contains(
+            "agent_doc_document_realtime::write_policy::normalization_repair_candidate_matches"
+        ) && write_ipc_source
+            .contains("agent_doc_ipc_protocol::normalization_repair_patch_message("),
+        "write/ipc.rs should call focused normalization repair policy and protocol builders directly"
+    );
+    for forbidden_snippet in [
+        "pub(crate) fn normalization_repair_candidate_matches(",
+        "pub(crate) fn normalization_repair_payload(",
+    ] {
+        assert!(
+            !write_ipc_source.contains(forbidden_snippet),
+            "write/ipc.rs must not re-own normalization repair policy or payload builders: {forbidden_snippet}"
+        );
+    }
     assert!(
         write_ipc_source.contains("response_already_in_current"),
         "write/ipc.rs should import the focused response-delta detector directly"
@@ -15847,8 +16004,24 @@ fn test_agent_doc_template_owns_strict_response_heading_policy() {
 #[test]
 fn test_agent_doc_queue_owns_queue_head_classification_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let queue_consume_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_consume.rs")).unwrap();
     let queue_response =
         fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue_response.rs")).unwrap();
+    for required_snippet in [
+        "pub fn queue_consumption_allowed_for_response(",
+        "pub fn should_consume_queue_prompt_for_write(",
+        "pub fn should_consume_queue_prompt_for_diff_content(",
+        "pub fn queue_targeted_completion_id_for_current_head(",
+        "pub fn queue_diff_completion_id_for_current_head(",
+        "pub fn answered_free_text_head_node_keys(",
+        "fn response_targets_synthetic_queue_head_id(",
+    ] {
+        assert!(
+            queue_consume_policy.contains(required_snippet),
+            "agent-doc-queue must own queue consumption decision policy: {required_snippet}"
+        );
+    }
     for required_snippet in [
         "pub fn head_id_names_tracked_directive_item",
         "pub fn head_id_is_registered_preset",
@@ -15873,6 +16046,14 @@ fn test_agent_doc_queue_owns_queue_head_classification_policy() {
         "pub(crate) fn queue_head_is_free_text_prompt",
         "pub fn queue_prompt_text_is_free_text",
         "pub(crate) fn queue_prompt_text_is_free_text",
+        "pub(crate) use agent_doc_queue::{",
+        "pub(crate) fn queue_consumption_allowed_for_response(",
+        "pub(crate) fn should_consume_queue_prompt_for_write(",
+        "pub(crate) fn should_consume_queue_prompt_for_diff_content(",
+        "pub(crate) fn queue_targeted_completion_id_for_current_head(",
+        "pub(crate) fn queue_diff_completion_id_for_current_head(",
+        "pub(crate) fn response_targets_synthetic_queue_head_id(",
+        "pub(crate) fn answered_free_text_head_node_keys(",
         "pub fn head_id_is_registered_preset",
         "pub(crate) fn head_id_is_registered_preset",
         "pub fn queue_head_is_bare_do_directive",
@@ -15881,6 +16062,15 @@ fn test_agent_doc_queue_owns_queue_head_classification_policy() {
         assert!(
             !queue_consume.contains(forbidden_snippet),
             "write/queue_consume.rs must not re-own or facade queue-head classification: {forbidden_snippet}"
+        );
+    }
+    for required_snippet in [
+        "answered_free_text_head_node_keys",
+        "should_consume_queue_prompt_for_diff_content",
+    ] {
+        assert!(
+            queue_consume.contains(required_snippet),
+            "write/queue_consume.rs should call focused queue consumption helpers directly: {required_snippet}"
         );
     }
 
@@ -15909,6 +16099,30 @@ fn test_agent_doc_queue_owns_queue_head_classification_policy() {
             .contains("agent_doc_queue::queue_response::active_queue_head_is_registered_preset("),
         "project_controller::rpc should call the queue-owned registered-preset classifier directly"
     );
+    for (relative_path, required_snippet) in [
+        (
+            "agent-doc-orchestration/src/write.rs",
+            "queue_consumption_allowed_for_response",
+        ),
+        (
+            "agent-doc-orchestration/src/write.rs",
+            "queue_targeted_completion_id_for_current_head",
+        ),
+        (
+            "agent-doc-orchestration/src/codex_hook.rs",
+            "agent_doc_queue::queue_consume::queue_targeted_completion_id_for_current_head",
+        ),
+        (
+            "agent-doc-orchestration/src/run.rs",
+            "agent_doc_queue::queue_consume::queue_diff_completion_id_for_current_head",
+        ),
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
+        assert!(
+            source.contains(required_snippet),
+            "{relative_path} should call queue consumption policy through agent-doc-queue directly: {required_snippet}"
+        );
+    }
 }
 
 #[test]

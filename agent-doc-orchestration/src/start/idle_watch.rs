@@ -1507,9 +1507,12 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         ),
                     );
                 }
-                // The recycle DECISION the escalation gates. The operator-restart
-                // reexec gate keeps the plain `cycle_open`; forced recycle preserves
-                // the open durable checkpoint so boot resume can adopt or redispatch.
+                // The cycle-open escalation gates both recycle and operator
+                // supervisor replacement. A normal open cycle still defers the
+                // true `execve`, but a never-closing cycle at a proven turn boundary
+                // must not starve the PCP-authorized replacement forever; the durable
+                // checkpoint remains on disk for the fresh supervisor to adopt or
+                // redispatch.
                 let effective_cycle_open = cycle_open && !escalate_cycle_open;
                 let restart_action = supervisor_restart_action(
                     shared.restart_requested.load(Ordering::Relaxed),
@@ -1517,7 +1520,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     turn_boundary,
                 );
                 if !reexec_recycle_disabled
-                    && !cycle_open
+                    && !effective_cycle_open
                     && matches!(restart_action, SupervisorRestartAction::ReexecInPlace)
                 {
                     #[cfg(unix)]

@@ -1166,6 +1166,39 @@ impl SimWorld {
         let turn_boundary = prompt_visible && !turn_active;
         let head_pending = has_active_head;
 
+        // `#midturn-recycle-resume` Phase B: track consecutive cycle-open
+        // deferrals at a turn boundary and ESCALATE past
+        // `MAX_CYCLE_OPEN_DEFER_TICKS`. The same effective gate is shared by
+        // supervisor replacement and recycle so a PCP-authorized restart cannot
+        // starve forever behind a never-closing cycle.
+        use agent_doc_supervisor::lifecycle::{
+            MAX_CYCLE_OPEN_DEFER_TICKS, cycle_open_defer_escalates,
+        };
+        if self.recycle_clear.cycle_open && turn_boundary {
+            self.recycle_clear.cycle_open_defer_streak =
+                self.recycle_clear.cycle_open_defer_streak.saturating_add(1);
+        } else {
+            self.recycle_clear.cycle_open_defer_streak = 0;
+        }
+        let escalate_cycle_open = cycle_open_defer_escalates(
+            self.recycle_clear.cycle_open_defer_streak,
+            MAX_CYCLE_OPEN_DEFER_TICKS,
+        );
+        if escalate_cycle_open {
+            // The escalation forces replacement/recycle over a wedged cycle. The
+            // forced execve can sever the never-closing cycle, but its open
+            // `#durablerecycle` checkpoint survives, so the fresh boot can adopt
+            // or re-dispatch the interrupted turn. Count the escalation once.
+            if self.recycle_clear.cycle_open_defer_streak == MAX_CYCLE_OPEN_DEFER_TICKS {
+                self.coverage.cycle_open_defer_escalations += 1;
+                self.record_ops_proof(format!(
+                    "supervisor_recycle_cycle_open_escalated streak={}/{} action=force_recycle reason=cycle_never_closed",
+                    self.recycle_clear.cycle_open_defer_streak, MAX_CYCLE_OPEN_DEFER_TICKS,
+                ));
+            }
+        }
+        let effective_cycle_open = self.recycle_clear.cycle_open && !escalate_cycle_open;
+
         // (2b) `#supkill-bg` blue/green drain-and-supersede restart. An explicit
         // `restart-supervisor` (IPC `Restart`) drives the production
         // `supervisor_restart_action` policy BEFORE the opt-in auto-recycle path: it
@@ -1182,10 +1215,10 @@ impl SimWorld {
         match restart_action {
             // `#midturn-recycle-resume`: an open agent-doc cycle defers the in-place
             // reexec so the operator restart cannot sever a live finalize IPC
-            // connection mid-cycle. The restart request stays pending for the next
-            // tick, exactly as production gates `ReexecInPlace` on `!cycle_open`.
+            // connection mid-cycle. A never-closing cycle eventually escalates through
+            // the shared effective-cycle gate so the replacement request cannot starve.
             SupervisorRestartAction::ReexecInPlace
-                if !self.recycle_clear.recycle_disabled && !self.recycle_clear.cycle_open =>
+                if !self.recycle_clear.recycle_disabled && !effective_cycle_open =>
             {
                 self.recycle_clear.restart_requested = false;
                 if self.recycle_clear.reexec_will_fail {
@@ -1214,39 +1247,6 @@ impl SimWorld {
         // `supervisor_recycle_action` predicate as `explicit_admin`, so it inherits
         // the same cycle-open deferral and bounded escalation behavior as auto,
         // write-wedged, and failed-reexec recycle arms.
-        // `#midturn-recycle-resume` Phase B: track the consecutive cycle-open recycle
-        // deferrals at a turn boundary and ESCALATE past `MAX_CYCLE_OPEN_DEFER_TICKS`,
-        // forcing the recycle so a never-closing / wedged cycle cannot starve the
-        // stale-binary self-recycle forever (mirrors idle_watch.rs's
-        // `cycle_open_defer_streak` / `effective_cycle_open`).
-        use agent_doc_supervisor::lifecycle::{
-            MAX_CYCLE_OPEN_DEFER_TICKS, cycle_open_defer_escalates,
-        };
-        if self.recycle_clear.cycle_open && turn_boundary {
-            self.recycle_clear.cycle_open_defer_streak =
-                self.recycle_clear.cycle_open_defer_streak.saturating_add(1);
-        } else {
-            self.recycle_clear.cycle_open_defer_streak = 0;
-        }
-        let escalate_cycle_open = cycle_open_defer_escalates(
-            self.recycle_clear.cycle_open_defer_streak,
-            MAX_CYCLE_OPEN_DEFER_TICKS,
-        );
-        if escalate_cycle_open {
-            // The escalation forces the recycle over a wedged cycle. The forced execve
-            // severs the never-closing cycle, but its open `#durablerecycle` checkpoint
-            // survives, so the harness child is reported dead and the fresh boot
-            // re-dispatches the interrupted turn. Count the escalation once it fires.
-            if self.recycle_clear.cycle_open_defer_streak == MAX_CYCLE_OPEN_DEFER_TICKS {
-                self.coverage.cycle_open_defer_escalations += 1;
-                self.recycle_clear.recycle_child_died = true;
-                self.record_ops_proof(format!(
-                    "supervisor_recycle_cycle_open_escalated streak={}/{} action=force_recycle reason=cycle_never_closed",
-                    self.recycle_clear.cycle_open_defer_streak, MAX_CYCLE_OPEN_DEFER_TICKS,
-                ));
-            }
-        }
-        let effective_cycle_open = self.recycle_clear.cycle_open && !escalate_cycle_open;
         let recycle_action = supervisor_recycle_action(
             self.recycle_clear.binary_stale,
             self.recycle_clear.auto_recycle,
@@ -1331,6 +1331,9 @@ impl SimWorld {
                 }
             } else {
                 self.recycle_supervisor_in_place();
+                if escalate_cycle_open {
+                    self.recycle_clear.recycle_child_died = true;
+                }
                 // The in-place execve promoted the freshly-installed binary.
                 self.recycle_clear.binary_stale = false;
                 self.coverage.supervisor_recycles += 1;

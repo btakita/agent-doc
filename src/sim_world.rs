@@ -3502,6 +3502,65 @@ fn restart_supervisor_drains_then_reexecs_in_place_no_dropped_turn() {
 }
 
 #[test]
+fn restart_supervisor_open_cycle_escalates_then_reexecs_in_place() {
+    // A PCP-authorized supervisor replacement must not starve forever behind a
+    // stale open closeout cycle. It should share the bounded cycle-open escalation
+    // used by recycle: below the threshold it defers; at the threshold it replaces
+    // the supervisor in place, preserving the pane and clearing the stale binary.
+    use agent_doc_supervisor::lifecycle::MAX_CYCLE_OPEN_DEFER_TICKS;
+
+    let mut world = SimWorld::new(4_243);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    let gen_before = world.route.durable.generation;
+    let pane_before = world.route.durable.pane_id.clone();
+
+    world.apply(SimCommand::MarkSupervisorBinaryStale).unwrap();
+    world.apply(SimCommand::SetAgentDocCycleOpen(true)).unwrap();
+    world.apply(SimCommand::RequestSupervisorRestart).unwrap();
+
+    for _ in 0..(MAX_CYCLE_OPEN_DEFER_TICKS - 1) {
+        world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    }
+    assert_eq!(
+        world.coverage.supervisor_restart_drain_reexecs, 0,
+        "the open cycle defers replacement below the escalation threshold"
+    );
+    assert!(
+        world.recycle_clear.restart_requested,
+        "the restart request stays pending while the open cycle is still inside the safe defer window"
+    );
+    assert_eq!(world.coverage.cycle_open_defer_escalations, 0);
+
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(
+        world.coverage.cycle_open_defer_escalations, 1,
+        "the wedged open cycle escalates at the threshold"
+    );
+    assert_eq!(
+        world.coverage.supervisor_restart_drain_reexecs, 1,
+        "the pending replacement reexecs in place instead of starving"
+    );
+    assert!(
+        !world.recycle_clear.restart_requested,
+        "the restart request is consumed by the replacement"
+    );
+    assert!(
+        !world.recycle_clear.binary_stale,
+        "the replacement promoted the fresh binary"
+    );
+    assert_eq!(world.route.durable.generation, gen_before + 1);
+    assert_eq!(
+        world.route.durable.pane_id, pane_before,
+        "the in-place replacement preserves the live pane"
+    );
+    assert_eq!(
+        world.coverage.supervisor_recycles, 0,
+        "the restart path owns this tick; it must not also run the recycle path"
+    );
+}
+
+#[test]
 fn restart_supervisor_on_fresh_binary_relaunches_not_reexecs() {
     // `#supkill-bg`: an explicit `restart-supervisor` on a FRESH binary has nothing to
     // upgrade, so `supervisor_restart_action` returns `RelaunchChild` at the boundary —

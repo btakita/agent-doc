@@ -144,6 +144,15 @@ pub fn send_message_with_timeout(
 ) -> Result<Option<String>> {
     let stream = try_connect(project_root)?;
 
+    // Bound the outbound write (wedge A): a plugin that accepted the connection
+    // but stopped draining its recv buffer would otherwise block `write_all`
+    // forever - before the bounded ack-read below is ever reached - on a patch
+    // payload larger than the socket buffer. With a send timeout the write fails
+    // closed on timeout and the degraded-socket circuit breaker takes over.
+    if let Err(e) = stream.set_send_timeout(Some(ack_timeout)) {
+        eprintln!("[ipc-socket] warning: failed to set IPC send timeout: {e}");
+    }
+
     // interprocess Stream implements Read + Write via halves
     let (reader_half, mut writer_half) = stream.split();
 

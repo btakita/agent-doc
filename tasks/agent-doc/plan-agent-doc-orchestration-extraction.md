@@ -885,6 +885,16 @@ should be deleted during extraction.
   direct-pane Enter-resubmit retry budget parser. Orchestration imports each
   focused owner directly and keeps only file IO, pane capture, env lookup,
   supervisor state, and ops-log adapters.
+- The next fan-out pass continued the same no-shim pattern. Exchange snapshot
+  stripping moved from `claim.rs` to `agent-doc-element-exchange`;
+  cross-document owner command-line/path matching moved from `sync.rs` to
+  `agent-doc-controller::command_line`; pure git relative-path, output
+  rendering, and index-lock text policy moved to the new `agent-doc-git` crate;
+  harness-name normalization moved to `agent-doc-harness`; and ownership
+  generation / transition-event parsing and rendering moved to
+  `agent-doc-supervisor`. Orchestration imports those focused APIs directly and
+  keeps only the surrounding snapshot, process, registry, pane, git-command, and
+  actor-store effects.
 
 ### Earlier closure finding
 

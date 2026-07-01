@@ -112,6 +112,7 @@ use agent_doc_document_realtime::write_policy::{
     is_safe_user_follow_up_exchange_growth,
 };
 use agent_doc_element::element::is_backlog_component;
+use agent_doc_element_exchange::post_commit_ipc_reposition_only_exchange_safe;
 use agent_doc_git::{is_index_lock_contention_text, relative_to_root, render_git_process_output};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2572,27 +2573,6 @@ pub fn show_head(file: &Path) -> Result<Option<String>> {
     show_rev(file, "HEAD")
 }
 
-fn redact_exchange_component_content(doc: &str) -> Option<String> {
-    let components = agent_doc_element::element::parse(doc).ok()?;
-    let mut redacted = doc.to_string();
-    for component in components.iter().rev() {
-        if component.name == "exchange" {
-            redacted = component.replace_content(&redacted, "");
-        }
-    }
-    Some(redacted)
-}
-
-fn post_commit_ipc_reposition_only_exchange_safe(parent_doc: &str, head_doc: &str) -> bool {
-    let Some(parent_redacted) = redact_exchange_component_content(parent_doc) else {
-        return false;
-    };
-    let Some(head_redacted) = redact_exchange_component_content(head_doc) else {
-        return false;
-    };
-    parent_redacted == head_redacted
-}
-
 fn should_send_post_commit_ipc_reposition(file: &Path) -> bool {
     let Ok(Some(parent_doc)) = show_rev(file, "HEAD^") else {
         return false;
@@ -3035,78 +3015,6 @@ pub(crate) use th::{
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-
-    #[test]
-    fn post_commit_ipc_reposition_safe_when_only_exchange_changes() {
-        let before = concat!(
-            "---\nagent_doc_format: template\n---\n\n",
-            "<!-- agent:exchange -->\n",
-            "### Re: previous\n",
-            "Done.\n",
-            "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue -->\n",
-            "- do [#head]\n",
-            "<!-- /agent:queue -->\n\n",
-            "<!-- agent:backlog -->\n",
-            "- [ ] [#head] current work\n",
-            "<!-- /agent:backlog -->\n",
-        );
-        let after = concat!(
-            "---\nagent_doc_format: template\n---\n\n",
-            "<!-- agent:exchange -->\n",
-            "### Re: previous\n",
-            "Done.\n\n",
-            "### Re: latest\n",
-            "Also done.\n",
-            "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue -->\n",
-            "- do [#head]\n",
-            "<!-- /agent:queue -->\n\n",
-            "<!-- agent:backlog -->\n",
-            "- [ ] [#head] current work\n",
-            "<!-- /agent:backlog -->\n",
-        );
-
-        assert!(post_commit_ipc_reposition_only_exchange_safe(before, after));
-    }
-
-    #[test]
-    fn post_commit_ipc_reposition_unsafe_when_queue_or_backlog_changes() {
-        let before = concat!(
-            "---\nagent_doc_format: template\n---\n\n",
-            "<!-- agent:exchange -->\n",
-            "### Re: previous\n",
-            "Done.\n",
-            "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue -->\n",
-            "- do [#head]\n",
-            "<!-- /agent:queue -->\n\n",
-            "<!-- agent:backlog -->\n",
-            "- [ ] [#head] current work\n",
-            "<!-- /agent:backlog -->\n",
-        );
-        let after = concat!(
-            "---\nagent_doc_format: template\n---\n\n",
-            "<!-- agent:exchange -->\n",
-            "### Re: previous\n",
-            "Done.\n\n",
-            "### Re: latest\n",
-            "Also done.\n",
-            "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue -->\n",
-            "- do [#head]\n",
-            "- do [#agentsignals]\n",
-            "<!-- /agent:queue -->\n\n",
-            "<!-- agent:backlog -->\n",
-            "- [ ] [#head] current work\n",
-            "- [ ] [#agentsignals] add realtime signals\n",
-            "<!-- /agent:backlog -->\n",
-        );
-
-        assert!(!post_commit_ipc_reposition_only_exchange_safe(
-            before, after
-        ));
-    }
 
     #[test]
     fn scoped_drift_gate_ignores_independent_sibling_queue_insert() {

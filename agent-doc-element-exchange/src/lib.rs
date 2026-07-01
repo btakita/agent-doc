@@ -60,6 +60,27 @@ pub fn strip_exchange_content(content: &str) -> String {
         .unwrap_or_else(|| content.to_string())
 }
 
+pub fn redact_exchange_component_content(doc: &str) -> Option<String> {
+    let components = agent_doc_element::element::parse(doc).ok()?;
+    let mut redacted = doc.to_string();
+    for component in components.iter().rev() {
+        if component.name == "exchange" {
+            redacted = component.replace_content(&redacted, "");
+        }
+    }
+    Some(redacted)
+}
+
+pub fn post_commit_ipc_reposition_only_exchange_safe(parent_doc: &str, head_doc: &str) -> bool {
+    let Some(parent_redacted) = redact_exchange_component_content(parent_doc) else {
+        return false;
+    };
+    let Some(head_redacted) = redact_exchange_component_content(head_doc) else {
+        return false;
+    };
+    parent_redacted == head_redacted
+}
+
 pub fn normalized_prompt_text(line: &str) -> Option<String> {
     let trimmed = line.trim();
     if trimmed.is_empty()
@@ -2110,6 +2131,78 @@ ship it
         let content = "---\nagent_doc_session: abc\n---\n\nJust text.\n";
         let result = strip_exchange_content(content);
         assert_eq!(result, content);
+    }
+
+    #[test]
+    fn post_commit_ipc_reposition_safe_when_only_exchange_changes() {
+        let before = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: previous\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#head]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#head] current work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let after = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: previous\n",
+            "Done.\n\n",
+            "### Re: latest\n",
+            "Also done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#head]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#head] current work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        assert!(post_commit_ipc_reposition_only_exchange_safe(before, after));
+    }
+
+    #[test]
+    fn post_commit_ipc_reposition_unsafe_when_queue_or_backlog_changes() {
+        let before = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: previous\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#head]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#head] current work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let after = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: previous\n",
+            "Done.\n\n",
+            "### Re: latest\n",
+            "Also done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#head]\n",
+            "- do [#agentsignals]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#head] current work\n",
+            "- [ ] [#agentsignals] add realtime signals\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        assert!(!post_commit_ipc_reposition_only_exchange_safe(
+            before, after
+        ));
     }
 
     #[test]

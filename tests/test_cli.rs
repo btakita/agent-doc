@@ -11813,6 +11813,8 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         "pub fn exchange_content",
         "pub fn exchange_component",
         "pub fn strip_exchange_content",
+        "pub fn redact_exchange_component_content",
+        "pub fn post_commit_ipc_reposition_only_exchange_safe",
         "pub fn normalized_prompt_text",
         "pub fn is_markdown_heading_line",
         "pub fn normalized_prompt_counts",
@@ -11931,6 +11933,19 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
             "use agent_doc_element_exchange::strip_prompt_prefix_from_response_body_first_lines;"
         ),
         "repair should import response-body prompt-prefix repair from the focused crate directly"
+    );
+    let git_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+    assert!(
+        git_source.contains(
+            "use agent_doc_element_exchange::post_commit_ipc_reposition_only_exchange_safe;"
+        ),
+        "git post-commit IPC path should import exchange-only reposition policy from the focused crate"
+    );
+    assert!(
+        !git_source.contains("fn redact_exchange_component_content(")
+            && !git_source.contains("fn post_commit_ipc_reposition_only_exchange_safe("),
+        "git.rs must not re-own exchange-only post-commit IPC policy"
     );
 
     let orchestration_policy_sources = [

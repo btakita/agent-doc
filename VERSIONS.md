@@ -13,7 +13,9 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   normalization lives in `agent-doc-harness`; and ownership generation/event
   formatting lives in `agent-doc-supervisor`. Orchestration imports those owners
   directly and keeps only git/process, snapshot, pane, registry, and actor-store
-  adapters.
+  adapters. Exchange-only post-commit IPC reposition safety now also lives in
+  `agent-doc-element-exchange`, leaving git orchestration to provide only the
+  HEAD document inputs and signal decision.
 
 - **Pure helper layer extracted from orchestration.** Exchange shrink/ack retry
   and prompt-dedupe helpers now live in `agent-doc-element-exchange`; preflight

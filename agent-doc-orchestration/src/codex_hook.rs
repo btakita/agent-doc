@@ -532,7 +532,7 @@ fn codex_continuation_clear_reason(
         crate::ops_log::log_op(
             file,
             &format!(
-                "[clearcodex] codex-continuation optIn=true reason={:?} clear_instructed={}",
+                "[clearcodex] codex-continuation optIn=true reason={:?} clear_instructed=false background_clear_suppressed={}",
                 reason.as_deref().unwrap_or(""),
                 reason.is_some()
             ),
@@ -544,7 +544,7 @@ fn codex_continuation_clear_reason(
 fn continuation_closeout_instruction(file: &Path, context_reset_reason: Option<&str>) -> String {
     if let Some(reason) = context_reset_reason {
         return format!(
-            "Do NOT answer the next queue prompt in this already-loaded Codex context. Fresh context is required because {reason}. Run `/clear` before continuing, then re-invoke `agent-doc {disp}` from the fresh context so the next queue head runs after the reset. Do not send the final answer yet.",
+            "Continue THIS turn in-pane: answer that prompt in {disp} and persist with `agent-doc finalize {disp}` (or `agent-doc write --commit {disp}`). Do NOT run `agent-doc {disp}` from this pane — that re-invokes the owner pane and hits the recursive-direct-invocation deadlock guard, and do not send the final answer yet. A background context reset was requested because {reason}, but automatic context clearing is disabled; only an explicit operator clear may reset the session.",
             disp = file.display()
         );
     }
@@ -596,11 +596,16 @@ fn log_codex_stop_queue_continuation(file: &Path, prompt: &str, source: &str) {
     );
 }
 
-fn log_codex_fresh_context_handoff(file: &Path, prompt: &str, source: &str, reason: &str) {
+fn log_codex_background_context_clear_suppressed(
+    file: &Path,
+    prompt: &str,
+    source: &str,
+    reason: &str,
+) {
     crate::ops_log::log_op(
         file,
         &format!(
-            "codex_fresh_context_handoff file={} source={} result=queued supervisor=idle_queue_watch prompt_bytes={} prompt_sha256={} reason={:?}",
+            "codex_background_context_clear_suppressed file={} source={} result=in_pane_continuation prompt_bytes={} prompt_sha256={} reason={:?}",
             file.display(),
             source,
             prompt.len(),
@@ -617,8 +622,8 @@ fn fresh_context_handoff_response(
     context_reset_reason: Option<&str>,
 ) -> Option<StopResponse> {
     let reason = context_reset_reason?;
-    log_codex_fresh_context_handoff(file, prompt, source, reason);
-    Some(StopResponse::Continue { continue_: true })
+    log_codex_background_context_clear_suppressed(file, prompt, source, reason);
+    None
 }
 
 enum RepeatedQueueHeadRecovery {
@@ -3219,12 +3224,10 @@ agent-doc {}\n",
     }
 
     #[test]
-    fn stop_marker_fallback_requires_clear_after_exchange_compaction() {
+    fn stop_marker_fallback_suppresses_background_clear_after_exchange_compaction() {
         let dir = setup_project();
-        // `#nm1x-codex-clear-parity`: the Codex Stop-hook pre-emptive `/clear`
-        // continuation is now gated on the `agent_doc_queue_context_reset` opt-in
-        // (off by default, product-wide). This test exercises the fresh-context
-        // path, so the project must opt in via `.agent-doc/config.toml`.
+        // Background context clears are disabled even when the document opted into
+        // queue context reset. The Stop hook should keep queue continuation in-pane.
         fs::write(
             dir.path().join(".agent-doc/config.toml"),
             "agent_doc_queue_context_reset = true\n",
@@ -3244,23 +3247,32 @@ agent-doc {}\n",
         })
         .unwrap();
 
-        assert_eq!(response, StopResponse::Continue { continue_: true });
+        match response {
+            StopResponse::Block { reason, .. } => {
+                assert!(reason.contains("Continue THIS turn in-pane"), "{reason}");
+                assert!(
+                    reason.contains("automatic context clearing is disabled"),
+                    "{reason}"
+                );
+                assert!(!reason.contains("Run `/clear`"), "{reason}");
+            }
+            other => panic!("expected in-pane continuation block, got {other:?}"),
+        }
         let ops_log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            ops_log.contains("codex_fresh_context_handoff")
+            ops_log.contains("codex_background_context_clear_suppressed")
                 && ops_log.contains("source=durable_marker")
-                && ops_log.contains("result=queued")
-                && ops_log.contains("supervisor=idle_queue_watch"),
-            "fresh-context continuation should be handed to the supervisor, not punted to the operator:\n{ops_log}"
+                && ops_log.contains("result=in_pane_continuation"),
+            "fresh-context continuation should be kept in-pane, not handed to supervisor:\n{ops_log}"
         );
         assert!(
             ops_log.contains("exchange was compacted after the last tracked context clear"),
-            "handoff proof should retain the reset reason:\n{ops_log}"
+            "suppression proof should retain the reset reason:\n{ops_log}"
         );
     }
 
     #[test]
-    fn stop_tracked_state_hands_fresh_context_continuation_to_supervisor() {
+    fn stop_tracked_state_suppresses_background_clear_continuation() {
         let dir = setup_project();
         fs::write(
             dir.path().join(".agent-doc/config.toml"),
@@ -3281,7 +3293,17 @@ agent-doc {}\n",
         })
         .unwrap();
 
-        assert_eq!(response, StopResponse::Continue { continue_: true });
+        match response {
+            StopResponse::Block { reason, .. } => {
+                assert!(reason.contains("Continue THIS turn in-pane"), "{reason}");
+                assert!(
+                    reason.contains("automatic context clearing is disabled"),
+                    "{reason}"
+                );
+                assert!(!reason.contains("Run `/clear`"), "{reason}");
+            }
+            other => panic!("expected in-pane continuation block, got {other:?}"),
+        }
         let root = project_root_for(dir.path()).unwrap();
         let state = load_state(&root, "codex-session").unwrap().unwrap();
         assert_eq!(
@@ -3292,10 +3314,10 @@ agent-doc {}\n",
         assert!(
             ops_log.contains("codex_stop_queue_continuation")
                 && ops_log.contains("source=tracked_state")
-                && ops_log.contains("codex_fresh_context_handoff")
+                && ops_log.contains("codex_background_context_clear_suppressed")
                 && ops_log.contains("source=tracked_state")
-                && ops_log.contains("result=queued"),
-            "tracked fresh-context continuation should be logged and handed to supervisor:\n{ops_log}"
+                && ops_log.contains("result=in_pane_continuation"),
+            "tracked fresh-context continuation should be logged and kept in-pane:\n{ops_log}"
         );
     }
 
@@ -3304,7 +3326,7 @@ agent-doc {}\n",
     /// queue-turn clear decision instead of guessing. The canonical
     /// `[s760] clear-decision` line plus a `[clearcodex] codex-continuation`
     /// companion (with the accretion/compaction reason and the
-    /// `clear_instructed` outcome) must both be present.
+    /// `clear_instructed=false` outcome) must both be present.
     #[test]
     fn stop_codex_continuation_logs_structured_clear_proof_when_opted_in() {
         let dir = setup_project();
@@ -3342,13 +3364,14 @@ agent-doc {}\n",
             "missing codex-continuation companion marker:\n{ops_log}"
         );
         assert!(
-            ops_log.contains("clear_instructed=true"),
-            "compaction-after-clear should instruct a /clear:\n{ops_log}"
+            ops_log.contains("clear_instructed=false")
+                && ops_log.contains("background_clear_suppressed=true"),
+            "compaction-after-clear should suppress automatic /clear:\n{ops_log}"
         );
     }
 
     #[test]
-    fn stop_codex_continuation_hands_off_when_token_count_crosses_threshold() {
+    fn stop_codex_continuation_suppresses_clear_when_token_count_crosses_threshold() {
         let dir = setup_project();
         fs::write(
             dir.path().join(".agent-doc/config.toml"),
@@ -3387,7 +3410,17 @@ agent-doc {}\n",
         })
         .unwrap();
 
-        assert_eq!(response, StopResponse::Continue { continue_: true });
+        match response {
+            StopResponse::Block { reason, .. } => {
+                assert!(reason.contains("Continue THIS turn in-pane"), "{reason}");
+                assert!(
+                    reason.contains("automatic context clearing is disabled"),
+                    "{reason}"
+                );
+                assert!(!reason.contains("Run `/clear`"), "{reason}");
+            }
+            other => panic!("expected in-pane continuation block, got {other:?}"),
+        }
         let ops_log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
             .expect("ops.log should exist after threshold clear");
         assert!(
@@ -3396,9 +3429,9 @@ agent-doc {}\n",
         );
         assert!(
             ops_log.contains("transcript context 40.0% >= clear threshold 15%")
-                && ops_log.contains("codex_fresh_context_handoff")
-                && ops_log.contains("result=queued"),
-            "threshold crossing should become a supervisor handoff reason:\n{ops_log}"
+                && ops_log.contains("codex_background_context_clear_suppressed")
+                && ops_log.contains("result=in_pane_continuation"),
+            "threshold crossing should be logged but kept in-pane:\n{ops_log}"
         );
     }
 

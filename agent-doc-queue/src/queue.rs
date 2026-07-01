@@ -79,6 +79,8 @@ pub struct ContextClearInFlight {
     pub target: String,
     pub harness: String,
     pub command: String,
+    #[serde(default)]
+    pub source: Option<String>,
     pub head_sha256: Option<String>,
     pub head_bytes: Option<usize>,
     pub written_at: u64,
@@ -89,6 +91,7 @@ pub fn context_clear_in_flight_marker(
     target: &str,
     harness: &str,
     command: &str,
+    source: &str,
     active_head: Option<&str>,
     written_at: u64,
 ) -> ContextClearInFlight {
@@ -97,6 +100,7 @@ pub fn context_clear_in_flight_marker(
         target: target.to_string(),
         harness: harness.to_string(),
         command: command.to_string(),
+        source: Some(source.to_string()),
         head_sha256: active_head.map(agent_doc_hash::content_hash),
         head_bytes: active_head.map(str::len),
         written_at,
@@ -564,6 +568,7 @@ mod tests {
             "%1",
             "codex",
             "/clear",
+            "queue_slash_command",
             Some("do [#a]"),
             42,
         );
@@ -572,6 +577,7 @@ mod tests {
         assert_eq!(marker.target, "%1");
         assert_eq!(marker.harness, "codex");
         assert_eq!(marker.command, "/clear");
+        assert_eq!(marker.source.as_deref(), Some("queue_slash_command"));
         assert_eq!(marker.head_bytes, Some("do [#a]".len()));
         assert_eq!(
             marker.head_sha256.as_deref(),

@@ -34,6 +34,9 @@ use agent_doc_supervisor::{
 
 const CLEAN_SESSION_CONTEXT_RESET_REASON: &str = "active queue head is a [clean-session] item - clearing to give it a fresh agent context (#cleandrainsup)";
 const FOCUSED_CYCLE_CONTEXT_RESET_REASON: &str = "active queue head is a [focused-cycle] item - clearing to continue in a fresh agent context (#qfocsup)";
+const CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED: &str = "operator_deferred_clear";
+const CONTEXT_CLEAR_SOURCE_QUEUE_SLASH: &str = "queue_slash_command";
+const CONTEXT_CLEAR_SOURCE_BACKGROUND_RESET: &str = "supervisor_background_context_reset";
 
 /// `#fbwire` / `#fullboundary` Phase 2 — bounded timeout for the inter-queue-item
 /// convergence gate. While the prior turn has not proven a quiescent close
@@ -44,6 +47,19 @@ const FOCUSED_CYCLE_CONTEXT_RESET_REASON: &str = "active queue head is a [focuse
 /// artifact. The idle-watch polls every 500ms (`AUTO_TRIGGER_POLL_INTERVAL`), so
 /// this is ~60 ticks.
 const CONVERGENCE_GATE_TIMEOUT_MS: u64 = 30_000;
+
+fn supervisor_background_context_clear_enabled() -> bool {
+    false
+}
+
+fn context_clear_marker_source_allows_supervisor_action(
+    marker: &agent_doc_queue::queue::ContextClearInFlight,
+) -> bool {
+    matches!(
+        marker.source.as_deref(),
+        Some(CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED | CONTEXT_CLEAR_SOURCE_QUEUE_SLASH)
+    )
+}
 
 /// `#fbwire` Phase 2 — is the session document's on-disk working tree converged
 /// to `HEAD`? This is the same ground truth `git::emit_postcommit_worktree_check`
@@ -354,6 +370,7 @@ fn record_context_clear_in_flight_marker(
     shared: &SupervisorShared,
     harness: &agent_doc_harness::HarnessConfig,
     clear_cmd: &str,
+    source: &str,
     active_head: Option<&str>,
 ) {
     let target = shared
@@ -371,6 +388,7 @@ fn record_context_clear_in_flight_marker(
         target,
         &harness.binary,
         clear_cmd,
+        source,
         active_head,
     ) {
         eprintln!(
@@ -910,7 +928,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
             } else {
                 editor_typing_active_logged = false;
             }
-            let context_clear_marker =
+            let mut context_clear_marker =
                 match crate::context_clear_in_flight::context_clear_in_flight(&path) {
                     Ok(marker) => marker,
                     Err(err) => {
@@ -930,6 +948,38 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         None
                     }
             };
+    if let Some(marker) = context_clear_marker.as_ref()
+        && !supervisor_background_context_clear_enabled()
+        && !context_clear_marker_source_allows_supervisor_action(marker)
+    {
+                let source = marker.source.as_deref().unwrap_or("legacy");
+                log_event(
+                    &mut session_log,
+                    &format!(
+                        "idle_queue_watch_context_clear_marker_dropped harness={} reason=background_context_clear_disabled source={} target={} cmd=\"{}\"",
+                        harness.binary, source, marker.target, marker.command
+                    ),
+                );
+                crate::ops_log::log_op(
+                    &path,
+                    &format!(
+                        "idle_queue_watch_context_clear_marker_dropped file={} harness={} reason=background_context_clear_disabled source={} target={} cmd={:?}",
+                        path.display(),
+                        harness.binary,
+                        source,
+                        marker.target,
+                        marker.command
+                    ),
+                );
+                if let Err(err) = crate::context_clear_in_flight::clear_context_clear_in_flight(&path)
+                {
+                    eprintln!(
+                        "[agent-doc] idle-queue watch: failed to drop unsupported context-clear marker for {}: {err:#}",
+                        path.display()
+                    );
+                }
+                context_clear_marker = None;
+            }
             let context_clear_pending = context_clear_marker.as_ref().and_then(|marker| {
                 supervisor_pane_payload_already_pending(&shared, &marker.command, &harness)
             });
@@ -2061,6 +2111,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     &shared,
                                     &harness,
                                     &clear_cmd,
+                                    CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED,
                                     active_head.as_deref(),
                                 );
                                 clear_cooldown_logged = false;
@@ -2100,43 +2151,48 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // requires fresh context. The reset decision still runs through
                 // prompt/turn/route gates below, so a live queue edit or in-flight
                 // route cannot churn clears.
-                let forced_context_reset_reason = active_head
-                    .as_deref()
-                    .and_then(|head| forced_context_reset_reason_for_head(&path, head));
-                let context_reset_reason = if clean_session_head_forces_context_reset(
-                    forced_context_reset_reason.is_some(),
-                    clear_cooldown_active,
-                ) {
-                    context_reset_policy_error_logged = false;
-                    forced_context_reset_reason.map(str::to_string)
-                } else if harness.binary == "codex" {
-                    match crate::codex_hook::codex_queue_context_reset_reason(
-                        &path,
-                        last_context_clear_at,
+                let context_reset_reason = if supervisor_background_context_clear_enabled() {
+                    let forced_context_reset_reason = active_head
+                        .as_deref()
+                        .and_then(|head| forced_context_reset_reason_for_head(&path, head));
+                    if clean_session_head_forces_context_reset(
+                        forced_context_reset_reason.is_some(),
+                        clear_cooldown_active,
                     ) {
-                        Ok(reason) => {
-                            context_reset_policy_error_logged = false;
-                            reason
-                        }
-                        Err(err) => {
-                            if !context_reset_policy_error_logged {
-                                log_event(
-                                    &mut session_log,
-                                    &format!(
-                                        "idle_queue_watch_context_reset_policy_failed harness={} file={} error={:?}",
-                                        harness.binary,
-                                        path.display(),
-                                        err.to_string()
-                                    ),
-                                );
-                                eprintln!(
-                                    "[agent-doc] idle-queue watch: failed to resolve Codex queue context reset for {}: {err:#}",
-                                    path.display()
-                                );
-                                context_reset_policy_error_logged = true;
+                        context_reset_policy_error_logged = false;
+                        forced_context_reset_reason.map(str::to_string)
+                    } else if harness.binary == "codex" {
+                        match crate::codex_hook::codex_queue_context_reset_reason(
+                            &path,
+                            last_context_clear_at,
+                        ) {
+                            Ok(reason) => {
+                                context_reset_policy_error_logged = false;
+                                reason
                             }
-                            None
+                            Err(err) => {
+                                if !context_reset_policy_error_logged {
+                                    log_event(
+                                        &mut session_log,
+                                        &format!(
+                                            "idle_queue_watch_context_reset_policy_failed harness={} file={} error={:?}",
+                                            harness.binary,
+                                            path.display(),
+                                            err.to_string()
+                                        ),
+                                    );
+                                    eprintln!(
+                                        "[agent-doc] idle-queue watch: failed to resolve Codex queue context reset for {}: {err:#}",
+                                        path.display()
+                                    );
+                                    context_reset_policy_error_logged = true;
+                                }
+                                None
+                            }
                         }
+                    } else {
+                        context_reset_policy_error_logged = false;
+                        None
                     }
                 } else {
                     context_reset_policy_error_logged = false;
@@ -2193,6 +2249,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                         &shared,
                                         &harness,
                                         clear_cmd,
+                                        CONTEXT_CLEAR_SOURCE_BACKGROUND_RESET,
                                         Some(head),
                                     );
                                     log_event(
@@ -2268,6 +2325,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     &shared,
                                     &harness,
                                     clear_cmd,
+                                    CONTEXT_CLEAR_SOURCE_BACKGROUND_RESET,
                                     Some(head),
                                 );
                                 log_idle_queue_context_reset_submit(
@@ -2319,84 +2377,91 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     | IdleQueueContextResetDecision::SkipNoResetNeeded => {}
                 }
 
-                // A visible `/clear`/`/new` draft is an input-ownership hazard even when its
-                // in-flight marker was lost across recycle or aged out. Recover it before
-                // the paused-queue gate so a durable pause cannot strand the pane with a
-                // command the operator must manually submit.
-                if let Some(head) = active_head.as_deref() {
-                    let clear_cmd = harness.context_clear_command();
-                    let clear_already_pending =
-                        supervisor_pane_payload_already_pending(&shared, clear_cmd, &harness);
-                    let resubmit_key = format!("orphan_context_clear:{head}");
-                    if route_submit_in_flight && drain_dispatch_dedup_skip(clear_already_pending) {
-                        log_event(
-                            &mut session_log,
-                            &format!(
-                                "idle_queue_watch_orphan_context_clear_wait harness={} reason=route_submit_in_flight head={:?}",
-                                harness.binary, head
-                            ),
-                        );
-                        crate::ops_log::log_op(
-                            &path,
-                            &format!(
-                                "idle_queue_watch_orphan_context_clear_wait file={} harness={} reason=route_submit_in_flight head_bytes={} head_sha256={} cmd={:?}",
-                                path.display(),
-                                harness.binary,
-                                head.len(),
-                                agent_doc_hash::content_hash(head),
-                                clear_cmd
-                            ),
-                        );
-                        continue;
-                    }
-                    if !route_submit_in_flight
-                        && idle_queue_pending_payload_needs_enter_resubmit(
-                        &harness.binary,
-                        clear_already_pending,
-                        last_pending_enter_resubmitted.as_deref() == Some(resubmit_key.as_str()),
-                    ) {
-                        match idle_queue_resubmit_pending_payload(
-                            &path,
-                            &shared,
-                            &harness,
-                            "context_clear",
-                            head,
-                            clear_cmd,
-                        ) {
-                            AutoTriggerOutcome::Sent => {
-                                last_pending_enter_resubmitted = Some(resubmit_key);
-                                last_context_reset_head = active_head.clone();
-                                last_context_clear_at = Some(current_epoch_secs());
-                                context_reset_in_flight = true;
-                                awaiting_clear_settle = true;
-                                clear_settle_idle_ticks = 0;
-                                record_context_clear_in_flight_marker(
-                                    &path,
-                                    &shared,
-                                    &harness,
-                                    clear_cmd,
-                                    Some(head),
-                                );
-                                log_event(
-                                    &mut session_log,
-                                    &format!(
-                                        "idle_queue_watch_orphan_context_clear_resubmit harness={} reason=clear_draft_pending head={:?}",
-                                        harness.binary, head
-                                    ),
-                                );
-                                continue;
-                            }
-                            AutoTriggerOutcome::Cancelled => return,
-                            outcome => {
-                                log_event(
-                                    &mut session_log,
-                                    &format!(
-                                        "idle_queue_watch_orphan_context_clear_resubmit_failed harness={} outcome={}",
-                                        harness.binary,
-                                        outcome.as_str()
-                                    ),
-                                );
-                                continue;
+                if supervisor_background_context_clear_enabled() {
+                    // A visible `/clear`/`/new` draft is an input-ownership hazard even when its
+                    // in-flight marker was lost across recycle or aged out. This recovery is
+                    // disabled with background context clears because an unproven draft must not
+                    // be converted into a supervisor-owned clear.
+                    if let Some(head) = active_head.as_deref() {
+                        let clear_cmd = harness.context_clear_command();
+                        let clear_already_pending =
+                            supervisor_pane_payload_already_pending(&shared, clear_cmd, &harness);
+                        let resubmit_key = format!("orphan_context_clear:{head}");
+                        if route_submit_in_flight
+                            && drain_dispatch_dedup_skip(clear_already_pending)
+                        {
+                            log_event(
+                                &mut session_log,
+                                &format!(
+                                    "idle_queue_watch_orphan_context_clear_wait harness={} reason=route_submit_in_flight head={:?}",
+                                    harness.binary, head
+                                ),
+                            );
+                            crate::ops_log::log_op(
+                                &path,
+                                &format!(
+                                    "idle_queue_watch_orphan_context_clear_wait file={} harness={} reason=route_submit_in_flight head_bytes={} head_sha256={} cmd={:?}",
+                                    path.display(),
+                                    harness.binary,
+                                    head.len(),
+                                    agent_doc_hash::content_hash(head),
+                                    clear_cmd
+                                ),
+                            );
+                            continue;
+                        }
+                        if !route_submit_in_flight
+                            && idle_queue_pending_payload_needs_enter_resubmit(
+                                &harness.binary,
+                                clear_already_pending,
+                                last_pending_enter_resubmitted.as_deref()
+                                    == Some(resubmit_key.as_str()),
+                            )
+                        {
+                            match idle_queue_resubmit_pending_payload(
+                                &path,
+                                &shared,
+                                &harness,
+                                "context_clear",
+                                head,
+                                clear_cmd,
+                            ) {
+                                AutoTriggerOutcome::Sent => {
+                                    last_pending_enter_resubmitted = Some(resubmit_key);
+                                    last_context_reset_head = active_head.clone();
+                                    last_context_clear_at = Some(current_epoch_secs());
+                                    context_reset_in_flight = true;
+                                    awaiting_clear_settle = true;
+                                    clear_settle_idle_ticks = 0;
+                                    record_context_clear_in_flight_marker(
+                                        &path,
+                                        &shared,
+                                        &harness,
+                                        clear_cmd,
+                                        CONTEXT_CLEAR_SOURCE_BACKGROUND_RESET,
+                                        Some(head),
+                                    );
+                                    log_event(
+                                        &mut session_log,
+                                        &format!(
+                                            "idle_queue_watch_orphan_context_clear_resubmit harness={} reason=clear_draft_pending head={:?}",
+                                            harness.binary, head
+                                        ),
+                                    );
+                                    continue;
+                                }
+                                AutoTriggerOutcome::Cancelled => return,
+                                outcome => {
+                                    log_event(
+                                        &mut session_log,
+                                        &format!(
+                                            "idle_queue_watch_orphan_context_clear_resubmit_failed harness={} outcome={}",
+                                            harness.binary,
+                                            outcome.as_str()
+                                        ),
+                                    );
+                                    continue;
+                                }
                             }
                         }
                     }
@@ -2670,6 +2735,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                             &shared,
                                             &harness,
                                             &drain_payload,
+                                            CONTEXT_CLEAR_SOURCE_QUEUE_SLASH,
                                             Some(&head),
                                         );
                                     }
@@ -2784,6 +2850,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                             &shared,
                                             &harness,
                                             command,
+                                            CONTEXT_CLEAR_SOURCE_QUEUE_SLASH,
                                             Some(&head),
                                         );
                                     }
@@ -2861,6 +2928,38 @@ pub(super) fn spawn_idle_queue_watch_thread(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn context_clear_marker_with_source(
+        source: Option<&str>,
+    ) -> agent_doc_queue::queue::ContextClearInFlight {
+        agent_doc_queue::queue::ContextClearInFlight {
+            file: "plan.md".to_string(),
+            target: "%1".to_string(),
+            harness: "codex".to_string(),
+            command: "/clear".to_string(),
+            source: source.map(str::to_string),
+            head_sha256: None,
+            head_bytes: None,
+            written_at: 42,
+        }
+    }
+
+    #[test]
+    fn context_clear_marker_source_allows_only_operator_and_queue_actions() {
+        assert!(context_clear_marker_source_allows_supervisor_action(
+            &context_clear_marker_with_source(Some(CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED))
+        ));
+        assert!(context_clear_marker_source_allows_supervisor_action(
+            &context_clear_marker_with_source(Some(CONTEXT_CLEAR_SOURCE_QUEUE_SLASH))
+        ));
+        assert!(!context_clear_marker_source_allows_supervisor_action(
+            &context_clear_marker_with_source(Some(CONTEXT_CLEAR_SOURCE_BACKGROUND_RESET))
+        ));
+        assert!(!context_clear_marker_source_allows_supervisor_action(
+            &context_clear_marker_with_source(None)
+        ));
+        assert!(!supervisor_background_context_clear_enabled());
+    }
 
     #[test]
     fn supervisor_auto_install_pane_message_started_warns_against_keypress() {
@@ -3087,7 +3186,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_opted_in_context_reset_dispatches_for_ordinary_head() {
+    fn codex_opted_in_context_reset_is_suppressed_for_ordinary_head() {
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("task.md");
         std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
@@ -3108,32 +3207,27 @@ mod tests {
             "unexpected reset reason: {reason}"
         );
         assert_eq!(
-            idle_queue_context_reset_decision(true, false, false, Some(head), None, true,),
-            IdleQueueContextResetDecision::Reset
+            idle_queue_context_reset_decision(
+                true,
+                false,
+                false,
+                Some(head),
+                None,
+                supervisor_background_context_clear_enabled() && !reason.is_empty(),
+            ),
+            IdleQueueContextResetDecision::SkipNoResetNeeded
         );
 
-        let harness = agent_doc_harness::HarnessConfig::codex();
-        let shared = SupervisorShared::with_actor_runtime(
-            "test",
-            "test-instance".to_string(),
-            "codex",
-            None,
-            None,
-            Some("%25".to_string()),
-        );
-        log_idle_queue_context_reset_submit(&doc, &shared, &harness, "/clear", head, &reason);
-
-        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
-            ops_log.contains("idle_queue_watch_context_reset")
-                && ops_log.contains("head_sha256=")
-                && ops_log.contains("exchange was compacted"),
-            "ordinary opted-in reset should leave context-reset proof:\n{ops_log}"
+            !ops_log.contains("idle_queue_watch_context_reset"),
+            "ordinary opted-in reset reason must not send automatic /clear:\n{ops_log}"
         );
     }
 
     #[test]
-    fn clean_session_reset_ops_log_precedes_drain_submit() {
+    fn clean_session_head_drains_without_background_clear() {
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("task.md");
         std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
@@ -3152,33 +3246,17 @@ mod tests {
 
         assert!(clean_session_head_forces_context_reset(true, false,));
         assert_eq!(
-            idle_queue_context_reset_decision(true, false, false, Some(head), None, true,),
-            IdleQueueContextResetDecision::Reset
+            idle_queue_context_reset_decision(
+                true,
+                false,
+                false,
+                Some(head),
+                None,
+                supervisor_background_context_clear_enabled(),
+            ),
+            IdleQueueContextResetDecision::SkipNoResetNeeded
         );
 
-        log_idle_queue_context_reset_submit(
-            &doc,
-            &shared,
-            &harness,
-            "/clear",
-            head,
-            CLEAN_SESSION_CONTEXT_RESET_REASON,
-        );
-
-        assert!(drain_blocked_awaiting_clear_settle(
-            true,
-            true,
-            false,
-            CLEAR_COOLDOWN_RESUME_IDLE_TICKS - 1,
-            CLEAR_COOLDOWN_RESUME_IDLE_TICKS,
-        ));
-        assert!(!drain_blocked_awaiting_clear_settle(
-            true,
-            true,
-            false,
-            CLEAR_COOLDOWN_RESUME_IDLE_TICKS,
-            CLEAR_COOLDOWN_RESUME_IDLE_TICKS,
-        ));
         assert_eq!(
             idle_queue_drain_decision(false, true, false, false, false, Some(head), None,),
             IdleQueueDrainDecision::Dispatch
@@ -3191,31 +3269,19 @@ mod tests {
             head,
             &format!("agent-doc {}", doc.display()),
         );
-        log_between_turn_enqueue_delivery(&doc, "/clear", &format!("agent-doc {}", doc.display()));
 
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        let reset_pos = ops_log
-            .find("idle_queue_watch_context_reset")
-            .expect("reset marker logged");
-        let drain_pos = ops_log
-            .find("idle_queue_watch_drain")
-            .expect("drain marker logged");
         assert!(
-            reset_pos < drain_pos,
-            "clean-session reset must be observable before drain: {ops_log}"
+            !ops_log.contains("idle_queue_watch_context_reset"),
+            "clean-session/focused-cycle tags must not send automatic /clear: {ops_log}"
         );
-        assert!(ops_log.contains("reason=\"active queue head is a [clean-session] item"));
-        assert!(ops_log.contains("#cleandrainsup"));
+        assert!(ops_log.contains("idle_queue_watch_drain"));
+        assert!(ops_log.contains("proof=go_drain_dispatch"));
         assert!(ops_log.contains("head_sha256="));
-        assert!(ops_log.contains("target=%25"));
-        assert!(
-            ops_log
-                .contains("between_turn_enqueue deduped=0 kept=/clear,/agent-doc result=delivered")
-        );
     }
 
     #[test]
-    fn focused_cycle_reset_ops_log_names_qfocsup_and_go_drain_dispatch() {
+    fn focused_cycle_head_drains_without_background_clear() {
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("task.md");
         std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
@@ -3239,7 +3305,6 @@ mod tests {
             None,
             Some("%25".to_string()),
         );
-        log_idle_queue_context_reset_submit(&doc, &shared, &harness, "/clear", head, reason);
         log_idle_queue_drain_submit(
             &doc,
             &shared,
@@ -3250,10 +3315,10 @@ mod tests {
         );
 
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(ops_log.contains("idle_queue_watch_context_reset"));
-        assert!(ops_log.contains("reason=\"active queue head is a [focused-cycle] item"));
-        assert!(ops_log.contains("#qfocsup"));
-        assert!(!ops_log.contains("#cleandrainsup"));
+        assert!(
+            !ops_log.contains("idle_queue_watch_context_reset"),
+            "focused-cycle must not send automatic /clear: {ops_log}"
+        );
         assert!(ops_log.contains("idle_queue_watch_drain"));
         assert!(ops_log.contains("proof=go_drain_dispatch"));
         assert!(ops_log.contains("head_sha256="));

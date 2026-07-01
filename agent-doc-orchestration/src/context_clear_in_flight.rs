@@ -39,6 +39,7 @@ pub fn record_context_clear_in_flight(
     target: &str,
     harness: &str,
     command: &str,
+    source: &str,
     active_head: Option<&str>,
 ) -> Result<()> {
     let Some(path) = marker_path(file)? else {
@@ -52,6 +53,7 @@ pub fn record_context_clear_in_flight(
         target,
         harness,
         command,
+        source,
         active_head,
         now_secs(),
     );
@@ -109,11 +111,20 @@ mod tests {
         let doc = dir.path().join("plan.md");
         std::fs::write(&doc, "body").unwrap();
 
-        record_context_clear_in_flight(&doc, "%1", "codex", "/clear", Some("do [#a]")).unwrap();
+        record_context_clear_in_flight(
+            &doc,
+            "%1",
+            "codex",
+            "/clear",
+            "operator_deferred_clear",
+            Some("do [#a]"),
+        )
+        .unwrap();
         let marker = context_clear_in_flight(&doc).unwrap().unwrap();
         assert_eq!(marker.target, "%1");
         assert_eq!(marker.harness, "codex");
         assert_eq!(marker.command, "/clear");
+        assert_eq!(marker.source.as_deref(), Some("operator_deferred_clear"));
 
         clear_context_clear_in_flight(&doc).unwrap();
         assert!(context_clear_in_flight(&doc).unwrap().is_none());
@@ -132,6 +143,7 @@ mod tests {
             target: "%1".to_string(),
             harness: "codex".to_string(),
             command: "/clear".to_string(),
+            source: Some("operator_deferred_clear".to_string()),
             head_sha256: Some("abc".to_string()),
             head_bytes: Some(3),
             written_at: now_secs().saturating_sub(CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS + 1),

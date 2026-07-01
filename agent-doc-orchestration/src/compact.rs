@@ -55,6 +55,12 @@
 //!   re-asserts the compacted snapshot immediately before the commit and then FAILS CLOSED (with a
 //!   `reset --from-current` recovery command) if the post-commit HEAD did not actually land the
 //!   compacted content, so `--commit` can never silently leave uncommitted compaction drift.
+//! - After an editor-IPC `--commit` closeout, `flush_editor_buffer_to_disk_after_compact` asks the
+//!   live editor to save its converged buffer to disk (`save_document` IPC) so the working-tree file
+//!   converges to HEAD. The plugin applies convergence patches to the in-memory Document and never
+//!   saves, so without this flush HEAD holds the summary while the disk file still holds the
+//!   pre-compact content — the "JB Compact Exchange left an uncommitted summary" defect
+//!   (`#jb-compact-editor-buffer-flush`). Fail-open: HEAD is already authoritative.
 //! - `apply_compacted_document` is the single replacement boundary used by inline, full component,
 //!   and partial component compaction.
 //!
@@ -77,6 +83,9 @@
 //!   working-tree file is still committable (`#jb-compact-commit-editor-ipc-async`)
 //! - compact_commit_lands_head_when_snapshot_replayed_stale: authoritative-content commit lands the
 //!   compacted content in HEAD even when a CRDT replay reverted the on-disk snapshot to pre-compact
+//! - compact_with_commit_flushes_editor_buffer_to_disk: an editor-IPC `--commit` compaction against a
+//!   buffer-only live editor (applies to the buffer, never saves) leaves the working-tree file equal
+//!   to HEAD because the closeout flushes the editor buffer to disk (`#jb-compact-editor-buffer-flush`)
 //! - compact_commit_fails_closed_when_head_cannot_land: `--commit` fails closed with a recovery
 //!   command instead of silently leaving uncommitted compaction drift (`#jb-compact-commit-left-uncommitted`)
 //! - component_compact_uses_guarded_direct_write_when_patches_dir_exists: compact does not emit a
@@ -259,6 +268,15 @@ pub fn run(
     if commit {
         if dirty {
             commit_compacted_authoritative(file, &authoritative)?;
+            if !force_disk {
+                // `#jb-compact-editor-buffer-flush`: the editor-IPC convergence
+                // above updated only the live editor's in-memory buffer; the
+                // plugin never saves it. HEAD now holds the compacted summary but
+                // the working-tree file still holds the pre-compact content, so
+                // `git status` is dirty — the "JB Compact Exchange left an
+                // uncommitted summary" defect. Ask the editor to flush its buffer.
+                flush_editor_buffer_to_disk_after_compact(file);
+            }
         }
     } else if dirty {
         // #jb-compact-repair-left-uncommitted: a compact/repair that rewrites the
@@ -359,6 +377,67 @@ fn verify_compact_head_landed(file: &Path, authoritative_snapshot: &str) -> Resu
         );
     }
     Ok(())
+}
+
+/// `#jb-compact-editor-buffer-flush`: converge the working-tree disk file with
+/// the just-committed HEAD after an editor-IPC compaction.
+///
+/// The editor-IPC convergence in `apply_compacted_document` replaces the live
+/// editor's in-memory buffer through the plugin's Document API; the plugin does
+/// **not** save (unlike a normal response append, a compaction has no `(HEAD)`
+/// markers to preserve in the working tree). So after the `--commit` closeout
+/// stages the compacted snapshot into HEAD, the working-tree file on disk still
+/// holds the pre-compact content and `git status` reports the document dirty —
+/// the operator sees "Compact Exchange left an uncommitted summary" even though
+/// HEAD is already correct.
+///
+/// Ask the live editor to flush its buffer to disk with the same `save_document`
+/// IPC that `preflight` uses to resolve `live_prompt_drift`. The plugin saves the
+/// buffer it already converged, so disk converges to HEAD. Fail-open: HEAD holds
+/// the authoritative compacted content regardless, so a flush failure only means
+/// the working tree lags until the editor saves on its own — never a lost
+/// compaction.
+fn flush_editor_buffer_to_disk_after_compact(file: &Path) {
+    let canonical = match file.canonicalize() {
+        Ok(canonical) => canonical,
+        Err(e) => {
+            eprintln!(
+                "[compact] warning: could not resolve {} to flush the editor buffer after compact: {e}",
+                file.display()
+            );
+            return;
+        }
+    };
+    let project_root = crate::write::resolve_ipc_project_root_pub(&canonical);
+    let path_str = canonical.to_string_lossy().to_string();
+    let patch_id = format!("compact-flush-{}", uuid::Uuid::new_v4());
+
+    let flushed = if crate::ipc_socket::is_listener_active(&project_root) {
+        crate::ipc_socket::send_save_document(&project_root, &path_str, &patch_id)
+    } else if project_root.join(".agent-doc").join("patches").is_dir() {
+        // Socket down but the plugin is installed: signal a save through the
+        // file-IPC patches directory (the degraded editor path).
+        crate::ipc_socket::send_save_document_file_signal(&project_root, &path_str, &patch_id)
+    } else {
+        // No live editor owns the buffer; the guarded disk write already made the
+        // working tree authoritative, so there is nothing to flush.
+        return;
+    };
+
+    match flushed {
+        Ok(_) => crate::ops_log::log_op(
+            file,
+            &format!(
+                "compact_editor_buffer_flush file={} patch_id={} transport=save_document",
+                file.display(),
+                patch_id
+            ),
+        ),
+        Err(e) => eprintln!(
+            "[compact] warning: editor buffer flush after compact failed for {} (working tree may lag HEAD until the editor saves): {e}",
+            file.display()
+        ),
+    }
 }
 
 fn closeout_compact_with_commit(file: &Path) -> Result<()> {

@@ -11166,6 +11166,9 @@ fn test_agent_doc_tmux_owns_layout_memory_policy() {
         "pub struct TmuxLayoutColumn",
         "pub fn apply_column_memory(",
         "pub fn build_layout_state(",
+        "pub fn classify_sync_layout_columns",
+        "pub fn same_sync_file(",
+        "pub fn focused_column_index(",
         "pub enum TmuxFocusOnlyExpansionMode",
         "pub fn expand_focus_only_columns_for_editor_switch(",
         "pub fn apply_focus_only_expansion_policy(",
@@ -11181,6 +11184,8 @@ fn test_agent_doc_tmux_owns_layout_memory_policy() {
     assert!(
         sync_source.contains("agent_doc_tmux::apply_column_memory(")
             && sync_source.contains("agent_doc_tmux::build_layout_state(")
+            && sync_source.contains("agent_doc_tmux::classify_sync_layout_columns(")
+            && sync_source.contains("agent_doc_tmux::focused_column_index(")
             && sync_source.contains("agent_doc_tmux::apply_focus_only_expansion_policy("),
         "sync.rs should call the focused tmux layout policy API directly"
     );
@@ -11188,12 +11193,20 @@ fn test_agent_doc_tmux_owns_layout_memory_policy() {
     let sync_layout_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync/layout.rs"))
             .unwrap();
+    let sync_registry_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync/registry.rs"))
+            .unwrap();
     assert!(
-        sync_layout_source.contains("classify_sync_layout_columns(")
-            && sync_layout_source.contains("TmuxLayoutColumn::new("),
-        "orchestration should keep only the document/frontmatter layout-column classifier"
+        sync_layout_source.contains("active_pane_column_index(")
+            && sync_layout_source.contains("agent_doc_tmux::classify_sync_layout_columns(")
+            && sync_registry_source.contains("first_agent_doc_in_col("),
+        "orchestration should keep tmux/file adapters and call focused layout policy directly"
     );
     for forbidden in [
+        "fn classify_sync_layout_columns(",
+        "fn same_sync_file(",
+        "fn focused_column_index(",
+        "TmuxLayoutColumn::new(",
         "fn apply_column_memory(",
         "fn build_layout_state(",
         "fn expand_focus_only_columns_for_editor_switch(",

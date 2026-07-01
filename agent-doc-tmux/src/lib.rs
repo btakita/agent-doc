@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     fmt,
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 pub const TMUX_PANE_GEOMETRY_FORMAT: &str =
@@ -447,6 +447,58 @@ impl TmuxLayoutColumn {
     }
 }
 
+pub fn classify_sync_layout_columns<F>(
+    col_args: &[String],
+    mut first_agent_doc_in_col: F,
+) -> Vec<TmuxLayoutColumn>
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    col_args
+        .iter()
+        .map(|col| TmuxLayoutColumn::new(col.clone(), first_agent_doc_in_col(col)))
+        .collect()
+}
+
+fn canonicalize_sync_file(file: &Path) -> Option<PathBuf> {
+    let candidate = if file.is_absolute() {
+        file.to_path_buf()
+    } else {
+        std::env::current_dir().ok()?.join(file)
+    };
+    Some(candidate.canonicalize().unwrap_or(candidate))
+}
+
+pub fn same_sync_file(lhs: &str, rhs: &str) -> bool {
+    let lhs = lhs.trim();
+    let rhs = rhs.trim();
+    if lhs.is_empty() || rhs.is_empty() {
+        return false;
+    }
+    if lhs == rhs {
+        return true;
+    }
+    match (
+        canonicalize_sync_file(Path::new(lhs)),
+        canonicalize_sync_file(Path::new(rhs)),
+    ) {
+        (Some(lhs), Some(rhs)) => lhs == rhs,
+        _ => false,
+    }
+}
+
+pub fn focused_column_index(remembered_layout: &[String], focus: Option<&str>) -> Option<usize> {
+    let focus = focus?.trim();
+    if focus.is_empty() {
+        return None;
+    }
+    remembered_layout.iter().position(|col| {
+        col.split(',')
+            .map(str::trim)
+            .any(|candidate| same_sync_file(candidate, focus))
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ColumnMemoryRestoration {
     pub column_index: usize,
@@ -793,6 +845,53 @@ mod tests {
 
     fn layout_col(raw: &str, agent_doc: Option<&str>) -> TmuxLayoutColumn {
         TmuxLayoutColumn::new(raw, agent_doc.map(str::to_string))
+    }
+
+    #[test]
+    fn classify_sync_layout_columns_marks_agent_doc_from_callback() {
+        let columns = classify_sync_layout_columns(
+            &["plain.md".to_string(), "left.md,right.md".to_string()],
+            |col| {
+                col.split(',')
+                    .find(|item| item.trim() == "right.md")
+                    .map(str::to_string)
+            },
+        );
+
+        assert_eq!(columns[0], layout_col("plain.md", None));
+        assert_eq!(columns[1], layout_col("left.md,right.md", Some("right.md")));
+    }
+
+    #[test]
+    fn focused_column_index_matches_exact_and_canonical_paths() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let left = root.join("tasks/left.md");
+        let right = root.join("tasks/right.md");
+        std::fs::create_dir_all(left.parent().unwrap()).unwrap();
+        std::fs::write(&left, "").unwrap();
+        std::fs::write(&right, "").unwrap();
+        let saved_layout = vec![
+            left.to_string_lossy().to_string(),
+            format!("notes.md,{}", right.to_string_lossy()),
+        ];
+
+        assert_eq!(
+            focused_column_index(&saved_layout, Some(&right.to_string_lossy())),
+            Some(1)
+        );
+        assert_eq!(
+            focused_column_index(&saved_layout, Some(&left.to_string_lossy())),
+            Some(0)
+        );
+        assert_eq!(focused_column_index(&saved_layout, Some("   ")), None);
+    }
+
+    #[test]
+    fn same_sync_file_rejects_empty_paths() {
+        assert!(!same_sync_file("", ""));
+        assert!(!same_sync_file("left.md", ""));
+        assert!(same_sync_file("left.md", "left.md"));
     }
 
     fn associated_candidate(

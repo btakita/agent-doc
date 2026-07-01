@@ -1881,7 +1881,7 @@ fn run_with_options_internal(
 
     let input_cols = effective_sync_columns(col_args, &saved_layout, &layout_state_path)?;
     let column_memory = agent_doc_tmux::apply_column_memory(
-        &classify_sync_layout_columns(&input_cols),
+        &agent_doc_tmux::classify_sync_layout_columns(&input_cols, first_agent_doc_in_col),
         &saved_layout,
     );
     for restoration in &column_memory.restorations {
@@ -1994,7 +1994,7 @@ fn run_with_options_internal(
         visible_registered_layout(tmux, window)
     };
     let active_column_index = if matches!(auto_start_mode, AutoStartMode::SafePassive) {
-        focused_column_index(&remembered_layout, focus).or_else(|| {
+        agent_doc_tmux::focused_column_index(&remembered_layout, focus).or_else(|| {
             active_pane_column_index(
                 tmux,
                 target_session.as_deref(),
@@ -3171,8 +3171,8 @@ fn run_with_options_internal(
     // record it so future syncs can substitute it when the column has a non-agent file.
     {
         let layout_state = agent_doc_tmux::build_layout_state(
-            &classify_sync_layout_columns(col_args),
-            &classify_sync_layout_columns(&saved_layout),
+            &agent_doc_tmux::classify_sync_layout_columns(col_args, first_agent_doc_in_col),
+            &agent_doc_tmux::classify_sync_layout_columns(&saved_layout, first_agent_doc_in_col),
         );
         // Only save if at least one column has an agent doc
         if layout_state.iter().any(|s| !s.is_empty())

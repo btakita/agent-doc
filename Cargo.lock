@@ -686,6 +686,7 @@ version = "0.34.65"
 dependencies = [
  "lazily 0.13.1",
  "serde",
+ "tempfile",
 ]
 
 [[package]]

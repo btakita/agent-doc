@@ -2,15 +2,6 @@
 
 use super::*;
 
-pub(crate) fn classify_sync_layout_columns(
-    col_args: &[String],
-) -> Vec<agent_doc_tmux::TmuxLayoutColumn> {
-    col_args
-        .iter()
-        .map(|col| agent_doc_tmux::TmuxLayoutColumn::new(col.clone(), first_agent_doc_in_col(col)))
-        .collect()
-}
-
 pub(crate) fn active_pane_column_index(
     tmux: &Tmux,
     target_session: Option<&str>,
@@ -52,39 +43,6 @@ pub(crate) fn visible_registered_layout(tmux: &Tmux, window: Option<&str>) -> Ve
                 .unwrap_or_default()
         })
         .collect()
-}
-
-pub(crate) fn same_sync_file(lhs: &str, rhs: &str) -> bool {
-    let lhs = lhs.trim();
-    let rhs = rhs.trim();
-    if lhs.is_empty() || rhs.is_empty() {
-        return false;
-    }
-    if lhs == rhs {
-        return true;
-    }
-    match (
-        canonicalize_sync_file(Path::new(lhs)),
-        canonicalize_sync_file(Path::new(rhs)),
-    ) {
-        (Some(lhs), Some(rhs)) => lhs == rhs,
-        _ => false,
-    }
-}
-
-pub(crate) fn focused_column_index(
-    remembered_layout: &[String],
-    focus: Option<&str>,
-) -> Option<usize> {
-    let focus = focus?.trim();
-    if focus.is_empty() {
-        return None;
-    }
-    remembered_layout.iter().position(|col| {
-        col.split(',')
-            .map(str::trim)
-            .any(|candidate| same_sync_file(candidate, focus))
-    })
 }
 
 pub(crate) fn lookup_registry_entry_for_file_session(
@@ -373,7 +331,10 @@ mod tests {
             .unwrap()
             .to_string_lossy()
             .to_string();
-        let columns = classify_sync_layout_columns(&[plain_doc.clone(), agent_doc.clone()]);
+        let columns = agent_doc_tmux::classify_sync_layout_columns(
+            &[plain_doc.clone(), agent_doc.clone()],
+            first_agent_doc_in_col,
+        );
 
         assert_eq!(columns[0].raw, plain_doc);
         assert_eq!(columns[0].agent_doc, None);
@@ -394,7 +355,7 @@ mod tests {
         let left = left.canonicalize().unwrap().to_string_lossy().to_string();
         let right = right.canonicalize().unwrap().to_string_lossy().to_string();
         let saved_layout = vec![left.clone(), right.clone()];
-        let resolved_column = focused_column_index(&saved_layout, Some(&right))
+        let resolved_column = agent_doc_tmux::focused_column_index(&saved_layout, Some(&right))
             .or(Some(0))
             .expect("focused right column should resolve");
         assert_eq!(

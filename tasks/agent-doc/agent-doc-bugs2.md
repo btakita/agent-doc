@@ -142,7 +142,7 @@ Grouped response for `continue; do [#qftlossproof]; do [#qftlossproof]`: I’m t
 Both `#qftlossproof` queue entries are already struck, and the unresolved follow-up is represented by `#qftlossdelta` at the top of the backlog. No additional `#qftlossproof` dispatch is needed from this archived marker.
 
 <!-- /patch:exchange -->
-<!-- agent:boundary:566f765b -->
+<!-- agent:boundary:40ca3ff7 -->
 <!-- /agent:exchange -->
 ## Queue
 

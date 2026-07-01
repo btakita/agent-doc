@@ -226,6 +226,12 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
+use agent_doc_document::write_normalization::{
+    SplicePendingComponentWarning, cleanup_resolved_backlog_prompts_after_response,
+    count_code_fence_openings, latest_response_block_missing_from_current,
+    lift_pending_from_exchange, splice_pending_component,
+    splice_response_block_into_current_exchange, strip_boundary_for_dedup,
+};
 use agent_doc_document_realtime::write_policy::response_already_in_current;
 use agent_doc_element::element::{self, is_backlog_component};
 use agent_doc_element_exchange::{
@@ -363,151 +369,7 @@ fn read_response_input() -> Result<String> {
     Ok(response)
 }
 
-fn normalized_prompt_line(line: &str) -> String {
-    line.trim()
-        .strip_prefix('❯')
-        .unwrap_or_else(|| line.trim())
-        .trim()
-        .to_string()
-}
-
-fn prompt_target_lines(target: &str) -> Vec<String> {
-    target
-        .lines()
-        .map(normalized_prompt_line)
-        .filter(|line| !line.is_empty())
-        .collect()
-}
-
-fn prompt_target_matches_at(
-    segments: &[&str],
-    removed: &[bool],
-    start: usize,
-    target: &[String],
-) -> bool {
-    if start + target.len() > segments.len() {
-        return false;
-    }
-    target.iter().enumerate().all(|(offset, expected)| {
-        let idx = start + offset;
-        !removed[idx] && normalized_prompt_line(segments[idx].trim_end_matches('\n')) == *expected
-    })
-}
-
-fn remove_prompt_target_blocks_from_body(body: &str, targets: &[String]) -> (String, usize) {
-    let segments: Vec<&str> = body.split_inclusive('\n').collect();
-    if segments.is_empty() || targets.is_empty() {
-        return (body.to_string(), 0);
-    }
-
-    let mut removed = vec![false; segments.len()];
-    let mut removed_count = 0usize;
-    let target_lines: Vec<Vec<String>> = targets
-        .iter()
-        .map(|target| prompt_target_lines(target))
-        .filter(|lines| !lines.is_empty())
-        .collect();
-
-    for target in &target_lines {
-        if let Some(start) = (0..segments.len())
-            .rev()
-            .find(|&idx| prompt_target_matches_at(&segments, &removed, idx, target))
-        {
-            for slot in removed.iter_mut().skip(start).take(target.len()) {
-                *slot = true;
-            }
-            removed_count += 1;
-        }
-    }
-
-    if removed_count == 0 {
-        return (body.to_string(), 0);
-    }
-
-    let mut cleaned = String::with_capacity(body.len());
-    for (idx, segment) in segments.iter().enumerate() {
-        if !removed[idx] {
-            cleaned.push_str(segment);
-        }
-    }
-    (cleaned, removed_count)
-}
-
-fn prompt_targets_added_to_backlog(
-    base: &str,
-    current: &str,
-) -> Result<Vec<(String, Vec<String>)>> {
-    let base_components = element::parse(base).context("failed to parse baseline components")?;
-    let current_components =
-        element::parse(current).context("failed to parse current components")?;
-    let mut targets = Vec::new();
-
-    for current_component in current_components
-        .iter()
-        .filter(|component| is_backlog_component(&component.name))
-    {
-        let base_body = base_components
-            .iter()
-            .find(|component| component.name == current_component.name)
-            .map(|component| component.content(base))
-            .unwrap_or("");
-        let current_body = current_component.content(current);
-        let Some(diff_text) = agent_doc_diff::unified_diff_from_contents(base_body, current_body)
-        else {
-            continue;
-        };
-        let component_targets: Vec<String> =
-            agent_doc_diff::classify_prompt_bearing_changes(&diff_text)
-                .into_iter()
-                .filter(|change| {
-                    change.kind == agent_doc_diff::PromptBearingChangeKind::PromptTarget
-                })
-                .map(|change| change.text)
-                .collect();
-        if !component_targets.is_empty() {
-            targets.push((current_component.name.clone(), component_targets));
-        }
-    }
-
-    Ok(targets)
-}
-
-fn cleanup_resolved_backlog_prompts_after_response(
-    file: &Path,
-    base: &str,
-    current: &str,
-    final_content: &str,
-) -> Result<Option<String>> {
-    let targets = prompt_targets_added_to_backlog(base, current)?;
-    if targets.is_empty() {
-        return Ok(None);
-    }
-
-    let mut result = final_content.to_string();
-    let mut removed_total = 0usize;
-    for (component_name, component_targets) in targets {
-        let components = element::parse(&result)
-            .with_context(|| format!("failed to parse final components in {}", file.display()))?;
-        let Some(component) = components
-            .iter()
-            .find(|component| component.name == component_name)
-        else {
-            continue;
-        };
-        let body = component.content(&result);
-        let (cleaned_body, removed_count) =
-            remove_prompt_target_blocks_from_body(body, &component_targets);
-        if removed_count == 0 {
-            continue;
-        }
-        result = component.replace_content(&result, &cleaned_body);
-        removed_total += removed_count;
-    }
-
-    if removed_total == 0 {
-        return Ok(None);
-    }
-
+fn log_resolved_backlog_prompt_cleanup(file: &Path, removed_total: usize) {
     crate::ops_log::log_op(
         file,
         &format!(
@@ -520,7 +382,28 @@ fn cleanup_resolved_backlog_prompts_after_response(
         "[write] removed {} resolved prompt target(s) from backlog component(s)",
         removed_total
     );
-    Ok(Some(result))
+}
+
+fn log_splice_pending_component_warning(warning: &SplicePendingComponentWarning) {
+    match warning {
+        SplicePendingComponentWarning::SourceParseFailed(err) => {
+            eprintln!(
+                "[write] WARNING: splice_pending: failed to parse source components: {}",
+                err
+            );
+        }
+        SplicePendingComponentWarning::TargetParseFailed(err) => {
+            eprintln!(
+                "[write] WARNING: splice_pending: failed to parse target components: {}",
+                err
+            );
+        }
+        SplicePendingComponentWarning::TargetMissingBacklogComponent => {
+            eprintln!(
+                "[write] WARNING: splice_pending: source has tracked backlog content but target does not - pending mutations may be lost on IPC fallback"
+            );
+        }
+    }
 }
 
 fn shell_quote_cli_arg(arg: &str) -> String {
@@ -1890,77 +1773,6 @@ fn recover_missing_committed_head_response(file: &Path) -> Result<bool> {
     Ok(true)
 }
 
-fn latest_response_block_missing_from_current(head: &str, current: &str) -> Option<String> {
-    let head_norm =
-        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(head);
-    let current_norm =
-        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(current);
-    let heading = head_norm
-        .lines()
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            trimmed.starts_with("### Re:").then_some(trimmed)
-        })
-        .next_back()?;
-    if current_norm.lines().any(|line| line.trim() == heading) {
-        return None;
-    }
-    let head_components = agent_doc_element::element::parse(head).ok()?;
-    let head_exchange = head_components
-        .iter()
-        .find(|component| component.name == "exchange")?;
-    latest_response_block_from_exchange_body(head_exchange.content(head))
-}
-
-fn latest_response_block_from_exchange_body(body: &str) -> Option<String> {
-    let lines: Vec<&str> = body.lines().collect();
-    let start = lines
-        .iter()
-        .rposition(|line| line.trim().starts_with("### Re:"))?;
-    let end = lines
-        .iter()
-        .enumerate()
-        .skip(start + 1)
-        .find_map(|(idx, line)| {
-            let trimmed = line.trim();
-            (trimmed.starts_with("### Re:") || trimmed.starts_with("<!-- agent:boundary:"))
-                .then_some(idx)
-        })
-        .unwrap_or(lines.len());
-    let block = lines[start..end].join("\n");
-    let block = block.trim();
-    if block.is_empty() {
-        return None;
-    }
-    Some(format!("{block}\n"))
-}
-
-fn splice_response_block_into_current_exchange(
-    current: &str,
-    response_block: &str,
-) -> Option<String> {
-    let components = agent_doc_element::element::parse(current).ok()?;
-    let exchange = components
-        .iter()
-        .find(|component| component.name == "exchange")?;
-    let body = exchange.content(current);
-    let insert_at = body.rfind("<!-- agent:boundary:").unwrap_or(body.len());
-    let (before_boundary, boundary_and_after) = body.split_at(insert_at);
-    let mut new_body = before_boundary.to_string();
-    if !new_body.ends_with('\n') {
-        new_body.push('\n');
-    }
-    if !new_body.ends_with("\n\n") {
-        new_body.push('\n');
-    }
-    new_body.push_str(response_block.trim());
-    new_body.push('\n');
-    if !boundary_and_after.is_empty() {
-        new_body.push_str(boundary_and_after);
-    }
-    Some(exchange.replace_content(current, &new_body))
-}
-
 /// When `agent-doc write --commit <FILE>` runs with empty stdin and the
 /// working tree differs from HEAD only by the deletions a fresh
 /// `agent-doc dedupe <FILE>` would produce against HEAD, accept that as a
@@ -2089,42 +1901,6 @@ pub(crate) fn ipc_direct_disk_degraded_for_file(project_root: &Path, file: &Path
 
 mod normalize;
 pub use normalize::*;
-
-/// Lift `agent:pending` out of `agent:exchange` if nested.
-///
-/// After patch application, pending may end up nested inside exchange due to
-/// boundary synthesis or CRDT merge artifacts. This detects the nesting and
-/// moves the entire pending block (open tag through close tag) to after
-/// exchange's close tag.
-pub fn lift_pending_from_exchange(content: &str) -> Option<String> {
-    let components = match agent_doc_element::element::parse(content) {
-        Ok(c) => c,
-        Err(_) => return None,
-    };
-    let exchange = components.iter().find(|c| c.name == "exchange")?;
-    let pending = components.iter().find(|c| is_backlog_component(&c.name))?;
-
-    if pending.open_start >= exchange.close_end {
-        return None; // already a sibling — no repair needed
-    }
-    if pending.open_start < exchange.open_end {
-        return None; // pending is before exchange, not nested
-    }
-
-    // pending is nested inside exchange — lift it out
-    let pending_block = &content[pending.open_start..pending.close_end];
-    let mut result = String::with_capacity(content.len() + 4);
-    // Everything before pending (still inside exchange)
-    result.push_str(&content[..pending.open_start]);
-    // Skip pending block, continue to exchange close
-    result.push_str(&content[pending.close_end..exchange.close_end]);
-    // Insert pending as sibling after exchange close
-    result.push('\n');
-    result.push_str(pending_block);
-    // Rest of document after exchange close
-    result.push_str(&content[exchange.close_end..]);
-    Some(result)
-}
 
 pub fn lift_pending_from_exchange_safe(content: &str, file: &std::path::Path) -> String {
     match lift_pending_from_exchange(content) {
@@ -2468,17 +2244,6 @@ pub fn normalize_template_structure_or_fail_preserving(
         Err(err) => Err(err)
             .with_context(|| format!("template structure guard failed for {}", file.display())),
     }
-}
-
-/// Strip boundary markers for dedup comparison.
-/// Boundary markers (`<!-- agent:boundary:XXXXXXXX -->`) get a fresh ID on each write,
-/// so they must be excluded from content equality checks.
-fn strip_boundary_for_dedup(content: &str) -> String {
-    content
-        .lines()
-        .filter(|line| !line.trim().starts_with("<!-- agent:boundary:"))
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 /// Minimum byte count for exchange content before the shrink guard triggers.
@@ -3135,62 +2900,6 @@ pub(crate) fn repair_response_prompt_order_for_file(
     Ok(repaired)
 }
 
-/// Transfer the tracked backlog/pending component content from `source` into
-/// `target`.
-///
-/// When the on-disk file has pending mutations applied (e.g. `--done`)
-/// that are not reflected in `content_ours` (which was built from a pre-mutation
-/// baseline), this function preserves those mutations by splicing the tracked
-/// backlog component from `source` into `target`.
-///
-/// Behaviour:
-/// - If both `source` and `target` have a tracked backlog component: replaces the
-///   content between the markers in `target` with the content from `source`.
-/// - If `source` has no tracked backlog component: returns `target` unchanged.
-/// - If `source` has tracked backlog content but `target` does not: logs a
-///   warning and returns `target` unchanged (can't locate insertion point
-///   without knowing document structure).
-fn splice_pending_component(target: &str, source: &str) -> String {
-    let source_comps = match element::parse(source) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!(
-                "[write] WARNING: splice_pending: failed to parse source components: {}",
-                e
-            );
-            return target.to_string();
-        }
-    };
-    let source_pending = source_comps.iter().find(|c| is_backlog_component(&c.name));
-    let Some(src_comp) = source_pending else {
-        // No pending component in source — nothing to splice.
-        return target.to_string();
-    };
-    let source_content = &source[src_comp.open_end..src_comp.close_start];
-
-    let target_comps = match element::parse(target) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!(
-                "[write] WARNING: splice_pending: failed to parse target components: {}",
-                e
-            );
-            return target.to_string();
-        }
-    };
-    let target_pending = target_comps.iter().find(|c| is_backlog_component(&c.name));
-    match target_pending {
-        Some(tgt_comp) => tgt_comp.replace_content(target, source_content),
-        None => {
-            eprintln!(
-                "[write] WARNING: splice_pending: source has tracked backlog content but target does not — \
-                 pending mutations may be lost on IPC fallback"
-            );
-            target.to_string()
-        }
-    }
-}
-
 /// Atomic write: write to temp file then rename. Public for use by compact.
 pub fn atomic_write_pub(path: &Path, content: &str) -> Result<()> {
     atomic_write(path, content)
@@ -3233,31 +2942,6 @@ fn log_fence_count_drop_if_any(path: &Path, new_content: &str) {
             ),
         );
     }
-}
-
-/// Count lines that open a fenced code block: a line whose first non-whitespace
-/// run starts with three or more backticks or three or more tildies. Mirrors
-/// CommonMark's fence-open recognition loosely — it intentionally over-counts
-/// (no info-string / closing-fence discrimination) so the drop detector never
-/// under-reports a real fence loss.
-fn count_code_fence_openings(content: &str) -> usize {
-    content
-        .lines()
-        .filter(|line| {
-            let trimmed = line.trim_start();
-            if let Some(rest) = trimmed.strip_prefix("```") {
-                rest.is_empty()
-                    || rest.starts_with(|c: char| !c.is_whitespace() && c != '`')
-                    || rest.starts_with(char::is_whitespace)
-            } else if let Some(rest) = trimmed.strip_prefix("~~~") {
-                rest.is_empty()
-                    || rest.starts_with(|c: char| !c.is_whitespace() && c != '~')
-                    || rest.starts_with(char::is_whitespace)
-            } else {
-                false
-            }
-        })
-        .count()
 }
 
 /// Atomic write through the 08b document write-authority end state
@@ -6608,7 +6292,7 @@ original content
 - [x] [#aaaa] old item
 <!-- /agent:pending -->
 ";
-        let result = splice_pending_component(target, source);
+        let result = splice_pending_component(target, source).content;
         // exchange content from target is preserved
         assert!(
             result.contains("response content"),
@@ -6640,7 +6324,7 @@ response
 original
 <!-- /agent:exchange -->
 ";
-        let result = splice_pending_component(target, source);
+        let result = splice_pending_component(target, source).content;
         assert_eq!(
             result, target,
             "target should be returned unchanged when source has no pending"
@@ -6662,7 +6346,7 @@ original
 - [x] [#cccc] done item
 <!-- /agent:pending -->
 ";
-        let result = splice_pending_component(target, source);
+        let result = splice_pending_component(target, source).content;
         assert_eq!(
             result, target,
             "target should be returned unchanged when target has no pending"

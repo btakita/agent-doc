@@ -174,6 +174,7 @@ dependencies = [
 name = "agent-doc-document"
 version = "0.34.65"
 dependencies = [
+ "agent-doc-diff",
  "agent-doc-element",
  "agent-doc-element-backlog",
  "agent-doc-element-registry",

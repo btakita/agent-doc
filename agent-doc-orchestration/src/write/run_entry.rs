@@ -324,16 +324,13 @@ pub fn run_template(
             &final_content,
             Some(&response),
         )?;
-        let cleaned_resolved_backlog_prompts = cleanup_resolved_backlog_prompts_after_response(
-            file,
-            base,
-            content_current,
-            &final_content,
-        )?;
+        let cleaned_resolved_backlog_prompts =
+            cleanup_resolved_backlog_prompts_after_response(base, content_current, &final_content)?;
         let cleaned_applied = cleaned_resolved_backlog_prompts.is_some();
         if let Some(cleaned) = cleaned_resolved_backlog_prompts {
+            log_resolved_backlog_prompt_cleanup(file, cleaned.removed);
             final_content = normalize_template_structure_or_fail_preserving(
-                &cleaned,
+                &cleaned.content,
                 file,
                 Some(content_current),
             )?;
@@ -942,8 +939,11 @@ pub fn run_stream(
                         e
                     );
                     let spliced = splice_pending_component(&content_ours, content_current);
-                    let doc = agent_doc_merge::crdt::CrdtDoc::from_text(&spliced);
-                    (spliced, doc.encode_state())
+                    if let Some(warning) = spliced.warning.as_ref() {
+                        log_splice_pending_component_warning(warning);
+                    }
+                    let doc = agent_doc_merge::crdt::CrdtDoc::from_text(&spliced.content);
+                    (spliced.content, doc.encode_state())
                 }
             }
         };
@@ -955,16 +955,13 @@ pub fn run_stream(
             &final_content,
             Some(&response),
         )?;
-        let cleaned_resolved_backlog_prompts = cleanup_resolved_backlog_prompts_after_response(
-            file,
-            base,
-            content_current,
-            &final_content,
-        )?;
+        let cleaned_resolved_backlog_prompts =
+            cleanup_resolved_backlog_prompts_after_response(base, content_current, &final_content)?;
         let cleaned_applied = cleaned_resolved_backlog_prompts.is_some();
         if let Some(cleaned) = cleaned_resolved_backlog_prompts {
+            log_resolved_backlog_prompt_cleanup(file, cleaned.removed);
             final_content = normalize_template_structure_or_fail_preserving(
-                &cleaned,
+                &cleaned.content,
                 file,
                 Some(content_current),
             )?;

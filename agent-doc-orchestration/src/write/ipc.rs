@@ -317,7 +317,13 @@ pub(crate) fn poll_ack_content_sidecar(
 #[cfg(test)]
 pub(crate) fn content_ours_with_pending_from_disk(file: &Path, content_ours: &str) -> String {
     match std::fs::read_to_string(file) {
-        Ok(on_disk_content) => splice_pending_component(content_ours, &on_disk_content),
+        Ok(on_disk_content) => {
+            let spliced = splice_pending_component(content_ours, &on_disk_content);
+            if let Some(warning) = spliced.warning.as_ref() {
+                log_splice_pending_component_warning(warning);
+            }
+            spliced.content
+        }
         Err(e) => {
             eprintln!(
                 "[write] WARNING: failed to read {} while preserving pending mutations during normalization fallback: {}",

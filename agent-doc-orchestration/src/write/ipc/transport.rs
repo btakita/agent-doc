@@ -3601,8 +3601,6 @@ mod submodule_patch_routing_tests {
 
     #[test]
     fn cleanup_resolved_backlog_prompts_removes_new_prompt_target_only() {
-        let dir = TempDir::new().unwrap();
-        let doc = dir.path().join("session.md");
         let base = concat!(
             "<!-- agent:exchange patch=append -->\n",
             "### Re: earlier — gpt-5\n\n",
@@ -3635,20 +3633,21 @@ mod submodule_patch_routing_tests {
             "<!-- /agent:backlog -->\n",
         );
 
-        let cleaned =
-            cleanup_resolved_backlog_prompts_after_response(&doc, base, current, final_content)
-                .unwrap()
-                .expect("prompt target should be cleaned");
+        let cleaned = cleanup_resolved_backlog_prompts_after_response(base, current, final_content)
+            .unwrap()
+            .expect("prompt target should be cleaned");
 
-        assert!(cleaned.contains("### Re: backlog prompt — gpt-5"));
-        assert!(cleaned.contains("- [x] [#keep1] Keep this tracked item"));
-        assert!(!cleaned.contains("commit + push uncommitted files"));
+        assert!(cleaned.content.contains("### Re: backlog prompt — gpt-5"));
+        assert!(
+            cleaned
+                .content
+                .contains("- [x] [#keep1] Keep this tracked item")
+        );
+        assert!(!cleaned.content.contains("commit + push uncommitted files"));
     }
 
     #[test]
     fn cleanup_resolved_backlog_prompts_preserves_non_prompt_backlog_edits() {
-        let dir = TempDir::new().unwrap();
-        let doc = dir.path().join("session.md");
         let base = concat!(
             "<!-- agent:exchange patch=append -->\n",
             "<!-- /agent:exchange -->\n\n",
@@ -3666,7 +3665,7 @@ mod submodule_patch_routing_tests {
         );
 
         let cleaned =
-            cleanup_resolved_backlog_prompts_after_response(&doc, base, current, current).unwrap();
+            cleanup_resolved_backlog_prompts_after_response(base, current, current).unwrap();
         assert!(
             cleaned.is_none(),
             "ordinary tracked backlog additions are not prompt cleanup targets"

@@ -12643,6 +12643,71 @@ fn test_agent_doc_document_owns_singleton_component_repair_policy() {
 }
 
 #[test]
+fn test_agent_doc_document_owns_write_normalization_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let document_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/lib.rs")).unwrap();
+    assert!(
+        document_lib.contains("pub mod write_normalization;"),
+        "agent-doc-document should expose write normalization through its owning module"
+    );
+    assert!(
+        !document_lib.contains("pub use write_normalization"),
+        "agent-doc-document should not add a write-normalization root facade"
+    );
+
+    let write_normalization =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/write_normalization.rs"))
+            .unwrap();
+    for required in [
+        "pub fn cleanup_resolved_backlog_prompts_after_response(",
+        "pub fn remove_prompt_target_blocks_from_body(",
+        "pub fn latest_response_block_missing_from_current(",
+        "pub fn splice_response_block_into_current_exchange(",
+        "pub fn lift_pending_from_exchange(",
+        "pub fn strip_boundary_for_dedup(",
+        "pub fn splice_pending_component(",
+        "pub fn count_code_fence_openings(",
+    ] {
+        assert!(
+            write_normalization.contains(required),
+            "agent-doc-document must own write normalization policy: {required}"
+        );
+    }
+    assert!(
+        !write_normalization.contains("agent_doc_orchestration::"),
+        "write normalization policy must not reach back through orchestration"
+    );
+
+    let write =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    for forbidden in [
+        "fn normalized_prompt_line(",
+        "fn prompt_target_lines(",
+        "fn prompt_target_matches_at(",
+        "fn remove_prompt_target_blocks_from_body(",
+        "fn prompt_targets_added_to_backlog(",
+        "fn cleanup_resolved_backlog_prompts_after_response(",
+        "fn latest_response_block_missing_from_current(",
+        "fn latest_response_block_from_exchange_body(",
+        "fn splice_response_block_into_current_exchange(",
+        "pub fn lift_pending_from_exchange(",
+        "fn strip_boundary_for_dedup(",
+        "fn splice_pending_component(",
+        "fn count_code_fence_openings(",
+    ] {
+        assert!(
+            !write.contains(forbidden),
+            "write.rs must not re-own write normalization policy: {forbidden}"
+        );
+    }
+    assert!(
+        write.contains("use agent_doc_document::write_normalization::{"),
+        "write.rs should call focused write normalization policy directly"
+    );
+}
+
+#[test]
 fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let exchange_lib =

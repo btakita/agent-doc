@@ -581,7 +581,7 @@ Yes — keep both; they're differentiators, not filler. "Agentic hours" explains
 
 24-44h is the cheapest insurance in the bid, not padding. REItrades is a **live** marketplace with real seller/buyer data, and every expensive downstream item — the teaser/OM production migration (30-65h), cascade deletes, the listing rebuild — depends on mapping an unfamiliar codebase + data model *before* touching it. The hours buy two things: (1) a repo/route/data-model map so the rest of the estimate firms up and agents work against real structure, and (2) a production-safety plan (migrations, rollback, delete policy) that prevents a live-data incident. It's ~4-5% of the full 545-850h engagement, it's **credited forward** into Phase 1, and it compresses toward the 16h low end if the codebase is clean. If you want a leaner headline, I can split it so only the ~16h audit is upfront and the safety plan rolls into Phase 1 — say the word.
 
-### Re: Phase-1 credit noted in §0 Setup — opus-4-8 (HEAD)
+### Re: Phase-1 credit noted in §0 Setup — opus-4-8
 
 > **Queue prompt:** In "0. Setup / technical audit", mention again that this work is credited to Phase 1.
 
@@ -590,6 +590,8 @@ Done. Added a note directly under the §0 Setup / technical audit table:
 > *This Phase-0 discovery work is **credited toward Phase 1** if we proceed — it is not an extra charge on top of the build, and it firms up every downstream estimate before any production code is written.*
 
 So the credit-forward now appears both at the line item (§0) and in the phasing section (§5 Phase 0) — a reader who lands on either one sees that the 24-44h isn't additive to the build. Report + regenerated PDF committed (`2e7f9521a`).
+
+❯ Please draft the linked in message for Artur, using the chosen framing.
 
 ### Re: Is the delete-listing estimate (and the bid overall) too high? — opus-4-8
 
@@ -619,7 +621,18 @@ I deliberately did **not** bid them lower across the board, and I'd caution agai
 3. **Trim specific rows now** if you've already decided the simple version is fine (e.g. archive-only deletes, no bulk-import audit trail).
 
 My recommendation: option 1 as the default framing, and I'll build option 2 (the lean-scope column) if you want a lower headline entry number to put in front of a bootstrapped buyer. Say which and I'll apply it + regenerate the PDF.
-<!-- agent:boundary:bd18db84 -->
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/recruit/reitrades.md source=ipc_visible_repair patch_id=57c0cf7e-4ab8-451c-98c8-888721358bd3 invariant=live_prompt_drift recovery=retry_without_disk_write redeliver_editor=true bad_len=59854 bad_hash=cba54f7950b14b2a7347de6c6ddd39f1a0b46842eec65157ca117980751624be repaired_len=63219 repaired_hash=b1a306203ab78e603deeace33da2995d5d32ca2305a0480c4b8ee8e91db6fe3f doc=reitrades session=62d195b8-b029-42a5-9c6c-836cb1b5b103 turn=cycle-1782922404840
+```
+<!-- agent:boundary:9cff2629 -->
 <!-- /agent:exchange -->
 
 ## Queue

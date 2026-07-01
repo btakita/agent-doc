@@ -874,7 +874,7 @@ Two notes:
 - The cash+equity line is soft and optional by design; it signals belief in the product without committing you to a number. If you'd rather keep equity out of a first re-approach, cut that sentence and it still reads well.
 
 Say the word and I'll publish it via `corky`/LinkedIn as a draft (no auto-send), or adjust tone/length.
-<!-- agent:boundary:0b08963b -->
+<!-- agent:boundary:ee21c7d8 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -885,7 +885,7 @@ Say the word and I'll publish it via `corky`/LinkedIn as a draft (no auto-send),
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#reirengagenote] [recommended] Draft a short no-pressure re-engagement note to Arthur/REItrades: respect the overseas-Upwork decision, leave the door open if it stalls, and optionally signal openness to a blended cash+equity structure.
+- [x] [#reirengagenote] [recommended] Draft a short no-pressure re-engagement note to Arthur/REItrades: respect the overseas-Upwork decision, leave the door open if it stalls, and optionally signal openness to a blended cash+equity structure.
 <!-- /agent:backlog -->
 
 ## Icebox

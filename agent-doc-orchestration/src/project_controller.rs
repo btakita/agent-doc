@@ -4,6 +4,10 @@
 //! generation changes, lifecycle reports, and routed dispatch acceptance.
 //! `sessions.json` and tmux state remain projections and layout inputs.
 
+use agent_doc_controller::paths::{
+    ACTOR_PROJECTION_FILE, LAYOUT_PROJECTION_FILE, actor_projection_path, launch_lock_path,
+    layout_projection_path, socket_path, state_path,
+};
 use agent_doc_controller::status::{
     ControlPlaneStoreCounts as ControllerControlPlaneStoreCounts, ControllerBinaryIdentity,
     ControllerBootstrapStatusFacts, ControllerFreshnessFacts, ControllerFreshnessStatus,
@@ -49,12 +53,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const SOCKET_FILE: &str = "controller.sock";
-const STATE_FILE: &str = "controller-state.json";
-const ACTOR_PROJECTION_FILE: &str = "session-actors.json";
-const LAYOUT_PROJECTION_FILE: &str = "last_layout.json";
 const DEFAULT_LAYOUT_SCOPE: &str = "default";
-const LOCK_FILE: &str = "controller-launch.lock";
 const CONNECT_WAIT: Duration = Duration::from_secs(3);
 const CONNECT_POLL: Duration = Duration::from_millis(50);
 /// How long a contended launch waits for the current holder to finish before
@@ -873,26 +872,6 @@ impl Drop for LaunchLock {
     fn drop(&mut self) {
         let _ = self._file.unlock();
     }
-}
-
-pub fn socket_path(project_root: &Path) -> PathBuf {
-    project_root.join(".agent-doc").join(SOCKET_FILE)
-}
-
-pub fn state_path(project_root: &Path) -> PathBuf {
-    project_root.join(".agent-doc").join(STATE_FILE)
-}
-
-fn actor_projection_path(project_root: &Path) -> PathBuf {
-    project_root.join(".agent-doc").join(ACTOR_PROJECTION_FILE)
-}
-
-fn layout_projection_path(project_root: &Path) -> PathBuf {
-    project_root.join(".agent-doc").join(LAYOUT_PROJECTION_FILE)
-}
-
-pub fn launch_lock_path(project_root: &Path) -> PathBuf {
-    project_root.join(".agent-doc/locks").join(LOCK_FILE)
 }
 
 pub fn read_bootstrap(project_root: &Path) -> Result<Option<ControllerBootstrap>> {
@@ -1918,8 +1897,7 @@ fn cmdline_has_preparing_handoff(pid: u32) -> bool {
         .filter(|arg| !arg.is_empty())
         .map(|arg| String::from_utf8_lossy(arg).to_string())
         .collect();
-    args.windows(2)
-        .any(|window| window[0] == "--handoff-state" && window[1] == "preparing")
+    agent_doc_controller::command_line::args_have_preparing_handoff(&args)
 }
 
 /// M3 (#stuckhandoff2) — process-scan reaper for *orphaned* preparing controllers.

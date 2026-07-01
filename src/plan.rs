@@ -39,7 +39,6 @@
 //! - `test_plan_detects_recommendation_request`
 //! - `test_plan_no_false_positive_on_questions`
 
-use agent_doc_document::queue_projection::strip_in_progress_marker;
 use agent_doc_hash::content_hash;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -187,7 +186,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         None
     };
     let queue_prompt = if doc_diff.is_none() && harness_diff.is_none() {
-        active_queue_prompt(&content)
+        agent_doc_queue::queue_heads::active_queue_prompt(&content)
     } else {
         None
     };
@@ -225,7 +224,8 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         });
     };
 
-    let queue_active_for_prompt_extraction = queue_is_active_for_diff(&content, &diff_text);
+    let queue_active_for_prompt_extraction =
+        agent_doc_queue::queue_heads::queue_is_active_for_diff(&content, &diff_text);
     let command_diff_text = if queue_active_for_prompt_extraction {
         diff_text.clone()
     } else {
@@ -380,54 +380,6 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         blockers: std::mem::take(&mut blockers),
         warnings,
     })
-}
-
-fn active_queue_prompt(content: &str) -> Option<String> {
-    let components = element::parse(content).ok()?;
-    let queue_component = components
-        .iter()
-        .find(|component| component.name == "queue")?;
-    let body = &content[queue_component.open_end..queue_component.close_start];
-    let entries = agent_doc_queue::document_queue::parse(body).ok()?;
-    let has_auto = agent_doc_queue::document_queue::has_auto_attr(&queue_component.attrs);
-    let (fm, _) = frontmatter::parse(content).ok()?;
-    let activation = agent_doc_queue::document_queue::resolve_activation(
-        &entries,
-        has_auto,
-        false,
-        fm.queue_active.unwrap_or(false),
-    );
-    if !activation.active {
-        return None;
-    }
-    agent_doc_queue::document_queue::prompts(&activation.entries_after)
-        .first()
-        .map(|prompt| strip_in_progress_marker(&prompt.text))
-}
-
-fn queue_is_active_for_diff(content: &str, diff_text: &str) -> bool {
-    let Ok(components) = element::parse(content) else {
-        return false;
-    };
-    let Some(queue_component) = components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
-        return false;
-    };
-    let body = &content[queue_component.open_end..queue_component.close_start];
-    let Ok(entries) = agent_doc_queue::document_queue::parse(body) else {
-        return false;
-    };
-    let has_auto = agent_doc_queue::document_queue::has_auto_attr(&queue_component.attrs);
-    let (fm, _) = frontmatter::parse(content).unwrap_or_default();
-    agent_doc_queue::document_queue::resolve_activation(
-        &entries,
-        has_auto,
-        diff::detect_queue_trigger(diff_text),
-        fm.queue_active.unwrap_or(false),
-    )
-    .active
 }
 
 fn orchestration_mode_arg(mode: diff::OrchestrationRequestMode) -> &'static str {

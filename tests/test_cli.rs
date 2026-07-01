@@ -9265,6 +9265,61 @@ fn test_agent_doc_controller_owns_handoff_staleness_policy() {
 }
 
 #[test]
+fn test_agent_doc_controller_owns_project_controller_paths() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let controller_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller/src/lib.rs")).unwrap();
+    let controller_paths =
+        fs::read_to_string(manifest_dir.join("agent-doc-controller/src/paths.rs")).unwrap();
+    assert!(
+        controller_lib.contains("pub mod paths;"),
+        "agent-doc-controller must expose focused controller path policy"
+    );
+    for required in [
+        "pub const SOCKET_FILE",
+        "pub const STATE_FILE",
+        "pub const ACTOR_PROJECTION_FILE",
+        "pub const LAYOUT_PROJECTION_FILE",
+        "pub const LOCK_FILE",
+        "pub fn socket_path(",
+        "pub fn state_path(",
+        "pub fn actor_projection_path(",
+        "pub fn layout_projection_path(",
+        "pub fn launch_lock_path(",
+    ] {
+        assert!(
+            controller_paths.contains(required),
+            "agent-doc-controller paths must own project controller path policy: {required}"
+        );
+    }
+
+    let project_controller =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/project_controller.rs"))
+            .unwrap();
+    for forbidden in [
+        "const SOCKET_FILE",
+        "const STATE_FILE",
+        "const ACTOR_PROJECTION_FILE",
+        "const LAYOUT_PROJECTION_FILE",
+        "const LOCK_FILE",
+        "pub fn socket_path(",
+        "pub fn state_path(",
+        "fn actor_projection_path(",
+        "fn layout_projection_path(",
+        "pub fn launch_lock_path(",
+    ] {
+        assert!(
+            !project_controller.contains(forbidden),
+            "project_controller.rs must not re-own controller path policy: {forbidden}"
+        );
+    }
+    assert!(
+        project_controller.contains("use agent_doc_controller::paths::{"),
+        "project_controller.rs should call focused controller path policy directly"
+    );
+}
+
+#[test]
 fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
@@ -9304,6 +9359,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn cmdline_has_file_match(",
         "pub fn agent_doc_cmdline_is_owner(",
         "pub fn cmdline_owns_other_document(",
+        "pub fn args_have_preparing_handoff(",
     ] {
         assert!(
             command_line_source.contains(required_snippet),
@@ -9400,12 +9456,18 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     for forbidden_snippet in [
         "fn agent_doc_controller_serve_arg_index(args:",
         "fn controller_serve_project_root_from_args(args:",
+        "window[0] == \"--handoff-state\" && window[1] == \"preparing\"",
     ] {
         assert!(
             !project_controller_source.contains(forbidden_snippet),
             "project_controller must not wrap pure controller command-line helpers: {forbidden_snippet}"
         );
     }
+    assert!(
+        project_controller_source
+            .contains("agent_doc_controller::command_line::args_have_preparing_handoff"),
+        "project_controller should call focused controller handoff command-line policy directly"
+    );
     for source in [&rpc_source, &project_controller_source] {
         assert!(
             source.contains(
@@ -11937,6 +11999,59 @@ fn test_agent_doc_queue_owns_operator_clear_preemption_policy() {
         orchestration_adapter.contains("agent_doc_queue_io::continuation_marker")
             && !orchestration_adapter.contains("use agent_doc_queue::queue_preemption::{"),
         "queue_continuation.rs should use focused queue-io marker storage, not queue-preemption directly"
+    );
+}
+
+#[test]
+fn test_agent_doc_element_done_owns_done_archive_content_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-element-done")),
+        "agent-doc-element-done must stay a first-class workspace crate"
+    );
+
+    let done_model =
+        fs::read_to_string(manifest_dir.join("agent-doc-element-done/src/lib.rs")).unwrap();
+    for required in [
+        "pub const DONE_SECTION_HEADING",
+        "pub const EMPTY_DONE_COMPONENT",
+        "pub fn insert_done_component_after_tracked_work(",
+        "pub fn render_done_archive_entry(",
+    ] {
+        assert!(
+            done_model.contains(required),
+            "agent-doc-element-done must own done archive content policy: {required}"
+        );
+    }
+
+    let orchestration_cargo =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    assert!(
+        orchestration_cargo.contains("agent-doc-element-done"),
+        "agent-doc-orchestration should depend on the focused done element crate directly"
+    );
+    let preflight =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    for forbidden in [
+        "fn insert_pending_done_component(",
+        "fn insert_done_component_after_tracked_work(",
+        "fn render_done_archive_entry(",
+        "## Completed / Reaped\\n\\n<!-- agent:done -->",
+    ] {
+        assert!(
+            !preflight.contains(forbidden),
+            "preflight.rs must not re-own done archive content policy: {forbidden}"
+        );
+    }
+    assert!(
+        preflight.contains("agent_doc_element_done::insert_done_component_after_tracked_work")
+            && preflight.contains("agent_doc_element_done::render_done_archive_entry"),
+        "preflight.rs should call done archive content policy through agent-doc-element-done directly"
     );
 }
 
@@ -16531,6 +16646,8 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
         "pub fn active_queue_heads(",
         "pub fn active_free_text_queue_heads(",
         "pub fn active_queue_head_text(",
+        "pub fn active_queue_prompt(",
+        "pub fn queue_is_active_for_diff(",
         "pub enum ActiveQueueHeadKind",
         "pub fn classify_active_queue_head(",
         "pub fn queue_skip_diagnostic_for_content(",
@@ -16633,6 +16750,23 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
     assert!(
         queue_response.contains("crate::queue_heads::active_queue_head_text"),
         "queue_response should share active queue-head projection through queue_heads"
+    );
+
+    let plan_source = fs::read_to_string(manifest_dir.join("src/plan.rs")).unwrap();
+    for forbidden_snippet in [
+        "fn active_queue_prompt(",
+        "fn queue_is_active_for_diff(",
+        "agent_doc_queue::document_queue::resolve_activation(",
+    ] {
+        assert!(
+            !plan_source.contains(forbidden_snippet),
+            "plan.rs must not re-own active queue activation policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        plan_source.contains("agent_doc_queue::queue_heads::active_queue_prompt")
+            && plan_source.contains("agent_doc_queue::queue_heads::queue_is_active_for_diff"),
+        "plan.rs should call active queue activation policy through agent-doc-queue directly"
     );
 
     let queue_closeout_guard =

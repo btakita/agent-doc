@@ -483,6 +483,7 @@ dependencies = [
  "agent-doc-element",
  "agent-doc-element-backlog",
  "agent-doc-element-boundary",
+ "agent-doc-element-done",
  "agent-doc-element-exchange",
  "agent-doc-element-queue",
  "agent-doc-element-review",

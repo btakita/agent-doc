@@ -4,7 +4,7 @@
 //! document text; file IO, cycle-state persistence, and closeout guards stay in
 //! orchestration.
 
-use agent_doc_document::queue_projection::strip_priority_markers;
+use agent_doc_document::queue_projection::{strip_in_progress_marker, strip_priority_markers};
 use anyhow::{Context, Result};
 
 use crate::queue_response::{
@@ -52,6 +52,56 @@ pub fn active_queue_head_text(content: &str) -> Result<Option<String>> {
     let entries = crate::document_queue::parse(queue.content(content))
         .context("queue consume guard: failed to parse document queue")?;
     Ok(crate::document_queue::first_prompt(&entries).map(|prompt| prompt.text.clone()))
+}
+
+/// Return the first prompt that should drive dispatch when the document has no
+/// fresh diff but its queue is already active.
+pub fn active_queue_prompt(content: &str) -> Option<String> {
+    let components = agent_doc_element::element::parse(content).ok()?;
+    let queue_component = components
+        .iter()
+        .find(|component| component.name == "queue")?;
+    let entries = crate::document_queue::parse(queue_component.content(content)).ok()?;
+    let has_auto = crate::document_queue::has_auto_attr(&queue_component.attrs);
+    let (fm, _) = agent_doc_frontmatter::frontmatter::parse(content).ok()?;
+    let activation = crate::document_queue::resolve_activation(
+        &entries,
+        has_auto,
+        false,
+        fm.queue_active.unwrap_or(false),
+    );
+    if !activation.active {
+        return None;
+    }
+    crate::document_queue::prompts(&activation.entries_after)
+        .first()
+        .map(|prompt| strip_in_progress_marker(&prompt.text))
+}
+
+/// True when the current diff activates the document queue for prompt
+/// extraction, including explicit `do queue` / `run queue` triggers.
+pub fn queue_is_active_for_diff(content: &str, diff_text: &str) -> bool {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return false;
+    };
+    let Some(queue_component) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return false;
+    };
+    let Ok(entries) = crate::document_queue::parse(queue_component.content(content)) else {
+        return false;
+    };
+    let has_auto = crate::document_queue::has_auto_attr(&queue_component.attrs);
+    let (fm, _) = agent_doc_frontmatter::frontmatter::parse(content).unwrap_or_default();
+    crate::document_queue::resolve_activation(
+        &entries,
+        has_auto,
+        agent_doc_diff::detect_queue_trigger(diff_text),
+        fm.queue_active.unwrap_or(false),
+    )
+    .active
 }
 
 /// Classification of the leading prompt in an `agent:queue` component for
@@ -347,6 +397,89 @@ mod tests {
         );
         let inactive = HALT_QUEUE_DOC.replace("queue_active: true", "queue_active: false");
         assert_eq!(active_queue_head_text(&inactive).unwrap(), None);
+    }
+
+    #[test]
+    fn active_queue_prompt_returns_first_active_auto_prompt() {
+        let doc = concat!(
+            "---\nqueue_active: false\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#build]\n",
+            "- write the status note\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        assert_eq!(active_queue_prompt(doc), Some("do [#build]".to_string()));
+    }
+
+    #[test]
+    fn active_queue_prompt_honors_persisted_queue_active() {
+        let doc = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue -->\n",
+            "- write the status note\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        assert_eq!(
+            active_queue_prompt(doc),
+            Some("write the status note".to_string())
+        );
+    }
+
+    #[test]
+    fn active_queue_prompt_strips_in_progress_marker() {
+        let doc = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue -->\n",
+            "- 🚧 write the status note\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        assert_eq!(
+            active_queue_prompt(doc),
+            Some("write the status note".to_string())
+        );
+    }
+
+    #[test]
+    fn active_queue_prompt_returns_none_for_inactive_queue() {
+        let doc = concat!(
+            "---\nqueue_active: false\n---\n\n",
+            "<!-- agent:queue -->\n",
+            "- write the status note\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        assert_eq!(active_queue_prompt(doc), None);
+    }
+
+    #[test]
+    fn queue_is_active_for_diff_accepts_exchange_trigger() {
+        let doc = concat!(
+            "---\nqueue_active: false\n---\n\n",
+            "<!-- agent:queue -->\n",
+            "- write the status note\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let diff = concat!(
+            "diff --git a/tasks/doc.md b/tasks/doc.md\n",
+            "@@\n",
+            "+do queue\n",
+        );
+
+        assert!(queue_is_active_for_diff(doc, diff));
+    }
+
+    #[test]
+    fn queue_is_active_for_diff_returns_false_for_missing_queue() {
+        let diff = concat!(
+            "diff --git a/tasks/doc.md b/tasks/doc.md\n",
+            "@@\n",
+            "+do queue\n",
+        );
+
+        assert!(!queue_is_active_for_diff("plain document", diff));
     }
 
     #[test]

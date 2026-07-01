@@ -1938,8 +1938,9 @@ pub fn archive_pending_done(
         .iter()
         .any(|c| agent_doc_element::element::is_backlog_done_component(&c.name))
     {
-        content_with_archive = insert_pending_done_component(&content_with_archive)
-            .context("failed to insert agent:done component")?;
+        content_with_archive =
+            agent_doc_element_done::insert_done_component_after_tracked_work(&content_with_archive)
+                .context("failed to insert agent:done component")?;
     }
     let components = agent_doc_element::element::parse(&content_with_archive)?;
     let archive = components
@@ -1979,32 +1980,17 @@ pub fn archive_pending_done(
         new_body.push('\n');
     }
     for item in removed {
-        new_body.push_str(&render_done_archive_entry(&today, item));
+        new_body.push_str(&agent_doc_element_done::render_done_archive_entry(
+            &today,
+            &item.id,
+            &item.text,
+            &item.continuation,
+        ));
     }
 
     Ok(Some(
         archive.replace_content(&content_with_archive, &new_body),
     ))
-}
-
-fn insert_pending_done_component(content: &str) -> Option<String> {
-    let components = agent_doc_element::element::parse(content).ok()?;
-    let anchor = components
-        .iter()
-        .filter(|c| agent_doc_element::element::is_tracked_work_component(&c.name))
-        .max_by_key(|c| c.close_end)?;
-    let insert_at = anchor.close_end;
-    let mut result = String::with_capacity(content.len() + 96);
-    result.push_str(&content[..insert_at]);
-    if !result.ends_with("\n\n") {
-        if !result.ends_with('\n') {
-            result.push('\n');
-        }
-        result.push('\n');
-    }
-    result.push_str("## Completed / Reaped\n\n<!-- agent:done -->\n<!-- /agent:done -->\n");
-    result.push_str(&content[insert_at..]);
-    Some(result)
 }
 
 pub fn external_done_archive_ids(file: &Path, content: &str) -> Result<HashSet<String>> {
@@ -2116,7 +2102,12 @@ fn append_external_done_archive(
         if existing.lines().any(|line| line == first_line) {
             continue;
         }
-        existing.push_str(&render_done_archive_entry(today, item));
+        existing.push_str(&agent_doc_element_done::render_done_archive_entry(
+            today,
+            &item.id,
+            &item.text,
+            &item.continuation,
+        ));
         changed = true;
     }
     if changed || !target.exists() {
@@ -2132,23 +2123,6 @@ fn append_external_done_archive(
             .with_context(|| format!("failed to write done archive {}", target.display()))?;
     }
     Ok(())
-}
-
-fn render_done_archive_entry(
-    today: &str,
-    item: &agent_doc_element_backlog::backlog::PendingItem,
-) -> String {
-    let mut entry = format!("- {} [#{}] {}", today, item.id, item.text);
-    if item.continuation.is_empty() {
-        entry.push('\n');
-    } else {
-        entry.push('\n');
-        entry.push_str(&item.continuation);
-        if !item.continuation.ends_with('\n') {
-            entry.push('\n');
-        }
-    }
-    entry
 }
 
 fn claims_log_path(file: &Path) -> Option<std::path::PathBuf> {

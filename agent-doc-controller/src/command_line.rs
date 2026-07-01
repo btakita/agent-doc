@@ -57,6 +57,11 @@ pub fn controller_serve_project_root_from_args(args: &[String]) -> Option<PathBu
         .find_map(|window| (window[0] == "--project-root").then(|| PathBuf::from(&window[1])))
 }
 
+pub fn args_have_preparing_handoff(args: &[String]) -> bool {
+    args.windows(2)
+        .any(|window| window[0] == "--handoff-state" && window[1] == "preparing")
+}
+
 /// True when `cmdline` is a long-lived agent-doc/harness owner invocation for
 /// some document, regardless of which document.
 pub fn cmdline_is_agent_doc_owner_session(cmdline: &str) -> bool {
@@ -249,6 +254,31 @@ mod tests {
             ]),
             None
         );
+    }
+
+    #[test]
+    fn args_have_preparing_handoff_detects_exact_flag_pair() {
+        assert!(args_have_preparing_handoff(&[
+            "agent-doc".to_string(),
+            "controller".to_string(),
+            "serve".to_string(),
+            "--handoff-state".to_string(),
+            "preparing".to_string(),
+        ]));
+        assert!(!args_have_preparing_handoff(&[
+            "agent-doc".to_string(),
+            "controller".to_string(),
+            "serve".to_string(),
+            "--handoff-state".to_string(),
+            "stable".to_string(),
+        ]));
+        assert!(!args_have_preparing_handoff(&[
+            "agent-doc".to_string(),
+            "controller".to_string(),
+            "serve".to_string(),
+            "preparing".to_string(),
+            "--handoff-state".to_string(),
+        ]));
     }
 
     #[test]

@@ -6,10 +6,11 @@
 
 use agent_doc_frontmatter::frontmatter::CodexNetworkAccess;
 use anyhow::Result;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::error::Error;
 use std::fmt;
 use std::path::PathBuf;
+use std::time::Duration;
 
 pub const CODEX_SANDBOX_NETWORK_DISABLED_ENV: &str = "CODEX_SANDBOX_NETWORK_DISABLED";
 pub const CODEX_CHILD_NETWORK_PROBE_MARKER: &str = "AGENT_DOC_NETWORK_PROBE_OK";
@@ -1004,6 +1005,101 @@ pub fn classify_child_writable_root_probe_failure(detail: &str, harness: &str) -
     } else {
         format!("{harness} child writable-root probe failed")
     }
+}
+
+pub fn add_dirs_from_args(args: &[String]) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        if arg == "--add-dir" {
+            if let Some(dir) = iter.next() {
+                dirs.push(PathBuf::from(dir));
+            }
+            continue;
+        }
+        if let Some(dir) = arg.strip_prefix("--add-dir=") {
+            dirs.push(PathBuf::from(dir));
+        }
+    }
+    dirs
+}
+
+pub fn args_contain_add_dir(args: &str) -> bool {
+    args.split_whitespace()
+        .any(|arg| arg == "--add-dir" || arg.starts_with("--add-dir="))
+}
+
+pub fn normalized_writable_root_strings(roots: &[PathBuf]) -> Vec<String> {
+    let mut normalized = BTreeSet::new();
+    for root in roots {
+        let path = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        normalized.insert(path.to_string_lossy().into_owned());
+    }
+    normalized.into_iter().collect()
+}
+
+pub fn writable_root_contract_id(roots: &[PathBuf]) -> Option<String> {
+    let normalized = normalized_writable_root_strings(roots);
+    if normalized.is_empty() {
+        return None;
+    }
+    Some(agent_doc_hash::path_string_hash(&normalized.join("\n")))
+}
+
+pub fn proof_status_label(required: bool, proven: bool) -> &'static str {
+    match (required, proven) {
+        (false, _) => "not_required",
+        (true, true) => "proven",
+        (true, false) => "failed",
+    }
+}
+
+pub fn proof_timing_ms(duration: Option<Duration>) -> String {
+    duration
+        .map(|value| value.as_millis().to_string())
+        .unwrap_or_else(|| "not_required".to_string())
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ManagedCapabilityProofTimings {
+    pub network_host_dns: Option<Duration>,
+    pub network_child: Option<Duration>,
+    pub ssh: Option<Duration>,
+    pub writable_launcher: Option<Duration>,
+    pub writable_child: Option<Duration>,
+    pub total: Duration,
+}
+
+impl ManagedCapabilityProofTimings {
+    pub fn event_fields(&self) -> String {
+        format!(
+            "timings_ms=network_host_dns:{},network_child:{},ssh:{},writable_launcher:{},writable_child:{},total:{}",
+            proof_timing_ms(self.network_host_dns),
+            proof_timing_ms(self.network_child),
+            proof_timing_ms(self.ssh),
+            proof_timing_ms(self.writable_launcher),
+            proof_timing_ms(self.writable_child),
+            self.total.as_millis()
+        )
+    }
+}
+
+pub fn managed_network_child_proof_cache_key(
+    command: &str,
+    args: &[String],
+    env: &HashMap<String, String>,
+    harness: &str,
+) -> String {
+    let mut env_pairs: Vec<_> = env.iter().collect();
+    env_pairs.sort_by_key(|(left, _)| *left);
+    let raw = serde_json::json!({
+        "harness": harness,
+        "command": command,
+        "probe_args": codex_exec_args_for_probe(args),
+        "env": env_pairs,
+    })
+    .to_string();
+    agent_doc_hash::content_hash(&raw)
 }
 
 #[cfg(test)]

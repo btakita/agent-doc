@@ -4129,7 +4129,8 @@ pub(crate) fn write_codex_writable_proof_status_fixture(
         ),
     )
     .unwrap();
-    let contract = crate::agent::codex::writable_root_contract_id(&[writable]).unwrap();
+    let contract =
+        agent_doc_turn_executor::codex_launch::writable_root_contract_id(&[writable]).unwrap();
     (doc, contract)
 }
 #[cfg(test)]

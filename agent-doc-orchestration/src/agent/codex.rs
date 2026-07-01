@@ -51,7 +51,7 @@
 //! - send_fork_args: verifies fork (resume --last) command
 
 use anyhow::Result;
-use std::collections::{BTreeSet, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 use std::io::BufRead;
 use std::net::ToSocketAddrs;
 use std::path::{Path, PathBuf};
@@ -66,7 +66,8 @@ use agent_doc_turn_executor::agent_stream::{StreamChunk, parse_codex_line};
 #[cfg(test)]
 use agent_doc_turn_executor::codex_launch::CODEX_CHILD_WRITABLE_ROOT_PROBE_MARKER;
 use agent_doc_turn_executor::codex_launch::{
-    CODEX_CHILD_NETWORK_PROBE_MARKER, OPENCODE_CHILD_SSH_PROBE_MARKER,
+    CODEX_CHILD_NETWORK_PROBE_MARKER, ManagedCapabilityProofTimings,
+    OPENCODE_CHILD_SSH_PROBE_MARKER, add_dirs_from_args, args_contain_add_dir,
     classify_child_network_probe_failure, classify_child_required_ssh_probe_failure,
     classify_child_writable_root_probe_failure, codex_child_network_probe_prompt,
     codex_child_writable_roots_probe_prompt, codex_exec_args_for_probe, codex_resume_restart_args,
@@ -74,11 +75,13 @@ use agent_doc_turn_executor::codex_launch::{
     looks_like_codex_transport_403_429, looks_like_local_browser_cdp_permission_denied,
     looks_like_opencode_usage_output, looks_like_ssh_alias_config_failure,
     looks_like_ssh_auth_failure, looks_like_ssh_dns_failure, looks_like_ssh_network_failure,
+    managed_network_child_proof_cache_key, normalized_writable_root_strings,
     opencode_child_network_probe_prompt, opencode_child_required_ssh_probe_prompt,
-    opencode_run_args_for_probe, resolve_codex_network_access, resume_capability_drift_notice,
-    transcript_has_required_ssh_failure, transcript_proves_required_ssh_success,
-    validate_codex_child_network_probe_output, validate_codex_child_writable_root_probe_output,
-    validate_opencode_child_probe_marker_output,
+    opencode_run_args_for_probe, proof_status_label, resolve_codex_network_access,
+    resume_capability_drift_notice, transcript_has_required_ssh_failure,
+    transcript_proves_required_ssh_success, validate_codex_child_network_probe_output,
+    validate_codex_child_writable_root_probe_output, validate_opencode_child_probe_marker_output,
+    writable_root_contract_id,
 };
 
 #[derive(Clone)]
@@ -142,23 +145,6 @@ fn append_isolated_ssh_probe_args(args: &mut Vec<String>) {
     );
 }
 
-fn add_dirs_from_args(args: &[String]) -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
-    let mut iter = args.iter();
-    while let Some(arg) = iter.next() {
-        if arg == "--add-dir" {
-            if let Some(dir) = iter.next() {
-                dirs.push(PathBuf::from(dir));
-            }
-            continue;
-        }
-        if let Some(dir) = arg.strip_prefix("--add-dir=") {
-            dirs.push(PathBuf::from(dir));
-        }
-    }
-    dirs
-}
-
 fn resolved_codex_agent_args_for_contract(
     fm: &Frontmatter,
     global_config: &agent_doc_config::Config,
@@ -168,23 +154,6 @@ fn resolved_codex_agent_args_for_contract(
         .or_else(|| fm.codex_args.clone())
         .or_else(|| global_config.agent_args.clone())
         .or_else(|| global_config.codex_args.clone())
-}
-
-fn normalized_writable_root_strings(roots: &[PathBuf]) -> Vec<String> {
-    let mut normalized = BTreeSet::new();
-    for root in roots {
-        let path = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
-        normalized.insert(path.to_string_lossy().into_owned());
-    }
-    normalized.into_iter().collect()
-}
-
-pub fn writable_root_contract_id(roots: &[PathBuf]) -> Option<String> {
-    let normalized = normalized_writable_root_strings(roots);
-    if normalized.is_empty() {
-        return None;
-    }
-    Some(crate::snapshot::doc_hash_from_str(&normalized.join("\n")))
 }
 
 pub fn managed_writable_roots_for_doc(
@@ -208,66 +177,10 @@ pub fn managed_writable_root_contract_id_for_doc(
     writable_root_contract_id(&managed_writable_roots_for_doc(file, fm, global_config))
 }
 
-fn proof_status_label(required: bool, proven: bool) -> &'static str {
-    match (required, proven) {
-        (false, _) => "not_required",
-        (true, true) => "proven",
-        (true, false) => "failed",
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-struct ManagedCapabilityProofTimings {
-    network_host_dns: Option<Duration>,
-    network_child: Option<Duration>,
-    ssh: Option<Duration>,
-    writable_launcher: Option<Duration>,
-    writable_child: Option<Duration>,
-    total: Duration,
-}
-
-fn proof_timing_ms(duration: Option<Duration>) -> String {
-    duration
-        .map(|value| value.as_millis().to_string())
-        .unwrap_or_else(|| "not_required".to_string())
-}
-
-impl ManagedCapabilityProofTimings {
-    fn event_fields(&self) -> String {
-        format!(
-            "timings_ms=network_host_dns:{},network_child:{},ssh:{},writable_launcher:{},writable_child:{},total:{}",
-            proof_timing_ms(self.network_host_dns),
-            proof_timing_ms(self.network_child),
-            proof_timing_ms(self.ssh),
-            proof_timing_ms(self.writable_launcher),
-            proof_timing_ms(self.writable_child),
-            self.total.as_millis()
-        )
-    }
-}
-
 static MANAGED_NETWORK_CHILD_PROOF_CACHE: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
 fn managed_network_child_proof_cache() -> &'static Mutex<HashSet<String>> {
     MANAGED_NETWORK_CHILD_PROOF_CACHE.get_or_init(|| Mutex::new(HashSet::new()))
-}
-
-fn managed_network_child_proof_cache_key(
-    command: &str,
-    args: &[String],
-    env: &std::collections::HashMap<String, String>,
-    harness: &str,
-) -> String {
-    let mut env_pairs: Vec<_> = env.iter().collect();
-    env_pairs.sort_by_key(|(left, _)| *left);
-    let raw = serde_json::json!({
-        "harness": harness,
-        "command": command,
-        "probe_args": codex_exec_args_for_probe(args),
-        "env": env_pairs,
-    })
-    .to_string();
-    agent_doc_hash::content_hash(&raw)
 }
 
 fn managed_network_child_proof_is_cached(key: &str) -> bool {
@@ -615,11 +528,6 @@ pub fn managed_capability_contract_required_for_doc_and_harness(
             .codex_args
             .as_deref()
             .is_some_and(args_contain_add_dir)
-}
-
-fn args_contain_add_dir(args: &str) -> bool {
-    args.split_whitespace()
-        .any(|arg| arg == "--add-dir" || arg.starts_with("--add-dir="))
 }
 
 pub fn managed_capability_contract_required(

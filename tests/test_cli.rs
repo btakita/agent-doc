@@ -9027,6 +9027,14 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         "pub fn validate_codex_child_network_probe_output(",
         "pub fn validate_opencode_child_probe_marker_output(",
         "pub fn validate_codex_child_writable_root_probe_output(",
+        "pub fn add_dirs_from_args(",
+        "pub fn args_contain_add_dir(",
+        "pub fn normalized_writable_root_strings(",
+        "pub fn writable_root_contract_id(",
+        "pub fn proof_status_label(",
+        "pub fn proof_timing_ms(",
+        "pub struct ManagedCapabilityProofTimings",
+        "pub fn managed_network_child_proof_cache_key(",
         "pub fn classify_child_network_probe_failure(",
         "pub fn classify_child_required_ssh_probe_failure(",
         "pub fn classify_child_writable_root_probe_failure(",
@@ -9257,6 +9265,14 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         "fn validate_codex_child_writable_root_probe_output(",
         "fn collect_json_strings(",
         "fn shell_single_quote(",
+        "fn add_dirs_from_args(",
+        "fn args_contain_add_dir(",
+        "fn normalized_writable_root_strings(",
+        "pub fn writable_root_contract_id(",
+        "fn proof_status_label(",
+        "fn proof_timing_ms(",
+        "struct ManagedCapabilityProofTimings",
+        "fn managed_network_child_proof_cache_key(",
         "fn classify_child_network_probe_failure(",
         "fn classify_child_required_ssh_probe_failure(",
         "fn classify_child_writable_root_probe_failure(",
@@ -9290,6 +9306,12 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
             && codex.contains("validate_codex_child_network_probe_output")
             && codex.contains("validate_opencode_child_probe_marker_output")
             && codex.contains("validate_codex_child_writable_root_probe_output")
+            && codex.contains("add_dirs_from_args")
+            && codex.contains("args_contain_add_dir")
+            && codex.contains("normalized_writable_root_strings")
+            && codex.contains("writable_root_contract_id")
+            && codex.contains("ManagedCapabilityProofTimings")
+            && codex.contains("managed_network_child_proof_cache_key")
             && codex.contains("classify_child_network_probe_failure")
             && codex.contains("classify_child_required_ssh_probe_failure")
             && codex.contains("classify_child_writable_root_probe_failure")

@@ -26,6 +26,7 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
+🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -231,7 +232,7 @@ What happened:
 - A follow-up preflight found another stale `preflight_started` cycle, `cycle-1782882671249`, appended the IPC proof diagnostic for the already-applied socket response, and committed that repair as `2b93bd940`. The remaining issue was live-buffer exchange drift beyond the committed snapshot, which this finalize closes through the normal binary-owned path.
 
 No source files needed changes in this recovery pass. The prior verification evidence for `#suptmuxstaleverify` remains the authoritative completion proof, and this closeout preserves the diagnostic text instead of manually rewriting the session document.
-<!-- agent:boundary:dd3d5e79 -->
+<!-- agent:boundary:c15949ba -->
 <!-- /agent:exchange -->
 ## Queue
 

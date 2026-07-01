@@ -16,7 +16,7 @@ use agent_doc_turn_executor::codex_launch::{
     codex_network_status_from_env_map, resolve_codex_network_access,
 };
 #[cfg(unix)]
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd};
 
 pub fn run(file: &Path, force: bool, route_owned: bool) -> Result<()> {
     run_with_reap_policy(file, force, route_owned, RouteOwnedReapPolicy::Auto)
@@ -58,6 +58,127 @@ struct HarnessLaunchSpec {
     base_args: Vec<String>,
     resolved_env: std::collections::HashMap<String, String>,
     capability_proof_required: bool,
+}
+
+#[cfg(unix)]
+struct SupervisorStderrRedirect {
+    saved_stderr: Option<OwnedFd>,
+}
+
+#[cfg(unix)]
+impl SupervisorStderrRedirect {
+    fn inactive() -> Self {
+        Self { saved_stderr: None }
+    }
+
+    fn maybe_start(
+        project_root: &Path,
+        harness: &agent_doc_harness::HarnessConfig,
+        route_owned: bool,
+        session_log: &mut Option<std::fs::File>,
+    ) -> Self {
+        if !route_owned || !harness.is_tui_harness() {
+            return Self::inactive();
+        }
+        match Self::start(project_root, harness, session_log) {
+            Ok(guard) => guard,
+            Err(err) => {
+                log_event(
+                    session_log,
+                    &format!(
+                        "supervisor_stderr_redirect_failed harness={} error={:?}",
+                        harness.binary,
+                        err.to_string()
+                    ),
+                );
+                eprintln!(
+                    "[start] warning: could not redirect supervisor stderr for {} TUI: {err:#}",
+                    harness.binary
+                );
+                Self::inactive()
+            }
+        }
+    }
+
+    fn start(
+        project_root: &Path,
+        harness: &agent_doc_harness::HarnessConfig,
+        session_log: &mut Option<std::fs::File>,
+    ) -> Result<Self> {
+        let logs_dir = project_root.join(".agent-doc").join("logs");
+        std::fs::create_dir_all(&logs_dir)
+            .with_context(|| format!("failed to create {}", logs_dir.display()))?;
+        let stderr_path = logs_dir.join("supervisor-stderr.log");
+        let log_file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&stderr_path)
+            .with_context(|| format!("failed to open {}", stderr_path.display()))?;
+        let saved_fd = unsafe { libc::dup(libc::STDERR_FILENO) };
+        if saved_fd < 0 {
+            anyhow::bail!("dup(stderr) failed: {}", std::io::Error::last_os_error());
+        }
+        let saved_stderr = unsafe { OwnedFd::from_raw_fd(saved_fd) };
+        let redirected = unsafe { libc::dup2(log_file.as_raw_fd(), libc::STDERR_FILENO) };
+        if redirected < 0 {
+            anyhow::bail!("dup2(stderr) failed: {}", std::io::Error::last_os_error());
+        }
+        log_event(
+            session_log,
+            &format!(
+                "supervisor_stderr_redirect harness={} target={}",
+                harness.binary,
+                stderr_path.display()
+            ),
+        );
+        eprintln!(
+            "[start] stderr redirected to {} for {} route-owned TUI",
+            stderr_path.display(),
+            harness.binary
+        );
+        Ok(Self {
+            saved_stderr: Some(saved_stderr),
+        })
+    }
+}
+
+#[cfg(unix)]
+impl Drop for SupervisorStderrRedirect {
+    fn drop(&mut self) {
+        let Some(saved_stderr) = self.saved_stderr.take() else {
+            return;
+        };
+        let restored = unsafe { libc::dup2(saved_stderr.as_raw_fd(), libc::STDERR_FILENO) };
+        if restored < 0 {
+            let msg = b"[start] warning: failed to restore stderr after supervisor redirect\n";
+            unsafe {
+                libc::write(
+                    saved_stderr.as_raw_fd(),
+                    msg.as_ptr().cast::<libc::c_void>(),
+                    msg.len(),
+                );
+            }
+        }
+    }
+}
+
+#[cfg(not(unix))]
+struct SupervisorStderrRedirect;
+
+#[cfg(not(unix))]
+impl SupervisorStderrRedirect {
+    fn inactive() -> Self {
+        Self
+    }
+
+    fn maybe_start(
+        _project_root: &Path,
+        _harness: &agent_doc_harness::HarnessConfig,
+        _route_owned: bool,
+        _session_log: &mut Option<std::fs::File>,
+    ) -> Self {
+        Self
+    }
 }
 
 /// Assemble the harness launch spec from current frontmatter + global config.
@@ -321,6 +442,12 @@ pub fn run_with_reap_policy(
 
     // Resolve harness config from frontmatter agent > config default_agent > claude
     let harness = agent_doc_harness::HarnessConfig::from_context(&fm, &global_config);
+    let _stderr_redirect = SupervisorStderrRedirect::maybe_start(
+        &project_root,
+        &harness,
+        route_owned,
+        &mut session_log,
+    );
     {
         let (source, _resolved_name) = if fm.agent.is_some() {
             ("frontmatter", fm.agent.as_deref().unwrap_or("?"))
@@ -843,41 +970,6 @@ pub fn run_with_reap_policy(
     // this, the outer pty's cooked mode silently converts \r to \n before
     // we even read it, breaking Enter for Claude Code's TUI.
     let raw_mode = RawMode::enable();
-
-    // Redirect stderr to a log file for TUI harnesses so that
-    // supervisor eprintln! diagnostics do not bleed over the child TUI render.
-    #[cfg(unix)]
-    if harness.is_tui_harness() {
-        let logs_dir = project_root.join(".agent-doc").join("logs");
-        if let Ok(()) = std::fs::create_dir_all(&logs_dir) {
-            let stderr_path = logs_dir.join("supervisor-stderr.log");
-            match std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&stderr_path)
-            {
-                Ok(f) => {
-                    let fd = f.as_raw_fd();
-                    unsafe {
-                        libc::dup2(fd, libc::STDERR_FILENO);
-                    }
-                    eprintln!(
-                        "[start] stderr redirected to {} for {} TUI",
-                        stderr_path.display(),
-                        harness.binary
-                    );
-                }
-                Err(e) => {
-                    // Keep stderr as-is; the TUI bleed is cosmetic, not fatal.
-                    eprintln!(
-                        "[start] warning: could not open {}: {}",
-                        stderr_path.display(),
-                        e
-                    );
-                }
-            }
-        }
-    }
 
     // --- Supervisor restart loop ---
     // `#ctlrecycle` R3 — if this process was launched by a stale supervisor's

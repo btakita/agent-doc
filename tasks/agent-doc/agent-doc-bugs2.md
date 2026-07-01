@@ -216,7 +216,22 @@ Evidence:
 Changed source paths: none in this verification cycle; the pane-title marker implementation was already in the installed source tree.
 
 Confidence: high that the warning appears only for a genuinely stale supervisor. Escalation: none; I did not use `--force-disk` or manually kill the live supervisor.
-<!-- agent:boundary:4a529064 -->
+
+### Re: external termination recovery for :pushpin: do [#suptmuxstaleverify] — gpt-5
+
+> **Queue prompt:**
+> :pushpin: do [#suptmuxstaleverify]
+
+I investigated the externally terminated run and completed the interrupted `#suptmuxstaleverify` closeout.
+
+What happened:
+- The interrupted cycle was `cycle-1782882001811`. It repeatedly reached `response_captured` between 2026-07-01T05:02:15Z and 2026-07-01T05:06:06Z, but never reached `committed` because the convergence gate stayed unmet: `committed,editor_converged`.
+- The supervisor was stale and auto-install/recycle ran during that stuck cycle. At 2026-07-01T05:07:40Z the cycle was marked `abandoned` with `event=suprecyclespin_stalled_cycle_resolved`, then the stale supervisor hot-reloaded onto the freshly installed binary.
+- A later recovery cycle, `cycle-1782882659553`, successfully committed the `#suptmuxstaleverify` response as commit `fd24c070d`. That response records the stale-supervisor proof, focused test evidence, successful `make install`, and the fact that the live fresh transition waits for idle after commit.
+- A follow-up preflight found another stale `preflight_started` cycle, `cycle-1782882671249`, appended the IPC proof diagnostic for the already-applied socket response, and committed that repair as `2b93bd940`. The remaining issue was live-buffer exchange drift beyond the committed snapshot, which this finalize closes through the normal binary-owned path.
+
+No source files needed changes in this recovery pass. The prior verification evidence for `#suptmuxstaleverify` remains the authoritative completion proof, and this closeout preserves the diagnostic text instead of manually rewriting the session document.
+<!-- agent:boundary:dd3d5e79 -->
 <!-- /agent:exchange -->
 ## Queue
 

@@ -5,7 +5,7 @@
 //! stable invariant outcomes.
 
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::{fmt::Write as _, path::Path};
 
 use crate::invariants::{
     RemediationAction, WorkflowInvariant, WorkflowInvariantCatalog, WorkflowInvariantId,
@@ -234,6 +234,51 @@ pub fn evaluate_catalog(
         results,
         warnings,
     }
+}
+
+pub fn format_text_report(report: &WorkflowDoctorReport) -> String {
+    let mut output = String::new();
+    writeln!(
+        &mut output,
+        "workflow doctor: {} outcome={}",
+        report.file,
+        report.outcome.as_str()
+    )
+    .expect("write workflow doctor report header");
+    for warning in &report.warnings {
+        writeln!(&mut output, "warning: {warning}").expect("write workflow doctor warning");
+    }
+    for result in &report.results {
+        writeln!(
+            &mut output,
+            "- {} outcome={} title={}",
+            result.id,
+            result.outcome.as_str(),
+            result.title
+        )
+        .expect("write workflow doctor result");
+        for evidence in &result.evidence {
+            writeln!(&mut output, "  evidence: {evidence}")
+                .expect("write workflow doctor evidence");
+        }
+        for missing in &result.missing_fact_sources {
+            writeln!(&mut output, "  missing: {missing}")
+                .expect("write workflow doctor missing fact");
+        }
+        for marker in &result.disproof_markers {
+            writeln!(&mut output, "  disproof: {marker}")
+                .expect("write workflow doctor disproof marker");
+        }
+        for command in &result.repair_commands {
+            writeln!(&mut output, "  repair: {command}")
+                .expect("write workflow doctor repair command");
+        }
+        for action in &result.operator_actions {
+            writeln!(&mut output, "  operator: {action}")
+                .expect("write workflow doctor operator action");
+        }
+    }
+    output
 }
 
 fn evaluate_queue_continuation(
@@ -472,6 +517,23 @@ fn remediation_label(action: RemediationAction, command: Option<&str>) -> String
 
 fn has_marker(ops: &OpsLogDoctorFacts, marker: &str) -> bool {
     ops.markers.iter().any(|item| item == marker)
+}
+
+pub fn ops_log_facts_from_content(content: &str, limit: usize) -> OpsLogDoctorFacts {
+    let lines: Vec<&str> = content.lines().rev().take(limit.max(1)).collect();
+    let mut markers = Vec::new();
+    for line in lines.iter().rev() {
+        if let Some(marker) = classify_ops_marker(line) {
+            markers.push(marker.to_string());
+        }
+    }
+    markers.sort();
+    markers.dedup();
+    OpsLogDoctorFacts {
+        present: true,
+        scanned_lines: lines.len(),
+        markers,
+    }
 }
 
 pub fn classify_ops_marker(line: &str) -> Option<&'static str> {
@@ -721,5 +783,50 @@ mod tests {
     #[test]
     fn ops_marker_ignores_unrelated_lines() {
         assert_eq!(classify_ops_marker("plain ops log line"), None);
+    }
+
+    #[test]
+    fn ops_log_facts_scan_recent_lines_and_dedup_markers() {
+        let facts = ops_log_facts_from_content(
+            "blocked stale_generation current=4\nplain\nFile Cache Conflict\nFile Cache Conflict\n",
+            3,
+        );
+
+        assert!(facts.present);
+        assert_eq!(facts.scanned_lines, 3);
+        assert_eq!(facts.markers, vec!["editor_convergence_failure"]);
+    }
+
+    #[test]
+    fn text_report_formatter_includes_all_result_sections() {
+        let report = WorkflowDoctorReport {
+            schema_version: WORKFLOW_DOCTOR_SCHEMA_VERSION,
+            file: "tasks/example.md".to_string(),
+            outcome: WorkflowDoctorOutcome::Recoverable,
+            catalog_contract_version: "test".to_string(),
+            facts: WorkflowDoctorFacts::default(),
+            warnings: vec!["heads up".to_string()],
+            results: vec![WorkflowInvariantResult {
+                id: WorkflowInvariantId::CloseoutCommit,
+                title: "Closeout commit".to_string(),
+                outcome: WorkflowDoctorOutcome::Recoverable,
+                evidence: vec!["captured response".to_string()],
+                missing_fact_sources: vec!["session_check.ok".to_string()],
+                disproof_markers: vec!["stale marker".to_string()],
+                repair_commands: vec!["agent-doc write --commit tasks/example.md".to_string()],
+                operator_actions: vec!["operator review".to_string()],
+            }],
+        };
+
+        let text = format_text_report(&report);
+
+        assert!(text.contains("workflow doctor: tasks/example.md outcome=recoverable\n"));
+        assert!(text.contains("warning: heads up\n"));
+        assert!(text.contains("- closeout_commit outcome=recoverable title=Closeout commit\n"));
+        assert!(text.contains("  evidence: captured response\n"));
+        assert!(text.contains("  missing: session_check.ok\n"));
+        assert!(text.contains("  disproof: stale marker\n"));
+        assert!(text.contains("  repair: agent-doc write --commit tasks/example.md\n"));
+        assert!(text.contains("  operator: operator review\n"));
     }
 }

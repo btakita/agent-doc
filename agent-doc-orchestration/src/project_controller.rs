@@ -12,7 +12,7 @@ use agent_doc_controller::paths::{
     layout_projection_path, socket_path, state_path,
 };
 use agent_doc_controller::status::{
-    ControlPlaneStoreCounts as ControllerControlPlaneStoreCounts, ControllerBinaryIdentity,
+    self, ControlPlaneStoreCounts as ControllerControlPlaneStoreCounts, ControllerBinaryIdentity,
     ControllerBootstrapStatusFacts, ControllerFreshnessFacts, ControllerFreshnessStatus,
     ControllerHandoffState, ControllerStatus, LaunchMode, controller_restart_recovery_needed,
     default_controller_generation, preparing_controller_is_stale,
@@ -367,7 +367,12 @@ fn reconcile_supervisor_leases_after_restart(
         else {
             continue;
         };
-        let fresh = supervisor_lease_is_fresh_or_alive(&lease, now, Duration::from_secs(60));
+        let fresh = status::supervisor_lease_is_fresh_and_alive(
+            lease.last_heartbeat,
+            lease.supervisor_pid.is_some_and(process_is_alive),
+            now,
+            Duration::from_secs(60),
+        );
         let status = if fresh {
             stats.supervisor_reattached += 1;
             "reattached"
@@ -1195,21 +1200,6 @@ pub fn store_actor_record(
     Ok(record.clone())
 }
 
-fn supervisor_lease_is_fresh_or_alive(
-    lease: &SupervisorLeaseStatus,
-    now: u64,
-    stale_after: Duration,
-) -> bool {
-    let fresh_heartbeat = lease
-        .last_heartbeat
-        .map(|timestamp| now.saturating_sub(timestamp) <= stale_after.as_secs())
-        .unwrap_or(false);
-    if !fresh_heartbeat {
-        return false;
-    }
-    lease.supervisor_pid.map(process_is_alive).unwrap_or(false)
-}
-
 /// Default staleness window for the cross-document supervisor-lease guard
 /// (`#xdocsuper0`). Matches the 60s heartbeat freshness window used by
 /// `reconcile_supervisor_leases_after_restart` and the GC's stale-actor sweep.
@@ -1233,7 +1223,8 @@ pub const SUPERVISOR_LEASE_GUARD_STALE_AFTER: Duration = Duration::from_secs(60)
 /// generation:
 ///   - a supervisor lease row exists,
 ///   - the lease heartbeat is fresh (within `stale_after`) AND its
-///     `supervisor_pid` is a live process (`supervisor_lease_is_fresh_or_alive`),
+///     `supervisor_pid` is a live process
+///     (`status::supervisor_lease_is_fresh_and_alive`),
 ///   - the lease's `supervisor_pid` is *foreign* — i.e. not `self_pid` (the
 ///     short-lived claim CLI's own process), so we never count our own process
 ///     as a competing supervisor.
@@ -1260,13 +1251,15 @@ pub fn fresh_foreign_supervisor_lease_holds_document(
     else {
         return false;
     };
-    // A lease whose pid is our own claim process (or unset) is not a competing
-    // foreign supervisor.
-    match lease.supervisor_pid {
-        Some(pid) if pid != self_pid => {}
-        _ => return false,
+    if !status::supervisor_lease_pid_is_foreign(lease.supervisor_pid, self_pid) {
+        return false;
     }
-    supervisor_lease_is_fresh_or_alive(&lease, now, stale_after)
+    status::supervisor_lease_is_fresh_and_alive(
+        lease.last_heartbeat,
+        lease.supervisor_pid.is_some_and(process_is_alive),
+        now,
+        stale_after,
+    )
 }
 
 pub fn close_stale_starting_actors_for_caller(
@@ -1292,10 +1285,14 @@ pub fn close_stale_starting_actors_for_caller(
         }
 
         let lease = load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)?;
-        if lease
-            .as_ref()
-            .is_some_and(|lease| supervisor_lease_is_fresh_or_alive(lease, now, stale_after))
-        {
+        if lease.as_ref().is_some_and(|lease| {
+            status::supervisor_lease_is_fresh_and_alive(
+                lease.last_heartbeat,
+                lease.supervisor_pid.is_some_and(process_is_alive),
+                now,
+                stale_after,
+            )
+        }) {
             kept += 1;
             continue;
         }
@@ -1488,8 +1485,8 @@ pub const DEAD_ACTOR_PRUNE_AFTER: Duration = Duration::from_secs(3600);
 ///   - state is `Closed`,
 ///   - `last_transition.timestamp` is older than `dead_after`,
 ///   - no fresh/alive supervisor lease owns its document/generation
-///     (`supervisor_lease_is_fresh_or_alive`, the same guard the stale-`Starting`
-///     sweep uses) — so a live actor is never pruned.
+///     (`status::supervisor_lease_is_fresh_and_alive`, the same guard the
+///     stale-`Starting` sweep uses) — so a live actor is never pruned.
 ///
 /// `dry_run` logs the prune candidates without deleting. Every prune is logged
 /// (`<caller>_pruned_dead_actor ... reason=dead_closed_record`) — never silent.
@@ -1520,10 +1517,14 @@ pub fn prune_dead_actors_for_caller(
         // stale-Starting sweep). The pid-alive check inside means a dead
         // supervisor's lingering lease never blocks the prune.
         let lease = load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)?;
-        if lease
-            .as_ref()
-            .is_some_and(|lease| supervisor_lease_is_fresh_or_alive(lease, now, dead_after))
-        {
+        if lease.as_ref().is_some_and(|lease| {
+            status::supervisor_lease_is_fresh_and_alive(
+                lease.last_heartbeat,
+                lease.supervisor_pid.is_some_and(process_is_alive),
+                now,
+                dead_after,
+            )
+        }) {
             kept += 1;
             continue;
         }

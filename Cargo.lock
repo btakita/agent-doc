@@ -404,6 +404,12 @@ dependencies = [
 name = "agent-doc-git"
 version = "0.34.66"
 dependencies = [
+ "agent-doc-diff",
+ "agent-doc-document",
+ "agent-doc-document-realtime",
+ "agent-doc-element",
+ "agent-doc-frontmatter",
+ "agent-doc-template",
  "tempfile",
 ]
 

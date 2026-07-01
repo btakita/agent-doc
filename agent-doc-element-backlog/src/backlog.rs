@@ -1265,6 +1265,15 @@ pub fn op_remove_matching_tracked_line(body: &str, target: &str, contains: bool)
     (new_lines.join("\n"), removed)
 }
 
+/// Non-empty tracked-work body lines as rendered by the CLI list command.
+pub fn printable_tracked_work_lines(body: &str) -> Vec<String> {
+    body.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SymptomDedupeKey {
     pub invariant_id: String,
@@ -2845,6 +2854,13 @@ pub fn backfill(body: &str, doc_id: &str, existing_ids: &HashSet<String>) -> (St
     (new_body, changed)
 }
 
+/// Render a tracked-work component body in canonical form, assigning any
+/// missing ids against an otherwise empty active-id registry.
+pub fn canonicalize_tracked_work_body(body: &str, doc_id: &str) -> String {
+    let (canonical, _) = backfill(body, doc_id, &HashSet::new());
+    canonical
+}
+
 /// Reap `[x]` items. `[/]` (gated) items are never reaped.
 /// Returns `(new_body, removed_ids)`.
 #[allow(dead_code)]
@@ -3308,6 +3324,15 @@ pub fn op_edit(body: &str, id: &str, new_text: &str) -> Result<String> {
         return Err(anyhow!("pending edit: no item with id [#{}]", id));
     }
     Ok(layout.render())
+}
+
+/// Apply multiple text edits in order to one tracked-work body.
+pub fn op_edit_many(body: &str, edits: &[(String, String)]) -> Result<String> {
+    let mut next = body.to_string();
+    for (id, text) in edits {
+        next = op_edit(&next, id, text)?;
+    }
+    Ok(next)
 }
 
 /// Clear all items from the body. Non-item lines, including headers, are preserved.
@@ -5084,6 +5109,16 @@ mod tests {
     }
 
     #[test]
+    fn canonicalize_tracked_work_body_backfills_missing_id() {
+        let body = "- write focused extraction tests\n";
+
+        let canonical = canonicalize_tracked_work_body(body, DOC_ID);
+
+        assert!(canonical.starts_with("- [ ] [#"), "{canonical}");
+        assert!(canonical.contains("write focused extraction tests"));
+    }
+
+    #[test]
     fn backfill_idempotent_after_placeholder_strip() {
         // After stripping [#] and assigning ID, second backfill should be a no-op
         let body = "- [ ] [#] task\n";
@@ -5302,6 +5337,28 @@ mod tests {
         assert!(new_body.contains("[#a1b2]"));
         assert!(new_body.contains("updated"));
         assert!(!new_body.contains("original"));
+    }
+
+    #[test]
+    fn op_edit_many_applies_edits_in_order() {
+        let body = "- [ ] [#a1b2] original one\n- [ ] [#c3d4] original two\n";
+
+        let new_body = op_edit_many(
+            body,
+            &[
+                ("a1b2".to_string(), "updated one".to_string()),
+                (
+                    "c3d4".to_string(),
+                    "updated two\n  - retained detail".to_string(),
+                ),
+            ],
+        )
+        .unwrap();
+
+        assert!(new_body.contains("- [ ] [#a1b2] updated one"));
+        assert!(new_body.contains("- [ ] [#c3d4] updated two\n  - retained detail"));
+        assert!(!new_body.contains("original one"));
+        assert!(!new_body.contains("original two"));
     }
 
     #[test]
@@ -6161,6 +6218,15 @@ mod tests {
 
         assert!(removed);
         assert_eq!(updated, "- [ ] [#one] First");
+    }
+
+    #[test]
+    fn printable_tracked_work_lines_trims_and_skips_blanks() {
+        let body = "\n  - [ ] [#one] First  \n\n  - child detail\n";
+
+        let lines = printable_tracked_work_lines(body);
+
+        assert_eq!(lines, vec!["- [ ] [#one] First", "- child detail"]);
     }
 
     #[test]

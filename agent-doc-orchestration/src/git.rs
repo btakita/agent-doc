@@ -92,7 +92,7 @@
 
 use agent_doc_document::commit_normalization::{
     canonicalize_answered_prompt_prefixes, normalize_committed_exchange_artifacts,
-    normalize_component_content_for_absorb, redact_component_contents_for_absorb,
+    normalize_component_content_for_absorb,
 };
 use agent_doc_document::transient_markers::{
     exchange_prompt_prefix_equivalent, normalize_for_replay_hash,
@@ -111,15 +111,13 @@ use std::process::Command;
 use agent_doc_document_realtime::write_policy::{
     classify_committed_historical_agent_doc_mutation, classify_safe_out_of_band_agent_doc_mutation,
     detect_reintroduced_reaped_pending_ids, is_empty_template_scaffold_snapshot,
-    is_safe_user_follow_up_exchange_growth,
 };
 use agent_doc_element::element::is_backlog_component;
 use agent_doc_element_exchange::post_commit_ipc_reposition_only_exchange_safe;
 use agent_doc_git::{
     PostCommitLocalDriftKind, SubmodulePointerDrift, agent_doc_branch_name_for_file,
-    agent_doc_commit_message_for_file, classify_post_commit_local_drift_from_checks,
-    classify_prompt_bearing_post_commit_drift, commit_retry_backoff,
-    line_looks_like_explicit_post_commit_prompt_directive, output_has_index_lock_contention,
+    agent_doc_commit_message_for_file, classify_post_commit_local_drift, commit_retry_backoff,
+    is_safe_user_only_follow_up_after_committed_head, output_has_index_lock_contention,
     parent_submodule_pointer_commit_message, parse_submodule_paths, relative_to_root,
     render_git_process_output, tracked_modified_paths_from_porcelain,
 };
@@ -422,68 +420,6 @@ fn non_exchange_change_is_turn_independent(
         )
         .affects_turn()
     })
-}
-
-fn is_safe_user_only_follow_up_after_committed_head(head_doc: &str, current_doc: &str) -> bool {
-    if head_doc == current_doc {
-        return false;
-    }
-
-    let head_body = agent_doc_frontmatter::frontmatter::parse(head_doc)
-        .map(|(_, body)| body)
-        .unwrap_or(head_doc);
-    let current_body = agent_doc_frontmatter::frontmatter::parse(current_doc)
-        .map(|(_, body)| body)
-        .unwrap_or(current_doc);
-
-    if redact_component_contents_for_absorb(head_body)
-        != redact_component_contents_for_absorb(current_body)
-    {
-        return false;
-    }
-
-    let Ok(head_components) = agent_doc_element::element::parse(head_body) else {
-        return false;
-    };
-    let Ok(current_components) = agent_doc_element::element::parse(current_body) else {
-        return false;
-    };
-    if head_components.len() != current_components.len() {
-        return false;
-    }
-
-    let mut saw_exchange = false;
-
-    for (head_comp, current_comp) in head_components.iter().zip(current_components.iter()) {
-        if head_comp.name != current_comp.name {
-            return false;
-        }
-        // Backlog/pending: tolerate patch attr differences (deprecated attr being stripped)
-        if !is_backlog_component(&head_comp.name)
-            && head_comp.patch_mode() != current_comp.patch_mode()
-        {
-            return false;
-        }
-
-        let head_content = normalize_component_content_for_absorb(head_comp.content(head_body));
-        let current_content =
-            normalize_component_content_for_absorb(current_comp.content(current_body));
-        if head_content == current_content {
-            continue;
-        }
-
-        match head_comp.name.as_str() {
-            "exchange" => {
-                if !is_safe_user_follow_up_exchange_growth(&head_content, &current_content) {
-                    return false;
-                }
-                saw_exchange = true;
-            }
-            _ => return false,
-        }
-    }
-
-    saw_exchange
 }
 
 pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<&'static str>> {
@@ -2045,86 +1981,6 @@ fn stage_and_commit_once(
     Ok(output)
 }
 
-fn prompt_classifier_post_commit_drift_kind(
-    head_doc: &str,
-    current_doc: &str,
-) -> Option<PostCommitLocalDriftKind> {
-    let prompt_bearing_body = |content: &str| {
-        agent_doc_frontmatter::frontmatter::parse(content)
-            .map(|(_, body)| body.to_string())
-            .unwrap_or_else(|_| content.to_string())
-    };
-    let norm = |content: &str| {
-        agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(
-            &prompt_bearing_body(content),
-        )
-    };
-    let diff_text =
-        agent_doc_diff::unified_diff_from_contents(&norm(head_doc), &norm(current_doc))?;
-    let changes = agent_doc_diff::classify_prompt_bearing_changes(&diff_text);
-    if changes.is_empty() {
-        return None;
-    }
-    let has_explicit_prompt_target = changes
-        .iter()
-        .filter(|change| change.kind == agent_doc_diff::PromptBearingChangeKind::PromptTarget)
-        .any(|change| {
-            change
-                .text
-                .lines()
-                .any(line_looks_like_explicit_post_commit_prompt_directive)
-        });
-    let has_content_edit = changes
-        .iter()
-        .any(|change| change.kind == agent_doc_diff::PromptBearingChangeKind::ContentEdit);
-    let has_recovery_artifact = changes
-        .iter()
-        .any(|change| change.kind == agent_doc_diff::PromptBearingChangeKind::RecoveryArtifact);
-    classify_prompt_bearing_post_commit_drift(
-        !changes.is_empty(),
-        has_explicit_prompt_target,
-        has_content_edit,
-        has_recovery_artifact,
-    )
-}
-
-fn classify_post_commit_local_drift(
-    head_doc: &str,
-    current_doc: &str,
-) -> Option<PostCommitLocalDriftKind> {
-    let contents_equal = head_doc == current_doc;
-    let transient_only = !contents_equal
-        && normalize_transient_agent_doc_markers(current_doc)
-            == normalize_transient_agent_doc_markers(head_doc);
-    let re_heading_only = !contents_equal
-        && !transient_only
-        && normalize_post_commit_re_heading_drift(current_doc)
-            == normalize_post_commit_re_heading_drift(head_doc);
-    let safe_user_follow_up = !contents_equal
-        && !transient_only
-        && !re_heading_only
-        && (is_safe_user_only_follow_up_after_committed_head(head_doc, current_doc)
-            || (if let Ok(Some(cleaned_head)) =
-                agent_doc_template::strip_conversation_tail_outside_exchange(head_doc)
-            {
-                is_safe_user_only_follow_up_after_committed_head(&cleaned_head, current_doc)
-            } else {
-                false
-            }));
-    let prompt_classifier_kind =
-        (!contents_equal && !transient_only && !re_heading_only && !safe_user_follow_up)
-            .then(|| prompt_classifier_post_commit_drift_kind(head_doc, current_doc))
-            .flatten();
-
-    classify_post_commit_local_drift_from_checks(
-        contents_equal,
-        transient_only,
-        re_heading_only,
-        safe_user_follow_up,
-        prompt_classifier_kind,
-    )
-}
-
 fn repair_stale_agent_response_collapse_worktree(
     file: &Path,
     head_doc: &str,
@@ -3583,85 +3439,6 @@ Duplicate replay should stay live.
         assert!(
             !is_in_git_repo(&doc),
             "file outside git repo should return false"
-        );
-    }
-    #[test]
-    fn is_safe_user_only_follow_up_after_committed_head_exchange_only() {
-        let head = "---\nagent_doc_session: test\n---\n\n\
-            <!-- agent:exchange patch=append -->\n\
-            ### Re: older\n\
-            old body\n\
-            ### Re: newer\n\
-            new body\n\
-            <!-- agent:boundary:head -->\n\
-            <!-- /agent:exchange -->\n";
-        let current = "---\nagent_doc_session: test\n---\n\n\
-            <!-- agent:exchange patch=append -->\n\
-            ### Re: older\n\
-            old body\n\
-            ### Re: newer (HEAD)\n\
-            new body\n\
-            ❯ follow-up question\n\
-            <!-- agent:boundary:live -->\n\
-            <!-- /agent:exchange -->\n";
-
-        assert!(is_safe_user_only_follow_up_after_committed_head(
-            head, current
-        ));
-    }
-    #[test]
-    fn post_commit_drift_uses_prompt_classifier_for_queue_directive() {
-        let head = "---\nagent_doc_session: test\n---\n\n\
-            ## Exchange\n\n\
-            <!-- agent:exchange patch=append -->\n\
-            ### Re: done\n\
-            Completed.\n\
-            <!-- /agent:exchange -->\n\n\
-            ## Queue\n\n\
-            <!-- agent:queue -->\n\
-            <!-- /agent:queue -->\n\n\
-            ## Backlog\n\n\
-            <!-- agent:backlog -->\n\
-            <!-- /agent:backlog -->\n";
-        let current = "---\nagent_doc_session: test\n---\n\n\
-            ## Exchange\n\n\
-            <!-- agent:exchange patch=append -->\n\
-            ### Re: done\n\
-            Completed.\n\
-            <!-- /agent:exchange -->\n\n\
-            ## Queue\n\n\
-            <!-- agent:queue auto -->\n\
-            preset #spec-test-build-install-commit-push\n\
-            - do [#nexttop]\n\
-            <!-- /agent:queue -->\n\n\
-            ## Backlog\n\n\
-            <!-- agent:backlog -->\n\
-            - [ ] [#nexttop] Fix stale status.\n\
-            <!-- /agent:backlog -->\n";
-
-        assert_eq!(
-            classify_post_commit_local_drift(head, current),
-            Some(PostCommitLocalDriftKind::UserFollowUp)
-        );
-    }
-    #[test]
-    fn post_commit_drift_keeps_inline_corrections_as_working_tree_edits() {
-        let head = "---\nagent_doc_session: test\n---\n\n\
-            <!-- agent:exchange patch=append -->\n\
-            ### Re: report\n\
-            The service returned 401.\n\
-            More analysis.\n\
-            <!-- /agent:exchange -->\n";
-        let current = "---\nagent_doc_session: test\n---\n\n\
-            <!-- agent:exchange patch=append -->\n\
-            ### Re: report\n\
-            The service returned 503.\n\
-            More analysis.\n\
-            <!-- /agent:exchange -->\n";
-
-        assert_eq!(
-            classify_post_commit_local_drift(head, current),
-            Some(PostCommitLocalDriftKind::WorkingTreeEdits)
         );
     }
     #[test]

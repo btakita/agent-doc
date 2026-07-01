@@ -349,6 +349,25 @@ pub fn preparing_controller_is_stale(
     now.saturating_sub(started) > stale_after.as_secs()
 }
 
+pub fn supervisor_lease_is_fresh_and_alive(
+    last_heartbeat: Option<u64>,
+    supervisor_process_alive: bool,
+    now: u64,
+    stale_after: Duration,
+) -> bool {
+    let fresh_heartbeat = last_heartbeat
+        .map(|timestamp| now.saturating_sub(timestamp) <= stale_after.as_secs())
+        .unwrap_or(false);
+    fresh_heartbeat && supervisor_process_alive
+}
+
+pub const fn supervisor_lease_pid_is_foreign(supervisor_pid: Option<u32>, self_pid: u32) -> bool {
+    match supervisor_pid {
+        Some(pid) => pid != self_pid,
+        None => false,
+    }
+}
+
 pub fn default_control_plane_status() -> ControlPlaneStatus {
     ControlPlaneStatus {
         process_model: "project_scoped_single_process".to_string(),
@@ -884,5 +903,43 @@ mod tests {
             now,
             stale_after,
         ));
+    }
+
+    #[test]
+    fn supervisor_lease_freshness_requires_recent_heartbeat_and_live_process() {
+        let stale_after = Duration::from_secs(60);
+        let now = 1_000u64;
+
+        assert!(supervisor_lease_is_fresh_and_alive(
+            Some(now - 60),
+            true,
+            now,
+            stale_after
+        ));
+        assert!(!supervisor_lease_is_fresh_and_alive(
+            Some(now - 61),
+            true,
+            now,
+            stale_after
+        ));
+        assert!(!supervisor_lease_is_fresh_and_alive(
+            Some(now - 1),
+            false,
+            now,
+            stale_after
+        ));
+        assert!(!supervisor_lease_is_fresh_and_alive(
+            None,
+            true,
+            now,
+            stale_after
+        ));
+    }
+
+    #[test]
+    fn supervisor_lease_foreign_pid_requires_present_different_pid() {
+        assert!(supervisor_lease_pid_is_foreign(Some(42), 7));
+        assert!(!supervisor_lease_pid_is_foreign(Some(7), 7));
+        assert!(!supervisor_lease_pid_is_foreign(None, 7));
     }
 }

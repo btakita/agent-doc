@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use agent_doc_workflow::doctor::{
     ActorDoctorFacts, CycleStateDoctorFacts, EditorDoctorFacts, GitDoctorFacts, OpsLogDoctorFacts,
     PreflightDoctorFacts, SessionCheckDoctorFacts, WorkflowDoctorFacts, WorkflowDoctorReport,
-    classify_ops_marker, evaluate_catalog,
+    evaluate_catalog, format_text_report, ops_log_facts_from_content,
 };
 use agent_doc_workflow::doctor_json::{project_preflight_facts, project_session_check_facts};
 use agent_doc_workflow::invariants::workflow_invariant_catalog;
@@ -43,7 +43,7 @@ pub fn run(file: &Path, options: WorkflowDoctorOptions) -> Result<()> {
     if options.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
-        print_text_report(&report);
+        print!("{}", format_text_report(&report));
     }
     Ok(())
 }
@@ -191,20 +191,7 @@ fn read_ops_log(
             return OpsLogDoctorFacts::default();
         }
     };
-    let lines: Vec<&str> = content.lines().rev().take(limit.max(1)).collect();
-    let mut markers = Vec::new();
-    for line in lines.iter().rev() {
-        if let Some(marker) = classify_ops_marker(line) {
-            markers.push(marker.to_string());
-        }
-    }
-    markers.sort();
-    markers.dedup();
-    OpsLogDoctorFacts {
-        present: true,
-        scanned_lines: lines.len(),
-        markers,
-    }
+    ops_log_facts_from_content(&content, limit)
 }
 
 fn read_actor_facts(
@@ -322,38 +309,4 @@ fn read_json(path: &Path) -> Result<Value> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read {}", path.display()))?;
     Ok(serde_json::from_str(&content)?)
-}
-
-fn print_text_report(report: &WorkflowDoctorReport) {
-    println!(
-        "workflow doctor: {} outcome={}",
-        report.file,
-        report.outcome.as_str()
-    );
-    for warning in &report.warnings {
-        println!("warning: {warning}");
-    }
-    for result in &report.results {
-        println!(
-            "- {} outcome={} title={}",
-            result.id,
-            result.outcome.as_str(),
-            result.title
-        );
-        for evidence in &result.evidence {
-            println!("  evidence: {evidence}");
-        }
-        for missing in &result.missing_fact_sources {
-            println!("  missing: {missing}");
-        }
-        for marker in &result.disproof_markers {
-            println!("  disproof: {marker}");
-        }
-        for command in &result.repair_commands {
-            println!("  repair: {command}");
-        }
-        for action in &result.operator_actions {
-            println!("  operator: {action}");
-        }
-    }
 }

@@ -84,6 +84,7 @@ use agent_doc_document::model_projection::{
     overlay_state_from_markdown, project_overlay_roundtrip, project_overlay_state,
     resolve_model_baseline_projection,
 };
+use agent_doc_document_realtime::crdt_merge_base::{CrdtMergeBase, CrdtMergeBaseSource};
 use agent_doc_element_exchange::strip_exchange_content;
 
 // ---------------------------------------------------------------------------
@@ -879,42 +880,6 @@ pub fn multinode_crdt_state(
         ));
     }
     agent_doc_merge::crdt::MultiNodeState::from_text(fallback_markdown)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CrdtMergeBaseSource {
-    Overlay,
-    FallbackNoOverlay,
-    FallbackOverlayDecodeError,
-    FallbackOverlayProjectionMismatch,
-    /// `#crdtlivedrop`: the overlay projection diverged from the cycle baseline
-    /// **and** carried content the baseline lacks (live keystrokes the user just
-    /// typed, not yet committed). The merge base stays the committed baseline (the
-    /// common ancestor of the downstream merge's `ours`/`theirs`), but unlike the
-    /// stale path the live overlay sidecar is **left intact** instead of being
-    /// rebuilt from the baseline — so the user's keystrokes are never silently
-    /// discarded and survive for op-capture and the next cycle's base.
-    OverlayAheadPreserved,
-}
-
-impl CrdtMergeBaseSource {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            CrdtMergeBaseSource::Overlay => "overlay",
-            CrdtMergeBaseSource::FallbackNoOverlay => "fallback_no_overlay",
-            CrdtMergeBaseSource::FallbackOverlayDecodeError => "fallback_overlay_decode_error",
-            CrdtMergeBaseSource::FallbackOverlayProjectionMismatch => {
-                "fallback_overlay_projection_mismatch"
-            }
-            CrdtMergeBaseSource::OverlayAheadPreserved => "overlay_ahead_preserved",
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct CrdtMergeBase {
-    pub state: Vec<u8>,
-    pub source: CrdtMergeBaseSource,
 }
 
 /// Whether the overlay projection carries content the cycle baseline lacks

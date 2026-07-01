@@ -106,20 +106,6 @@ fn tracked_work_id_already_resolved(file: &Path, id: &str) -> Result<bool> {
     backlog::content_has_resolved_tracked_work_id(&content, &id)
 }
 
-fn canonicalize_component_content(file: &Path, content: &str) -> String {
-    let doc_id = agent_doc_hash::document_id_for_path(file);
-    let (canonical, _) = backlog::backfill(content, &doc_id, &HashSet::new());
-    canonical
-}
-
-fn canonicalize_tracked_list_content(
-    file: &Path,
-    _list: backlog::TrackedWorkList,
-    content: &str,
-) -> String {
-    canonicalize_component_content(file, content)
-}
-
 fn log_symptom_dedupe(file: &Path, surface: &str, id: &str, key: &backlog::SymptomDedupeKey) {
     crate::ops_log::log_op(
         file,
@@ -143,7 +129,7 @@ pub fn add(file: &Path, item: &str, gated: bool) -> Result<()> {
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = agent_doc_hash::document_id_for_path(file);
     let outcome = backlog::op_add_with_outcome(existing, item, &doc_id, gated)?;
-    let canonical = canonicalize_component_content(file, &outcome.body);
+    let canonical = backlog::canonicalize_tracked_work_body(&outcome.body, &doc_id);
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
     if let Some(key) = outcome.deduped_key.as_ref() {
@@ -181,7 +167,7 @@ fn add_many_to_list(
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = agent_doc_hash::document_id_for_path(file);
     let outcome = backlog::op_prepend_many_with_outcomes(existing, items, &doc_id, gated)?;
-    let canonical = canonicalize_component_content(file, &outcome.body);
+    let canonical = backlog::canonicalize_tracked_work_body(&outcome.body, &doc_id);
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
     let mut ids = Vec::new();
@@ -217,7 +203,7 @@ fn add_at_to_list(
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = agent_doc_hash::document_id_for_path(file);
     let outcome = backlog::op_add_at_with_outcome(existing, item, &doc_id, false, position)?;
-    let canonical = canonicalize_component_content(file, &outcome.body);
+    let canonical = backlog::canonicalize_tracked_work_body(&outcome.body, &doc_id);
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
     if let Some(key) = outcome.deduped_key.as_ref() {
@@ -335,7 +321,10 @@ pub fn done(file: &Path, id: &str) -> Result<()> {
     };
     let existing = &full_content[comp.open_end..comp.close_start];
     let new_content = backlog::op_done(existing, id)?;
-    let canonical = canonicalize_component_content(file, &new_content);
+    let canonical = backlog::canonicalize_tracked_work_body(
+        &new_content,
+        &agent_doc_hash::document_id_for_path(file),
+    );
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
     Ok(())
@@ -371,7 +360,10 @@ pub fn gate(file: &Path, id: &str) -> Result<()> {
 
     let mut new_doc = comp.replace_content(
         &full_content,
-        &canonicalize_component_content(file, &new_backlog),
+        &backlog::canonicalize_tracked_work_body(
+            &new_backlog,
+            &agent_doc_hash::document_id_for_path(file),
+        ),
     );
     let (content_with_review, review_comp) = ensure_review_component_in_document(&new_doc)?;
     new_doc = content_with_review;
@@ -379,8 +371,13 @@ pub fn gate(file: &Path, id: &str) -> Result<()> {
     let new_review = backlog::op_insert_item_first(review_body, item);
     let review_comp = find_review_component_in_content(&new_doc)?
         .context("document has no review component after insertion")?;
-    let new_doc =
-        review_comp.replace_content(&new_doc, &canonicalize_component_content(file, &new_review));
+    let new_doc = review_comp.replace_content(
+        &new_doc,
+        &backlog::canonicalize_tracked_work_body(
+            &new_review,
+            &agent_doc_hash::document_id_for_path(file),
+        ),
+    );
     persist_pending_write(file, &full_content, &new_doc)?;
     Ok(())
 }
@@ -394,7 +391,7 @@ pub fn review_add(file: &Path, item: &str) -> Result<Option<String>> {
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = agent_doc_hash::document_id_for_path(file);
     let outcome = backlog::op_add_with_outcome(existing, item, &doc_id, true)?;
-    let canonical = canonicalize_component_content(file, &outcome.body);
+    let canonical = backlog::canonicalize_tracked_work_body(&outcome.body, &doc_id);
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
     if let Some(key) = outcome.deduped_key.as_ref() {
@@ -410,7 +407,10 @@ pub fn review_edit(file: &Path, id: &str, text: &str) -> Result<()> {
         .context("document has no review component")?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let new_content = backlog::op_edit(existing, id, text)?;
-    let canonical = canonicalize_component_content(file, &new_content);
+    let canonical = backlog::canonicalize_tracked_work_body(
+        &new_content,
+        &agent_doc_hash::document_id_for_path(file),
+    );
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
     Ok(())
@@ -473,7 +473,10 @@ pub fn ungate(file: &Path, id: &str) -> Result<()> {
         let (full_content, comp) = find_pending_component(file)?;
         let existing = &full_content[comp.open_end..comp.close_start];
         let new_content = backlog::op_ungate(existing, id)?;
-        let canonical = canonicalize_component_content(file, &new_content);
+        let canonical = backlog::canonicalize_tracked_work_body(
+            &new_content,
+            &agent_doc_hash::document_id_for_path(file),
+        );
         let new_doc = comp.replace_content(&full_content, &canonical);
         persist_pending_write(file, &full_content, &new_doc)?;
         return Ok(());
@@ -485,7 +488,10 @@ pub fn ungate(file: &Path, id: &str) -> Result<()> {
             let (full_content, comp) = find_pending_component(file)?;
             let existing = &full_content[comp.open_end..comp.close_start];
             let new_content = backlog::op_ungate(existing, id)?;
-            let canonical = canonicalize_component_content(file, &new_content);
+            let canonical = backlog::canonicalize_tracked_work_body(
+                &new_content,
+                &agent_doc_hash::document_id_for_path(file),
+            );
             let new_doc = comp.replace_content(&full_content, &canonical);
             persist_pending_write(file, &full_content, &new_doc)?;
             return Ok(());
@@ -500,7 +506,10 @@ pub fn ungate(file: &Path, id: &str) -> Result<()> {
 
     let new_doc = review_comp.replace_content(
         &full_content,
-        &canonicalize_component_content(file, &new_review),
+        &backlog::canonicalize_tracked_work_body(
+            &new_review,
+            &agent_doc_hash::document_id_for_path(file),
+        ),
     );
     let components = element::parse(&new_doc).context("failed to parse components")?;
     let backlog_comp = components
@@ -511,7 +520,10 @@ pub fn ungate(file: &Path, id: &str) -> Result<()> {
     let new_backlog = backlog::op_insert_item_first(backlog_body, item);
     let new_doc = backlog_comp.replace_content(
         &new_doc,
-        &canonicalize_component_content(file, &new_backlog),
+        &backlog::canonicalize_tracked_work_body(
+            &new_backlog,
+            &agent_doc_hash::document_id_for_path(file),
+        ),
     );
     persist_pending_write(file, &full_content, &new_doc)?;
     Ok(())
@@ -526,7 +538,10 @@ fn gate_in_place(file: &Path, id: &str) -> Result<()> {
     if new_content == existing {
         return Ok(());
     }
-    let canonical = canonicalize_component_content(file, &new_content);
+    let canonical = backlog::canonicalize_tracked_work_body(
+        &new_content,
+        &agent_doc_hash::document_id_for_path(file),
+    );
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
     Ok(())
@@ -537,7 +552,10 @@ fn edit_list(file: &Path, list: backlog::TrackedWorkList, id: &str, text: &str) 
     let (full_content, comp) = find_tracked_list_component(file, list)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let new_content = backlog::op_edit(existing, id, text)?;
-    let canonical = canonicalize_tracked_list_content(file, list, &new_content);
+    let canonical = backlog::canonicalize_tracked_work_body(
+        &new_content,
+        &agent_doc_hash::document_id_for_path(file),
+    );
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
     Ok(())
@@ -553,14 +571,14 @@ fn edit_many_list(
     }
     let (full_content, comp) = find_tracked_list_component(file, list)?;
     let existing = &full_content[comp.open_end..comp.close_start];
-    let mut new_content = existing.to_string();
-    for (id, text) in edits {
-        new_content = backlog::op_edit(&new_content, id, text)?;
-    }
+    let new_content = backlog::op_edit_many(existing, edits)?;
     if new_content == existing {
         return Ok(());
     }
-    let canonical = canonicalize_tracked_list_content(file, list, &new_content);
+    let canonical = backlog::canonicalize_tracked_work_body(
+        &new_content,
+        &agent_doc_hash::document_id_for_path(file),
+    );
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
     Ok(())
@@ -606,7 +624,10 @@ fn reorder_list(file: &Path, list: backlog::TrackedWorkList, ids: &[String]) -> 
     let (full_content, comp) = find_tracked_list_component(file, list)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let new_content = backlog::op_reorder(existing, ids)?;
-    let canonical = canonicalize_tracked_list_content(file, list, &new_content);
+    let canonical = backlog::canonicalize_tracked_work_body(
+        &new_content,
+        &agent_doc_hash::document_id_for_path(file),
+    );
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
     Ok(())
@@ -637,7 +658,10 @@ fn reap_list(file: &Path, list: backlog::TrackedWorkList) -> Result<()> {
         eprintln!("[{}] no [x] items to reap", list.label());
         return Ok(());
     }
-    let canonical = canonicalize_tracked_list_content(file, list, &final_content);
+    let canonical = backlog::canonicalize_tracked_work_body(
+        &final_content,
+        &agent_doc_hash::document_id_for_path(file),
+    );
     let mut new_doc = comp.replace_content(&full_content, &canonical);
     if !removed_items.is_empty() {
         let archived = crate::preflight::archive_pending_done(file, &new_doc, &removed_items)
@@ -723,7 +747,10 @@ pub fn resolve_gate(file: &Path, gate_type: &str) -> Result<()> {
         );
         return Ok(());
     }
-    let canonical = canonicalize_component_content(file, &new_content);
+    let canonical = backlog::canonicalize_tracked_work_body(
+        &new_content,
+        &agent_doc_hash::document_id_for_path(file),
+    );
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
     eprintln!(
@@ -743,7 +770,10 @@ pub fn set_gate_type(file: &Path, id: &str, gate_type: &str) -> Result<()> {
     let (full_content, comp) = find_pending_component(file)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let new_content = backlog::op_set_gate_type(existing, id, gate_type)?;
-    let canonical = canonicalize_component_content(file, &new_content);
+    let canonical = backlog::canonicalize_tracked_work_body(
+        &new_content,
+        &agent_doc_hash::document_id_for_path(file),
+    );
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
     eprintln!("[pending] set gate type [/{}] on [#{}]", gate_type, id);
@@ -761,7 +791,10 @@ pub fn set_gate_verify(file: &Path, id: &str, spec: &str) -> Result<()> {
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let new_content = backlog::op_set_gate_verify(existing, id, spec, set_at)?;
-    let canonical = canonicalize_component_content(file, &new_content);
+    let canonical = backlog::canonicalize_tracked_work_body(
+        &new_content,
+        &agent_doc_hash::document_id_for_path(file),
+    );
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
     eprintln!(
@@ -836,17 +869,15 @@ pub fn resolve_gate_scan(gate_type: &str, scope: &Path) -> Result<usize> {
 fn list_items(file: &Path, list: backlog::TrackedWorkList) -> Result<()> {
     let (full_content, comp) = find_tracked_list_component(file, list)?;
     let existing = &full_content[comp.open_end..comp.close_start];
+    let lines = backlog::printable_tracked_work_lines(existing);
 
-    if existing.trim().is_empty() {
+    if lines.is_empty() {
         println!("(no {} items)", list.label());
         return Ok(());
     }
 
-    for line in existing.lines() {
-        let trimmed = line.trim();
-        if !trimmed.is_empty() {
-            println!("{}", trimmed);
-        }
+    for line in lines {
+        println!("{}", line);
     }
     Ok(())
 }

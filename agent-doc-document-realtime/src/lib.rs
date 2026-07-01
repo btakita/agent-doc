@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 pub mod broadcast;
 pub mod convergence_gate;
 pub mod crdt_authority;
+pub mod crdt_merge_base;
 pub mod crdt_relay;
 pub mod editor_identity;
 pub mod ipc_corruption;

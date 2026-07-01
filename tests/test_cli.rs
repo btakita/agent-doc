@@ -7996,6 +7996,8 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         "pub struct EditorDoctorFacts",
         "pub struct WorkflowInvariantResult",
         "pub fn evaluate_catalog",
+        "pub fn format_text_report",
+        "pub fn ops_log_facts_from_content",
         "pub fn classify_ops_marker",
     ] {
         assert!(
@@ -8044,7 +8046,10 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         "fn operator_steps",
         "fn remediation_label",
         "fn has_marker",
+        "fn ops_log_facts_from_content(",
         "fn classify_ops_marker(",
+        "fn print_text_report(",
+        "fn format_text_report(",
         "fn lookup_value",
         "fn lookup_bool",
         "fn lookup_usize",
@@ -8062,7 +8067,9 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
     }
     assert!(
         orchestration_doctor.contains("use agent_doc_workflow::doctor::{")
-            && orchestration_doctor.contains("classify_ops_marker, evaluate_catalog"),
+            && orchestration_doctor.contains("evaluate_catalog")
+            && orchestration_doctor.contains("format_text_report")
+            && orchestration_doctor.contains("ops_log_facts_from_content"),
         "orchestration doctor should call the focused doctor policy directly"
     );
     assert!(

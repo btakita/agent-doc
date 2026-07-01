@@ -54,6 +54,30 @@ pub fn classify(text: &str) -> QueueItem {
     }
 }
 
+/// Sanitize a progress log field so it stays single-token and redaction-safe.
+pub fn sanitize_progress_field(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | ':' | '/' | '%' | '=') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// Redacted, stable fingerprint for a queue dispatch item.
+pub fn item_fingerprint(item: &QueueItem) -> String {
+    format!(
+        "command={} bytes={} sha256={}",
+        sanitize_progress_field(item.command.as_deref().unwrap_or("prompt")),
+        item.raw.len(),
+        agent_doc_hash::content_hash(&item.raw)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,5 +134,23 @@ mod tests {
     fn classify_review_prompt() {
         let item = classify("Review the pending items");
         assert_eq!(item.kind, QueueItemKind::Prompt);
+    }
+
+    #[test]
+    fn sanitize_progress_field_keeps_safe_symbols_and_masks_unsafe_text() {
+        assert_eq!(
+            sanitize_progress_field("socket:/tmp/doc pane:%1 target=a b\nc"),
+            "socket:/tmp/doc_pane:%1_target=a_b_c"
+        );
+    }
+
+    #[test]
+    fn item_fingerprint_redacts_raw_command_text() {
+        let item = classify("/doctor secret value");
+        let fingerprint = item_fingerprint(&item);
+        assert!(fingerprint.contains("command=doctor"));
+        assert!(fingerprint.contains("bytes=20"));
+        assert!(fingerprint.contains(&agent_doc_hash::content_hash("/doctor secret value")));
+        assert!(!fingerprint.contains("secret value"));
     }
 }

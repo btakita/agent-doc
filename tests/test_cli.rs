@@ -3359,6 +3359,8 @@ fn test_agent_doc_queue_owns_dispatch_item_classification_policy() {
         "pub enum QueueItemKind",
         "pub struct QueueItem",
         "pub fn classify(",
+        "pub fn sanitize_progress_field(",
+        "pub fn item_fingerprint(",
     ] {
         assert!(
             dispatch_item.contains(required),
@@ -3372,6 +3374,8 @@ fn test_agent_doc_queue_owns_dispatch_item_classification_policy() {
         "pub enum QueueItemKind",
         "pub struct QueueItem",
         "pub fn classify(",
+        "fn sanitize_progress_field(",
+        "fn item_fingerprint(",
         "pub use agent_doc_queue::dispatch_item",
         "pub(crate) use agent_doc_queue::dispatch_item",
     ] {
@@ -3381,8 +3385,11 @@ fn test_agent_doc_queue_owns_dispatch_item_classification_policy() {
         );
     }
     assert!(
-        queue_dispatch_source.contains("use agent_doc_queue::dispatch_item::QueueItem;"),
-        "queue_dispatch should depend on the focused dispatch item type directly"
+        queue_dispatch_source.contains("agent_doc_queue::dispatch_item::{")
+            && queue_dispatch_source.contains("QueueItem")
+            && queue_dispatch_source.contains("item_fingerprint")
+            && queue_dispatch_source.contains("sanitize_progress_field"),
+        "queue_dispatch should depend on focused dispatch item policy directly"
     );
 
     let orchestrate_source = fs::read_to_string(manifest_dir.join("src/orchestrate.rs")).unwrap();

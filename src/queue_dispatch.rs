@@ -33,9 +33,9 @@ use anyhow::{Context, Result};
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_orchestration::sessions;
 use agent_doc_orchestration::supervisor::ipc as supervisor_ipc;
-use agent_doc_queue::dispatch_item::QueueItem;
 #[cfg(test)]
 use agent_doc_queue::dispatch_item::classify;
+use agent_doc_queue::dispatch_item::{QueueItem, item_fingerprint, sanitize_progress_field};
 
 /// Commands that can be executed inline without a harness session.
 const INLINE_COMMANDS: &[&str] = &["model", "compact"];
@@ -81,28 +81,6 @@ impl DispatchContext {
             harness: fm.agent.unwrap_or_else(|| "claude".to_string()),
         })
     }
-}
-
-fn sanitize_progress_field(value: &str) -> String {
-    value
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | ':' | '/' | '%' | '=') {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
-
-fn item_fingerprint(item: &QueueItem) -> String {
-    format!(
-        "command={} bytes={} sha256={}",
-        sanitize_progress_field(item.command.as_deref().unwrap_or("prompt")),
-        item.raw.len(),
-        agent_doc_hash::content_hash(&item.raw)
-    )
 }
 
 fn log_dispatch_progress(ctx: &DispatchContext, event: String) {

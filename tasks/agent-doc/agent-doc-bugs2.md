@@ -34,31 +34,12 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260701-211950.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260701-220435.md`*
 
 Compacted content:
-- Archived 1 response topic(s): Claim for Tmux Pane should open a NEW pane in the same session
-- Prior summary/context: prior compacted content: Archived 5 response topic(s): Pre-run queue edits partially reverted (only first added head ...
-
-### Re: JB Run Agent Doc dispatch hang (#kjw0) — opus-4-8
-
-Root-caused and fixed the ~21s "Run Agent Doc" dispatch hang and audited where the IPC can wedge.
-
-**Hang root cause (#kjw0 / #jbrunautobug):** the route injected the trigger into a *busy* Codex pane (mid-turn, `esc to interrupt` visible). Codex queues prompts submitted while working, so the `UserPromptSubmit` hook could not advance within the 10s dispatch-start-proof budget — and the direct-pane path paid TWO sequential 10s waits (initial + late-resubmit) + ~1s acceptance ≈ 21s, then filed a false `accepted_without_dispatch_start_proof` bug. The captured diagnostic confirmed pane %69 showed `• Working (10s · esc to interrupt)` during the wait.
-
-**Fix:** `short_circuit_dispatch_start_when_pane_busy` (route/dispatch.rs) captures the pane before the proof wait; when `harness.busy_proof_line` proves an active turn it does one short probe (in case that turn IS our routed prompt), then returns the new `RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn` — treated as **accepted** (not fail-closed) by `decide_dispatch_start_proof` even when proof is required (codex). A busy dispatch now resolves fast as "queued behind active turn" (queued diagnostic on the pane) instead of a 21s hang + scary failure. Wired into both the direct-pane and supervisor-IPC dispatch paths.
-
-**IPC wedge audit + fixes:**
-- **C (HIGH, fixed):** the supervisor IPC listener was single-threaded with an inline `read_line`/`write_all` and no timeout — a half-open client wedged ALL supervisor command dispatch. It now spawns one short-lived thread per connection (`serve_supervisor_connection`), mirroring the editor-IPC `#jbacceptwedge` fix; `inflight_supervisor_handler_count()` added for observability.
-- **A (MED-HIGH, fixed):** the editor IPC send had no write timeout — a plugin that stopped draining its recv buffer could block `write_all` forever before the bounded ack-read. Added `set_send_timeout`.
-- **E / B+D / F (audited, follow-up filed):** pty stdin lock-across-read (kept as-is to preserve restart-prompt coexistence), listener reader-thread leak backstop, and `connect_sync` connect timeout.
-
-**Verification:** `make check` green — 6662 tests pass, clippy clean; 5 new unit tests cover the busy short-circuit decision and the queued→accepted classification. Built + installed locally; the stale supervisor was recycled onto the new binary.
-
-**Deliberately not done:** no version bump / tag / crates.io / PyPI publish — held per the release moratorium (confirm before cutting a release). Live JB proof of the hang fix is filed as an `[operator-verify]` follow-up.
-
-On the design questions: multi-threaded per-connection accept is the right fix for this low-volume operator/editor control-plane IPC; Tokio would fight the sync core and belongs at a future async server/gateway boundary in front of the sync document/merge/git core, not retrofitted into this listener.
-<!-- agent:boundary:96e9e28e -->
+- Archived 1 response topic(s): JB Run Agent Doc dispatch hang (#kjw0)
+- Prior summary/context: prior compacted content: Archived 1 response topic(s): Claim for Tmux Pane should open a NEW pane in the same session
+<!-- agent:boundary:98b92039 -->
 <!-- /agent:exchange -->
 ## Queue
 

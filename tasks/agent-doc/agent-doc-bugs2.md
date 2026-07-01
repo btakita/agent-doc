@@ -78,13 +78,13 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/recruit/re
 ### Session Summary
 
 
-❯ - `make install` — installed `agent-doc` and `libagent_doc.so`; installer marked 2 controllers to recycle at the next idle boundary.
-❯ - `make check` — clippy, 6155 nextest tests, doctests, SimWorld medium seed, and Lean all passed.
-❯ - `cargo test -p agent-doc-queue in_progress_marker_detection_allows_priority_prefix`
-❯ - `cargo test -p agent-doc-orchestration abandoned`
-❯ - Refactor: updated the cycle-state contract docs to distinguish abandoned stale preflight terminal state from a later real commit closeout that supersedes it.
-❯ - Green: `cargo test -p agent-doc-orchestration abandoned` passes, including the new terminal-proof regression and the cycle-state unit regression.
-❯ - Red: the new closeout regression failed before the fix with `terminal proof cannot record closeout ... is abandoned`.
+- `make install` — installed `agent-doc` and `libagent_doc.so`; installer marked 2 controllers to recycle at the next idle boundary.
+- `make check` — clippy, 6155 nextest tests, doctests, SimWorld medium seed, and Lean all passed.
+- `cargo test -p agent-doc-queue in_progress_marker_detection_allows_priority_prefix`
+- `cargo test -p agent-doc-orchestration abandoned`
+- Refactor: updated the cycle-state contract docs to distinguish abandoned stale preflight terminal state from a later real commit closeout that supersedes it.
+- Green: `cargo test -p agent-doc-orchestration abandoned` passes, including the new terminal-proof regression and the cycle-state unit regression.
+- Red: the new closeout regression failed before the fix with `terminal proof cannot record closeout ... is abandoned`.
 
 ```
 [route] target tmux session: 0
@@ -110,16 +110,16 @@ I kept terminal proof strict. The fix is that a real commit closeout now superse
 
 Red-green-refactor evidence:
 
-- Red: the new closeout regression failed before the fix with `terminal proof cannot record closeout ... is abandoned`.
-- Green: `cargo test -p agent-doc-orchestration abandoned` passes, including the new terminal-proof regression and the cycle-state unit regression.
-- Refactor: updated the cycle-state contract docs to distinguish abandoned stale preflight terminal state from a later real commit closeout that supersedes it.
+❯ - Red: the new closeout regression failed before the fix with `terminal proof cannot record closeout ... is abandoned`.
+❯ - Green: `cargo test -p agent-doc-orchestration abandoned` passes, including the new terminal-proof regression and the cycle-state unit regression.
+❯ - Refactor: updated the cycle-state contract docs to distinguish abandoned stale preflight terminal state from a later real commit closeout that supersedes it.
 
 Verification completed:
 
-- `cargo test -p agent-doc-orchestration abandoned`
-- `cargo test -p agent-doc-queue in_progress_marker_detection_allows_priority_prefix`
-- `make check` — clippy, 6155 nextest tests, doctests, SimWorld medium seed, and Lean all passed.
-- `make install` — installed `agent-doc` and `libagent_doc.so`; installer marked 2 controllers to recycle at the next idle boundary.
+❯ - `cargo test -p agent-doc-orchestration abandoned`
+❯ - `cargo test -p agent-doc-queue in_progress_marker_detection_allows_priority_prefix`
+❯ - `make check` — clippy, 6155 nextest tests, doctests, SimWorld medium seed, and Lean all passed.
+❯ - `make install` — installed `agent-doc` and `libagent_doc.so`; installer marked 2 controllers to recycle at the next idle boundary.
 
 GitHub CI for `fee78f7a` is currently in progress: run `28485233701`.
 ❯ Fix
@@ -142,7 +142,26 @@ Grouped response for `continue; do [#qftlossproof]; do [#qftlossproof]`: I’m t
 Both `#qftlossproof` queue entries are already struck, and the unresolved follow-up is represented by `#qftlossdelta` at the top of the backlog. No additional `#qftlossproof` dispatch is needed from this archived marker.
 
 <!-- /patch:exchange -->
-<!-- agent:boundary:40ca3ff7 -->
+
+### Re: do [#provauth3bimpl] — gpt-5
+
+I audited the operator-origin authority invariant under the hard rule from `tasks/agent-doc/plan-operator-provenance-authority.md`.
+
+No source patch was needed in this cycle: the remaining unsafe `content_ours` / stale-editor resurrection class is already covered by the current operator-preserving and fail-closed guards. The existing regressions assert that operator-visible document text is authoritative, that fallback paths must preserve user edits through `agent-doc write --stream`, and that docs/instructions must not reintroduce `content_ours`, stale snapshots, or ACK-content as authority for dropping operator text.
+
+Changed paths for this queue item: none. I left the unrelated dirty `src/agent-doc` worktree changes untouched.
+
+Verification passed:
+- `cargo test -p agent-doc --test test_cli root_agents_instructions_preserve_operator_authority`
+- `cargo test -p agent-doc --test test_cli docs_do_not_reintroduce_content_ours_snapshot_authority`
+- `cargo test -p agent-doc-orchestration operator_text_authority`
+- `cargo test -p agent-doc-orchestration content_ours`
+- `cargo test -p agent-doc-orchestration live_buffer`
+- `cargo test -p agent-doc-orchestration visible_write`
+- `cargo test -p agent-doc-orchestration stale_supervisor_content_ours`
+
+Confidence: high for the audit result and regression coverage. Escalation: none; I did not use `--force-disk`.
+<!-- agent:boundary:c4de4058 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -204,11 +223,10 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#kjw0] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=tasks/agent-doc/agent-doc-bugs2.md stage=dispatch_start_proof pane=%69 actor_generation=1161 editor_attempt_id=1782871961019-10 dispatch_proof_state=none elapsed_ms=21174 diagnostic_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782872116210-direct_pane_dispatch_start_unproven-codex-_69-a2246a0e8c6f.txt ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0 component=route/dispatch_start_proof content_hash=sha256:15e835a6e0f770b814aa68069d2a7354628b2401ea485f84d2a929ae58cc6554]
+- [ ] [#restartstderrbleed] #agent-doc-bug Diagnose binary-restart stderr bleed into the agent after supervisor/PCP restart; capture the stderr source and add regression/proof that restart diagnostics stay out of the agent prompt/UI. Related JB Run Agent Doc route failure remains tracked by #kjw0.
 - [ ] [#qftlossdelta] #agent-doc-bug focused invariant-loss follow-up from failed #qftlossproof live proof: `.agent-doc/logs/ops.log:4338964-4338997` shows ACK/live-buffer content at len 16676 hash `83f08ab7e6be49a671f96f7c0ffbb71fe28bba858929b883c5904140cabd5192`, then closeout committed len 16669 hash `dc278d260b5b2a3efffeb12c428f0f81f5be1c8373fdd3ef044eee4b39adda4f`; `live_buffer_classify` suppressed the differing operator-capable buffer with `reason=write_provenance_newer_than_buffer` and no durable sidecar preserving the 16676-byte content was found. Fix the operator-wins merge/write-provenance path so concurrent operator text is preserved end-to-end or the write fails closed with a recoverable artifact. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#tmuxsynccrashlog] [operator-verify] Replacement for #tmuxsynccrash: JB Sync Tmux Layout live repro log review. After the operator runs repeated JB Sync Tmux Layout against the repro layout, inspect idea.log, agent-doc ops.log, and tmux server pid/session evidence; close only if the server pid stays stable with repair_layout no-op/passive supersede markers, otherwise file a follow-up bug with the failing log markers. Plan: tasks/agent-doc/plan-sync-tmux-layout-crash.md
-- [ ] [#midturnrecycleproof] Replacement for #midturn-recycle-resume: Phase A recycle interlock live proof. Drive a recycle in the preflight->finalize window, inspect ops.log cycle-open recycle-defer/commit markers and editor writeback proof; close only if no live_prompt_drift_after_preflight appears, otherwise file a regression. Plan: tasks/agent-doc/plan-midturn-recycle-resume-wedge.md
-- [ ] [#midturnresumeimpl] Replacement for #midturnresumeb: Phase B durable turn checkpoint resume. Implement and verify consumption of the #durablerecycle turn checkpoint on fresh supervisor boot, with ops-log markers proving interrupted-child redispatch versus surviving-child no-op and deferred-too-long escalation coverage. Plan: tasks/agent-doc/plan-midturn-recycle-resume-wedge.md
-- [ ] [#provauth3bimpl] Replacement for #provauth3b: operator-origin authority audit under the hard invariant. Replace any remaining content_ours/stale-editor resurrection heuristic that can reset operator-visible text with an operator-preserving merge or fail-closed path; add logs/tests proving operator-origin working-tree/editor edits are never reset. Do not gate the invariant on #crdtauth6. Plan: tasks/agent-doc/plan-operator-provenance-authority.md
 - [ ] [#supstaledetectverify] Replacement for #supstaledetect: stale-install warning merge/install verification. Merge the source-mtime warning fix, install/recycle, then verify logs show a fresh build no longer warns while a genuinely stale binary still emits stale_install evidence.
 - [ ] [#suptmuxstaleverify] Replacement for #suptmuxstale: stale-supervisor pane indicator install/log proof. Merge/install the pane-title marker change, recycle, then verify .agent-doc/supervisor-stale plus pane title/turn_status logs show STALE SUPERVISOR only when the supervisor binary is actually stale.
 - [ ] [#60ev] plan-dynamic-context-injection-ledger.md

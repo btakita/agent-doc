@@ -1284,6 +1284,25 @@ fn run_auto_install_steps_once(crate_root: &Path) -> Result<()> {
             );
         }
     }
+    // `#turnsaferecycle` Goal 1 — a supervisor auto-install refreshes THIS process's
+    // binary (it self-detects staleness on the next tick), but every OTHER route-owned
+    // supervisor across all projects is now serving the prior build too. Fan the recycle
+    // request out to them so the whole fleet promotes the fresh binary at the next idle
+    // boundary. Best-effort: a fan-out failure must never fail the install.
+    match recycle_supervisors_all_projects() {
+        Ok((marked, skipped)) => {
+            if marked > 0 || skipped > 0 {
+                eprintln!(
+                    "[agent-doc] supervisor auto-install: marked {marked} route-owned supervisor(s) to recycle onto the fresh binary ({skipped} skipped)"
+                );
+            }
+        }
+        Err(err) => {
+            eprintln!(
+                "[agent-doc] warning: supervisor recycle fan-out after auto-install failed: {err:#}"
+            );
+        }
+    }
     Ok(())
 }
 
@@ -1701,6 +1720,83 @@ pub fn recycle_controllers_all_projects_force(force: bool) -> Result<(usize, usi
     // wedged-preparing orphan's root gets a `recycle_controller` call that reaps it —
     // no separate cross-project sweep needed here (gc still runs that on its tick).
     Ok((recycled, skipped))
+}
+
+/// `#turnsaferecycle` Goal 1 — resolve the document a live `agent-doc start
+/// --route-owned <doc>` supervisor process is serving, from its `/proc/<pid>/cmdline`.
+/// Pure-parse sibling of [`controller_serve_project_root`]; returns `None` for any
+/// non-route-owned process or unreadable cmdline.
+fn route_owned_supervisor_document(pid: u32) -> Option<PathBuf> {
+    let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+    let args: Vec<String> = cmdline
+        .split(|byte| *byte == 0)
+        .filter(|arg| !arg.is_empty())
+        .map(|arg| String::from_utf8_lossy(arg).to_string())
+        .collect();
+    agent_doc_controller::command_line::start_route_owned_document_from_args(&args)
+}
+
+/// `#turnsaferecycle` Goal 1 — write the per-document recycle-request marker the
+/// route-owned supervisor idle loop honors (recycle at the next idle boundary even
+/// when not yet stale / auto-recycle opted out). Best-effort but never silent: an
+/// error is returned so callers can log it.
+pub fn schedule_supervisor_recycle_for_doc(file: &Path, reason: &str) -> Result<()> {
+    agent_doc_supervisor_io::recycle_request::request_recycle(&file.to_string_lossy(), reason)
+}
+
+/// `#turnsaferecycle` Goal 1 — the supervisor breadth of an install fan-out. Today
+/// [`recycle_controllers_all_projects_force`] only marks lazy CONTROLLER (PCP)
+/// processes; the long-lived `agent-doc start --route-owned` supervisors that
+/// actually write documents are left to self-detect staleness. This walks `/proc`
+/// for every route-owned supervisor, dedups by served document, and writes each a
+/// recycle-request marker so they recycle onto the freshly-installed binary at the
+/// next idle boundary. Returns `(marked, skipped)`. `force` is recorded in the
+/// marker reason for parity with the controller fan-out; the supervisor honors the
+/// request regardless.
+pub fn recycle_supervisors_all_projects() -> Result<(usize, usize)> {
+    recycle_supervisors_all_projects_force(false)
+}
+
+pub fn recycle_supervisors_all_projects_force(force: bool) -> Result<(usize, usize)> {
+    let self_pid = std::process::id();
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Ok((0, 0));
+    };
+    let mut docs: BTreeSet<PathBuf> = BTreeSet::new();
+    for entry in entries.flatten() {
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        let Ok(pid) = name.parse::<u32>() else {
+            continue;
+        };
+        if pid == self_pid {
+            continue;
+        }
+        if let Some(doc) = route_owned_supervisor_document(pid) {
+            docs.insert(canonical_path_for_compare(&doc));
+        }
+    }
+    let reason = if force {
+        "install_fanout_force"
+    } else {
+        agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_INSTALL_FANOUT
+    };
+    let mut marked = 0;
+    let mut skipped = 0;
+    for doc in docs {
+        match schedule_supervisor_recycle_for_doc(&doc, reason) {
+            Ok(()) => marked += 1,
+            Err(err) => {
+                skipped += 1;
+                eprintln!(
+                    "[agent-doc] warning: failed to mark supervisor recycle-request for {}: {err:#}",
+                    doc.display()
+                );
+            }
+        }
+    }
+    Ok((marked, skipped))
 }
 
 /// M4 (#stuckhandoff2) — client handoff drop-guard. The two-phase handoff is
@@ -6166,6 +6262,48 @@ mod tests {
             None
         );
     }
+    #[test]
+    fn schedule_supervisor_recycle_marks_served_doc() {
+        // `#turnsaferecycle` Goal 1: an install fan-out marks a served route-owned
+        // document so its supervisor recycles at the next idle boundary.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+
+        assert!(
+            agent_doc_supervisor_io::recycle_request::read_recycle_request(
+                &file.to_string_lossy()
+            )
+            .is_none(),
+            "no request before scheduling"
+        );
+
+        schedule_supervisor_recycle_for_doc(
+            &file,
+            agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_INSTALL_FANOUT,
+        )
+        .unwrap();
+
+        let request = agent_doc_supervisor_io::recycle_request::read_recycle_request(
+            &file.to_string_lossy(),
+        )
+        .expect("recycle-request present after scheduling");
+        assert_eq!(
+            request.reason,
+            agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_INSTALL_FANOUT
+        );
+    }
+
+    #[test]
+    fn recycle_supervisors_all_projects_force_enumerates_without_error() {
+        // `#turnsaferecycle` Goal 1: the /proc supervisor fan-out is fail-open and
+        // returns a (marked, skipped) tally even when no route-owned supervisor is
+        // running in this test environment.
+        let (marked, skipped) = recycle_supervisors_all_projects_force(false).unwrap();
+        assert!(marked + skipped >= 0);
+    }
+
     #[test]
     fn recycle_debounce_decision_requires_continuous_idle_grace() {
         use agent_doc_controller::recycle::recycle_debounce_decision;

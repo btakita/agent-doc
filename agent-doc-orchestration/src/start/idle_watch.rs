@@ -1588,7 +1588,21 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // The `admin recycle` → route-owned-supervisor IPC adapter that flips
                 // this to `true` is the queued follow-up (`#supselfheal-adminwire`);
                 // until it lands the idle path keeps its current behavior.
-                let explicit_admin_recycle = false;
+                // `#turnsaferecycle` Goal 1 — an install fan-out
+                // (`recycle_supervisors_all_projects_force`) writes a per-document
+                // recycle-request marker so EVERY route-owned supervisor recycles onto
+                // the freshly-installed binary at its next idle boundary, not just the
+                // ones that independently self-detect staleness. Honor it like an
+                // explicit admin recycle: `supervisor_recycle_action` maps that to
+                // `RecycleImmediate` whether or not the running binary reads stale. The
+                // marker is cleared immediately before the `execve` below so the fresh
+                // process does not re-loop on it.
+                let recycle_requested = agent_doc_supervisor_io::recycle_request::fresh_recycle_request(
+                    &file,
+                    current_epoch_secs(),
+                )
+                .is_some();
+                let explicit_admin_recycle = recycle_requested;
                 // `#supselfheal` Phase 2 (`#supselfheal-wedgetrigger`): read the
                 // persisted editor-IPC wedge fact for the owned document. The
                 // write/converge closeout path latches `degraded` after repeated
@@ -1913,6 +1927,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 "[agent-doc] warning: failed to mark recycle-inflight before self-recycle reexec: {err:#}"
                             );
                         }
+                        // `#turnsaferecycle` Goal 1 — consume any install-fanout
+                        // recycle-request marker BEFORE the `execve` so the fresh
+                        // process (now serving the current binary) does not immediately
+                        // re-recycle in a loop.
+                        agent_doc_supervisor_io::recycle_request::clear_recycle_request(&file);
                         match supervisor_perform_reexec(&shared) {
                             Ok(never) => match never {},
                             Err(err) => {

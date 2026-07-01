@@ -230,6 +230,23 @@ fn auto_recycle_after_install() {
             );
         }
     }
+    // `#turnsaferecycle` Goal 1 — controllers (PCPs) are only half the fleet. The
+    // long-lived `agent-doc start --route-owned` supervisors that actually write
+    // documents must also be marked to recycle onto the freshly-installed binary,
+    // otherwise they keep serving the prior build until each independently
+    // self-detects staleness.
+    match agent_doc_orchestration::project_controller::recycle_supervisors_all_projects() {
+        Ok((marked, skipped)) => {
+            eprintln!(
+                "[lib-install] auto-recycle: {marked} route-owned supervisor(s) marked to recycle at next idle boundary, {skipped} skipped"
+            );
+        }
+        Err(e) => {
+            eprintln!(
+                "[lib-install] warning: supervisor recycle fan-out failed ({e}) — route-owned supervisors still serve the prior binary until they self-detect staleness"
+            );
+        }
+    }
 }
 
 #[cfg(test)]

@@ -57,6 +57,37 @@ pub fn controller_serve_project_root_from_args(args: &[String]) -> Option<PathBu
         .find_map(|window| (window[0] == "--project-root").then(|| PathBuf::from(&window[1])))
 }
 
+/// Index of the `agent-doc start` invocation in `args` (direct or under a
+/// `sh -c` sentinel), mirroring [`agent_doc_controller_serve_arg_index`].
+pub fn agent_doc_start_arg_index(args: &[String]) -> Option<usize> {
+    args.windows(2).enumerate().find_map(|(idx, window)| {
+        (arg_file_name_is(&window[0], "agent-doc")
+            && window[1] == "start"
+            && (idx == 0 || is_shell_c_controller_sentinel(args, idx)))
+        .then_some(idx)
+    })
+}
+
+/// Extract the document path a long-lived `agent-doc start --route-owned <doc>`
+/// supervisor process is serving. Returns `None` unless the args are an
+/// `agent-doc start` invocation carrying the `--route-owned` flag with a `.md`
+/// document token after the subcommand. Pure sibling of
+/// [`controller_serve_project_root_from_args`]: `/proc` walkers resolve the doc
+/// to a project root via the caller's filesystem adapter.
+pub fn start_route_owned_document_from_args(args: &[String]) -> Option<PathBuf> {
+    let start_idx = agent_doc_start_arg_index(args)?;
+    let tail = &args[start_idx + 2..];
+    if !tail.iter().any(|arg| arg == "--route-owned") {
+        return None;
+    }
+    tail.iter()
+        .find(|arg| {
+            let trimmed = arg.trim_matches(|c| c == '"' || c == '\'');
+            trimmed.ends_with(".md")
+        })
+        .map(PathBuf::from)
+}
+
 pub fn args_have_preparing_handoff(args: &[String]) -> bool {
     args.windows(2)
         .any(|window| window[0] == "--handoff-state" && window[1] == "preparing")
@@ -210,6 +241,66 @@ mod tests {
         assert_eq!(
             controller_serve_project_root_from_args(&shell_sentinel),
             Some(PathBuf::from("/home/me/work/sample-app"))
+        );
+    }
+
+    #[test]
+    fn start_route_owned_document_from_args_extracts_direct_and_shell_sentinel() {
+        let args = vec![
+            "/home/me/.cargo/bin/agent-doc".to_string(),
+            "start".to_string(),
+            "--route-owned".to_string(),
+            "tasks/software/tsift.md".to_string(),
+        ];
+        assert_eq!(
+            start_route_owned_document_from_args(&args),
+            Some(PathBuf::from("tasks/software/tsift.md"))
+        );
+
+        let shell_sentinel = vec![
+            "sh".to_string(),
+            "-c".to_string(),
+            "sleep 30; :".to_string(),
+            "/home/me/work/sample-app/agent-doc".to_string(),
+            "start".to_string(),
+            "--route-owned".to_string(),
+            "tasks/doc.md".to_string(),
+        ];
+        assert_eq!(
+            start_route_owned_document_from_args(&shell_sentinel),
+            Some(PathBuf::from("tasks/doc.md"))
+        );
+    }
+
+    #[test]
+    fn start_route_owned_document_from_args_rejects_non_route_owned_starts() {
+        // `start` without `--route-owned` is not a route-owned supervisor.
+        assert_eq!(
+            start_route_owned_document_from_args(&[
+                "/bin/agent-doc".to_string(),
+                "start".to_string(),
+                "tasks/doc.md".to_string(),
+            ]),
+            None
+        );
+        // A non-start subcommand never matches.
+        assert_eq!(
+            start_route_owned_document_from_args(&[
+                "/bin/agent-doc".to_string(),
+                "route".to_string(),
+                "--route-owned".to_string(),
+                "tasks/doc.md".to_string(),
+            ]),
+            None
+        );
+        // `--route-owned` present but no `.md` document token.
+        assert_eq!(
+            start_route_owned_document_from_args(&[
+                "/bin/agent-doc".to_string(),
+                "start".to_string(),
+                "--route-owned".to_string(),
+            ]),
+            None
         );
     }
 

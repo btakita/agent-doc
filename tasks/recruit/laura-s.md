@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 pending_done_guard: warn
 agent_doc_lint_dialect: off
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -158,16 +158,20 @@ Draining the last completed head (echoed exactly to trigger the strike):
 > **Queue prompt:** They use MS Copilot. https://careers-lsac.icims.com/jobs/1736/engineer-lead---assessments-applications/job?mobile=false&width=1455&height=500&bga=true&needsRedirect=false&jan1offset=-300&jun1offset=-240 mentions CopilotKit experience with the Stealth Company. Add CopilotKit.
 
 Already complete: CopilotKit is in the master resume (Confidential/Stealth client entry + Skills) and bolded in the LSAC profile (`resume` `b9572f8` → `3cd6954`). No further action — the queue is now fully drained.
-<!-- agent:boundary:d8ed6d4b -->
+
+### Re: Strike final LiveKit queue head — opus-4.8
+
+Echoing the last completed head exactly to drain it:
+
+> **Queue prompt:** Ensure Livekit is in the resume. I integrated Livekit with Copilotkit in the Stealth Company.
+
+Already complete: LiveKit is in the master resume on the Confidential/Stealth client entry (paired with CopilotKit over LiveKit WebRTC) and bolded in the LSAC profile (`resume` `3cd6954`). Queue fully drained.
+<!-- agent:boundary:f13ef957 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- ~~DRaft a linkedin reply. Build a resume for this role.~~
-- ~~They use MS Copilot. https://careers-lsac.icims.com/jobs/1736/engineer-lead---assessments-applications/job?mobile=false&width=1455&height=500&bga=true&needsRedirect=false&jan1offset=-300&jun1offset=-240 mentions CopilotKit experience with the Stealth Company. Add CopilotKit.~~
-- Ensure Livekit is in the resume. I integrated Livekit with Copilotkit in the Stealth Company.
-- ~~In the draft, remove the AI tells such as ` — `. Use my natural professional voice.~~
 <!-- /agent:queue -->
 
 ## Backlog

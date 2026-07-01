@@ -764,12 +764,25 @@ Done — both rewritten to address Artur directly (committed `ac24a9b67`, PDF re
 - **Q7 was internal dev-log** — a struck-through "~~Resolved~~" line referencing "the markdown brief." Replaced it with just the clean remaining question: which single asset class ships first (hotel or another).
 
 That's the last section that read like working notes; the report now reads consistently as a document *to* Artur throughout.
-<!-- agent:boundary:237dc6f6 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/recruit/reitrades.md source=ipc_visible_repair patch_id=67fb1e16-ac79-4b61-88f9-f188ac4c9223 invariant=live_prompt_drift recovery=retry_without_disk_write redeliver_editor=true bad_len=74265 bad_hash=7765b1e25cce8671ac732705fd41c281ad7a1eabc48186f8c5871a6f3076d920 repaired_len=75577 repaired_hash=69022564947aaf29eead5a43b0fa2ca71272c7539b4b45de9f7b682f39980217 doc=reitrades session=62d195b8-b029-42a5-9c6c-836cb1b5b103 turn=cycle-1782926193304
+```
+<!-- agent:boundary:df37d029 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue go -->
+- 5. Recommended phasing is not client-facing.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -825,7 +825,7 @@ pub(crate) fn wait_for_agent_ready_outcome(
                     "[route] Still waiting for {} ({:.0}s)... last line: {}",
                     harness.binary,
                     start.elapsed().as_secs_f64(),
-                    truncate_log_line(&last_line, 60)
+                    agent_doc_turn_executor_tmux::prompt::truncate_log_line(&last_line, 60)
                 );
             }
         }
@@ -864,10 +864,6 @@ pub(crate) fn fresh_start_pane_idle_ready(
         ),
         Err(_) => false,
     }
-}
-
-pub(crate) fn truncate_log_line(text: &str, max_chars: usize) -> String {
-    text.chars().take(max_chars).collect()
 }
 
 /// After a lazy claim, sync tmux layout for all files in the same window.
@@ -5154,18 +5150,5 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 .any(|entry| entry.session_id == "route-test-concurrent-provision-session-b"),
             "second provisioned document should be registered"
         );
-    }
-    #[test]
-    fn truncate_log_line_preserves_utf8_boundaries() {
-        let line = "  gpt-5.4 high · ~/work/btakita/agent-loop/src/boost-clien…";
-        let truncated = truncate_log_line(line, 60);
-        assert_eq!(truncated, line);
-        assert!(std::str::from_utf8(truncated.as_bytes()).is_ok());
-
-        let longer = format!("{line} with trailing content");
-        let truncated_longer = truncate_log_line(&longer, 60);
-        assert!(std::str::from_utf8(truncated_longer.as_bytes()).is_ok());
-        assert_eq!(truncated_longer.chars().count(), 60);
-        assert!(longer.starts_with(&truncated_longer));
     }
 }

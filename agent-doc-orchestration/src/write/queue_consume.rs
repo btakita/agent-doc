@@ -5,7 +5,8 @@ use agent_doc_document::queue_projection::strip_priority_markers;
 use agent_doc_queue::{
     queue_consume::{
         annotate_newly_struck_free_text_heads, consume_queue_nodes_by_key,
-        first_n_queue_prompt_texts, head_id_names_open_backlog_item, id_backed_head_node_keys,
+        cycle_answered_foreign_exchange_prompt, first_n_queue_prompt_texts,
+        head_id_names_open_backlog_item, id_backed_head_node_keys,
         mark_entries_completed_by_done_ids, mark_first_matching_prompts_completed_by_texts,
         normalized_done_id_bag, queue_consume_count_for_done_ids, queue_prompt_node_keys_for_count,
         queue_prompt_node_keys_for_done_ids, queue_prompt_node_keys_for_texts,
@@ -541,87 +542,6 @@ pub(crate) fn should_consume_queue_prompt_for_diff_content(
         ),
     );
     Ok(false)
-}
-
-/// True when this cycle's diff introduced a prompt-bearing exchange change (a
-/// new or edited user prompt) that does NOT match the active queue head — i.e.
-/// the response answered *foreign* exchange work. Used to keep a free-text queue
-/// head queued when the cycle was driven by an unrelated new exchange prompt
-/// rather than by draining the head (#queue-head-struck-on-foreign-exchange-answer).
-///
-/// A legitimate free-text-head drain has no such foreign prompt-bearing change
-/// (the head itself was already in the baseline queue, and the only addition is
-/// this cycle's `### Re:` response, which is not classified as a prompt), so this
-/// returns false and the head is allowed to drain.
-pub(crate) fn cycle_answered_foreign_exchange_prompt(
-    baseline: Option<&str>,
-    current_content: &str,
-    queue_head: &str,
-) -> bool {
-    let Some(base) = baseline else {
-        return false;
-    };
-    let base_norm = agent_doc_diff::strip_comments(&strip_boundary_for_dedup(base));
-    let current_norm = agent_doc_diff::strip_comments(&strip_boundary_for_dedup(current_content));
-    let Some(diff_text) = agent_doc_diff::unified_diff_from_contents(&base_norm, &current_norm)
-    else {
-        return false;
-    };
-    // A foreign exchange prompt is a user-prompt line (`❯ …`) genuinely NEW this
-    // cycle whose text is not the queue head. The bug shape is a foreign prompt
-    // that WAS answered this cycle, and `classify_prompt_bearing_changes`
-    // suppresses prompts already answered by an adjacent response — so scan the
-    // raw added lines for the canonical `❯` user-prompt marker instead of the
-    // suppressed classifier.
-    //
-    // #free-text-head-consume-genuine-not-struck: the unified diff is computed
-    // against the *normalized snapshot* baseline, but `current_content` is the
-    // *live* working-tree/editor buffer. The buffer preserves `❯` prompt
-    // prefixes on already-answered prompts that the snapshot normalized to the
-    // bare form (CLAUDE.md "committed exchange-only prompt-prefix normalization
-    // on already-answered prompts"). A pure `do x` → `❯ do x` prefix flip then
-    // shows as an added `+❯ …` line and was wrongly read as a NEW foreign
-    // prompt, blocking the free-text head strike and stalling the auto-loop. So
-    // a `❯` added line counts as foreign only when its normalized text is absent
-    // from the baseline entirely — a genuine new prompt, not a prefix flip on a
-    // prompt that already existed (in either `❯ X` or bare `X` form) at baseline.
-    let baseline_prompt_texts: std::collections::HashSet<String> = base_norm
-        .lines()
-        .map(|line| normalize_queue_prompt_text(line.trim().trim_start_matches('❯').trim()))
-        .filter(|text| !text.is_empty())
-        .collect();
-    let debug = std::env::var("AGENT_DOC_DEBUG_QUEUE_CONSUME").is_ok();
-    diff_text.lines().any(|line| {
-        let Some(added) = line.strip_prefix('+') else {
-            return false;
-        };
-        if added.starts_with("++") {
-            return false; // unified-diff `+++` file header, not content
-        }
-        let Some(prompt) = added.trim().strip_prefix('❯') else {
-            return false;
-        };
-        let prompt = prompt.trim();
-        if prompt.is_empty() || queue_prompt_text_matches(prompt, queue_head) {
-            return false;
-        }
-        // Skip prefix-normalization artifacts: the prompt text already existed in
-        // the baseline (bare or `❯`-prefixed), so it is not new this cycle.
-        if baseline_prompt_texts.contains(&normalize_queue_prompt_text(prompt)) {
-            if debug {
-                eprintln!(
-                    "[queue-consume] ❯ added line is a prefix-flip on an existing baseline prompt, not foreign: {prompt:?}"
-                );
-            }
-            return false;
-        }
-        if debug {
-            eprintln!(
-                "[queue-consume] foreign ❯ prompt added this cycle (blocks free-text head strike): {prompt:?} (head={queue_head:?})"
-            );
-        }
-        true
-    })
 }
 
 /// Return the id of the pre-commit queue head when this turn targeted that

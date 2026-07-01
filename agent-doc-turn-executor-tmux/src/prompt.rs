@@ -342,6 +342,10 @@ pub fn strip_ansi(s: &str) -> String {
     result
 }
 
+pub fn truncate_log_line(text: &str, max_chars: usize) -> String {
+    text.chars().take(max_chars).collect()
+}
+
 pub fn inactive_prompt() -> PromptInfo {
     PromptInfo {
         active: false,
@@ -602,6 +606,20 @@ mod tests {
     fn strip_ansi_colors() {
         let s = "\x1b[32mGreen\x1b[0m \x1b[31mRed\x1b[0m";
         assert_eq!(strip_ansi(s), "Green Red");
+    }
+
+    #[test]
+    fn truncate_log_line_preserves_utf8_boundaries() {
+        let line = "  gpt-5.4 high · ~/work/btakita/agent-loop/src/boost-clien…";
+        let truncated = truncate_log_line(line, 60);
+        assert_eq!(truncated, line);
+        assert!(std::str::from_utf8(truncated.as_bytes()).is_ok());
+
+        let longer = format!("{line} with trailing content");
+        let truncated_longer = truncate_log_line(&longer, 60);
+        assert!(std::str::from_utf8(truncated_longer.as_bytes()).is_ok());
+        assert_eq!(truncated_longer.chars().count(), 60);
+        assert!(longer.starts_with(&truncated_longer));
     }
 
     #[test]

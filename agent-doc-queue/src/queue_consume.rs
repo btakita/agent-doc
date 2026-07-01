@@ -8,12 +8,16 @@ use std::collections::HashSet;
 use agent_doc_document::queue_projection::{
     IN_PROGRESS_MARKER, strip_in_progress_marker, strip_priority_markers,
 };
+use agent_doc_document::write_normalization::strip_boundary_for_dedup;
 use agent_doc_element::element;
 use anyhow::{Context, Result};
 
 use crate::{
     document_queue::{self, QueueEntry},
-    queue_response::{normalize_done_id, queue_prompt_done_id, queue_prompt_text_is_free_text},
+    queue_response::{
+        normalize_done_id, normalize_queue_prompt_text, queue_prompt_done_id,
+        queue_prompt_text_is_free_text, queue_prompt_text_matches,
+    },
 };
 
 /// The deterministic, visible explanation appended to a struck free-text queue
@@ -59,6 +63,54 @@ pub fn queue_consume_count_for_done_ids(entries: &[QueueEntry], done_ids: &[Stri
 
 pub fn queue_prompt_texts_match_for_consumption(left: &str, right: &str) -> bool {
     strip_priority_markers(left) == strip_priority_markers(right)
+}
+
+/// True when this cycle's diff introduced a prompt-bearing exchange change (a
+/// new or edited user prompt) that does NOT match the active queue head.
+///
+/// This is pure queue policy for free-text queue consumption: a cycle that
+/// answered unrelated exchange work should keep the free-text head queued, while
+/// a cycle that only added a response for the head may drain it.
+pub fn cycle_answered_foreign_exchange_prompt(
+    baseline: Option<&str>,
+    current_content: &str,
+    queue_head: &str,
+) -> bool {
+    let Some(base) = baseline else {
+        return false;
+    };
+    let base_norm = agent_doc_diff::strip_comments(&strip_boundary_for_dedup(base));
+    let current_norm = agent_doc_diff::strip_comments(&strip_boundary_for_dedup(current_content));
+    let Some(diff_text) = agent_doc_diff::unified_diff_from_contents(&base_norm, &current_norm)
+    else {
+        return false;
+    };
+
+    // Prefix-normalization can make an already-answered baseline prompt appear
+    // as an added `+❯ ...` diff line. Skip prompt text that already existed in
+    // the baseline in bare or prefixed form.
+    let baseline_prompt_texts: HashSet<String> = base_norm
+        .lines()
+        .map(|line| normalize_queue_prompt_text(line.trim().trim_start_matches('❯').trim()))
+        .filter(|text| !text.is_empty())
+        .collect();
+
+    diff_text.lines().any(|line| {
+        let Some(added) = line.strip_prefix('+') else {
+            return false;
+        };
+        if added.starts_with("++") {
+            return false;
+        }
+        let Some(prompt) = added.trim().strip_prefix('❯') else {
+            return false;
+        };
+        let prompt = prompt.trim();
+        if prompt.is_empty() || queue_prompt_text_matches(prompt, queue_head) {
+            return false;
+        }
+        !baseline_prompt_texts.contains(&normalize_queue_prompt_text(prompt))
+    })
 }
 
 pub fn mark_first_matching_prompts_completed_by_texts(
@@ -628,6 +680,76 @@ mod tests {
         assert_eq!(
             queue_consume_count_for_done_ids(&entries, &["tail".to_string()]),
             0
+        );
+    }
+
+    #[test]
+    fn foreign_exchange_prompt_detection_ignores_prefix_flip_on_baseline_prompt() {
+        let head = "Evaluate axocoatl thing";
+        let baseline = concat!(
+            "<!-- agent:exchange -->\n",
+            "do earlier task\n",
+            "### Re: earlier\n",
+            "answered.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue go -->\n",
+            "- Evaluate axocoatl thing\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let prefix_flip = concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ do earlier task\n",
+            "### Re: earlier\n",
+            "answered.\n",
+            "### Re: axocoatl\n",
+            "plan written.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue go -->\n",
+            "- Evaluate axocoatl thing\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        assert!(
+            !cycle_answered_foreign_exchange_prompt(Some(baseline), prefix_flip, head),
+            "a prompt-prefix flip on an already-answered baseline prompt is not new foreign work"
+        );
+    }
+
+    #[test]
+    fn foreign_exchange_prompt_detection_distinguishes_drain_and_new_prompt() {
+        let head = "lazily-rs plan-update";
+        let baseline = "\
+---
+agent_doc_format: template
+queue_active: true
+---
+
+<!-- agent:exchange -->
+### Re: older
+Old.
+<!-- agent:boundary:x -->
+<!-- /agent:exchange -->
+
+<!-- agent:queue auto -->
+- lazily-rs plan-update
+<!-- /agent:queue -->
+";
+        let drain = baseline.replace(
+            "<!-- agent:boundary:x -->",
+            "### Re: updated the plan\nDone.\n<!-- agent:boundary:x -->",
+        );
+        assert!(
+            !cycle_answered_foreign_exchange_prompt(Some(baseline), &drain, head),
+            "a drain cycle with only a new response is not foreign work"
+        );
+
+        let foreign = baseline.replace(
+            "<!-- agent:boundary:x -->",
+            "❯ Fix the JB cache conflict instead\n### Re: fix jb\nDone.\n<!-- agent:boundary:x -->",
+        );
+        assert!(
+            cycle_answered_foreign_exchange_prompt(Some(baseline), &foreign, head),
+            "a genuinely new unrelated exchange prompt is foreign work"
         );
     }
 

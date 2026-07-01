@@ -13,7 +13,7 @@ use agent_doc_document_realtime::write_policy::{
 #[cfg(test)]
 use agent_doc_element_exchange::extract_post_commit_normalization_targets;
 use agent_doc_element_exchange::{
-    exchange_prompt_prefix_eligible_lines, normalization_target_counts,
+    duplicate_prompt_line_count, normalization_prefix_observation_counts,
     normalize_exchange_prefixes_for_targets, user_prompt_count_growth,
     verify_sidecar_normalization,
 };
@@ -2056,80 +2056,6 @@ pub(crate) fn mark_ack_content_live_buffer_synced_after_write(
             proof.source_buffer_matches
         ),
     );
-}
-
-pub(crate) fn normalization_prefix_observation_counts(
-    content: &str,
-    normalize_prefix_lines: &[String],
-) -> (usize, usize) {
-    let target_counts = normalization_target_counts(normalize_prefix_lines);
-    let required = target_counts.values().sum();
-    if required == 0 {
-        return (0, 0);
-    }
-
-    let exchange = element::parse(content)
-        .ok()
-        .and_then(|components| {
-            components
-                .iter()
-                .find(|component| component.name == "exchange")
-                .map(|component| component.content(content).to_string())
-        })
-        .unwrap_or_else(|| content.to_string());
-
-    let mut observed_counts = std::collections::HashMap::<String, usize>::new();
-    for line in exchange_prompt_prefix_eligible_lines(&exchange, Some(&target_counts)) {
-        let Some(stripped) = line.trim_end().strip_prefix("❯ ") else {
-            continue;
-        };
-        if target_counts.contains_key(stripped) {
-            *observed_counts.entry(stripped.to_string()).or_default() += 1;
-        }
-    }
-
-    let observed = target_counts
-        .iter()
-        .map(|(target, required)| {
-            observed_counts
-                .get(target)
-                .copied()
-                .unwrap_or(0)
-                .min(*required)
-        })
-        .sum();
-    (required, observed)
-}
-
-pub(crate) fn duplicate_prompt_line_count(content: &str) -> usize {
-    let exchange = element::parse(content)
-        .ok()
-        .and_then(|components| {
-            components
-                .iter()
-                .find(|component| component.name == "exchange")
-                .map(|component| component.content(content).to_string())
-        })
-        .unwrap_or_else(|| content.to_string());
-
-    let mut counts = std::collections::HashMap::<String, usize>::new();
-    let mut duplicates = 0;
-    for line in exchange_prompt_prefix_eligible_lines(&exchange, None) {
-        let normalized = line
-            .trim_end()
-            .strip_prefix("❯ ")
-            .unwrap_or(line.trim_end())
-            .trim();
-        if normalized.is_empty() {
-            continue;
-        }
-        let count = counts.entry(normalized.to_string()).or_default();
-        *count += 1;
-        if *count > 1 {
-            duplicates += 1;
-        }
-    }
-    duplicates
 }
 
 pub(crate) fn ipc_repair_decision_from_sidecar(

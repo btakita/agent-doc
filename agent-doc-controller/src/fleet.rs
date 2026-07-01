@@ -68,6 +68,61 @@ pub struct DashboardModel {
     pub problem_count: usize,
 }
 
+/// Derive cross-document / staleness findings from enumerated admin actor rows.
+///
+/// Pure over already-adapted rows (no DB, no tmux):
+///
+/// - `cross_document_pane`: a single live pane is the authoritative binding of
+///   more than one non-closed document.
+/// - `stale_dead_pane`: a non-closed actor whose pane is not alive.
+pub fn detect_admin_findings(rows: &[AdminActor]) -> Vec<AdminFinding> {
+    let mut findings = Vec::new();
+
+    let mut by_pane: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for row in rows {
+        if row.state == "closed" || row.pane.is_empty() || !row.pane_alive {
+            continue;
+        }
+        by_pane
+            .entry(row.pane.as_str())
+            .or_default()
+            .push(row.document_id.as_str());
+    }
+    for (pane, docs) in &by_pane {
+        if docs.len() > 1 {
+            let mut documents: Vec<String> = docs.iter().map(|d| d.to_string()).collect();
+            documents.sort();
+            findings.push(AdminFinding {
+                kind: "cross_document_pane".to_string(),
+                detail: format!(
+                    "pane {} is the live binding of {} documents; only one actor may own a pane",
+                    pane,
+                    documents.len()
+                ),
+                documents,
+                pane: Some((*pane).to_string()),
+            });
+        }
+    }
+
+    for row in rows {
+        if row.state == "closed" || row.pane.is_empty() || row.pane_alive {
+            continue;
+        }
+        findings.push(AdminFinding {
+            kind: "stale_dead_pane".to_string(),
+            detail: format!(
+                "actor for {} is {} but its pane {} is not alive (orphaned binding)",
+                row.document_id, row.state, row.pane
+            ),
+            documents: vec![row.document_id.clone()],
+            pane: Some(row.pane.clone()),
+        });
+    }
+
+    findings
+}
+
 /// Fold enumerated actors + derived findings into the deterministic view model.
 ///
 /// Pure over its inputs (no I/O, no clock, no tmux), so the highlight logic is
@@ -263,6 +318,83 @@ mod tests {
             supervisor_pid: Some(1234),
             cwd: Some("/proj".to_string()),
         }
+    }
+
+    #[test]
+    fn detect_flags_two_documents_sharing_one_live_pane() {
+        let rows = vec![
+            actor("tasks/agent-doc-bugs2.md", "%70", "busy", true),
+            actor("tasks/lazily-rs.md", "%70", "ready", true),
+        ];
+        let findings = detect_admin_findings(&rows);
+        assert_eq!(findings.len(), 1, "exactly one cross-document finding");
+        let f = &findings[0];
+        assert_eq!(f.kind, "cross_document_pane");
+        assert_eq!(f.pane.as_deref(), Some("%70"));
+        assert_eq!(
+            f.documents,
+            vec![
+                "tasks/agent-doc-bugs2.md".to_string(),
+                "tasks/lazily-rs.md".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn detect_flags_non_closed_actor_with_dead_pane() {
+        let rows = vec![actor("tasks/a.md", "%9", "busy", false)];
+        let findings = detect_admin_findings(&rows);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].kind, "stale_dead_pane");
+        assert_eq!(findings[0].pane.as_deref(), Some("%9"));
+    }
+
+    #[test]
+    fn detect_clean_fleet_reports_nothing() {
+        let rows = vec![
+            actor("tasks/a.md", "%1", "busy", true),
+            actor("tasks/b.md", "%2", "ready", true),
+        ];
+        let findings = detect_admin_findings(&rows);
+        assert!(
+            findings.is_empty(),
+            "distinct live panes, one owner each must have no findings, got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn detect_does_not_flag_cross_document_on_dead_shared_pane() {
+        let rows = vec![
+            actor("tasks/a.md", "%9", "ready", false),
+            actor("tasks/b.md", "%9", "ready", false),
+        ];
+        let findings = detect_admin_findings(&rows);
+        assert!(
+            findings.iter().all(|f| f.kind == "stale_dead_pane"),
+            "dead shared pane must not produce cross_document_pane, got {findings:?}"
+        );
+        assert_eq!(
+            findings
+                .iter()
+                .filter(|f| f.kind == "stale_dead_pane")
+                .count(),
+            2,
+            "each non-closed actor on the dead pane is an orphaned binding"
+        );
+    }
+
+    #[test]
+    fn detect_ignores_closed_actors() {
+        let rows = vec![
+            actor("tasks/old.md", "%5", "closed", true),
+            actor("tasks/new.md", "%5", "busy", true),
+            actor("tasks/closed-dead.md", "%9", "closed", false),
+        ];
+        let findings = detect_admin_findings(&rows);
+        assert!(
+            findings.is_empty(),
+            "closed actor rows must not emit findings, got {findings:?}"
+        );
     }
 
     #[test]

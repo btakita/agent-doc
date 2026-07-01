@@ -3132,6 +3132,7 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
         "pub fn mark_first_matching_prompts_completed_by_texts",
         "pub fn mark_entries_completed_by_done_ids",
         "pub fn normalized_done_id_bag",
+        "pub fn cycle_answered_foreign_exchange_prompt",
         "pub const STRUCK_FREE_TEXT_NOTE",
         "pub fn annotate_struck_free_text_line",
         "fn strip_list_bullet_prefix",
@@ -3159,6 +3160,8 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
         "fn mark_first_matching_prompts_completed_by_texts",
         "pub(crate) fn mark_entries_completed_by_done_ids",
         "pub(crate) fn normalized_done_id_bag",
+        "pub(crate) fn cycle_answered_foreign_exchange_prompt",
+        "fn cycle_answered_foreign_exchange_prompt",
         "pub(crate) const STRUCK_FREE_TEXT_NOTE",
         "pub(crate) fn annotate_struck_free_text_line",
         "fn strip_list_bullet_prefix",
@@ -3175,7 +3178,8 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
     );
     assert!(
         orchestration_queue_consume.contains("queue_consume::{")
-            && orchestration_queue_consume.contains("annotate_newly_struck_free_text_heads"),
+            && orchestration_queue_consume.contains("annotate_newly_struck_free_text_heads")
+            && orchestration_queue_consume.contains("cycle_answered_foreign_exchange_prompt"),
         "write/queue_consume.rs should call queue consumption entry policy through agent-doc-queue directly"
     );
     assert!(
@@ -9886,6 +9890,7 @@ fn test_agent_doc_controller_owns_fleet_dashboard_policy() {
         "pub struct DashboardRow",
         "pub struct DashboardActorDiagnostics",
         "pub struct DashboardModel",
+        "pub fn detect_admin_findings(",
         "pub fn build_dashboard_model(",
         "pub fn build_dashboard_model_with_diagnostics(",
         "pub fn render_dashboard(",
@@ -9906,6 +9911,9 @@ fn test_agent_doc_controller_owns_fleet_dashboard_policy() {
         "pub struct DashboardRow",
         "pub struct DashboardActorDiagnostics",
         "pub struct DashboardModel",
+        "pub fn detect_findings(",
+        "pub fn detect_admin_findings(",
+        "pub(crate) fn detect_admin_findings(",
         "pub fn build_dashboard_model(",
         "pub fn build_dashboard_model_with_diagnostics(",
         "pub fn render_dashboard(",
@@ -9923,11 +9931,12 @@ fn test_agent_doc_controller_owns_fleet_dashboard_policy() {
     }
     assert!(
         orchestration_admin
-            .contains("use agent_doc_controller::fleet::{AdminActor, AdminFinding};"),
-        "admin should construct focused fleet actor/finding rows directly"
+            .contains("use agent_doc_controller::fleet::{AdminActor, detect_admin_findings};"),
+        "admin should construct focused fleet actor rows and call controller finding derivation directly"
     );
     assert!(
         orchestration_dashboard.contains("use agent_doc_controller::fleet::{")
+            && orchestration_dashboard.contains("detect_admin_findings")
             && orchestration_dashboard.contains("build_dashboard_model_with_diagnostics")
             && orchestration_dashboard.contains("render_dashboard"),
         "dashboard should call focused fleet model/rendering policy directly"
@@ -14301,6 +14310,8 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         "pub fn strip_prompt_prefix_from_response_body_first_lines",
         "pub fn extract_post_commit_normalization_targets",
         "pub fn normalize_exchange_prefixes_for_targets",
+        "pub fn normalization_prefix_observation_counts",
+        "pub fn duplicate_prompt_line_count",
         "pub fn extract_normalization_targets",
         "pub fn normalize_user_prompts_in_exchange",
         "pub fn preserve_head_exchange_prompt_prefix_state",
@@ -14467,6 +14478,10 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         "pub use strip_prompt_prefix_from_response_body_first_lines",
         "pub fn extract_post_commit_normalization_targets",
         "pub fn normalize_exchange_prefixes_for_targets",
+        "pub fn normalization_prefix_observation_counts",
+        "pub fn duplicate_prompt_line_count",
+        "pub(crate) fn normalization_prefix_observation_counts",
+        "pub(crate) fn duplicate_prompt_line_count",
         "pub fn extract_normalization_targets(",
         "pub fn normalize_user_prompts_in_exchange(",
         "pub(crate) fn preserve_head_exchange_prompt_prefix_state(",

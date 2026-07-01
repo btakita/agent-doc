@@ -1240,6 +1240,70 @@ pub fn normalize_exchange_prefixes_for_targets(doc: &str, prefix_lines: &[String
     format!("{before_exchange}{normalized_user_region}{agent_region}{after_exchange}")
 }
 
+/// Return required and observed prompt-prefix counts for normalization targets.
+///
+/// Falls back to inspecting the full content when the exchange component cannot
+/// be parsed or found.
+pub fn normalization_prefix_observation_counts(
+    content: &str,
+    normalize_prefix_lines: &[String],
+) -> (usize, usize) {
+    let target_counts = normalization_target_counts(normalize_prefix_lines);
+    let required = target_counts.values().sum();
+    if required == 0 {
+        return (0, 0);
+    }
+
+    let exchange = exchange_content(content).unwrap_or(content);
+    let mut observed_counts = HashMap::<String, usize>::new();
+    for line in exchange_prompt_prefix_eligible_lines(exchange, Some(&target_counts)) {
+        let Some(stripped) = line.trim_end().strip_prefix("❯ ") else {
+            continue;
+        };
+        if target_counts.contains_key(stripped) {
+            *observed_counts.entry(stripped.to_string()).or_default() += 1;
+        }
+    }
+
+    let observed = target_counts
+        .iter()
+        .map(|(target, required)| {
+            observed_counts
+                .get(target)
+                .copied()
+                .unwrap_or(0)
+                .min(*required)
+        })
+        .sum();
+    (required, observed)
+}
+
+/// Count duplicate eligible prompt lines after normalizing optional `❯ ` prefixes.
+///
+/// Falls back to inspecting the full content when the exchange component cannot
+/// be parsed or found.
+pub fn duplicate_prompt_line_count(content: &str) -> usize {
+    let exchange = exchange_content(content).unwrap_or(content);
+    let mut counts = HashMap::<String, usize>::new();
+    let mut duplicates = 0;
+    for line in exchange_prompt_prefix_eligible_lines(exchange, None) {
+        let normalized = line
+            .trim_end()
+            .strip_prefix("❯ ")
+            .unwrap_or(line.trim_end())
+            .trim();
+        if normalized.is_empty() {
+            continue;
+        }
+        let count = counts.entry(normalized.to_string()).or_default();
+        *count += 1;
+        if *count > 1 {
+            duplicates += 1;
+        }
+    }
+    duplicates
+}
+
 /// Extract lines that were normalized by [`normalize_user_prompts_in_exchange`].
 ///
 /// Compares the exchange content line-by-line and returns lines where `before`
@@ -2381,5 +2445,62 @@ do #spfxnorm. spec-test-build-install-commit-push
             repaired.contains("<!-- agent:boundary:dirty123 -->\ndo #spfxnorm. spec-test-build-install-commit-push"),
             "agent region after the boundary must remain untouched: {repaired}"
         );
+    }
+
+    #[test]
+    fn normalization_prefix_observation_counts_counts_exchange_targets() {
+        let content = "\
+<!-- agent:exchange -->
+❯ do #one
+❯ do #one
+do #two
+### Re: response
+❯ do #two
+<!-- /agent:exchange -->
+";
+
+        assert_eq!(
+            normalization_prefix_observation_counts(
+                content,
+                &[
+                    "do #one".to_string(),
+                    "do #one".to_string(),
+                    "do #two".to_string(),
+                ],
+            ),
+            (3, 3)
+        );
+    }
+
+    #[test]
+    fn observation_helpers_fall_back_to_full_content_without_exchange_component() {
+        let content = "\
+❯ do #one
+do #one
+❯ do #two
+";
+
+        assert_eq!(
+            normalization_prefix_observation_counts(
+                content,
+                &["do #one".to_string(), "do #two".to_string()],
+            ),
+            (2, 2)
+        );
+        assert_eq!(duplicate_prompt_line_count(content), 1);
+    }
+
+    #[test]
+    fn duplicate_prompt_line_count_normalizes_prefixes_for_eligible_lines() {
+        let content = "\
+<!-- agent:exchange -->
+❯ do #one
+do #one
+### Re: response
+do #one
+<!-- /agent:exchange -->
+";
+
+        assert_eq!(duplicate_prompt_line_count(content), 2);
     }
 }

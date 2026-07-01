@@ -22,7 +22,7 @@ use std::time::Duration;
 use crate::sessions;
 use agent_doc_controller::fleet::{
     AdminActor, DashboardActorDiagnostics, DashboardModel, build_dashboard_model_with_diagnostics,
-    render_dashboard,
+    detect_admin_findings, render_dashboard,
 };
 use tmux_router::Tmux;
 
@@ -48,7 +48,7 @@ fn snapshot_model(root: &Path) -> Result<DashboardModel> {
     let registry = sessions::load_in(root)?;
     let tmux = Tmux::default_server();
     let rows = crate::admin::build_actor_list(&actors, &registry, |pane| tmux.pane_alive(pane));
-    let findings = crate::admin::detect_findings(&actors, |pane| tmux.pane_alive(pane));
+    let findings = detect_admin_findings(&rows);
     let diagnostics = snapshot_controller_diagnostics(root, &rows)?;
     Ok(build_dashboard_model_with_diagnostics(
         rows,

@@ -625,6 +625,7 @@ dependencies = [
 name = "agent-doc-queue"
 version = "0.34.66"
 dependencies = [
+ "agent-doc-diff",
  "agent-doc-document",
  "agent-doc-element",
  "agent-doc-element-backlog",

@@ -57,6 +57,7 @@ pub mod crdt_relay_host;
 pub mod cycle_state;
 pub mod dashboard;
 pub mod dedupe;
+pub(crate) mod detached_child;
 pub mod diff_io;
 pub mod doctor;
 pub mod document_watcher;

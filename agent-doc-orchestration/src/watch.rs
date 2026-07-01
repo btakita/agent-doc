@@ -184,7 +184,7 @@ pub fn ensure_running() -> Result<bool> {
 
     // Spawn daemon in background from project root
     let exe = std::env::current_exe().context("failed to resolve agent-doc binary path")?;
-    std::process::Command::new(exe)
+    let child = std::process::Command::new(exe)
         .arg("watch")
         .current_dir(&project_root)
         .stdin(std::process::Stdio::null())
@@ -192,6 +192,10 @@ pub fn ensure_running() -> Result<bool> {
         .stderr(std::process::Stdio::piped())
         .spawn()
         .context("failed to spawn watch daemon")?;
+    // Reap the detached watch daemon instead of dropping the handle so it can
+    // never linger as a `<defunct>` zombie under a long-lived launcher
+    // (`#zombiereap`).
+    crate::detached_child::reap_detached(child);
 
     // Wait briefly for daemon to write PID file
     for _ in 0..10 {

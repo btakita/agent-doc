@@ -1986,12 +1986,18 @@ pub(crate) fn launch_detached_at(
             ControllerHandoffState::Failed => "failed",
         });
     }
-    command
+    let child = command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .context("failed to launch project controller")?;
+    // Reap the detached controller instead of dropping the handle: under a
+    // long-lived launcher (the route-owned supervisor re-`ensure`ing every
+    // reconcile tick) a replacement controller that immediately finds a live
+    // peer owning the socket exits fast, and an unreaped handle becomes a
+    // `<defunct>` zombie parented to the supervisor forever (`#zombiereap`).
+    crate::detached_child::reap_detached(child);
     Ok(())
 }
 

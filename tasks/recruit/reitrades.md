@@ -30,7 +30,7 @@ batch/async is good. I want to work on the AI...perhaps where the AI signals com
 
 ❯ Regenerate the linkedin response.
 
-### Re: Regenerated — reactive-data reframe folded in — opus-4-8
+### Re: Regenerated — reactive-data reframe folded in — opus-4-8 (HEAD)
 
 > **Queue prompt:** Regenerate the linkedin response.
 
@@ -55,7 +55,34 @@ Brian
 This is the current working draft: generalist lead, reactive-data (not real-time) framing that holds up even if his pipeline is batch, AI in a supporting role, shared-libraries line intact, and a budget question to anchor the number. Still in your voice, no AI tells.
 
 Want me to drop it into `corky`/LinkedIn as a draft (no auto-send), or adjust anything?
-<!-- agent:boundary:09cdd167 -->
+Given what you know about my work, what are some examples of the plumbing that I can work on?
+
+### Re: Plumbing you could contribute as reusable libraries — opus-4-8
+
+> **Queue prompt:** Given what you know about my work, what are some examples of the plumbing that I can work on?
+
+"Plumbing" = generic infra that overlaps what you already build, so you can contribute it cheaply and open-source or royalty-free-license it without giving away REItrades' actual product. Each maps to a real piece of your work:
+
+1. **Derived-data consistency engine (from `lazily`).** A reactive/incremental layer that keeps generated content (OM, teaser, summary fields) in sync when a listing's numbers change — recompute only what changed instead of regenerating the whole document. Your cell/signal wheelhouse, fully generic, and it fixes the "batch generation drifts from the data" weakness a cheap freelancer leaves behind.
+
+2. **AI-extraction-with-validation framework (your deterministic-AI approach, packaged).** The engine behind "code owns every number, AI only proposes, low-confidence gets flagged." As a standalone library: schema-bound extraction, confidence scoring, validation rules, human-review routing. Reusable across any AI-content product, and exactly what their "100% accurate" claim needs. Their CRE schemas stay theirs; the engine is yours to share.
+
+3. **Old-OM / flyer structured extraction (from `tsift` + the framework above).** Pulling structured fields out of existing OMs, flyers, and PDFs is a parsing-plus-AI problem you already work on. The extraction/parsing tooling is generic; the mapping into their listing schema is bespoke.
+
+4. **Tera-based document/PDF generation harness.** A reusable Rust+Tera engine for templated OM/teaser PDF output — layout, data-binding, deterministic rendering. They need the OM rebuild; the engine is generic, the templates and branding are theirs.
+
+5. **Audit-trail / change-history library.** Append-only "who changed what, when" tracking. Their admin DBMS explicitly needs audit trails; a clean generic audit crate is pure plumbing.
+
+6. **Permissions / RBAC layer.** Roles, scopes, and resource ownership for the buyer / seller / broker separation. Generic policy infra, load-bearing for the broker segment.
+
+Optional: import/export + migration tooling (overlaps your spreadsheet/cell-family work), and an eval harness for AI output quality (from `eval-runner`).
+
+The line to hold: **share the engines, keep their schemas, templates, business rules, and data model as bespoke work-for-hire.** Items 1–4 are strongest — genuinely yours and genuinely central to making their AI story trustworthy.
+
+**On your other note (batch/async is fine, you want the AI, maybe signals / MLPs):** worth being clear-eyed here. REItrades' AI need is almost entirely **LLM extraction and generation** (structured data out of documents, teaser/OM copy), not model-building. There's little call for custom MLPs or signal-processing models in their stack. So if what you actually want is to build reactive-signal or MLP systems, this engagement won't scratch that itch — it'd be LLM-plumbing work. That's not a reason to skip it (it pays and it's real), but don't take it expecting an ML-modeling playground. If the signals/MLP direction is where you want to steer your work, that's a bigger conversation about which clients/problems fit it, and I'm happy to dig into that separately.
+
+Want me to turn the top three into a short "here's what I'd bring off the shelf" paragraph for Artur once he responds?
+<!-- agent:boundary:5588e027 -->
 <!-- /agent:exchange -->
 
 ## Queue

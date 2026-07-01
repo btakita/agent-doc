@@ -874,6 +874,17 @@ should be deleted during extraction.
   removed, and tracked-work completion uses `--done` only rather than the old
   `--pending-done` / `--backlog-done` spellings. Boundary tests assert the new
   owner crate and reject the removed surfaces.
+- The follow-on pure-helper pass pulled another layer out of orchestration while
+  waiting on fan-out extractors. `agent-doc-element-exchange` now owns exchange
+  shrink-block decisions, live-ack retry predicates, document-level prompt-line
+  dedupe, and live prompt-prefix dedupe; `agent-doc-prompt-contract` owns the
+  prompt accumulator helpers used by preflight semantic diffing;
+  `agent-doc-harness` owns output-prompt visibility for prompt/chrome
+  classification; `agent-doc-turn-executor-tmux` owns OpenCode permission prompt
+  stdin normalization and key translation; and `agent-doc-controller` owns the
+  direct-pane Enter-resubmit retry budget parser. Orchestration imports each
+  focused owner directly and keeps only file IO, pane capture, env lookup,
+  supervisor state, and ops-log adapters.
 
 ### Earlier closure finding
 

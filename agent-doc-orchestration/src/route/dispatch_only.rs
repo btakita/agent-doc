@@ -3,7 +3,7 @@
 use super::*;
 
 pub(crate) fn dispatch_only_requires_ready_probe(
-    status: Option<&crate::startup_miss::SessionLogStatus>,
+    status: Option<&agent_doc_supervisor::startup_miss::SessionLogStatus>,
     pane: &str,
     harness: &HarnessConfig,
 ) -> bool {
@@ -156,9 +156,9 @@ pub(crate) fn dispatch_only_send_reopen(
     // marker on watch-loop start), then proceed with the normal ready probe.
     // Fail closed (never type) if it never settles, so the caller retries
     // instead of stacking an unsubmitted trigger.
-    if crate::recycle_inflight::recycle_inflight_pending(file_path) {
+    if agent_doc_supervisor_io::recycle_inflight::recycle_inflight_pending(file_path) {
         let started = std::time::Instant::now();
-        let reason = crate::recycle_inflight::read_recycle_inflight(file_path)
+        let reason = agent_doc_supervisor_io::recycle_inflight::read_recycle_inflight(file_path)
             .map(|m| m.reason)
             .unwrap_or_else(|| "unknown".to_string());
         crate::ops_log::log_op(
@@ -171,7 +171,7 @@ pub(crate) fn dispatch_only_send_reopen(
                 reason
             ),
         );
-        while crate::recycle_inflight::recycle_inflight_pending(file_path) {
+        while agent_doc_supervisor_io::recycle_inflight::recycle_inflight_pending(file_path) {
             if started.elapsed() >= agent_doc_supervisor::recycle_inflight::RECYCLE_SETTLE_WAIT {
                 crate::ops_log::log_op(
                     file,
@@ -210,8 +210,8 @@ pub(crate) fn dispatch_only_send_reopen(
     let mut recovery_attempts = 0usize;
     let requires_ready_probe =
         dispatch_only_requires_ready_probe(log_status.as_ref(), &dispatch_pane, harness);
-    let mut pre_dispatch_route_guard =
-        Some(crate::route_in_flight::begin_route_submit_with_reason(
+    let mut pre_dispatch_route_guard = Some(
+        agent_doc_supervisor_io::route_submit_inflight::begin_route_submit_with_reason(
             file,
             &dispatch_pane,
             &harness.binary,
@@ -220,7 +220,8 @@ pub(crate) fn dispatch_only_send_reopen(
             } else {
                 "dispatch_only_pre_dispatch"
             },
-        )?);
+        )?,
+    );
     if requires_ready_probe {
         loop {
             if dispatch_only_starting_pane_ready_via_authoritative_actor(
@@ -484,7 +485,7 @@ pub(crate) fn require_dispatch_only_dispatch_start_proof(
         file,
         RoutedReopenGuardReason::AcceptedOnlyDispatchStartProof,
     );
-    if let Err(err) = crate::route_in_flight::mark_route_submit_blocked(
+    if let Err(err) = agent_doc_supervisor_io::route_submit_inflight::mark_route_submit_blocked(
         file,
         pane,
         &harness.binary,

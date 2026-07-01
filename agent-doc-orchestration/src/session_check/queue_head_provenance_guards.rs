@@ -28,7 +28,8 @@ pub(crate) fn check_expect_done_or_gate_guard(
     let unresolved = match agent_doc_turn::closeout_signal::expect_done_or_gate_decision(
         agent_doc_turn::closeout_signal::ExpectDoneOrGateEvidence {
             cycle_open: state.is_open(),
-            capture_committed: capture.state == crate::capture::CaptureState::Committed,
+            capture_committed: capture.state
+                == agent_doc_workflow::capture::CaptureState::Committed,
             response_body: &capture.response_body,
             directed_ids: &state.expect_done_or_gate_ids,
             pending_done_ids: &state.pending_done_ids,

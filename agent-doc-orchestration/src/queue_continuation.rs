@@ -56,7 +56,7 @@ pub fn detect(file: &Path) -> Result<Option<queue_policy::QueueContinuation>> {
     // [`agent_doc_queue::queue_continuation::RECYCLE_YIELD_GUIDANCE`].
     // The supervisor's OWN idle-watch drain uses `live_drainable_continuation_head`
     // (not this), so it is unaffected and resumes the drain after recycling.
-    if crate::recycle_yield::recycle_yield_pending(file) {
+    if agent_doc_supervisor_io::recycle_yield::recycle_yield_pending(file) {
         return Ok(None);
     }
     let content = match std::fs::read_to_string(file) {
@@ -902,7 +902,7 @@ mod tests {
         assert!(detect(&doc).unwrap().is_some());
 
         // A live recycle-yield request suppresses continuation entirely.
-        crate::recycle_yield::request_recycle_yield(
+        agent_doc_supervisor_io::recycle_yield::request_recycle_yield(
             &doc_str,
             agent_doc_supervisor::recycle_yield::RECYCLE_YIELD_STALE_BINARY,
         )
@@ -913,7 +913,7 @@ mod tests {
         );
 
         // Clearing the request hands the drain back so the loop resumes.
-        crate::recycle_yield::clear_recycle_yield(&doc_str);
+        agent_doc_supervisor_io::recycle_yield::clear_recycle_yield(&doc_str);
         assert!(
             detect(&doc).unwrap().is_some(),
             "clearing the recycle-yield must restore normal continuation"

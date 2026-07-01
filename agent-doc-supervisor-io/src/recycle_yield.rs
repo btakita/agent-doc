@@ -1,29 +1,4 @@
-//! Stale-binary recycle-yield request (`#wd40` / `#staleloop-recycle-restart`).
-//!
-//! The supervisor hot-reloads onto a freshly-installed binary only at a turn
-//! boundary (`prompt_visible && !turn_active`) — see
-//! [`agent_doc_supervisor::lifecycle::supervisor_recycle_action`]. A continuously
-//! self-draining Claude Code `/loop` holds a fresh drain-owner lease AND keeps
-//! the harness `turn_active` back-to-back, so the supervisor never reaches that
-//! boundary and a stale binary persists for the whole session (the root of the
-//! `content_ours` finalize drift + `#rt83` phantom-pin flood this session).
-//!
-//! This module is the automation that closes that gap. When the supervisor
-//! idle-watch detects its own binary is stale AND a self-driving loop owns the
-//! drain AND the boundary is not currently reachable, it writes a short-TTL
-//! *recycle-yield request* sidecar for the document. The attended in-session
-//! loop reads the request at its next inter-item boundary (via
-//! [`crate::queue_continuation::detect`] / `session-check` / preflight), yields
-//! one boundary instead of re-triggering, and the resulting idle turn lets the
-//! `execve` recycle fire on its own. After the recycle the fresh (no-longer-stale)
-//! supervisor clears the request and the drain resumes on the new binary.
-//!
-//! Mid-turn `execve` stays OUT of scope (the supervisor owns the in-flight
-//! cycle CRDT / write-queue / IPC state, rebuilt fresh after re-exec): the yield
-//! is exactly what produces a clean boundary without a mid-write swap.
-//!
-//! Mirrors the [`agent_doc_queue::drain_owner`] sidecar layout: keyed on the *document*
-//! path, short TTL so an abandoned request self-clears.
+//! Stale-binary recycle-yield request marker storage.
 
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -40,8 +15,8 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
-/// Compute the recycle-yield request path for a document. Mirrors
-/// [`agent_doc_queue::drain_owner`]: hash the document path and land the sidecar in the
+/// Compute the recycle-yield request path for a document. Mirrors the
+/// drain-owner layout: hash the document path and land the sidecar in the
 /// nearest ancestor `.agent-doc/` directory.
 fn recycle_yield_path(file: &str) -> PathBuf {
     use std::hash::{Hash, Hasher};
@@ -69,8 +44,7 @@ fn recycle_yield_path(file: &str) -> PathBuf {
 }
 
 /// Write (or refresh) a recycle-yield request for `file` with the current
-/// heartbeat. Idempotent: re-requesting just refreshes the timestamp so a
-/// long-running stale supervisor keeps the request live until the loop yields.
+/// heartbeat.
 pub fn request_recycle_yield(file: &str, reason: &str) -> Result<()> {
     let path = recycle_yield_path(file);
     if let Some(parent) = path.parent() {
@@ -85,29 +59,25 @@ pub fn request_recycle_yield(file: &str, reason: &str) -> Result<()> {
     Ok(())
 }
 
-/// Read the raw recycle-yield request for `file` (regardless of freshness).
+/// Read the raw recycle-yield request for `file` regardless of freshness.
 pub fn read_recycle_yield(file: &str) -> Option<RecycleYieldRequest> {
     let path = recycle_yield_path(file);
     let content = std::fs::read_to_string(&path).ok()?;
     serde_json::from_str(&content).ok()
 }
 
-/// Return the recycle-yield request iff a stale supervisor *currently* wants the
-/// in-session loop to yield (the request exists and is fresh against `now`).
-/// `None` means the loop should drain as usual.
+/// Return the recycle-yield request iff it exists and is fresh against `now`.
 pub fn fresh_recycle_yield(file: &str, now: u64) -> Option<RecycleYieldRequest> {
     let request = read_recycle_yield(file)?;
     recycle_yield_request_is_fresh(&request, now).then_some(request)
 }
 
-/// Convenience boolean: is a fresh recycle-yield request pending for `file`
-/// right now? Best-effort and read-only.
+/// Convenience boolean: is a fresh recycle-yield request pending for `file`?
 pub fn recycle_yield_pending(file: &Path) -> bool {
     fresh_recycle_yield(&file.to_string_lossy(), now_secs()).is_some()
 }
 
-/// Best-effort clear of the recycle-yield request (the fresh post-recycle
-/// supervisor drops it, and the loop may drop it after yielding).
+/// Best-effort clear of the recycle-yield request.
 pub fn clear_recycle_yield(file: &str) {
     let path = recycle_yield_path(file);
     if let Err(err) = std::fs::remove_file(&path)
@@ -143,9 +113,7 @@ mod tests {
             agent_doc_supervisor::recycle_yield::RECYCLE_YIELD_STALE_BINARY
         );
 
-        // Fresh against a `now` near the request...
         assert!(fresh_recycle_yield(&file, request.requested_secs).is_some());
-        // ...stale against a `now` far past the TTL.
         assert!(
             fresh_recycle_yield(&file, request.requested_secs + 10_000).is_none(),
             "an old request must hand the loop back to a normal drain"
@@ -175,7 +143,6 @@ mod tests {
         .unwrap();
         clear_recycle_yield(&file);
         assert!(read_recycle_yield(&file).is_none());
-        // Idempotent: clearing an absent request must not panic or warn-fail.
         clear_recycle_yield(&file);
     }
 }

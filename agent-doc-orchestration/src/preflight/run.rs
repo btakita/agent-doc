@@ -1412,7 +1412,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // `queue_continuation_required` so the loop ends its turn (the idle boundary
     // lets the `execve` recycle fire), and surface the recycle-yield guidance so
     // the agent understands the yield is intentional and resumes after recycle.
-    let recycle_yield_pending = crate::recycle_yield::recycle_yield_pending(file);
+    let recycle_yield_pending = agent_doc_supervisor_io::recycle_yield::recycle_yield_pending(file);
     let effective_queue_continuation_required =
         queue_state.queue_continuation_required && !exchange_prompt_preempts_queue;
     let effective_continuation = agent_doc_queue::queue_continuation::effective_continuation_output(
@@ -2823,7 +2823,10 @@ mod tests {
             .unwrap()
             .unwrap();
         let snapshot_content = snapshot::load(&doc).unwrap().unwrap();
-        assert_eq!(refreshed.state, crate::capture::CaptureState::Committed);
+        assert_eq!(
+            refreshed.state,
+            agent_doc_workflow::capture::CaptureState::Committed
+        );
         assert_eq!(
             refreshed.file_hash.as_deref(),
             Some(agent_doc_hash::content_hash(&content).as_str()),

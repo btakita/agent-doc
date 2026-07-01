@@ -351,7 +351,7 @@ fn record_session_startup_miss(
         pane,
         &session_id,
         &harness.binary,
-        crate::startup_miss::StartupMissOrigin::FreshStart,
+        agent_doc_supervisor::startup_miss::StartupMissOrigin::FreshStart,
         None,
     ) {
         Ok(_) => log_event(

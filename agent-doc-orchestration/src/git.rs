@@ -2201,7 +2201,8 @@ fn ensure_active_capture_materialized_for_commit(
     };
     if matches!(
         capture.state,
-        crate::capture::CaptureState::Committed | crate::capture::CaptureState::Discarded
+        agent_doc_workflow::capture::CaptureState::Committed
+            | agent_doc_workflow::capture::CaptureState::Discarded
     ) {
         return Ok(());
     }
@@ -5163,7 +5164,10 @@ Duplicate replay should stay live.
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::ResponseCaptured);
         let capture = crate::capture::load_active(&doc).unwrap().unwrap();
-        assert_eq!(capture.state, crate::capture::CaptureState::Captured);
+        assert_eq!(
+            capture.state,
+            agent_doc_workflow::capture::CaptureState::Captured
+        );
 
         let head = show_head(&doc).unwrap().unwrap();
         assert!(

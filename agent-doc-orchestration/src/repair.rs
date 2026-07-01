@@ -106,9 +106,9 @@ impl RepairOutcome {
 fn capture_is_repairable(capture: &crate::capture::CaptureRecord) -> bool {
     matches!(
         capture.state,
-        crate::capture::CaptureState::Captured
-            | crate::capture::CaptureState::WriteApplied
-            | crate::capture::CaptureState::Replayed
+        agent_doc_workflow::capture::CaptureState::Captured
+            | agent_doc_workflow::capture::CaptureState::WriteApplied
+            | agent_doc_workflow::capture::CaptureState::Replayed
     )
 }
 
@@ -1060,7 +1060,7 @@ fn retire_wedged_write_applied_capture_if_drifted(
     doc_content: &str,
     capture: &crate::capture::CaptureRecord,
 ) -> Result<bool> {
-    if capture.state != crate::capture::CaptureState::WriteApplied {
+    if capture.state != agent_doc_workflow::capture::CaptureState::WriteApplied {
         return Ok(false);
     }
     if !crate::capture::replay_baseline_drifted(file, capture)? {
@@ -1124,7 +1124,7 @@ fn retire_superseded_captured_only_orphan_if_drifted(
     doc_content: &str,
     capture: &crate::capture::CaptureRecord,
 ) -> Result<bool> {
-    if capture.state != crate::capture::CaptureState::Captured {
+    if capture.state != agent_doc_workflow::capture::CaptureState::Captured {
         return Ok(false);
     }
     if !crate::capture::replay_baseline_drifted(file, capture)? {
@@ -2726,7 +2726,10 @@ mod tests {
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert!(!state.is_open(), "cycle must be closed after retire");
         let capture = crate::capture::load_active(&doc).unwrap().unwrap();
-        assert_eq!(capture.state, crate::capture::CaptureState::Discarded);
+        assert_eq!(
+            capture.state,
+            agent_doc_workflow::capture::CaptureState::Discarded
+        );
         assert_eq!(
             capture.response_body, lost_response,
             "captured body must be preserved for forensics"
@@ -2790,7 +2793,10 @@ mod tests {
         // Capture a response (never written) answering `### Re: new`.
         let lost = "<!-- patch:exchange -->\n### Re: new — opus-4-8\n\nLost duplicate.\n<!-- /patch:exchange -->";
         let capture = crate::capture::capture_response(&doc, lost).unwrap();
-        assert_eq!(capture.state, crate::capture::CaptureState::Captured);
+        assert_eq!(
+            capture.state,
+            agent_doc_workflow::capture::CaptureState::Captured
+        );
 
         // A superseding turn answered the SAME prompt with a DIFFERENT body and
         // drifted the live document off the capture's recorded baseline.
@@ -2812,7 +2818,10 @@ mod tests {
         );
         // Orphan retired (Discarded); body preserved on disk for forensics.
         let capture = crate::capture::load_active(&doc).unwrap().unwrap();
-        assert_eq!(capture.state, crate::capture::CaptureState::Discarded);
+        assert_eq!(
+            capture.state,
+            agent_doc_workflow::capture::CaptureState::Discarded
+        );
         assert_eq!(
             capture.response_body, lost,
             "captured body must be preserved for forensics"
@@ -2888,7 +2897,10 @@ mod tests {
         assert_eq!(snap, repaired, "snapshot should follow the user repair");
 
         let capture = crate::capture::load_active(&doc).unwrap().unwrap();
-        assert_eq!(capture.state, crate::capture::CaptureState::Discarded);
+        assert_eq!(
+            capture.state,
+            agent_doc_workflow::capture::CaptureState::Discarded
+        );
     }
 
     #[test]
@@ -3563,7 +3575,10 @@ mod tests {
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
 
         let capture = crate::capture::load_active(&doc).unwrap().unwrap();
-        assert_eq!(capture.state, crate::capture::CaptureState::Committed);
+        assert_eq!(
+            capture.state,
+            agent_doc_workflow::capture::CaptureState::Committed
+        );
         assert!(
             capture.replayed_at.is_some(),
             "recovered patchback should retain replay provenance"

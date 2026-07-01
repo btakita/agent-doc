@@ -547,7 +547,7 @@ pub fn run_with_reap_policy(
     }
 
     if let Some((miss, supersession)) = crate::startup_miss::take_superseded_startup_miss(file)? {
-        let miss_ts = crate::startup_miss::format_timestamp(miss.timestamp);
+        let miss_ts = agent_doc_supervisor::startup_miss::format_timestamp(miss.timestamp);
         start_console_status(
             &mut session_log,
             route_owned,
@@ -580,7 +580,8 @@ pub fn run_with_reap_policy(
                     if let Some(miss) = unresolved_startup_miss.as_ref()
                         && miss.pane_id == conflicting_pane
                     {
-                        let miss_ts = crate::startup_miss::format_timestamp(miss.timestamp);
+                        let miss_ts =
+                            agent_doc_supervisor::startup_miss::format_timestamp(miss.timestamp);
                         anyhow::bail!(
                             "startup-miss from {} still belongs to alive pane {} for {}.\n\n{}",
                             miss_ts,
@@ -719,7 +720,9 @@ pub fn run_with_reap_policy(
                 Ok(record) => break record,
                 Err(err) => {
                     let recycle_pending =
-                        crate::recycle_inflight::recycle_inflight_pending(&file_path_str);
+                        agent_doc_supervisor_io::recycle_inflight::recycle_inflight_pending(
+                            &file_path_str,
+                        );
                     if !start_session_retryable_during_recycle(
                         recycle_pending,
                         attempts_used,
@@ -728,9 +731,11 @@ pub fn run_with_reap_policy(
                         return Err(err);
                     }
                     attempts_used += 1;
-                    let reason = crate::recycle_inflight::read_recycle_inflight(&file_path_str)
-                        .map(|m| m.reason)
-                        .unwrap_or_else(|| "unknown".to_string());
+                    let reason = agent_doc_supervisor_io::recycle_inflight::read_recycle_inflight(
+                        &file_path_str,
+                    )
+                    .map(|m| m.reason)
+                    .unwrap_or_else(|| "unknown".to_string());
                     crate::ops_log::log_op(
                         file,
                         &format!(
@@ -753,7 +758,7 @@ pub fn run_with_reap_policy(
                     // start; TTL is the backstop). If it never settles, surface the
                     // original error so the caller retries the whole dispatch rather
                     // than spinning here.
-                    if !crate::recycle_inflight::wait_for_recycle_settle(
+                    if !agent_doc_supervisor_io::recycle_inflight::wait_for_recycle_settle(
                         &file_path_str,
                         agent_doc_supervisor::recycle_inflight::RECYCLE_SETTLE_WAIT,
                         agent_doc_supervisor::recycle_inflight::RECYCLE_SETTLE_POLL,

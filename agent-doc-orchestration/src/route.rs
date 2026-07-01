@@ -1559,12 +1559,12 @@ fn reapply_codex_launch_contract_before_reuse(
 }
 
 fn startup_miss_route_facts(
-    miss: &crate::startup_miss::StartupMiss,
+    miss: &agent_doc_supervisor::startup_miss::StartupMiss,
     registered_pane: &str,
     pane_alive: bool,
     live_owner: Option<&str>,
     supervisor_health: SupervisorHealth,
-    log_status: Option<&crate::startup_miss::SessionLogStatus>,
+    log_status: Option<&agent_doc_supervisor::startup_miss::SessionLogStatus>,
 ) -> StartupMissRouteFacts {
     StartupMissRouteFacts {
         miss_timestamp: miss.timestamp,
@@ -1575,12 +1575,13 @@ fn startup_miss_route_facts(
             .and_then(|status| status.latest_start_pane.as_deref())
             == Some(registered_pane),
         latest_session_open: log_status
-            .is_some_and(crate::startup_miss::SessionLogStatus::latest_session_open),
-        latest_session_closed: log_status
-            .is_some_and(crate::startup_miss::SessionLogStatus::latest_session_closed),
+            .is_some_and(agent_doc_supervisor::startup_miss::SessionLogStatus::latest_session_open),
+        latest_session_closed: log_status.is_some_and(
+            agent_doc_supervisor::startup_miss::SessionLogStatus::latest_session_closed,
+        ),
         latest_start_timestamp: log_status.and_then(|status| status.latest_start_timestamp),
         latest_open_run_timestamp: log_status
-            .and_then(crate::startup_miss::latest_open_run_timestamp),
+            .and_then(agent_doc_supervisor::startup_miss::latest_open_run_timestamp),
     }
 }
 
@@ -1589,14 +1590,14 @@ fn startup_miss_route_provenance(
     pane_id: &str,
     live_owner: Option<&str>,
     supervisor_health: SupervisorHealth,
-    log_status: Option<&crate::startup_miss::SessionLogStatus>,
+    log_status: Option<&agent_doc_supervisor::startup_miss::SessionLogStatus>,
 ) -> String {
     let log_detail = match log_status {
         Some(status) => format!(
             "session_log={} {} last_event={}",
-            crate::startup_miss::latest_log_outcome(status),
-            crate::startup_miss::latest_log_anchor(status),
-            crate::startup_miss::latest_log_last_event(status)
+            agent_doc_supervisor::startup_miss::latest_log_outcome(status),
+            agent_doc_supervisor::startup_miss::latest_log_anchor(status),
+            agent_doc_supervisor::startup_miss::latest_log_last_event(status)
         ),
         None => "session_log=missing".to_string(),
     };
@@ -1617,8 +1618,8 @@ fn fail_if_recent_session_loss_window(file: &Path, session_id: &str) -> Result<(
         return Ok(());
     };
 
-    let first = crate::startup_miss::format_timestamp(window.first_timestamp);
-    let last = crate::startup_miss::format_timestamp(window.last_timestamp);
+    let first = agent_doc_supervisor::startup_miss::format_timestamp(window.first_timestamp);
+    let last = agent_doc_supervisor::startup_miss::format_timestamp(window.last_timestamp);
     let latest_reason = window.latest_reason.as_deref().unwrap_or("unknown");
     crate::ops_log::log_op(
         file,
@@ -2519,7 +2520,7 @@ fn failed_route_pane_has_startup_miss(file: &Path, pane_id: &str) -> bool {
             miss.pane_id == pane_id
                 && matches!(
                     miss.origin,
-                    crate::startup_miss::StartupMissOrigin::FreshStart
+                    agent_doc_supervisor::startup_miss::StartupMissOrigin::FreshStart
                 )
         })
 }
@@ -2589,8 +2590,8 @@ enum StartingPaneRecoveryTarget {
 }
 
 fn starting_pane_generation_changed(
-    initial_status: Option<&crate::startup_miss::SessionLogStatus>,
-    current_status: &crate::startup_miss::SessionLogStatus,
+    initial_status: Option<&agent_doc_supervisor::startup_miss::SessionLogStatus>,
+    current_status: &agent_doc_supervisor::startup_miss::SessionLogStatus,
     pane: &str,
 ) -> bool {
     if current_status.latest_start_pane.as_deref() != Some(pane)
@@ -2609,8 +2610,8 @@ fn starting_pane_generation_changed(
 }
 
 fn starting_pane_recovery_target(
-    initial_status: Option<&crate::startup_miss::SessionLogStatus>,
-    current_status: Option<&crate::startup_miss::SessionLogStatus>,
+    initial_status: Option<&agent_doc_supervisor::startup_miss::SessionLogStatus>,
+    current_status: Option<&agent_doc_supervisor::startup_miss::SessionLogStatus>,
     current_pane: &str,
     registered_pane: Option<&str>,
 ) -> Option<StartingPaneRecoveryTarget> {
@@ -2640,7 +2641,7 @@ fn wait_for_starting_pane_recovery_target(
     current_pane: &str,
     file_path: &str,
     harness: &HarnessConfig,
-    initial_status: Option<&crate::startup_miss::SessionLogStatus>,
+    initial_status: Option<&agent_doc_supervisor::startup_miss::SessionLogStatus>,
 ) -> Option<StartingPaneRecoveryTarget> {
     let registry_base_dir = registry_base_dir_for_dispatch(file_path);
     let budget = dispatch_only_starting_pane_recovery_retry_budget(
@@ -6573,7 +6574,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
     }
     #[test]
     fn starting_pane_recovery_target_follows_same_file_handoff() {
-        let initial = crate::startup_miss::SessionLogStatus {
+        let initial = agent_doc_supervisor::startup_miss::SessionLogStatus {
             latest_start_pane: Some("%151".to_string()),
             latest_start_timestamp: Some(10),
             latest_run_timestamp: Some(11),
@@ -6585,7 +6586,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
             saw_process_exit_after_latest_run: false,
             saw_session_end_after_latest_run: false,
         };
-        let handed_off = crate::startup_miss::SessionLogStatus {
+        let handed_off = agent_doc_supervisor::startup_miss::SessionLogStatus {
             latest_start_pane: Some("%183".to_string()),
             latest_start_timestamp: Some(20),
             latest_run_timestamp: Some(21),
@@ -6607,7 +6608,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
     }
     #[test]
     fn starting_pane_recovery_target_retries_same_pane_after_new_generation() {
-        let initial = crate::startup_miss::SessionLogStatus {
+        let initial = agent_doc_supervisor::startup_miss::SessionLogStatus {
             latest_start_pane: Some("%151".to_string()),
             latest_start_timestamp: Some(10),
             latest_run_timestamp: Some(11),
@@ -6619,7 +6620,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
             saw_process_exit_after_latest_run: false,
             saw_session_end_after_latest_run: false,
         };
-        let restarted = crate::startup_miss::SessionLogStatus {
+        let restarted = agent_doc_supervisor::startup_miss::SessionLogStatus {
             latest_start_pane: Some("%151".to_string()),
             latest_start_timestamp: Some(12),
             latest_run_timestamp: Some(13),
@@ -6639,7 +6640,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
     }
     #[test]
     fn starting_pane_recovery_target_ignores_unchanged_open_start() {
-        let initial = crate::startup_miss::SessionLogStatus {
+        let initial = agent_doc_supervisor::startup_miss::SessionLogStatus {
             latest_start_pane: Some("%151".to_string()),
             latest_start_timestamp: Some(10),
             latest_run_timestamp: Some(11),
@@ -6810,7 +6811,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
             &pane,
             "session-1",
             "claude",
-            crate::startup_miss::StartupMissOrigin::FreshStart,
+            agent_doc_supervisor::startup_miss::StartupMissOrigin::FreshStart,
             None,
         )
         .unwrap();
@@ -6907,7 +6908,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
             "%42",
             "session-test",
             "claude",
-            crate::startup_miss::StartupMissOrigin::FreshStart,
+            agent_doc_supervisor::startup_miss::StartupMissOrigin::FreshStart,
             None,
         )
         .unwrap();
@@ -6918,7 +6919,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
         assert_eq!(miss.pane_id, "%42");
         assert_eq!(
             miss.origin,
-            crate::startup_miss::StartupMissOrigin::FreshStart
+            agent_doc_supervisor::startup_miss::StartupMissOrigin::FreshStart
         );
         assert!(crate::startup_miss::is_startup_miss_pane(&doc, "%42"));
     }
@@ -6934,7 +6935,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
             "%42",
             "session-test",
             "claude",
-            crate::startup_miss::StartupMissOrigin::FreshStart,
+            agent_doc_supervisor::startup_miss::StartupMissOrigin::FreshStart,
             None,
         )
         .unwrap();
@@ -6956,7 +6957,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
             "%99",
             "session-test",
             "codex",
-            crate::startup_miss::StartupMissOrigin::RoutedTrigger,
+            agent_doc_supervisor::startup_miss::StartupMissOrigin::RoutedTrigger,
             Some("cycle-old"),
         )
         .unwrap();
@@ -6979,7 +6980,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
             "%50",
             "session-test",
             "claude",
-            crate::startup_miss::StartupMissOrigin::RoutedTrigger,
+            agent_doc_supervisor::startup_miss::StartupMissOrigin::RoutedTrigger,
             Some("cycle-baseline-123"),
         )
         .unwrap();
@@ -6987,7 +6988,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
         let miss = crate::startup_miss::load(&doc).unwrap().expect("marker");
         assert_eq!(
             miss.origin,
-            crate::startup_miss::StartupMissOrigin::RoutedTrigger
+            agent_doc_supervisor::startup_miss::StartupMissOrigin::RoutedTrigger
         );
         assert_eq!(
             miss.cycle_baseline_id.as_deref(),
@@ -6996,13 +6997,13 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
     }
     #[test]
     fn startup_miss_requires_fresh_start_only_without_matching_live_owner() {
-        let miss = crate::startup_miss::StartupMiss {
+        let miss = agent_doc_supervisor::startup_miss::StartupMiss {
             file: "test.md".to_string(),
             pane_id: "%42".to_string(),
             session_id: "session-123".to_string(),
             harness: "codex".to_string(),
             timestamp: 10,
-            origin: crate::startup_miss::StartupMissOrigin::RoutedTrigger,
+            origin: agent_doc_supervisor::startup_miss::StartupMissOrigin::RoutedTrigger,
             cycle_baseline_id: Some("cycle-abc".to_string()),
         };
         assert!(startup_miss_requires_fresh_start(startup_miss_route_facts(
@@ -7047,16 +7048,16 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
     }
     #[test]
     fn startup_miss_live_owner_restart_requires_closed_unsuperseded_start() {
-        let miss = crate::startup_miss::StartupMiss {
+        let miss = agent_doc_supervisor::startup_miss::StartupMiss {
             file: "test.md".to_string(),
             pane_id: "%42".to_string(),
             session_id: "session-123".to_string(),
             harness: "codex".to_string(),
             timestamp: 10,
-            origin: crate::startup_miss::StartupMissOrigin::RoutedTrigger,
+            origin: agent_doc_supervisor::startup_miss::StartupMissOrigin::RoutedTrigger,
             cycle_baseline_id: Some("cycle-abc".to_string()),
         };
-        let closed_same_start = crate::startup_miss::SessionLogStatus {
+        let closed_same_start = agent_doc_supervisor::startup_miss::SessionLogStatus {
             latest_start_pane: Some("%42".to_string()),
             latest_start_timestamp: Some(10),
             latest_run_timestamp: Some(10),
@@ -7070,7 +7071,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
             saw_process_exit_after_latest_run: true,
             saw_session_end_after_latest_run: false,
         };
-        let newer_open_start = crate::startup_miss::SessionLogStatus {
+        let newer_open_start = agent_doc_supervisor::startup_miss::SessionLogStatus {
             latest_start_pane: Some("%42".to_string()),
             latest_start_timestamp: Some(10),
             latest_run_timestamp: Some(11),
@@ -7126,16 +7127,16 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
     }
     #[test]
     fn startup_miss_fail_closed_only_for_alive_open_no_socket_sessions() {
-        let miss = crate::startup_miss::StartupMiss {
+        let miss = agent_doc_supervisor::startup_miss::StartupMiss {
             file: "test.md".to_string(),
             pane_id: "%42".to_string(),
             session_id: "session-123".to_string(),
             harness: "codex".to_string(),
             timestamp: 10,
-            origin: crate::startup_miss::StartupMissOrigin::RoutedTrigger,
+            origin: agent_doc_supervisor::startup_miss::StartupMissOrigin::RoutedTrigger,
             cycle_baseline_id: Some("cycle-abc".to_string()),
         };
-        let open = crate::startup_miss::SessionLogStatus {
+        let open = agent_doc_supervisor::startup_miss::SessionLogStatus {
             latest_start_pane: Some("%42".to_string()),
             latest_start_timestamp: Some(1),
             latest_run_timestamp: Some(1),
@@ -7147,7 +7148,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
             saw_process_exit_after_latest_run: false,
             saw_session_end_after_latest_run: false,
         };
-        let closed = crate::startup_miss::SessionLogStatus {
+        let closed = agent_doc_supervisor::startup_miss::SessionLogStatus {
             latest_start_pane: Some("%42".to_string()),
             latest_start_timestamp: Some(1),
             latest_run_timestamp: Some(1),

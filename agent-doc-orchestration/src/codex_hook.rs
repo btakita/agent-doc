@@ -39,6 +39,9 @@
 //! - `stop_fails_closed_after_one_auto_continue`
 
 use agent_doc_document::queue_projection::strip_in_progress_marker;
+use agent_doc_model_tier::context_transcript_io::{
+    latest_codex_transcript, transcript_context_pct,
+};
 use agent_doc_model_tier::context_usage::{Harness, clear_decision};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -483,8 +486,8 @@ fn codex_live_context_pct(file: &Path) -> Option<f64> {
         .into_iter()
         .next()
         .or_else(|| std::env::current_dir().ok())?;
-    let transcript = crate::context_pct::latest_codex_transcript(Path::new(&home), &project_dir)?;
-    crate::context_pct::transcript_context_pct(Harness::Codex, &transcript, "codex")
+    let transcript = latest_codex_transcript(Path::new(&home), &project_dir)?;
+    transcript_context_pct(Harness::Codex, &transcript, "codex")
 }
 
 pub(crate) fn codex_queue_context_reset_reason(

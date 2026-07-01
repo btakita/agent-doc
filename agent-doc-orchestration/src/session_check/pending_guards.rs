@@ -23,7 +23,7 @@ pub(crate) fn check_pending_capture_guard(
     let Some(capture) = crate::capture::load_by_id(file, capture_id)? else {
         return Ok(GuardResult::None);
     };
-    if capture.state != crate::capture::CaptureState::Committed {
+    if capture.state != agent_doc_workflow::capture::CaptureState::Committed {
         return Ok(GuardResult::None);
     }
     if capture
@@ -234,7 +234,7 @@ pub(crate) fn check_pending_done_guard(
     let Some(capture) = crate::capture::load_by_id(file, capture_id)? else {
         return Ok(GuardResult::None);
     };
-    if capture.state != crate::capture::CaptureState::Committed {
+    if capture.state != agent_doc_workflow::capture::CaptureState::Committed {
         return Ok(GuardResult::None);
     }
 

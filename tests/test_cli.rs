@@ -2407,9 +2407,29 @@ fn test_agent_doc_model_tier_owns_context_usage_policy() {
         );
     }
 
-    let orchestration_context =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/context_pct.rs"))
+    let context_transcript_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-model-tier/src/context_transcript_io.rs"))
             .unwrap();
+    for required_snippet in [
+        "pub fn read_used_tokens(",
+        "pub fn transcript_context_pct(",
+        "pub fn latest_claude_transcript(",
+        "pub fn latest_codex_transcript(",
+    ] {
+        assert!(
+            context_transcript_io.contains(required_snippet),
+            "agent-doc-model-tier should own transcript locator/read IO directly: {required_snippet}"
+        );
+    }
+
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let orchestration_context_path =
+        manifest_dir.join("agent-doc-orchestration/src/context_pct.rs");
+    assert!(
+        !orchestration_context_path.exists(),
+        "orchestration must not keep a context_pct adapter module after transcript IO extraction"
+    );
     let preflight_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
     let preflight_run_source =
@@ -2451,22 +2471,23 @@ fn test_agent_doc_model_tier_owns_context_usage_policy() {
         "pub fn clear_decision(",
     ] {
         assert!(
-            !orchestration_context.contains(forbidden_snippet),
-            "context_pct.rs must stay a transcript IO adapter and not re-own context usage policy: {forbidden_snippet}"
+            !orchestration_lib.contains(forbidden_snippet),
+            "orchestration lib must not expose context usage policy or transcript IO: {forbidden_snippet}"
         );
     }
     assert!(
-        orchestration_context.contains("use agent_doc_model_tier::context_usage::{"),
-        "context_pct.rs should call focused model-tier context usage helpers directly"
+        !orchestration_lib.contains("pub mod context_pct;"),
+        "orchestration must not keep a context_pct adapter module after transcript IO extraction"
     );
 
     let codex_hook =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/codex_hook.rs")).unwrap();
     assert!(
         codex_hook.contains("use agent_doc_model_tier::context_usage::{")
+            && codex_hook.contains("use agent_doc_model_tier::context_transcript_io::{")
             && codex_hook.contains("clear_decision")
             && codex_hook.contains("Harness"),
-        "codex hook should use focused context usage policy directly"
+        "codex hook should use focused context usage policy and transcript IO directly"
     );
 }
 
@@ -6359,6 +6380,16 @@ fn test_agent_doc_memory_owns_semantic_memory_ranking_policy() {
 #[test]
 fn test_agent_doc_supervisor_owns_recycle_marker_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-supervisor-io")),
+        "agent-doc-supervisor-io must stay a first-class workspace crate"
+    );
+
     let supervisor_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/lib.rs")).unwrap();
     assert!(supervisor_lib.contains("pub mod recycle_yield;"));
@@ -6408,36 +6439,35 @@ fn test_agent_doc_supervisor_owns_recycle_marker_policy() {
         );
     }
 
-    for (relative, forbidden) in [
-        (
-            "agent-doc-orchestration/src/recycle_yield.rs",
-            vec![
-                "pub const RECYCLE_YIELD_",
-                "const DEFAULT_RECYCLE_YIELD",
-                "pub struct RecycleYieldRequest",
-                "pub fn recycle_yield_ttl(",
-                "agent_doc_lease::timestamp_is_fresh",
-                "pub use agent_doc_supervisor::recycle_yield",
-            ],
-        ),
-        (
-            "agent-doc-orchestration/src/recycle_inflight.rs",
-            vec![
-                "pub const RECYCLE_INFLIGHT_",
-                "const DEFAULT_RECYCLE_INFLIGHT",
-                "pub const RECYCLE_SETTLE_",
-                "const RECYCLE_SETTLE_",
-                "pub struct RecycleInflightMarker",
-                "pub fn recycle_inflight_ttl(",
-                "agent_doc_lease::timestamp_is_fresh",
-                "pub use agent_doc_supervisor::recycle_inflight",
-            ],
-        ),
-        (
-            "agent-doc-orchestration/src/route/dispatch_only.rs",
-            vec!["const RECYCLE_SETTLE_WAIT", "const RECYCLE_SETTLE_POLL"],
-        ),
+    for removed in [
+        "agent-doc-orchestration/src/recycle_yield.rs",
+        "agent-doc-orchestration/src/recycle_inflight.rs",
     ] {
+        assert!(
+            !manifest_dir.join(removed).exists(),
+            "orchestration must not own supervisor marker storage IO: {removed}"
+        );
+    }
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    for forbidden in [
+        "pub mod recycle_yield;",
+        "pub mod recycle_inflight;",
+        "pub use agent_doc_supervisor_io::recycle_yield",
+        "pub use agent_doc_supervisor_io::recycle_inflight",
+        "pub use agent_doc_supervisor::recycle_yield",
+        "pub use agent_doc_supervisor::recycle_inflight",
+    ] {
+        assert!(
+            !orchestration_lib.contains(forbidden),
+            "orchestration must not expose a supervisor marker facade: {forbidden}"
+        );
+    }
+
+    for (relative, forbidden) in [(
+        "agent-doc-orchestration/src/route/dispatch_only.rs",
+        vec!["const RECYCLE_SETTLE_WAIT", "const RECYCLE_SETTLE_POLL"],
+    )] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         for forbidden in forbidden {
             assert!(
@@ -6447,40 +6477,44 @@ fn test_agent_doc_supervisor_owns_recycle_marker_policy() {
         }
     }
 
+    let supervisor_io_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/lib.rs")).unwrap();
+    assert!(supervisor_io_lib.contains("pub mod recycle_yield;"));
+    assert!(supervisor_io_lib.contains("pub mod recycle_inflight;"));
     let recycle_yield =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/recycle_yield.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/recycle_yield.rs"))
             .unwrap();
     assert!(
         recycle_yield.contains("use agent_doc_supervisor::recycle_yield::{")
             && recycle_yield.contains("recycle_yield_request_is_fresh"),
-        "recycle_yield adapter should import focused supervisor marker policy directly"
+        "recycle_yield IO should import focused supervisor marker policy directly"
     );
     let recycle_inflight =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/recycle_inflight.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/recycle_inflight.rs"))
             .unwrap();
     assert!(
         recycle_inflight.contains("use agent_doc_supervisor::recycle_inflight::{")
             && recycle_inflight.contains("recycle_inflight_marker_is_fresh"),
-        "recycle_inflight adapter should import focused supervisor marker policy directly"
+        "recycle_inflight IO should import focused supervisor marker policy directly"
     );
     for (relative, required) in [
         (
             "agent-doc-orchestration/src/start/idle_watch.rs",
-            "agent_doc_supervisor::recycle_yield::RECYCLE_YIELD_STALE_BINARY",
+            "agent_doc_supervisor_io::recycle_yield::request_recycle_yield",
         ),
         (
             "agent-doc-orchestration/src/start/idle_watch.rs",
-            "agent_doc_supervisor::recycle_inflight::RECYCLE_INFLIGHT_AUTO_INSTALL",
+            "agent_doc_supervisor_io::recycle_inflight::mark_recycle_inflight",
         ),
         (
             "agent-doc-orchestration/src/route/dispatch_only.rs",
-            "agent_doc_supervisor::recycle_inflight::RECYCLE_SETTLE_WAIT",
+            "agent_doc_supervisor_io::recycle_inflight::recycle_inflight_pending",
         ),
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
             source.contains(required),
-            "{relative} should call focused supervisor recycle marker policy directly: {required}"
+            "{relative} should call focused supervisor marker IO directly: {required}"
         );
     }
 }
@@ -6523,9 +6557,29 @@ fn test_agent_doc_supervisor_owns_route_submit_inflight_marker_policy() {
         );
     }
 
-    let route_in_flight =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route_in_flight.rs"))
-            .unwrap();
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/route_in_flight.rs")
+            .exists(),
+        "orchestration must not own route-submit marker storage IO"
+    );
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    for forbidden in [
+        "pub mod route_in_flight;",
+        "pub use agent_doc_supervisor_io::route_submit_inflight",
+        "pub use agent_doc_supervisor::route_submit_inflight",
+    ] {
+        assert!(
+            !orchestration_lib.contains(forbidden),
+            "orchestration must not expose a route-submit marker facade: {forbidden}"
+        );
+    }
+
+    let route_submit_io = fs::read_to_string(
+        manifest_dir.join("agent-doc-supervisor-io/src/route_submit_inflight.rs"),
+    )
+    .unwrap();
     for forbidden in [
         "const ROUTE_IN_FLIGHT_",
         "const ROUTE_READY_PROBE_",
@@ -6535,22 +6589,44 @@ fn test_agent_doc_supervisor_owns_route_submit_inflight_marker_policy() {
         "fn route_submit_ttl_secs_for_reason(",
         "pub fn route_submit_ttl_secs_for_reason(",
         "agent_doc_lease::timestamp_is_fresh",
-        "serde_json::from_str",
-        "serde_json::to_string",
         "pub use agent_doc_supervisor::route_submit_inflight",
     ] {
         assert!(
-            !route_in_flight.contains(forbidden),
-            "route_in_flight must stay a marker IO adapter, not re-own or facade route-submit marker policy: {forbidden}"
+            !route_submit_io.contains(forbidden),
+            "route-submit IO must not re-own or facade route-submit marker policy: {forbidden}"
         );
     }
     assert!(
-        route_in_flight.contains("use agent_doc_supervisor::route_submit_inflight::{")
-            && route_in_flight.contains("parse_route_submit_inflight_marker_json")
-            && route_in_flight.contains("parse_route_submit_blocked_marker_json")
-            && route_in_flight.contains("route_submit_inflight_marker_json")
-            && route_in_flight.contains("route_submit_blocked_marker_json"),
-        "route_in_flight adapter should import focused supervisor marker policy directly"
+        route_submit_io.contains("use agent_doc_supervisor::route_submit_inflight::{")
+            && route_submit_io.contains("parse_route_submit_inflight_marker_json")
+            && route_submit_io.contains("parse_route_submit_blocked_marker_json")
+            && route_submit_io.contains("route_submit_inflight_marker_json")
+            && route_submit_io.contains("route_submit_blocked_marker_json"),
+        "route-submit IO should import focused supervisor marker policy directly"
+    );
+    for (relative, required) in [
+        (
+            "agent-doc-orchestration/src/route/dispatch.rs",
+            "agent_doc_supervisor_io::route_submit_inflight::begin_route_submit",
+        ),
+        (
+            "agent-doc-orchestration/src/route/dispatch_only.rs",
+            "agent_doc_supervisor_io::route_submit_inflight::begin_route_submit_with_reason",
+        ),
+        (
+            "agent-doc-orchestration/src/start/idle_watch.rs",
+            "agent_doc_supervisor_io::route_submit_inflight::route_submit_in_flight",
+        ),
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains(required),
+            "{relative} should call focused route-submit marker IO directly: {required}"
+        );
+    }
+    assert!(
+        !route_submit_io.contains("pub use "),
+        "agent-doc-supervisor-io must not expose pub use facades"
     );
 }
 
@@ -10140,6 +10216,12 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "agent-doc-supervisor must own auto-install stdio planning policy"
     );
     assert!(
+        manifest_dir
+            .join("agent-doc-supervisor/src/startup_miss.rs")
+            .exists(),
+        "agent-doc-supervisor must own pure startup-miss/session-log policy"
+    );
+    assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/start/decisions.rs")
             .exists(),
@@ -10178,6 +10260,11 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/input.rs")).unwrap();
     let supervisor_reexec_policy =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/reexec.rs")).unwrap();
+    let supervisor_startup_miss =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/startup_miss.rs")).unwrap();
+    let orchestration_startup_miss =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/startup_miss.rs"))
+            .unwrap();
     for required_snippet in [
         "pub struct OwnershipGeneration",
         "pub struct OwnershipTransitionEvent",
@@ -10207,6 +10294,35 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         session_actor_source.contains("use agent_doc_supervisor::{")
             && session_actor_source.contains("infer_latest_generation_from_content(&content)"),
         "session_actor should call focused supervisor lifecycle vocabulary directly"
+    );
+    for required_snippet in [
+        "pub fn session_log_status_from_content(",
+        "pub fn is_harness_run_start_event(",
+        "pub fn event_reason(",
+        "pub fn recent_session_loss_window_at(",
+        "pub fn latest_log_anchor(",
+    ] {
+        assert!(
+            supervisor_startup_miss.contains(required_snippet),
+            "agent-doc-supervisor must own startup-miss/session-log policy: {required_snippet}"
+        );
+    }
+    for forbidden_snippet in [
+        "pub use agent_doc_supervisor::startup_miss",
+        "pub struct SessionLogStatus",
+        "pub struct RecentSessionLossWindow",
+        "pub fn session_log_status_from_content(",
+        "pub fn latest_log_anchor(",
+    ] {
+        assert!(
+            !orchestration_startup_miss.contains(forbidden_snippet),
+            "orchestration startup_miss must stay a filesystem adapter, not a pure policy facade: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        orchestration_startup_miss
+            .contains("agent_doc_supervisor::startup_miss::session_log_status_from_content"),
+        "orchestration startup_miss should call focused supervisor startup-miss policy directly"
     );
     for required_snippet in [
         "pub struct AgentLaunchArgsSources",
@@ -10523,9 +10639,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         write_ipc.contains("agent_doc_supervisor::lifecycle::write_wedged_from_ipc_failures"),
         "write::ipc should call focused supervisor write-wedge classification directly"
     );
-    let recycle_inflight =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/recycle_inflight.rs"))
-            .unwrap();
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
     for forbidden_snippet in [
         "pub fn start_session_retryable_during_recycle(",
         "fn start_session_retryable_during_recycle(",
@@ -10534,8 +10649,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub use agent_doc_supervisor::lifecycle",
     ] {
         assert!(
-            !recycle_inflight.contains(forbidden_snippet),
-            "recycle_inflight must stay a marker IO adapter, not re-own or facade supervisor recycle policy: {forbidden_snippet}"
+            !orchestration_lib.contains(forbidden_snippet),
+            "orchestration must not expose a supervisor lifecycle facade: {forbidden_snippet}"
         );
     }
     let start_run =

@@ -36,22 +36,13 @@
 //! - `mark_committed_updates_capture_state`
 
 use agent_doc_turn::closeout_recovery::CloseoutRecoveryMutationReason;
+use agent_doc_workflow::capture::{CaptureState, capture_state_can_advance};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 const PARTIAL_CHECKPOINT_INTERVAL: Duration = Duration::from_secs(30);
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum CaptureState {
-    Captured,
-    WriteApplied,
-    Replayed,
-    Committed,
-    Discarded,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CaptureRecord {
@@ -764,9 +755,9 @@ fn update_active_state(file: &Path, state: CaptureState) -> Result<()> {
     let Some(mut record) = load_active(file)? else {
         return Ok(());
     };
-    let prior_state = record.state.clone();
+    let prior_state = record.state;
     let now = now_secs();
-    if capture_state_rank(state.clone()) < capture_state_rank(record.state.clone()) {
+    if !capture_state_can_advance(record.state, state) {
         if matches!(state, CaptureState::Replayed)
             && matches!(record.state, CaptureState::Committed)
             && record.replayed_at.is_none()
@@ -842,16 +833,6 @@ fn update_active_state(file: &Path, state: CaptureState) -> Result<()> {
         );
     }
     write_record(file, &record)
-}
-
-fn capture_state_rank(state: CaptureState) -> u8 {
-    match state {
-        CaptureState::Captured => 0,
-        CaptureState::WriteApplied => 1,
-        CaptureState::Replayed => 2,
-        CaptureState::Committed => 3,
-        CaptureState::Discarded => 4,
-    }
 }
 
 fn metadata_from_frontmatter(file_content: &str) -> CaptureMetadata {

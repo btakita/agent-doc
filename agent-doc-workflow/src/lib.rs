@@ -5,6 +5,7 @@
 //! is deliberately side-effect free so those paths can converge on a single
 //! evidence -> decision -> mutation -> proof boundary.
 
+pub mod capture;
 pub mod doctor;
 pub mod invariants;
 pub mod orchestrate_tasks;
@@ -12,6 +13,7 @@ pub mod pending_capture;
 pub mod preflight_policy;
 pub mod session_check;
 pub mod session_cycle;
+pub mod state_wire;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum WorkflowEvidenceKind {

@@ -877,7 +877,7 @@ mod tests {
             "%1",
             session_id,
             "codex",
-            crate::startup_miss::StartupMissOrigin::RoutedTrigger,
+            agent_doc_supervisor::startup_miss::StartupMissOrigin::RoutedTrigger,
             None,
         )
         .unwrap();

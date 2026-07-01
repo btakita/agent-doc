@@ -59,6 +59,7 @@ dependencies = [
  "agent-doc-session-accretion",
  "agent-doc-sqlite",
  "agent-doc-supervisor",
+ "agent-doc-supervisor-io",
  "agent-doc-template",
  "agent-doc-tmux-commands",
  "agent-doc-turn",
@@ -453,8 +454,10 @@ version = "0.34.66"
 dependencies = [
  "agent-doc-markdown-ast",
  "anyhow",
+ "filetime",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -500,6 +503,7 @@ dependencies = [
  "agent-doc-session-accretion",
  "agent-doc-sqlite",
  "agent-doc-supervisor",
+ "agent-doc-supervisor-io",
  "agent-doc-supervisor-process",
  "agent-doc-sync",
  "agent-doc-template",
@@ -708,11 +712,24 @@ dependencies = [
  "agent-doc-element-backlog",
  "agent-doc-hash",
  "agent-doc-lease",
+ "agent-doc-log-time",
  "agent-doc-prompt-lines",
  "agent-doc-queue",
  "lazily 0.13.1",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "agent-doc-supervisor-io"
+version = "0.34.66"
+dependencies = [
+ "agent-doc-fs",
+ "agent-doc-hash",
+ "agent-doc-supervisor",
+ "anyhow",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

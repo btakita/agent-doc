@@ -525,7 +525,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // the recycle-in-flight marker so the `route` dispatch guard reopens.
             // The marker's short TTL is the backstop if a recycler died before
             // reaching here; clearing on startup makes the common path crisp.
-            crate::recycle_inflight::clear_recycle_inflight(&file);
+            agent_doc_supervisor_io::recycle_inflight::clear_recycle_inflight(&file);
             let mut last_dispatched: Option<String> = None;
             let mut last_context_reset_head: Option<String> = None;
             let mut last_context_clear_at: Option<u64> = None;
@@ -858,7 +858,9 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     }
                 }
                 let route_submit_in_flight =
-                    match crate::route_in_flight::route_submit_in_flight(&path) {
+                    match agent_doc_supervisor_io::route_submit_inflight::route_submit_in_flight(
+                        &path,
+                    ) {
                         Ok(active) => active,
                         Err(err) => {
                             if !route_submit_in_flight_logged {
@@ -1337,7 +1339,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             // instead of typing a trigger that the recycle drops
                             // before submit. Refreshed at the reexec boundary; the
                             // fresh supervisor clears it on watch-loop start.
-                            if let Err(err) = crate::recycle_inflight::mark_recycle_inflight(
+                            if let Err(err) =
+                                agent_doc_supervisor_io::recycle_inflight::mark_recycle_inflight(
                                 &file,
                                 agent_doc_supervisor::recycle_inflight::RECYCLE_INFLIGHT_AUTO_INSTALL,
                             ) {
@@ -1605,7 +1608,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         // `#jbdisprecycle`: refresh the recycle-in-flight marker
                         // immediately before the `execve` so a concurrent dispatch
                         // defers across the hot-reload boundary.
-                        if let Err(err) = crate::recycle_inflight::mark_recycle_inflight(
+                        if let Err(err) =
+                            agent_doc_supervisor_io::recycle_inflight::mark_recycle_inflight(
                             &file,
                             agent_doc_supervisor::recycle_inflight::RECYCLE_INFLIGHT_RESTART,
                         ) {
@@ -1767,7 +1771,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         } else {
                             agent_doc_supervisor::recycle_yield::RECYCLE_YIELD_STATE_FLUSH
                         };
-                        if let Err(err) = crate::recycle_yield::request_recycle_yield(
+                        if let Err(err) =
+                            agent_doc_supervisor_io::recycle_yield::request_recycle_yield(
                             &file,
                             yield_reason,
                         ) {
@@ -1806,7 +1811,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         // Post-recycle (or no longer stale): drop any leftover
                         // request so the loop resumes draining on the fresh binary.
                         // Reset the log latch so a later staleness can re-request.
-                        crate::recycle_yield::clear_recycle_yield(&file);
+                        agent_doc_supervisor_io::recycle_yield::clear_recycle_yield(&file);
                         recycle_yield_requested_logged = false;
                     }
                 }
@@ -1971,7 +1976,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         // defers across the hot-reload boundary (this is the path
                         // that emits the `(next_queue_item)`/`(idle)` hot-reload
                         // lines seen in the live repro).
-                        if let Err(err) = crate::recycle_inflight::mark_recycle_inflight(
+                        if let Err(err) =
+                            agent_doc_supervisor_io::recycle_inflight::mark_recycle_inflight(
                             &file,
                             agent_doc_supervisor::recycle_inflight::RECYCLE_INFLIGHT_AUTO_INSTALL,
                         ) {

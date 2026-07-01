@@ -23,89 +23,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use agent_doc_workflow::state_wire::{AgentDocNodeType, slot_id};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use serde::{Deserialize, Serialize};
 
 use crate::state_backbone::{DocumentStateProjection, EventLedger, StateOwner};
-
-/// The eight agent-doc state node `type_tag`s — the stable cross-language
-/// vocabulary plugins address nodes by. Each maps to a source struct in
-/// `state_backbone` (see the type_tag table in
-/// `plan-lazily-plugin-state-sync.md`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum AgentDocNodeType {
-    /// `agent_doc.document.baseline` — `BaselineProjection`.
-    DocumentBaseline,
-    /// `agent_doc.queue` — `QueueProjection` (document-level singleton).
-    Queue,
-    /// `agent_doc.queue.head` — `QueueHeadProjection` (one per head node_key).
-    QueueHead,
-    /// `agent_doc.closeout.cycle` — `CloseoutProjection` (one per cycle).
-    CloseoutCycle,
-    /// `agent_doc.transport.patch` — `TransportPatchProjection` (one per patch).
-    TransportPatch,
-    /// `agent_doc.supervisor.owner` — `OwnerProjection` (one per StateOwner).
-    SupervisorOwner,
-    /// `agent_doc.route` — `RouteProjection` (document-level singleton).
-    Route,
-    /// `agent_doc.proof.marker` — `ProofMarkerProjection` (one per marker).
-    ProofMarker,
-}
-
-impl AgentDocNodeType {
-    /// Wire-stable, versioned `type_tag` string. Never rename without bumping
-    /// the `lazily-spec` schema (`#lazilyspecpin`).
-    pub const fn type_tag(self) -> &'static str {
-        match self {
-            Self::DocumentBaseline => "agent_doc.document.baseline",
-            Self::Queue => "agent_doc.queue",
-            Self::QueueHead => "agent_doc.queue.head",
-            Self::CloseoutCycle => "agent_doc.closeout.cycle",
-            Self::TransportPatch => "agent_doc.transport.patch",
-            Self::SupervisorOwner => "agent_doc.supervisor.owner",
-            Self::Route => "agent_doc.route",
-            Self::ProofMarker => "agent_doc.proof.marker",
-        }
-    }
-
-    /// All node kinds in canonical order (used for deterministic node walks).
-    pub const ALL: [Self; 8] = [
-        Self::DocumentBaseline,
-        Self::Queue,
-        Self::QueueHead,
-        Self::CloseoutCycle,
-        Self::TransportPatch,
-        Self::SupervisorOwner,
-        Self::Route,
-        Self::ProofMarker,
-    ];
-}
-
-/// FNV-1a 64-bit over `(document_hash, type_tag, entity_key)`.
-///
-/// Produces a stable, allocation-free `slot_id` so Rust/Kotlin/JS address the
-/// same node without a central allocator. FNV-1a is chosen because it is trivial
-/// to re-implement identically across kt/js/rs (no platform `Hasher` drift).
-pub fn slot_id(document_hash: &str, type_tag: &str, entity_key: &str) -> u64 {
-    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
-    const FNV_PRIME: u64 = 0x100000001b3;
-    const SEP: u8 = 0xFF;
-    let mut hash = FNV_OFFSET;
-    let mix = |mut hash: u64, bytes: &[u8]| -> u64 {
-        for &byte in bytes {
-            hash ^= u64::from(byte);
-            hash = hash.wrapping_mul(FNV_PRIME);
-        }
-        hash
-    };
-    hash = mix(hash, document_hash.as_bytes());
-    hash = mix(hash, std::slice::from_ref(&SEP));
-    hash = mix(hash, type_tag.as_bytes());
-    hash = mix(hash, std::slice::from_ref(&SEP));
-    hash = mix(hash, entity_key.as_bytes());
-    hash
-}
 
 fn b64_payload<T: Serialize>(value: &T) -> String {
     let json = serde_json::to_value(value).unwrap_or(serde_json::Value::Null);

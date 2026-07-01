@@ -6,13 +6,13 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 #[cfg(test)]
 use agent_doc_controller::operator_clear::OperatorClearGuardOutcome;
 use agent_doc_controller::operator_clear::OperatorClearInputState;
-use agent_doc_orchestration::startup_miss::{SessionLogStatus, StartupMiss};
 use agent_doc_orchestration::supervisor::ipc::IpcMethod;
 #[cfg(test)]
 use agent_doc_sqlite::state_store::SupervisorLeaseStatus;
 use agent_doc_sqlite::state_store::{
     ActorRecord, ActorState, ActorTransitionStatus, SessionOperatorStatus,
 };
+use agent_doc_supervisor::startup_miss::{SessionLogStatus, StartupMiss, format_timestamp};
 use agent_doc_tmux_commands::tmux_submit_mode_for_harness;
 use agent_doc_turn_executor_tmux::context_clear::{
     ContextClearSubmitObservation, ContextClearSubmitStatus, InterruptClearTimeoutFacts,
@@ -3073,9 +3073,7 @@ fn print_status_summary(ctx: &SessionContext) {
                 record.last_transition.reason,
                 record.last_transition.prior_generation,
                 record.last_transition.new_generation,
-                agent_doc_orchestration::startup_miss::format_timestamp(
-                    record.last_transition.timestamp
-                )
+                format_timestamp(record.last_transition.timestamp)
             );
         }
         None => println!("actor: missing"),
@@ -3149,7 +3147,7 @@ fn print_status_summary(ctx: &SessionContext) {
             "startup_miss: pane={} origin={:?} at={}",
             miss.pane_id,
             miss.origin,
-            agent_doc_orchestration::startup_miss::format_timestamp(miss.timestamp)
+            format_timestamp(miss.timestamp)
         ),
         None => println!("startup_miss: none"),
     }
@@ -3181,7 +3179,7 @@ fn print_status_summary(ctx: &SessionContext) {
             lease.runtime_state.as_deref().unwrap_or("unknown"),
             lease
                 .last_heartbeat
-                .map(agent_doc_orchestration::startup_miss::format_timestamp)
+                .map(format_timestamp)
                 .unwrap_or_else(|| "unknown".to_string()),
             lease.supervisor_socket.as_deref().unwrap_or("unknown")
         ),
@@ -3193,7 +3191,7 @@ fn print_status_summary(ctx: &SessionContext) {
             attempt.command_kind,
             attempt.accepted_stage.as_deref().unwrap_or("none"),
             attempt.failed_stage.as_deref().unwrap_or("none"),
-            agent_doc_orchestration::startup_miss::format_timestamp(attempt.timestamp)
+            format_timestamp(attempt.timestamp)
         );
     } else {
         println!("controller_last_command: none");
@@ -3210,7 +3208,7 @@ fn print_status_summary(ctx: &SessionContext) {
                     .unwrap_or_else(|| "unknown".to_string()),
                 diagnostic.intended_hash.as_deref().unwrap_or("unknown"),
                 diagnostic.retry_status.as_deref().unwrap_or("unknown"),
-                agent_doc_orchestration::startup_miss::format_timestamp(diagnostic.timestamp),
+                format_timestamp(diagnostic.timestamp),
                 diagnostic.message
             );
         }

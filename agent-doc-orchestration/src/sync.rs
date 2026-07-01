@@ -408,8 +408,8 @@ fn skip_auto_start_for_recent_session_loss(file: &Path, session_id: &str) -> Res
         return Ok(false);
     };
 
-    let first = crate::startup_miss::format_timestamp(window.first_timestamp);
-    let last = crate::startup_miss::format_timestamp(window.last_timestamp);
+    let first = agent_doc_supervisor::startup_miss::format_timestamp(window.first_timestamp);
+    let last = agent_doc_supervisor::startup_miss::format_timestamp(window.last_timestamp);
     let latest_reason = window.latest_reason.as_deref().unwrap_or("unknown");
     eprintln!(
         "[sync] repeated pane-loss window for {} ({} events since {}, latest reason={} at {}) — skipping auto-start until manual recovery",
@@ -722,7 +722,7 @@ fn passive_autostart_skip_reason(
     tmux: &Tmux,
     file: &Path,
     session_id: &str,
-    unresolved_startup_miss: Option<&crate::startup_miss::StartupMiss>,
+    unresolved_startup_miss: Option<&agent_doc_supervisor::startup_miss::StartupMiss>,
 ) -> Result<Option<String>> {
     if unresolved_startup_miss.is_some() {
         return Ok(Some(
@@ -737,11 +737,11 @@ fn passive_autostart_skip_reason(
     if !status.latest_session_closed() {
         return Ok(Some(format!(
             "latest session log is still open or ambiguous (last_event={})",
-            crate::startup_miss::latest_log_last_event(&status)
+            agent_doc_supervisor::startup_miss::latest_log_last_event(&status)
         )));
     }
 
-    let last_event = crate::startup_miss::latest_log_last_event(&status);
+    let last_event = agent_doc_supervisor::startup_miss::latest_log_last_event(&status);
     if last_event.starts_with("session_end origin=registry_rebind ")
         && let Some(successor) =
             find_alive_pane_via_registry_rebind_successor(tmux, file, session_id, None, false)
@@ -2184,7 +2184,7 @@ fn run_with_options_internal(
             if let Some((miss, supersession)) =
                 crate::startup_miss::take_superseded_startup_miss(file_path)?
             {
-                let miss_ts = crate::startup_miss::format_timestamp(miss.timestamp);
+                let miss_ts = agent_doc_supervisor::startup_miss::format_timestamp(miss.timestamp);
                 eprintln!(
                     "[sync] clearing stale startup-miss on pane {} from {} for {} because newer registered owner {} already took over",
                     miss.pane_id,
@@ -2435,7 +2435,7 @@ fn run_with_options_internal(
                 let miss = unresolved_startup_miss
                     .as_ref()
                     .expect("guard checked presence");
-                let miss_ts = crate::startup_miss::format_timestamp(miss.timestamp);
+                let miss_ts = agent_doc_supervisor::startup_miss::format_timestamp(miss.timestamp);
                 eprintln!(
                     "[sync] unresolved startup-miss {} still belongs to alive pane {} for {} — skipping auto-start instead of rebinding over the existing owner",
                     miss_ts,
@@ -4206,7 +4206,7 @@ fn find_alive_pane_via_registry_rebind_successor(
     if !status.latest_session_closed() {
         return None;
     }
-    let pane_id = crate::startup_miss::latest_registry_rebind_successor(&status)?;
+    let pane_id = agent_doc_supervisor::startup_miss::latest_registry_rebind_successor(&status)?;
     if excluded_pane == Some(pane_id) || !tmux.pane_alive(pane_id) {
         return None;
     }
@@ -4288,7 +4288,7 @@ fn pid_is_agent_session(pid: &str) -> bool {
 fn should_skip_autostart_for_unresolved_startup_miss(
     registered_pane: Option<&str>,
     pane_alive: bool,
-    miss: Option<&crate::startup_miss::StartupMiss>,
+    miss: Option<&agent_doc_supervisor::startup_miss::StartupMiss>,
 ) -> bool {
     pane_alive && registered_pane.is_some_and(|pane| miss.is_some_and(|miss| miss.pane_id == pane))
 }
@@ -5028,13 +5028,13 @@ mod tests {
     }
     #[test]
     fn unresolved_startup_miss_skips_sync_autostart_only_for_matching_alive_pane() {
-        let miss = crate::startup_miss::StartupMiss {
+        let miss = agent_doc_supervisor::startup_miss::StartupMiss {
             file: "tasks/owned.md".to_string(),
             pane_id: "%42".to_string(),
             session_id: "associated-supervisor".to_string(),
             harness: "codex".to_string(),
             timestamp: 5,
-            origin: crate::startup_miss::StartupMissOrigin::RoutedTrigger,
+            origin: agent_doc_supervisor::startup_miss::StartupMissOrigin::RoutedTrigger,
             cycle_baseline_id: None,
         };
 
@@ -5169,13 +5169,13 @@ mod tests {
         let doc = tmp.path().join("tasks").join("miss.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         std::fs::write(&doc, "---\nagent_doc_session: passive-miss\n---\n").unwrap();
-        let miss = crate::startup_miss::StartupMiss {
+        let miss = agent_doc_supervisor::startup_miss::StartupMiss {
             file: "tasks/miss.md".to_string(),
             pane_id: "%81".to_string(),
             session_id: "passive-miss".to_string(),
             harness: "codex".to_string(),
             timestamp: 17,
-            origin: crate::startup_miss::StartupMissOrigin::RoutedTrigger,
+            origin: agent_doc_supervisor::startup_miss::StartupMissOrigin::RoutedTrigger,
             cycle_baseline_id: None,
         };
 

@@ -35,7 +35,8 @@ pub(crate) fn check_blocked_closeout_followup_guard(
     let unresolved = match agent_doc_turn::closeout_signal::blocked_closeout_followup_decision(
         agent_doc_turn::closeout_signal::BlockedCloseoutFollowupEvidence {
             cycle_open: state.is_open(),
-            capture_committed: capture.state == crate::capture::CaptureState::Committed,
+            capture_committed: capture.state
+                == agent_doc_workflow::capture::CaptureState::Committed,
             pending_added_this_cycle: state.pending_added_this_cycle,
             response_body: &capture.response_body,
             directed_ids: &state.expect_done_or_gate_ids,
@@ -163,7 +164,8 @@ pub(crate) fn check_gated_phase_split_guard(
     let flagged = match agent_doc_turn::closeout_signal::gated_phase_split_decision(
         agent_doc_turn::closeout_signal::GatedPhaseSplitEvidence {
             cycle_open: state.is_open(),
-            capture_committed: capture.state == crate::capture::CaptureState::Committed,
+            capture_committed: capture.state
+                == agent_doc_workflow::capture::CaptureState::Committed,
             response_body: &capture.response_body,
             directed_ids: &state.expect_done_or_gate_ids,
             pending_kept_open_ids: &state.pending_kept_open_ids,
@@ -239,7 +241,8 @@ pub(crate) fn check_queue_audit_partial_completion_guard(file: &Path) -> Result<
     match agent_doc_turn::closeout_signal::queue_audit_partial_completion_decision(
         agent_doc_turn::closeout_signal::QueueAuditPartialCompletionEvidence {
             cycle_open: state.is_open(),
-            capture_committed: capture.state == crate::capture::CaptureState::Committed,
+            capture_committed: capture.state
+                == agent_doc_workflow::capture::CaptureState::Committed,
             response_body: &capture.response_body,
         },
     ) {

@@ -47,6 +47,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
+pub mod context_transcript_io;
 pub mod context_usage;
 
 /// The Claude Code `opus` model alias. It is **deferred**, not version-pinned:

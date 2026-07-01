@@ -229,7 +229,10 @@ pub fn stuck_captured_cycle(file: &Path) -> Option<StuckCapturedCycleInfo> {
         return None;
     }
     if capture.response_body.trim().is_empty()
-        || matches!(capture.state, crate::capture::CaptureState::Discarded)
+        || matches!(
+            capture.state,
+            agent_doc_workflow::capture::CaptureState::Discarded
+        )
     {
         return None;
     }
@@ -298,7 +301,10 @@ pub fn reconcile_compacted_committed_capture(file: &Path) -> Result<bool> {
         return Ok(false);
     }
     if capture.response_body.trim().is_empty()
-        || matches!(capture.state, crate::capture::CaptureState::Discarded)
+        || matches!(
+            capture.state,
+            agent_doc_workflow::capture::CaptureState::Discarded
+        )
     {
         return Ok(false);
     }
@@ -381,13 +387,13 @@ pub(crate) fn read_head_compact_archive(file: &Path, pointer: &str) -> Option<St
     std::fs::read_to_string(archive_path).ok()
 }
 
-fn capture_state_label(state: crate::capture::CaptureState) -> &'static str {
+fn capture_state_label(state: agent_doc_workflow::capture::CaptureState) -> &'static str {
     match state {
-        crate::capture::CaptureState::Captured => "captured",
-        crate::capture::CaptureState::WriteApplied => "write_applied",
-        crate::capture::CaptureState::Replayed => "replayed",
-        crate::capture::CaptureState::Committed => "committed",
-        crate::capture::CaptureState::Discarded => "discarded",
+        agent_doc_workflow::capture::CaptureState::Captured => "captured",
+        agent_doc_workflow::capture::CaptureState::WriteApplied => "write_applied",
+        agent_doc_workflow::capture::CaptureState::Replayed => "replayed",
+        agent_doc_workflow::capture::CaptureState::Committed => "committed",
+        agent_doc_workflow::capture::CaptureState::Discarded => "discarded",
     }
 }
 
@@ -651,7 +657,7 @@ pub struct CloseoutCycleEvidence {
 pub struct CloseoutCaptureEvidence {
     pub capture_id: String,
     pub cycle_id: String,
-    pub state: crate::capture::CaptureState,
+    pub state: agent_doc_workflow::capture::CaptureState,
     pub response_sha256: String,
 }
 
@@ -714,7 +720,7 @@ pub fn gather_closeout_recovery_evidence(file: &Path) -> Result<CloseoutRecovery
     let active_capture = capture.as_ref().map(|capture| CloseoutCaptureEvidence {
         capture_id: capture.capture_id.clone(),
         cycle_id: capture.cycle_id.clone(),
-        state: capture.state.clone(),
+        state: capture.state,
         response_sha256: capture.response_sha256.clone(),
     });
     let response_body = closeout_response_body_evidence(&visible, capture.as_ref());
@@ -1777,7 +1783,7 @@ mod tests {
             Some(CloseoutCaptureEvidence {
                 capture_id: capture.capture_id.clone(),
                 cycle_id: capture.cycle_id.clone(),
-                state: crate::capture::CaptureState::Captured,
+                state: agent_doc_workflow::capture::CaptureState::Captured,
                 response_sha256: capture.response_sha256.clone(),
             })
         );
@@ -2513,7 +2519,10 @@ mod tests {
         );
         let capture = crate::capture::load_active(&doc).unwrap().unwrap();
         assert!(
-            matches!(capture.state, crate::capture::CaptureState::Discarded),
+            matches!(
+                capture.state,
+                agent_doc_workflow::capture::CaptureState::Discarded
+            ),
             "capture should be terminally Discarded after reconciliation, got {:?}",
             capture.state
         );

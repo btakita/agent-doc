@@ -241,7 +241,7 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
             // a stall) so the loop ends its turn cleanly; the idle boundary lets the
             // `execve` recycle fire and the drain resumes on the fresh binary. Never
             // force the Codex final-gate here — yielding is the desired outcome.
-            if crate::recycle_yield::recycle_yield_pending(file) {
+            if agent_doc_supervisor_io::recycle_yield::recycle_yield_pending(file) {
                 let outcome_fields = crate::flow::outcome::UserFacingOutcome::new(
                     crate::flow::outcome::UserFacingOutcomeKind::NoDrainableWork,
                 )
@@ -4572,13 +4572,13 @@ Body\n\
         let tmp = tempfile::TempDir::new().unwrap();
         let doc = make_project(tmp.path());
         fs::create_dir_all(tmp.path().join(".agent-doc/state/startup-miss")).unwrap();
-        let miss = crate::startup_miss::StartupMiss {
+        let miss = agent_doc_supervisor::startup_miss::StartupMiss {
             file: doc.display().to_string(),
             pane_id: "%401".to_string(),
             session_id: "session-123".to_string(),
             harness: "codex".to_string(),
             timestamp: 5,
-            origin: crate::startup_miss::StartupMissOrigin::RoutedTrigger,
+            origin: agent_doc_supervisor::startup_miss::StartupMissOrigin::RoutedTrigger,
             cycle_baseline_id: None,
         };
         let miss_path = tmp

@@ -109,10 +109,10 @@ pub(crate) fn retry_routed_cycle_ack_after_fresh_restart(
                 &dispatch_pane,
                 session_id,
                 &harness.binary,
-                crate::startup_miss::StartupMissOrigin::RoutedTrigger,
+                agent_doc_supervisor::startup_miss::StartupMissOrigin::RoutedTrigger,
                 baseline_id,
             )?;
-            let miss_ts = crate::startup_miss::format_timestamp(miss.timestamp);
+            let miss_ts = agent_doc_supervisor::startup_miss::format_timestamp(miss.timestamp);
             crate::ops_log::log_op(
                 file,
                 &format!(
@@ -206,10 +206,10 @@ pub(crate) fn retry_routed_cycle_ack_after_fresh_restart(
                     &dispatch_pane,
                     session_id,
                     &harness.binary,
-                    crate::startup_miss::StartupMissOrigin::RoutedTrigger,
+                    agent_doc_supervisor::startup_miss::StartupMissOrigin::RoutedTrigger,
                     baseline_id,
                 )?;
-                let miss_ts = crate::startup_miss::format_timestamp(miss.timestamp);
+                let miss_ts = agent_doc_supervisor::startup_miss::format_timestamp(miss.timestamp);
                 emit_startup_miss_diagnostic(
                     tmux,
                     &dispatch_pane,
@@ -386,10 +386,10 @@ pub(crate) fn require_routed_cycle_ack(
                 pane,
                 session_id,
                 &harness.binary,
-                crate::startup_miss::StartupMissOrigin::RoutedTrigger,
+                agent_doc_supervisor::startup_miss::StartupMissOrigin::RoutedTrigger,
                 baseline_id,
             )?;
-            let miss_ts = crate::startup_miss::format_timestamp(miss.timestamp);
+            let miss_ts = agent_doc_supervisor::startup_miss::format_timestamp(miss.timestamp);
             let dispatch_stage = dispatch_start.dispatch_stage_label();
             emit_startup_miss_diagnostic(
                 tmux,

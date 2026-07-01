@@ -610,10 +610,10 @@ pub(crate) fn send_command_unchecked(
     if acceptance.status != CommandDispatchStatus::Accepted
         && recycle_interrupted_resubmit_should_wait(
             true,
-            crate::recycle_inflight::recycle_inflight_pending(file_path),
+            agent_doc_supervisor_io::recycle_inflight::recycle_inflight_pending(file_path),
         )
     {
-        let settled = crate::recycle_inflight::wait_for_recycle_settle(
+        let settled = agent_doc_supervisor_io::recycle_inflight::wait_for_recycle_settle(
             file_path,
             agent_doc_supervisor::recycle_inflight::RECYCLE_SETTLE_WAIT,
             agent_doc_supervisor::recycle_inflight::RECYCLE_SETTLE_POLL,
@@ -792,8 +792,11 @@ pub(crate) fn dispatch_via_supervisor_ipc_with_mode(
 
     let tracker =
         build_routed_dispatch_start_tracker(file, file_path, harness, Some(tmux), Some(pane))?;
-    let _route_submit_guard =
-        crate::route_in_flight::begin_route_submit(file, pane, &harness.binary)?;
+    let _route_submit_guard = agent_doc_supervisor_io::route_submit_inflight::begin_route_submit(
+        file,
+        pane,
+        &harness.binary,
+    )?;
     let method = IpcMethod::Inject {
         bytes: agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(&payload)
             .to_string(),
@@ -1399,8 +1402,11 @@ pub(crate) fn dispatch_routed_reopen_with_mode(
 ) -> Result<RoutedDispatchStartProof> {
     let tracker =
         build_routed_dispatch_start_tracker(file, file_path, harness, Some(tmux), Some(pane))?;
-    let _route_submit_guard =
-        crate::route_in_flight::begin_route_submit(file, pane, &harness.binary)?;
+    let _route_submit_guard = agent_doc_supervisor_io::route_submit_inflight::begin_route_submit(
+        file,
+        pane,
+        &harness.binary,
+    )?;
     let submit_result = send_command_checked(tmux, pane, file_path, harness)?;
     let Some(tracker) = tracker else {
         log_route_latency(

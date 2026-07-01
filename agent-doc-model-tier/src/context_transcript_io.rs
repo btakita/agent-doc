@@ -1,40 +1,10 @@
-//! # Module: context_pct (`#s760a` orchestration adapter)
+//! File-backed transcript context usage helpers (`#s760a`).
 //!
-//! ## Spec (`#s760wire` — transcript-token context-% source)
-//! The file-backed half of the pre-emptive queue `/clear` source: locate and
-//! read harness session transcripts, then call
-//! `agent_doc_model_tier::context_usage` for token parsing, context-window
-//! percentage, and clear/no-clear policy. Context usage still comes from the
-//! transcript's cumulative token usage — **not** exchange size, **not** a TUI
-//! footer scrape. See `tasks/agent-doc/plan-s760-transcript-ctx-clear.md`.
-//!
-//! This module owns one adapter phase:
-//! - **`#s760a`** — the harness-aware transcript locator + token reader. For
-//!   Claude Code, locate `~/.claude/projects/<project-hash>/<session-id>.jsonl`
-//!   and parse the latest entry's cumulative `usage`. For Codex, locate the
-//!   newest `~/.codex/sessions/**/rollout-*.jsonl` for the current project and
-//!   read the latest `token_count` event's `last_token_usage` plus
-//!   `model_context_window`. OpenCode transcript stores are not yet confirmed,
-//!   so they return `None` (unsupported, skip) rather than guess.
-//!
-//! The route-dispatch gate (`#s760c`, in `route.rs`) and operator live-verify
-//! (`#s760d`) consume this source; they are intentionally **not** in this module.
-//!
-//! ## Safety
-//! Sending `/clear` wipes the agent's context, so this source fails safe at every
-//! boundary: an unknown model, a missing/empty/unreadable transcript, or an
-//! unsupported harness all yield `None`, and the caller never clears on `None`
-//! (per the `plan-s760` safety invariants). The destructive `/clear` also stays
-//! behind the existing default-off `agent_doc_queue_context_reset` opt-in at the
-//! `route.rs` gate.
-//!
-//! ## Evals
-//! - `read_used_tokens_unsupported_harness_is_none`
-//! - `transcript_context_pct_end_to_end`
-//! - `latest_claude_transcript_picks_newest_jsonl`
-//! - `latest_codex_transcript_picks_newest_matching_project`
+//! This module owns the harness transcript locator/read layer. Pure token
+//! parsing, context-window lookup, percentage math, and clear/no-clear policy
+//! stay in [`crate::context_usage`].
 
-use agent_doc_model_tier::context_usage::{
+use crate::context_usage::{
     Harness, TranscriptContextPctDiagnostic, UsedTokens, parse_claude_jsonl_used_tokens,
     parse_codex_jsonl_session_meta_cwd, transcript_context_pct_from_content,
 };
@@ -190,7 +160,6 @@ mod tests {
         let tmp = NamedTempFile::new().unwrap();
         assert!(read_used_tokens(Harness::Codex, tmp.path()).is_none());
         assert!(read_used_tokens(Harness::OpenCode, tmp.path()).is_none());
-        // Missing file is also None (fail safe).
         assert!(
             read_used_tokens(Harness::Claude, Path::new("/no/such/transcript.jsonl")).is_none()
         );
@@ -200,10 +169,9 @@ mod tests {
     fn transcript_context_pct_end_to_end() {
         let mut tmp = NamedTempFile::new().unwrap();
         tmp.write_all(FIXTURE.as_bytes()).unwrap();
-        // total = 2 + 4205 + 243320 + 2232 = 249759; /200000*100 clamps to 100.
         let pct = transcript_context_pct(Harness::Claude, tmp.path(), "claude-opus-4-8").unwrap();
         assert_eq!(pct, 100.0);
-        // Below window: build a small fixture.
+
         let mut small = NamedTempFile::new().unwrap();
         small
             .write_all(
@@ -211,7 +179,8 @@ mod tests {
             )
             .unwrap();
         let pct = transcript_context_pct(Harness::Claude, small.path(), "sonnet").unwrap();
-        assert_eq!(pct, 30.0); // 60000 / 200000 * 100
+        assert_eq!(pct, 30.0);
+
         let mut codex = NamedTempFile::new().unwrap();
         codex
             .write_all(
@@ -223,27 +192,23 @@ mod tests {
             transcript_context_pct(Harness::Codex, codex.path(), "gpt-5"),
             Some(30.0)
         );
-        // Unsupported harness -> None.
         assert!(transcript_context_pct(Harness::OpenCode, tmp.path(), "opus").is_none());
     }
 
     #[test]
     fn latest_claude_transcript_picks_newest_jsonl() {
         let dir = tempfile::tempdir().unwrap();
-        // No .jsonl yet → None (fail safe).
         assert!(latest_claude_transcript(dir.path()).is_none());
 
         let older = dir.path().join("old-session.jsonl");
         let newer = dir.path().join("new-session.jsonl");
         std::fs::write(&older, b"{}").unwrap();
         std::fs::write(&newer, b"{}").unwrap();
-        // Force `newer` to have a strictly later mtime regardless of fs resolution.
         let later = std::time::SystemTime::now() + std::time::Duration::from_secs(60);
         filetime::set_file_mtime(&newer, filetime::FileTime::from_system_time(later)).unwrap();
 
         assert_eq!(latest_claude_transcript(dir.path()), Some(newer));
 
-        // A non-.jsonl file is ignored even if it is newest.
         let txt = dir.path().join("zzz.txt");
         std::fs::write(&txt, b"x").unwrap();
         let even_later = std::time::SystemTime::now() + std::time::Duration::from_secs(120);

@@ -20,106 +20,19 @@
 //! - clear_removes_marker
 //! - is_startup_miss_pane_matches
 
+use agent_doc_supervisor::startup_miss::{
+    RecentSessionLossWindow, SessionLogStatus, StartupMiss, StartupMissOrigin,
+    StartupMissSupersession,
+};
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-
-const RECENT_SESSION_LOSS_WINDOW_SECS: u64 = 600;
-const RECENT_SESSION_LOSS_THRESHOLD: usize = 2;
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct StartupMiss {
-    pub file: String,
-    pub pane_id: String,
-    pub session_id: String,
-    pub harness: String,
-    pub timestamp: u64,
-    pub origin: StartupMissOrigin,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cycle_baseline_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum StartupMissOrigin {
-    FreshStart,
-    RoutedTrigger,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionLogStatus {
-    pub latest_start_pane: Option<String>,
-    pub latest_start_timestamp: Option<u64>,
-    pub latest_run_timestamp: Option<u64>,
-    pub latest_run_event: Option<String>,
-    pub saw_committed_cycle_after_latest_run: bool,
-    pub last_event: Option<String>,
-    pub saw_process_exit_after_latest_start: bool,
-    pub saw_session_end_after_latest_start: bool,
-    pub saw_process_exit_after_latest_run: bool,
-    pub saw_session_end_after_latest_run: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StartupMissSupersession {
-    pub registered_pane: String,
-    pub latest_start_pane: String,
-    pub latest_start_timestamp: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RecentSessionLossWindow {
-    pub count: usize,
-    pub first_timestamp: u64,
-    pub last_timestamp: u64,
-    pub latest_reason: Option<String>,
-}
-
-impl SessionLogStatus {
-    fn latest_anchor_timestamp(&self) -> Option<u64> {
-        self.latest_run_timestamp.or(self.latest_start_timestamp)
-    }
-
-    fn latest_anchor_closed(&self) -> bool {
-        if self.latest_run_timestamp.is_some() {
-            self.saw_process_exit_after_latest_run || self.saw_session_end_after_latest_run
-        } else {
-            self.saw_process_exit_after_latest_start || self.saw_session_end_after_latest_start
-        }
-    }
-
-    pub fn latest_session_open(&self) -> bool {
-        self.latest_anchor_timestamp().is_some() && !self.latest_anchor_closed()
-    }
-
-    pub fn latest_session_closed(&self) -> bool {
-        self.latest_anchor_timestamp().is_some() && self.latest_anchor_closed()
-    }
-}
-
-fn is_harness_run_start_event(event: &str) -> bool {
-    matches!(
-        event.split_whitespace().next(),
-        Some(token) if token.ends_with("_start") || token.ends_with("_restart")
-    )
-}
 
 fn current_epoch_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
-}
-
-fn is_session_loss_event(event: &str) -> bool {
-    event.starts_with("supervisor_exit code=missing_pane ")
-}
-
-fn event_reason(event: &str) -> Option<String> {
-    event
-        .split_whitespace()
-        .find_map(|part| part.strip_prefix("reason=").map(ToOwned::to_owned))
 }
 
 fn state_path(file: &Path) -> Result<Option<PathBuf>> {
@@ -243,42 +156,6 @@ pub fn clear(file: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn format_timestamp(epoch_secs: u64) -> String {
-    #[cfg(not(unix))]
-    {
-        return epoch_secs.to_string();
-    }
-
-    #[cfg(unix)]
-    {
-        let epoch: libc::time_t = match epoch_secs.try_into() {
-            Ok(value) => value,
-            Err(_) => return epoch_secs.to_string(),
-        };
-        let mut tm = std::mem::MaybeUninit::<libc::tm>::uninit();
-        let mut buf = [0u8; 21];
-        let format = b"%Y-%m-%dT%H:%M:%SZ\0";
-
-        // Format persisted startup-miss timestamps without depending on shell `date`
-        // flags, which differ across Linux/macOS.
-        unsafe {
-            if libc::gmtime_r(&epoch, tm.as_mut_ptr()).is_null() {
-                return epoch_secs.to_string();
-            }
-            let written = libc::strftime(
-                buf.as_mut_ptr().cast(),
-                buf.len(),
-                format.as_ptr().cast(),
-                tm.as_ptr(),
-            );
-            if written == 0 {
-                return epoch_secs.to_string();
-            }
-            String::from_utf8_lossy(&buf[..written]).into_owned()
-        }
-    }
-}
-
 #[allow(dead_code)]
 pub fn is_startup_miss_pane(file: &Path, pane_id: &str) -> bool {
     load(file)
@@ -294,102 +171,7 @@ pub fn session_log_status(file: &Path, session_id: &str) -> Result<Option<Sessio
     let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
         return Ok(None);
     };
-    let mut saw_start = false;
-    let mut latest_start_pane = None;
-    let mut latest_start_timestamp = None;
-    let mut latest_run_timestamp = None;
-    let mut latest_run_event = None;
-    let mut saw_committed_cycle_after_latest_run = false;
-    let mut last_event = None;
-    let mut saw_process_exit_after_latest_start = false;
-    let mut saw_session_end_after_latest_start = false;
-    let mut saw_process_exit_after_latest_run = false;
-    let mut saw_session_end_after_latest_run = false;
-
-    for raw_line in content.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let event = line
-            .split_once("] ")
-            .map(|(_, event)| event)
-            .unwrap_or(line)
-            .trim();
-        let timestamp = line
-            .strip_prefix('[')
-            .and_then(|rest| rest.split_once(']'))
-            .and_then(|(ts, _)| agent_doc_log_time::parse_log_timestamp(ts));
-
-        if event.starts_with("session_start ") {
-            saw_start = true;
-            latest_start_timestamp = timestamp;
-            latest_start_pane = event
-                .split_whitespace()
-                .find_map(|part| part.strip_prefix("pane=").map(ToOwned::to_owned));
-            latest_run_timestamp = None;
-            latest_run_event = None;
-            saw_committed_cycle_after_latest_run = false;
-            last_event = Some(event.to_string());
-            saw_process_exit_after_latest_start = false;
-            saw_session_end_after_latest_start = false;
-            saw_process_exit_after_latest_run = false;
-            saw_session_end_after_latest_run = false;
-            continue;
-        }
-
-        if !saw_start {
-            continue;
-        }
-
-        if is_harness_run_start_event(event) {
-            latest_run_timestamp = timestamp.or(latest_start_timestamp);
-            latest_run_event = Some(event.to_string());
-            saw_committed_cycle_after_latest_run = false;
-            last_event = Some(event.to_string());
-            saw_process_exit_after_latest_run = false;
-            saw_session_end_after_latest_run = false;
-            continue;
-        }
-
-        last_event = Some(event.to_string());
-        if event.starts_with("document_cycle phase=committed ") && latest_run_timestamp.is_some() {
-            saw_committed_cycle_after_latest_run = true;
-        }
-        if event.contains("_exit code=") {
-            saw_process_exit_after_latest_start = true;
-            if latest_run_timestamp.is_some() {
-                saw_process_exit_after_latest_run = true;
-            }
-        }
-        if event
-            .split_whitespace()
-            .next()
-            .is_some_and(|token| token == "session_end")
-        {
-            saw_session_end_after_latest_start = true;
-            if latest_run_timestamp.is_some() {
-                saw_session_end_after_latest_run = true;
-            }
-        }
-    }
-
-    if !saw_start {
-        return Ok(None);
-    }
-
-    Ok(Some(SessionLogStatus {
-        latest_start_pane,
-        latest_start_timestamp,
-        latest_run_timestamp,
-        latest_run_event,
-        saw_committed_cycle_after_latest_run,
-        last_event,
-        saw_process_exit_after_latest_start,
-        saw_session_end_after_latest_start,
-        saw_process_exit_after_latest_run,
-        saw_session_end_after_latest_run,
-    }))
+    Ok(agent_doc_supervisor::startup_miss::session_log_status_from_content(&content))
 }
 
 pub fn session_log_has_event_after_latest_start(
@@ -423,60 +205,22 @@ fn session_log_has_event_after_latest_start_matching(
     let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
         return Ok(false);
     };
-    let mut found_after_latest_start = false;
-    for raw_line in content.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let event = line
-            .split_once("] ")
-            .map(|(_, event)| event)
-            .unwrap_or(line)
-            .trim();
-        if event.starts_with("session_start ") {
-            found_after_latest_start = false;
-            continue;
-        }
-        if event.starts_with("agent_restart_performed ") {
-            found_after_latest_start = false;
-            continue;
-        }
-        if event.starts_with(event_prefix) && matches_event(event) {
-            found_after_latest_start = true;
-        }
-    }
-    Ok(found_after_latest_start)
+    Ok(
+        agent_doc_supervisor::startup_miss::session_log_has_event_after_latest_start(
+            &content,
+            event_prefix,
+            matches_event,
+        ),
+    )
 }
 
 pub fn session_log_diagnostic(file: &Path, session_id: &str) -> Result<Option<String>> {
     let Some(status) = session_log_status(file, session_id)? else {
         return Ok(None);
     };
-    let latest_start = status
-        .latest_run_event
-        .as_deref()
-        .map(|event| {
-            format!(
-                "latest harness run `{event}` on pane={}",
-                status.latest_start_pane.as_deref().unwrap_or("<unknown>")
-            )
-        })
-        .unwrap_or_else(|| {
-            status
-                .latest_start_pane
-                .as_deref()
-                .map(|pane| format!("latest session_start pane={pane}"))
-                .unwrap_or_else(|| "latest session_start pane=<unknown>".to_string())
-        });
-    let detail = if status.latest_session_open() {
-        format!("{latest_start}; session log still has no later child exit or session_end")
-    } else if status.latest_session_closed() {
-        format!("{latest_start}; session log recorded a later child exit/session_end")
-    } else {
-        latest_start
-    };
-    Ok(Some(detail))
+    Ok(Some(
+        agent_doc_supervisor::startup_miss::session_log_diagnostic(&status),
+    ))
 }
 
 pub fn superseded_by_newer_registered_start(
@@ -530,58 +274,6 @@ pub fn take_superseded_startup_miss(
     Ok(Some((miss, supersession)))
 }
 
-pub fn latest_open_run_timestamp(status: &SessionLogStatus) -> Option<u64> {
-    if status.latest_session_open() {
-        status.latest_anchor_timestamp()
-    } else {
-        None
-    }
-}
-
-pub fn latest_log_anchor(status: &SessionLogStatus) -> String {
-    status
-        .latest_run_event
-        .as_deref()
-        .map(|event| {
-            format!(
-                "latest_run={} pane={}",
-                event,
-                status.latest_start_pane.as_deref().unwrap_or("?")
-            )
-        })
-        .unwrap_or_else(|| {
-            format!(
-                "latest session_start pane={}",
-                status.latest_start_pane.as_deref().unwrap_or("?")
-            )
-        })
-}
-
-pub fn latest_log_outcome(status: &SessionLogStatus) -> &'static str {
-    if status.latest_session_open() {
-        "open"
-    } else if status.latest_session_closed() {
-        "closed"
-    } else {
-        "unknown"
-    }
-}
-
-pub fn latest_log_last_event(status: &SessionLogStatus) -> &str {
-    status.last_event.as_deref().unwrap_or("?")
-}
-
-pub fn latest_registry_rebind_successor(status: &SessionLogStatus) -> Option<&str> {
-    let event = status.last_event.as_deref()?;
-    if !event.starts_with("session_end origin=registry_rebind ") {
-        return None;
-    }
-    event
-        .split_whitespace()
-        .find_map(|part| part.strip_prefix("next_pane="))
-        .filter(|pane| !pane.is_empty())
-}
-
 pub fn recent_session_loss_window(
     file: &Path,
     session_id: &str,
@@ -600,50 +292,7 @@ fn recent_session_loss_window_at(
     let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
         return Ok(None);
     };
-    let cutoff = now_epoch_secs.saturating_sub(RECENT_SESSION_LOSS_WINDOW_SECS);
-    let mut count = 0usize;
-    let mut first_timestamp = None;
-    let mut last_timestamp = None;
-    let mut latest_reason = None;
-
-    for raw_line in content.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let event = line
-            .split_once("] ")
-            .map(|(_, event)| event)
-            .unwrap_or(line)
-            .trim();
-        let Some(timestamp) = line
-            .strip_prefix('[')
-            .and_then(|rest| rest.split_once(']'))
-            .and_then(|(ts, _)| agent_doc_log_time::parse_log_timestamp(ts))
-        else {
-            continue;
-        };
-
-        if timestamp < cutoff || timestamp > now_epoch_secs || !is_session_loss_event(event) {
-            continue;
-        }
-
-        count += 1;
-        first_timestamp.get_or_insert(timestamp);
-        last_timestamp = Some(timestamp);
-        latest_reason = event_reason(event);
-    }
-
-    if count < RECENT_SESSION_LOSS_THRESHOLD {
-        return Ok(None);
-    }
-
-    Ok(Some(RecentSessionLossWindow {
-        count,
-        first_timestamp: first_timestamp.unwrap_or(now_epoch_secs),
-        last_timestamp: last_timestamp.unwrap_or(now_epoch_secs),
-        latest_reason,
-    }))
+    Ok(agent_doc_supervisor::startup_miss::recent_session_loss_window_at(&content, now_epoch_secs))
 }
 
 pub fn record_session_loss(
@@ -731,7 +380,10 @@ mod tests {
 
     #[test]
     fn format_timestamp_renders_utc_iso8601() {
-        assert_eq!(format_timestamp(0), "1970-01-01T00:00:00Z");
+        assert_eq!(
+            agent_doc_supervisor::startup_miss::format_timestamp(0),
+            "1970-01-01T00:00:00Z"
+        );
     }
 
     #[test]
@@ -887,7 +539,10 @@ mod tests {
         assert!(!status.saw_committed_cycle_after_latest_run);
         assert!(status.latest_session_open());
         assert!(!status.latest_session_closed());
-        assert_eq!(latest_open_run_timestamp(&status), Some(4));
+        assert_eq!(
+            agent_doc_supervisor::startup_miss::latest_open_run_timestamp(&status),
+            Some(4)
+        );
     }
 
     #[test]

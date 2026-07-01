@@ -500,7 +500,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
         && let Some(supersession) =
             crate::startup_miss::superseded_by_newer_registered_start(file, &miss)?
     {
-        let miss_ts = crate::startup_miss::format_timestamp(miss.timestamp);
+        let miss_ts = agent_doc_supervisor::startup_miss::format_timestamp(miss.timestamp);
         eprintln!(
             "[route] startup-miss on pane {} from {} for {} is superseded by newer registered owner {} — clearing stale marker",
             miss.pane_id, miss_ts, file_path, supersession.registered_pane
@@ -530,7 +530,7 @@ pub(crate) fn resolve_or_create_pane_with_auto_fix_retry(
         let log_status = crate::startup_miss::session_log_status(file, &miss.session_id)
             .ok()
             .flatten();
-        let miss_ts = crate::startup_miss::format_timestamp(miss.timestamp);
+        let miss_ts = agent_doc_supervisor::startup_miss::format_timestamp(miss.timestamp);
         let provenance = startup_miss_route_provenance(
             tmux,
             registered_pane,
@@ -3914,7 +3914,7 @@ mod tests {
             &existing_pane,
             "route-fresh-start-ignore-startup-miss-handoff",
             "codex",
-            crate::startup_miss::StartupMissOrigin::RoutedTrigger,
+            agent_doc_supervisor::startup_miss::StartupMissOrigin::RoutedTrigger,
             Some("cycle-baseline"),
         )
         .unwrap();

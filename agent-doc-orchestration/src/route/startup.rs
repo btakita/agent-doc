@@ -659,7 +659,7 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
                     &dispatch_pane,
                     session_id,
                     &harness.binary,
-                    crate::startup_miss::StartupMissOrigin::FreshStart,
+                    agent_doc_supervisor::startup_miss::StartupMissOrigin::FreshStart,
                     baseline_id,
                 );
                 emit_startup_miss_diagnostic(
@@ -1974,7 +1974,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         assert_eq!(miss.pane_id, pane);
         assert_eq!(
             miss.origin,
-            crate::startup_miss::StartupMissOrigin::RoutedTrigger
+            agent_doc_supervisor::startup_miss::StartupMissOrigin::RoutedTrigger
         );
 
         ipc.stop();
@@ -2026,7 +2026,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             &pane,
             session_id,
             "codex",
-            crate::startup_miss::StartupMissOrigin::RoutedTrigger,
+            agent_doc_supervisor::startup_miss::StartupMissOrigin::RoutedTrigger,
             None,
         )
         .unwrap();
@@ -2373,7 +2373,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         assert_eq!(miss.pane_id, pane);
         assert_eq!(
             miss.origin,
-            crate::startup_miss::StartupMissOrigin::RoutedTrigger
+            agent_doc_supervisor::startup_miss::StartupMissOrigin::RoutedTrigger
         );
 
         ipc.stop();

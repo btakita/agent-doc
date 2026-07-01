@@ -2613,14 +2613,6 @@ pub(crate) fn guard_visible_write_idle_current_or_target(
 /// fresh disk content so a CRDT-merge caller can re-merge the captured response
 /// and retry. A genuine live editor-buffer divergence (pending user edit) still
 /// fails closed — only a clean foreign disk write is reported as reconcilable.
-fn guard_visible_write_reconcile(
-    file: &Path,
-    source: &str,
-    expected_current: &str,
-) -> Result<VisibleWriteReconcile> {
-    guard_visible_write_reconcile_with_target(file, source, expected_current, None)
-}
-
 fn guard_visible_write_reconcile_with_target(
     file: &Path,
     source: &str,
@@ -4019,8 +4011,13 @@ scratch
         )
         .unwrap();
 
-        let outcome =
-            guard_visible_write_reconcile(&doc, "test_editor_matches_disk", expected).unwrap();
+        let outcome = guard_visible_write_reconcile_with_target(
+            &doc,
+            "test_editor_matches_disk",
+            expected,
+            None,
+        )
+        .unwrap();
         match outcome {
             VisibleWriteReconcile::DiskDrifted { fresh_current } => {
                 assert_eq!(fresh_current, drifted);
@@ -4087,7 +4084,8 @@ scratch
             "<!-- agent:exchange patch=append -->\n### Re: x\n<!-- /agent:exchange -->\n";
         fs::write(&doc, expected).unwrap();
 
-        let outcome = guard_visible_write_reconcile(&doc, "test_clean", expected).unwrap();
+        let outcome =
+            guard_visible_write_reconcile_with_target(&doc, "test_clean", expected, None).unwrap();
         assert!(matches!(outcome, VisibleWriteReconcile::Clean));
     }
     #[test]
@@ -4155,7 +4153,8 @@ scratch
         );
         fs::write(&doc, &drifted).unwrap();
 
-        let outcome = guard_visible_write_reconcile(&doc, "test_drift", expected).unwrap();
+        let outcome =
+            guard_visible_write_reconcile_with_target(&doc, "test_drift", expected, None).unwrap();
         match outcome {
             VisibleWriteReconcile::DiskDrifted { fresh_current } => {
                 assert_eq!(fresh_current, drifted);
@@ -4179,19 +4178,20 @@ scratch
         let guard_calls = std::cell::RefCell::new(0usize);
         let recompute_calls = std::cell::RefCell::new(0usize);
 
-        let guard = |_f: &Path, expected: &str, _payload: &String| -> Result<VisibleWriteReconcile> {
-            let mut n = guard_calls.borrow_mut();
-            *n += 1;
-            if *n == 1 {
-                assert_eq!(expected, base);
-                Ok(VisibleWriteReconcile::DiskDrifted {
-                    fresh_current: foreign.to_string(),
-                })
-            } else {
-                assert_eq!(expected, foreign);
-                Ok(VisibleWriteReconcile::Clean)
-            }
-        };
+        let guard =
+            |_f: &Path, expected: &str, _payload: &String| -> Result<VisibleWriteReconcile> {
+                let mut n = guard_calls.borrow_mut();
+                *n += 1;
+                if *n == 1 {
+                    assert_eq!(expected, base);
+                    Ok(VisibleWriteReconcile::DiskDrifted {
+                        fresh_current: foreign.to_string(),
+                    })
+                } else {
+                    assert_eq!(expected, foreign);
+                    Ok(VisibleWriteReconcile::Clean)
+                }
+            };
         let recompute = |current: &str| -> Result<String> {
             *recompute_calls.borrow_mut() += 1;
             // The re-merge incorporates the foreign disk content + the response.

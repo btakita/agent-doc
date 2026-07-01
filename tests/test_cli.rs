@@ -1465,7 +1465,14 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // uses the existing visible-write idle/current guard before merging a
         // committed HEAD response back into a stale visible document. This is an
         // audited reuse of the document-write guard, not a new authority source.
-        ("agent-doc-orchestration/src/write.rs", "guard_") => 47,
+        // 47 -> 50 (#visible-write-target-buffer): the visible-write guard now
+        // accepts an optional target-buffer proof so editor-visible target
+        // content can satisfy the existing idle/current barrier. This extends
+        // the same visible-write guard boundary; callers still route through
+        // `guard_visible_write_idle_current_or_target` /
+        // `guard_visible_write_reconcile_with_target` rather than introducing a
+        // new write authority.
+        ("agent-doc-orchestration/src/write.rs", "guard_") => 50,
         ("agent-doc-orchestration/src/write/pending_checks.rs", "guard_") => 4,
         // 3 -> 1 (#template-materialization-policy): raw-response probe
         // construction now lives in `agent-doc-template::response_materialization`,

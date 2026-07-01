@@ -119,7 +119,12 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
         &[],
         "",
     );
-    guard_visible_write_idle_and_current(file, "write_inline", &content_current)?;
+    guard_visible_write_idle_current_or_target(
+        file,
+        "write_inline",
+        &content_current,
+        Some(&final_content),
+    )?;
     snapshot::save(file, snapshot_content)?;
 
     atomic_write(file, &final_content)?;
@@ -349,9 +354,23 @@ pub fn run_template(
             content_current,
             initial_payload,
             VISIBLE_WRITE_RECONCILE_MAX_ATTEMPTS,
-            |f, expected| guard_visible_write_reconcile(f, "run_template", expected),
+            |f, expected, payload| {
+                guard_visible_write_reconcile_with_target(
+                    f,
+                    "run_template",
+                    expected,
+                    Some(&payload.0),
+                )
+            },
             recompute_final,
-            |f, current| guard_visible_write_idle_and_current(f, "run_template", current),
+            |f, current, payload| {
+                guard_visible_write_idle_current_or_target(
+                    f,
+                    "run_template",
+                    current,
+                    Some(&payload.0),
+                )
+            },
         )?;
 
     // Dedup: skip write if merged content is identical to current file (strip boundary markers)
@@ -966,9 +985,23 @@ pub fn run_stream(
             content_current,
             initial_payload,
             VISIBLE_WRITE_RECONCILE_MAX_ATTEMPTS,
-            |f, expected| guard_visible_write_reconcile(f, "run_stream", expected),
+            |f, expected, payload| {
+                guard_visible_write_reconcile_with_target(
+                    f,
+                    "run_stream",
+                    expected,
+                    Some(&payload.0),
+                )
+            },
             recompute_final,
-            |f, current| guard_visible_write_idle_and_current(f, "run_stream", current),
+            |f, current, payload| {
+                guard_visible_write_idle_current_or_target(
+                    f,
+                    "run_stream",
+                    current,
+                    Some(&payload.0),
+                )
+            },
         )?;
 
     // Dedup: skip write if merged content is identical to current file (strip boundary markers)
@@ -1516,7 +1549,12 @@ pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
         "apply_append_from_string",
     )?;
 
-    guard_visible_write_idle_and_current(file, "apply_append_from_string", &content_current)?;
+    guard_visible_write_idle_current_or_target(
+        file,
+        "apply_append_from_string",
+        &content_current,
+        Some(&final_content),
+    )?;
     atomic_write(file, &final_content)?;
     // Save snapshot as content_ours, not final_content
     save_recovery_snapshot(file, &content_ours, use_crdt)?;
@@ -1630,7 +1668,12 @@ pub fn apply_template_from_string_with_options(
             ),
         );
     } else {
-        guard_visible_write_idle_and_current(file, "apply_template_from_string", &content_current)?;
+        guard_visible_write_idle_current_or_target(
+            file,
+            "apply_template_from_string",
+            &content_current,
+            Some(&final_content),
+        )?;
         // `#fcc0`: repair recovery applies template (component) patches through
         // the editor path; if editor convergence is unavailable or unproven,
         // fail closed instead of writing the repaired document straight to disk.

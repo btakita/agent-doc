@@ -15,7 +15,7 @@
 //!   (`agent_doc_env_inherit`, default `true`; and `env`) and returns the spec.
 //! - [`EnvSpec::resolve`] walks: capture base env → apply overrides in order
 //!   → return the final `HashMap` for [`PtySpawnConfig::env`].
-//! - Set values are shell-expanded via [`crate::env::expand_values`] so
+//! - Set values are shell-expanded via [`agent_doc_config::env::expand_values`] so
 //!   `$(passage ...)` / `$VAR` / `${HOME}/x` work the way a shell user expects.
 //!   Expansion runs exactly once per `resolve()` call.
 //!
@@ -53,7 +53,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use indexmap::IndexMap;
 
-use crate::env::{EnvMap, expand_values};
+use agent_doc_config::env::{EnvMap, expand_values};
 use agent_doc_frontmatter::frontmatter::Frontmatter;
 
 /// Declarative description of how to build the child env.

@@ -124,7 +124,7 @@ a closed actor record is replaceable through the stale-authority path.
 ### Env determinism
 - Supervisor builds the child env from:
   1. Parent process env (whitelisted via `HOME`, `PATH`, `TERM`, `LANG`, `TMUX`, `USER`, …)
-  2. Frontmatter `env:` map (already expanded by `crate::env::expand_values`)
+  2. Frontmatter `env:` map (already expanded by `agent_doc_config::env::expand_values`)
   3. `AGENT_DOC_SESSION=<uuid>` and `AGENT_DOC_DOCUMENT=<path>` (new, so claude can introspect its own session without parsing frontmatter)
 - **No inheritance of `PWD` from the tmux pane** — supervisor sets `PWD` explicitly to match the resolved CWD, so shell-side `$PWD` matches the process-level CWD.
 

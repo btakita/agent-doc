@@ -400,7 +400,7 @@ fn expand_frontmatter_env(fm: &frontmatter::Frontmatter) -> Vec<(String, Option<
     if fm.env.is_empty() {
         return Vec::new();
     }
-    match agent_doc_orchestration::env::expand_values(&fm.env) {
+    match agent_doc_config::env::expand_values(&fm.env) {
         Ok(values) => values,
         Err(err) => {
             eprintln!(

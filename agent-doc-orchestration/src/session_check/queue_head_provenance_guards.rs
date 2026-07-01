@@ -46,26 +46,6 @@ pub(crate) fn check_expect_done_or_gate_guard(
         }
     };
 
-    let ids = unresolved
-        .iter()
-        .map(|id| format!("#{}", id))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let done_hint = unresolved
-        .iter()
-        .map(|id| format!("--done {}", id))
-        .collect::<Vec<_>>()
-        .join(" ");
-    let repair = format!(
-        "agent-doc write {} {} --pending-only --commit",
-        file.display(),
-        done_hint
-    );
-    let warn_line = format!(
-        "[session-check] warn: `do #id` directive resolved this cycle but tracked target {} is still open in agent:backlog with no `--done`, `--pending-gate`, or kept-open edit recorded",
-        ids
-    );
-
     crate::ops_log::log_op(
         file,
         &format!(
@@ -75,25 +55,14 @@ pub(crate) fn check_expect_done_or_gate_guard(
         ),
     );
 
-    Ok(match mode {
-        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Warn => {
-            GuardResult::Warn(vec![
-                warn_line,
-                format!(
-                    "[session-check] hint: repair with `{}`, run `--pending-gate <id>` if review/external validation remains, or add `pending_done_guard: off` when the item should stay open",
-                    repair
-                ),
-            ])
-        }
-        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict => {
-            GuardResult::Error(format!(
-                "{}\n[session-check] hint: repair with `{}`, run `--pending-gate <id>` if review/external validation remains, or set pending_done_guard = \"warn\" to downgrade",
-                warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
-                repair
-            ))
-        }
-        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
-    })
+    let file_display = file.display().to_string();
+    Ok(
+        agent_doc_workflow::session_check::expect_done_or_gate_guard_result(
+            &file_display,
+            &unresolved,
+            mode,
+        ),
+    )
 }
 
 /// `#queue-clear-unrun-items`: an active `agent:queue` head is executable user
@@ -183,12 +152,6 @@ pub(crate) fn check_queue_head_removal_guard(
         return Ok(GuardResult::None);
     }
 
-    let ids = decision
-        .lost
-        .iter()
-        .map(|id| format!("#{}", id))
-        .collect::<Vec<_>>()
-        .join(", ");
     crate::ops_log::log_op(
         file,
         &format!(
@@ -197,30 +160,15 @@ pub(crate) fn check_queue_head_removal_guard(
             decision.lost.join(",")
         ),
     );
-    let warn_line = format!(
-        "[session-check] warn: runnable agent:queue head(s) {} were removed from the committed queue but their backlog item(s) are still open in agent:backlog, and the cycle never consumed, completed, gated, or reaped them — unrun queue work was silently dropped",
-        ids
-    );
-    let repair = format!(
-        "restore the dropped head(s) to `agent:queue` (or resolve each id with `--done`/`--pending-gate`), then re-run `agent-doc write --commit {}`; add `<!-- no-queue-removal-guard -->` to the response if the removal was an explicit user edit",
-        file.display()
-    );
 
-    Ok(match mode {
-        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Warn => {
-            GuardResult::Warn(vec![
-                warn_line,
-                format!("[session-check] hint: {repair} (see #queue-clear-unrun-items)"),
-            ])
-        }
-        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict => {
-            GuardResult::Error(format!(
-                "{}\n[session-check] hint: {repair} (see #queue-clear-unrun-items)",
-                warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
-            ))
-        }
-        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
-    })
+    let file_display = file.display().to_string();
+    Ok(
+        agent_doc_workflow::session_check::queue_head_removal_guard_result(
+            &file_display,
+            &decision.lost,
+            mode,
+        ),
+    )
 }
 
 /// `#lr-queue-patchback-miss`: require committed-response / deferral
@@ -265,13 +213,12 @@ pub(crate) fn check_free_text_queue_head_provenance(
                     file.display()
                 ),
             );
-            return Ok(GuardResult::Error(format!(
-                "[session-check] INTERRUPTED: {} contains `<!-- no-free-text-queue-head-guard -->` plus a bare `###` heading, which is interrupted closeout evidence rather than committed response proof. Finish the response through `agent-doc finalize {}` or `agent-doc write --commit {}`, then run `agent-doc session-check {}`. (see #directchatpb2)",
-                file.display(),
-                file.display(),
-                file.display(),
-                file.display()
-            )));
+            let file_display = file.display().to_string();
+            return Ok(
+                agent_doc_workflow::session_check::free_text_queue_marker_residue_result(
+                    &file_display,
+                ),
+            );
         }
         return Ok(GuardResult::None);
     }
@@ -290,10 +237,13 @@ pub(crate) fn check_free_text_queue_head_provenance(
                 heads_text
             ),
         );
-        return Ok(GuardResult::Error(format!(
-            "[session-check] INTERRUPTED: completed free-text agent:queue head(s) {heads_text} are still active in the committed queue even though exchange history contains a `Queue prompt` echo proving they were already answered — completed queue residue would re-run stale work\n[session-check] hint: remove or strike the answered head(s), then re-run `agent-doc write --commit {}`; add `<!-- no-free-text-queue-head-guard -->` only if keeping the answered row active is intentional (see #qheadresidue)",
-            file.display()
-        )));
+        let file_display = file.display().to_string();
+        return Ok(
+            agent_doc_workflow::session_check::free_text_queue_completed_residue_result(
+                &file_display,
+                &decision.completed_residue,
+            ),
+        );
     }
     if !decision.response_proven_removed.is_empty() {
         let heads_text = decision
@@ -328,28 +278,14 @@ pub(crate) fn check_free_text_queue_head_provenance(
             heads_text
         ),
     );
-    let warn_line = format!(
-        "[session-check] warn: free-text agent:queue head(s) {heads_text} were seen at preflight but have no committed response/echo or explicit deferral proof in the closeout — the prompt may have been silently lost"
-    );
-    let repair = format!(
-        "either respond to the unresolved head(s) and run `agent-doc finalize {}`, or add `<!-- no-free-text-queue-head-guard -->` if the removal was intentional",
-        file.display()
-    );
-    Ok(match mode {
-        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Warn => {
-            GuardResult::Warn(vec![
-                warn_line,
-                format!("[session-check] hint: {repair} (see #lr-queue-patchback-miss)"),
-            ])
-        }
-        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict => {
-            GuardResult::Error(format!(
-                "{}\n[session-check] hint: {repair} (see #lr-queue-patchback-miss)",
-                warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
-            ))
-        }
-        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
-    })
+    let file_display = file.display().to_string();
+    Ok(
+        agent_doc_workflow::session_check::free_text_queue_head_provenance_guard_result(
+            &file_display,
+            &decision.unresolved,
+            mode,
+        ),
+    )
 }
 
 #[cfg(test)]

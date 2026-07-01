@@ -22,7 +22,7 @@ pub(crate) fn persist_op_log(
         return;
     };
     let document_path = file.to_string_lossy().to_string();
-    let recorded_at = op_log_timestamp().to_string();
+    let recorded_at = agent_doc_log_time::current_epoch_secs().to_string();
     let ops = agent_doc_turn::op_log::build_ops_from_semantic_diff(
         &document_path,
         origin_session,
@@ -32,12 +32,4 @@ pub(crate) fn persist_op_log(
     if let Err(err) = agent_doc_sqlite::op_log::append_ops(&project_root, &ops) {
         eprintln!("[preflight] op-log persist skipped: {err}");
     }
-}
-
-pub(crate) fn op_log_timestamp() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or_default()
 }

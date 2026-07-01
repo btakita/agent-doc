@@ -34,114 +34,18 @@
 //! - `watch_change_routes_serialized_through_session_actor`
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 
 use agent_doc_document::watch_projection::file_watch_event_id;
 use agent_doc_document_realtime::session_ops::SessionOpKind;
+use agent_doc_document_realtime::watch_authority::{
+    DocumentWatchGate, RawWatchEvent, WatchDelivery, WatchWriteProvenance,
+};
 
 use crate::session_actor::document_actor_in;
-
-/// Minimal classification of a raw filesystem event, mirroring the
-/// `notify::EventKind` subset `watch.rs` reacts to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RawKind {
-    /// File content modified.
-    Modify,
-    /// File (re)created.
-    Create,
-    /// Anything else (access, metadata, remove) — ignored as a change source.
-    Other,
-}
-
-/// A raw event delivered by the underlying watcher backend.
-#[derive(Debug, Clone)]
-pub struct RawWatchEvent {
-    pub path: PathBuf,
-    pub kind: RawKind,
-}
-
-impl RawWatchEvent {
-    pub fn modify(path: impl Into<PathBuf>) -> Self {
-        Self {
-            path: path.into(),
-            kind: RawKind::Modify,
-        }
-    }
-}
-
-/// What the gate decided about a raw event.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WatchDelivery {
-    /// A new settled change the actor should reconcile. `generation` increments
-    /// per distinct delivered change.
-    Change { generation: u64 },
-    /// Same content as the last delivered change — a coalesced burst event.
-    Coalesced,
-    /// The current content matches agent-doc's own most recent write — a
-    /// self-write echo, suppressed so the agent never reconciles its own write.
-    SelfWriteEcho,
-    /// Not a content-bearing event (or a path mismatch).
-    Ignored,
-}
-
-/// Per-document coalescing + self-write-suppression gate. One gate exists per
-/// document in the [`WatcherRegistry`], so every raw event for that document —
-/// regardless of which backend produced it — funnels through one place.
-pub struct DocumentWatchGate {
-    /// Provenance-lookup key (the document path string, as `debounce` keys it).
-    file: String,
-    last_delivered_hash: Option<String>,
-    generation: u64,
-}
-
-impl DocumentWatchGate {
-    fn new(file: String) -> Self {
-        Self {
-            file,
-            last_delivered_hash: None,
-            generation: 0,
-        }
-    }
-
-    /// Number of distinct changes delivered so far.
-    pub fn generation(&self) -> u64 {
-        self.generation
-    }
-
-    /// Classify a raw event given the document's `current_content` (already read
-    /// from disk by the caller). Pure decision logic — no I/O beyond the
-    /// provenance lookup — so it is deterministically testable.
-    pub fn observe(&mut self, raw: &RawWatchEvent, current_content: &str) -> WatchDelivery {
-        if !matches!(raw.kind, RawKind::Modify | RawKind::Create) {
-            return WatchDelivery::Ignored;
-        }
-        let hash = agent_doc_hash::content_hash(current_content);
-
-        // Self-write echo: agent-doc just wrote exactly this content. Suppress so
-        // the watcher never feeds our own write back as a user change.
-        if let Some(prov) = agent_doc_debounce::write_provenance(&self.file)
-            && prov.actor == "agent"
-            && prov.hash == hash
-        {
-            return WatchDelivery::SelfWriteEcho;
-        }
-
-        // Coalesce a burst: identical content to the last delivered change is not
-        // a new change.
-        if self.last_delivered_hash.as_deref() == Some(hash.as_str()) {
-            return WatchDelivery::Coalesced;
-        }
-
-        self.last_delivered_hash = Some(hash);
-        self.generation += 1;
-        WatchDelivery::Change {
-            generation: self.generation,
-        }
-    }
-}
 
 /// Controller-owned registry of one watch gate per document. Registration is
 /// idempotent: the second `register` for a document returns the existing gate,
@@ -158,13 +62,13 @@ impl WatcherRegistry {
 
     /// Get-or-create the gate for `doc_id`. Returns the gate and whether it was
     /// newly created (`true` only on the first registration). `file` is the
-    /// provenance-lookup path key.
+    /// document path this gate accepts raw events for.
     pub fn register(&self, doc_id: &str, file: &str) -> (Arc<Mutex<DocumentWatchGate>>, bool) {
         let mut gates = self.gates.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(gate) = gates.get(doc_id) {
             return (Arc::clone(gate), false);
         }
-        let gate = Arc::new(Mutex::new(DocumentWatchGate::new(file.to_string())));
+        let gate = Arc::new(Mutex::new(DocumentWatchGate::new(file)));
         gates.insert(doc_id.to_string(), Arc::clone(&gate));
         (gate, true)
     }
@@ -215,13 +119,17 @@ pub fn route_event(
     on_change: impl FnOnce() -> Result<()> + Send + 'static,
 ) -> Result<WatchDelivery> {
     let (gate, _new) = registry().register(doc_id, file);
+    let content_hash = agent_doc_hash::content_hash(current_content);
+    let provenance = agent_doc_debounce::write_provenance(file);
+    let write_provenance = provenance
+        .as_ref()
+        .map(|prov| WatchWriteProvenance::new(prov.actor.as_str(), prov.hash.as_str()));
     let delivery = {
         let mut g = gate.lock().unwrap_or_else(|p| p.into_inner());
-        g.observe(raw, current_content)
+        g.observe(raw, &content_hash, write_provenance)
     };
     if let WatchDelivery::Change { generation } = delivery {
         let actor = document_actor_in(base_dir, file);
-        let content_hash = agent_doc_hash::content_hash(current_content);
         let event = crate::state_backbone::StateEvent::new(
             file_watch_event_id(doc_id, generation, &content_hash),
             crate::state_backbone::StateFact::FileWatchChangeObserved {
@@ -242,8 +150,13 @@ pub fn route_event(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use super::{WatcherRegistry, registry, route_event};
+    use agent_doc_document_realtime::watch_authority::{RawWatchEvent, WatchDelivery};
+    use std::path::PathBuf;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    };
 
     fn seed(dir: &tempfile::TempDir, rel: &str, content: &str) -> PathBuf {
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -276,78 +189,6 @@ mod tests {
         let (b, _) = reg.register("doc-B", "/tmp/b.md");
         assert!(!Arc::ptr_eq(&a, &b));
         assert_eq!(reg.len(), 2);
-    }
-
-    #[test]
-    fn gate_coalesces_event_burst_into_one_change() {
-        let mut gate = DocumentWatchGate::new("/tmp/none.md".into());
-        let raw = RawWatchEvent::modify("/tmp/none.md");
-        // A burst of identical-content events: only the first is a Change.
-        assert_eq!(
-            gate.observe(&raw, "version one"),
-            WatchDelivery::Change { generation: 1 }
-        );
-        for _ in 0..5 {
-            assert_eq!(gate.observe(&raw, "version one"), WatchDelivery::Coalesced);
-        }
-        assert_eq!(gate.generation(), 1, "burst delivered exactly one change");
-    }
-
-    #[test]
-    fn gate_emits_change_on_distinct_content() {
-        let mut gate = DocumentWatchGate::new("/tmp/none.md".into());
-        let raw = RawWatchEvent::modify("/tmp/none.md");
-        assert_eq!(
-            gate.observe(&raw, "A"),
-            WatchDelivery::Change { generation: 1 }
-        );
-        assert_eq!(
-            gate.observe(&raw, "B"),
-            WatchDelivery::Change { generation: 2 }
-        );
-        assert_eq!(gate.observe(&raw, "B"), WatchDelivery::Coalesced);
-    }
-
-    #[test]
-    fn gate_suppresses_agent_self_write_echo() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let file = seed(&dir, "doc.md", "agent wrote this\n");
-        let file_str = file.to_string_lossy().to_string();
-
-        // Record agent-doc's own write of the current content.
-        let content = "agent wrote this\n";
-        let hash = agent_doc_hash::content_hash(content);
-        agent_doc_debounce::record_write_provenance(
-            &file_str,
-            content.len(),
-            &hash,
-            "wid-1",
-            "agent",
-        )
-        .unwrap();
-
-        let mut gate = DocumentWatchGate::new(file_str.clone());
-        let raw = RawWatchEvent::modify(&file);
-        // The watcher fires for our own write → suppressed, no change delivered.
-        assert_eq!(gate.observe(&raw, content), WatchDelivery::SelfWriteEcho);
-        assert_eq!(gate.generation(), 0);
-
-        // A genuine subsequent user edit (different content) is delivered.
-        assert_eq!(
-            gate.observe(&raw, "user edited this\n"),
-            WatchDelivery::Change { generation: 1 }
-        );
-    }
-
-    #[test]
-    fn gate_ignores_non_content_events() {
-        let mut gate = DocumentWatchGate::new("/tmp/none.md".into());
-        let other = RawWatchEvent {
-            path: "/tmp/none.md".into(),
-            kind: RawKind::Other,
-        };
-        assert_eq!(gate.observe(&other, "anything"), WatchDelivery::Ignored);
-        assert_eq!(gate.generation(), 0);
     }
 
     #[test]

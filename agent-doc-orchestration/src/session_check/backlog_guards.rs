@@ -1,16 +1,7 @@
 use super::*;
 use agent_doc_element_backlog::guard_policy::{
-    BacklogGuardOutcome, dropped_from_history_guard, malformed_tracked_item_guard,
-    shadow_backlog_guard,
+    dropped_from_history_guard, malformed_tracked_item_guard, shadow_backlog_guard,
 };
-
-fn backlog_guard_outcome(outcome: BacklogGuardOutcome) -> GuardResult {
-    match outcome {
-        BacklogGuardOutcome::Pass => GuardResult::None,
-        BacklogGuardOutcome::Warn(lines) => GuardResult::Warn(lines),
-        BacklogGuardOutcome::Interrupt(message) => GuardResult::Error(message),
-    }
-}
 
 /// Where a reaped `do #id` directive's `### Re: ... #id` response heading
 pub(crate) fn check_shadow_backlog_guard(
@@ -18,9 +9,7 @@ pub(crate) fn check_shadow_backlog_guard(
     rc: &crate::graph::RunContext,
 ) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): cached document content.
-    Ok(backlog_guard_outcome(shadow_backlog_guard(
-        &rc.doc_content(),
-    )?))
+    Ok(shadow_backlog_guard(&rc.doc_content())?.into())
 }
 
 pub(crate) fn check_malformed_tracked_item_guard(
@@ -28,10 +17,7 @@ pub(crate) fn check_malformed_tracked_item_guard(
     rc: &crate::graph::RunContext,
 ) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): cached content + parsed components.
-    Ok(backlog_guard_outcome(malformed_tracked_item_guard(
-        &rc.doc_content(),
-        &rc.components(),
-    )))
+    Ok(malformed_tracked_item_guard(&rc.doc_content(), &rc.components()).into())
 }
 
 pub(crate) fn check_backlog_replay_guard(
@@ -58,10 +44,11 @@ pub(crate) fn check_backlog_replay_guard(
     let resolved_ids = crate::cycle_state::resolved_pending_ids(file)?;
 
     let external_done_ids = crate::preflight::external_done_archive_ids(file, &current_content)?;
-    Ok(backlog_guard_outcome(dropped_from_history_guard(
+    Ok(dropped_from_history_guard(
         &current_content,
         &baseline,
         &resolved_ids,
         &external_done_ids,
-    )?))
+    )?
+    .into())
 }

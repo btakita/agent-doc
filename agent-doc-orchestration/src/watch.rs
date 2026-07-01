@@ -74,6 +74,7 @@ use std::time::{Duration, Instant};
 use agent_doc_document::watch_projection::{
     document_node_events_payload, project_watch_node_events, watch_content_hash,
 };
+use agent_doc_document_realtime::watch_authority::{RawWatchEvent, WatchDelivery};
 use notify::{EventKind, RecursiveMode, Watcher};
 
 use agent_doc_config::Config;
@@ -81,11 +82,7 @@ use agent_doc_frontmatter::frontmatter;
 use agent_doc_markdown_ast::events::DocumentNodeEvent;
 use agent_doc_turn_executor::capture::{capture_delta, limit_capture_lines};
 
-use crate::{
-    document_watcher::{RawWatchEvent, WatchDelivery},
-    graph::ActorContext,
-    sessions, stream,
-};
+use crate::{graph::ActorContext, sessions, stream};
 
 /// Default idle timeout before daemon auto-exits (seconds).
 const IDLE_TIMEOUT_SECS: u64 = 60;

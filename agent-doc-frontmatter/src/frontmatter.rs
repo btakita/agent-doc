@@ -911,6 +911,16 @@ pub fn parse(content: &str) -> Result<(Frontmatter, &str)> {
     Ok((fm, body))
 }
 
+/// Read the document session id from frontmatter content.
+///
+/// Returns `None` when the document has no parseable session field. This is a
+/// pure content helper; file-backed callers should read the document bytes
+/// before calling it.
+pub fn session_id_from_content(content: &str) -> Option<String> {
+    let (fm, _) = parse(content).ok()?;
+    fm.session
+}
+
 /// Wrap a frontmatter parse failure with the target document display string
 /// and a repair hint.
 pub fn contextualize_parse_error(file_display: &str, err: anyhow::Error) -> anyhow::Error {
@@ -2473,6 +2483,27 @@ mod tests {
         assert_eq!(sid, "existing-id");
         // Content should be unchanged
         assert_eq!(updated, content);
+    }
+
+    #[test]
+    fn session_id_from_content_reads_canonical_and_legacy_fields() {
+        assert_eq!(
+            session_id_from_content("---\nagent_doc_session: canonical\n---\nBody\n").as_deref(),
+            Some("canonical")
+        );
+        assert_eq!(
+            session_id_from_content("---\nsession: legacy\n---\nBody\n").as_deref(),
+            Some("legacy")
+        );
+    }
+
+    #[test]
+    fn session_id_from_content_returns_none_without_parseable_session() {
+        assert_eq!(session_id_from_content("# Plain notes\n"), None);
+        assert_eq!(
+            session_id_from_content("---\nagent_doc_session: [unterminated\n---\nBody\n"),
+            None
+        );
     }
 
     #[test]

@@ -54,30 +54,6 @@ pub(crate) fn check_blocked_closeout_followup_guard(
         } => unresolved_ids,
     };
 
-    let ids = unresolved
-        .iter()
-        .map(|id| format!("#{}", id))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let edit_hint = unresolved
-        .iter()
-        .map(|id| format!("--backlog-edit \"{}=<remaining next action>\"", id))
-        .collect::<Vec<_>>()
-        .join(" ");
-    let add_after_hint = unresolved
-        .first()
-        .map(|id| format!("--backlog-add-after {} \"<id>=<concrete next step>\"", id))
-        .unwrap_or_default();
-    let repair = format!(
-        "agent-doc write {} {} --pending-only --commit",
-        file.display(),
-        edit_hint
-    );
-    let warn_line = format!(
-        "[session-check] warn: `do #id` closeout reported blocked / still-needed work but gated tracked target {} out of agent:backlog with no kept-open edit, new follow-up item, or explicit no-follow-up justification — the remaining steps live only in prose",
-        ids
-    );
-
     crate::ops_log::log_op(
         file,
         &format!(
@@ -87,28 +63,14 @@ pub(crate) fn check_blocked_closeout_followup_guard(
         ),
     );
 
-    Ok(match mode {
-        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Warn => {
-            GuardResult::Warn(vec![
-                warn_line,
-                format!(
-                    "[session-check] hint: keep the work tracked with `{}`, split a new follow-up via `{}`, add an explicit \"no additional backlog follow-up is needed because ...\" phrase for a true review-only gate, or add `{}`",
-                    repair,
-                    add_after_hint,
-                    agent_doc_turn::closeout_signal::BLOCKED_CLOSEOUT_FOLLOWUP_GUARD_SUPPRESS_MARKER
-                ),
-            ])
-        }
-        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict => {
-            GuardResult::Error(format!(
-                "{}\n[session-check] hint: keep the work tracked with `{}`, split a new follow-up via `{}`, add an explicit \"no additional backlog follow-up is needed because ...\" phrase for a true review-only gate, or set pending_done_guard = \"warn\" to downgrade",
-                warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
-                repair,
-                add_after_hint
-            ))
-        }
-        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
-    })
+    let file_display = file.display().to_string();
+    Ok(
+        agent_doc_workflow::session_check::blocked_closeout_followup_guard_result(
+            &file_display,
+            &unresolved,
+            mode,
+        ),
+    )
 }
 
 /// `#gated-followup-split-enforcement`: when a directed `do [#id]` cycle keeps a
@@ -180,16 +142,6 @@ pub(crate) fn check_gated_phase_split_guard(
         }
     };
 
-    let ids = flagged
-        .iter()
-        .map(|id| format!("#{id}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let add_after_hint = flagged
-        .first()
-        .map(|id| format!("--backlog-add-after {id} \"<child-id>=<one phase scope>\""))
-        .unwrap_or_default();
-
     crate::ops_log::log_op(
         file,
         &format!(
@@ -199,17 +151,8 @@ pub(crate) fn check_gated_phase_split_guard(
         ),
     );
 
-    Ok(GuardResult::Warn(vec![
-        format!(
-            "[session-check] warn: kept-open tracked item {ids} enumerates multiple gated/remaining phases in its body but does not break them out into discrete child backlog IDs — the deferred phases are not independently trackable or queueable"
-        ),
-        format!(
-            "[session-check] hint: split each gated phase into its own child id (e.g. `agent-doc write {} {} --pending-only --commit`), keeping the parent as context, or add `{}` if the phases are intentionally one unit",
-            file.display(),
-            add_after_hint,
-            agent_doc_turn::closeout_signal::GATED_PHASE_SPLIT_GUARD_SUPPRESS_MARKER
-        ),
-    ]))
+    let file_display = file.display().to_string();
+    Ok(agent_doc_workflow::session_check::gated_phase_split_guard_result(&file_display, &flagged))
 }
 
 /// `#queue-audit-partial-completion`: detect a queue-completion audit response
@@ -260,13 +203,7 @@ pub(crate) fn check_queue_audit_partial_completion_guard(file: &Path) -> Result<
         ),
     );
 
-    Ok(GuardResult::Warn(vec![
-        "[session-check] warn: this queue-completion audit reports the queue as not complete while also citing several completed substeps, but never classifies any row as partially complete — meaningful partial progress is collapsed into \"none complete\"".to_string(),
-        format!(
-            "[session-check] hint: classify each queue row as complete / partially complete / not-started, naming the completed substeps and the exact remaining condition for partial rows; recommend splitting a row with multiple gateable phases. Add `{}` if the all-or-none framing is intentional.",
-            agent_doc_turn::closeout_signal::QUEUE_AUDIT_GUARD_SUPPRESS_MARKER
-        ),
-    ]))
+    Ok(agent_doc_workflow::session_check::queue_audit_partial_completion_guard_result())
 }
 
 pub(crate) fn detect_active_session_post_commit_drift(file: &Path) -> Result<Option<String>> {

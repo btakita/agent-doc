@@ -129,6 +129,7 @@ dependencies = [
  "agent-doc-frontmatter",
  "agent-doc-model-tier",
  "anyhow",
+ "indexmap",
  "serde",
  "toml 1.1.2+spec-1.1.0",
 ]

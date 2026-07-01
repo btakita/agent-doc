@@ -73,39 +73,6 @@ fn cached_session_id(file: &Path, rc: Option<&RunContext>) -> Option<String> {
     Some(session)
 }
 
-/// Build the `ops.log` tracking suffix (`#opslogtrack`) appended to each line so
-/// interleaved entries from multiple documents in one project `ops.log` are
-/// attributable: ` doc=<stem> session=<id> turn=<cycle_id>`.
-///
-/// Appended (not prepended) so it never disturbs positional message parsers
-/// (for example `gate_verify`'s `strip_prefix("s760 clear-decision ")`) and so
-/// `contains()`-based ops.log marker scans keep matching. `doc` is always
-/// present (derived from the path, no I/O); `session` and `turn` are best-effort
-/// and omitted when unavailable.
-fn ops_log_tracking_suffix(file: &Path, rc: Option<&RunContext>) -> String {
-    let mut suffix = String::new();
-    if let Some(stem) = file.file_stem().and_then(|n| n.to_str()) {
-        suffix.push_str(" doc=");
-        suffix.push_str(stem);
-    }
-    if let Some(session) = cached_session_id(file, rc) {
-        suffix.push_str(" session=");
-        suffix.push_str(&session);
-    }
-    let turn = match rc {
-        Some(rc) => rc.cycle_state().map(|cs| cs.cycle_id.clone()),
-        None => crate::cycle_state::load(file)
-            .ok()
-            .flatten()
-            .map(|cs| cs.cycle_id),
-    };
-    if let Some(turn) = turn.filter(|t| !t.is_empty()) {
-        suffix.push_str(" turn=");
-        suffix.push_str(&turn);
-    }
-    suffix
-}
-
 /// Append a timestamped log line to `.agent-doc/logs/ops.log`.
 ///
 /// Finds the project root by walking up from `file` (`agent_doc_fs::find_project_root`).
@@ -157,15 +124,6 @@ fn git_head_hash(file: &Path) -> Option<String> {
     }
 }
 
-/// Get the current timestamp in ISO 8601 (UTC) format.
-fn iso_timestamp() -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    agent_doc_log_time::format_log_timestamp(now)
-}
-
 /// Append a structured cycle entry to `.agent-doc/logs/cycles.jsonl`.
 ///
 /// Best-effort: silently returns on any I/O error.
@@ -199,7 +157,7 @@ fn try_log_cycle(
     let entry = CycleEntry {
         op: op.to_string(),
         file: relative,
-        timestamp: iso_timestamp(),
+        timestamp: agent_doc_log_time::current_log_timestamp(),
         commit_hash: git_head_hash(file),
         snapshot_hash: snapshot_content.map(agent_doc_hash::content_hash),
         file_hash: file_content.map(agent_doc_hash::content_hash),
@@ -225,10 +183,6 @@ fn try_log_op(file: &Path, message: &str, rc: Option<&RunContext>) -> Option<()>
     let logs_dir = project_root.join(".agent-doc/logs");
     std::fs::create_dir_all(&logs_dir).ok()?;
     let log_path = logs_dir.join("ops.log");
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
     let mut f = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -236,15 +190,26 @@ fn try_log_op(file: &Path, message: &str, rc: Option<&RunContext>) -> Option<()>
         .ok()?;
     // `#opslogtrack`: append doc/session/turn attribution so interleaved entries
     // from multiple documents in one project ops.log are traceable.
-    let suffix = ops_log_tracking_suffix(file, rc);
-    writeln!(
-        f,
-        "[{}] {}{}",
-        agent_doc_log_time::format_log_timestamp(ts),
+    let doc_stem = file.file_stem().and_then(|n| n.to_str());
+    let session = cached_session_id(file, rc);
+    let turn = match rc {
+        Some(rc) => rc.cycle_state().map(|cs| cs.cycle_id.clone()),
+        None => crate::cycle_state::load(file)
+            .ok()
+            .flatten()
+            .map(|cs| cs.cycle_id),
+    };
+    let suffix = agent_doc_log_time::format_ops_log_tracking_suffix(
+        doc_stem,
+        session.as_deref(),
+        turn.as_deref(),
+    );
+    let line = agent_doc_log_time::format_ops_log_line(
+        agent_doc_log_time::current_epoch_secs(),
         message,
-        suffix
-    )
-    .ok()
+        &suffix,
+    );
+    writeln!(f, "{line}").ok()
 }
 
 #[cfg(test)]

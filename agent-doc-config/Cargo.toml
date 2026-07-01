@@ -13,5 +13,6 @@ name = "agent_doc_config"
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.66" }
 agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.34.66" }
 anyhow = "1"
+indexmap = { version = "2", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 toml = "1.1"

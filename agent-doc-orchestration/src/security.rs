@@ -1,10 +1,11 @@
 use anyhow::Result;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use agent_doc_frontmatter::frontmatter::Frontmatter;
 use agent_doc_frontmatter::security_review::{
     SecurityReviewSubject, cross_document_security_review_decision,
 };
+use agent_doc_fs::same_document_path;
 
 pub fn enforce_cross_document_review(
     action: &str,
@@ -13,7 +14,7 @@ pub fn enforce_cross_document_review(
     target: &Path,
     target_fm: Option<&Frontmatter>,
 ) -> Result<()> {
-    let same_document = same_document(source, target);
+    let same_document = same_document_path(source, target);
     let decision = cross_document_security_review_decision(same_document, source_fm, target_fm);
     if decision.is_allowed() {
         return Ok(());
@@ -33,14 +34,6 @@ pub fn enforce_cross_document_review(
         action,
         missing.join(", ")
     );
-}
-
-fn same_document(left: &Path, right: &Path) -> bool {
-    normalize_path(left) == normalize_path(right)
-}
-
-fn normalize_path(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[cfg(test)]

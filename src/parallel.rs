@@ -169,7 +169,7 @@ pub fn run(file: &Path, config: ParallelConfig) -> Result<()> {
         ));
         // Prepend frontmatter env exports (unexpanded — target shell handles $(passage ...)
         // so secrets never appear in the tmux send-keys argument list or scrollback).
-        let env_prefix = agent_doc_orchestration::env::shell_export_prefix(&fm.env);
+        let env_prefix = agent_doc_config::env::shell_export_prefix(&fm.env);
         let cmd_str = format!("{}{}", env_prefix, cmd_parts.join(" "));
 
         // Send the command to the pane

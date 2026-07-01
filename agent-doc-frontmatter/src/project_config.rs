@@ -412,6 +412,33 @@ pub fn is_agent_doc_document(rel_path: &str, content: &str, config: &ProjectConf
         .any(|pattern| glob_match(pattern.trim_start_matches("./"), norm))
 }
 
+/// Fail closed unless the document is opted in as an agent-doc session.
+///
+/// This is the pure policy/error-message layer for the document gate. Callers
+/// provide already-resolved project config, project-relative document path, and
+/// display string; no filesystem access happens here.
+pub fn require_agent_doc_document(
+    rel_path: &str,
+    content: &str,
+    config: &ProjectConfig,
+    file_display: &str,
+) -> Result<()> {
+    // A malformed frontmatter block must surface its own contextual parse
+    // error downstream (via session/frontmatter parsing) rather than be masked
+    // by the opt-in message; only gate documents that parse cleanly.
+    if crate::frontmatter::parse(content).is_err() {
+        return Ok(());
+    }
+    if is_agent_doc_document(rel_path, content, config) {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "{file_display} is not an agent-doc document. Run `agent-doc init {file_display}` to scaffold a session, \
+add an `agent_doc_format: template` frontmatter field, or list it under `[documents] include` \
+(or set `auto_session_for_all_md = true`) in `.agent-doc/config.toml` to opt in."
+    );
+}
+
 /// Minimal path-glob matcher supporting `*` (any run of non-`/` chars), `?`
 /// (one non-`/` char), and `**` (spans `/` boundaries, including zero
 /// segments). Both inputs are `/`-separated, project-relative paths. Pure, no
@@ -659,6 +686,31 @@ free_text_execution = "goal"
             "---\ntitle: foo\n---\nbody\n",
             &c
         ));
+    }
+
+    #[test]
+    fn require_agent_doc_document_rejects_plain_md_with_opt_in_hint() {
+        let c = cfg(&[], false);
+        let err =
+            require_agent_doc_document("notes.md", "# Just notes\n", &c, "notes.md").unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("notes.md is not an agent-doc document"));
+        assert!(message.contains("agent_doc_format: template"));
+        assert!(message.contains("[documents] include"));
+    }
+
+    #[test]
+    fn require_agent_doc_document_defers_malformed_frontmatter() {
+        let c = cfg(&[], false);
+        assert!(
+            require_agent_doc_document(
+                "notes.md",
+                "---\nagent_doc_session: [unterminated\n---\nBody\n",
+                &c,
+                "notes.md",
+            )
+            .is_ok()
+        );
     }
 
     #[test]

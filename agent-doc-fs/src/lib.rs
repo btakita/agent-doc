@@ -339,6 +339,10 @@ fn normalize_path(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
+pub fn same_document_path(left: &Path, right: &Path) -> bool {
+    normalize_path(left) == normalize_path(right)
+}
+
 fn canonical_document_path(doc: &Path) -> Result<PathBuf> {
     doc.canonicalize()
         .with_context(|| format!("canonicalize document path for hash: {}", doc.display()))
@@ -388,10 +392,10 @@ mod tests {
         cycle_state_path_for, document_state_hash, document_state_hash_from_str,
         multinode_crdt_path_for, overlay_crdt_path_for, pending_response_path_for,
         pre_response_path_for, read_optional, referenced_markdown_path,
-        referenced_markdown_path_checked, rewrite_start_path, snapshot_flock_path_for,
-        snapshot_path_for, startup_document_lock_path_for, startup_session_lock_name,
-        startup_session_lock_path_for, startup_starting_dir_for, state_lock_path_for,
-        turn_scope_path_for,
+        referenced_markdown_path_checked, rewrite_start_path, same_document_path,
+        snapshot_flock_path_for, snapshot_path_for, startup_document_lock_path_for,
+        startup_session_lock_name, startup_session_lock_path_for, startup_starting_dir_for,
+        state_lock_path_for, turn_scope_path_for,
     };
     use std::path::Path;
 
@@ -428,6 +432,18 @@ mod tests {
             document_state_hash(&doc).unwrap(),
             document_state_hash_from_str(&canonical.to_string_lossy())
         );
+    }
+
+    #[test]
+    fn same_document_path_matches_equal_unresolved_paths() {
+        assert!(same_document_path(
+            Path::new("/tmp/agent-doc-same.md"),
+            Path::new("/tmp/agent-doc-same.md")
+        ));
+        assert!(!same_document_path(
+            Path::new("/tmp/agent-doc-left.md"),
+            Path::new("/tmp/agent-doc-right.md")
+        ));
     }
 
     #[test]

@@ -59,7 +59,7 @@ Reference only.
 
 - Schema lift: `Frontmatter.env: IndexMap<String, Option<String>>` (supports `KEY: null` to unset).
 - `env::expand_values` and `shell_export_prefix` take the new map type; `unset KEY` emitted for `None`.
-- `supervisor::env::EnvSpec { inherit_parent, overrides }` — thin resolver over the shared `env.rs` foundation.
+- `supervisor::env::EnvSpec { inherit_parent, overrides }` — thin resolver over the shared `agent_doc_config::env` foundation.
 - `resolve()` captures `std::env::vars()` **once** (when `inherit_parent`) so `state.rs` restarts are deterministic.
 - `agent_doc_env_inherit` frontmatter field (default `true`).
 - Consumers (`start.rs`, `run.rs`, `stream.rs`, `parallel.rs`, `preflight.rs`) updated to handle `None`.

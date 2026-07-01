@@ -13,7 +13,7 @@ use std::path::Path;
 
 use agent_doc_frontmatter::frontmatter::{
     Frontmatter, SshResolverContext, contextualize_parse_error, ensure_session_with_ssh_resolver,
-    parse, parse_with_ssh_resolver,
+    parse_with_ssh_resolver, session_id_from_content,
 };
 use agent_doc_frontmatter::project_config::{self, ProjectConfig};
 
@@ -77,8 +77,7 @@ pub fn ensure_session_for_file_with_context(
 /// Read the session UUID from a document file. Returns `None` if not found.
 pub fn read_session_id(file: &Path) -> Option<String> {
     let content = std::fs::read_to_string(file).ok()?;
-    let (fm, _) = parse(&content).ok()?;
-    fm.session
+    session_id_from_content(&content)
 }
 
 /// Resolve the project config + canonical project-relative path for a
@@ -118,21 +117,14 @@ pub fn is_agent_doc_document_for_file(content: &str, file: &Path) -> bool {
 /// and the caller must **not** mutate the file. Callers run this immediately
 /// before [`ensure_session_for_file`] so a plain `.md` is never converted.
 pub fn require_agent_doc_document(content: &str, file: &Path) -> Result<()> {
-    // A malformed frontmatter block must surface its own contextual parse
-    // error downstream (via `ensure_session_for_file`) rather than be masked
-    // by the opt-in message — only gate documents that parse cleanly.
-    if parse(content).is_err() {
-        return Ok(());
-    }
-    if is_agent_doc_document_for_file(content, file) {
-        return Ok(());
-    }
     let display = file.display();
-    anyhow::bail!(
-        "{display} is not an agent-doc document. Run `agent-doc init {display}` to scaffold a session, \
-add an `agent_doc_format: template` frontmatter field, or list it under `[documents] include` \
-(or set `auto_session_for_all_md = true`) in `.agent-doc/config.toml` to opt in."
-    );
+    let (project, doc_relative) = resolve_ssh_context_inputs(file);
+    project_config::require_agent_doc_document(
+        &doc_relative,
+        content,
+        &project,
+        &display.to_string(),
+    )
 }
 
 #[cfg(test)]

@@ -257,43 +257,6 @@ pub(crate) fn check_pending_done_guard(
         } => missing_ids,
     };
 
-    let ids = missing
-        .iter()
-        .map(|id| format!("#{}", id))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let hint = missing
-        .iter()
-        .map(|id| format!("--done {}", id))
-        .collect::<Vec<_>>()
-        .join(" ");
-    let repair = format!(
-        "agent-doc write {} {} --pending-only --commit",
-        file.display(),
-        hint
-    );
-    let warn_line = format!(
-        "[session-check] warn: response appears to complete existing pending {} but no matching `--done` was recorded this cycle",
-        ids
-    );
-
-    Ok(match mode {
-        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Warn => {
-            GuardResult::Warn(vec![
-                warn_line,
-                format!(
-                    "[session-check] hint: repair with `{}` or add `pending_done_guard: off` for this document when the item should stay open",
-                    repair
-                ),
-            ])
-        }
-        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict => {
-            GuardResult::Error(format!(
-                "{}\n[session-check] hint: repair with `{}` or set pending_done_guard = \"warn\" to downgrade",
-                warn_line.replacen("[session-check] warn:", "[session-check] error:", 1),
-                repair
-            ))
-        }
-        agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
-    })
+    let file_display = file.display().to_string();
+    Ok(agent_doc_workflow::session_check::pending_done_guard_result(&file_display, &missing, mode))
 }

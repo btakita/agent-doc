@@ -1,10 +1,11 @@
 //! # Module: log_time
 //!
-//! Human-readable log timestamps (`#opslogts`). Operators read the supervisor
-//! session log and `.agent-doc/logs/ops.log` to verify reported issues, and a
-//! bare Unix epoch like `1781771180` is not legible. This module formats every
-//! log entry's timestamp as ISO-8601 UTC and parses it back, with **no external
-//! date dependency** (Howard Hinnant's civil-date algorithms).
+//! Human-readable log timestamps (`#opslogts`) and low-level ops-log line
+//! formatting. Operators read the supervisor session log and
+//! `.agent-doc/logs/ops.log` to verify reported issues, and a bare Unix epoch
+//! like `1781771180` is not legible. This module formats every log entry's
+//! timestamp as ISO-8601 UTC and parses it back, with **no external date
+//! dependency** (Howard Hinnant's civil-date algorithms).
 //!
 //! ## Spec
 //! - [`format_log_timestamp`] renders a Unix epoch (seconds) as
@@ -15,11 +16,36 @@
 //!   compatibility keeps the staleness / accretion / startup-miss /
 //!   `gate_verify` scanners working across the format switch — old `[<epoch>]`
 //!   lines still parse, and `parse(format(x)) == x` round-trips.
+//! - [`current_log_timestamp`] samples the system clock and returns the current
+//!   timestamp in the same ISO-8601 UTC format.
+//! - [`format_ops_log_tracking_suffix`] renders the appended
+//!   ` doc=<stem>[ session=<id>][ turn=<cycle_id>]` suffix without knowing how
+//!   callers found those values.
+//! - [`format_ops_log_line`] renders the final bracketed ops-log line.
 //!
 //! ## Agentic Contracts
-//! - Pure and deterministic for unit testing; no I/O, no clock reads.
+//! - Formatting/parsing helpers are pure and deterministic for unit testing; no
+//!   I/O and no orchestration dependencies.
+//! - Clock helpers fail closed to Unix epoch `0` when the system clock is before
+//!   `UNIX_EPOCH`.
 //! - `parse_log_timestamp` fails closed (`None`) on garbage rather than mapping
 //!   it to `0`, so a malformed line is skipped, not mis-windowed.
+
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Return the current Unix epoch seconds, defaulting to `0` when the system
+/// clock is earlier than `UNIX_EPOCH`.
+pub fn current_epoch_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default()
+}
+
+/// Return the current timestamp in the log format `YYYY-MM-DDTHH:MM:SSZ`.
+pub fn current_log_timestamp() -> String {
+    format_log_timestamp(current_epoch_secs())
+}
 
 /// Format a Unix epoch (seconds) as a human-readable ISO-8601 UTC timestamp
 /// `YYYY-MM-DDTHH:MM:SSZ` (`#opslogts`).
@@ -41,6 +67,41 @@ pub fn format_log_timestamp(secs: u64) -> String {
     let year = if m <= 2 { y + 1 } else { y };
 
     format!("{year:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}Z")
+}
+
+/// Render the `#opslogtrack` suffix appended to each ops-log line.
+///
+/// The caller owns data collection. This helper only preserves the wire format:
+/// ` doc=<stem>[ session=<id>][ turn=<cycle_id>]`.
+pub fn format_ops_log_tracking_suffix(
+    doc_stem: Option<&str>,
+    session: Option<&str>,
+    turn: Option<&str>,
+) -> String {
+    let mut suffix = String::new();
+    if let Some(stem) = doc_stem {
+        suffix.push_str(" doc=");
+        suffix.push_str(stem);
+    }
+    if let Some(session) = session.filter(|session| !session.is_empty()) {
+        suffix.push_str(" session=");
+        suffix.push_str(session);
+    }
+    if let Some(turn) = turn.filter(|turn| !turn.is_empty()) {
+        suffix.push_str(" turn=");
+        suffix.push_str(turn);
+    }
+    suffix
+}
+
+/// Render a full bracketed `.agent-doc/logs/ops.log` line.
+pub fn format_ops_log_line(timestamp_secs: u64, message: &str, tracking_suffix: &str) -> String {
+    format!(
+        "[{}] {}{}",
+        format_log_timestamp(timestamp_secs),
+        message,
+        tracking_suffix
+    )
 }
 
 /// Parse a log timestamp that is either a bare Unix epoch (seconds) or an
@@ -113,5 +174,34 @@ mod tests {
         // Garbage is rejected, not silently mapped to 0.
         assert_eq!(parse_log_timestamp("not-a-timestamp"), None);
         assert_eq!(parse_log_timestamp("2026-13-01T00:00:00Z"), None);
+    }
+
+    #[test]
+    fn current_log_timestamp_is_parseable() {
+        let timestamp = current_log_timestamp();
+        assert!(
+            parse_log_timestamp(&timestamp).is_some(),
+            "current timestamp should parse: {timestamp:?}"
+        );
+    }
+
+    #[test]
+    fn tracking_suffix_preserves_ops_log_wire_format() {
+        assert_eq!(
+            format_ops_log_tracking_suffix(Some("plan"), Some("sess-1"), Some("turn-2")),
+            " doc=plan session=sess-1 turn=turn-2"
+        );
+        assert_eq!(
+            format_ops_log_tracking_suffix(Some("plan"), None, Some("")),
+            " doc=plan"
+        );
+    }
+
+    #[test]
+    fn ops_log_line_uses_bracketed_iso_timestamp() {
+        assert_eq!(
+            format_ops_log_line(0, "event happened", " doc=plan"),
+            "[1970-01-01T00:00:00Z] event happened doc=plan"
+        );
     }
 }

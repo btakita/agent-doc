@@ -1,3 +1,5 @@
+use agent_doc_element_backlog::guard_policy::BacklogGuardOutcome;
+use agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode;
 use agent_doc_turn::CyclePhase;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -5,6 +7,327 @@ pub enum GuardResult {
     None,
     Warn(Vec<String>),
     Error(String),
+}
+
+impl From<BacklogGuardOutcome> for GuardResult {
+    fn from(outcome: BacklogGuardOutcome) -> Self {
+        match outcome {
+            BacklogGuardOutcome::Pass => Self::None,
+            BacklogGuardOutcome::Warn(lines) => Self::Warn(lines),
+            BacklogGuardOutcome::Interrupt(message) => Self::Error(message),
+        }
+    }
+}
+
+fn hash_refs(ids: &[String]) -> String {
+    ids.iter()
+        .map(|id| format!("#{id}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn done_flags(ids: &[String]) -> String {
+    ids.iter()
+        .map(|id| format!("--done {id}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+pub fn pending_done_guard_result(
+    file: &str,
+    missing: &[String],
+    mode: PendingCaptureGuardMode,
+) -> GuardResult {
+    let ids = hash_refs(missing);
+    let hint = done_flags(missing);
+    let repair = format!("agent-doc write {file} {hint} --pending-only --commit");
+    let warn_line = format!(
+        "[session-check] warn: response appears to complete existing pending {ids} but no matching `--done` was recorded this cycle"
+    );
+
+    match mode {
+        PendingCaptureGuardMode::Warn => GuardResult::Warn(vec![
+            warn_line,
+            format!(
+                "[session-check] hint: repair with `{repair}` or add `pending_done_guard: off` for this document when the item should stay open"
+            ),
+        ]),
+        PendingCaptureGuardMode::Strict => GuardResult::Error(format!(
+            "{}\n[session-check] hint: repair with `{repair}` or set pending_done_guard = \"warn\" to downgrade",
+            warn_line.replacen("[session-check] warn:", "[session-check] error:", 1),
+        )),
+        PendingCaptureGuardMode::Off => GuardResult::None,
+    }
+}
+
+pub fn expect_done_or_gate_guard_result(
+    file: &str,
+    unresolved: &[String],
+    mode: PendingCaptureGuardMode,
+) -> GuardResult {
+    let ids = hash_refs(unresolved);
+    let done_hint = done_flags(unresolved);
+    let repair = format!("agent-doc write {file} {done_hint} --pending-only --commit");
+    let warn_line = format!(
+        "[session-check] warn: `do #id` directive resolved this cycle but tracked target {ids} is still open in agent:backlog with no `--done`, `--pending-gate`, or kept-open edit recorded"
+    );
+
+    match mode {
+        PendingCaptureGuardMode::Warn => GuardResult::Warn(vec![
+            warn_line,
+            format!(
+                "[session-check] hint: repair with `{repair}`, run `--pending-gate <id>` if review/external validation remains, or add `pending_done_guard: off` when the item should stay open"
+            ),
+        ]),
+        PendingCaptureGuardMode::Strict => GuardResult::Error(format!(
+            "{}\n[session-check] hint: repair with `{repair}`, run `--pending-gate <id>` if review/external validation remains, or set pending_done_guard = \"warn\" to downgrade",
+            warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
+        )),
+        PendingCaptureGuardMode::Off => GuardResult::None,
+    }
+}
+
+pub fn blocked_closeout_followup_guard_result(
+    file: &str,
+    unresolved: &[String],
+    mode: PendingCaptureGuardMode,
+) -> GuardResult {
+    let ids = hash_refs(unresolved);
+    let edit_hint = unresolved
+        .iter()
+        .map(|id| format!("--backlog-edit \"{id}=<remaining next action>\""))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let add_after_hint = unresolved
+        .first()
+        .map(|id| format!("--backlog-add-after {id} \"<id>=<concrete next step>\""))
+        .unwrap_or_default();
+    let repair = format!("agent-doc write {file} {edit_hint} --pending-only --commit");
+    let warn_line = format!(
+        "[session-check] warn: `do #id` closeout reported blocked / still-needed work but gated tracked target {ids} out of agent:backlog with no kept-open edit, new follow-up item, or explicit no-follow-up justification — the remaining steps live only in prose"
+    );
+
+    match mode {
+        PendingCaptureGuardMode::Warn => GuardResult::Warn(vec![
+            warn_line,
+            format!(
+                "[session-check] hint: keep the work tracked with `{repair}`, split a new follow-up via `{add_after_hint}`, add an explicit \"no additional backlog follow-up is needed because ...\" phrase for a true review-only gate, or add `{}`",
+                agent_doc_turn::closeout_signal::BLOCKED_CLOSEOUT_FOLLOWUP_GUARD_SUPPRESS_MARKER
+            ),
+        ]),
+        PendingCaptureGuardMode::Strict => GuardResult::Error(format!(
+            "{}\n[session-check] hint: keep the work tracked with `{repair}`, split a new follow-up via `{add_after_hint}`, add an explicit \"no additional backlog follow-up is needed because ...\" phrase for a true review-only gate, or set pending_done_guard = \"warn\" to downgrade",
+            warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
+        )),
+        PendingCaptureGuardMode::Off => GuardResult::None,
+    }
+}
+
+pub fn gated_phase_split_guard_result(file: &str, flagged: &[String]) -> GuardResult {
+    let ids = hash_refs(flagged);
+    let add_after_hint = flagged
+        .first()
+        .map(|id| format!("--backlog-add-after {id} \"<child-id>=<one phase scope>\""))
+        .unwrap_or_default();
+
+    GuardResult::Warn(vec![
+        format!(
+            "[session-check] warn: kept-open tracked item {ids} enumerates multiple gated/remaining phases in its body but does not break them out into discrete child backlog IDs — the deferred phases are not independently trackable or queueable"
+        ),
+        format!(
+            "[session-check] hint: split each gated phase into its own child id (e.g. `agent-doc write {file} {add_after_hint} --pending-only --commit`), keeping the parent as context, or add `{}` if the phases are intentionally one unit",
+            agent_doc_turn::closeout_signal::GATED_PHASE_SPLIT_GUARD_SUPPRESS_MARKER
+        ),
+    ])
+}
+
+pub fn queue_audit_partial_completion_guard_result() -> GuardResult {
+    GuardResult::Warn(vec![
+        "[session-check] warn: this queue-completion audit reports the queue as not complete while also citing several completed substeps, but never classifies any row as partially complete — meaningful partial progress is collapsed into \"none complete\"".to_string(),
+        format!(
+            "[session-check] hint: classify each queue row as complete / partially complete / not-started, naming the completed substeps and the exact remaining condition for partial rows; recommend splitting a row with multiple gateable phases. Add `{}` if the all-or-none framing is intentional.",
+            agent_doc_turn::closeout_signal::QUEUE_AUDIT_GUARD_SUPPRESS_MARKER
+        ),
+    ])
+}
+
+pub fn queue_head_removal_guard_result(
+    file: &str,
+    lost: &[String],
+    mode: PendingCaptureGuardMode,
+) -> GuardResult {
+    let ids = hash_refs(lost);
+    let warn_line = format!(
+        "[session-check] warn: runnable agent:queue head(s) {ids} were removed from the committed queue but their backlog item(s) are still open in agent:backlog, and the cycle never consumed, completed, gated, or reaped them — unrun queue work was silently dropped"
+    );
+    let repair = format!(
+        "restore the dropped head(s) to `agent:queue` (or resolve each id with `--done`/`--pending-gate`), then re-run `agent-doc write --commit {file}`; add `<!-- no-queue-removal-guard -->` to the response if the removal was an explicit user edit"
+    );
+
+    match mode {
+        PendingCaptureGuardMode::Warn => GuardResult::Warn(vec![
+            warn_line,
+            format!("[session-check] hint: {repair} (see #queue-clear-unrun-items)"),
+        ]),
+        PendingCaptureGuardMode::Strict => GuardResult::Error(format!(
+            "{}\n[session-check] hint: {repair} (see #queue-clear-unrun-items)",
+            warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
+        )),
+        PendingCaptureGuardMode::Off => GuardResult::None,
+    }
+}
+
+pub fn free_text_queue_marker_residue_result(file: &str) -> GuardResult {
+    GuardResult::Error(format!(
+        "[session-check] INTERRUPTED: {file} contains `<!-- no-free-text-queue-head-guard -->` plus a bare `###` heading, which is interrupted closeout evidence rather than committed response proof. Finish the response through `agent-doc finalize {file}` or `agent-doc write --commit {file}`, then run `agent-doc session-check {file}`. (see #directchatpb2)"
+    ))
+}
+
+pub fn free_text_queue_completed_residue_result(file: &str, heads: &[String]) -> GuardResult {
+    let heads_text = heads
+        .iter()
+        .map(|head| format!("{head:?}"))
+        .collect::<Vec<_>>()
+        .join("; ");
+    GuardResult::Error(format!(
+        "[session-check] INTERRUPTED: completed free-text agent:queue head(s) {heads_text} are still active in the committed queue even though exchange history contains a `Queue prompt` echo proving they were already answered — completed queue residue would re-run stale work\n[session-check] hint: remove or strike the answered head(s), then re-run `agent-doc write --commit {file}`; add `<!-- no-free-text-queue-head-guard -->` only if keeping the answered row active is intentional (see #qheadresidue)"
+    ))
+}
+
+pub fn free_text_queue_head_provenance_guard_result(
+    file: &str,
+    unresolved: &[String],
+    mode: PendingCaptureGuardMode,
+) -> GuardResult {
+    let heads_text = unresolved
+        .iter()
+        .map(|head| format!("\"{head}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let warn_line = format!(
+        "[session-check] warn: free-text agent:queue head(s) {heads_text} were seen at preflight but have no committed response/echo or explicit deferral proof in the closeout — the prompt may have been silently lost"
+    );
+    let repair = format!(
+        "either respond to the unresolved head(s) and run `agent-doc finalize {file}`, or add `<!-- no-free-text-queue-head-guard -->` if the removal was intentional"
+    );
+    match mode {
+        PendingCaptureGuardMode::Warn => GuardResult::Warn(vec![
+            warn_line,
+            format!("[session-check] hint: {repair} (see #lr-queue-patchback-miss)"),
+        ]),
+        PendingCaptureGuardMode::Strict => GuardResult::Error(format!(
+            "{}\n[session-check] hint: {repair} (see #lr-queue-patchback-miss)",
+            warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
+        )),
+        PendingCaptureGuardMode::Off => GuardResult::None,
+    }
+}
+
+pub fn no_response_active_queue_head_result(
+    file: &str,
+    cycle_id: &str,
+    live: &[String],
+    mode: PendingCaptureGuardMode,
+) -> GuardResult {
+    let ids = hash_refs(live);
+    let warn_line = format!(
+        "[session-check] warn: cycle `{cycle_id}` committed without an assistant response body while runnable agent:queue head(s) {ids} remained queued and open in agent:backlog; this was a no-response repair/reap-only closeout, not a completed queue turn"
+    );
+    let repair = format!(
+        "run `agent-doc {file}` from the owning session so the queued head is answered, or resolve each id through `agent-doc write --commit {file}` with `--done`, `--pending-gate`, or `--pending-edit` proof before closing"
+    );
+
+    match mode {
+        PendingCaptureGuardMode::Warn => GuardResult::Warn(vec![
+            warn_line,
+            format!("[session-check] hint: {repair} (see #nochange-after-stall-breadth)"),
+        ]),
+        PendingCaptureGuardMode::Strict => GuardResult::Error(format!(
+            "{}\n[session-check] hint: {repair} (see #nochange-after-stall-breadth)",
+            warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
+        )),
+        PendingCaptureGuardMode::Off => GuardResult::None,
+    }
+}
+
+pub fn reaped_queue_head_without_response_result(
+    file: &str,
+    cycle_id: &str,
+    lost: &[String],
+    mode: PendingCaptureGuardMode,
+) -> GuardResult {
+    let ids = hash_refs(lost);
+    let warn_line = format!(
+        "[session-check] warn: cycle `{cycle_id}` reaped `do` queue-directive head(s) {ids} into agent:done without an assistant response landing in agent:exchange (no response body this cycle and no `### Re:` for the id in the exchange or a HEAD compact archive); the response record was silently lost"
+    );
+    let repair = format!(
+        "recover the lost response by re-running `agent-doc {file}` so the directive id is answered, or restore the missing `### Re:` block through `agent-doc write --commit {file}` before closing"
+    );
+
+    match mode {
+        PendingCaptureGuardMode::Warn => GuardResult::Warn(vec![
+            warn_line,
+            format!("[session-check] hint: {repair} (see #compact-reap-no-response-record)"),
+        ]),
+        PendingCaptureGuardMode::Strict => GuardResult::Error(format!(
+            "{}\n[session-check] hint: {repair} (see #compact-reap-no-response-record)",
+            warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
+        )),
+        PendingCaptureGuardMode::Off => GuardResult::None,
+    }
+}
+
+pub fn dropped_queue_prompt_guard_result(file: &str, still_missing: &[String]) -> GuardResult {
+    GuardResult::Error(format!(
+        "[session-check] INTERRUPTED: user-authored agent:queue edit(s) were dropped during an IPC content_ours merge and are missing from the visible document without being consumed: {}. Convergence overwrote a newer visible queue; re-add them to `agent:queue` and re-run `agent-doc finalize {file}` / `agent-doc write --commit {file}` so the queued work is preserved (see #queue-user-edit-overwrite).",
+        still_missing.join("; "),
+    ))
+}
+
+pub fn queue_response_contamination_guard_result(contaminated: &[String]) -> GuardResult {
+    GuardResult::Error(format!(
+        "[session-check] INTERRUPTED: agent:queue contains assistant response prose copied from a `### Re:` body, not a user prompt or `do [#id]` directive: {}. Remove the contaminating line(s) from `agent:queue` (only user prompts, `do [#id]`, `preset`/`dispatch`, or backlog-derived entries are valid queue sources) and re-run finalize (see #jb-run-agent-doc-response-queue-contamination).",
+        contaminated
+            .iter()
+            .map(|text| format!("{text:?}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ))
+}
+
+pub fn dropped_exchange_prompt_guard_result(file: &str, still_missing: &[String]) -> GuardResult {
+    GuardResult::Error(format!(
+        "[session-check] INTERRUPTED: user-authored exchange prompt(s) were dropped during an IPC content_ours merge and are missing from the committed document: {}. The cycle committed `content_ours` without these prompt-bearing line(s); re-add them to `agent:exchange` and re-run `agent-doc finalize {file}` / `agent-doc write --commit {file}` so they are answered (see #exchange-prompt-dropped-on-merge).",
+        still_missing.join("; "),
+    ))
+}
+
+pub fn completed_pending_reap_guard_message(refs: &str) -> String {
+    format!(
+        "[session-check] INTERRUPTED: document still contains completed tracked item(s) after closeout: {refs}. Re-run preflight/repair so the reap is persisted through the snapshot + commit boundary"
+    )
+}
+
+pub fn snapshot_committed_guard_message(
+    snapshot_len: usize,
+    head_len: usize,
+    side_effects: &str,
+    recovery_hint: &str,
+) -> String {
+    format!(
+        "[session-check] INTERRUPTED: cycle state is committed but the snapshot does not match HEAD in the owning repo (snapshot_len={snapshot_len}, head_len={head_len}). The response patchback is visible but was never committed{side_effects} {recovery_hint}"
+    )
+}
+
+pub fn committed_without_response_body_guard_message(
+    cycle_id: &str,
+    last_event: &str,
+    side_effects: &str,
+    recovery_hint: &str,
+) -> String {
+    format!(
+        "[session-check] INTERRUPTED: cycle committed binary-owned work this turn but no assistant `### Re:` response body is present in `agent:exchange` (cycle `{cycle_id}`, last_event `{last_event}`). The close-out response was never written into `agent:exchange`{side_effects} (#codex-queue-drain-no-response-body). {recovery_hint}"
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

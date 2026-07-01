@@ -176,7 +176,7 @@ pub fn run(
     let expanded_env = if fm.env.is_empty() {
         Vec::new()
     } else {
-        match crate::env::expand_values(&fm.env) {
+        match agent_doc_config::env::expand_values(&fm.env) {
             Ok(e) => e,
             Err(e) => {
                 eprintln!(

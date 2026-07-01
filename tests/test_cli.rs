@@ -1393,8 +1393,18 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // #session-check-workflow-extract: focused workflow policy now owns the
         // canonical blocked-closeout diagnostic text, including its audited
         // `reason={}` field.
+        // +14 (#session-check-guard-policy-extract): guard result/message
+        // builders for pending, closeout, queue-head, and free-text provenance
+        // checks moved to the focused workflow policy crate. These are the
+        // canonical guard-result function names, not new orchestration flow
+        // boundaries.
+        ("agent-doc-workflow/src/session_check.rs", "guard_") => 14,
         ("agent-doc-workflow/src/session_check.rs", "reason=") => 1,
-        ("agent-doc-orchestration/src/session_check/closeout_guards.rs", "guard_") => 4,
+        // 4 -> 7 (#session-check-guard-policy-extract): orchestration keeps the
+        // IO/proof collection and calls the focused workflow guard-result
+        // builders directly for blocked closeout, gated split, and queue-audit
+        // diagnostics.
+        ("agent-doc-orchestration/src/session_check/closeout_guards.rs", "guard_") => 7,
         // +3 (#samplequeuepreserve): the audited
         // `queue_head_removal_guard_proof` diagnostic plus two regression test
         // names proving removed id-backed/free-text queue heads log their proof
@@ -1410,7 +1420,10 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
             // new production flow guards: the residue guard reuses the existing
             // `free_text_queue_completed_residue_guard_fired` event, only adding an
             // early `is_recurring_imperative_head` exemption before it can fire.
-            14
+            // +3 (#session-check-guard-policy-extract): this adapter now calls
+            // the focused workflow guard-result builders directly for
+            // expect-done, queue-head removal, and free-text provenance.
+            17
         }
         // 8 -> 12: guard-mode precedence/defaulting moved to
         // `agent-doc-frontmatter`, so this file now names the focused
@@ -1418,7 +1431,9 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // call sites. `resolve_review_done_guard_mode_with_context` was deleted
         // because there was no cached-context call site to preserve, for a net
         // +4 audited tokens.
-        ("agent-doc-orchestration/src/session_check/pending_guards.rs", "guard_") => 12,
+        // 12 -> 13 (#session-check-guard-policy-extract): the adapter now calls
+        // the focused workflow pending-done guard-result builder directly.
+        ("agent-doc-orchestration/src/session_check/pending_guards.rs", "guard_") => 13,
         ("agent-doc-orchestration/src/session_check/queue_head_guards.rs", "guard_") => 2,
         ("agent-doc-orchestration/src/session_check/partial_staging.rs", "guard_") => 2,
         ("agent-doc-orchestration/src/session_check/response_guards.rs", "guard_") => 8,
@@ -5335,6 +5350,8 @@ fn test_agent_doc_log_time_has_no_ops_log_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/ops_log.rs")).unwrap();
     for forbidden_snippet in [
         "pub use agent_doc_log_time",
+        "fn iso_timestamp(",
+        "fn ops_log_tracking_suffix(",
         "pub fn format_log_timestamp",
         "pub fn parse_log_timestamp",
     ] {
@@ -5344,9 +5361,35 @@ fn test_agent_doc_log_time_has_no_ops_log_facade() {
         );
     }
     assert!(
-        ops_log_source.contains("agent_doc_log_time::format_log_timestamp"),
+        ops_log_source.contains("agent_doc_log_time::current_log_timestamp")
+            && ops_log_source.contains("agent_doc_log_time::format_ops_log_tracking_suffix")
+            && ops_log_source.contains("agent_doc_log_time::format_ops_log_line"),
         "ops_log should call the focused log-time crate directly"
     );
+
+    let semantic_diff_source = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/preflight/semantic_diff.rs"),
+    )
+    .unwrap();
+    assert!(
+        !semantic_diff_source.contains("fn op_log_timestamp(")
+            && semantic_diff_source.contains("agent_doc_log_time::current_epoch_secs()"),
+        "semantic_diff must not re-own the op-log timestamp helper"
+    );
+
+    let log_time_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-log-time/src/lib.rs")).unwrap();
+    for required_snippet in [
+        "pub fn current_epoch_secs(",
+        "pub fn current_log_timestamp(",
+        "pub fn format_ops_log_tracking_suffix(",
+        "pub fn format_ops_log_line(",
+    ] {
+        assert!(
+            log_time_source.contains(required_snippet),
+            "agent-doc-log-time must own low-level log timestamp/format helpers: {required_snippet}"
+        );
+    }
 
     for relative in [
         "agent-doc-orchestration/src/ops_log.rs",
@@ -8382,6 +8425,81 @@ fn test_agent_doc_frontmatter_owns_raw_frontmatter_yaml_policy() {
 }
 
 #[test]
+fn test_agent_doc_frontmatter_owns_session_id_and_document_gate_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let frontmatter_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-frontmatter/src/frontmatter.rs")).unwrap();
+    let project_config_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-frontmatter/src/project_config.rs"))
+            .unwrap();
+    let frontmatter_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/frontmatter_io.rs"))
+            .unwrap();
+
+    assert!(
+        frontmatter_source.contains("pub fn session_id_from_content("),
+        "agent-doc-frontmatter must own pure session-id extraction from document content"
+    );
+    assert!(
+        project_config_source.contains("pub fn require_agent_doc_document("),
+        "agent-doc-frontmatter must own pure document opt-in gate policy"
+    );
+    for forbidden in [
+        "let (fm, _) = parse(&content)",
+        "fm.session",
+        "is not an agent-doc document. Run `agent-doc init",
+    ] {
+        assert!(
+            !frontmatter_io_source.contains(forbidden),
+            "frontmatter_io must adapt path/config IO, not re-own frontmatter policy: {forbidden}"
+        );
+    }
+    assert!(
+        frontmatter_io_source.contains("session_id_from_content(&content)")
+            && frontmatter_io_source.contains("project_config::require_agent_doc_document("),
+        "frontmatter_io should resolve IO inputs then call frontmatter-owned helpers directly"
+    );
+}
+
+#[test]
+fn test_agent_doc_config_owns_env_expansion_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let config_env_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-config/src/env.rs")).unwrap();
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    let root_orchestrate_source =
+        fs::read_to_string(manifest_dir.join("src/orchestrate.rs")).unwrap();
+    let root_parallel_source = fs::read_to_string(manifest_dir.join("src/parallel.rs")).unwrap();
+
+    for required_snippet in [
+        "pub type EnvMap",
+        "pub fn expand_values(",
+        "pub fn shell_export_prefix(",
+    ] {
+        assert!(
+            config_env_source.contains(required_snippet),
+            "agent-doc-config must own env expansion/export policy: {required_snippet}"
+        );
+    }
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/env.rs")
+            .exists(),
+        "orchestration must not keep an env module file after env policy extraction"
+    );
+    assert!(
+        !orchestration_lib.contains("pub mod env;"),
+        "orchestration must not expose an env facade over agent-doc-config"
+    );
+    assert!(
+        root_orchestrate_source.contains("agent_doc_config::env::expand_values(")
+            && root_parallel_source.contains("agent_doc_config::env::shell_export_prefix("),
+        "root callers should use agent-doc-config env helpers directly"
+    );
+}
+
+#[test]
 fn test_snapshot_state_paths_are_owned_by_agent_doc_fs() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let fs_source = fs::read_to_string(manifest_dir.join("agent-doc-fs/src/lib.rs")).unwrap();
@@ -8405,6 +8523,7 @@ fn test_snapshot_state_paths_are_owned_by_agent_doc_fs() {
         "pub fn multinode_crdt_path_for(",
         "pub fn snapshot_flock_path_for(",
         "pub fn crdt_flock_path_for(",
+        "pub fn same_document_path(",
     ] {
         assert!(
             fs_source.contains(required_snippet),
@@ -8554,6 +8673,20 @@ fn test_snapshot_state_paths_are_owned_by_agent_doc_fs() {
     assert!(
         !orchestration_lib.contains("pub mod fs_util"),
         "orchestration must not keep an fs_util facade over agent-doc-fs"
+    );
+
+    let security_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/security.rs")).unwrap();
+    for forbidden_snippet in ["fn same_document(", "fn normalize_path("] {
+        assert!(
+            !security_source.contains(forbidden_snippet),
+            "security.rs must not re-own same-document path comparison: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        security_source.contains("agent_doc_fs::same_document_path")
+            || security_source.contains("use agent_doc_fs::same_document_path;"),
+        "security.rs should call focused agent-doc-fs same-document path helper directly"
     );
 
     fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -14963,6 +15096,14 @@ fn test_agent_doc_document_owns_watch_projection_policy() {
     for forbidden in [
         "fn file_watch_event_id(",
         "pub use agent_doc_document::watch_projection",
+        "pub enum RawKind",
+        "pub struct RawWatchEvent",
+        "pub enum WatchDelivery",
+        "pub struct DocumentWatchGate",
+        "pub type RawWatchEvent",
+        "pub type WatchDelivery",
+        "pub type DocumentWatchGate",
+        "pub use agent_doc_document_realtime::watch_authority",
     ] {
         assert!(
             !document_watcher.contains(forbidden),
@@ -15185,6 +15326,21 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
             .join("agent-doc-document-realtime/src/watch_authority.rs")
             .exists()
     );
+    let realtime_watch_authority =
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime/src/watch_authority.rs"))
+            .unwrap();
+    for required_snippet in [
+        "pub enum RawKind",
+        "pub struct RawWatchEvent",
+        "pub enum WatchDelivery",
+        "pub struct DocumentWatchGate",
+        "pub struct WatchWriteProvenance",
+    ] {
+        assert!(
+            realtime_watch_authority.contains(required_snippet),
+            "agent-doc-document-realtime must own watch delivery/gate policy: {required_snippet}"
+        );
+    }
     assert!(
         manifest_dir
             .join("agent-doc-document-realtime/src/read_authority.rs")

@@ -198,6 +198,118 @@ pub fn early_ack_ops_marker() -> &'static str {
     "[ipc-socket] early_ack_pending emitted before apply"
 }
 
+/// Ops-log marker emitted when a listener connection is accepted and handed to
+/// a fresh handler thread.
+pub fn ipc_accept_thread_ops_marker(inflight: u64) -> String {
+    format!("[ipc-socket] ipc_accept_thread_spawned inflight={inflight}")
+}
+
+/// Build a patch IPC payload for editor-owned document mutation.
+pub fn patch_message(
+    file: &str,
+    patches: serde_json::Value,
+    frontmatter_yaml: Option<&str>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "type": "patch",
+        "file": file,
+        "patches": patches,
+        "frontmatter": frontmatter_yaml,
+    })
+}
+
+/// Build a queue convergence patch payload.
+pub fn queue_convergence_message(
+    file: &str,
+    queue_auto: bool,
+    frontmatter_yaml: Option<&str>,
+    queue_body: Option<&str>,
+) -> serde_json::Value {
+    let patches = queue_body
+        .map(|content| {
+            serde_json::json!([{
+                "component": "queue",
+                "content": content,
+            }])
+        })
+        .unwrap_or_else(|| serde_json::json!([]));
+    serde_json::json!({
+        "type": "patch",
+        "file": file,
+        "patches": patches,
+        "unmatched": "",
+        "frontmatter": frontmatter_yaml,
+        "queue_auto": queue_auto,
+    })
+}
+
+/// Build a boundary reposition IPC payload.
+pub fn reposition_message(
+    file: &str,
+    boundary_id: Option<&str>,
+    preserve_head: bool,
+) -> serde_json::Value {
+    let mut message = serde_json::json!({
+        "type": "reposition",
+        "file": file,
+    });
+    if let Some(boundary_id) = boundary_id {
+        message["boundary_id"] = serde_json::Value::String(boundary_id.to_string());
+    }
+    if preserve_head {
+        message["preserve_head"] = serde_json::Value::Bool(true);
+    }
+    message
+}
+
+/// Build an editor save request payload.
+pub fn save_document_message(file: &str, patch_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "type": "save_document",
+        "file": file,
+        "patch_id": patch_id,
+    })
+}
+
+/// Build a full content refresh payload.
+pub fn refresh_content_message(
+    file: &str,
+    content: &str,
+    expected_content_hash: &str,
+    expected_content_len: usize,
+) -> serde_json::Value {
+    serde_json::json!({
+        "type": "refresh_content",
+        "file": file,
+        "content": content,
+        "expected_content_hash": expected_content_hash,
+        "expected_content_len": expected_content_len,
+    })
+}
+
+/// Build a read-only live-buffer publication request payload.
+pub fn publish_live_buffer_message(file: &str) -> serde_json::Value {
+    serde_json::json!({
+        "type": "publish_live_buffer",
+        "file": file,
+    })
+}
+
+/// Build a VCS refresh payload.
+pub fn vcs_refresh_message() -> serde_json::Value {
+    serde_json::json!({
+        "type": "vcs_refresh",
+    })
+}
+
+/// Build a VCS refresh probe payload.
+pub fn vcs_refresh_probe_message(probe: &str) -> serde_json::Value {
+    serde_json::json!({
+        "type": "vcs_refresh",
+        "probe": probe,
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FullContentIpcMode {
@@ -224,7 +336,10 @@ mod tests {
         AckClassification, FullContentIpcMode, callback_request, callback_request_is_expired,
         callback_response, callback_response_matches_request, callback_urgency_for_elapsed,
         classify_ack, early_ack_line, early_ack_ops_marker, early_ack_tagged_message,
-        message_requests_early_ack, pending_callback_from_request,
+        ipc_accept_thread_ops_marker, message_requests_early_ack, patch_message,
+        pending_callback_from_request, publish_live_buffer_message, queue_convergence_message,
+        refresh_content_message, reposition_message, save_document_message, vcs_refresh_message,
+        vcs_refresh_probe_message,
     };
 
     #[test]
@@ -317,6 +432,96 @@ mod tests {
             "ops marker must carry the predicate token: {marker}"
         );
         assert!(!early_ack_line().contains("early_ack_pending"));
+    }
+
+    #[test]
+    fn ipc_accept_thread_ops_marker_carries_predicate_and_count() {
+        let marker = ipc_accept_thread_ops_marker(7);
+        assert!(marker.contains("ipc_accept_thread_spawned"));
+        assert!(marker.contains("inflight=7"));
+    }
+
+    #[test]
+    fn patch_message_carries_patch_payload_and_frontmatter() {
+        let message = patch_message(
+            "/tmp/plan.md",
+            serde_json::json!([{"component": "exchange", "content": "done"}]),
+            Some("queue: []"),
+        );
+
+        assert_eq!(message["type"], "patch");
+        assert_eq!(message["file"], "/tmp/plan.md");
+        assert_eq!(message["frontmatter"], "queue: []");
+        assert_eq!(message["patches"][0]["component"], "exchange");
+    }
+
+    #[test]
+    fn queue_convergence_message_uses_patch_shape() {
+        let message = queue_convergence_message("/tmp/plan.md", false, None, Some("- item"));
+
+        assert_eq!(message["type"], "patch");
+        assert_eq!(message["file"], "/tmp/plan.md");
+        assert_eq!(message["unmatched"], "");
+        assert_eq!(message["queue_auto"], false);
+        assert_eq!(message["frontmatter"], serde_json::Value::Null);
+        assert_eq!(message["patches"][0]["component"], "queue");
+        assert_eq!(message["patches"][0]["content"], "- item");
+    }
+
+    #[test]
+    fn reposition_message_adds_only_requested_options() {
+        let bare = reposition_message("/tmp/plan.md", None, false);
+        assert_eq!(bare["type"], "reposition");
+        assert_eq!(bare["file"], "/tmp/plan.md");
+        assert!(bare.get("boundary_id").is_none());
+        assert!(bare.get("preserve_head").is_none());
+
+        let full = reposition_message("/tmp/plan.md", Some("boundary-1"), true);
+        assert_eq!(full["boundary_id"], "boundary-1");
+        assert_eq!(full["preserve_head"], true);
+    }
+
+    #[test]
+    fn save_document_message_is_typed_and_readonly() {
+        let message = save_document_message("/tmp/plan.md", "save-123");
+
+        assert_eq!(message["type"], "save_document");
+        assert_eq!(message["file"], "/tmp/plan.md");
+        assert_eq!(message["patch_id"], "save-123");
+        assert!(message.get("content").is_none());
+        assert!(message.get("patches").is_none());
+    }
+
+    #[test]
+    fn refresh_content_message_carries_expected_source_proof() {
+        let message = refresh_content_message("/tmp/plan.md", "content", "hash-1", 7);
+
+        assert_eq!(message["type"], "refresh_content");
+        assert_eq!(message["file"], "/tmp/plan.md");
+        assert_eq!(message["content"], "content");
+        assert_eq!(message["expected_content_hash"], "hash-1");
+        assert_eq!(message["expected_content_len"], 7);
+    }
+
+    #[test]
+    fn publish_live_buffer_message_is_readonly() {
+        let message = publish_live_buffer_message("/tmp/plan.md");
+
+        assert_eq!(message["type"], "publish_live_buffer");
+        assert_eq!(message["file"], "/tmp/plan.md");
+        assert!(message.get("content").is_none());
+        assert!(message.get("patches").is_none());
+    }
+
+    #[test]
+    fn vcs_refresh_messages_have_stable_type_and_probe_field() {
+        let message = vcs_refresh_message();
+        assert_eq!(message["type"], "vcs_refresh");
+        assert!(message.get("probe").is_none());
+
+        let probe = vcs_refresh_probe_message("ipc_degraded_self_heal");
+        assert_eq!(probe["type"], "vcs_refresh");
+        assert_eq!(probe["probe"], "ipc_degraded_self_heal");
     }
 
     #[test]

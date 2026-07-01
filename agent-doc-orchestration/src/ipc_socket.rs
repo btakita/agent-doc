@@ -37,7 +37,9 @@
 
 use agent_doc_ipc_protocol::{
     AckClassification, classify_ack, early_ack_line, early_ack_ops_marker,
-    early_ack_tagged_message, message_requests_early_ack,
+    early_ack_tagged_message, ipc_accept_thread_ops_marker, message_requests_early_ack,
+    patch_message, publish_live_buffer_message, queue_convergence_message, refresh_content_message,
+    reposition_message, save_document_message, vcs_refresh_message, vcs_refresh_probe_message,
 };
 use anyhow::{Context, Result};
 use interprocess::local_socket::{
@@ -221,10 +223,7 @@ pub fn send_message_with_timeout(
 
 /// Probe whether the socket listener can accept and ack a lightweight message.
 pub fn probe_listener_ack(project_root: &Path, timeout: Duration) -> Result<bool> {
-    let message = serde_json::json!({
-        "type": "vcs_refresh",
-        "probe": "ipc_degraded_self_heal",
-    });
+    let message = vcs_refresh_probe_message("ipc_degraded_self_heal");
     send_message_with_timeout(project_root, &message, timeout).map(|_| true)
 }
 
@@ -249,18 +248,6 @@ impl Drop for InflightConnectionGuard {
     }
 }
 
-/// `#jbacceptwedge`: ops.log marker emitted when a connection is accepted
-/// and handed to a fresh thread. Carries the `ipc_accept_thread_spawned`
-/// predicate token plus the live inflight count so a single grep both
-/// proves the per-connection-thread fix is live and bounds how many
-/// concurrent connections the listener is juggling.
-pub fn ipc_accept_thread_ops_marker(inflight: u64) -> String {
-    format!(
-        "[ipc-socket] ipc_accept_thread_spawned inflight={}",
-        inflight
-    )
-}
-
 /// `#jbacceptwedge`: current in-flight handler-thread count. Exposed for
 /// tests so the regression can assert the listener actually reached a
 /// concurrent state (rather than only asserting wall-clock timing).
@@ -283,12 +270,8 @@ pub fn send_patch(
     patches_json: &str,
     frontmatter_yaml: Option<&str>,
 ) -> Result<bool> {
-    let message = serde_json::json!({
-        "type": "patch",
-        "file": file,
-        "patches": serde_json::from_str::<serde_json::Value>(patches_json)?,
-        "frontmatter": frontmatter_yaml,
-    });
+    let patches = serde_json::from_str::<serde_json::Value>(patches_json)?;
+    let message = patch_message(file, patches, frontmatter_yaml);
 
     match send_message(project_root, &message) {
         Ok(Some(ack)) => {
@@ -325,22 +308,7 @@ pub fn send_queue_convergence(
     frontmatter_yaml: Option<&str>,
     queue_body: Option<&str>,
 ) -> Result<bool> {
-    let patches = queue_body
-        .map(|content| {
-            serde_json::json!([{
-                "component": "queue",
-                "content": content,
-            }])
-        })
-        .unwrap_or_else(|| serde_json::json!([]));
-    let message = serde_json::json!({
-        "type": "patch",
-        "file": file,
-        "patches": patches,
-        "unmatched": "",
-        "frontmatter": frontmatter_yaml,
-        "queue_auto": queue_auto,
-    });
+    let message = queue_convergence_message(file, queue_auto, frontmatter_yaml, queue_body);
 
     match send_message(project_root, &message) {
         Ok(Some(ack)) => {
@@ -367,16 +335,7 @@ pub fn send_reposition(
     boundary_id: Option<&str>,
     preserve_head: bool,
 ) -> Result<bool> {
-    let mut message = serde_json::json!({
-        "type": "reposition",
-        "file": file,
-    });
-    if let Some(boundary_id) = boundary_id {
-        message["boundary_id"] = serde_json::Value::String(boundary_id.to_string());
-    }
-    if preserve_head {
-        message["preserve_head"] = serde_json::Value::Bool(true);
-    }
+    let message = reposition_message(file, boundary_id, preserve_head);
 
     send_message(project_root, &message).map(|_| true)
 }
@@ -393,11 +352,7 @@ pub fn send_reposition(
 /// the saved buffer to the ack-content sidecar keyed by `patch_id` so the binary
 /// can read exactly what was persisted and adopt it as a clean on-disk snapshot.
 pub fn send_save_document(project_root: &Path, file: &str, patch_id: &str) -> Result<bool> {
-    let message = serde_json::json!({
-        "type": "save_document",
-        "file": file,
-        "patch_id": patch_id,
-    });
+    let message = save_document_message(file, patch_id);
 
     match send_message(project_root, &message) {
         Ok(Some(ack)) => {
@@ -425,13 +380,8 @@ pub fn send_refresh_content(
     expected_content_hash: &str,
     expected_content_len: usize,
 ) -> Result<bool> {
-    let message = serde_json::json!({
-        "type": "refresh_content",
-        "file": file,
-        "content": content,
-        "expected_content_hash": expected_content_hash,
-        "expected_content_len": expected_content_len,
-    });
+    let message =
+        refresh_content_message(file, content, expected_content_hash, expected_content_len);
 
     send_message(project_root, &message).map(|_| true)
 }
@@ -439,10 +389,7 @@ pub fn send_refresh_content(
 /// Ask the live editor to republish its current visible-buffer sidecar for
 /// `file` without changing the document.
 pub fn send_publish_live_buffer(project_root: &Path, file: &str) -> Result<bool> {
-    let message = serde_json::json!({
-        "type": "publish_live_buffer",
-        "file": file,
-    });
+    let message = publish_live_buffer_message(file);
 
     send_message(project_root, &message).map(|_| true)
 }
@@ -458,10 +405,7 @@ pub fn send_publish_live_buffer_file_signal(project_root: &Path, file: &str) -> 
         "publish-live-buffer.signal.{}.tmp",
         std::process::id()
     ));
-    let payload = serde_json::json!({
-        "type": "publish_live_buffer",
-        "file": file,
-    });
+    let payload = publish_live_buffer_message(file);
     std::fs::write(&tmp_file, serde_json::to_vec(&payload)?)
         .with_context(|| format!("failed to write {}", tmp_file.display()))?;
     match std::fs::rename(&tmp_file, &signal_file) {
@@ -492,11 +436,7 @@ pub fn send_save_document_file_signal(
         .with_context(|| format!("failed to create {}", patches_dir.display()))?;
     let signal_file = patches_dir.join("save-document.signal");
     let tmp_file = patches_dir.join(format!("save-document.signal.{}.tmp", std::process::id()));
-    let payload = serde_json::json!({
-        "type": "save_document",
-        "file": file,
-        "patch_id": patch_id,
-    });
+    let payload = save_document_message(file, patch_id);
     std::fs::write(&tmp_file, serde_json::to_vec(&payload)?)
         .with_context(|| format!("failed to write {}", tmp_file.display()))?;
     match std::fs::rename(&tmp_file, &signal_file) {
@@ -517,9 +457,7 @@ pub fn send_save_document_file_signal(
 
 /// Send a VCS refresh signal.
 pub fn send_vcs_refresh(project_root: &Path) -> Result<bool> {
-    let message = serde_json::json!({
-        "type": "vcs_refresh",
-    });
+    let message = vcs_refresh_message();
 
     send_message(project_root, &message).map(|_| true)
 }

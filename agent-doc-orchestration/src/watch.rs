@@ -67,11 +67,13 @@
 
 use anyhow::{Context, Result, bail};
 use std::collections::{HashMap, HashSet};
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use agent_doc_document::watch_projection::{
+    document_node_events_payload, project_watch_node_events, watch_content_hash,
+};
 use notify::{EventKind, RecursiveMode, Watcher};
 
 use agent_doc_config::Config;
@@ -106,7 +108,7 @@ pub struct WatchConfig {
 struct FileState {
     last_run: Option<Instant>,
     cycle_count: u32,
-    last_hash: Option<u64>,
+    last_hash: Option<String>,
 }
 
 impl FileState {
@@ -148,33 +150,6 @@ enum DocMode {
     StreamCapture,
 }
 
-/// Hash file content for convergence detection.
-fn hash_content(path: &Path) -> Option<u64> {
-    let content = std::fs::read_to_string(path).ok()?;
-    // Strip boundary markers before hashing to prevent feedback loops.
-    // Boundary repositions change the marker ID each cycle, making the hash
-    // different even when no meaningful content changed. Without this,
-    // reactive-mode documents (zero debounce) enter an infinite loop:
-    // IPC write → boundary change → watch detects → re-run → IPC write → ...
-    let content = strip_boundaries_for_hash(&content);
-    let mut hasher = DefaultHasher::new();
-    content.hash(&mut hasher);
-    Some(hasher.finish())
-}
-
-/// Strip boundary markers from content for hash comparison.
-/// This ensures boundary-only changes don't trigger re-runs.
-fn strip_boundaries_for_hash(content: &str) -> String {
-    content
-        .lines()
-        .filter(|line| {
-            let trimmed = line.trim();
-            !(trimmed.starts_with("<!-- agent:boundary:") && trimmed.ends_with(" -->"))
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 fn update_node_snapshot(
     path: &Path,
     snapshots: &mut HashMap<PathBuf, String>,
@@ -182,37 +157,15 @@ fn update_node_snapshot(
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read {} for node-event snapshot", path.display()))?;
     let previous = snapshots.insert(path.to_path_buf(), content.clone());
-    Ok(previous
-        .as_deref()
-        .map(|before| agent_doc_markdown_ast::events::diff_node_events(before, &content))
-        .unwrap_or_default())
+    Ok(project_watch_node_events(previous.as_deref(), &content))
 }
 
 fn log_node_events(path: &Path, events: &[DocumentNodeEvent]) {
     if events.is_empty() {
         return;
     }
-    let payload = serde_json::json!({
-        "event": "document_node_events",
-        "file": path.display().to_string(),
-        "events": events.iter().map(node_event_json).collect::<Vec<_>>(),
-    });
+    let payload = document_node_events_payload(&path.display().to_string(), events);
     crate::ops_log::log_op(path, &format!("document_node_events {payload}"));
-}
-
-fn node_event_json(event: &DocumentNodeEvent) -> serde_json::Value {
-    serde_json::json!({
-        "component": &event.component,
-        "node_key": &event.node_key,
-        "op": event.kind.as_str(),
-        "item_id": &event.item_id,
-        "before_index": event.before_index,
-        "after_index": event.after_index,
-        "before": event.before.as_deref(),
-        "after": event.after.as_deref(),
-        "previous_node_key": event.previous_node_key.as_deref(),
-        "next_node_key": event.next_node_key.as_deref(),
-    })
 }
 
 /// Check if a PID is alive via /proc.
@@ -694,7 +647,9 @@ fn run_event_loop(
                 }
 
                 // Check convergence
-                let current_hash = hash_content(&path);
+                let current_hash = std::fs::read_to_string(&path)
+                    .ok()
+                    .map(|content| watch_content_hash(&content));
                 if current_hash.is_some() && current_hash == state.last_hash {
                     eprintln!("Converged for {} — skipping", path.display());
                     state.cycle_count = 0;
@@ -704,7 +659,9 @@ fn run_event_loop(
             } else {
                 // User change — reset cycle counter
                 state.cycle_count = 0;
-                state.last_hash = hash_content(&path);
+                state.last_hash = std::fs::read_to_string(&path)
+                    .ok()
+                    .map(|content| watch_content_hash(&content));
             }
 
             match update_node_snapshot(&path, &mut node_snapshots) {
@@ -979,31 +936,6 @@ mod tests {
     }
 
     #[test]
-    fn hash_deterministic() {
-        let dir = TempDir::new().unwrap();
-        let path = dir.path().join("test.md");
-        std::fs::write(&path, "hello world").unwrap();
-
-        let h1 = hash_content(&path).unwrap();
-        let h2 = hash_content(&path).unwrap();
-        assert_eq!(h1, h2);
-    }
-
-    #[test]
-    fn hash_changes_with_content() {
-        let dir = TempDir::new().unwrap();
-        let path = dir.path().join("test.md");
-
-        std::fs::write(&path, "version 1").unwrap();
-        let h1 = hash_content(&path).unwrap();
-
-        std::fs::write(&path, "version 2").unwrap();
-        let h2 = hash_content(&path).unwrap();
-
-        assert_ne!(h1, h2);
-    }
-
-    #[test]
     fn loop_prevention_counter() {
         let mut state = FileState::new();
         assert_eq!(state.cycle_count, 0);
@@ -1016,8 +948,8 @@ mod tests {
     #[test]
     fn convergence_detection() {
         let mut state = FileState::new();
-        state.last_hash = Some(42);
-        assert_eq!(state.last_hash, Some(42));
+        state.last_hash = Some("hash".to_string());
+        assert_eq!(state.last_hash.as_deref(), Some("hash"));
     }
 
     #[test]

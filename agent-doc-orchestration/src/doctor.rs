@@ -14,6 +14,7 @@ use agent_doc_workflow::doctor::{
     PreflightDoctorFacts, SessionCheckDoctorFacts, WorkflowDoctorFacts, WorkflowDoctorReport,
     classify_ops_marker, evaluate_catalog,
 };
+use agent_doc_workflow::doctor_json::{project_preflight_facts, project_session_check_facts};
 use agent_doc_workflow::invariants::workflow_invariant_catalog;
 
 const DEFAULT_OPS_LIMIT: usize = 200;
@@ -97,16 +98,7 @@ fn read_preflight_facts(path: Option<&Path>) -> Result<PreflightDoctorFacts> {
             path.display()
         )
     })?;
-    let mut facts = PreflightDoctorFacts {
-        json_provided: true,
-        queue_active: lookup_bool(&value, "queue_active"),
-        queue_continuation_required: lookup_bool(&value, "queue_continuation_required"),
-        queue_drainable_head_count: lookup_usize(&value, "queue_drainable_head_count"),
-        queue_prompts: lookup_string_array(&value, "queue_prompts"),
-        warnings: Vec::new(),
-    };
-    facts.warnings = lookup_string_array(&value, "warnings");
-    Ok(facts)
+    Ok(project_preflight_facts(&value))
 }
 
 fn read_session_check_json_facts(path: Option<&Path>) -> Result<SessionCheckDoctorFacts> {
@@ -119,15 +111,7 @@ fn read_session_check_json_facts(path: Option<&Path>) -> Result<SessionCheckDoct
             path.display()
         )
     })?;
-    Ok(SessionCheckDoctorFacts {
-        json_provided: true,
-        ok: lookup_bool(&value, "ok"),
-        status: lookup_string(&value, "status"),
-        message: lookup_string(&value, "message")
-            .or_else(|| lookup_string(&value, "reason"))
-            .or_else(|| lookup_string(&value, "detail")),
-        warnings: lookup_string_array(&value, "warnings"),
-    })
+    Ok(project_session_check_facts(&value))
 }
 
 fn merge_live_session_check(
@@ -338,46 +322,6 @@ fn read_json(path: &Path) -> Result<Value> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read {}", path.display()))?;
     Ok(serde_json::from_str(&content)?)
-}
-
-fn lookup_value<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
-    value
-        .get(key)
-        .or_else(|| value.get("report").and_then(|report| report.get(key)))
-        .or_else(|| {
-            value
-                .get("session_check")
-                .and_then(|report| report.get(key))
-        })
-}
-
-fn lookup_bool(value: &Value, key: &str) -> Option<bool> {
-    lookup_value(value, key).and_then(Value::as_bool)
-}
-
-fn lookup_usize(value: &Value, key: &str) -> Option<usize> {
-    lookup_value(value, key)
-        .and_then(Value::as_u64)
-        .and_then(|value| usize::try_from(value).ok())
-}
-
-fn lookup_string(value: &Value, key: &str) -> Option<String> {
-    lookup_value(value, key)
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned)
-}
-
-fn lookup_string_array(value: &Value, key: &str) -> Vec<String> {
-    lookup_value(value, key)
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(Value::as_str)
-                .map(ToOwned::to_owned)
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 fn print_text_report(report: &WorkflowDoctorReport) {

@@ -7003,6 +7003,7 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
     for required in [
         "pub mod invariants;",
         "pub mod doctor;",
+        "pub mod doctor_json;",
         "pub mod orchestrate_tasks;",
         "pub mod preflight_policy;",
         "pub mod session_cycle;",
@@ -7114,6 +7115,8 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
 
     let workflow_doctor =
         fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/doctor.rs")).unwrap();
+    let workflow_doctor_json =
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/doctor_json.rs")).unwrap();
     for required in [
         "WORKFLOW_DOCTOR_SCHEMA_VERSION",
         "pub enum WorkflowDoctorOutcome",
@@ -7133,6 +7136,20 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         assert!(
             workflow_doctor.contains(required),
             "agent-doc-workflow must own workflow doctor policy API: {required}"
+        );
+    }
+    for required in [
+        "pub fn project_preflight_facts(",
+        "pub fn project_session_check_facts(",
+        "pub fn lookup_value",
+        "pub fn lookup_bool",
+        "pub fn lookup_usize",
+        "pub fn lookup_string",
+        "pub fn lookup_string_array",
+    ] {
+        assert!(
+            workflow_doctor_json.contains(required),
+            "agent-doc-workflow must own workflow doctor JSON projection policy: {required}"
         );
     }
     let orchestration_doctor =
@@ -7163,6 +7180,12 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         "fn remediation_label",
         "fn has_marker",
         "fn classify_ops_marker(",
+        "fn lookup_value",
+        "fn lookup_bool",
+        "fn lookup_usize",
+        "fn lookup_string",
+        "fn lookup_string_array",
+        "pub use agent_doc_workflow::doctor_json",
         "pub fn classify_ops_marker(",
         "pub use agent_doc_workflow::doctor",
         "pub(crate) use agent_doc_workflow::doctor",
@@ -7176,6 +7199,12 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         orchestration_doctor.contains("use agent_doc_workflow::doctor::{")
             && orchestration_doctor.contains("classify_ops_marker, evaluate_catalog"),
         "orchestration doctor should call the focused doctor policy directly"
+    );
+    assert!(
+        orchestration_doctor.contains("use agent_doc_workflow::doctor_json::{")
+            && orchestration_doctor.contains("project_preflight_facts")
+            && orchestration_doctor.contains("project_session_check_facts"),
+        "orchestration doctor should call focused doctor JSON projection directly"
     );
     let orchestration_autofix =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/autofix.rs")).unwrap();
@@ -12783,6 +12812,15 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "pub fn message_requests_early_ack(",
         "pub fn early_ack_line(",
         "pub fn early_ack_ops_marker(",
+        "pub fn ipc_accept_thread_ops_marker(",
+        "pub fn patch_message(",
+        "pub fn queue_convergence_message(",
+        "pub fn reposition_message(",
+        "pub fn save_document_message(",
+        "pub fn refresh_content_message(",
+        "pub fn publish_live_buffer_message(",
+        "pub fn vcs_refresh_message(",
+        "pub fn vcs_refresh_probe_message(",
         "pub enum FullContentIpcMode",
         "pub const fn source_label(",
     ] {
@@ -12829,7 +12867,10 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
             && ipc_socket_source.contains("AckClassification")
             && ipc_socket_source.contains("classify_ack")
             && ipc_socket_source.contains("early_ack_tagged_message")
-            && ipc_socket_source.contains("message_requests_early_ack"),
+            && ipc_socket_source.contains("message_requests_early_ack")
+            && ipc_socket_source.contains("patch_message")
+            && ipc_socket_source.contains("save_document_message")
+            && ipc_socket_source.contains("vcs_refresh_message"),
         "ipc_socket.rs should import the focused IPC protocol API directly"
     );
     for forbidden in [
@@ -12839,6 +12880,15 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "pub fn message_requests_early_ack(",
         "pub fn early_ack_line(",
         "pub fn early_ack_ops_marker(",
+        "pub fn ipc_accept_thread_ops_marker(",
+        "fn patch_message(",
+        "fn queue_convergence_message(",
+        "fn reposition_message(",
+        "fn save_document_message(",
+        "fn refresh_content_message(",
+        "fn publish_live_buffer_message(",
+        "fn vcs_refresh_message(",
+        "fn vcs_refresh_probe_message(",
     ] {
         assert!(
             !ipc_socket_source.contains(forbidden),
@@ -14379,6 +14429,64 @@ fn test_agent_doc_document_owns_markdown_outline_projection_policy() {
         document_deps.contains_key("pulldown-cmark"),
         "agent-doc-document should own markdown parser dependency for outline projection"
     );
+}
+
+#[test]
+fn test_agent_doc_document_owns_watch_projection_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let watch_projection =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/watch_projection.rs"))
+            .unwrap();
+    for required in [
+        "pub fn strip_boundaries_for_watch_hash(",
+        "pub fn watch_content_hash(",
+        "pub fn project_watch_node_events(",
+        "pub fn document_node_event_json(",
+        "pub fn document_node_events_payload(",
+    ] {
+        assert!(
+            watch_projection.contains(required),
+            "agent-doc-document must own pure watch projection policy: {required}"
+        );
+    }
+    let document_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/lib.rs")).unwrap();
+    assert!(
+        document_lib.contains("pub mod watch_projection;"),
+        "agent-doc-document should expose watch projection through its owning module"
+    );
+
+    let document_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/Cargo.toml")).unwrap();
+    let document_toml: toml::Value = toml::from_str(&document_manifest).unwrap();
+    let document_deps = document_toml["dependencies"].as_table().unwrap();
+    assert!(
+        document_deps.contains_key("agent-doc-hash")
+            && document_deps.contains_key("agent-doc-markdown-ast")
+            && document_deps.contains_key("serde_json"),
+        "watch projection should keep its hash, AST, and JSON dependencies in agent-doc-document"
+    );
+
+    let watch_adapter =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/watch.rs")).unwrap();
+    assert!(
+        watch_adapter.contains("use agent_doc_document::watch_projection::{")
+            && watch_adapter.contains("watch_content_hash")
+            && watch_adapter.contains("project_watch_node_events")
+            && watch_adapter.contains("document_node_events_payload"),
+        "watch.rs should call focused document watch projection directly"
+    );
+    for forbidden in [
+        "fn hash_content(",
+        "fn strip_boundaries_for_hash(",
+        "fn node_event_json(",
+        "pub use agent_doc_document::watch_projection",
+    ] {
+        assert!(
+            !watch_adapter.contains(forbidden),
+            "watch.rs must stay an adapter, not re-own or facade watch projection: {forbidden}"
+        );
+    }
 }
 
 #[test]

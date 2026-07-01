@@ -7,6 +7,7 @@
 
 pub mod capture;
 pub mod doctor;
+pub mod doctor_json;
 pub mod invariants;
 pub mod orchestrate_tasks;
 pub mod pending_capture;

@@ -1471,6 +1471,62 @@ mod tests {
     }
 
     #[test]
+    fn complete_required_closeout_records_terminal_proof_after_abandoned_preflight_cycle() {
+        // An interrupted/stale preflight may be force-closed as `abandoned` by the
+        // supervisor recycle path. A later visible repair/response closeout that
+        // successfully commits must not inherit that old abandoned terminal state;
+        // terminal proof should attach to the new committed closeout.
+        let base = concat!(
+            "---\nagent_doc_format: template\nsession: test\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior - gpt-5\n\nDone.\n",
+            "<!-- agent:boundary:base -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let (_dir, doc) = setup_git_project_with_doc(base);
+        crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        let abandoned = crate::cycle_state::mark_abandoned(
+            &doc,
+            "suprecyclespin_stalled_cycle_resolved",
+            Some(base),
+            Some(base),
+        )
+        .unwrap();
+        assert_eq!(abandoned.phase, agent_doc_turn::CyclePhase::Abandoned);
+
+        let closed = base.replace(
+            "<!-- agent:boundary:base -->",
+            "### Re: repair closeout - gpt-5\n\nRecovered.\n<!-- agent:boundary:repair -->",
+        );
+        std::fs::write(&doc, &closed).unwrap();
+        crate::snapshot::save(&doc, &closed).unwrap();
+
+        complete_required_closeout(&doc)
+            .expect("abandoned stale cycle must not block terminal closeout proof");
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
+        assert_ne!(
+            state.cycle_id, abandoned.cycle_id,
+            "new committed closeout should not reuse the stale abandoned cycle id"
+        );
+        let root = doc.parent().unwrap().canonicalize().unwrap();
+        let canonical_doc = doc.canonicalize().unwrap();
+        let ledger_path = crate::flow::proof_ledger::proof_ledger_path(&root, &canonical_doc);
+        let records = crate::flow::proof_ledger::read_operation_proofs(&ledger_path).unwrap();
+        assert!(
+            records.iter().any(|record| {
+                record.operation_kind
+                    == crate::flow::proof_ledger::ProofOperationKind::TerminalProof
+                    && record.subject_id.as_deref() == Some(state.cycle_id.as_str())
+                    && record.proof.contains("phase=committed")
+            }),
+            "terminal proof should be recorded for the new committed cycle: {records:?}"
+        );
+    }
+
+    #[test]
     fn complete_required_closeout_blocks_until_live_replica_delivery_is_acked() {
         use agent_doc_merge::crdt_sync::ReplicaState;
 

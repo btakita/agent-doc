@@ -20,9 +20,11 @@
 //! - `mark_write_applied()` advances the open cycle to `write_applied` (or
 //!   creates a synthetic cycle if a write lands without a prior preflight).
 //! - `mark_committed()` advances the cycle to `committed` (or creates a
-//!   synthetic committed cycle if commit happens without a prior state file).
-//! - Lower-rank bookkeeping and duplicate terminal bookkeeping must never
-//!   mutate an already-committed or abandoned cycle.
+//!   synthetic committed cycle if commit happens without a closable open state,
+//!   including after a stale preflight was abandoned).
+//! - Lower-rank bookkeeping must never mutate an already-committed or abandoned
+//!   cycle; duplicate terminal bookkeeping stays idempotent for already-committed
+//!   cycles.
 //! - Phase transitions are accepted through `cycle_state_machine`; the sidecar
 //!   remains the durable crash-recovery log emitted after that transition table
 //!   accepts an event.
@@ -32,7 +34,7 @@
 //! - State is per-document, never global across the repo.
 //! - Writes are deterministic JSON file replacements.
 //! - Missing project root or state file returns `Ok(None)`.
-//! - `is_open()` is true for any phase except `Committed`.
+//! - `is_open()` is true for any phase except `Committed` or `Abandoned`.
 //!
 //! ## Evals
 //! - `start_preflight_persists_open_cycle`
@@ -1066,7 +1068,13 @@ pub fn mark_committed(
     snapshot_content: Option<&str>,
     file_content: Option<&str>,
 ) -> Result<CycleState> {
-    let mut state = load(file)?.unwrap_or_else(|| synthetic_state(file, CyclePhase::WriteApplied));
+    let mut state = match load(file)? {
+        Some(state) if state.phase == CyclePhase::Abandoned => {
+            synthetic_state(file, CyclePhase::WriteApplied)
+        }
+        Some(state) => state,
+        None => synthetic_state(file, CyclePhase::WriteApplied),
+    };
     if matches!(state.phase, CyclePhase::Committed)
         && (state.last_event == event || is_stable_commit_event(&state.last_event))
     {
@@ -1888,6 +1896,24 @@ mod tests {
         let replay = mark_committed(&doc, "repair_applied", Some("new"), Some("new")).unwrap();
 
         assert_eq!(replay, committed);
+        assert_eq!(load(&doc).unwrap().unwrap(), committed);
+    }
+
+    #[test]
+    fn mark_committed_supersedes_abandoned_cycle_with_synthetic_committed_cycle() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        let abandoned =
+            mark_abandoned(&doc, "stalled_preflight", Some("snap"), Some("body")).unwrap();
+
+        let committed = mark_committed(&doc, "commit_success", Some("body"), Some("body")).unwrap();
+
+        assert_eq!(committed.phase, CyclePhase::Committed);
+        assert_eq!(committed.last_event, "commit_success");
+        assert_ne!(committed.cycle_id, abandoned.cycle_id);
+        assert!(committed.cycle_id.starts_with("synthetic-"));
         assert_eq!(load(&doc).unwrap().unwrap(), committed);
     }
 

@@ -923,6 +923,10 @@ should be deleted during extraction.
   classification for in-flight and blocked markers. Orchestration keeps only
   marker path resolution, file reads/writes/removal, guard drop cleanup, and
   ops-log diagnostics.
+- Queue preemption sidecar policy now owns deferred operator-clear marker
+  payload construction and JSON parsing in `agent-doc-queue`; orchestration only
+  resolves project-scoped marker paths, reads/writes/removes sidecar files, and
+  lets the supervisor idle-watch deliver the recorded clear command.
 
 ### Earlier closure finding
 

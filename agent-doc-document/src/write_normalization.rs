@@ -1,9 +1,12 @@
 //! Pure document normalization helpers shared by write/recovery adapters.
 
 use anyhow::{Context, Result};
+use std::collections::HashSet;
 
 use crate::transient_markers::normalize_transient_agent_doc_markers;
 use agent_doc_element::element::{self, is_backlog_component};
+
+pub const AGENT_RESPONSE_COMPONENT: &str = "exchange";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedBacklogPromptCleanup {
@@ -262,6 +265,248 @@ pub fn splice_response_block_into_current_exchange(
     Some(exchange.replace_content(current, &new_body))
 }
 
+/// Blank the content of every component whose name is not in `keep`, preserving
+/// component markers and non-component regions for structure-aware comparison.
+pub fn blank_components_except(doc: &str, keep: &[&str]) -> Option<String> {
+    let components = element::parse(doc).ok()?;
+    let mut spans: Vec<(usize, usize)> = components
+        .iter()
+        .filter(|component| !keep.contains(&component.name.as_str()))
+        .map(|component| (component.open_end, component.close_start))
+        .collect();
+    spans.sort_by_key(|(start, _)| *start);
+    let mut out = doc.to_string();
+    for (start, end) in spans.into_iter().rev() {
+        if start <= end
+            && end <= out.len()
+            && out.is_char_boundary(start)
+            && out.is_char_boundary(end)
+        {
+            out.replace_range(start..end, "");
+        }
+    }
+    Some(out)
+}
+
+pub fn convergence_recovered_editor_wins_outside_response(recovered: &str, snapshot: &str) -> bool {
+    let (Some(rec_blanked), Some(snap_blanked)) = (
+        blank_components_except(recovered, &[AGENT_RESPONSE_COMPONENT]),
+        blank_components_except(snapshot, &[AGENT_RESPONSE_COMPONENT]),
+    ) else {
+        return false;
+    };
+    normalize_transient_agent_doc_markers(&rec_blanked)
+        == normalize_transient_agent_doc_markers(&snap_blanked)
+        && normalize_transient_agent_doc_markers(recovered)
+            != normalize_transient_agent_doc_markers(snapshot)
+}
+
+pub fn convergence_recovered_editor_wins_for_payload(
+    recovered: &str,
+    target: &str,
+    payload: &serde_json::Value,
+) -> bool {
+    if normalize_transient_agent_doc_markers(recovered)
+        == normalize_transient_agent_doc_markers(target)
+    {
+        return false;
+    }
+
+    let Some(node_patches) = agent_doc_markdown_ast::mutations::parse_node_patches_payload(payload)
+    else {
+        return false;
+    };
+    if !node_patches.is_empty()
+        && !agent_doc_markdown_ast::mutations::node_patches_already_landed(recovered, &node_patches)
+    {
+        return false;
+    }
+
+    let Some(strict_components) = convergence_strict_components(payload) else {
+        return false;
+    };
+    let strict_component_refs = strict_components
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    let (Some(recovered_blanked), Some(target_blanked)) = (
+        blank_components_except(recovered, &strict_component_refs),
+        blank_components_except(target, &strict_component_refs),
+    ) else {
+        return false;
+    };
+    normalize_transient_agent_doc_markers(&recovered_blanked)
+        == normalize_transient_agent_doc_markers(&target_blanked)
+}
+
+fn convergence_strict_components(payload: &serde_json::Value) -> Option<Vec<String>> {
+    let mut strict_components = vec![AGENT_RESPONSE_COMPONENT.to_string()];
+    if let Some(patches_value) = payload.get("patches") {
+        let patches = patches_value.as_array()?;
+        for patch in patches {
+            let component = patch
+                .get("component")
+                .or_else(|| patch.get("name"))
+                .and_then(|value| value.as_str())?;
+            if !strict_components
+                .iter()
+                .any(|existing| existing == component)
+            {
+                strict_components.push(component.to_string());
+            }
+        }
+    }
+    Some(strict_components)
+}
+
+pub fn reconcile_postcommit_exchange_to_head(working: &str, head: &str) -> Option<String> {
+    let working_components = element::parse(working).ok()?;
+    let head_components = element::parse(head).ok()?;
+    let head_exchange = head_components
+        .iter()
+        .find(|component| component.name == AGENT_RESPONSE_COMPONENT)?;
+    let working_exchange = working_components
+        .iter()
+        .find(|component| component.name == AGENT_RESPONSE_COMPONENT)?;
+    let head_body = head_exchange.content(head);
+    let working_body = working_exchange.content(working);
+    let head_norm = normalize_transient_agent_doc_markers(head_body);
+    let working_norm = normalize_transient_agent_doc_markers(working_body);
+    if head_norm == working_norm {
+        return None;
+    }
+    let head_lines: HashSet<&str> = head_norm
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    let working_lines: HashSet<&str> = working_norm
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    if !head_lines.iter().all(|line| working_lines.contains(line)) {
+        return None;
+    }
+    let working_only: Vec<&str> = working_lines.difference(&head_lines).copied().collect();
+    if working_only.is_empty() || !working_only.iter().all(|line| line.starts_with('>')) {
+        return None;
+    }
+    if prompt_bearing_user_changes_between(head_body, working_body)
+        .iter()
+        .any(|change| change.kind == agent_doc_diff::PromptBearingChangeKind::PromptTarget)
+    {
+        return None;
+    }
+    let start = working_exchange.open_end;
+    let end = working_exchange.close_start;
+    if !(start <= end
+        && end <= working.len()
+        && working.is_char_boundary(start)
+        && working.is_char_boundary(end))
+    {
+        return None;
+    }
+    let mut out = working.to_string();
+    out.replace_range(start..end, head_body);
+    Some(out)
+}
+
+fn prompt_bearing_user_changes_between(
+    base: &str,
+    current: &str,
+) -> Vec<agent_doc_diff::PromptBearingChange> {
+    let base_norm = crate::transient_markers::strip_boundary_markers(base);
+    let current_norm = crate::transient_markers::strip_boundary_markers(current);
+    let base_prompt_norm = agent_doc_diff::strip_comments(&base_norm);
+    let current_prompt_norm = agent_doc_diff::strip_comments(&current_norm);
+    let Some(diff_text) =
+        agent_doc_diff::unified_diff_from_contents(&base_prompt_norm, &current_prompt_norm)
+    else {
+        return Vec::new();
+    };
+    let mut changes: Vec<_> = agent_doc_diff::classify_prompt_bearing_changes(&diff_text)
+        .into_iter()
+        .filter(|change| {
+            matches!(
+                change.kind,
+                agent_doc_diff::PromptBearingChangeKind::PromptTarget
+                    | agent_doc_diff::PromptBearingChangeKind::ContentEdit
+            )
+        })
+        .collect();
+    if diff_text.lines().any(|line| {
+        let Some(added) = line.strip_prefix('+') else {
+            return false;
+        };
+        if line.starts_with("+++") {
+            return false;
+        }
+        let trimmed = added.trim();
+        trimmed.starts_with('❯')
+            || agent_doc_prompt_lines::text_line_looks_like_prompt_target(trimmed)
+    }) {
+        for line in diff_text.lines() {
+            let Some(added) = line.strip_prefix('+') else {
+                continue;
+            };
+            if line.starts_with("+++") {
+                continue;
+            }
+            let trimmed = added.trim();
+            if trimmed.starts_with('❯')
+                || agent_doc_prompt_lines::text_line_looks_like_prompt_target(trimmed)
+            {
+                let text = trimmed
+                    .strip_prefix('❯')
+                    .unwrap_or(trimmed)
+                    .trim()
+                    .to_string();
+                if !changes.iter().any(|change| {
+                    change.kind == agent_doc_diff::PromptBearingChangeKind::PromptTarget
+                        && change.text.trim() == text
+                }) {
+                    changes.push(agent_doc_diff::PromptBearingChange {
+                        kind: agent_doc_diff::PromptBearingChangeKind::PromptTarget,
+                        text,
+                    });
+                }
+            }
+        }
+    }
+    changes
+}
+
+pub fn editor_buffer_preserved_head_exchange(flushed: &str, head: &str) -> bool {
+    let (Ok(flushed_components), Ok(head_components)) =
+        (element::parse(flushed), element::parse(head))
+    else {
+        return false;
+    };
+    let (Some(head_exchange), Some(flushed_exchange)) = (
+        head_components
+            .iter()
+            .find(|component| component.name == AGENT_RESPONSE_COMPONENT),
+        flushed_components
+            .iter()
+            .find(|component| component.name == AGENT_RESPONSE_COMPONENT),
+    ) else {
+        return false;
+    };
+    let head_norm = normalize_transient_agent_doc_markers(head_exchange.content(head));
+    let flushed_norm = normalize_transient_agent_doc_markers(flushed_exchange.content(flushed));
+    let flushed_lines: HashSet<&str> = flushed_norm
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    head_norm
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .all(|line| flushed_lines.contains(line))
+}
+
 pub fn lift_pending_from_exchange(content: &str) -> Option<String> {
     let components = match element::parse(content) {
         Ok(c) => c,
@@ -390,6 +635,18 @@ pub fn count_code_fence_openings(content: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn doc_with_queue_and_exchange(queue_body: &str, response: &str) -> String {
+        format!(
+            "---\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange -->\n{response}\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n{queue_body}\n<!-- /agent:queue -->\n"
+        )
+    }
+
+    fn doc_with_exchange(exchange_body: &str, queue_body: &str) -> String {
+        format!(
+            "---\nagent_doc_format: template\n---\n<!-- agent:exchange -->\n{exchange_body}\n<!-- /agent:exchange -->\n## Queue\n<!-- agent:queue -->\n{queue_body}\n<!-- /agent:queue -->\n"
+        )
+    }
 
     #[test]
     fn cleanup_resolved_backlog_prompts_removes_only_prompt_targets() {
@@ -533,6 +790,186 @@ mod tests {
             latest_response_heading_missing_from_current(head, head),
             None
         );
+    }
+
+    #[test]
+    fn convergence_recovered_editor_wins_accepts_editor_buffer_when_only_queue_differs() {
+        let snapshot =
+            doc_with_queue_and_exchange("- a free-text head\n", "### Re: topic\n\nAnswered.");
+        let recovered =
+            doc_with_queue_and_exchange("- ~~a free-text head~~\n", "### Re: topic\n\nAnswered.");
+
+        assert!(
+            convergence_recovered_editor_wins_outside_response(&recovered, &snapshot),
+            "queue-only divergence with matching response must be accepted"
+        );
+    }
+
+    #[test]
+    fn convergence_recovered_editor_wins_accepts_arbitrary_plugin_component() {
+        let doc = |panel: &str| {
+            format!(
+                "---\nq: 1\n---\n\n<!-- agent:exchange -->\n### Re: x\n\nbody\n<!-- /agent:exchange -->\n\n<!-- agent:pluginpanel -->\n{panel}\n<!-- /agent:pluginpanel -->\n"
+            )
+        };
+        let snapshot = doc("plugin state v1");
+        let recovered = doc("plugin state v2 (editor-updated)");
+
+        assert!(
+            convergence_recovered_editor_wins_outside_response(&recovered, &snapshot),
+            "a plugin-defined component must be editor-authoritative without an allowlist"
+        );
+    }
+
+    #[test]
+    fn convergence_recovered_editor_wins_rejects_when_response_differs() {
+        let snapshot =
+            doc_with_queue_and_exchange("- head\n", "### Re: topic\n\nAnswered correctly.");
+        let recovered =
+            doc_with_queue_and_exchange("- ~~head~~\n", "### Re: topic\n\nAnswered DIFFERENTLY.");
+
+        assert!(
+            !convergence_recovered_editor_wins_outside_response(&recovered, &snapshot),
+            "a response divergence must fail closed"
+        );
+    }
+
+    #[test]
+    fn convergence_recovered_editor_wins_rejects_when_identical() {
+        let doc = doc_with_queue_and_exchange("- head\n", "### Re: topic\n\nAnswered.");
+
+        assert!(
+            !convergence_recovered_editor_wins_outside_response(&doc, &doc),
+            "identical docs are handled by the strict path"
+        );
+    }
+
+    #[test]
+    fn convergence_recovered_editor_wins_rejects_when_non_component_region_differs() {
+        let snapshot = doc_with_queue_and_exchange("- head\n", "### Re: topic\n\nAnswered.");
+        let mut recovered =
+            doc_with_queue_and_exchange("- ~~head~~\n", "### Re: topic\n\nAnswered.");
+        recovered = recovered.replace("## Queue", "## Queue (tampered interstitial)");
+
+        assert!(
+            !convergence_recovered_editor_wins_outside_response(&recovered, &snapshot),
+            "a non-component-region divergence must fail closed"
+        );
+    }
+
+    #[test]
+    fn convergence_recovered_editor_wins_rejects_structural_component_add() {
+        let snapshot = doc_with_queue_and_exchange("- head\n", "### Re: topic\n\nAnswered.");
+        let recovered = format!(
+            "{}\n<!-- agent:extra -->\nnew\n<!-- /agent:extra -->\n",
+            doc_with_queue_and_exchange("- head\n", "### Re: topic\n\nAnswered.").trim_end()
+        );
+
+        assert!(
+            !convergence_recovered_editor_wins_outside_response(&recovered, &snapshot),
+            "a structural component add must fail closed"
+        );
+    }
+
+    #[test]
+    fn reconcile_postcommit_exchange_adopts_head_exchange_and_preserves_queue() {
+        let head =
+            doc_with_queue_and_exchange("- a live head\n", "### Re: topic\n\nAnswered cleanly.");
+        let working = doc_with_queue_and_exchange(
+            "- ~~a live head~~\n",
+            "### Re: topic\n\nAnswered cleanly.\n\n> **Queue prompt:** stale leftover from a prior cycle",
+        );
+
+        let reconciled = reconcile_postcommit_exchange_to_head(&working, &head)
+            .expect("stale exchange blockquote must reconcile to HEAD");
+
+        assert!(
+            !reconciled.contains("stale leftover from a prior cycle"),
+            "the stale exchange blockquote must be dropped"
+        );
+        assert!(
+            reconciled.contains("- ~~a live head~~"),
+            "the editor-owned queue must be preserved"
+        );
+        assert!(
+            reconcile_postcommit_exchange_to_head(&reconciled, &head).is_none(),
+            "reconcile must converge"
+        );
+    }
+
+    #[test]
+    fn reconcile_postcommit_exchange_returns_none_when_only_queue_differs() {
+        let head = doc_with_queue_and_exchange("- a head\n", "### Re: x\n\nbody");
+        let working = doc_with_queue_and_exchange("- ~~a head~~\n", "### Re: x\n\nbody");
+
+        assert!(
+            reconcile_postcommit_exchange_to_head(&working, &head).is_none(),
+            "queue-only divergence with a matching exchange must not reconcile"
+        );
+    }
+
+    #[test]
+    fn reconcile_postcommit_exchange_fails_closed_on_new_user_prompt() {
+        let head = doc_with_queue_and_exchange("- a head\n", "### Re: x\n\nbody");
+        let working = doc_with_queue_and_exchange(
+            "- a head\n",
+            "### Re: x\n\nbody\n\n❯ do [#followup] a new directive",
+        );
+
+        assert!(
+            reconcile_postcommit_exchange_to_head(&working, &head).is_none(),
+            "a new user PromptTarget in the working exchange must fail closed"
+        );
+    }
+
+    #[test]
+    fn blank_components_except_clears_others_keeps_exchange() {
+        let doc = doc_with_queue_and_exchange("- some head\n", "### Re: x\n\nbody");
+        let blanked = blank_components_except(&doc, &[AGENT_RESPONSE_COMPONENT]).unwrap();
+
+        assert!(
+            !blanked.contains("some head"),
+            "queue content must be blanked"
+        );
+        assert!(
+            blanked.contains("### Re: x"),
+            "response content must be preserved"
+        );
+        assert!(
+            blanked.contains("<!-- agent:queue -->"),
+            "queue markers stay"
+        );
+    }
+
+    #[test]
+    fn editor_buffer_preserved_head_exchange_accepts_buffer_with_head_response_plus_editor_edits() {
+        let head = doc_with_exchange("### Re: topic\n\nThe committed answer.", "- do [#a]");
+        let flushed = doc_with_exchange(
+            "### Re: topic\n\nThe committed answer.",
+            "- do [#a]\n- a new operator queue line",
+        );
+
+        assert!(editor_buffer_preserved_head_exchange(&flushed, &head));
+    }
+
+    #[test]
+    fn editor_buffer_preserved_head_exchange_rejects_buffer_that_dropped_committed_response() {
+        let head = doc_with_exchange(
+            "### Re: topic\n\nThe committed answer.\n\nA second committed paragraph.",
+            "- do [#a]",
+        );
+        let flushed = doc_with_exchange("### Re: topic\n\nThe committed answer.", "- do [#a]");
+
+        assert!(!editor_buffer_preserved_head_exchange(&flushed, &head));
+    }
+
+    #[test]
+    fn editor_buffer_preserved_head_exchange_ignores_boundary_markers() {
+        let head = doc_with_exchange("### Re: topic\n\nThe committed answer.", "- do [#a]");
+        let flushed =
+            doc_with_exchange("### Re: topic (HEAD)\n\nThe committed answer.", "- do [#a]");
+
+        assert!(editor_buffer_preserved_head_exchange(&flushed, &head));
     }
 
     #[test]

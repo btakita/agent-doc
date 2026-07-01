@@ -112,6 +112,7 @@ use agent_doc_session_accretion::SessionAccretionLevel;
 use agent_doc_session_accretion::SessionAccretionReport;
 
 use crate::{diff_io, frontmatter_io, git, repair, resync, sessions, snapshot, sync};
+use agent_doc_document::write_normalization::editor_buffer_preserved_head_exchange;
 use agent_doc_element::element::{
     is_backlog_component, is_review_component, is_tracked_work_component,
 };
@@ -1404,7 +1405,7 @@ fn recover_ipc_truncated_worktree_from_editor_buffer(
             canonical.display()
         )
     })?;
-    if !crate::write::editor_buffer_preserved_head_exchange(&flushed, &head) {
+    if !editor_buffer_preserved_head_exchange(&flushed, &head) {
         crate::ops_log::log_op(
             file,
             &format!(

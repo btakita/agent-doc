@@ -3,7 +3,7 @@
 //! This module owns entry-level consume planning helpers. Callers still own
 //! file IO, snapshot persistence, IPC transport, and editor convergence.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use agent_doc_document::queue_projection::{
@@ -36,6 +36,74 @@ pub struct QueueConsumptionPlan {
     pub new_document: String,
     pub new_snapshot: String,
     pub save_snapshot: bool,
+}
+
+pub fn reconcile_postcommit_queue_strikes_to_head(working: &str, head: &str) -> Option<String> {
+    let working_components = element::parse(working).ok()?;
+    let head_components = element::parse(head).ok()?;
+    let working_queue = working_components
+        .iter()
+        .find(|component| component.name == "queue")?;
+    let head_queue = head_components
+        .iter()
+        .find(|component| component.name == "queue")?;
+    let working_body = working_queue.content(working);
+    let head_body = head_queue.content(head);
+    let working_entries = document_queue::parse(working_body).ok()?;
+    let head_entries = document_queue::parse(head_body).ok()?;
+
+    let prompt_key = |text: &str| text.trim().to_string();
+    let mut head_active_counts: HashMap<String, usize> = HashMap::new();
+    let mut head_completed_counts: HashMap<String, usize> = HashMap::new();
+    for entry in &head_entries {
+        match entry {
+            QueueEntry::Prompt(prompt) => {
+                *head_active_counts
+                    .entry(prompt_key(&prompt.text))
+                    .or_insert(0) += 1;
+            }
+            QueueEntry::Completed(prompt) => {
+                *head_completed_counts
+                    .entry(prompt_key(&prompt.text))
+                    .or_insert(0) += 1;
+            }
+            _ => {}
+        }
+    }
+    if head_completed_counts.is_empty() {
+        return None;
+    }
+
+    let mut seen_working_active: HashMap<String, usize> = HashMap::new();
+    let mut restored = false;
+    let reconciled_entries: Vec<QueueEntry> = working_entries
+        .into_iter()
+        .map(|entry| match entry {
+            QueueEntry::Prompt(prompt) => {
+                let key = prompt_key(&prompt.text);
+                let seen = seen_working_active.entry(key.clone()).or_insert(0);
+                *seen += 1;
+                let allowed_active = head_active_counts.get(&key).copied().unwrap_or(0);
+                let head_completed = head_completed_counts.get(&key).copied().unwrap_or(0);
+                if *seen > allowed_active && head_completed > 0 {
+                    restored = true;
+                    QueueEntry::Completed(prompt)
+                } else {
+                    QueueEntry::Prompt(prompt)
+                }
+            }
+            other => other,
+        })
+        .collect();
+    if !restored {
+        return None;
+    }
+
+    let new_body = document_queue::render(&reconciled_entries);
+    if new_body == working_body {
+        return None;
+    }
+    Some(working_queue.replace_content(working, &new_body))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -938,6 +1006,53 @@ mod tests {
 
     fn entries(body: &str) -> Vec<QueueEntry> {
         document_queue::parse(body).unwrap()
+    }
+
+    fn doc_with_queue_and_exchange(queue_body: &str, response: &str) -> String {
+        format!(
+            "---\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange -->\n{response}\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n{queue_body}\n<!-- /agent:queue -->\n"
+        )
+    }
+
+    #[test]
+    fn reconcile_postcommit_queue_strikes_restores_answered_pinned_and_free_text_heads() {
+        let head = doc_with_queue_and_exchange(
+            "- ~~:pushpin: do [#pzjy]~~\n- ~~plain queued report~~\n",
+            "### Re: topic\n\nAnswered.",
+        );
+        let working = doc_with_queue_and_exchange(
+            "- :pushpin: do [#pzjy]\n- plain queued report\n- do [#new]\n",
+            "### Re: topic\n\nAnswered.",
+        );
+
+        let reconciled =
+            reconcile_postcommit_queue_strikes_to_head(&working, &head).expect("queue repair");
+
+        assert!(
+            reconciled.contains("- ~~:pushpin: do [#pzjy]~~\n"),
+            "pinned completed prompt should stay struck:\n{reconciled}"
+        );
+        assert!(
+            reconciled.contains("- ~~plain queued report~~\n"),
+            "answered free-text prompt should stay struck:\n{reconciled}"
+        );
+        assert!(
+            reconciled.contains("- do [#new]\n"),
+            "unrelated queue additions must remain live:\n{reconciled}"
+        );
+    }
+
+    #[test]
+    fn reconcile_postcommit_queue_strikes_does_not_unstrike_editor_completed_head() {
+        let head =
+            doc_with_queue_and_exchange("- a free-text head\n", "### Re: topic\n\nAnswered.");
+        let working =
+            doc_with_queue_and_exchange("- ~~a free-text head~~\n", "### Re: topic\n\nAnswered.");
+
+        assert!(
+            reconcile_postcommit_queue_strikes_to_head(&working, &head).is_none(),
+            "editor-owned queue strike must remain editor-wins"
+        );
     }
 
     #[test]

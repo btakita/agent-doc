@@ -12927,6 +12927,9 @@ fn test_agent_doc_markdown_ast_uses_current_node_key_mutation_api_names() {
     let converge =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/converge.rs"))
             .unwrap();
+    let write_normalization =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/write_normalization.rs"))
+            .unwrap();
     for forbidden in [
         "fn parse_convergence_node_patches(",
         "fn convergence_node_patches_already_landed(",
@@ -12937,13 +12940,17 @@ fn test_agent_doc_markdown_ast_uses_current_node_key_mutation_api_names() {
             "write/converge.rs must not re-own node-key mutation payload policy: {forbidden}"
         );
     }
+    assert!(
+        converge.contains("convergence_recovered_editor_wins_for_payload"),
+        "write/converge.rs should delegate convergence payload policy to agent-doc-document"
+    );
     for required in [
         "agent_doc_markdown_ast::mutations::parse_node_patches_payload",
         "agent_doc_markdown_ast::mutations::node_patches_already_landed",
     ] {
         assert!(
-            converge.contains(required),
-            "write/converge.rs should call focused node-key mutation payload policy directly: {required}"
+            write_normalization.contains(required),
+            "agent-doc-document should call focused node-key mutation payload policy directly: {required}"
         );
     }
 }

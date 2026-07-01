@@ -109,6 +109,54 @@ pub struct CycleEntry {
     pub file_hash: Option<String>,
 }
 
+/// Maximum size (bytes) an individual best-effort log (`ops.log`,
+/// `cycles.jsonl`) may reach before it is rotated aside. A runaway logger must
+/// never be able to balloon a single log file unbounded and starve a live
+/// session again: the qualia IPC wedge (`cycle-1782934039471`) grew `ops.log`
+/// to ~832MB via the pre-fix `#crdtpullspam` empty-pull flood (~4×/second) that
+/// starved the run. The empty-pull flood itself is fixed at the source
+/// (`crdt_relay_host::pull_replica_updates_for_file`), but this cap is the
+/// defense-in-depth backstop so *any* future runaway logger is bounded. When the
+/// active file reaches this cap it is rotated to a single `<name>.1` backup
+/// (replacing any prior backup) and a fresh file is started, bounding on-disk
+/// usage to ~2× this cap per log (`#opslogcap`).
+const LOG_ROTATE_MAX_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Best-effort size-based rotation for an append-only log. If `log_path` is at or
+/// over `max_bytes`, move it aside to a single `<name>.1` backup (overwriting any
+/// existing backup) so the next append starts a fresh file. Never panics; on any
+/// unexpected error it logs a warning to stderr and leaves the file in place so
+/// the caller still appends (a too-large log is better than a lost line).
+fn rotate_log_if_oversized(log_path: &Path, max_bytes: u64) {
+    let len = match std::fs::metadata(log_path) {
+        Ok(meta) => meta.len(),
+        // A not-yet-created log is the common first-call case, not an error.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+        Err(e) => {
+            eprintln!("[ops-log] stat of {} failed: {e}", log_path.display());
+            return;
+        }
+    };
+    if len < max_bytes {
+        return;
+    }
+    let Some(name) = log_path.file_name().and_then(|n| n.to_str()) else {
+        eprintln!(
+            "[ops-log] cannot rotate {}: non-UTF-8 file name",
+            log_path.display()
+        );
+        return;
+    };
+    let rotated = log_path.with_file_name(format!("{name}.1"));
+    if let Err(e) = std::fs::rename(log_path, &rotated) {
+        eprintln!(
+            "[ops-log] rotation of {} -> {} failed: {e}",
+            log_path.display(),
+            rotated.display()
+        );
+    }
+}
+
 /// Get the current git HEAD commit hash for a file.
 fn git_head_hash(file: &Path) -> Option<String> {
     let output = std::process::Command::new("git")
@@ -147,6 +195,7 @@ fn try_log_cycle(
     let logs_dir = project_root.join(".agent-doc/logs");
     std::fs::create_dir_all(&logs_dir).ok()?;
     let log_path = logs_dir.join("cycles.jsonl");
+    rotate_log_if_oversized(&log_path, LOG_ROTATE_MAX_BYTES);
 
     let relative = canonical
         .strip_prefix(&project_root)
@@ -183,6 +232,7 @@ fn try_log_op(file: &Path, message: &str, rc: Option<&RunContext>) -> Option<()>
     let logs_dir = project_root.join(".agent-doc/logs");
     std::fs::create_dir_all(&logs_dir).ok()?;
     let log_path = logs_dir.join("ops.log");
+    rotate_log_if_oversized(&log_path, LOG_ROTATE_MAX_BYTES);
     let mut f = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -216,6 +266,73 @@ fn try_log_op(file: &Path, message: &str, rc: Option<&RunContext>) -> Option<()>
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn rotate_log_moves_oversized_file_to_backup() {
+        // `#opslogcap`: a log at/over the cap is moved aside so the next append
+        // starts a fresh file, bounding disk usage instead of starving the
+        // session the way the ~832MB qualia ops.log did.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let log_path = tmp.path().join("ops.log");
+        fs::write(&log_path, "0123456789").unwrap(); // 10 bytes
+
+        rotate_log_if_oversized(&log_path, 10);
+
+        assert!(
+            !log_path.exists(),
+            "oversized active log should be rotated away"
+        );
+        let backup = tmp.path().join("ops.log.1");
+        assert!(backup.exists(), "backup <name>.1 should exist");
+        assert_eq!(fs::read_to_string(&backup).unwrap(), "0123456789");
+    }
+
+    #[test]
+    fn rotate_log_leaves_small_file_in_place() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let log_path = tmp.path().join("ops.log");
+        fs::write(&log_path, "small").unwrap(); // 5 bytes, under cap
+
+        rotate_log_if_oversized(&log_path, 64);
+
+        assert!(log_path.exists(), "under-cap log must not be rotated");
+        assert!(
+            !tmp.path().join("ops.log.1").exists(),
+            "no backup should be created under cap"
+        );
+        assert_eq!(fs::read_to_string(&log_path).unwrap(), "small");
+    }
+
+    #[test]
+    fn rotate_log_replaces_existing_backup() {
+        // A second rotation overwrites the prior `.1` backup so on-disk usage
+        // stays bounded to ~2× the cap (one active + one backup) rather than
+        // accumulating `.1`, `.2`, ... generations forever.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let log_path = tmp.path().join("ops.log");
+        let backup = tmp.path().join("ops.log.1");
+        fs::write(&backup, "stale-backup").unwrap();
+        fs::write(&log_path, "fresh-oversized").unwrap();
+
+        rotate_log_if_oversized(&log_path, 1);
+
+        assert!(!log_path.exists(), "active log rotated away");
+        assert_eq!(
+            fs::read_to_string(&backup).unwrap(),
+            "fresh-oversized",
+            "backup should be replaced by the newest rotation"
+        );
+    }
+
+    #[test]
+    fn rotate_log_absent_file_is_noop() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let log_path = tmp.path().join("ops.log");
+        // Must not panic or create anything when the log does not exist yet.
+        rotate_log_if_oversized(&log_path, 10);
+        assert!(!log_path.exists());
+        assert!(!tmp.path().join("ops.log.1").exists());
+    }
 
     #[test]
     fn log_op_creates_file_and_appends() {

@@ -1454,6 +1454,78 @@ pub fn materialize_response_in_current_exchange(
     Some(exchange.replace_content(current, &exchange_body))
 }
 
+fn first_response_heading(response: &str) -> Option<String> {
+    response
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with("### Re:"))
+        .map(str::to_string)
+}
+
+pub(crate) fn materialize_missing_response_for_socket_ack_drift(
+    file: &Path,
+    patch_id: Option<&str>,
+    content_ours: Option<&str>,
+    expected_response: &str,
+    drift_fired: bool,
+    decision: &mut IpcRepairDecision,
+) -> bool {
+    if !drift_fired
+        || decision.snap_source != IpcSnapshotSource::AckContentSidecar
+        || decision.disk_repair_reason.is_some()
+    {
+        return false;
+    }
+    let response = response_materialization_probe_from_response(expected_response);
+    if response.trim().is_empty()
+        || response_materialized_in_content(&response, &decision.snapshot_content)
+    {
+        return false;
+    }
+    let Some(ours) = content_ours else {
+        return false;
+    };
+    if !response_materialized_in_content(&response, ours) {
+        return false;
+    }
+    if first_response_heading(&response).is_some_and(|heading| {
+        decision
+            .snapshot_content
+            .lines()
+            .any(|line| line.trim() == heading)
+    }) {
+        return false;
+    }
+    let Some(repaired) =
+        materialize_response_in_current_exchange(&decision.snapshot_content, &response)
+    else {
+        return false;
+    };
+    if repaired == decision.snapshot_content
+        || !response_materialized_in_content(&response, &repaired)
+    {
+        return false;
+    }
+
+    let bad_state = decision.snapshot_content.clone();
+    decision.snapshot_content = repaired;
+    decision.disk_repair_reason = Some(IpcDiskRepairReason::LivePromptDrift);
+    decision.editor_bad_state = Some(EditorBadStateFingerprint::new(bad_state));
+    decision.redeliver_editor = true;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "ipc_socket_ack_drift_missing_response_materialized file={} patch_id={} repaired_len={} repaired_hash={} response_sha256={}",
+            file.display(),
+            patch_id.unwrap_or("-"),
+            decision.snapshot_content.len(),
+            agent_doc_hash::content_hash(&decision.snapshot_content),
+            agent_doc_hash::content_hash(&response),
+        ),
+    );
+    true
+}
+
 struct StaleAckContentContext<'a> {
     file: &'a Path,
     source: &'a str,
@@ -3389,6 +3461,133 @@ mod ack_content_snapshot_tests {
         );
         assert_eq!(decision.disk_repair_reason, None);
         assert_eq!(decision.editor_bad_state, None);
+    }
+
+    #[test]
+    fn socket_ack_drift_missing_response_materializes_only_with_content_ours_proof() {
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("doc.md");
+        let ack_content = concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ queued prompt\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let response = "### Re: queued prompt - gpt-5\n\nAnswered.\n";
+        let content_ours = concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ queued prompt\n",
+            "### Re: queued prompt - gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let mut decision = IpcRepairDecision::ack_content(ack_content.to_string());
+
+        let repaired = materialize_missing_response_for_socket_ack_drift(
+            &file,
+            Some("p-response"),
+            Some(content_ours),
+            response,
+            true,
+            &mut decision,
+        );
+
+        assert!(
+            repaired,
+            "socket ACK drift should repair only when content_ours proves the exact response"
+        );
+        assert_eq!(decision.snap_source, IpcSnapshotSource::AckContentSidecar);
+        assert_eq!(
+            decision.disk_repair_reason,
+            Some(IpcDiskRepairReason::LivePromptDrift)
+        );
+        assert!(decision.redeliver_editor);
+        assert_eq!(
+            decision
+                .editor_bad_state
+                .as_ref()
+                .expect("bad state fingerprint")
+                .content(),
+            ack_content
+        );
+        assert!(decision.snapshot_content.contains("❯ queued prompt"));
+        assert!(
+            response_materialized_in_content(response, &decision.snapshot_content),
+            "repaired snapshot must contain the exact response body:\n{}",
+            decision.snapshot_content
+        );
+    }
+
+    #[test]
+    fn socket_ack_drift_missing_response_refuses_partial_heading() {
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("doc.md");
+        let partial_ack_content = concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ queued prompt\n",
+            "### Re: queued prompt - gpt-5\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let response = "### Re: queued prompt - gpt-5\n\nAnswered.\n";
+        let content_ours = concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ queued prompt\n",
+            "### Re: queued prompt - gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let mut decision = IpcRepairDecision::ack_content(partial_ack_content.to_string());
+
+        let repaired = materialize_missing_response_for_socket_ack_drift(
+            &file,
+            Some("p-partial"),
+            Some(content_ours),
+            response,
+            true,
+            &mut decision,
+        );
+
+        assert!(
+            !repaired,
+            "partial response headings must fail closed instead of appending a second body"
+        );
+        assert_eq!(decision.snapshot_content, partial_ack_content);
+        assert_eq!(decision.disk_repair_reason, None);
+        assert!(!decision.redeliver_editor);
+    }
+
+    #[test]
+    fn socket_ack_drift_missing_response_refuses_without_content_ours_response() {
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("doc.md");
+        let ack_content = concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ queued prompt\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let response = "### Re: queued prompt - gpt-5\n\nAnswered.\n";
+        let content_ours_without_response = concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ queued prompt\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let mut decision = IpcRepairDecision::ack_content(ack_content.to_string());
+
+        let repaired = materialize_missing_response_for_socket_ack_drift(
+            &file,
+            Some("p-no-proof"),
+            Some(content_ours_without_response),
+            response,
+            true,
+            &mut decision,
+        );
+
+        assert!(
+            !repaired,
+            "missing content_ours response proof must fail closed"
+        );
+        assert_eq!(decision.snapshot_content, ack_content);
+        assert_eq!(decision.disk_repair_reason, None);
+        assert!(!decision.redeliver_editor);
     }
 
     #[test]

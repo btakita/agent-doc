@@ -510,6 +510,14 @@ pub fn try_ipc(
                         content_ours,
                         &mut repair_decision,
                     );
+                    let missing_response_repair = materialize_missing_response_for_socket_ack_drift(
+                        file,
+                        Some(&patch_id),
+                        content_ours,
+                        &expected_response,
+                        drift_fired,
+                        &mut repair_decision,
+                    );
                     log_ipc_snapshot_adoption_allowed(
                         file,
                         "socket_ack_content",
@@ -517,7 +525,7 @@ pub fn try_ipc(
                         baseline,
                         content_ours,
                         &repair_decision,
-                        drift_fired || dup_fired,
+                        drift_fired || dup_fired || missing_response_repair,
                     );
                     log_ipcfullprompt_corruption_if_any(
                         file,

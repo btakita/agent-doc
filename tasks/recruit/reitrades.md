@@ -1058,7 +1058,33 @@ Some of the work overlaps tooling I already build and maintain, so I can contrib
 ```
 
 Want me to fold that into the working draft?
-<!-- agent:boundary:ea449450 -->
+yes
+### Re: Folded the library line into the working draft — opus-4-8
+
+> **Queue prompt:** yes
+
+Done. Added the shared-libraries line right after "flexible on how we structure it," and kept it in your voice (commas, no em-dashes). Here's the full working draft now:
+
+```
+Hi Artur,
+
+Totally get going with what fits the budget when you're bootstrapped. Hope the build's going well.
+
+I wanted to reach out anyway. REItrades is something I'd genuinely like to work on, and the part I'd be most useful on is the AI. Your whole pitch rests on the automated marketing and the "100% accurate" listing and OM content, and that's the hardest thing to get right and the easiest to lose trust on. Getting an AI to actually be accurate in front of buyers, not just plausible, is the specific problem I work on.
+
+The way I'd do it: deterministic code owns every number and validation, the AI only proposes, and anything low-confidence gets flagged for a human before it reaches a buyer. That's what makes "AI-generated" safe to put your name on. It's also the part a general freelancer is least likely to nail, so a few senior hours a week goes a long way there.
+
+I'm flexible on how we structure it. Some of the work overlaps tooling I already build and maintain, so I can contribute those pieces at a low rate, either open-sourced or licensed to you royalty-free, so you're not paying full custom price for the plumbing. If you can give me a rough idea of your budget for this phase, I'll put together something that fits.
+
+Let me know if it's worth a quick call.
+
+Brian
+```
+
+That's the AI-led note with the library offer folded in. It now carries all three levers without touching your rate: senior hours on the AI accuracy problem, low-cost reusable plumbing, and a budget question to anchor the number.
+
+One thing to watch: the note now has two "low cost" ideas close together (the few senior hours, and the low-rate plumbing). It reads fine, but if it starts to feel like you're stacking discounts, cut the "at a low rate" from the plumbing line and let "so you're not paying full custom price for the plumbing" carry it. Say the word if you want that trim, or I'll drop it into `corky`/LinkedIn as a draft (no auto-send).
+<!-- agent:boundary:3a0fcea8 -->
 <!-- /agent:exchange -->
 
 ## Queue

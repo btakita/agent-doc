@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 pending_done_guard: warn
 agent_doc_lint_dialect: off
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -750,13 +750,26 @@ What changed:
 - **"Engagement options (pick one)"** → "pick whichever fits your budgeting" — framed as his choice.
 
 If you want, I can do the same client-facing pass on §1 ("How to read this estimate"), which still has a couple of you-facing asides ("that is the competitive lever, not cutting scope") — say the word.
-<!-- agent:boundary:60ddffc8 -->
+### Re: §1 and §6 made client-facing — opus-4-8
+
+> **Queue prompt:** Make §1 & "6. Assumptions & open questions (confirm before locking a fixed price)" client facing.
+
+Done — both rewritten to address Artur directly (committed `ac24a9b67`, PDF regenerated, 12 pages).
+
+**§1 "How to read this estimate":** it was already mostly client-facing; the one operator-facing aside was "that is the competitive lever, not cutting scope" (a note about how *you* position the bid). Reframed to a client benefit: "...biases delivery toward the low end of each range, so you're most likely to land there — from efficiency, not from cutting scope."
+
+**§6 "Assumptions & open questions":**
+- Dropped "(confirm before locking a fixed price)" from the heading and moved it into a plain-English intro that reassures him none of these block starting Phase 0.
+- Rephrased every question to address "you" (e.g. "your existing Postgres system," "credentials I can access," "buyers").
+- **Q7 was internal dev-log** — a struck-through "~~Resolved~~" line referencing "the markdown brief." Replaced it with just the clean remaining question: which single asset class ships first (hotel or another).
+
+That's the last section that read like working notes; the report now reads consistently as a document *to* Artur throughout.
+<!-- agent:boundary:237dc6f6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue go -->
-- Make "6. Assumptions & open questions (confirm before locking a fixed price)" client facing.
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

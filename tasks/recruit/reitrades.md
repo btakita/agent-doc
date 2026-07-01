@@ -940,8 +940,7 @@ Say the word and I'll publish it via `corky`/LinkedIn as a draft (no auto-send),
 
 ## Queue
 
-<!-- agent:queue start go -->
-- I like that reitrades is in real estate and using Rust. I'm willing to see what he can offer. Perhaps we can work something out. I could work limited hours perhaps. I am interested in this role.
+<!-- agent:queue stop -->
 <!-- /agent:queue -->
 
 ## Backlog

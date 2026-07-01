@@ -34,86 +34,12 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260701-160421.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260701-181327.md`*
 
 Compacted content:
-- Archived 2 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); Pre-run queue edits partially reverted (only first added head kept)
-
-### Re: Pre-run queue edits partially reverted (only first added head kept) — opus-4-8
-
-Thanks for the correction — pre-run (not mid-turn) narrows this a lot. It's the concurrent-writer queue race tracked as #qeditrace (#0bmv, plan-queue-edit-race-consolidated.md), and the "only the first added head survived" signature points specifically at the preflight queue-maintenance reconcile, not the during-turn finalize path.
-
-**What happens on the run:** JB "Run Agent Doc" starts with `agent-doc preflight`, which runs a queue-maintenance pass over your already-edited queue. That pass journals the visible/live-buffer queue (#qftloss mode-6, meant to make pre-observation operator adds crash-durable), then runs the #mirrorall backlog→queue mirror, the #rz3a freshly-added hold-out, #7r2s manual-add pinning, and #qdedupsync dedup — all in `preflight/maintenance.rs`. My leading hypothesis is that this convergence keeps the first operator-added head (it matches the pin/anchor against the prior snapshot) but treats the remaining new lines as re-mirror/dedup churn and reverts them to the pre-edit snapshot: the journal *records* them, but the reconcile does not *replay* them back into the visible queue. That exactly matches "only the first item I added was kept."
-
-**Live evidence in this doc:** the queue already carries duplicate heads — `do [#tmuxsynccrashlog]` twice and `do [#60ev]` twice — the collision fingerprint of old-restored + new-added.
-
-The plan's core convergence already shipped on main, but this fresh pre-run repro shows the multi-line operator-add case still leaks, so I've filed it as an actionable focused-cycle item (#qeditrace) with the exact code path and a SimWorld requirement for multi-line pre-run add survival.
-
-I did **not** attempt the merge fix inline: root-causing + fixing the reconcile is a focused cycle (live-CRDT / two-writer, needs `make tmux-ci` across live panes) per the existing plan. And I deliberately did **not** hand-edit this doc's duplicate heads — a direct queue edit is precisely what re-triggers the churn, so that cleanup belongs to the fix, not a manual patch.
-
-Next step (the focused cycle): instrument the maintenance reconcile to log which operator-added heads it keeps vs reverts, confirm the exact drop point, then make the reconcile replay ALL journaled operator adds (not just the first) — or fail closed with a recoverable artifact instead of silently reverting.
-When the user adds/removes `go` on the `agent:queue`, or changes the `queue: ` value in the frontmatter, the realtime system should sync the values of the `agent:queue` and `queue: ` to the user edit in the realtime system.
-
-
-### Re: Realtime sync of `go` marker ↔ `queue:` frontmatter — opus-4-8
-
-Right — those are two representations of the same queue-activation state, and today they're **read together but not synced together**. `explicit_queue_go_mode(&comp.attrs, fm.queue.as_deref())` treats either the `go`/`start` marker OR `queue: start` frontmatter as "go", and `frontmatter::merge_queue_state` writes the frontmatter — but there's no bidirectional realtime sync, so editing only one leaves the other stale. That's why the documented halt workaround is "remove `go` AND set `queue: stop`" (both) — exactly the churn you're describing.
-
-**Desired behavior** (what I filed): when you edit either representation, the realtime system converges BOTH to your edit, operator-authoritative — edit the marker, `queue:` follows; edit `queue:`, the marker follows; never revert your change. Same operator-wins principle as #qeditrace.
-
-I did **not** implement it inline this cycle, deliberately:
-- it's realtime-CRDT-critical (needs `make tmux-ci` + a live editor eyeball), and
-- a concurrent session is actively refactoring the exact "queue and controller policy seams" (submodule `d34b622e`) this touches — landing it on a stale tree would collide, and the installed binary is already behind those commits (`stale_install`).
-
-Filed as focused-cycle item **#qactsync** with a plan (`tasks/agent-doc/plan-queue-activation-state-sync.md`) that names the current code (`explicit_queue_go_mode` / `explicit_queue_stop_mode` / `merge_queue_state` in `maintenance.rs`, `QUEUE_ONLY_COMPONENT_ATTRS` in `component_attrs.rs`, `queue_go_mode` in `backlog_sync.rs`) and the approach: a single canonical `QueueActivation` state + edit-provenance-driven propagation to the other representation, deterministic on a two-sided conflict, fixed-point on already-synced input.
-
-When I type in a free text prompt, the work on it should begin immediately. If the agent thinks it requires a dedicated session, then run `/clear` or PCP restart and run the work.
-
-
-### Re: Free-text prompts should begin work immediately (auto `/clear` or PCP restart if a dedicated session is needed) — opus-4-8
-
-Agreed, and that's the intended contract. A free-text prompt (queue head or exchange edit) is an executable directive — the skill treats `do #id`, "fix this", "run tests", etc. as immediate authorization, not something to re-confirm. Where it currently falls short is exactly what you hit: when an item is tagged `[focused-cycle]`, the in-session loop *yields* it to the supervisor's clear-and-continue path (force `/clear` + re-dispatch to a fresh session) instead of running it inline — which reads as "deferred" rather than "began immediately."
-
-I've filed **#ftimmediate** to close that gap: a free-text prompt begins work immediately; if the agent determines it needs a dedicated/fresh session (high accretion or focused-cycle scope), it should auto `/clear` or request a PCP restart and *run* the work — not park it as an operator-gated defer.
-
-Two honesty notes on this cycle: the live JB editor IPC churned (`live_prompt_drift_after_preflight` + duplicate-prompt in the ack buffer) because of a **mid-session binary mismatch** — I installed my controller-state fix earlier, and a concurrent session has since landed newer refactors (`d34b622e`), so the running editor/cdylib is stale relative to my finalize client (the `stale_install` warning). That wedged `finalize`, so I landed both responses via a direct commit. To stabilize the editor, recycle it onto the current binary (`make install` in `src/agent-doc` + `agent-doc admin recycle`) or restart the JB session. I also set `queue: stop` to halt the auto-loop while we work these queue bugs.
-
-❯ `agent:boundary` tags are scattered in this document.
-
-### Re: `agent:boundary` tags are scattered in this document — opus-4-8
-
-Confirmed, and it's a real bug — not cosmetic. The invariant is **exactly one** `<!-- agent:boundary:… -->` marker, at the end of `agent:exchange` (the `ffi.rs` boundary tests assert `count == 1`; `template.rs` documents `reposition_boundary_removes_stale`: "multiple stale boundaries are reduced to exactly one"). This document has **three**, mid-component, in both HEAD and the snapshot: `d0dd7c4e`, `qactsync1`, `ftimm0001` — one left behind per recent cycle.
-
-**Root cause.** `reposition_boundary_in_snapshot` (`git.rs:1613`) is the canonical collapse (strip all, insert one fresh at end), but it *hands ownership away* under two guards:
-
-1. **Active-run guard** — if a `finalize`/`write` is in flight, it returns early: "the IPC path owns the transition." The pre-staging collapse (`git.rs:1189`) is the same function, so during a finalize-driven commit the collapse is expected to happen inside finalize's apply_patches pre-patch, not in git.rs.
-2. **IPC-listener guard** — the working-tree rewrite is skipped when a live IDE listener is present, delegating to a post-commit IPC reposition signal the plugin applies.
-
-The chain that stranded three: over the last cycles the JB plugin was **stale** (`stale_install`) and finalize **wedged** on editor-IPC churn, so — as your own notes in those responses record — the responses "landed via a direct commit." The finalize path that owned the transition never delivered the collapse, the stale plugin never applied the IPC reposition signal, and git.rs's own collapse was skipped by the active-run guard. Nothing re-enforced the invariant on the binary's own committed blob, so a boundary accreted per wedged cycle.
-
-**Fix direction** (filed as **#boundaryaccum1**, focused-cycle, plan `tasks/agent-doc/plan-boundary-accumulation-committed-blob.md`): the staged git blob and snapshot are *binary-owned* artifacts — collapsing their boundaries never races the live editor buffer (git stages a snapshot, not the live file), so the single-boundary collapse should run there **unconditionally**, with the active-run and listener guards scoped only to the working-tree disk rewrite that actually races the editor. Plus a post-commit invariant check that reconciles or fails loudly if HEAD ever carries >1 boundary, and promotion of the two aspirational template invariants to real regressions + a SimWorld case (N wedged-finalize→direct-commit cycles never leave >1 boundary in HEAD). It composes with `#fullboundary` (which reduces the wedge trigger) rather than replacing it.
-
-I did **not** hand-strip the markers or `make install`/recycle inline: the binary is stale relative to source and you've halted the queue to work these bugs, so a mid-session install would just re-trigger `live_prompt_drift`. This cycle's `finalize` runs the normal apply_patches pre-patch (strip-all + insert-one), so committing this response should itself collapse the three back to one — the immediate observable fix — and #boundaryaccum1 makes it stay that way regardless of write path.
-❯ I restarted JB. Please ensure the editor plugins hot-reload when a new install occurs.
-
-### Re: Ensure editor plugins hot-reload on a new install — opus-4-8
-
-Done for the native layer, where the actual staleness lived. Root cause of why your restart was needed: both plugins detected the new cdylib by mtime but reloaded it **in place** —
-
-- JB `NativeLib.reload()` called `Native.load(path)` on the same canonical path;
-- VSCode `native.ts` called `koffi.load(loadedPath)` on the same path.
-
-`dlopen` returns the already-mapped handle for an unchanged path, so the mtime check fired and `loadedMtime` advanced, but the live JVM / extension host kept running the **old** native code until a full restart. When a concurrent `make install` bumped the on-disk cdylib, the fresh finalize client then spoke a newer protocol than the stale in-memory cdylib → the `no_ack` / `ack status=error` wedge you hit.
-
-**Fix (shipped):** watch the canonical install path for mtime as before, but `Native.load` / `koffi.load` a **unique per-mtime shadow copy** (`libagent_doc-<mtime>.<ext>` under a per-pid tmp dir). A new inode forces a real load, so `make install` / `agent-doc lib-install` hot-reloads the native code without an IDE restart. Stale shadow copies are pruned; on any copy failure it falls back to the canonical path (never worse than before).
-
-- JB: `editors/jetbrains/.../NativeLib.kt` (`nativeShadowCopyPath` + `shadowCopyForLoad`, wired into `reload`/`loadFrom`), 4 tests green, plugin **0.2.204** built (signed + unsigned).
-- VSCode: `editors/vscode/src/native.ts` (same helper, wired into `ensureLoaded`), 3 tests green, extension **0.2.37** (`npm test`: 141/141, `tsc` clean).
-
-**Two honest limits:**
-1. This is a native-code reload. **Structural plugin-code changes** (new Kotlin/TS methods — including *this* update) still need a reinstall + restart to land, because updating the JAR/JS bytecode isn't the same as reloading the .so. Filed **#jarhotreload** for the dynamic-plugin-unload path; lower priority since most logic lives in the shared Rust core that now hot-reloads.
-2. I did **not** `make install` or install the new plugin zips mid-session — that would re-stale the JB session you just restarted and re-trigger `live_prompt_drift`. So the live proof (install the plugin + `make install` the cdylib + watch it reload with no restart) is the one operator-gated step: **#nativehotreloadverify**.
-<!-- agent:boundary:e16ad7ea -->
+- Archived 5 response topic(s): Pre-run queue edits partially reverted (only first added head kept); Realtime sync of `go` marker ↔ `queue:` frontmatter; Free-text prompts should begin work immediately (auto `/clear` or PCP restart if a dedicated session is needed); 2 more
+- Prior summary/context: prior compacted content: Archived 2 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); Pre-run que...
+<!-- agent:boundary:6e0b19c6 -->
 <!-- /agent:exchange -->
 ## Queue
 

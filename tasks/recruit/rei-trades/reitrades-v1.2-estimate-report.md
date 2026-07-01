@@ -42,6 +42,8 @@ Three workstreams against a launched (post-beta, 10/14/2025) production platform
 | Production-safety plan for live beta data | 8-16 | Migrations, rollback, delete policy, regression-risk mapping. |
 | **Subtotal** | **24-44** | |
 
+*This Phase-0 discovery work is **credited toward Phase 1** if we proceed — it is not an extra charge on top of the build, and it firms up every downstream estimate before any production code is written.*
+
 ### 1.1 Listings Management
 
 | Task | Hours | Notes |

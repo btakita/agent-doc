@@ -879,9 +879,28 @@ pub fn read_bootstrap(project_root: &Path) -> Result<Option<ControllerBootstrap>
     let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
         return Ok(None);
     };
-    serde_json::from_str(&content)
-        .with_context(|| format!("failed to parse {}", path.display()))
-        .map(Some)
+    // A truncated/0-byte or otherwise unparseable controller-state.json (e.g. an
+    // interrupted auto_install_reexec recycle killed mid-write before atomic
+    // writes landed) must not hard-error and wedge every future launch. Treat
+    // corrupt bootstrap state as absent so the controller re-bootstraps cleanly;
+    // warn (never silently swallow) so the recovery is visible.
+    if content.trim().is_empty() {
+        eprintln!(
+            "[agent-doc] warning: empty controller bootstrap state {}; treating as absent (will re-bootstrap)",
+            path.display()
+        );
+        return Ok(None);
+    }
+    match serde_json::from_str(&content) {
+        Ok(bootstrap) => Ok(Some(bootstrap)),
+        Err(err) => {
+            eprintln!(
+                "[agent-doc] warning: unparseable controller bootstrap state {} ({err}); treating as absent (will re-bootstrap)",
+                path.display()
+            );
+            Ok(None)
+        }
+    }
 }
 
 pub(crate) fn current_binary_identity() -> Result<ControllerBinaryIdentity> {
@@ -947,10 +966,10 @@ fn write_bootstrap_with_options(
 
 fn write_bootstrap_state(bootstrap: &ControllerBootstrap) -> Result<()> {
     let path = state_path(&bootstrap.project_root);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&path, serde_json::to_string_pretty(&bootstrap)?)
+    let json = serde_json::to_string_pretty(&bootstrap)?;
+    // Atomic write (temp + rename) so an interrupted recycle/execve cannot leave
+    // a truncated 0-byte controller-state.json that wedges every future launch.
+    agent_doc_fs::write_atomic(&path, json.as_bytes())
         .with_context(|| format!("failed to write {}", path.display()))?;
     Ok(())
 }
@@ -2632,6 +2651,41 @@ mod tests {
             dir.path().join(".agent-doc/controller-state.json")
         );
     }
+
+    #[test]
+    fn read_bootstrap_treats_empty_state_as_absent() {
+        // Regression: an interrupted auto_install_reexec recycle left a truncated
+        // 0-byte controller-state.json; read_bootstrap must self-heal to Ok(None)
+        // (re-bootstrap) instead of hard-erroring and wedging every future launch.
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = state_path(dir.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"").unwrap();
+        assert!(read_bootstrap(dir.path()).unwrap().is_none());
+    }
+
+    #[test]
+    fn read_bootstrap_treats_corrupt_state_as_absent() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = state_path(dir.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"{ partial-write not valid json").unwrap();
+        assert!(read_bootstrap(dir.path()).unwrap().is_none());
+    }
+
+    #[test]
+    fn write_then_read_bootstrap_roundtrips() {
+        // The atomic write path must still produce a fully-readable state file.
+        let dir = tempfile::TempDir::new().unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        write_bootstrap_state(&bootstrap).unwrap();
+        let read = read_bootstrap(dir.path())
+            .unwrap()
+            .expect("bootstrap present after write");
+        assert_eq!(read.controller_generation, bootstrap.controller_generation);
+        assert_eq!(read.project_root, bootstrap.project_root);
+    }
+
     fn actor_record(
         document_id: &str,
         pane: &str,

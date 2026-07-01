@@ -1210,56 +1210,6 @@ pub(crate) fn dogfood_agent_doc_crate_root(file: &Path) -> Option<PathBuf> {
     None
 }
 
-/// `#supautoinstall` — newest mtime (unix secs) among the crate's build inputs: a bounded
-/// recursive walk of `.rs`/`.toml`/`.md` files under `crate_root`, skipping build/VCS/cache
-/// dirs (`target`, `.git`, `.agent-doc`, `node_modules`, `.tsift`, `build`, `dist`). Used to
-/// detect "a finalize committed a source edit but the binary has not been rebuilt yet".
-/// Fail-open `None` when nothing is readable.
-pub(crate) fn newest_crate_source_mtime_secs(crate_root: &Path) -> Option<u64> {
-    fn walk(dir: &Path, newest: &mut u64) {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let Ok(file_type) = entry.file_type() else {
-                continue;
-            };
-            if file_type.is_dir() {
-                let name = entry.file_name();
-                let name = name.to_string_lossy();
-                if matches!(
-                    name.as_ref(),
-                    "target" | ".git" | ".agent-doc" | "node_modules" | ".tsift" | "build" | "dist"
-                ) {
-                    continue;
-                }
-                walk(&entry.path(), newest);
-            } else if file_type.is_file() {
-                let path = entry.path();
-                let ext_ok = path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .map(|e| matches!(e, "rs" | "toml" | "md"))
-                    .unwrap_or(false);
-                if !ext_ok {
-                    continue;
-                }
-                if let Ok(secs) = entry
-                    .metadata()
-                    .and_then(|m| m.modified())
-                    .map_err(anyhow::Error::from)
-                    .and_then(|m| Ok(m.duration_since(UNIX_EPOCH)?.as_secs()))
-                {
-                    *newest = (*newest).max(secs);
-                }
-            }
-        }
-    }
-    let mut newest = 0u64;
-    walk(crate_root, &mut newest);
-    (newest > 0).then_some(newest)
-}
-
 /// `#supautoinstall` — run the dogfood local install for agent-doc's own source
 /// from `crate_root`. Runs IN THE SUPERVISOR at an idle boundary (never the
 /// finalize client mid-cycle), which is what root-fixes the mid-session-install

@@ -1212,7 +1212,9 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 {
                     {
                         let source_newer = match (
-                            crate::project_controller::newest_crate_source_mtime_secs(crate_root),
+                            agent_doc_fs::install_freshness::newest_crate_source_mtime_secs(
+                                crate_root,
+                            ),
                             crate::project_controller::current_binary_identity().ok(),
                         ) {
                             (Some(src), Some(bin)) => {

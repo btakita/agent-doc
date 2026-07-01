@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use std::path::{Component, Path, PathBuf};
 
+pub mod install_freshness;
+
 const SNAPSHOT_DIR: &str = ".agent-doc/snapshots";
 const BASELINE_DIR: &str = ".agent-doc/baselines";
 const LOCK_DIR: &str = ".agent-doc/locks";
@@ -299,6 +301,49 @@ pub fn referenced_markdown_path_checked(
     Ok(None)
 }
 
+/// Process-local sequence so concurrent [`write_atomic`] calls never collide on
+/// the same sibling temp-file name.
+static ATOMIC_WRITE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Atomically write `contents` to `path` by writing a sibling temp file and
+/// renaming it into place. `rename(2)` on the same filesystem is atomic, so a
+/// crash or `execve` mid-write leaves either the previous file or the
+/// fully-written new one — never a truncated/0-byte file. Creates the parent
+/// directory if missing.
+///
+/// This is the write counterpart to [`read_optional_text`] and the fix for an
+/// interrupted write (e.g. an `auto_install_reexec` recycle killed mid-write)
+/// leaving a 0-byte controller-state file that then wedges every future read.
+pub fn write_atomic(path: &Path, contents: &[u8]) -> Result<()> {
+    let parent = path.parent().filter(|p| !p.as_os_str().is_empty());
+    if let Some(parent) = parent {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create parent dir for {}", path.display()))?;
+    }
+    let dir = parent.unwrap_or_else(|| Path::new("."));
+    let stem = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("agent-doc-state");
+    let seq = ATOMIC_WRITE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = dir.join(format!(".{stem}.tmp-{}-{seq}", std::process::id()));
+    std::fs::write(&tmp, contents)
+        .with_context(|| format!("failed to write temp file {}", tmp.display()))?;
+    if let Err(err) = std::fs::rename(&tmp, path) {
+        // Best-effort cleanup so a failed rename does not litter temp files;
+        // surface (never swallow) the original rename error.
+        if let Err(cleanup) = std::fs::remove_file(&tmp) {
+            eprintln!(
+                "[agent-doc] warning: failed to clean up temp file {} after rename error: {cleanup}",
+                tmp.display()
+            );
+        }
+        return Err(err)
+            .with_context(|| format!("failed to rename {} -> {}", tmp.display(), path.display()));
+    }
+    Ok(())
+}
+
 pub fn read_optional_text(path: &Path) -> Result<Option<String>> {
     read_optional(path, |path| std::fs::read_to_string(path))
 }
@@ -395,9 +440,35 @@ mod tests {
         referenced_markdown_path_checked, rewrite_start_path, same_document_path,
         snapshot_flock_path_for, snapshot_path_for, startup_document_lock_path_for,
         startup_session_lock_name, startup_session_lock_path_for, startup_starting_dir_for,
-        state_lock_path_for, turn_scope_path_for,
+        state_lock_path_for, turn_scope_path_for, write_atomic,
     };
     use std::path::Path;
+
+    #[test]
+    fn write_atomic_creates_parent_and_writes_contents() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("nested/dir/state.json");
+        write_atomic(&path, b"{\"k\":1}").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"k\":1}");
+    }
+
+    #[test]
+    fn write_atomic_overwrites_existing_and_leaves_no_temp_files() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("state.json");
+        write_atomic(&path, b"old").unwrap();
+        write_atomic(&path, b"new-longer-content").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "new-longer-content"
+        );
+        // No sibling ".state.json.tmp-*" temp files should survive a successful write.
+        let leftover = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .any(|e| e.file_name().to_string_lossy().contains(".tmp-"));
+        assert!(!leftover, "temp file leaked after atomic write");
+    }
 
     #[test]
     fn read_optional_returns_none_on_not_found() {

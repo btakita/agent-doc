@@ -16,3 +16,7 @@ agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.66" }
 agent-doc-session-accretion = { path = "../agent-doc-session-accretion", version = "0.34.66" }
 lazily = "0.13.1"
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"

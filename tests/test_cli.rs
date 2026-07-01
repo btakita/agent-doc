@@ -5615,6 +5615,13 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
 
     let focused_source =
         fs::read_to_string(manifest_dir.join("agent-doc-prompt-context/src/lib.rs")).unwrap();
+    let loaded_context_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-prompt-context/src/loaded_context.rs"))
+            .unwrap();
+    assert!(
+        focused_source.contains("pub mod loaded_context;"),
+        "agent-doc-prompt-context must expose loaded-context ledger policy"
+    );
     for required_snippet in [
         "pub struct BoundedResponseContext",
         "pub struct DocumentSectionContext",
@@ -5638,6 +5645,17 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
         assert!(
             focused_source.contains(required_snippet),
             "agent-doc-prompt-context must own pure prompt-context rendering policy: {required_snippet}"
+        );
+    }
+    for required_snippet in [
+        "pub struct LoadedContextLedger",
+        "pub struct LoadedContextRecord",
+        "pub fn loaded_context_record(",
+        "pub fn build_loaded_context_ledger(",
+    ] {
+        assert!(
+            loaded_context_source.contains(required_snippet),
+            "agent-doc-prompt-context must own loaded-context ledger policy: {required_snippet}"
         );
     }
 
@@ -5670,6 +5688,27 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
             && orchestration_source.contains("frontmatter_io::parse_for_file_with_context")
             && orchestration_source.contains("agent_doc_response_toc_io::render_prompt_toc"),
         "orchestration prompt_context should gather project context then call focused rendering policy directly"
+    );
+
+    let plan_source = fs::read_to_string(manifest_dir.join("src/plan.rs")).unwrap();
+    let jobs_source = fs::read_to_string(manifest_dir.join("src/jobs.rs")).unwrap();
+    for forbidden_snippet in [
+        "pub struct LoadedContextLedger",
+        "pub struct LoadedContextRecord",
+        "fn loaded_context_record(",
+        "fn build_loaded_context_ledger(",
+    ] {
+        assert!(
+            !plan_source.contains(forbidden_snippet),
+            "src/plan.rs must not re-own or facade loaded-context ledger policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        plan_source.contains("agent_doc_prompt_context::loaded_context::{")
+            && jobs_source.contains("agent_doc_prompt_context::loaded_context::{")
+            && jobs_source.contains("build_loaded_context_ledger")
+            && jobs_source.contains("loaded_context_record"),
+        "plan/jobs should call loaded-context ledger policy through agent-doc-prompt-context directly"
     );
 
     assert!(
@@ -5738,7 +5777,9 @@ fn test_agent_doc_prompt_context_owns_pure_rendering_policy() {
         "agent-doc-diff",
         "agent-doc-element",
         "agent-doc-element-backlog",
+        "agent-doc-hash",
         "agent-doc-session-accretion",
+        "serde",
     ] {
         assert!(
             dependencies.contains_key(required),
@@ -10929,6 +10970,9 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     .unwrap();
     let supervisor_config =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/config.rs")).unwrap();
+    let fs_lib = fs::read_to_string(manifest_dir.join("agent-doc-fs/src/lib.rs")).unwrap();
+    let fs_install_freshness =
+        fs::read_to_string(manifest_dir.join("agent-doc-fs/src/install_freshness.rs")).unwrap();
     let supervisor_auto_install_stdio =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/auto_install_stdio.rs"))
             .unwrap();
@@ -11084,19 +11128,58 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     }
     let preflight =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let start_idle_watch_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
+            .unwrap();
+    assert!(
+        fs_lib.contains("pub mod install_freshness;"),
+        "agent-doc-fs must expose install freshness filesystem probes"
+    );
+    for required_snippet in [
+        "pub fn artifact_mtime_secs(",
+        "pub fn newest_artifact_mtime(",
+        "pub fn cargo_bin_dir(",
+        "pub fn installed_agent_doc_cdylib_mtime(",
+        "pub fn locate_agent_doc_source_repo(",
+        "pub fn newest_crate_source_mtime_secs(",
+        "pub fn agent_doc_install_artifacts(",
+    ] {
+        assert!(
+            fs_install_freshness.contains(required_snippet),
+            "agent-doc-fs should own install freshness filesystem policy: {required_snippet}"
+        );
+    }
     for forbidden_snippet in [
         "const STALE_INSTALL_GRACE_SECS",
         "fn classify_stale_install_artifacts",
+        "fn artifact_mtime_secs(",
+        "fn newest_artifact_mtime(",
+        "fn cargo_bin_dir(",
+        "fn installed_cdylib_mtime(",
+        "fn locate_agent_doc_source_repo(",
     ] {
         assert!(
             !preflight.contains(forbidden_snippet),
-            "preflight must not re-own pure stale-install policy: {forbidden_snippet}"
+            "preflight must not re-own stale-install or install-freshness policy: {forbidden_snippet}"
         );
     }
     assert!(
+        !rpc_source.contains("fn newest_crate_source_mtime_secs("),
+        "project_controller::rpc must not re-own install freshness source mtime scanning"
+    );
+    assert!(
         preflight.contains("agent_doc_supervisor::config::classify_stale_install_artifacts")
-            && preflight.contains("agent_doc_supervisor::config::STALE_INSTALL_GRACE_SECS"),
-        "preflight should call focused stale-install policy directly"
+            && preflight.contains("agent_doc_supervisor::config::STALE_INSTALL_GRACE_SECS")
+            && preflight.contains("agent_doc_fs::install_freshness::locate_agent_doc_source_repo")
+            && preflight
+                .contains("agent_doc_fs::install_freshness::newest_crate_source_mtime_secs")
+            && preflight.contains("agent_doc_fs::install_freshness::agent_doc_install_artifacts"),
+        "preflight should call focused stale-install and install-freshness policy directly"
+    );
+    assert!(
+        start_idle_watch_source
+            .contains("agent_doc_fs::install_freshness::newest_crate_source_mtime_secs"),
+        "idle_watch should call install freshness source mtime scanning through agent-doc-fs directly"
     );
     for required_snippet in [
         "pub enum SupervisorPromptDecision",

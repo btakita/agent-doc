@@ -365,6 +365,7 @@ version = "0.34.66"
 dependencies = [
  "agent-doc-hash",
  "anyhow",
+ "filetime",
  "tempfile",
 ]
 
@@ -607,6 +608,8 @@ dependencies = [
  "agent-doc-hash",
  "agent-doc-session-accretion",
  "lazily 0.13.1",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

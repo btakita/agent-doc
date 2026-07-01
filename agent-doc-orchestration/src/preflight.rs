@@ -574,69 +574,6 @@ fn explicit_backlog_target_requirements(
     Ok(requirements)
 }
 
-/// Unix mtime (seconds) of `path`, following symlinks. `None` when
-/// missing/unreadable.
-fn artifact_mtime_secs(path: &Path) -> Option<u64> {
-    std::fs::metadata(path)
-        .ok()?
-        .modified()
-        .ok()?
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .map(|d| d.as_secs())
-}
-
-fn newest_artifact_mtime(paths: &[PathBuf]) -> Option<u64> {
-    paths
-        .iter()
-        .filter_map(|path| artifact_mtime_secs(path))
-        .max()
-}
-
-/// `~/.cargo/bin` (honoring `CARGO_HOME`), or `None` when unresolvable.
-fn cargo_bin_dir() -> Option<PathBuf> {
-    if let Ok(cargo_home) = std::env::var("CARGO_HOME")
-        && !cargo_home.is_empty()
-    {
-        return Some(PathBuf::from(cargo_home).join("bin"));
-    }
-    let home = std::env::var("HOME").ok().filter(|h| !h.is_empty())?;
-    Some(PathBuf::from(home).join(".cargo/bin"))
-}
-
-/// Newest mtime among `<bin_dir>/libagent_doc-*.so` (the lib-installed cdylib
-/// the JetBrains plugin hot-reloads). Version-globbed because the cdylib is
-/// named after the `agent-doc` binary crate version, not this crate's.
-fn installed_cdylib_mtime(bin_dir: &Path) -> Option<u64> {
-    std::fs::read_dir(bin_dir)
-        .ok()?
-        .flatten()
-        .filter_map(|entry| {
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            (name.starts_with("libagent_doc-") && name.ends_with(".so"))
-                .then(|| artifact_mtime_secs(&entry.path()))
-                .flatten()
-        })
-        .max()
-}
-
-/// Locate the `agent-doc` source repo relative to the document's git root: the
-/// root itself (standalone checkout) or `<root>/src/agent-doc` (the dogfood
-/// submodule layout), identified by a `Cargo.toml` declaring the binary crate.
-fn locate_agent_doc_source_repo(doc_git_root: &Path) -> Option<PathBuf> {
-    [
-        doc_git_root.to_path_buf(),
-        doc_git_root.join("src/agent-doc"),
-    ]
-    .into_iter()
-    .find(|candidate| {
-        std::fs::read_to_string(candidate.join("Cargo.toml"))
-            .map(|toml| toml.lines().any(|l| l.trim() == "name = \"agent-doc\""))
-            .unwrap_or(false)
-    })
-}
-
 /// Warn when the installed/built `agent-doc` artifacts predate the latest local
 /// source edit, so live sessions (tmux, JetBrains) do not silently run stale code
 /// at an unchanged version string (`#install-stale-guard`). Best-effort: only
@@ -653,38 +590,9 @@ fn locate_agent_doc_source_repo(doc_git_root: &Path) -> Option<PathBuf> {
 /// edits). Unifying onto the source-file mtime keeps this warning in agreement
 /// with the auto-install staleness signal.
 fn stale_install_warning(doc_git_root: &Path) -> Option<PreflightWarning> {
-    let repo = locate_agent_doc_source_repo(doc_git_root)?;
-    let source_ts = crate::project_controller::newest_crate_source_mtime_secs(&repo)?;
-
-    let bin_dir = cargo_bin_dir();
-    let release_dir = repo.join("target/release");
-    let local_install_dir = repo.join("target/local-install/release-local");
-    let artifacts: Vec<(&'static str, Option<u64>)> = vec![
-        (
-            "~/.cargo/bin/agent-doc",
-            bin_dir
-                .as_deref()
-                .and_then(|d| artifact_mtime_secs(&d.join("agent-doc"))),
-        ),
-        (
-            "~/.cargo/bin cdylib",
-            bin_dir.as_deref().and_then(installed_cdylib_mtime),
-        ),
-        (
-            "built agent-doc",
-            newest_artifact_mtime(&[
-                release_dir.join("agent-doc"),
-                local_install_dir.join("agent-doc"),
-            ]),
-        ),
-        (
-            "built cdylib",
-            newest_artifact_mtime(&[
-                release_dir.join("libagent_doc.so"),
-                local_install_dir.join("libagent_doc.so"),
-            ]),
-        ),
-    ];
+    let repo = agent_doc_fs::install_freshness::locate_agent_doc_source_repo(doc_git_root)?;
+    let source_ts = agent_doc_fs::install_freshness::newest_crate_source_mtime_secs(&repo)?;
+    let artifacts = agent_doc_fs::install_freshness::agent_doc_install_artifacts(&repo);
 
     let stale = agent_doc_supervisor::config::classify_stale_install_artifacts(
         source_ts,
@@ -2637,56 +2545,6 @@ mod tests {
     use std::io::Write;
     use std::process::Command;
     use tempfile::TempDir;
-    #[test]
-    fn newest_artifact_mtime_uses_freshest_existing_path() {
-        let dir = TempDir::new().unwrap();
-        let old = dir.path().join("target/release/agent-doc");
-        let fresh = dir
-            .path()
-            .join("target/local-install/release-local/agent-doc");
-        std::fs::create_dir_all(old.parent().unwrap()).unwrap();
-        std::fs::create_dir_all(fresh.parent().unwrap()).unwrap();
-        std::fs::write(&old, "old").unwrap();
-        std::fs::write(&fresh, "fresh").unwrap();
-
-        filetime::set_file_mtime(&old, filetime::FileTime::from_unix_time(1_000, 0)).unwrap();
-        filetime::set_file_mtime(&fresh, filetime::FileTime::from_unix_time(2_000, 0)).unwrap();
-
-        assert_eq!(
-            newest_artifact_mtime(&[old, fresh]),
-            Some(2_000),
-            "fresh local-install output should satisfy stale-install freshness"
-        );
-    }
-
-    #[test]
-    fn locate_agent_doc_source_repo_matches_root_and_dogfood_layout() {
-        let agent_doc_manifest = "[package]\nname = \"agent-doc\"\nversion = \"0.0.0\"\n";
-
-        // Standalone checkout: the git root itself is the crate.
-        let root = TempDir::new().unwrap();
-        std::fs::write(root.path().join("Cargo.toml"), agent_doc_manifest).unwrap();
-        assert_eq!(
-            locate_agent_doc_source_repo(root.path()).as_deref(),
-            Some(root.path())
-        );
-
-        // Dogfood superproject: source lives under src/agent-doc.
-        let superproject = TempDir::new().unwrap();
-        let src = superproject.path().join("src/agent-doc");
-        std::fs::create_dir_all(&src).unwrap();
-        std::fs::write(src.join("Cargo.toml"), agent_doc_manifest).unwrap();
-        assert_eq!(locate_agent_doc_source_repo(superproject.path()), Some(src));
-
-        // Unrelated repo (no agent-doc crate) → no warning source.
-        let other = TempDir::new().unwrap();
-        std::fs::write(
-            other.path().join("Cargo.toml"),
-            "[package]\nname = \"something-else\"\n",
-        )
-        .unwrap();
-        assert!(locate_agent_doc_source_repo(other.path()).is_none());
-    }
     #[test]
     fn preflight_output_omits_empty_claims_and_layout_issues() {
         let output = PreflightOutput::default();

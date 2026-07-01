@@ -39,14 +39,15 @@
 //! - `test_plan_detects_recommendation_request`
 //! - `test_plan_no_false_positive_on_questions`
 
-use agent_doc_hash::content_hash;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::Path;
 
 use agent_doc_element::element::{self, is_backlog_component, is_tracked_work_component};
 use agent_doc_element_backlog::backlog;
+use agent_doc_prompt_context::loaded_context::{
+    LoadedContextLedger, build_loaded_context_ledger, loaded_context_record,
+};
 
 use agent_doc_diff as diff;
 use agent_doc_frontmatter::frontmatter;
@@ -114,26 +115,6 @@ pub struct TsiftContextPlan {
     pub test_digest_command: String,
     pub stale_fallback: String,
     pub loaded_context_ledger: LoadedContextLedger,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct LoadedContextLedger {
-    pub entries: Vec<LoadedContextRecord>,
-    pub duplicate_expansions_suppressed: usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct LoadedContextRecord {
-    pub source_id: String,
-    pub source_kind: String,
-    pub path: String,
-    pub content_hash: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub concept_id: Option<String>,
-    pub loaded_at: String,
-    pub expansion_reason: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -667,52 +648,6 @@ fn tsift_context_plan(file: &Path) -> TsiftContextPlan {
         test_digest_command,
         stale_fallback: "skip tsift graph/context evidence, continue with parent-owned execution or manual packets, and carry the diagnostic for review".to_string(),
         loaded_context_ledger,
-    }
-}
-
-pub(crate) fn loaded_context_record(
-    source_id: &str,
-    source_kind: &str,
-    path: &str,
-    content: &str,
-    concept_id: Option<&str>,
-    loaded_at: &str,
-    expansion_reason: &str,
-) -> LoadedContextRecord {
-    LoadedContextRecord {
-        source_id: source_id.to_string(),
-        source_kind: source_kind.to_string(),
-        path: path.to_string(),
-        content_hash: content_hash(content),
-        concept_id: concept_id.map(str::to_string),
-        loaded_at: loaded_at.to_string(),
-        expansion_reason: expansion_reason.to_string(),
-    }
-}
-
-pub(crate) fn build_loaded_context_ledger(
-    records: Vec<LoadedContextRecord>,
-) -> LoadedContextLedger {
-    let mut entries_by_key: HashMap<(String, String), LoadedContextRecord> = HashMap::new();
-    let mut duplicate_expansions_suppressed = 0;
-    for record in records {
-        let key = (record.source_id.clone(), record.content_hash.clone());
-        if let std::collections::hash_map::Entry::Vacant(entry) = entries_by_key.entry(key) {
-            entry.insert(record);
-        } else {
-            duplicate_expansions_suppressed += 1;
-        }
-    }
-    let mut entries = entries_by_key.into_values().collect::<Vec<_>>();
-    entries.sort_by(|a, b| {
-        a.source_id
-            .cmp(&b.source_id)
-            .then_with(|| a.path.cmp(&b.path))
-            .then_with(|| a.content_hash.cmp(&b.content_hash))
-    });
-    LoadedContextLedger {
-        entries,
-        duplicate_expansions_suppressed,
     }
 }
 
@@ -1589,42 +1524,6 @@ agent_doc_dispatch: auto
                 .iter()
                 .any(|cmd| cmd.contains("--done jobp1") && cmd.contains("--done jobp2"))
         );
-    }
-
-    #[test]
-    fn loaded_context_ledger_suppresses_duplicate_source_hashes() {
-        let first = loaded_context_record(
-            "agent-doc.test.source",
-            "procedure",
-            "runbooks/respond.md",
-            "same content",
-            None,
-            "test",
-            "first expansion",
-        );
-        let duplicate = loaded_context_record(
-            "agent-doc.test.source",
-            "procedure",
-            "runbooks/respond.md",
-            "same content",
-            None,
-            "test",
-            "duplicate expansion",
-        );
-        let distinct = loaded_context_record(
-            "agent-doc.test.source",
-            "procedure",
-            "runbooks/respond.md",
-            "changed content",
-            None,
-            "test",
-            "changed source expansion",
-        );
-
-        let ledger = build_loaded_context_ledger(vec![first, duplicate, distinct]);
-
-        assert_eq!(ledger.entries.len(), 2);
-        assert_eq!(ledger.duplicate_expansions_suppressed, 1);
     }
 
     #[test]

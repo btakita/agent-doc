@@ -3,6 +3,7 @@ use agent_doc_element_backlog::backlog;
 use agent_doc_session_accretion::{SessionAccretionReport, level_label};
 
 pub mod dynamic_context;
+pub mod loaded_context;
 
 const BACKLOG_HEAD_LIMIT: usize = 3;
 pub const RECENT_EXCHANGE_TURNS_LIMIT: usize = 2;

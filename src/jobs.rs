@@ -22,6 +22,9 @@ use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::plan;
+use agent_doc_prompt_context::loaded_context::{
+    LoadedContextLedger, build_loaded_context_ledger, loaded_context_record,
+};
 use agent_doc_work_graph::schedule::{AutoDagNode, AutoDagSchedule};
 
 const JOB_PACKET_CONTRACT_VERSION: &str = "agent-doc-job-packet-v1";
@@ -104,7 +107,7 @@ struct TsiftContextSummary {
     context_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     estimated_tokens: Option<usize>,
-    loaded_context_ledger: plan::LoadedContextLedger,
+    loaded_context_ledger: LoadedContextLedger,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -115,7 +118,7 @@ struct ContextSidecar {
     command: Vec<String>,
     report: Value,
     estimated_tokens: usize,
-    loaded_context_ledger: plan::LoadedContextLedger,
+    loaded_context_ledger: LoadedContextLedger,
 }
 
 #[derive(Debug, Clone)]
@@ -1211,7 +1214,7 @@ fn collect_tsift_context(
                 summary.status = index_status.to_string();
             }
             summary.loaded_context_ledger =
-                plan::build_loaded_context_ledger(vec![plan::loaded_context_record(
+                build_loaded_context_ledger(vec![loaded_context_record(
                     "agent-doc.job.tsift-status",
                     "generated-state",
                     &root.display().to_string(),
@@ -1262,7 +1265,7 @@ fn collect_tsift_context(
                 .context("failed to parse tsift context-pack JSON")?;
             let bytes = output.stdout.len();
             let mut ledger_entries = summary.loaded_context_ledger.entries.clone();
-            ledger_entries.push(plan::loaded_context_record(
+            ledger_entries.push(loaded_context_record(
                 "agent-doc.job.context-pack",
                 "generated-state",
                 &file.display().to_string(),
@@ -1271,7 +1274,7 @@ fn collect_tsift_context(
                 "job_context_collection",
                 "materialize bounded tsift context-pack sidecar",
             ));
-            let loaded_context_ledger = plan::build_loaded_context_ledger(ledger_entries);
+            let loaded_context_ledger = build_loaded_context_ledger(ledger_entries);
             let sidecar = ContextSidecar {
                 contract_version: "agent-doc-tsift-context-sidecar-v1".to_string(),
                 job_id: job_id.to_string(),

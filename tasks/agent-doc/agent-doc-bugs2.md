@@ -26,7 +26,6 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
-🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -80,7 +79,7 @@ Verification completed:
 - `make install` — installed `agent-doc` and `libagent_doc.so`; installer marked 2 controllers to recycle at the next idle boundary.
 
 GitHub CI for `fee78f7a` is currently in progress: run `28485233701`.
-<!-- agent:boundary:1ce41454 -->
+<!-- agent:boundary:d163eda7 -->
 <!-- /agent:exchange -->
 ## Queue
 

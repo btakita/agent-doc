@@ -1288,15 +1288,81 @@ pub(crate) fn run_supervisor_auto_install(crate_root: &Path) -> Result<()> {
 const AUTO_INSTALL_MAX_ATTEMPTS: u32 = 3;
 const AUTO_INSTALL_RETRY_BACKOFF_SECS: u64 = 20;
 
+/// `#restartstderrbleed` — stdio wiring for an auto-install child process,
+/// duplicating `target_fd` for both the child's stdout and stderr and denying it
+/// stdin. Returns `(stdin, stdout, stderr)` ready to hand to
+/// [`std::process::Command`].
+///
+/// Why this exists: the route-owned supervisor renders the agent TUI into its own
+/// tmux pane via **fd1 (stdout)**, while only **fd2 (stderr)** is process-wide
+/// redirected to `.agent-doc/logs/supervisor-stderr.log` (`SupervisorStderrRedirect`).
+/// A `make install` child spawned with inherited stdio therefore sends `make`'s
+/// unsuppressed recipe echo (`cargo install --path ...`) and any cargo stdout
+/// straight to fd1 — i.e. straight into the agent pane, corrupting the live TUI /
+/// prompt during a supervisor/PCP restart. Pointing the child's stdout at a dup of
+/// the supervisor's stderr keeps that output on the same channel the rest of the
+/// build diagnostics already use (the redirected log when route-owned), and never
+/// on fd1. Nulling stdin stops a build sub-process from consuming forwarded
+/// operator keystrokes.
+#[cfg(unix)]
+fn auto_install_child_stdio_to_fd(
+    target_fd: std::os::fd::RawFd,
+) -> (
+    std::process::Stdio,
+    std::process::Stdio,
+    std::process::Stdio,
+) {
+    use std::os::fd::FromRawFd;
+    use std::process::Stdio;
+    // NEVER inherit: a failed dup falls back to a discard sink, not fd1.
+    let dup_target = || -> Stdio {
+        let fd = unsafe { libc::dup(target_fd) };
+        if fd < 0 {
+            Stdio::null()
+        } else {
+            unsafe { Stdio::from_raw_fd(fd) }
+        }
+    };
+    (Stdio::null(), dup_target(), dup_target())
+}
+
+/// Default auto-install child stdio: route stdout+stderr to a dup of the current
+/// process stderr (the redirected supervisor log when route-owned) and deny stdin.
+#[cfg(unix)]
+fn auto_install_child_stdio() -> (
+    std::process::Stdio,
+    std::process::Stdio,
+    std::process::Stdio,
+) {
+    auto_install_child_stdio_to_fd(libc::STDERR_FILENO)
+}
+
+/// Non-unix has no route-owned pane fd-multiplexing model; still keep build stdout
+/// off the parent stdout and deny stdin, while letting stderr through for logs.
+#[cfg(not(unix))]
+fn auto_install_child_stdio() -> (
+    std::process::Stdio,
+    std::process::Stdio,
+    std::process::Stdio,
+) {
+    use std::process::Stdio;
+    (Stdio::null(), Stdio::null(), Stdio::inherit())
+}
+
 /// Run the auto-install sequence ONCE through `make install`. The Makefile owns
 /// the local-dev profile, incremental target dir, linker selection, and cdylib
 /// install flags. The target is idempotent, so retrying it is safe.
 fn run_auto_install_steps_once(crate_root: &Path) -> Result<()> {
     let steps: [(&str, &[&str]); 1] = [("make", &["install"])];
     for (program, args) in steps {
+        // `#restartstderrbleed` — never inherit stdio: fd1 is the agent pane.
+        let (stdin, stdout, stderr) = auto_install_child_stdio();
         let status = std::process::Command::new(program)
             .args(args)
             .current_dir(crate_root)
+            .stdin(stdin)
+            .stdout(stdout)
+            .stderr(stderr)
             .status()
             .with_context(|| format!("failed to spawn `{program} {}`", args.join(" ")))?;
         if !status.success() {
@@ -4705,6 +4771,53 @@ mod tests {
     // directly to assert the schema/rows the seam writes. `Connection` is the
     // `state_store` re-export already in scope via `super::*`.
     use agent_doc_sqlite::state_store::{load_actor_transitions_from_db, sqlite_i64};
+
+    /// `#restartstderrbleed` — the auto-install child must NOT inherit the
+    /// supervisor's fd1 (the agent pane). Prove that `make install`-style output
+    /// on BOTH stdout and stderr is redirected to the supervisor-log target fd,
+    /// never left on the parent's stdout where it would corrupt the agent TUI.
+    #[cfg(unix)]
+    #[test]
+    fn auto_install_child_stdio_redirects_stdout_off_the_pane() {
+        use std::io::Read;
+        use std::os::fd::AsRawFd;
+
+        let tmp = tempfile::NamedTempFile::new().expect("temp log file");
+        let log = std::fs::OpenOptions::new()
+            .write(true)
+            .open(tmp.path())
+            .expect("open temp log for write");
+
+        // Wire the probe child exactly as the auto-install path does, but at a
+        // caller-controlled target fd (a temp file standing in for the redirected
+        // supervisor-stderr.log) so the test never perturbs the harness fds.
+        let (stdin, stdout, stderr) = auto_install_child_stdio_to_fd(log.as_raw_fd());
+        let status = std::process::Command::new("sh")
+            .args(["-c", "echo BLEED_STDOUT; echo BLEED_STDERR 1>&2"])
+            .stdin(stdin)
+            .stdout(stdout)
+            .stderr(stderr)
+            .status()
+            .expect("spawn probe child");
+        assert!(status.success(), "probe child exited non-zero: {status}");
+
+        let mut captured = String::new();
+        std::fs::File::open(tmp.path())
+            .expect("reopen temp log")
+            .read_to_string(&mut captured)
+            .expect("read temp log");
+
+        // The child's stdout was routed to the log target (a dup of the
+        // supervisor stderr), NOT inherited onto fd1 / the pane.
+        assert!(
+            captured.contains("BLEED_STDOUT"),
+            "child stdout must land on the supervisor-log target, not the agent pane: {captured:?}"
+        );
+        assert!(
+            captured.contains("BLEED_STDERR"),
+            "child stderr must land on the supervisor-log target: {captured:?}"
+        );
+    }
 
     #[test]
     fn auto_install_should_retry_while_attempts_remain() {

@@ -2,6 +2,7 @@
 agent_doc_session: aaca1487-6409-4c94-88d6-97b579485190
 agent_doc_format: template
 agent_doc_write: crdt
+claude_model: opus
 claude_args: --dangerously-skip-permissions
 links:
   - ../professional/judith-krug.md
@@ -259,7 +260,6 @@ Please transcribe and diarize these phone calls:
 [phone_20260326-005855_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260326-005855_3109684542.amr)
 [phone_20260324-214531_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260324-214531_3109684542.amr)
 [phone_20260324-005235_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260324-005235_3109684542.amr)
-[phone_20260321-051012_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260321-051012_3109684542.amr)
 [phone_20260321-051012_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260321-051012_3109684542.amr)
 [phone_20260321-051112_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260321-051112_3109684542.amr)
 [phone_20260322-022648_3109684542.amr](../../mail/contacts/robert-ward/recordings/phone_20260322-022648_3109684542.amr)
@@ -522,10 +522,10 @@ Re-transcribed all 17 calls using Whisper large-v3-turbo + RTX 5090 CUDA (74–1
 - Ian has PTSD from prison, depression
 - Consistently following up with Judith on Brian's behalf
 
-Please transcribe + diarize:
-/home/brian/work/btakita/agent-loop/mail/contacts/robert-ward/recordings/phone_20260330-040607_3109684542.amr
-/home/brian/work/btakita/agent-loop/mail/contacts/robert-ward/recordings/phone_20260330-212922_3109684542.amr
-/home/brian/work/btakita/agent-loop/mail/contacts/robert-ward/recordings/phone_20260401-042624_3109684542.amr
+❯ Please transcribe + diarize:
+❯ /home/brian/work/btakita/agent-loop/mail/contacts/robert-ward/recordings/phone_20260330-040607_3109684542.amr
+❯ /home/brian/work/btakita/agent-loop/mail/contacts/robert-ward/recordings/phone_20260330-212922_3109684542.amr
+❯ /home/brian/work/btakita/agent-loop/mail/contacts/robert-ward/recordings/phone_20260401-042624_3109684542.amr
 ### Re: Transcriptions (Mar 30 - Apr 1, 2026)
 
 **Call 1: Mar 30, 4:06am ET (37:38)** — Diarization failed (single-channel AMR)
@@ -612,8 +612,8 @@ Please transcribe + diarize:
 
 Corrected. You spent $400 on groceries at Whole Foods yourself.
 
-Where are the 3 most recent transcript files?
-Please print the paths.
+❯ Where are the 3 most recent transcript files?
+❯ Please print the paths.
 ### Re: Transcript file paths
 
 The 3 most recent **transcribed** recordings (.txt files):
@@ -624,10 +624,10 @@ The 3 most recent **transcribed** recordings (.txt files):
 
 Note: The 3 most recent recordings (Apr 1, Mar 30 x2) don't have transcripts yet. You can generate them with `corky transcribe --diarize --speakers "Brian,Robert"`.
 
-What about the transcripts for?
-/home/brian/work/btakita/agent-loop/mail/contacts/robert-ward/recordings/phone_20260330-040607_3109684542.amr
-/home/brian/work/btakita/agent-loop/mail/contacts/robert-ward/recordings/phone_20260330-212922_3109684542.amr
-/home/brian/work/btakita/agent-loop/mail/contacts/robert-ward/recordings/phone_20260401-042624_3109684542.amr
+❯ What about the transcripts for?
+❯ /home/brian/work/btakita/agent-loop/mail/contacts/robert-ward/recordings/phone_20260330-040607_3109684542.amr
+❯ /home/brian/work/btakita/agent-loop/mail/contacts/robert-ward/recordings/phone_20260330-212922_3109684542.amr
+❯ /home/brian/work/btakita/agent-loop/mail/contacts/robert-ward/recordings/phone_20260401-042624_3109684542.amr
 ### Re: Transcript file paths
 
 The 3 most recent **transcribed** recordings (.txt files):
@@ -639,7 +639,7 @@ The 3 most recent **transcribed** recordings (.txt files):
 Note: The 3 most recent recordings (Apr 1, Mar 30 x2) don't have transcripts yet. You can generate them with `corky transcribe --diarize --speakers "Brian,Robert"`.
 
 transcribe + diarize using the gpu
-I already did that. Why were the transcripts not written to files?
+❯ I already did that. Why were the transcripts not written to files?
 ### Re: Transcription
 
 Done. All 3 recordings transcribed with GPU + diarization and saved:
@@ -650,7 +650,7 @@ Done. All 3 recordings transcribed with GPU + diarization and saved:
 
 Note: Diarization only succeeded on the Mar 30 evening call (short call, clear speaker turns). The other two produced 0 diarization segments, so the text is attributed to "Unknown" as a single block. This sometimes happens with longer AMR recordings where speaker boundaries are less distinct.
 
-Can the diarization for the longer blocks be fixed? What if we segment the audio into chunks?
+❯ Can the diarization for the longer blocks be fixed? What if we segment the audio into chunks?
 ### Re: Chunked diarization
 
 Splitting into 10-minute chunks and re-diarizing worked well:
@@ -686,7 +686,7 @@ More diarized speaker turns recovered from the 30s-90s range. The remaining 3+1 
 
 The transcripts are updated in place. Those first-30s Unknown blocks are just a few sentences of audio each.
 
-Can we use the transcribed content to infer who said what?
+❯ Can we use the transcribed content to infer who said what?
 ### Re: Inferring Unknown speakers
 
 Read the content of each Unknown segment and used context clues to attribute them:
@@ -701,7 +701,7 @@ All 4 Unknown segments replaced with **Brian**. Final counts:
 - **Mar 30 AM:** 102 Brian + 96 Robert + 0 Unknown
 
 100% speaker attribution across all 3 transcripts.
-Please include confidence % for the inference.
+❯ Please include confidence % for the inference.
 ### Re: Inference confidence
 
 1. **Apr 1 #1** "hello hey Robert good morning" → Brian — **95%** confidence. "Hey Robert" is a direct address, meaning the speaker is NOT Robert. Next diarized segment starts with Brian.
@@ -712,8 +712,8 @@ Please include confidence % for the inference.
 
 4. **Mar 30 AM #1** "Hey. Hey. It seems that I have two numbers for you" → Brian — **85%** confidence. "I have two numbers for you" implies the speaker saved two contacts for the listener. Robert has one phone + one Google Voice number. Brian is the one who would have saved both, noticing the duplicate. Slightly less certain because Robert could be saying "you have two numbers for me" in a colloquial way.
 
-Please update tasks/software/corky.md to add to `corky transcribe` the algorithm that we just used to attribute unknown speakers in diarized transcriptions.
-Make sure this algorithm is deterministic and in the binary.
+❯ Please update tasks/software/corky.md to add to `corky transcribe` the algorithm that we just used to attribute unknown speakers in diarized transcriptions.
+❯ Make sure this algorithm is deterministic and in the binary.
 ### Re: corky.md updated
 
 Added the adaptive chunked diarization algorithm to `tasks/software/corky.md`:
@@ -724,5 +724,54 @@ Added the adaptive chunked diarization algorithm to `tasks/software/corky.md`:
   - `corky transcribe --resolve-unknown` — LLM-based speaker attribution
 
 The algorithm documents exactly what we did here: progressive splitting + contextual inference for the remaining Unknown segments.
-<!-- agent:boundary:a7415878 -->
+How can robert-ward's friend Karen get out of a speeding ticket she received on the PCD after the Malibu Fires. The speed limit was temporarily lowered from 45 mph to 25 mph.
+
+```
+I would like to respectfully explain the circumstances regarding the speeding ticket I received on Pacific Coast Highway around July 2025.
+According to the officer, I was driving 40 mph in an area where the speed limit had suddenly changed to 25 mph. I was unfamiliar with the area and had not driven there since the devastating fires. I had returned to the area for the first time in order to support a close friend who had been directly affected by the fires and their aftermath.
+At the time, I genuinely did not realize that the speed limit had changed so abruptly. There was no intention to drive recklessly or unsafely, and I have always tried to be a careful and respectful driver.
+The original court date was postponed, and my most recent court date was scheduled for May 30, 2026. Unfortunately, around that time I was also experiencing significant hip pain and I asked the judge to postpone my ticket again and she agreed.
+My next court appearance is scheduled for Thursday, July 2, 2026, at 1:30 PM at the Santa Monica Courthouse
+```
+
+### Re: Karen's PCH speeding ticket — Santa Monica Court, Jul 2 — opus-4-8
+
+General info, not legal advice — but here's the practical playbook. The single most important thing first: **Karen's draft statement is a *mitigation* letter, not a *defense*.** It admits she drove 40 in a 25. Handed to a judge, that's effectively pleading guilty and asking for mercy. That's a legitimate strategy, but she should choose her path *on purpose*, because the two paths need opposite letters.
+
+**Fix the label first:** it's the **PCH** (Pacific Coast Highway), and the ticket is on **PCH**, not "PCD" — get the road name right on anything filed.
+
+#### Path A — Fight to dismiss (plead not guilty)
+This is the path with a real shot at zero fine and zero point. Do **not** admit the speed. Angles, strongest first:
+
+1. **Signage / notice of the temporary limit.** A prima-facie speed limit in California is only enforceable if it's properly posted and legally authorized. A limit dropped abruptly from 45 to 25 after the fires is exactly the kind of temporary change that's often under-signed. Karen should go back (or use Google Street View for the citation date) and photograph: how many 25 signs, spacing, visibility, whether there was any "reduced speed ahead" warning. If a driver couldn't reasonably know, that's the defense.
+2. **Was the reduction properly enacted?** Emergency/temporary limits need an actual authorizing order (Caltrans on PCH, or the city). Ask — in writing before trial (informal discovery request to the officer/agency) — for the engineering/traffic survey or the emergency order justifying 25 mph, plus the radar/lidar unit's **calibration and officer certification records**. Missing paperwork = leverage.
+3. **Speed-trap argument.** If radar was used where the posted limit isn't backed by a current engineering & traffic survey, radar evidence can be inadmissible (CVC 40801-40802). Weaker in a genuine emergency zone, but worth raising if the "temporary" limit had no survey behind it.
+4. **Officer no-show.** At an in-person trial, if the citing officer doesn't appear, the case is dismissed. On PCH post-fire, officer availability is a real variable.
+
+Mechanism: she can plead not guilty and either (a) do an in-person trial, or (b) file a **Trial by Written Declaration (form TR-205)** — contest entirely by mail, no court appearance, and if she loses she gets a **new trial (trial de novo, TR-220)** as a second bite. TR-205 is low-risk and pairs perfectly with the signage argument.
+
+#### Path B — Mitigation (what her current draft is)
+Only choose this if she'd rather not fight. Two better sub-options than just reading the letter:
+- **Traffic school.** If she hasn't done it in the last 18 months, ask the judge/clerk. She still pays, but the **point stays off her record** (insurance protection). Usually the smart default if she doesn't want a trial.
+- **Reduction.** Ask the judge to reduce to a **non-moving violation** or lower the fine given the circumstances. The mitigation letter supports this.
+
+⚠️ One caution: fire-recovery / construction zones sometimes carry **doubled fines**. Check the ticket — if there's a zone enhancement, that raises the stakes and makes Path A more worth it.
+
+#### On her draft statement
+It reads well and is sympathetic, but as written it only helps Path B, and it has two soft spots:
+- It says the stop was **"around July 2025"** yet the next court date is **July 2026** — a 12-month gap. If that date is real, the long delay from citation to trial is itself an *asset* (witness memory, officer availability) — but don't headline a wrong date; confirm the actual citation date from the ticket.
+- Unfamiliarity and "supporting a friend affected by the fires" are emotionally strong but **legally irrelevant to guilt**. They're pure mitigation. Keep them for Path B; drop them for Path A.
+
+**My recommendation:** file a **Trial by Written Declaration (Path A)** built around inadequate signage/notice of the abrupt 25 mph limit, and request the agency's authorizing order + radar calibration. It costs only the bail deposit (refunded if she wins), needs no court appearance, and if it fails she still gets a fresh trial and can *then* fall back to traffic school. If she just wants this over with, skip straight to asking for traffic school on July 2.
+
+Here are tightened versions for each path — want me to drop these into the doc as ready-to-send drafts?
+
+**Path A (not-guilty / written declaration) — omits any admission:**
+> On [date], I received a citation on Pacific Coast Highway for allegedly exceeding a 25 mph limit. This stretch of PCH normally carries a 45 mph limit; the 25 mph limit was a temporary reduction following the Malibu Fires. I dispute that the temporary limit was posted with adequate signage and advance notice for a driver to reasonably observe it, and I request the engineering/traffic survey or emergency order authorizing the reduced limit, along with the calibration records for the speed-measuring device and the officer's certification. I plead not guilty.
+
+**Path B (mitigation) — cleaned up, drop the wrong year:**
+> I respectfully explain the circumstances of my citation on Pacific Coast Highway. I was cited for driving 40 mph where the limit had recently been reduced to 25 mph. I was returning to the area for the first time since the fires to support a close friend affected by them, was unfamiliar with the abrupt change, and had no intent to drive unsafely. My prior court dates were postponed, most recently due to significant hip pain, with the judge's agreement. I ask the court's leniency and, if eligible, permission to attend traffic school.
+
+Tell me which path Karen wants and I'll finalize the exact filing text (and pull the current TR-205/TR-220 forms and Santa Monica courthouse filing details).
+<!-- agent:boundary:e8eeb49d -->
 <!-- /agent:exchange -->

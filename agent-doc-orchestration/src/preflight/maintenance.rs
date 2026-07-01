@@ -1514,32 +1514,32 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         // Restrict the sync to ids already present as queue heads so captured
         // follow-ups wait for the NEXT activation instead of joining mid-loop. A
         // fresh activation (queue not yet active) still mirrors the full backlog.
-        let persisted_active_incoming = frontmatter::parse(&content)
-            .map(|(fm, _)| fm.queue_active.unwrap_or(false))
+        let incoming_frontmatter = frontmatter::parse(&content).ok().map(|(fm, _)| fm);
+        let persisted_active_incoming = incoming_frontmatter
+            .as_ref()
+            .and_then(|fm| fm.queue_active)
             .unwrap_or(false);
         // `#backlog-queue-empty-active-repopulate`: gate the empty-active-queue
-        // repopulation on the queue's `go` control. `go` (frontmatter `queue: go`
-        // or a marker-side `go`/`start` token, both → `QueueControl::Start`) opts
+        // repopulation on the queue's explicit `go` control. `go` (frontmatter
+        // `queue: go` or a marker-side `go` token) opts
         // into continuous-backlog-loop: when the live queue is fully drained (0
         // un-struck prompts), repopulate from the full active backlog instead of
-        // holding. Without `go` (a plain persisted-active queue), keep the
+        // holding. Without `go` (including a plain `queue: start` activation or
+        // persisted-active queue), keep the
         // drain-then-stop hold. Amplification can't occur with 0 live prompts, and
         // `active_item_ids` returns only Open `[ ]` items, so processed items
         // (marked `[/]`/`[x]` per the `do #id` closeout rule) drop out and the
         // loop converges when no Open backlog item remains.
-        let queue_go_mode = matches!(
-            agent_doc_queue::document_queue::marker_control(&comp.attrs),
-            Some(agent_doc_frontmatter::frontmatter::QueueControl::Start)
-        ) || frontmatter::parse(&content)
-            .ok()
-            .and_then(|(fm, _)| fm.queue)
-            .and_then(|q| agent_doc_frontmatter::frontmatter::QueueControl::parse(&q))
-            .map(|c| matches!(c, agent_doc_frontmatter::frontmatter::QueueControl::Start))
-            .unwrap_or(false);
+        let queue_go_mode = explicit_queue_go_mode(
+            &comp.attrs,
+            incoming_frontmatter
+                .as_ref()
+                .and_then(|fm| fm.queue.as_deref()),
+        );
         // `#backlog-queue-attr-populates-in-go-mode`: a plain persisted-active
-        // queue (no `go`/`start`) still holds freshly-added backlog ids out of the
+        // queue (no explicit `go`) still holds freshly-added backlog ids out of the
         // running loop to avoid mid-loop amplification. But a `go`-mode queue
-        // (`queue: go`/`start`) is an explicit continuous-backlog-loop opt-in: the
+        // (`queue: go` or marker-side `go`) is an explicit continuous-backlog-loop opt-in: the
         // `queue` backlog attribute is *supposed* to populate the queue, so fresh
         // backlog ids append immediately (not only when the queue fully drains).
         // Append/Prepend stay idempotent (existing + struck `Completed` ids are
@@ -2967,15 +2967,7 @@ pub(crate) fn sync_same_cycle_pending_adds_into_go_queue(file: &Path) -> Result<
     };
 
     let (fm, _) = frontmatter::parse(&content).unwrap_or_default();
-    let queue_control = fm
-        .queue
-        .as_deref()
-        .and_then(agent_doc_frontmatter::frontmatter::QueueControl::parse);
-    let marker_control = agent_doc_queue::document_queue::marker_control(&queue_component.attrs);
-    let queue_go_mode = matches!(
-        marker_control.or(queue_control),
-        Some(agent_doc_frontmatter::frontmatter::QueueControl::Start)
-    );
+    let queue_go_mode = explicit_queue_go_mode(&queue_component.attrs, fm.queue.as_deref());
     let queue_active = fm.queue_active.unwrap_or(false) || queue_go_mode;
     if !queue_active || !queue_go_mode {
         return Ok(Vec::new());
@@ -3093,6 +3085,14 @@ pub(crate) fn sync_same_cycle_pending_adds_into_go_queue(file: &Path) -> Result<
         synced_ids.len()
     );
     Ok(synced_ids)
+}
+
+fn explicit_queue_go_mode(
+    attrs: &std::collections::HashMap<String, String>,
+    frontmatter_queue: Option<&str>,
+) -> bool {
+    attrs.contains_key("go")
+        || frontmatter_queue.is_some_and(|raw| raw.trim().eq_ignore_ascii_case("go"))
 }
 
 /// `#fccqueue`: persist a queue-maintenance document mutation without provoking
@@ -4072,6 +4072,47 @@ mod tests {
         );
     }
     #[test]
+    fn run_queue_maintenance_queue_start_without_go_holds_fresh_backlog() {
+        // `queue: start` is the durable active-state spelling for a normal queue
+        // run, not a continuous-backlog-loop opt-in. Only explicit `go` should
+        // append freshly-added backlog `queue` items into an already-running queue.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior - gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority preset=\"#spec-test-build-install-commit-push\" -->\n",
+            "- do [#alpha]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog queue=append -->\n",
+            "- [ ] [#alpha] already running\n",
+            "- [ ] [#beta] freshly added mid-loop\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let updated_state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+
+        assert!(
+            !updated.contains("do [#beta]"),
+            "queue:start without marker/frontmatter go must hold fresh backlog ids:\n{updated}"
+        );
+        assert!(
+            updated_state.synced_queue_ids.is_empty(),
+            "non-go queue must not report newly synced ids: {:?}",
+            updated_state.synced_queue_ids
+        );
+    }
+    #[test]
     fn run_queue_maintenance_routes_through_ipc_without_disk_write_when_listener_active() {
         // #fccqueue: with a live JB editor listener owning the document, queue
         // maintenance must NOT raw-write the session doc to disk (the every-cycle
@@ -4227,7 +4268,8 @@ mod tests {
     fn closeout_sync_holds_same_cycle_pending_add_without_go_mode() {
         // The old amplification guard still applies to a plain persisted-active
         // queue: same-cycle captures wait for a later activation unless the
-        // operator opted into go/start continuous backlog drain.
+        // operator opted into explicit `go` continuous backlog drain. `queue:
+        // start` alone is just the durable active-state spelling.
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let content = concat!(
@@ -4235,7 +4277,7 @@ mod tests {
             "agent_doc_session: test\n",
             "agent_doc_format: template\n",
             "agent_doc_write: crdt\n",
-            "queue_active: true\n",
+            "queue: start\n",
             "---\n\n",
             "<!-- agent:queue priority -->\n",
             "- do [#head]\n",

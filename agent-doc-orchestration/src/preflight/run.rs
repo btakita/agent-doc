@@ -51,6 +51,8 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // agent-doc's own just-written disk content can never override disk here.
     // With no editor attached (the common/CI case) this returns disk unchanged.
     let content = crate::realtime_model::resolve_current_doc(file, &disk).content;
+    let pre_mutation_unresolved_exchange_prompt =
+        agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(&content);
     let rc = crate::graph::RunContext::new(file.to_path_buf());
     let (initial_frontmatter, _) =
         frontmatter_io::parse_for_file_with_context(&content, file, &rc)?;
@@ -761,6 +763,52 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         classification = None;
         eprintln!("[preflight] queue: absorbed non-selected queue edit into future queue state");
     }
+    let diff_has_prompt_bearing_changes = diff_result.as_deref().is_some_and(|d| {
+        diff::classify_prompt_bearing_changes(d)
+            .iter()
+            .any(|change| {
+                matches!(
+                    change.kind,
+                    agent_doc_diff::PromptBearingChangeKind::PromptTarget
+                        | agent_doc_diff::PromptBearingChangeKind::ContentEdit
+                )
+            })
+    });
+    if !diff_has_prompt_bearing_changes {
+        let unresolved_exchange_prompt = match pre_mutation_unresolved_exchange_prompt.clone() {
+            Some(prompt) => Some(prompt),
+            None => match crate::session_check::unresolved_exchange_prompt(file) {
+                Ok(prompt) => prompt,
+                Err(err) => {
+                    warnings.push(PreflightWarning {
+                        code: "unresolved_exchange_prompt_unavailable".to_string(),
+                        message: format!(
+                            "could not inspect unresolved exchange prompt before queue selection: {err}"
+                        ),
+                        document_agent: None,
+                        active_harness: None,
+                    });
+                    None
+                }
+            },
+        };
+        if let Some(unresolved) = unresolved_exchange_prompt
+            && !unresolved.trim().is_empty()
+        {
+            let unresolved = unresolved.trim();
+            let prompt_source = if unresolved.starts_with('❯') {
+                unresolved.to_string()
+            } else {
+                format!("❯ {unresolved}")
+            };
+            diff_result = Some(diff::synthetic_added_lines_diff(&prompt_source, "exchange"));
+            classification = diff_result.as_ref().map(|d| diff::classify_diff(d));
+            eprintln!(
+                "[preflight] queue: deferred active queue for unresolved exchange prompt \
+                 (#prompt-preempts-auto-queue)"
+            );
+        }
+    }
     // `#agent-doc-bug` auto-queue stall: when there is no real user/document diff
     // this cycle, an active queue head is synthesized as the cycle's prompt diff.
     // That synthetic head is queue *continuation*, not user intent — so it must
@@ -1273,6 +1321,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     if prompt_edit_independent_of_active_turn {
         user_intent_prompt_changes.clear();
     }
+    let exchange_prompt_preempts_queue = !user_intent_prompt_changes.is_empty();
 
     // #codex-owned-pane-prompt-miss-followups: surface a structured owner-pane
     // self-invocation contract so Codex guidance can drive an in-pane response
@@ -1292,13 +1341,14 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                 )
             })
             .map(|change| change.text.clone());
-        let suppress_active_queue_head = !diff_from_queue_head_only
-            && !prompt_bearing_changes.is_empty()
-            && user_intent_prompt_changes.is_empty()
-            && (prompt_edit_independent_of_active_turn
-                || op_affectedness.as_ref().is_some_and(|affectedness| {
-                    !affectedness.turn_affected && !affectedness.classified.is_empty()
-                }));
+        let suppress_active_queue_head = exchange_prompt_preempts_queue
+            || (!diff_from_queue_head_only
+                && !prompt_bearing_changes.is_empty()
+                && user_intent_prompt_changes.is_empty()
+                && (prompt_edit_independent_of_active_turn
+                    || op_affectedness.as_ref().is_some_and(|affectedness| {
+                        !affectedness.turn_affected && !affectedness.classified.is_empty()
+                    })));
         let current = std::fs::read_to_string(file).unwrap_or_default();
         match frontmatter_io::parse_for_file_with_context(&current, file, &rc) {
             Ok((owner_fm, _)) => match owner_fm.session.as_deref() {
@@ -1356,8 +1406,10 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // lets the `execve` recycle fire), and surface the recycle-yield guidance so
     // the agent understands the yield is intentional and resumes after recycle.
     let recycle_yield_pending = crate::recycle_yield::recycle_yield_pending(file);
+    let effective_queue_continuation_required =
+        queue_state.queue_continuation_required && !exchange_prompt_preempts_queue;
     let effective_continuation = agent_doc_queue::queue_continuation::effective_continuation_output(
-        queue_state.queue_continuation_required,
+        effective_queue_continuation_required,
         recycle_yield_pending,
         queue_state.queue_pause_reason.as_deref(),
     );
@@ -1448,7 +1500,11 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         gate_verify: gate_verify_results,
         agent_model,
         queue_prompts: queue_state.queue_prompts,
-        selected_queue_prompts: queue_state.selected_queue_prompts,
+        selected_queue_prompts: if exchange_prompt_preempts_queue {
+            Vec::new()
+        } else {
+            queue_state.selected_queue_prompts
+        },
         queue_active: queue_state.queue_active,
         queue_deferred: queue_state.queue_deferred,
         queue_start_at: queue_state.queue_start_at,
@@ -1939,6 +1995,58 @@ mod tests {
                 .iter()
                 .any(|target| target.contains("Operator follow-up")),
             "exchange edit must remain prompt-bearing: {:?}",
+            state.prompt_targets
+        );
+    }
+    #[test]
+    fn preflight_unresolved_exchange_tail_preempts_queue_even_when_snapshot_matches() {
+        // #prompt-preempts-auto-queue: a live unresolved exchange prompt is
+        // authoritative turn input even when it was already mirrored into the
+        // snapshot, leaving ordinary diff with no user-prompt delta. Preflight
+        // must synthesize the exchange prompt instead of selecting the active
+        // queue head.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: start\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior - gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:test -->\n",
+            "Please answer this exchange prompt before the queue.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority preset=\"#spec-test-build-install-commit-push\" -->\n",
+            "- do [#active]\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#active] active work\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        run(&doc).unwrap();
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_ne!(
+            state.queue_task_id.as_deref(),
+            Some("#active"),
+            "baselined unresolved exchange prompt must preempt active queue head"
+        );
+        assert!(
+            state
+                .prompt_targets
+                .iter()
+                .any(|target| target
+                    .contains("Please answer this exchange prompt before the queue.")),
+            "preflight should synthesize the unresolved exchange prompt: {:?}",
             state.prompt_targets
         );
     }

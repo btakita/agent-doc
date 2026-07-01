@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 pending_done_guard: warn
 agent_doc_lint_dialect: off
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -507,18 +507,57 @@ Done. The last response ("Deterministic software for 100% accuracy") recommended
 Both deliverables are committed (`9776c1e48`).
 
 Note: the task named `agent-doc-bugs2.md`, but the proposal/PDF work only fits this reitrades session — confirmed with you before proceeding. The `agent-doc-bugs2.md` session still has uncommitted working-tree drift from an interrupted IPC cycle; say the word if you want me to recover that one too.
-<!-- agent:boundary:01eb80e8 -->
+❯ What vendors have the most accurate document extraction? Can vendors help other aspects of the system?
+### Re: Document extraction vendors + build-vs-buy alternatives — opus-4-8
+
+Short version: **no vendor is "100% accurate" on messy CRE documents** — which is exactly why the deterministic-core + provenance-rubric architecture (§3a/§3b) holds. A vendor slots in as the *propose* layer; it never replaces the validators/confidence/review that make the "100%" claim honest. So the real questions are (a) which vendor gives the best raw extraction to feed that layer, and (b) where else you can buy instead of build for a bootstrapped client. Both below, as alternatives.
+
+#### 1. Document extraction — three alternatives
+
+The hard part on REItrades docs is financial tables (rent rolls, T-12s, OM financials), scanned/inconsistent PDFs, and a schema that varies by asset class. The alternatives differ in *how much you buy* vs. *how much you own*:
+
+**Alt A — Specialized parser API → your own schema fill (accuracy + control sweet spot).**
+Vendors: **Reducto**, **Azure AI Document Intelligence** (layout + custom extraction models), **Landing AI Agentic Document Extraction**, **Google Document AI**, **AWS Textract**.
+Best raw table/layout accuracy, and they return **bounding boxes / citations** — which map directly to your Grade-A "source-exact" provenance. You keep the schema mapping and validators. Reducto or Azure DI are the strongest on financial tables; Landing AI if you want visual grounding/citations out of the box.
+
+**Alt B — LLM-native structured extraction (most flexible, least lock-in).**
+Claude (Opus/Sonnet) or Gemini 2.5 with native PDF + structured outputs, filling the asset-class schema directly. Handles the long tail of weird layouts, adapts to new asset classes without retraining, and is one vendor for *both* extraction and generation. Cheapest to iterate. The catch is already covered in §3b: never let the model do arithmetic — it proposes fields, deterministic code computes the numbers and validates.
+
+**Alt C — Full managed IDP with built-in human-review queue (biggest build-hour cut).**
+Vendors: **Rossum**, **Docsumo**, **Nanonets**, **Sensible**, **Mindee**. These buy the extraction *and* the admin review UI + confidence + correction loop — a big chunk of the 45-100h extraction item plus part of the review-UI build. Docsumo and Rossum specifically target financial documents. Trade-offs: highest recurring per-page cost, least control over schema/grading, and another integration + data-residency surface.
+
+**Honesty note for the bid:** published accuracy numbers are vendor-reported and workload-specific — don't quote them to Artur. The §3a eval harness *is* the selection tool: run 2-3 candidates against a labeled sample of his real OMs/rent rolls, measure to the rubric thresholds, pick on data. I'd put that bake-off inside Phase-0 discovery so the vendor choice is evidence-based, not a guess.
+
+**Recommended default:** chain **Alt A → Alt B → deterministic validators** — a parser (Reducto/Azure) for accurate tables + citations, an LLM for the fuzzy/heterogeneous fields, then your validators and the A-D rubric gating what ships. It's the accuracy leader on money fields, gives citations for Grade-A provenance, and avoids single-vendor lock-in. Keep **Alt C** in your back pocket as the "cut upfront hours" lever if Artur prioritizes budget over control.
+
+#### 2. Where vendors reduce cost elsewhere (buy vs. build)
+
+Several estimate line items can be *bought* instead of built — presented as a menu, highest-leverage first:
+
+- **Demographics / market data (biggest win).** Instead of AI-*generating* demographics (an accuracy liability that's Grade-C by default), buy source-backed data: **US Census / ACS API (free)**, **Esri GeoEnrichment / ArcGIS**, **Attom Data**, **Precisely**, **Regrid** (parcels), **Placer.ai** (foot traffic). This turns demographics from "AI-inferred" into "source-exact," which is *cheaper and more accurate at the same time*, and directly shrinks the "improve demographics/data accuracy" item (32-75h) while de-risking the accuracy bar.
+- **Address validation / geocoding.** **Smarty**, **Google Address Validation**, or **Mapbox** — deterministic normalization that feeds the schema-validation layer as Grade-A. Small buy, removes a whole class of dirty-address bugs.
+- **Payments / tiers (18-38h).** **Stripe Payment Links** or the hosted pricing table — Stripe is already in the brief, so this is mostly configuration vs. a custom checkout build.
+- **Email status + engagement (the MailerLite items).** MailerLite's own API/webhooks already expose status + campaign engagement; buy the tracking rather than building it.
+- **OM / PDF rendering polish (20-50h).** Template-PDF vendors (**Anvil**, **Carbone**, **DocRaptor**, **Docmosis**, **Templated**) can offload rendering — *but* you already have Tera (deterministic, free). Only worth it if the cost there is design polish, not logic. Likely keep Tera; flag as optional.
+- **Broker license verification.** State license-lookup APIs exist but coverage is uneven; probably admin/manual for V1.2, not a buy.
+
+**The trade to state plainly to Artur:** every "buy" lowers build hours but adds recurring per-use cost — capex→opex. For a bootstrapped founder that's usually the *right* trade (lower upfront), but name the ongoing cost so it isn't a surprise. The two highest-leverage buys — **source-backed demographics data** and a **managed extraction/parser** — hit the two most expensive, least agent-compressible line items (AI extraction 45-100h, demographics accuracy 32-75h). That's where "buy vs. build" actually moves the bid.
+
+Want me to fold this into the estimate report as a short **§3c "Build vs. Buy / vendor options"** subsection plus a Phase-0 extraction bake-off line item, then regenerate the PDF? Queued that as a `[recommended]` follow-up — say the word and I'll do it.
+<!-- agent:boundary:bc17b795 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue -->
+/goal Implement backlog item(s): #k65j
 /goal Implement backlog item(s): #22tg
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#reibuyvsbuild] [recommended] Fold a "Build vs. Buy / vendor options" §3c into rei-trades/reitrades-v1.2-estimate-report.md (extraction: parser API vs LLM-native vs managed IDP; source-backed demographics; Stripe/MailerLite/geocode buys) + add a Phase-0 extraction bake-off line item, then regenerate the PDF.
 <!-- /agent:backlog -->
 
 ## Icebox

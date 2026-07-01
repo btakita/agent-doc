@@ -795,6 +795,7 @@ dependencies = [
  "agent-doc-hash",
  "agent-doc-supervisor",
  "anyhow",
+ "libc",
  "serde_json",
  "tempfile",
 ]

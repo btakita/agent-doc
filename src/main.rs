@@ -3457,7 +3457,7 @@ fn main() -> anyhow::Result<()> {
             } => {
                 #[cfg(unix)]
                 {
-                    use agent_doc_orchestration::supervisor_selfkill::{
+                    use agent_doc_supervisor_io::selfkill::{
                         SupervisorKillOutcome, drive_supervisor_kill, selfkill_grace,
                     };
                     let grace = grace_secs

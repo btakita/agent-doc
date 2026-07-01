@@ -97,7 +97,6 @@ pub mod startup_miss;
 pub mod status_cmd;
 pub mod stream;
 pub mod supervisor;
-pub mod supervisor_selfkill;
 pub mod sync;
 pub mod watch;
 pub mod write;

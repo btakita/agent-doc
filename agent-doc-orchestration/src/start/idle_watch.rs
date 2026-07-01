@@ -1175,7 +1175,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // force-killed externally instead (`#supkill-b`). Checked before the
                 // recycle decision so a kill request wins over a hot-reload.
                 if agent_doc_supervisor::selfkill::supervisor_self_kill_action(
-                    crate::supervisor_selfkill::self_kill_requested(&path),
+                    agent_doc_supervisor_io::selfkill::self_kill_requested(&path),
                     turn_boundary,
                 ) {
                     let child_pid = shared.child_pid.load(Ordering::Relaxed);
@@ -1190,7 +1190,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     eprintln!(
                         "[agent-doc] supervisor self-kill requested; tearing down the harness child and exiting"
                     );
-                    crate::supervisor_selfkill::clear_self_kill_request(&path);
+                    agent_doc_supervisor_io::selfkill::clear_self_kill_request(&path);
                     #[cfg(unix)]
                     if child_pid > 0 {
                         unsafe {

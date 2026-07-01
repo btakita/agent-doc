@@ -11883,9 +11883,14 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         );
     }
 
+    let supervisor_io_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/lib.rs")).unwrap();
+    assert!(
+        supervisor_io_lib.contains("pub mod selfkill;"),
+        "agent-doc-supervisor-io must expose supervisor selfkill effect IO through its owning module"
+    );
     let supervisor_selfkill =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/supervisor_selfkill.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/selfkill.rs")).unwrap();
     for forbidden_snippet in [
         "pub fn supervisor_self_kill_action(",
         "pub fn supervisor_force_kill_decision(",
@@ -11893,7 +11898,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     ] {
         assert!(
             !supervisor_selfkill.contains(forbidden_snippet),
-            "supervisor_selfkill must stay an effect adapter, not re-own pure self-kill policy: {forbidden_snippet}"
+            "supervisor selfkill IO must stay an effect adapter, not re-own pure self-kill policy: {forbidden_snippet}"
         );
     }
     let supervisor_selfkill_policy =
@@ -11949,6 +11954,16 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     );
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/supervisor_selfkill.rs")
+            .exists(),
+        "orchestration must not keep a supervisor_selfkill source module facade"
+    );
+    assert!(
+        !orchestration_lib.contains("pub mod supervisor_selfkill"),
+        "orchestration must not expose a supervisor_selfkill facade"
+    );
     for forbidden_snippet in [
         "pub fn start_session_retryable_during_recycle(",
         "fn start_session_retryable_during_recycle(",
@@ -12004,13 +12019,29 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     assert!(
         supervisor_selfkill
             .contains("agent_doc_supervisor::selfkill::start_route_owned_doc_from_args"),
-        "supervisor_selfkill should call focused route-owned cmdline parsing directly"
+        "supervisor selfkill IO should call focused route-owned cmdline parsing directly"
     );
     assert!(
         supervisor_selfkill
             .contains("agent_doc_supervisor::selfkill::supervisor_force_kill_decision"),
-        "supervisor_selfkill should call focused force-kill escalation policy directly"
+        "supervisor selfkill IO should call focused force-kill escalation policy directly"
     );
+    for relative in [
+        "src/main.rs",
+        "agent-doc-orchestration/src/project_controller/rpc.rs",
+        "agent-doc-orchestration/src/start/idle_watch.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("agent_doc_supervisor_io::selfkill"),
+            "{relative} should call focused supervisor selfkill IO directly"
+        );
+        assert!(
+            !source.contains("crate::supervisor_selfkill")
+                && !source.contains("agent_doc_orchestration::supervisor_selfkill"),
+            "{relative} must not call the removed orchestration supervisor_selfkill facade"
+        );
+    }
 
     let start_detection =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/detection.rs"))

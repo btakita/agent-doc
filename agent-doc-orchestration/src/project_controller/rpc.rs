@@ -4352,7 +4352,7 @@ fn spawn_supervisor_replacement_worker(work: SupervisorReplacementWork) -> Resul
 
 #[cfg(not(any(test, feature = "test-support")))]
 fn drive_supervisor_replacement_background(work: SupervisorReplacementWork) -> Result<()> {
-    let initial_pid = crate::supervisor_selfkill::supervisor_pid_for_doc(&work.file);
+    let initial_pid = agent_doc_supervisor_io::selfkill::supervisor_pid_for_doc(&work.file);
     let initial_host_stale = host_supervisor_stale_warning_for_doc(&work.file).is_some();
     let socket = crate::supervisor::ipc::socket_path(&work.project_root, &work.session_id);
     crate::ops_log::log_op(
@@ -4421,9 +4421,9 @@ fn drive_supervisor_replacement_background(work: SupervisorReplacementWork) -> R
             initial_host_stale
         ),
     );
-    let kill_outcome = crate::supervisor_selfkill::drive_supervisor_kill(
+    let kill_outcome = agent_doc_supervisor_io::selfkill::drive_supervisor_kill(
         &work.file,
-        crate::supervisor_selfkill::selfkill_grace(),
+        agent_doc_supervisor_io::selfkill::selfkill_grace(),
         false,
     )?;
     crate::ops_log::log_op(
@@ -4543,7 +4543,7 @@ fn wait_for_supervisor_replacement_completion(
 ) -> bool {
     let deadline = Instant::now() + supervisor_replacement_wait_timeout();
     while Instant::now() < deadline {
-        let current_pid = crate::supervisor_selfkill::supervisor_pid_for_doc(file);
+        let current_pid = agent_doc_supervisor_io::selfkill::supervisor_pid_for_doc(file);
         if let (Some(initial), Some(current)) = (initial_pid, current_pid)
             && initial != current
         {

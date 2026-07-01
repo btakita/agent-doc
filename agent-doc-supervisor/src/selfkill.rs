@@ -1,8 +1,8 @@
 //! Pure supervisor self-kill policy.
 //!
-//! The orchestration crate owns sentinel files, `/proc` reads, and process
-//! signalling. This module owns the side-effect-free decisions used by those
-//! adapters.
+//! The supervisor I/O crate owns sentinel files, `/proc` reads, and process
+//! signalling. This module owns the side-effect-free decisions used by that
+//! adapter.
 
 use std::path::PathBuf;
 use std::time::Duration;

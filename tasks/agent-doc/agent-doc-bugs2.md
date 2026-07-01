@@ -26,6 +26,7 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
+🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -71,7 +72,7 @@ You're right — that was a false `editor_typing_active` signal, and it's now fi
 **Follow-up (deeper, tracked):** the binary-side guard also fails closed ("visible editor buffer differs from expected disk state") when the live buffer diverges due to CRDT-replica churn rather than a real operator edit. Making that guard provenance-aware (re-merge on replica churn instead of demanding a save/discard) is a focused-cycle change and is filed as `#falsetyping-guard`.
 
 Also shipping this turn: the original **Compact Exchange uncommitted-summary** fix (`#jb-compact-editor-buffer-flush`, agent-doc 0.34.66) — flush the editor buffer to disk before the compact commit so the working tree matches HEAD. Code + test + spec committed and pushed; release binary rebuilt.
-<!-- agent:boundary:397705d5 -->
+<!-- agent:boundary:2a21c6da -->
 <!-- /agent:exchange -->
 ## Queue
 

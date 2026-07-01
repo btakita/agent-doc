@@ -12037,6 +12037,9 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         "pub fn is_index_lock_contention_text(",
         "pub fn render_git_process_output(",
         "pub fn parse_porcelain_path(",
+        "pub struct RecoveryTag",
+        "pub fn doc_stem(",
+        "pub fn parse_recovery_tags(",
     ] {
         assert!(
             git_policy_source.contains(required),
@@ -12082,6 +12085,26 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
     assert!(
         partial_staging.contains("use agent_doc_git::parse_porcelain_path;"),
         "partial_staging should call the focused git porcelain parser directly"
+    );
+
+    let checkpoint_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/checkpoint.rs")).unwrap();
+    for forbidden in [
+        "pub struct RecoveryTag",
+        "fn doc_stem(",
+        "fn parse_recovery_tags(",
+        "pub use agent_doc_git::RecoveryTag",
+        "pub(crate) use agent_doc_git::RecoveryTag",
+    ] {
+        assert!(
+            !checkpoint_source.contains(forbidden),
+            "checkpoint.rs must stay a git command adapter, not re-own or facade recovery tag policy: {forbidden}"
+        );
+    }
+    assert!(
+        checkpoint_source
+            .contains("use agent_doc_git::{RecoveryTag, doc_stem, parse_recovery_tags};"),
+        "checkpoint.rs should import focused recovery tag policy directly"
     );
 
     for relative in [

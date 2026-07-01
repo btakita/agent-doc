@@ -1,6 +1,5 @@
 // Process-global lock for the main (`agent-doc` bin) test binary. The orchestration
-// cluster moved to `agent-doc-orchestration` (which has its own crate-local lock keyed
-// on `harness_prompt::TEST_ENV_LOCK`); each crate's tests compile into a separate test
+// cluster moved to `agent-doc-orchestration`; each crate's tests compile into a separate test
 // process, so the CLI shell's env-mutating tests serialize on this lock.
 #[cfg(test)]
 pub(crate) static TEST_ENV_LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =

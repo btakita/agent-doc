@@ -6498,6 +6498,10 @@ fn test_agent_doc_prompt_contract_owns_prompt_contract_policy() {
     let focused_harness_prompt_source =
         fs::read_to_string(manifest_dir.join("agent-doc-prompt-contract/src/harness_prompt.rs"))
             .unwrap();
+    let harness_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-harness/src/lib.rs")).unwrap();
+    let harness_prompt_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-harness/src/prompt_source.rs")).unwrap();
     for required_snippet in [
         "pub fn prompt_requests_plan_work(",
         "pub fn prompt_requests_backlog_work(",
@@ -6535,6 +6539,35 @@ fn test_agent_doc_prompt_contract_owns_prompt_contract_policy() {
             "agent-doc-prompt-contract must own harness prompt parsing policy directly: {required_snippet}"
         );
     }
+    assert!(
+        harness_source.contains("pub mod prompt_source;"),
+        "agent-doc-harness must expose the effectful prompt source adapter"
+    );
+    for required_snippet in [
+        "pub fn synthetic_diff_for_file(",
+        "pub fn prompt_body_for_file(",
+        "load_prompt_for_current_session: impl FnOnce(&Path) -> Result<Option<String>>",
+        "load_prompt_for_current_session(&canonical)?",
+        "agent_doc_prompt_contract::harness_prompt::prompt_body_from_text",
+        "agent_doc_prompt_contract::harness_prompt::synthetic_diff_from_body",
+    ] {
+        assert!(
+            harness_prompt_source.contains(required_snippet),
+            "agent-doc-harness must own the effectful harness prompt source adapter: {required_snippet}"
+        );
+    }
+    for forbidden_snippet in [
+        "crate::codex_hook",
+        "agent_doc_orchestration",
+        "fn prompt_body_from_text(",
+        "fn synthetic_diff_from_body(",
+        "fn parse_agent_doc_invocation(",
+    ] {
+        assert!(
+            !harness_prompt_source.contains(forbidden_snippet),
+            "agent-doc-harness prompt source must inject effects and delegate pure parsing policy: {forbidden_snippet}"
+        );
+    }
 
     assert!(
         !manifest_dir
@@ -6542,12 +6575,22 @@ fn test_agent_doc_prompt_contract_owns_prompt_contract_policy() {
             .exists(),
         "orchestration must not keep a prompt_contract module or facade"
     );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/harness_prompt.rs")
+            .exists(),
+        "orchestration must not keep a harness_prompt module or facade"
+    );
 
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
     assert!(
         !orchestration_lib.contains("pub mod prompt_contract"),
         "orchestration must not expose prompt_contract as a module facade"
+    );
+    assert!(
+        !orchestration_lib.contains("pub mod harness_prompt"),
+        "orchestration must not expose harness_prompt as a module facade"
     );
     let preflight_semantic_diff = fs::read_to_string(
         manifest_dir.join("agent-doc-orchestration/src/preflight/semantic_diff.rs"),
@@ -6612,21 +6655,6 @@ fn test_agent_doc_prompt_contract_owns_prompt_contract_policy() {
             ],
         ),
         (
-            "agent-doc-orchestration/src/harness_prompt.rs",
-            vec![
-                "agent_doc_prompt_contract::harness_prompt::prompt_body_from_text",
-                "agent_doc_prompt_contract::harness_prompt::synthetic_diff_from_body",
-            ],
-            vec![
-                "enum InvocationKind",
-                "struct ParsedInvocation",
-                "fn prompt_body_from_text(",
-                "fn synthetic_diff_from_body(",
-                "fn parse_agent_doc_invocation(",
-                "fn same_file(",
-            ],
-        ),
-        (
             "agent-doc-orchestration/src/codex_hook.rs",
             vec!["agent_doc_prompt_contract::harness_prompt::agent_doc_invocation_file_from_text"],
             vec![
@@ -6651,6 +6679,32 @@ fn test_agent_doc_prompt_contract_owns_prompt_contract_policy() {
         }
     }
 
+    for (path, required_snippet) in [
+        (
+            "src/plan.rs",
+            "agent_doc_harness::prompt_source::synthetic_diff_for_file(",
+        ),
+        (
+            "agent-doc-orchestration/src/preflight/run.rs",
+            "agent_doc_harness::prompt_source::synthetic_diff_for_file(",
+        ),
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(path)).unwrap();
+        assert!(
+            source.contains(required_snippet),
+            "{path} should call the harness-owned prompt source adapter directly"
+        );
+        for forbidden_snippet in [
+            "agent_doc_orchestration::harness_prompt",
+            "crate::harness_prompt",
+        ] {
+            assert!(
+                !source.contains(forbidden_snippet),
+                "{path} must not call the retired orchestration harness_prompt facade"
+            );
+        }
+    }
+
     let orchestration_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
     let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
@@ -6658,6 +6712,19 @@ fn test_agent_doc_prompt_contract_owns_prompt_contract_policy() {
     assert!(
         orchestration_dependencies.contains_key("agent-doc-prompt-contract"),
         "orchestration must depend on the focused prompt-contract crate directly"
+    );
+
+    let harness_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-harness/Cargo.toml")).unwrap();
+    let harness: toml::Value = toml::from_str(&harness_manifest).unwrap();
+    let harness_dependencies = harness["dependencies"].as_table().unwrap();
+    assert!(
+        harness_dependencies.contains_key("agent-doc-prompt-contract"),
+        "agent-doc-harness must depend on the prompt-contract crate for pure harness prompt parsing"
+    );
+    assert!(
+        !harness_dependencies.contains_key("agent-doc-orchestration"),
+        "agent-doc-harness prompt source must not depend on orchestration for Codex hook loading"
     );
 
     let root_manifest = toml::from_str::<toml::Value>(&workspace_manifest).unwrap();

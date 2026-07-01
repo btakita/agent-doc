@@ -418,10 +418,12 @@ version = "0.34.66"
 dependencies = [
  "agent-doc-config",
  "agent-doc-frontmatter",
+ "agent-doc-prompt-contract",
  "agent-doc-secret-redact",
  "agent-doc-turn-executor",
  "agent-doc-turn-executor-tmux",
  "anyhow",
+ "tempfile",
 ]
 
 [[package]]

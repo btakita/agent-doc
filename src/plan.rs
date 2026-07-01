@@ -162,7 +162,10 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
 
     let doc_diff = diff_io::compute(file)?;
     let harness_diff = if doc_diff.is_none() {
-        agent_doc_orchestration::harness_prompt::synthetic_diff_for_file(file)?
+        agent_doc_harness::prompt_source::synthetic_diff_for_file(
+            file,
+            agent_doc_orchestration::codex_hook::load_prompt_for_current_session,
+        )?
     } else {
         None
     };

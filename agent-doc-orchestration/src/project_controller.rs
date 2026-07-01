@@ -5919,7 +5919,9 @@ agent:queue\n\
         // controller listening, the recycle RPC no-ops but the project-scoped orphan
         // reap must still fire (`caller=recycle`), so a recycle no longer leaves the
         // zombie behind for M1's later self-watchdog tick to clear.
-        let _env = crate::harness_prompt::TEST_ENV_LOCK.lock().unwrap();
+        let _env = agent_doc_harness::prompt_source::TEST_ENV_LOCK
+            .lock()
+            .unwrap();
         unsafe { std::env::set_var(STALE_PREPARING_CONTROLLER_SECS_ENV, "1") };
 
         let dir = tempfile::TempDir::new().unwrap();

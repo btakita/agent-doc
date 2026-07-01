@@ -27,6 +27,8 @@ use agent_doc_turn_executor_tmux::prompt::{
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
+pub mod prompt_source;
+
 /// How the supervisor builds args on restart after a crash.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RestartBehavior {

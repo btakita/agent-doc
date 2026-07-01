@@ -252,8 +252,8 @@ use agent_doc_workflow::session_cycle::{
     pending_kept_open_ids_from_mutations,
 };
 
-use crate::{
-    flow::document_mutation::{TemplateStructureGuardReason, log_template_structure_guard_event},
+use crate::flow::document_mutation::{
+    TemplateStructureGuardReason, log_template_structure_guard_event,
 };
 use agent_doc_flow::types::FlowOutcome;
 use agent_doc_frontmatter::frontmatter;

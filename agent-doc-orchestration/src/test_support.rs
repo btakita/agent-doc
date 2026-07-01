@@ -42,7 +42,7 @@ pub fn env_lock() -> ProcessGlobalLockGuard {
         return ProcessGlobalLockGuard { _guard: None };
     }
 
-    let guard = crate::harness_prompt::TEST_ENV_LOCK
+    let guard = agent_doc_harness::prompt_source::TEST_ENV_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     ProcessGlobalLockGuard {

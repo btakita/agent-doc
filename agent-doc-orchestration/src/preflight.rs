@@ -2342,7 +2342,9 @@ mod th {
     }
     impl EnvGuard {
         pub(crate) fn set(key: &'static str, value: &str) -> Self {
-            let lock = crate::harness_prompt::TEST_ENV_LOCK.lock().unwrap();
+            let lock = agent_doc_harness::prompt_source::TEST_ENV_LOCK
+                .lock()
+                .unwrap();
             let prev = std::env::var(key).ok();
             unsafe { std::env::set_var(key, value) };
             Self {

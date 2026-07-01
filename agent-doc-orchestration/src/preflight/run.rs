@@ -670,7 +670,10 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         save_baseline_content(file, &diff_result_with_current.current)
     };
     let raw_diff = diff_result_with_current.diff;
-    let harness_diff = crate::harness_prompt::synthetic_diff_for_file(file)?;
+    let harness_diff = agent_doc_harness::prompt_source::synthetic_diff_for_file(
+        file,
+        crate::codex_hook::load_prompt_for_current_session,
+    )?;
     let initial_diff = raw_diff.clone().or(harness_diff.clone());
 
     // Step 4a: Scan diff for inline `/model <x>` command and strip the matching

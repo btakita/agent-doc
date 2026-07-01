@@ -1,4 +1,4 @@
-//! # Module: harness_prompt
+//! # Module: prompt_source
 //!
 //! ## Spec
 //! - Resolves harness-side prompt text for a session document when the live file
@@ -20,12 +20,14 @@
 use anyhow::Result;
 use std::path::Path;
 
-#[cfg(test)]
 pub static TEST_ENV_LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
     std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
 
-pub fn synthetic_diff_for_file(file: &Path) -> Result<Option<String>> {
-    let Some(body) = prompt_body_for_file(file)? else {
+pub fn synthetic_diff_for_file(
+    file: &Path,
+    load_prompt_for_current_session: impl FnOnce(&Path) -> Result<Option<String>>,
+) -> Result<Option<String>> {
+    let Some(body) = prompt_body_for_file(file, load_prompt_for_current_session)? else {
         return Ok(None);
     };
     Ok(Some(
@@ -33,7 +35,10 @@ pub fn synthetic_diff_for_file(file: &Path) -> Result<Option<String>> {
     ))
 }
 
-pub fn prompt_body_for_file(file: &Path) -> Result<Option<String>> {
+pub fn prompt_body_for_file(
+    file: &Path,
+    load_prompt_for_current_session: impl FnOnce(&Path) -> Result<Option<String>>,
+) -> Result<Option<String>> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
 
     if let Ok(env_prompt) = std::env::var("AGENT_DOC_HARNESS_PROMPT")
@@ -45,7 +50,7 @@ pub fn prompt_body_for_file(file: &Path) -> Result<Option<String>> {
         return Ok(Some(body));
     }
 
-    if let Some(prompt) = crate::codex_hook::load_prompt_for_current_session(&canonical)?
+    if let Some(prompt) = load_prompt_for_current_session(&canonical)?
         && let Some(body) =
             agent_doc_prompt_contract::harness_prompt::prompt_body_from_text(&prompt, &canonical)
     {
@@ -117,7 +122,7 @@ mod tests {
             "AGENT_DOC_HARNESS_PROMPT",
             &format!("agent-doc {}", doc.display()),
         );
-        assert!(prompt_body_for_file(&doc).unwrap().is_none());
+        assert!(prompt_body_for_file(&doc, |_| Ok(None)).unwrap().is_none());
     }
 
     #[test]
@@ -128,7 +133,7 @@ mod tests {
             &format!("agent-doc {} #agent-doc-bug", doc.display()),
         );
         assert_eq!(
-            prompt_body_for_file(&doc).unwrap(),
+            prompt_body_for_file(&doc, |_| Ok(None)).unwrap(),
             Some("#agent-doc-bug".to_string())
         );
     }
@@ -144,7 +149,7 @@ mod tests {
             ),
         );
         assert_eq!(
-            prompt_body_for_file(&doc).unwrap(),
+            prompt_body_for_file(&doc, |_| Ok(None)).unwrap(),
             Some("do #abcd. spec-test-build-install-commit-push".to_string())
         );
     }
@@ -154,7 +159,7 @@ mod tests {
         let (_dir, doc) = setup_doc();
         let _prompt = EnvGuard::set("AGENT_DOC_HARNESS_PROMPT", "#agent-doc-bug");
         assert_eq!(
-            prompt_body_for_file(&doc).unwrap(),
+            prompt_body_for_file(&doc, |_| Ok(None)).unwrap(),
             Some("#agent-doc-bug".to_string())
         );
     }
@@ -167,7 +172,7 @@ mod tests {
             "AGENT_DOC_HARNESS_PROMPT",
             &format!("agent-doc {} #agent-doc-bug", other.display()),
         );
-        assert!(prompt_body_for_file(&doc).unwrap().is_none());
+        assert!(prompt_body_for_file(&doc, |_| Ok(None)).unwrap().is_none());
     }
 
     #[test]

@@ -1969,10 +1969,16 @@ Done.\n\
             format!("agent-doc {} #code-review", doc.display())
         );
 
-        let _lock = crate::harness_prompt::TEST_ENV_LOCK.lock().unwrap();
+        let _lock = agent_doc_harness::prompt_source::TEST_ENV_LOCK
+            .lock()
+            .unwrap();
         let prev = std::env::var("CODEX_THREAD_ID").ok();
         unsafe { std::env::set_var("CODEX_THREAD_ID", "codex-session") };
-        let loaded = crate::harness_prompt::prompt_body_for_file(&doc).unwrap();
+        let loaded = agent_doc_harness::prompt_source::prompt_body_for_file(
+            &doc,
+            load_prompt_for_current_session,
+        )
+        .unwrap();
         if let Some(value) = prev {
             unsafe { std::env::set_var("CODEX_THREAD_ID", value) };
         } else {
@@ -2023,7 +2029,9 @@ agent-doc {}\n",
         let doc = write_doc(&dir);
         track_doc(&dir, &doc, "turn-1");
 
-        let _lock = crate::harness_prompt::TEST_ENV_LOCK.lock().unwrap();
+        let _lock = agent_doc_harness::prompt_source::TEST_ENV_LOCK
+            .lock()
+            .unwrap();
         let prev = std::env::var("CODEX_THREAD_ID").ok();
         unsafe { std::env::set_var("CODEX_THREAD_ID", "codex-session") };
         let loaded = load_prompt_for_current_session(&doc).unwrap();
@@ -2663,7 +2671,9 @@ agent-doc {}\n",
         fs::write(&doc, &drifted).unwrap();
         track_doc(&dir, &doc, "turn-1");
 
-        let _lock = crate::harness_prompt::TEST_ENV_LOCK.lock().unwrap();
+        let _lock = agent_doc_harness::prompt_source::TEST_ENV_LOCK
+            .lock()
+            .unwrap();
         let prev = std::env::var("CODEX_THREAD_ID").ok();
         unsafe { std::env::set_var("CODEX_THREAD_ID", "codex-session") };
 
@@ -2786,7 +2796,9 @@ agent-doc {}\n",
         })
         .unwrap();
 
-        let _lock = crate::harness_prompt::TEST_ENV_LOCK.lock().unwrap();
+        let _lock = agent_doc_harness::prompt_source::TEST_ENV_LOCK
+            .lock()
+            .unwrap();
         let prev = std::env::var("CODEX_THREAD_ID").ok();
         unsafe { std::env::set_var("CODEX_THREAD_ID", "codex-session") };
 

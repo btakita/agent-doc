@@ -67,7 +67,6 @@ pub mod focus;
 pub mod gc;
 pub mod git;
 pub mod graph;
-pub mod harness_prompt;
 pub mod hooks;
 pub mod lint_gate;
 pub mod memory_cmd;

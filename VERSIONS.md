@@ -22,6 +22,9 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   orchestration to handle only transcript file discovery and reads. Drain-stall
   continuation-pending marker construction now lives in `agent-doc-turn`, with
   orchestration retaining only marker path, clock, JSON, and file IO.
+  Transcript-content context percentage policy now also lives in
+  `agent-doc-model-tier`; orchestration only reads transcript files and renders
+  the existing operator diagnostics.
 
 - **Pure helper layer extracted from orchestration.** Exchange shrink/ack retry
   and prompt-dedupe helpers now live in `agent-doc-element-exchange`; preflight

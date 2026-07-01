@@ -11,7 +11,7 @@
 //! This module owns one adapter phase:
 //! - **`#s760a`** — the harness-aware transcript locator + token reader. For
 //!   Claude Code, locate `~/.claude/projects/<project-hash>/<session-id>.jsonl`
-//!   and read the latest entry's cumulative `usage`. For Codex, locate the
+//!   and parse the latest entry's cumulative `usage`. For Codex, locate the
 //!   newest `~/.codex/sessions/**/rollout-*.jsonl` for the current project and
 //!   read the latest `token_count` event's `last_token_usage` plus
 //!   `model_context_window`. OpenCode transcript stores are not yet confirmed,
@@ -35,8 +35,8 @@
 //! - `latest_codex_transcript_picks_newest_matching_project`
 
 use agent_doc_model_tier::context_usage::{
-    Harness, UsedTokens, context_pct, parse_claude_jsonl_used_tokens,
-    parse_codex_jsonl_context_pct, parse_codex_jsonl_session_meta_cwd,
+    Harness, TranscriptContextPctDiagnostic, UsedTokens, parse_claude_jsonl_used_tokens,
+    parse_codex_jsonl_session_meta_cwd, transcript_context_pct_from_content,
 };
 use std::path::{Path, PathBuf};
 
@@ -44,7 +44,7 @@ use std::path::{Path, PathBuf};
 /// (`#s760a`). Claude -> parse JSONL; OpenCode -> `None` (unsupported until its
 /// transcript store is confirmed live, so the caller fails safe and never
 /// clears). Codex usage needs the event-provided context window, so callers use
-/// [`parse_codex_jsonl_context_pct`] through [`transcript_context_pct`] instead
+/// [`transcript_context_pct_from_content`] through [`transcript_context_pct`] instead
 /// of this raw token helper. A missing/unreadable file is `None`.
 pub fn read_used_tokens(harness: Harness, transcript: &Path) -> Option<UsedTokens> {
     match harness {
@@ -65,28 +65,28 @@ pub fn read_used_tokens(harness: Harness, transcript: &Path) -> Option<UsedToken
 /// (never clear) on any failure: unreadable/empty transcript, unsupported
 /// harness, or unknown model.
 pub fn transcript_context_pct(harness: Harness, transcript: &Path, model: &str) -> Option<f64> {
-    match harness {
-        Harness::Claude => {
-            let used = read_used_tokens(harness, transcript)?;
-            let pct = context_pct(used.total(), model);
-            if pct.is_none() {
-                eprintln!(
-                    "[s760] WARNING: unknown model {model:?}; context window unknown, ctx% None (never clears)"
-                );
-            }
-            pct
+    let content;
+    let result = match harness {
+        Harness::Claude | Harness::Codex => {
+            content = std::fs::read_to_string(transcript).ok()?;
+            transcript_context_pct_from_content(harness, &content, model)
         }
-        Harness::Codex => {
-            let content = std::fs::read_to_string(transcript).ok()?;
-            parse_codex_jsonl_context_pct(&content)
+        Harness::OpenCode => transcript_context_pct_from_content(harness, "", model),
+    };
+    match result.diagnostic {
+        Some(TranscriptContextPctDiagnostic::UnknownModel) => {
+            eprintln!(
+                "[s760] WARNING: unknown model {model:?}; context window unknown, ctx% None (never clears)"
+            );
         }
-        Harness::OpenCode => {
+        Some(TranscriptContextPctDiagnostic::UnsupportedHarness) => {
             eprintln!(
                 "[s760] transcript context reading unsupported for {harness:?}; ctx% None (never clears)"
             );
-            None
         }
+        None => {}
     }
+    result.pct
 }
 
 /// Locate the active Claude Code session transcript as the most-recently-modified

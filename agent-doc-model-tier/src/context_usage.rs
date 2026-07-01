@@ -133,6 +133,51 @@ pub fn context_pct(used: u64, model: &str) -> Option<f64> {
     context_pct_for_window(used, window)
 }
 
+/// Diagnostic reason for a transcript context-% miss.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TranscriptContextPctDiagnostic {
+    UnknownModel,
+    UnsupportedHarness,
+}
+
+/// Pure transcript context-% policy result.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TranscriptContextPct {
+    pub pct: Option<f64>,
+    pub diagnostic: Option<TranscriptContextPctDiagnostic>,
+}
+
+/// Parse transcript content and compute context-usage percentage for a harness.
+pub fn transcript_context_pct_from_content(
+    harness: Harness,
+    content: &str,
+    model: &str,
+) -> TranscriptContextPct {
+    match harness {
+        Harness::Claude => {
+            let Some(used) = parse_claude_jsonl_used_tokens(content) else {
+                return TranscriptContextPct {
+                    pct: None,
+                    diagnostic: None,
+                };
+            };
+            let pct = context_pct(used.total(), model);
+            let diagnostic = pct
+                .is_none()
+                .then_some(TranscriptContextPctDiagnostic::UnknownModel);
+            TranscriptContextPct { pct, diagnostic }
+        }
+        Harness::Codex => TranscriptContextPct {
+            pct: parse_codex_jsonl_context_pct(content),
+            diagnostic: None,
+        },
+        Harness::OpenCode => TranscriptContextPct {
+            pct: None,
+            diagnostic: Some(TranscriptContextPctDiagnostic::UnsupportedHarness),
+        },
+    }
+}
+
 fn json_u64_at(value: &serde_json::Value, path: &[&str]) -> u64 {
     let mut cursor = value;
     for key in path {
@@ -350,6 +395,59 @@ mod tests {
     #[test]
     fn context_pct_unknown_model_is_none() {
         assert!(context_pct(100_000, "gpt-5").is_none());
+    }
+
+    #[test]
+    fn transcript_context_pct_from_content_handles_claude_and_codex() {
+        let claude = transcript_context_pct_from_content(Harness::Claude, FIXTURE, "opus");
+        assert_eq!(
+            claude,
+            TranscriptContextPct {
+                pct: Some(100.0),
+                diagnostic: None
+            }
+        );
+
+        let codex_content = r#"{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":20000,"cached_input_tokens":10000,"output_tokens":0},"model_context_window":100000}}}
+"#;
+        let codex = transcript_context_pct_from_content(Harness::Codex, codex_content, "gpt-5");
+        assert_eq!(
+            codex,
+            TranscriptContextPct {
+                pct: Some(30.0),
+                diagnostic: None
+            }
+        );
+    }
+
+    #[test]
+    fn transcript_context_pct_from_content_reports_safe_misses() {
+        let unknown_model = transcript_context_pct_from_content(Harness::Claude, FIXTURE, "gpt-5");
+        assert_eq!(
+            unknown_model,
+            TranscriptContextPct {
+                pct: None,
+                diagnostic: Some(TranscriptContextPctDiagnostic::UnknownModel)
+            }
+        );
+
+        let empty_claude = transcript_context_pct_from_content(Harness::Claude, "", "opus");
+        assert_eq!(
+            empty_claude,
+            TranscriptContextPct {
+                pct: None,
+                diagnostic: None
+            }
+        );
+
+        let opencode = transcript_context_pct_from_content(Harness::OpenCode, "", "opus");
+        assert_eq!(
+            opencode,
+            TranscriptContextPct {
+                pct: None,
+                diagnostic: Some(TranscriptContextPctDiagnostic::UnsupportedHarness)
+            }
+        );
     }
 
     #[test]

@@ -3,7 +3,9 @@
 use agent_doc_element::{
     ElementAuthority, ElementCompositionRole, ElementDescriptor, ElementRealtimeModel,
     ElementSchedulingRole, ElementShape, ElementSource, ElementWritePolicy,
+    element::{self, Component},
 };
+use std::collections::HashSet;
 
 pub const DESCRIPTOR: ElementDescriptor = ElementDescriptor {
     name: "done",
@@ -58,6 +60,50 @@ pub fn render_done_archive_entry(today: &str, id: &str, text: &str, continuation
         }
     }
     entry
+}
+
+/// Extract each done item's own leading id from archive/done text.
+///
+/// Prose citations are ignored: a done item's identity is the first `[#id]` on
+/// its list-item line, not any bracketed ids mentioned in continuation text.
+pub fn collect_done_item_own_ids(text: &str) -> HashSet<String> {
+    let mut ids = HashSet::new();
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if !(trimmed.starts_with("- ") || trimmed.starts_with("* ")) {
+            continue;
+        }
+        if let Some(start) = trimmed.find("[#") {
+            let after = &trimmed[start + 2..];
+            if let Some(end) = after.find(']') {
+                let id = &after[..end];
+                if agent_doc_element_backlog::backlog::is_valid_pending_id(id) {
+                    ids.insert(id.to_ascii_lowercase());
+                }
+            }
+        }
+    }
+    ids
+}
+
+/// Extract done-item ids from a parsed `agent:done` component.
+pub fn collect_done_component_own_ids(document: &str, component: &Component) -> HashSet<String> {
+    if !DESCRIPTOR.matches_name(&component.name) {
+        return HashSet::new();
+    }
+    collect_done_item_own_ids(component.content(document))
+}
+
+/// Extract done-item ids from every `agent:done` component in a document.
+pub fn collect_done_document_own_ids(document: &str) -> HashSet<String> {
+    let Ok(components) = element::parse(document) else {
+        return HashSet::new();
+    };
+
+    components
+        .iter()
+        .flat_map(|component| collect_done_component_own_ids(document, component))
+        .collect()
 }
 
 #[cfg(test)]
@@ -130,5 +176,54 @@ mod tests {
             render_done_archive_entry("2026-07-01", "done1", "completed item", "  proof line"),
             "- 2026-07-01 [#done1] completed item\n  proof line\n"
         );
+    }
+
+    #[test]
+    fn collect_done_document_own_ids_extracts_from_done_component() {
+        let content = concat!(
+            "<!-- agent:done -->\n",
+            "- [x] [#alpha] One thing\n",
+            "- [x] [#bravo] Another\n",
+            "<!-- /agent:done -->\n"
+        );
+
+        let ids = collect_done_document_own_ids(content);
+
+        assert!(ids.contains("alpha"));
+        assert!(ids.contains("bravo"));
+        assert_eq!(ids.len(), 2);
+    }
+
+    #[test]
+    fn collect_done_document_own_ids_ignores_non_done_components_and_prose_citations() {
+        let content = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#open] Still open\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done -->\n",
+            "- 2026-07-01 [#done1] Completed item mentioning [#open]\n",
+            "  Continuation also cites [#not-own]\n",
+            "<!-- /agent:done -->\n"
+        );
+
+        let ids = collect_done_document_own_ids(content);
+
+        assert!(ids.contains("done1"));
+        assert_eq!(ids.len(), 1);
+    }
+
+    #[test]
+    fn collect_done_item_own_ids_extracts_archive_text_without_markers() {
+        let archive = concat!(
+            "- [x] [#archived1] First archived item\n",
+            "- 2026-07-01 [#archived2] Second item mentioning [#citation]\n",
+            "  Continuation cites [#continuation]\n",
+        );
+
+        let ids = collect_done_item_own_ids(archive);
+
+        assert!(ids.contains("archived1"));
+        assert!(ids.contains("archived2"));
+        assert_eq!(ids.len(), 2);
     }
 }

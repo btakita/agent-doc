@@ -252,6 +252,7 @@ name = "agent-doc-element-done"
 version = "0.34.66"
 dependencies = [
  "agent-doc-element",
+ "agent-doc-element-backlog",
 ]
 
 [[package]]

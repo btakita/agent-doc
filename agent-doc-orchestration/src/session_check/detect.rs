@@ -1,12 +1,10 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct JbCacheConflictAcceptDuplicateReplay {
-    pub heading: String,
-    pub deduped_content: String,
-}
+use agent_doc_turn::response_replay::{
+    JbCacheConflictAcceptDuplicateReplay, LateIpcResponseOverapplication,
+    classify_jb_cache_conflict_accept_duplicate_replay, classify_late_ipc_response_overapplication,
+};
 
 /// Detect the late JetBrains File Cache Conflict "accept" replay shape.
 ///
@@ -29,27 +27,12 @@ pub fn detect_jb_cache_conflict_accept_duplicate_replay_with_context(
 ) -> Result<Option<JbCacheConflictAcceptDuplicateReplay>> {
     let current = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    let Some(heading) = agent_doc_turn::response_replay::first_duplicate_response_heading(&current)
-    else {
-        return Ok(None);
-    };
-    let deduped = agent_doc_turn::response_replay::dedupe_responses(&current);
-    if deduped == current {
-        return Ok(None);
-    }
     let Some(head) = rc.head_content() else {
         return Ok(None);
     };
-    if agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(&deduped)
-        != agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(&head)
-    {
-        return Ok(None);
-    }
-
-    Ok(Some(JbCacheConflictAcceptDuplicateReplay {
-        heading,
-        deduped_content: head.to_string(),
-    }))
+    Ok(classify_jb_cache_conflict_accept_duplicate_replay(
+        &current, &head,
+    ))
 }
 
 /// A late-IPC reposition / stale-patch replay re-inserted the committed
@@ -59,11 +42,6 @@ pub fn detect_jb_cache_conflict_accept_duplicate_replay_with_context(
 /// redundant `<!-- agent:boundary:* -->` markers and non-adjacent), so the
 /// safe repair is to restore the committed `HEAD` content over the working tree
 /// and snapshot. See `tasks/agent-doc/plan-duplicate-response-after-commit.md`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LateIpcResponseOverapplication {
-    pub remediated_content: String,
-}
-
 /// Detect the late-IPC committed-response over-application shape.
 ///
 /// Unlike [`detect_jb_cache_conflict_accept_duplicate_replay`], this does not
@@ -92,21 +70,7 @@ pub fn detect_late_ipc_response_overapplication_with_context(
     let Some(head) = rc.head_content() else {
         return Ok(None);
     };
-    // Strict path: surplus block is a byte-identical copy of a committed
-    // response. Stale path (#jb-cache-conflict-stale-accept-replay): a JB File
-    // Cache Conflict accepted late replayed an *earlier draft* of the same
-    // response, so the surplus block shares a committed heading topic but its
-    // body drifted — `cur_set != head_set`. Both restore the committed HEAD.
-    if agent_doc_turn::response_replay::is_committed_response_overapplication(&current, &head)
-        || agent_doc_turn::response_replay::is_committed_response_replay_including_stale(
-            &current, &head,
-        )
-    {
-        return Ok(Some(LateIpcResponseOverapplication {
-            remediated_content: head.to_string(),
-        }));
-    }
-    Ok(None)
+    Ok(classify_late_ipc_response_overapplication(&current, &head))
 }
 
 pub(crate) fn check_parent_submodule_pointer_guard(file: &Path) -> Result<GuardResult> {

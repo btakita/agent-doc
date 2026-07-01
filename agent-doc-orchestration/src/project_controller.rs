@@ -1147,7 +1147,7 @@ pub fn persist_session_actor_closeout(file: &Path) -> Result<bool> {
         &state_store::SessionActorCloseoutCommit {
             document_id: &document_id,
             cycle_id: &state.cycle_id,
-            cycle_state: cycle_phase_store_label(state.phase),
+            cycle_state: state.phase.as_str(),
             queue_name: "agent:queue",
             queue_head_id: queue_head_id.as_deref(),
             queue_head_prompt,
@@ -1157,16 +1157,6 @@ pub fn persist_session_actor_closeout(file: &Path) -> Result<bool> {
         },
     )?;
     Ok(true)
-}
-
-fn cycle_phase_store_label(phase: agent_doc_turn::CyclePhase) -> &'static str {
-    match phase {
-        agent_doc_turn::CyclePhase::PreflightStarted => "preflight_started",
-        agent_doc_turn::CyclePhase::ResponseCaptured => "response_captured",
-        agent_doc_turn::CyclePhase::WriteApplied => "write_applied",
-        agent_doc_turn::CyclePhase::Committed => "committed",
-        agent_doc_turn::CyclePhase::Abandoned => "abandoned",
-    }
 }
 
 fn session_actor_closeout_mutations(

@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 /// Queue-origin prompt admission scope for a maintenance pass.
 #[derive(Debug, Clone, Default)]
@@ -71,6 +71,109 @@ impl ActionableFreeTextPrompts {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FreeTextAdmissionExecution {
+    Goal,
+    Queue,
+}
+
+impl FreeTextAdmissionExecution {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Goal => "goal",
+            Self::Queue => "queue",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FreeTextAdmission {
+    pub content: String,
+    pub queued_ids: Vec<String>,
+    pub admitted_count: usize,
+    pub execution_label: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedFreeTextAdmission {
+    pub content: String,
+    pub unique_ids: Vec<String>,
+    pub admitted_count: usize,
+    queue_entries: Vec<crate::document_queue::QueueEntry>,
+    queue_start_required: bool,
+}
+
+impl PreparedFreeTextAdmission {
+    pub fn finish(self, execution: FreeTextAdmissionExecution) -> Result<FreeTextAdmission> {
+        let components = agent_doc_element::element::parse(&self.content)?;
+        let queue = components
+            .iter()
+            .find(|c| c.name == "queue")
+            .context("free-text admission: queue component missing")?
+            .clone();
+        let mut queue_entries = self.queue_entries;
+        let queued_ids = match execution {
+            FreeTextAdmissionExecution::Goal => {
+                let command = goal_command_for_ids(&self.unique_ids);
+                if !goal_command_already_queued(&queue_entries, &self.unique_ids) {
+                    queue_entries.insert(
+                        0,
+                        crate::document_queue::QueueEntry::Prompt(
+                            crate::document_queue::QueuePrompt {
+                                text: command,
+                                multiline: false,
+                            },
+                        ),
+                    );
+                    if self.queue_start_required {
+                        queue_entries
+                            .insert(0, crate::document_queue::QueueEntry::StartFence(None));
+                    }
+                }
+                Vec::new()
+            }
+            FreeTextAdmissionExecution::Queue => {
+                let before_ids: HashSet<String> = queue_entries
+                    .iter()
+                    .filter_map(crate::queue_projection::queue_entry_do_id)
+                    .collect();
+                let synced = crate::document_queue::sync_backlog_into_queue(
+                    &queue_entries,
+                    &self.unique_ids,
+                    crate::document_queue::BacklogQueueSyncMode::Prepend,
+                )
+                .unwrap_or_else(|| queue_entries.clone());
+                queue_entries = synced;
+                if self.queue_start_required
+                    && !matches!(
+                        queue_entries.first(),
+                        Some(crate::document_queue::QueueEntry::StartFence(_))
+                    )
+                {
+                    queue_entries.insert(0, crate::document_queue::QueueEntry::StartFence(None));
+                }
+                queue_entries
+                    .iter()
+                    .filter_map(crate::queue_projection::queue_entry_do_id)
+                    .filter(|id| !before_ids.contains(id))
+                    .collect()
+            }
+        };
+
+        let new_queue_body = crate::document_queue::render(&queue_entries);
+        let mut content = queue.replace_content(&self.content, &new_queue_body);
+        if execution == FreeTextAdmissionExecution::Queue {
+            content = ensure_queue_priority_attr(&content)?;
+        }
+        Ok(FreeTextAdmission {
+            content,
+            queued_ids,
+            admitted_count: self.admitted_count,
+            execution_label: execution.label(),
+        })
+    }
+}
+
 pub fn collect_actionable_free_text_prompts(
     exchange_prompt: Option<&str>,
     entries: &[crate::document_queue::QueueEntry],
@@ -99,6 +202,103 @@ pub fn collect_actionable_free_text_prompts(
         !key.is_empty() && seen.insert(key)
     });
     ActionableFreeTextPrompts { prompts }
+}
+
+pub fn prepare_free_text_admission(
+    content: &str,
+    entries: &[crate::document_queue::QueueEntry],
+    exchange_prompt: Option<&str>,
+    queue_scope: &FreeTextAdmissionScope,
+    queue_start_required: bool,
+    document_id: &str,
+) -> Result<Option<PreparedFreeTextAdmission>> {
+    let prompts = collect_actionable_free_text_prompts(exchange_prompt, entries, queue_scope);
+    if !prompts.has_work() {
+        return Ok(None);
+    }
+
+    let mut current = if agent_doc_element::element::parse(content)?
+        .iter()
+        .any(|c| c.name == "backlog")
+    {
+        content.to_string()
+    } else {
+        append_empty_agent_component(content, "backlog")
+    };
+    let mut components = agent_doc_element::element::parse(&current)?;
+    let backlog = components
+        .iter()
+        .find(|c| c.name == "backlog")
+        .context("free-text admission: backlog component missing after ensure")?
+        .clone();
+    let backlog_body = backlog.content(&current);
+    let (_, existing_items, _) = agent_doc_element_backlog::backlog::parse_items(backlog_body);
+    let mut id_by_text = HashMap::new();
+    for item in existing_items {
+        if item.state != agent_doc_element_backlog::backlog::PendingState::Done {
+            let key = crate::queue_response::normalize_for_answer_match(&item.text);
+            if !key.is_empty() {
+                id_by_text.entry(key).or_insert(item.id);
+            }
+        }
+    }
+
+    let mut prompt_keys = Vec::new();
+    let mut texts_to_add = Vec::new();
+    for prompt in &prompts.prompts {
+        let key = crate::queue_response::normalize_for_answer_match(&prompt.text);
+        if !id_by_text.contains_key(&key) {
+            texts_to_add.push(prompt.text.clone());
+        }
+        prompt_keys.push(key);
+    }
+    if !texts_to_add.is_empty() {
+        let outcome = agent_doc_element_backlog::backlog::op_prepend_many_with_outcomes(
+            backlog_body,
+            &texts_to_add,
+            document_id,
+            false,
+        )?;
+        current = backlog.replace_content(&current, &outcome.body);
+        for (text, item_outcome) in texts_to_add.iter().zip(outcome.outcomes) {
+            let key = crate::queue_response::normalize_for_answer_match(text);
+            id_by_text.insert(key, item_outcome.id.clone());
+        }
+    }
+
+    let mut unique_ids = Vec::new();
+    let mut seen_ids = HashSet::new();
+    for key in prompt_keys {
+        let Some(id) = id_by_text.get(&key) else {
+            continue;
+        };
+        let normalized = id.trim().to_ascii_lowercase();
+        if !normalized.is_empty() && seen_ids.insert(normalized.clone()) {
+            unique_ids.push(normalized);
+        }
+    }
+    if unique_ids.is_empty() {
+        return Ok(None);
+    }
+
+    components = agent_doc_element::element::parse(&current)?;
+    components
+        .iter()
+        .find(|c| c.name == "queue")
+        .context("free-text admission: queue component missing")?;
+    let queue_entries = entries
+        .iter()
+        .filter(|entry| !queue_entry_is_admitted_free_text(entry, queue_scope))
+        .cloned()
+        .collect();
+
+    Ok(Some(PreparedFreeTextAdmission {
+        content: current,
+        unique_ids,
+        admitted_count: prompts.prompts.len(),
+        queue_entries,
+        queue_start_required,
+    }))
 }
 
 pub fn append_empty_agent_component(content: &str, name: &str) -> String {
@@ -377,5 +577,107 @@ mod tests {
             },
         )];
         assert!(goal_command_already_queued(&bracketed, &ids));
+    }
+
+    fn queue_entries_from_content(content: &str) -> Vec<crate::document_queue::QueueEntry> {
+        let components = agent_doc_element::element::parse(content).unwrap();
+        let queue = components
+            .iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        crate::document_queue::parse(queue.content(content)).unwrap()
+    }
+
+    #[test]
+    fn prepare_and_finish_queue_execution_adds_backlog_and_synced_queue() {
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "- Implement checkout setup\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let entries = queue_entries_from_content(content);
+
+        let prepared = prepare_free_text_admission(
+            content,
+            &entries,
+            None,
+            &FreeTextAdmissionScope::All,
+            true,
+            "doc-id",
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(prepared.admitted_count, 1);
+        assert_eq!(prepared.unique_ids.len(), 1);
+        assert!(prepared.content.contains("<!-- agent:backlog -->"));
+
+        let id = prepared.unique_ids[0].clone();
+        let admission = prepared.finish(FreeTextAdmissionExecution::Queue).unwrap();
+        let queue_entries = queue_entries_from_content(&admission.content);
+
+        assert_eq!(admission.execution_label, "queue");
+        assert_eq!(admission.queued_ids, vec![id.clone()]);
+        assert!(admission.content.contains("<!-- agent:queue priority -->"));
+        assert!(matches!(
+            queue_entries.first(),
+            Some(crate::document_queue::QueueEntry::StartFence(None))
+        ));
+        assert!(queue_entries.iter().any(|entry| matches!(
+            entry,
+            crate::document_queue::QueueEntry::Prompt(prompt)
+                if prompt.text == format!("do [#{id}]")
+        )));
+        assert!(!queue_entries.iter().any(|entry| matches!(
+            entry,
+            crate::document_queue::QueueEntry::Prompt(prompt)
+                if prompt.text == "Implement checkout setup"
+        )));
+    }
+
+    #[test]
+    fn prepare_and_finish_goal_execution_reuses_existing_backlog_id() {
+        let content = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#existing] Implement checkout setup\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- Implement checkout setup\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let entries = queue_entries_from_content(content);
+
+        let prepared = prepare_free_text_admission(
+            content,
+            &entries,
+            None,
+            &FreeTextAdmissionScope::All,
+            true,
+            "doc-id",
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(prepared.unique_ids, vec!["existing".to_string()]);
+
+        let admission = prepared.finish(FreeTextAdmissionExecution::Goal).unwrap();
+        let queue_entries = queue_entries_from_content(&admission.content);
+
+        assert_eq!(admission.execution_label, "goal");
+        assert!(admission.queued_ids.is_empty());
+        assert!(matches!(
+            queue_entries.first(),
+            Some(crate::document_queue::QueueEntry::StartFence(None))
+        ));
+        assert!(queue_entries.iter().any(|entry| matches!(
+            entry,
+            crate::document_queue::QueueEntry::Prompt(prompt)
+                if prompt.text == "/goal Implement backlog item(s): #existing"
+        )));
+        assert!(!queue_entries.iter().any(|entry| matches!(
+            entry,
+            crate::document_queue::QueueEntry::Prompt(prompt)
+                if prompt.text == "Implement checkout setup"
+        )));
     }
 }

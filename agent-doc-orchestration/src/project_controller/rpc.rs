@@ -3,11 +3,12 @@
 use super::*;
 use agent_doc_controller::dispatch::{
     DISPATCH_COALESCED_IN_FLIGHT_MARKER, DISPATCH_STALE_GENERATION_REDIRECT_MARKER,
-    DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER, StaleQueuePauseRecovery,
-    append_dispatch_proof_payload, dispatch_command_kind_is_operator_reopen,
-    dispatch_diagnostic_field, dispatch_error_stale_generation_redirect_target,
-    dispatch_should_coalesce_in_flight, pause_reason_is_stale_supervisor_churn_stop,
-    spent_preset_id_from_pause_reason, stale_supervisor_pid_from_pause_reason,
+    DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER, DispatchBlockedProofFacts,
+    StaleQueuePauseRecovery, append_dispatch_proof_payload, dispatch_blocked_proof_fields,
+    dispatch_command_kind_is_operator_reopen, dispatch_diagnostic_field,
+    dispatch_error_stale_generation_redirect_target, dispatch_should_coalesce_in_flight,
+    pause_reason_is_stale_supervisor_churn_stop, spent_preset_id_from_pause_reason,
+    stale_supervisor_pid_from_pause_reason,
 };
 use agent_doc_controller::status;
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
@@ -2624,76 +2625,6 @@ pub(crate) fn request_u64(value: Option<u64>, name: &str) -> Result<u64> {
     value.with_context(|| format!("controller request missing {name}"))
 }
 
-fn dispatch_blocked_proof_fields(
-    project_root: &Path,
-    file: &Path,
-    stage: &str,
-    reason: &str,
-    diagnostic_payload: &str,
-) -> String {
-    let mut fields = Vec::new();
-    fields.push(dispatch_blocked_user_facing_outcome_fields(stage, reason));
-    let file_path = if file.is_absolute() {
-        file.to_path_buf()
-    } else {
-        project_root.join(file)
-    };
-    if let Ok(content) = std::fs::read_to_string(&file_path)
-        && let Ok(Some(head)) = agent_doc_queue::queue_heads::active_queue_head_text(&content)
-    {
-        fields.push(format!("blocked_head_bytes={}", head.len()));
-        fields.push(format!(
-            "blocked_head_sha256={}",
-            agent_doc_hash::content_hash(&head)
-        ));
-    }
-    if let Some(harness) = dispatch_diagnostic_field(diagnostic_payload, "harness") {
-        let trigger = agent_doc_harness::HarnessConfig::from_agent_name(harness)
-            .trigger_command(&file.to_string_lossy());
-        fields.push(format!("trigger_bytes={}", trigger.len()));
-        fields.push(format!(
-            "trigger_sha256={}",
-            agent_doc_hash::content_hash(&trigger)
-        ));
-    }
-    fields.join(" ")
-}
-
-fn dispatch_blocked_user_facing_outcome_fields(stage: &str, reason: &str) -> String {
-    use crate::flow::outcome::{UserFacingOutcome, UserFacingOutcomeKind as Kind};
-
-    let lower = reason.to_ascii_lowercase();
-    let outcome = if stage == "actor_busy_draining" {
-        UserFacingOutcome::new(Kind::QueuedBehindOwner)
-    } else if stage == "queue_paused" && pause_reason_is_stale_supervisor_churn_stop(reason) {
-        UserFacingOutcome::new(Kind::RecoveredAndRetried)
-    } else if lower.contains("file cache conflict")
-        || lower.contains("component conflict")
-        || lower.contains("typed_component_drift")
-    {
-        UserFacingOutcome::new(Kind::RealComponentConflict)
-    } else if lower.contains("zero drainable")
-        || lower.contains("no drainable")
-        || lower.contains("undrainable")
-    {
-        UserFacingOutcome::new(Kind::NoDrainableWork)
-    } else if lower.contains("operator-verify")
-        || lower.contains("operator proof")
-        || lower.contains("manual review")
-    {
-        UserFacingOutcome::new(Kind::DeferredForOperatorProof)
-    } else {
-        UserFacingOutcome::with_unblocker(
-            Kind::BlockedWithExactUnblocker,
-            "resume_or_clear_queue_control",
-        )
-    };
-
-    outcome
-        .expect("static dispatch blocked user-facing outcome fields are valid")
-        .log_fields()
-}
-
 pub(crate) fn handle_start_session(
     bootstrap: &ControllerBootstrap,
     runtime: Option<&ControllerRuntime>,
@@ -3268,13 +3199,28 @@ pub(crate) fn handle_dispatch(
             .as_ref()
             .and_then(|control| control.reason.as_deref())
             .unwrap_or(stage);
-        let proof_fields = dispatch_blocked_proof_fields(
-            &bootstrap.project_root,
-            &file,
+        let file_path = if file.is_absolute() {
+            file.to_path_buf()
+        } else {
+            bootstrap.project_root.join(&file)
+        };
+        let blocked_head = std::fs::read_to_string(&file_path)
+            .ok()
+            .and_then(|content| {
+                agent_doc_queue::queue_heads::active_queue_head_text(&content)
+                    .ok()
+                    .flatten()
+            });
+        let trigger = dispatch_diagnostic_field(&diagnostic_payload, "harness").map(|harness| {
+            agent_doc_harness::HarnessConfig::from_agent_name(harness)
+                .trigger_command(&file.to_string_lossy())
+        });
+        let proof_fields = dispatch_blocked_proof_fields(DispatchBlockedProofFacts {
             stage,
             reason,
-            &diagnostic_payload,
-        );
+            blocked_head: blocked_head.as_deref(),
+            trigger: trigger.as_deref(),
+        });
         let blocked_diagnostic_payload =
             append_dispatch_proof_payload(&diagnostic_payload, &proof_fields);
         let receipt = insert_dispatch_attempt_record(

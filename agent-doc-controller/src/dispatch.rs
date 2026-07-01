@@ -9,6 +9,7 @@ pub const DISPATCH_SUPERVISOR_RESTART_REDIRECT_MARKER: &str = "supervisor_restar
 pub const STALE_QUEUE_PAUSE_INVARIANT_ID: &str = "stale_queue_pause";
 pub const STALE_QUEUE_PAUSE_NEXT_ACTION: &str = "restart_supervisor_once_and_retry";
 pub const DISPATCH_RECOVERY_OUTCOME_CONTRACT_VERSION: &str = "binary-outcome-v1";
+const DISPATCH_BLOCKED_USER_FACING_OUTCOME_CONTRACT_VERSION: &str = "ui-outcome-v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum DispatchRecoveryOutcomeClass {
@@ -101,6 +102,123 @@ pub fn append_dispatch_proof_payload(diagnostic_payload: &str, proof_fields: &st
         (true, false) => proof_fields.to_string(),
         (false, false) => format!("{diagnostic_payload} {proof_fields}"),
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DispatchBlockedUserFacingOutcome {
+    outcome: &'static str,
+    class: &'static str,
+    next_action: &'static str,
+    unblocker: Option<&'static str>,
+}
+
+impl DispatchBlockedUserFacingOutcome {
+    const fn log_fields(self) -> DispatchBlockedUserFacingOutcomeFields {
+        DispatchBlockedUserFacingOutcomeFields(self)
+    }
+}
+
+struct DispatchBlockedUserFacingOutcomeFields(DispatchBlockedUserFacingOutcome);
+
+impl std::fmt::Display for DispatchBlockedUserFacingOutcomeFields {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let outcome = self.0;
+        write!(
+            f,
+            "ui_outcome_contract={} ui_outcome={} ui_outcome_class={} next_action={}",
+            DISPATCH_BLOCKED_USER_FACING_OUTCOME_CONTRACT_VERSION,
+            outcome.outcome,
+            outcome.class,
+            outcome.next_action
+        )?;
+        if let Some(unblocker) = outcome.unblocker {
+            write!(f, " unblocker={unblocker}")?;
+        }
+        Ok(())
+    }
+}
+
+pub fn dispatch_blocked_user_facing_outcome_fields(stage: &str, reason: &str) -> String {
+    let lower = reason.to_ascii_lowercase();
+    let outcome = if stage == "actor_busy_draining" {
+        DispatchBlockedUserFacingOutcome {
+            outcome: "queued_behind_owner",
+            class: "ok",
+            next_action: "wait_for_owner_turn_to_drain",
+            unblocker: None,
+        }
+    } else if stage == "queue_paused" && pause_reason_is_stale_supervisor_churn_stop(reason) {
+        DispatchBlockedUserFacingOutcome {
+            outcome: "recovered_and_retried",
+            class: "recoverable",
+            next_action: "continue_after_recovery_retry",
+            unblocker: None,
+        }
+    } else if lower.contains("file cache conflict")
+        || lower.contains("component conflict")
+        || lower.contains("typed_component_drift")
+    {
+        DispatchBlockedUserFacingOutcome {
+            outcome: "real_component_conflict",
+            class: "blocked",
+            next_action: "resolve_component_conflict",
+            unblocker: None,
+        }
+    } else if lower.contains("zero drainable")
+        || lower.contains("no drainable")
+        || lower.contains("undrainable")
+    {
+        DispatchBlockedUserFacingOutcome {
+            outcome: "no_drainable_work",
+            class: "ok",
+            next_action: "no_agent_action",
+            unblocker: None,
+        }
+    } else if lower.contains("operator-verify")
+        || lower.contains("operator proof")
+        || lower.contains("manual review")
+    {
+        DispatchBlockedUserFacingOutcome {
+            outcome: "deferred_for_operator_proof",
+            class: "operator",
+            next_action: "operator_proof_required",
+            unblocker: None,
+        }
+    } else {
+        DispatchBlockedUserFacingOutcome {
+            outcome: "blocked_with_exact_unblocker",
+            class: "blocked",
+            next_action: "follow_unblocker",
+            unblocker: Some("resume_or_clear_queue_control"),
+        }
+    };
+
+    outcome.log_fields().to_string()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DispatchBlockedProofFacts<'a> {
+    pub stage: &'a str,
+    pub reason: &'a str,
+    pub blocked_head: Option<&'a str>,
+    pub trigger: Option<&'a str>,
+}
+
+pub fn dispatch_blocked_proof_fields(facts: DispatchBlockedProofFacts<'_>) -> String {
+    let mut fields = Vec::new();
+    fields.push(dispatch_blocked_user_facing_outcome_fields(
+        facts.stage,
+        facts.reason,
+    ));
+    if let Some(head) = facts.blocked_head {
+        fields.push(format!("blocked_head_bytes={}", head.len()));
+        fields.push(format!("blocked_head_sha256={}", sha256_hex(head)));
+    }
+    if let Some(trigger) = facts.trigger {
+        fields.push(format!("trigger_bytes={}", trigger.len()));
+        fields.push(format!("trigger_sha256={}", sha256_hex(trigger)));
+    }
+    fields.join(" ")
 }
 
 pub fn recent_lines_contain_trigger(content: &str, trigger: &str) -> bool {
@@ -1342,7 +1460,7 @@ pub struct RouteDispatchBugReportItemFacts<'a> {
     pub ops_log_path: Option<&'a str>,
 }
 
-fn route_dispatch_bug_report_hash(content: &str) -> String {
+fn sha256_hex(content: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
     hex::encode(hasher.finalize())
@@ -1368,7 +1486,7 @@ pub fn route_dispatch_bug_report_item(
     facts: RouteDispatchBugReportItemFacts<'_>,
 ) -> Result<String, String> {
     let component = format!("route/{}", route_dispatch_bug_report_field(facts.phase));
-    let content_hash = route_dispatch_bug_report_hash(&format!(
+    let content_hash = sha256_hex(&format!(
         "{}:{}:{}",
         facts.document_id, facts.phase, facts.issue
     ));
@@ -4004,6 +4122,56 @@ gpt-5.4 high - ~/work/btakita/agent-loop/src/session-share - Context 31% used
         assert!(!dispatch_error_is_coalesced(
             "dispatch blocked for x: failed_stage=queue_paused"
         ));
+    }
+
+    #[test]
+    fn dispatch_blocked_user_facing_outcome_fields_classify_stage_and_reason() {
+        assert!(
+            dispatch_blocked_user_facing_outcome_fields("actor_busy_draining", "busy")
+                .contains("ui_outcome=queued_behind_owner")
+        );
+        assert!(
+            dispatch_blocked_user_facing_outcome_fields(
+                "queue_paused",
+                "supervisor_binary_stale pid=42"
+            )
+            .contains("ui_outcome=recovered_and_retried")
+        );
+        assert!(
+            dispatch_blocked_user_facing_outcome_fields("queue_paused", "typed_component_drift")
+                .contains("ui_outcome=real_component_conflict")
+        );
+        assert!(
+            dispatch_blocked_user_facing_outcome_fields("queue_paused", "zero drainable head")
+                .contains("ui_outcome=no_drainable_work")
+        );
+        assert!(
+            dispatch_blocked_user_facing_outcome_fields("queue_paused", "manual review")
+                .contains("ui_outcome=deferred_for_operator_proof")
+        );
+        assert_eq!(
+            dispatch_blocked_user_facing_outcome_fields("queue_paused", "operator pause"),
+            "ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control"
+        );
+    }
+
+    #[test]
+    fn dispatch_blocked_proof_fields_use_supplied_io_facts() {
+        let head = "abc";
+        let trigger = "agent-doc doc.md";
+
+        assert_eq!(
+            dispatch_blocked_proof_fields(DispatchBlockedProofFacts {
+                stage: "queue_paused",
+                reason: "manual review",
+                blocked_head: Some(head),
+                trigger: Some(trigger),
+            }),
+            format!(
+                "ui_outcome_contract=ui-outcome-v1 ui_outcome=deferred_for_operator_proof ui_outcome_class=operator next_action=operator_proof_required blocked_head_bytes=3 blocked_head_sha256=ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad trigger_bytes=16 trigger_sha256={}",
+                sha256_hex(trigger)
+            )
+        );
     }
 
     fn codex_prompt_line(line: &str) -> bool {

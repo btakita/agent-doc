@@ -17,10 +17,9 @@ use agent_doc_queue::{
         explicit_queue_stop_mode, strip_queue_activation_tokens_in_content,
     },
     free_text_admission::{
-        FreeTextAdmissionScope, append_empty_agent_component, collect_actionable_free_text_prompts,
-        ensure_queue_priority_attr, goal_command_already_queued, goal_command_for_ids,
-        queue_currently_active_for_free_text_admission, queue_entry_is_admitted_free_text,
-        queue_free_text_admission_scope,
+        FreeTextAdmissionExecution, FreeTextAdmissionScope, append_empty_agent_component,
+        collect_actionable_free_text_prompts, prepare_free_text_admission,
+        queue_currently_active_for_free_text_admission, queue_free_text_admission_scope,
     },
     queue_response::{free_text_head_answered_by_response, queue_prompt_text_is_free_text},
 };
@@ -1407,14 +1406,28 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         &entries,
         snapshot_content.as_deref(),
     );
-    if let Some(admission) = admit_free_text_work(
-        file,
+    let exchange_prompt =
+        agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(&current_content);
+    let document_id = agent_doc_hash::document_id_for_path(file);
+    if let Some(prepared_admission) = prepare_free_text_admission(
         &current_content,
         &entries,
-        project_root.as_deref(),
+        exchange_prompt.as_deref(),
         &queue_free_text_scope,
         !queue_active_for_free_text,
+        &document_id,
     )? {
+        let (execution, warnings) = resolve_free_text_execution(
+            file,
+            &prepared_admission.content,
+            project_root.as_deref(),
+            &prepared_admission.unique_ids,
+        )?;
+        let execution = match execution {
+            ResolvedFreeTextExecution::Goal => FreeTextAdmissionExecution::Goal,
+            ResolvedFreeTextExecution::Queue => FreeTextAdmissionExecution::Queue,
+        };
+        let admission = prepared_admission.finish(execution)?;
         current_content = admission.content;
         content = current_content.clone();
         components = agent_doc_element::element::parse(&current_content)?;
@@ -1427,7 +1440,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         entries = agent_doc_queue::document_queue::parse(body)
             .context("queue maintenance: failed to parse queue after free-text admission")?;
         synced_queue_ids.extend(admission.queued_ids);
-        queue_warnings.extend(admission.warnings);
+        queue_warnings.extend(warnings);
         mutated = true;
         eprintln!(
             "[preflight] queue: admitted {} free-text prompt(s) into backlog ({})",
@@ -3054,176 +3067,6 @@ pub(crate) fn sync_same_cycle_pending_adds_into_go_queue(file: &Path) -> Result<
         synced_ids.len()
     );
     Ok(synced_ids)
-}
-
-struct FreeTextAdmission {
-    content: String,
-    queued_ids: Vec<String>,
-    warnings: Vec<PreflightWarning>,
-    admitted_count: usize,
-    execution_label: &'static str,
-}
-
-fn admit_free_text_work(
-    file: &Path,
-    content: &str,
-    entries: &[agent_doc_queue::document_queue::QueueEntry],
-    project_root: Option<&Path>,
-    queue_scope: &FreeTextAdmissionScope,
-    queue_start_required: bool,
-) -> Result<Option<FreeTextAdmission>> {
-    let exchange_prompt =
-        agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(content);
-    let prompts =
-        collect_actionable_free_text_prompts(exchange_prompt.as_deref(), entries, queue_scope);
-    if !prompts.has_work() {
-        return Ok(None);
-    }
-
-    let mut current = if agent_doc_element::element::parse(content)?
-        .iter()
-        .any(|c| c.name == "backlog")
-    {
-        content.to_string()
-    } else {
-        append_empty_agent_component(content, "backlog")
-    };
-    let mut components = agent_doc_element::element::parse(&current)?;
-    let backlog = components
-        .iter()
-        .find(|c| c.name == "backlog")
-        .context("free-text admission: backlog component missing after ensure")?
-        .clone();
-    let backlog_body = backlog.content(&current);
-    let (_, existing_items, _) = agent_doc_element_backlog::backlog::parse_items(backlog_body);
-    let mut id_by_text = std::collections::HashMap::new();
-    for item in existing_items {
-        if item.state != agent_doc_element_backlog::backlog::PendingState::Done {
-            let key = agent_doc_queue::queue_response::normalize_for_answer_match(&item.text);
-            if !key.is_empty() {
-                id_by_text.entry(key).or_insert(item.id);
-            }
-        }
-    }
-
-    let mut prompt_keys = Vec::new();
-    let mut texts_to_add = Vec::new();
-    for prompt in &prompts.prompts {
-        let key = agent_doc_queue::queue_response::normalize_for_answer_match(&prompt.text);
-        if !id_by_text.contains_key(&key) {
-            texts_to_add.push(prompt.text.clone());
-        }
-        prompt_keys.push(key);
-    }
-    if !texts_to_add.is_empty() {
-        let doc_id = agent_doc_hash::document_id_for_path(file);
-        let outcome = agent_doc_element_backlog::backlog::op_prepend_many_with_outcomes(
-            backlog_body,
-            &texts_to_add,
-            &doc_id,
-            false,
-        )?;
-        current = backlog.replace_content(&current, &outcome.body);
-        for (text, item_outcome) in texts_to_add.iter().zip(outcome.outcomes) {
-            let key = agent_doc_queue::queue_response::normalize_for_answer_match(text);
-            id_by_text.insert(key, item_outcome.id.clone());
-        }
-    }
-
-    let mut unique_ids = Vec::new();
-    let mut seen_ids = std::collections::HashSet::new();
-    for key in prompt_keys {
-        let Some(id) = id_by_text.get(&key) else {
-            continue;
-        };
-        let normalized = id.trim().to_ascii_lowercase();
-        if !normalized.is_empty() && seen_ids.insert(normalized.clone()) {
-            unique_ids.push(normalized);
-        }
-    }
-    if unique_ids.is_empty() {
-        return Ok(None);
-    }
-
-    components = agent_doc_element::element::parse(&current)?;
-    let queue = components
-        .iter()
-        .find(|c| c.name == "queue")
-        .context("free-text admission: queue component missing")?
-        .clone();
-    let mut queue_entries: Vec<agent_doc_queue::document_queue::QueueEntry> = entries
-        .iter()
-        .filter(|entry| !queue_entry_is_admitted_free_text(entry, queue_scope))
-        .cloned()
-        .collect();
-
-    let (execution, warnings) =
-        resolve_free_text_execution(file, &current, project_root, &unique_ids)?;
-    let queued_ids = match execution {
-        ResolvedFreeTextExecution::Goal => {
-            let command = goal_command_for_ids(&unique_ids);
-            if !goal_command_already_queued(&queue_entries, &unique_ids) {
-                queue_entries.insert(
-                    0,
-                    agent_doc_queue::document_queue::QueueEntry::Prompt(
-                        agent_doc_queue::document_queue::QueuePrompt {
-                            text: command,
-                            multiline: false,
-                        },
-                    ),
-                );
-                if queue_start_required {
-                    queue_entries.insert(
-                        0,
-                        agent_doc_queue::document_queue::QueueEntry::StartFence(None),
-                    );
-                }
-            }
-            Vec::new()
-        }
-        ResolvedFreeTextExecution::Queue => {
-            let before_ids: std::collections::HashSet<String> = queue_entries
-                .iter()
-                .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
-                .collect();
-            let synced = agent_doc_queue::document_queue::sync_backlog_into_queue(
-                &queue_entries,
-                &unique_ids,
-                agent_doc_queue::document_queue::BacklogQueueSyncMode::Prepend,
-            )
-            .unwrap_or_else(|| queue_entries.clone());
-            queue_entries = synced;
-            if queue_start_required
-                && !matches!(
-                    queue_entries.first(),
-                    Some(agent_doc_queue::document_queue::QueueEntry::StartFence(_))
-                )
-            {
-                queue_entries.insert(
-                    0,
-                    agent_doc_queue::document_queue::QueueEntry::StartFence(None),
-                );
-            }
-            queue_entries
-                .iter()
-                .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
-                .filter(|id| !before_ids.contains(id))
-                .collect()
-        }
-    };
-
-    let new_queue_body = agent_doc_queue::document_queue::render(&queue_entries);
-    current = queue.replace_content(&current, &new_queue_body);
-    if execution == ResolvedFreeTextExecution::Queue {
-        current = ensure_queue_priority_attr(&current)?;
-    }
-    Ok(Some(FreeTextAdmission {
-        content: current,
-        queued_ids,
-        warnings,
-        admitted_count: prompts.prompts.len(),
-        execution_label: execution.label(),
-    }))
 }
 
 fn resolve_free_text_execution(

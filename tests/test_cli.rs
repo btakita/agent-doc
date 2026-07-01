@@ -3351,7 +3351,11 @@ fn test_agent_doc_queue_owns_free_text_admission_policy() {
         "pub fn normalize_admitted_free_text",
         "pub fn free_text_prompt_is_backlog_task",
         "pub struct ActionableFreeTextPrompts",
+        "pub struct PreparedFreeTextAdmission",
+        "pub struct FreeTextAdmission",
+        "pub enum FreeTextAdmissionExecution",
         "pub fn collect_actionable_free_text_prompts",
+        "pub fn prepare_free_text_admission",
         "pub fn append_empty_agent_component",
         "pub fn queue_entry_is_admitted_free_text",
         "pub fn ensure_queue_priority_attr",
@@ -3377,7 +3381,12 @@ fn test_agent_doc_queue_owns_free_text_admission_policy() {
         "fn free_text_prompt_is_backlog_task",
         "struct FreeTextWorkPrompt",
         "struct ActionableFreeTextPrompts",
+        "struct PreparedFreeTextAdmission",
+        "struct FreeTextAdmission",
+        "enum FreeTextAdmissionExecution",
         "fn collect_actionable_free_text_prompts",
+        "fn prepare_free_text_admission",
+        "fn admit_free_text_work",
         "fn append_empty_agent_component",
         "fn queue_entry_is_admitted_free_text",
         "fn ensure_queue_priority_attr",
@@ -3394,7 +3403,8 @@ fn test_agent_doc_queue_owns_free_text_admission_policy() {
     }
     assert!(
         maintenance.contains("free_text_admission::{")
-            && maintenance.contains("queue_free_text_admission_scope("),
+            && maintenance.contains("queue_free_text_admission_scope(")
+            && maintenance.contains("prepare_free_text_admission("),
         "preflight maintenance should adapt snapshots into focused queue free-text admission policy"
     );
 }
@@ -4494,6 +4504,10 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub fn prompt_change_is_known_response",
         "pub fn dedupe_responses",
         "pub fn first_duplicate_response_heading",
+        "pub struct JbCacheConflictAcceptDuplicateReplay",
+        "pub fn classify_jb_cache_conflict_accept_duplicate_replay",
+        "pub struct LateIpcResponseOverapplication",
+        "pub fn classify_late_ipc_response_overapplication",
         "pub fn is_committed_response_overapplication",
         "pub fn is_committed_response_replay_including_stale",
         "fn normalized_response_lines",
@@ -4576,6 +4590,29 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
             "orchestration repair must not re-own response replay/application policy: {forbidden}"
         );
     }
+    let session_check_detect = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/detect.rs"),
+    )
+    .unwrap();
+    for forbidden in [
+        "struct JbCacheConflictAcceptDuplicateReplay",
+        "struct LateIpcResponseOverapplication",
+        "fn classify_jb_cache_conflict_accept_duplicate_replay",
+        "fn classify_late_ipc_response_overapplication",
+        "fn is_committed_response_overapplication",
+        "fn is_committed_response_replay_including_stale",
+    ] {
+        assert!(
+            !session_check_detect.contains(forbidden),
+            "session_check/detect.rs must adapt file IO into focused response replay policy, not re-own it: {forbidden}"
+        );
+    }
+    assert!(
+        session_check_detect.contains("use agent_doc_turn::response_replay::{")
+            && session_check_detect.contains("classify_jb_cache_conflict_accept_duplicate_replay(")
+            && session_check_detect.contains("classify_late_ipc_response_overapplication("),
+        "session_check/detect.rs should call focused response replay classifiers directly"
+    );
     for relative in [
         "agent-doc-orchestration/src/capture.rs",
         "agent-doc-orchestration/src/flow/closeout.rs",
@@ -5333,6 +5370,7 @@ fn test_agent_doc_turn_cycle_phase_has_no_cycle_state_facade() {
             "agent_doc_orchestration::cycle_state::CyclePhase",
             "use crate::cycle_state::CyclePhase",
             "fn cycle_phase_name(",
+            "fn cycle_phase_store_label(",
             "fn phase_name(phase: agent_doc_turn::CyclePhase)",
         ] {
             assert!(
@@ -9410,6 +9448,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     for required_snippet in [
         "pub fn dispatch_diagnostic_field",
         "pub fn append_dispatch_proof_payload(",
+        "pub fn dispatch_blocked_user_facing_outcome_fields(",
+        "pub struct DispatchBlockedProofFacts",
+        "pub fn dispatch_blocked_proof_fields(",
     ] {
         assert!(
             controller_dispatch.contains(required_snippet),
@@ -9454,6 +9495,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub(crate) fn force_overrides_in_flight_gate",
         "fn dispatch_diagnostic_field",
         "fn append_dispatch_proof_payload(",
+        "fn dispatch_blocked_user_facing_outcome_fields(",
+        "struct DispatchBlockedProofFacts",
+        "fn dispatch_blocked_proof_fields(",
     ] {
         assert!(
             !rpc_source.contains(forbidden_snippet),
@@ -9485,9 +9529,13 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "project_controller::rpc should import focused controller dispatch helpers privately"
     );
     assert!(
-        rpc_source.contains("dispatch_diagnostic_field(diagnostic_payload,")
+        rpc_source.contains("dispatch_diagnostic_field(&diagnostic_payload,")
             && rpc_source.contains("append_dispatch_proof_payload(&diagnostic_payload,"),
         "project_controller::rpc should call focused controller dispatch diagnostic helpers directly"
+    );
+    assert!(
+        rpc_source.contains("dispatch_blocked_proof_fields(DispatchBlockedProofFacts {"),
+        "project_controller::rpc should call focused dispatch-blocked proof field policy directly"
     );
     assert!(
         rpc_source.contains("use agent_doc_controller::status")
@@ -12105,6 +12153,9 @@ fn test_agent_doc_element_done_owns_done_archive_content_policy() {
         "pub const EMPTY_DONE_COMPONENT",
         "pub fn insert_done_component_after_tracked_work(",
         "pub fn render_done_archive_entry(",
+        "pub fn collect_done_item_own_ids(",
+        "pub fn collect_done_component_own_ids(",
+        "pub fn collect_done_document_own_ids(",
     ] {
         assert!(
             done_model.contains(required),
@@ -12124,6 +12175,11 @@ fn test_agent_doc_element_done_owns_done_archive_content_policy() {
         "fn insert_pending_done_component(",
         "fn insert_done_component_after_tracked_work(",
         "fn render_done_archive_entry(",
+        "fn collect_done_item_own_ids(",
+        "fn collect_done_component_own_ids(",
+        "fn collect_done_document_own_ids(",
+        "trimmed.starts_with(\"- \")",
+        "trimmed.find(\"[#\")",
         "## Completed / Reaped\\n\\n<!-- agent:done -->",
     ] {
         assert!(
@@ -12133,7 +12189,9 @@ fn test_agent_doc_element_done_owns_done_archive_content_policy() {
     }
     assert!(
         preflight.contains("agent_doc_element_done::insert_done_component_after_tracked_work")
-            && preflight.contains("agent_doc_element_done::render_done_archive_entry"),
+            && preflight.contains("agent_doc_element_done::render_done_archive_entry")
+            && preflight.contains("agent_doc_element_done::collect_done_component_own_ids")
+            && preflight.contains("agent_doc_element_done::collect_done_item_own_ids"),
         "preflight.rs should call done archive content policy through agent-doc-element-done directly"
     );
 }

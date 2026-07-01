@@ -287,6 +287,48 @@ pub fn first_duplicate_response_heading(content: &str) -> Option<String> {
     dedupe_responses_with_report(content).1
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct JbCacheConflictAcceptDuplicateReplay {
+    pub heading: String,
+    pub deduped_content: String,
+}
+
+/// Detect the late JetBrains File Cache Conflict "accept" replay shape from
+/// already-loaded document contents.
+///
+/// The stale editor/cache payload lands after the cycle already committed, so
+/// the working tree contains an extra adjacent response block while `head`
+/// still contains the correct single-response document. This is safe to repair
+/// by replacing the working tree and snapshot with `dedupe(current)` when that
+/// result matches `head` modulo transient editor markers.
+pub fn classify_jb_cache_conflict_accept_duplicate_replay(
+    current: &str,
+    head: &str,
+) -> Option<JbCacheConflictAcceptDuplicateReplay> {
+    let heading = first_duplicate_response_heading(current)?;
+    let deduped = dedupe_responses(current);
+    if deduped == current {
+        return None;
+    }
+    if agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(&deduped)
+        != agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(head)
+    {
+        return None;
+    }
+
+    Some(JbCacheConflictAcceptDuplicateReplay {
+        heading,
+        deduped_content: head.to_string(),
+    })
+}
+
+/// A late-IPC reposition / stale-patch replay re-inserted the committed
+/// response into the working tree after the cycle already reached `head`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LateIpcResponseOverapplication {
+    pub remediated_content: String,
+}
+
 /// Detect "late-IPC response over-application": the working tree (`current`)
 /// contains the committed `head` content plus one or more extra copies of
 /// already-committed response blocks, with identical surrounding scaffold and
@@ -341,6 +383,22 @@ pub fn is_committed_response_replay_including_stale(current: &str, head: &str) -
         .lines()
         .map(str::trim)
         .any(|line| line_carries_user_directive(line) && !head_lines.contains(line))
+}
+
+/// Classify a late-IPC committed-response over-application and return the
+/// content that should be restored.
+pub fn classify_late_ipc_response_overapplication(
+    current: &str,
+    head: &str,
+) -> Option<LateIpcResponseOverapplication> {
+    if is_committed_response_overapplication(current, head)
+        || is_committed_response_replay_including_stale(current, head)
+    {
+        return Some(LateIpcResponseOverapplication {
+            remediated_content: head.to_string(),
+        });
+    }
+    None
 }
 
 fn line_carries_user_directive(line: &str) -> bool {
@@ -743,6 +801,29 @@ Content.
         );
     }
 
+    #[test]
+    fn classify_duplicate_replay_returns_committed_head_repair() {
+        let current = "\
+### Re: Foo — gpt-5
+Content.
+<!-- agent:boundary:old -->
+### Re: Foo — gpt-5 (HEAD)
+Content.
+<!-- agent:boundary:late -->
+";
+        let head = "\
+### Re: Foo — gpt-5
+Content.
+<!-- agent:boundary:committed -->
+";
+
+        let replay = classify_jb_cache_conflict_accept_duplicate_replay(current, head)
+            .expect("duplicate replay should be classified");
+
+        assert_eq!(replay.heading, "### Re: Foo — gpt-5 (HEAD)");
+        assert_eq!(replay.deduped_content, head);
+    }
+
     const HEAD_DOC: &str = "\
 <!-- agent:exchange -->
 do [#fix-thing]
@@ -767,6 +848,26 @@ Fixed it.
 ";
 
         assert!(is_committed_response_overapplication(current, HEAD_DOC));
+    }
+
+    #[test]
+    fn classify_late_ipc_overapplication_returns_committed_head_repair() {
+        let current = "\
+<!-- agent:exchange -->
+do [#fix-thing]
+### Re: fix thing — opus-4-8
+Fixed it.
+<!-- agent:boundary:88409761 -->
+### Re: fix thing — opus-4-8
+Fixed it.
+<!-- agent:boundary:replayed -->
+<!-- /agent:exchange -->
+";
+
+        let overapplication = classify_late_ipc_response_overapplication(current, HEAD_DOC)
+            .expect("late IPC replay should be classified");
+
+        assert_eq!(overapplication.remediated_content, HEAD_DOC);
     }
 
     #[test]

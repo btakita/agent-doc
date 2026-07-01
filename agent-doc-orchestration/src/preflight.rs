@@ -1743,18 +1743,6 @@ pub use maintenance::*;
 
 mod queue_tombstone;
 
-/// Collect every `[#id]` hash present in the document's `agent:done` (and the
-/// legacy `agent:backlog-done` / `agent:pending-done`) components. When the
-/// component carries an `archive=<path>` attribute, also walk the referenced
-/// archive file so externally-archived done items still feed the queue-strike
-/// maintenance pass.
-///
-/// Lower-cased so the comparison against queue prompt ids stays canonical.
-#[cfg(test)]
-fn collect_agent_done_ids(content: &str) -> std::collections::HashSet<String> {
-    collect_agent_done_ids_with_root(content, None)
-}
-
 fn collect_agent_done_ids_with_root(
     content: &str,
     project_root: Option<&Path>,
@@ -1767,12 +1755,7 @@ fn collect_agent_done_ids_with_root(
         if !agent_doc_element::element::is_backlog_done_component(&comp.name) {
             continue;
         }
-        // #donemirrorreap: collect only each done item's OWN leading id, not every
-        // bracketed id cited in its prose — otherwise a `[#other]` mentioned inside
-        // one entry's body falsely marks `#other` done and reaps its open mirror.
-        for id in
-            agent_doc_element_backlog::backlog::extract_done_item_own_ids(comp.content(content))
-        {
+        for id in agent_doc_element_done::collect_done_component_own_ids(content, comp) {
             ids.insert(id);
         }
         if let Some(archive) = comp.attrs.get("archive")
@@ -1780,9 +1763,7 @@ fn collect_agent_done_ids_with_root(
         {
             let archive_path = root.join(archive);
             if let Ok(archive_content) = std::fs::read_to_string(&archive_path) {
-                for id in
-                    agent_doc_element_backlog::backlog::extract_done_item_own_ids(&archive_content)
-                {
+                for id in agent_doc_element_done::collect_done_item_own_ids(&archive_content) {
                     ids.insert(id);
                 }
             }
@@ -2575,14 +2556,6 @@ mod tests {
         assert_eq!(round_trip.layout_issues, vec!["stash overflow".to_string()]);
     }
     #[test]
-    fn collect_agent_done_ids_extracts_from_done_component() {
-        let content = "<!-- agent:done -->\n- [x] [#alpha] One thing\n- [x] [#bravo] Another\n<!-- /agent:done -->\n";
-        let ids = super::collect_agent_done_ids(content);
-        assert!(ids.contains("alpha"));
-        assert!(ids.contains("bravo"));
-        assert_eq!(ids.len(), 2);
-    }
-    #[test]
     fn collect_agent_done_ids_reads_archive_attr_when_present() {
         let dir = TempDir::new().unwrap();
         let archive_rel = "tasks/done-archive.md";
@@ -2605,7 +2578,7 @@ mod tests {
         );
         assert!(ids.contains("archived2"));
         // Without the root, the archive path cannot be resolved → empty.
-        let ids_no_root = super::collect_agent_done_ids(&content);
+        let ids_no_root = super::collect_agent_done_ids_with_root(&content, None);
         assert!(ids_no_root.is_empty());
     }
     #[test]

@@ -11,3 +11,4 @@ name = "agent_doc_element_done"
 
 [dependencies]
 agent-doc-element = { path = "../agent-doc-element", version = "0.34.66" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.66" }

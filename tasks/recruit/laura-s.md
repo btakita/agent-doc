@@ -8,6 +8,7 @@ claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 pending_done_guard: warn
 agent_doc_lint_dialect: off
+queue: start
 ---
 
 ## Status
@@ -99,12 +100,15 @@ Warm, no apology (cold inbound, nothing owed on timing), from mild scarcity. The
 - Built clean via `make PROFILE=law-school-admission-council` (no filter warnings).
 
 Want me to push these submodules, or refine either the draft tone or the resume emphasis first?
-<!-- agent:boundary:f79a8a5e -->
+<!-- agent:boundary:5b63922a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue go -->
+- 🚧 DRaft a linkedin reply. Build a resume for this role.
+- They use MS Copilot. https://careers-lsac.icims.com/jobs/1736/engineer-lead---assessments-applications/job?mobile=false&width=1455&height=500&bga=true&needsRedirect=false&jan1offset=-300&jun1offset=-240 mentions CopilotKit experience with the Stealth Company. Add CopilotKit.
+- In the draft, remove the AI tells such as ` — `. Use my natural professional voice.
 <!-- /agent:queue -->
 
 ## Backlog

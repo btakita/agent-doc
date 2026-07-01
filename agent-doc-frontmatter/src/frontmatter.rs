@@ -929,6 +929,17 @@ pub fn parse(content: &str) -> Result<(Frontmatter, &str)> {
     Ok((fm, body))
 }
 
+/// Return whether document content resolves to the CRDT write strategy.
+///
+/// Parse failures are treated as non-CRDT so callers can safely choose the
+/// conservative non-CRDT path without swallowing a user-facing parse error from
+/// their primary validation flow.
+pub fn content_uses_crdt_write(content: &str) -> bool {
+    parse(content)
+        .map(|(fm, _)| fm.resolve_mode().is_crdt())
+        .unwrap_or(false)
+}
+
 /// Read the document session id from frontmatter content.
 ///
 /// Returns `None` when the document has no parseable session field. This is a
@@ -2834,6 +2845,36 @@ mod tests {
         assert!(resolved.is_template());
         assert!(!resolved.is_append());
         assert!(resolved.is_crdt());
+    }
+
+    #[test]
+    fn content_uses_crdt_write_for_append_mode() {
+        let content = "---\nagent_doc_mode: append\n---\nBody\n";
+        assert!(content_uses_crdt_write(content));
+    }
+
+    #[test]
+    fn content_uses_crdt_write_for_template_mode() {
+        let content = "---\nagent_doc_mode: template\n---\nBody\n";
+        assert!(content_uses_crdt_write(content));
+    }
+
+    #[test]
+    fn content_uses_crdt_write_for_explicit_crdt() {
+        let content = "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\nBody\n";
+        assert!(content_uses_crdt_write(content));
+    }
+
+    #[test]
+    fn content_uses_crdt_write_false_for_merge() {
+        let content = "---\nagent_doc_format: template\nagent_doc_write: merge\n---\nBody\n";
+        assert!(!content_uses_crdt_write(content));
+    }
+
+    #[test]
+    fn content_uses_crdt_write_false_on_parse_failure() {
+        let content = "---\nagent_doc_write: [\n---\nBody\n";
+        assert!(!content_uses_crdt_write(content));
     }
 
     #[test]

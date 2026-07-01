@@ -5285,7 +5285,10 @@ Commit / push:
 - `git push` returned `Everything up-to-date`.
 ";
 
-        let normalized = normalize_patch_content(patch, &[String::from("Commit / push:")]);
+        let normalized = agent_doc_document_realtime::write_policy::normalize_patch_content(
+            patch,
+            &[String::from("Commit / push:")],
+        );
 
         assert!(
             normalized.contains("\nCommit / push:\n"),

@@ -9399,6 +9399,35 @@ fn test_agent_doc_frontmatter_owns_session_id_and_document_gate_policy() {
 }
 
 #[test]
+fn test_agent_doc_frontmatter_owns_write_mode_detection_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let frontmatter_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-frontmatter/src/frontmatter.rs")).unwrap();
+    assert!(
+        frontmatter_source.contains("pub fn content_uses_crdt_write("),
+        "agent-doc-frontmatter must own pure CRDT write-mode detection"
+    );
+
+    let write_run_entry =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/run_entry.rs"))
+            .unwrap();
+    let git_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+    for forbidden in ["fn content_uses_crdt_write(", "fn document_uses_crdt("] {
+        assert!(
+            !write_run_entry.contains(forbidden) && !git_source.contains(forbidden),
+            "orchestration must not re-own CRDT write-mode detection: {forbidden}"
+        );
+    }
+    assert!(
+        write_run_entry
+            .contains("use agent_doc_frontmatter::frontmatter::content_uses_crdt_write;")
+            && git_source.contains("agent_doc_frontmatter::frontmatter::content_uses_crdt_write("),
+        "orchestration should call frontmatter-owned CRDT write-mode detection directly"
+    );
+}
+
+#[test]
 fn test_agent_doc_fs_owns_process_inode_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let fs_source = fs::read_to_string(manifest_dir.join("agent-doc-fs/src/lib.rs")).unwrap();
@@ -10589,6 +10618,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn route_busy_diagnostic_message(",
         "pub struct RouteBusyQueuedDiagnosticFacts",
         "pub fn route_busy_queued_diagnostic_message(",
+        "pub fn failclosed_wait_context(",
         "pub fn format_busy_existing_pane_error(",
         "pub struct DuplicatePanePolicyErrorFacts",
         "pub fn duplicate_pane_policy_error_message(",
@@ -10649,6 +10679,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn startup_miss_diagnostic_message(",
         "fn busy_route_diagnostic_message(",
         "fn busy_route_queued_diagnostic_message(",
+        "fn failclosed_wait_context(",
         "fn format_duplicate_pane_policy_error(",
         "fn route_dispatch_bug_report_item(",
         "fn routed_dispatch_start_timeout(",
@@ -10836,6 +10867,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("route_busy_diagnostic_message(")
             && route_source.contains("RouteBusyQueuedDiagnosticFacts")
             && route_source.contains("route_busy_queued_diagnostic_message(")
+            && route_source.contains("failclosed_wait_context(")
             && route_source.contains("RouteDispatchBugReportItemFacts")
             && route_source.contains("route_dispatch_bug_report_item(")
             && route_source.contains("DispatchOnlyReopenDelivery")
@@ -16209,9 +16241,14 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
     let write_ipc_transport =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc/transport.rs"))
             .unwrap();
+    let realtime_write_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime/src/write_policy.rs"))
+            .unwrap();
     assert!(
-        write_ipc_transport.contains("use agent_doc_element_exchange::{"),
-        "write IPC transport should import exchange prefix policy from the focused crate"
+        write_ipc_transport.contains("normalize_patch_content")
+            && realtime_write_policy.contains("use agent_doc_element_exchange::{")
+            && realtime_write_policy.contains("normalization_target_counts"),
+        "write IPC transport should call realtime patch normalization, and realtime should import exchange prefix policy from the focused crate"
     );
 
     let write_main =
@@ -16791,6 +16828,7 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
         "pub fn exchange_component_text",
         "pub fn new_agent_response_headings",
         "pub fn ack_content_contains_latest_response",
+        "pub fn normalize_patch_content",
         "fn latest_exchange_response_block",
         "fn exchange_content",
         "pub fn first_response_heading",
@@ -16831,6 +16869,9 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
             .unwrap();
     let write_ipc =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+    let write_ipc_transport =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc/transport.rs"))
+            .unwrap();
     let preflight_run =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
             .unwrap();
@@ -16850,16 +16891,23 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
             && write_ipc.contains("first_response_heading"),
         "write/ipc.rs should import focused realtime snapshot/live-drift policy directly"
     );
+    assert!(
+        write_ipc_transport.contains("agent_doc_document_realtime::write_policy::{")
+            && write_ipc_transport.contains("normalize_patch_content"),
+        "write/ipc/transport.rs should import focused IPC patch normalization policy directly"
+    );
     for forbidden_snippet in [
         "fn new_agent_response_headings(",
         "fn ack_content_contains_latest_response(",
         "fn latest_exchange_response_block(",
         "fn exchange_content(",
         "fn first_response_heading(",
+        "fn normalize_patch_content(",
     ] {
         assert!(
-            !write_ipc.contains(forbidden_snippet),
-            "write/ipc.rs must not re-own response-delta write policy: {forbidden_snippet}"
+            !write_ipc.contains(forbidden_snippet)
+                && !write_ipc_transport.contains(forbidden_snippet),
+            "write IPC modules must not re-own response-delta or patch-normalization policy: {forbidden_snippet}"
         );
     }
     assert!(
@@ -18459,6 +18507,8 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         "pub fn sync_frontmatter_status_message",
         "pub const SAFE_PASSIVE_SYNC_LOCK_SKIPPED_MARKER",
         "pub fn safe_passive_lock_contention_message",
+        "pub fn duration_millis_saturating",
+        "pub fn epoch_millis_now",
         "pub fn sanitize_stamp_component",
         "pub fn sync_prune_fingerprint",
         "pub struct SyncPruneState",
@@ -18520,6 +18570,8 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         "fn sync_frontmatter_status_message",
         "const SAFE_PASSIVE_SYNC_LOCK_SKIPPED_MARKER",
         "fn safe_passive_lock_contention_message",
+        "fn destructive_repair_now_ms",
+        "fn epoch_millis_now",
         "fn sanitize_stamp_component",
         "fn sync_prune_fingerprint",
         "struct SyncPruneState",
@@ -18576,6 +18628,7 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
             && sync_orchestration.contains("planned_stash_window_indices")
             && sync_orchestration.contains("AutoStartMode")
             && sync_orchestration.contains("safe_passive_prune_cleanup_throttle")
+            && sync_orchestration.contains("epoch_millis_now")
             && sync_orchestration.contains("sync_repair_stamp_path")
             && sync_orchestration.contains("rename_debounce_expired")
             && sync_orchestration.contains("auto_started_panes_summary")

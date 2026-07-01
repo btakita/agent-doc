@@ -1838,18 +1838,12 @@ fn enforce_committed_single_boundary_invariant(file: &Path, git_root: &Path, res
     }
 }
 
-fn document_uses_crdt(content: &str) -> bool {
-    agent_doc_frontmatter::frontmatter::parse(content)
-        .map(|(fm, _)| fm.resolve_mode().is_crdt())
-        .unwrap_or(false)
-}
-
 fn refresh_live_closeout_sidecars(
     file: &Path,
     committed_doc: &str,
     signal_editor_refresh: bool,
 ) -> Result<Option<bool>> {
-    if document_uses_crdt(committed_doc) {
+    if agent_doc_frontmatter::frontmatter::content_uses_crdt_write(committed_doc) {
         let crdt = agent_doc_merge::crdt::CrdtDoc::from_text(committed_doc).encode_state();
         crate::snapshot::save_document_crdt(file, &crdt, committed_doc)?;
     }
@@ -3029,7 +3023,7 @@ mod th {
 }
 #[cfg(test)]
 pub(crate) use th::{
-    add_submodule, commit_file, drift_gate_doc, drift_gate_scope, init_repo, start_fake_listener,
+    commit_file, drift_gate_doc, drift_gate_scope, init_repo, start_fake_listener,
     wait_for_listener,
 };
 

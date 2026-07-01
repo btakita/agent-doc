@@ -5826,7 +5826,10 @@ scratch
             "transferred line 1".to_string(),
             "transferred line 2".to_string(),
         ];
-        let result = normalize_patch_content(patch_content, &prefix_lines);
+        let result = agent_doc_document_realtime::write_policy::normalize_patch_content(
+            patch_content,
+            &prefix_lines,
+        );
         let expected =
             "❯ transferred line 1\n❯ transferred line 2\n### Re: Response\nAgent answer\n";
         assert_eq!(
@@ -5838,7 +5841,10 @@ scratch
     fn normalize_patch_content_idempotent_already_prefixed() {
         let patch_content = "❯ already prefixed\nnot prefixed\n";
         let prefix_lines = vec!["already prefixed".to_string(), "not prefixed".to_string()];
-        let result = normalize_patch_content(patch_content, &prefix_lines);
+        let result = agent_doc_document_realtime::write_policy::normalize_patch_content(
+            patch_content,
+            &prefix_lines,
+        );
         let expected = "❯ already prefixed\n❯ not prefixed\n";
         assert_eq!(
             result, expected,
@@ -5848,7 +5854,8 @@ scratch
     #[test]
     fn normalize_patch_content_empty_prefix_lines_passthrough() {
         let patch_content = "some line\nanother line\n";
-        let result = normalize_patch_content(patch_content, &[]);
+        let result =
+            agent_doc_document_realtime::write_policy::normalize_patch_content(patch_content, &[]);
         assert_eq!(
             result, patch_content,
             "empty prefix_lines should leave content unchanged"
@@ -5858,7 +5865,10 @@ scratch
     fn normalize_patch_content_non_matching_lines_unchanged() {
         let patch_content = "agent response line\n### heading\n";
         let prefix_lines = vec!["user line".to_string()];
-        let result = normalize_patch_content(patch_content, &prefix_lines);
+        let result = agent_doc_document_realtime::write_policy::normalize_patch_content(
+            patch_content,
+            &prefix_lines,
+        );
         assert_eq!(
             result, patch_content,
             "non-matching lines should pass through unchanged"
@@ -5872,7 +5882,10 @@ scratch
             "spec-test-build-install-commit-push".to_string(),
         ];
 
-        let result = normalize_patch_content(patch_content, &prefix_lines);
+        let result = agent_doc_document_realtime::write_policy::normalize_patch_content(
+            patch_content,
+            &prefix_lines,
+        );
 
         assert_eq!(
             result,
@@ -5893,7 +5906,10 @@ scratch
         assert!(is_pending, "pending should not be an append-mode component");
         // If the guard is respected, pending content is not normalized.
         let result = if is_append_mode_component("pending") {
-            normalize_patch_content(pending_content, &prefix_lines)
+            agent_doc_document_realtime::write_policy::normalize_patch_content(
+                pending_content,
+                &prefix_lines,
+            )
         } else {
             pending_content.to_string()
         };

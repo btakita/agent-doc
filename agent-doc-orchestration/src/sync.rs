@@ -200,10 +200,10 @@ use agent_doc_controller::dispatch::is_stash_window_name;
 use agent_doc_element::element;
 use agent_doc_sync::{
     AutoStartMode, WindowIndexNormalizationPlan, auto_started_panes_summary,
-    effective_sync_columns, is_file_rename, last_visible_excerpt, latency_budget_status,
-    plan_window_index_normalization, planned_stash_window_indices, registry_relative_file_path,
-    rename_debounce_expired, safe_passive_prune_cleanup_throttle, sanitize_excerpt,
-    sync_latency_message, sync_prune_state_update, sync_repair_stamp_path,
+    effective_sync_columns, epoch_millis_now, is_file_rename, last_visible_excerpt,
+    latency_budget_status, plan_window_index_normalization, planned_stash_window_indices,
+    registry_relative_file_path, rename_debounce_expired, safe_passive_prune_cleanup_throttle,
+    sanitize_excerpt, sync_latency_message, sync_prune_state_update, sync_repair_stamp_path,
 };
 use agent_doc_tmux::{
     AssociatedPaneCandidate, AssociatedPaneResolution, AssociatedPaneSource,
@@ -1201,13 +1201,6 @@ fn sync_log(msg: &str) {
     }
 }
 
-fn destructive_repair_now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
-
 /// Check the per-server-per-session destructive-repair stamp. Returns `true`
 /// when a destructive repair ran within `DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS` (so
 /// this pass should skip it); otherwise records a fresh stamp and returns
@@ -1219,7 +1212,7 @@ fn throttle_destructive_repair(tmux: &Tmux, session_name: &str) -> bool {
     else {
         return false;
     };
-    let now = destructive_repair_now_ms();
+    let now = epoch_millis_now();
     let last = std::fs::read_to_string(&path)
         .ok()
         .and_then(|s| s.trim().parse::<u64>().ok());
@@ -1271,14 +1264,6 @@ fn sync_doctor_repair_candidate(col_args: &[String], focus: Option<&str>) -> Opt
             }
             Some(path.canonicalize().unwrap_or(path))
         })
-}
-
-fn epoch_millis_now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .min(u128::from(u64::MAX)) as u64
 }
 
 fn safe_passive_prune_cleanup_mode_at(

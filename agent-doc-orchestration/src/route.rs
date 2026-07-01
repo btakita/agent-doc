@@ -200,10 +200,10 @@ use agent_doc_controller::dispatch::{
     dispatch_only_starting_pane_ready_timeout_for_binary,
     dispatch_only_starting_pane_recovery_retry_budget,
     dispatch_only_starting_pane_recovery_timeout_for_binary, duplicate_pane_policy_error_message,
-    existing_pane_ready_timeout, fresh_route_start_ack_timeout, recent_lines_contain_trigger,
-    route_busy_diagnostic_message, route_busy_queued_diagnostic_message,
-    route_dispatch_bug_report_item, route_latency_message, route_latency_status,
-    route_startup_miss_diagnostic_message, route_submit_issue_message,
+    existing_pane_ready_timeout, failclosed_wait_context, fresh_route_start_ack_timeout,
+    recent_lines_contain_trigger, route_busy_diagnostic_message,
+    route_busy_queued_diagnostic_message, route_dispatch_bug_report_item, route_latency_message,
+    route_latency_status, route_startup_miss_diagnostic_message, route_submit_issue_message,
     route_submit_observation_message, routed_cycle_ack_timeout,
     routed_dispatch_start_timeout_for_binary, routed_trigger_payload_rejection,
     should_optimistically_accept_missing_cycle_ack, should_require_routed_cycle_ack,
@@ -2563,26 +2563,6 @@ fn dispatch_only_starting_pane_ready_timeout(harness: &HarnessConfig) -> Duratio
     })
 }
 
-/// #route-busy-vs-starting-wording: word the authoritative-actor `FailClosed`
-/// wait context. When the live pane shows a harness busy cue the actor is busy
-/// on an active turn, not cold-starting, so the "(waited Ns for X startup)"
-/// phrasing is misleading. `busy_cue` is the harness-specific reason from
-/// [`HarnessConfig::dispatch_blocker_reason`] (e.g. `active claude turn`); `None`
-/// keeps the cold-startup timeout wording.
-fn failclosed_wait_context(
-    harness: &HarnessConfig,
-    busy_cue: Option<&str>,
-    startup_secs: u64,
-) -> String {
-    match busy_cue {
-        Some(cue) => format!(
-            "the pane is busy on an active {} turn ({}), not cold-starting",
-            harness.binary, cue
-        ),
-        None => format!("waited {}s for {} startup", startup_secs, harness.binary),
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum StartingPaneRecoveryTarget {
     SamePane,
@@ -3777,7 +3757,7 @@ fn route_via_authoritative_actor(
                 .ok()
                 .and_then(|content| harness.dispatch_blocker_reason(&content));
             let wait_context = failclosed_wait_context(
-                harness,
+                &harness.binary,
                 busy_cue.as_deref(),
                 dispatch_only_busy_refusal_wait_secs(
                     wait_for_ready_override(),
@@ -7603,20 +7583,6 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
         assert_eq!(
             dispatch_only_starting_pane_ready_timeout(&codex),
             Duration::from_millis(250)
-        );
-    }
-    #[test]
-    fn failclosed_wait_context_distinguishes_busy_turn_from_cold_startup() {
-        let claude = agent_doc_harness::HarnessConfig::claude();
-        // No busy cue → cold-startup timeout wording (unchanged behavior).
-        assert_eq!(
-            failclosed_wait_context(&claude, None, 12),
-            "waited 12s for claude startup"
-        );
-        // A live busy cue → the pane is busy on an active turn, not cold-starting.
-        assert_eq!(
-            failclosed_wait_context(&claude, Some("active claude turn"), 12),
-            "the pane is busy on an active claude turn (active claude turn), not cold-starting"
         );
     }
 }

@@ -10,8 +10,12 @@ use agent_doc_document::commit_normalization::{
 use agent_doc_document::transient_markers::strip_boundary_markers;
 use agent_doc_document::write_normalization::strip_boundary_for_dedup;
 use agent_doc_element::element;
-use agent_doc_element_exchange::normalize_exchange_prefixes_for_targets;
-use agent_doc_prompt_lines::text_line_looks_like_prompt_target;
+use agent_doc_element_exchange::{
+    normalization_target_counts, normalize_exchange_prefixes_for_targets,
+};
+use agent_doc_prompt_lines::{
+    line_looks_like_plain_response_after_prompt, text_line_looks_like_prompt_target,
+};
 use agent_doc_queue::queue_prompt_drift::queue_prompt_deletions_between;
 use agent_doc_turn::closeout_signal::line_is_carry_forward_signal;
 use agent_doc_turn::response_replay::response_materialized_in_content;
@@ -57,6 +61,42 @@ pub fn decide_visible_write_after_typing(facts: VisibleWriteTypingFacts) -> Visi
     } else {
         VisibleWriteDecision::DeferActiveTyping
     }
+}
+
+/// Apply `❯ ` prefix to lines in `content` that appear in `prefix_lines`.
+///
+/// IPC patch content is normalized before delivery so newly-appended lines
+/// already carry the prompt prefix when the editor applies them.
+pub fn normalize_patch_content(content: &str, prefix_lines: &[String]) -> String {
+    if prefix_lines.is_empty() {
+        return content.to_string();
+    }
+    let mut remaining = normalization_target_counts(prefix_lines);
+    let mut result = String::with_capacity(content.len() + 2 * prefix_lines.len());
+    for line in content.lines() {
+        let bare = line
+            .trim_end()
+            .strip_prefix("\u{276f} ")
+            .unwrap_or(line.trim_end());
+        if line_looks_like_plain_response_after_prompt(bare) {
+            result.push_str(line);
+            result.push('\n');
+            continue;
+        }
+        if !line.starts_with("\u{276f} ")
+            && let Some(remaining_count) = remaining.get_mut(bare)
+            && *remaining_count > 0
+        {
+            result.push_str("\u{276f} ");
+            *remaining_count -= 1;
+        }
+        result.push_str(line);
+        result.push('\n');
+    }
+    if !content.ends_with('\n') && result.ends_with('\n') {
+        result.truncate(result.len() - 1);
+    }
+    result
 }
 
 fn normalize_component_content_for_delta(content: &str) -> String {
@@ -1921,6 +1961,57 @@ mod tests {
         format!(
             "# Plan\n\n<!-- agent:exchange -->\n{exchange}<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n{queue}<!-- /agent:queue -->\n"
         )
+    }
+
+    #[test]
+    fn normalize_patch_content_empty_prefix_lines_passthrough() {
+        let patch_content = "some line\nanother line\n";
+
+        assert_eq!(normalize_patch_content(patch_content, &[]), patch_content);
+    }
+
+    #[test]
+    fn normalize_patch_content_counts_duplicate_targets() {
+        let patch_content = "repeat target\nrepeat target\nrepeat target\n";
+        let prefix_lines = vec!["repeat target".to_string(), "repeat target".to_string()];
+
+        assert_eq!(
+            normalize_patch_content(patch_content, &prefix_lines),
+            "❯ repeat target\n❯ repeat target\nrepeat target\n"
+        );
+    }
+
+    #[test]
+    fn normalize_patch_content_keeps_already_prefixed_lines_idempotent() {
+        let patch_content = "❯ already prefixed\nnot prefixed\n";
+        let prefix_lines = vec!["already prefixed".to_string(), "not prefixed".to_string()];
+
+        assert_eq!(
+            normalize_patch_content(patch_content, &prefix_lines),
+            "❯ already prefixed\n❯ not prefixed\n"
+        );
+    }
+
+    #[test]
+    fn normalize_patch_content_preserves_plain_response_lines_after_prompt() {
+        let patch_content = "Verification:\nuser directive\n";
+        let prefix_lines = vec!["Verification:".to_string(), "user directive".to_string()];
+
+        assert_eq!(
+            normalize_patch_content(patch_content, &prefix_lines),
+            "Verification:\n❯ user directive\n"
+        );
+    }
+
+    #[test]
+    fn normalize_patch_content_preserves_missing_trailing_newline() {
+        let patch_content = "target line";
+        let prefix_lines = vec!["target line".to_string()];
+
+        assert_eq!(
+            normalize_patch_content(patch_content, &prefix_lines),
+            "❯ target line"
+        );
     }
 
     #[test]

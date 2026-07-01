@@ -5,7 +5,7 @@
 //! document validation, and state-file IO.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
@@ -177,6 +177,17 @@ pub fn safe_passive_lock_contention_message(elapsed: Duration, budget: Duration)
 
 pub fn safe_passive_prune_cleanup_throttle() -> Duration {
     Duration::from_secs(2)
+}
+
+pub fn duration_millis_saturating(duration: Duration) -> u64 {
+    duration.as_millis().min(u128::from(u64::MAX)) as u64
+}
+
+pub fn epoch_millis_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(duration_millis_saturating)
+        .unwrap_or(0)
 }
 
 pub fn sanitize_stamp_component(value: &str) -> String {
@@ -604,6 +615,30 @@ mod tests {
         assert!(message.contains("status=over_budget"), "{message}");
         assert!(message.contains("coalesced=skipped_stale"), "{message}");
         assert!(message.contains("action=retry"), "{message}");
+    }
+
+    #[test]
+    fn duration_millis_saturating_caps_at_u64_max() {
+        assert_eq!(duration_millis_saturating(Duration::from_millis(42)), 42);
+        assert_eq!(
+            duration_millis_saturating(Duration::from_secs(u64::MAX)),
+            u64::MAX
+        );
+    }
+
+    #[test]
+    fn epoch_millis_now_matches_system_time_smoke() {
+        let direct = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(duration_millis_saturating)
+            .unwrap_or(0);
+        let helper = epoch_millis_now();
+
+        assert!(helper > 1_000_000_000_000, "{helper}");
+        assert!(
+            helper.abs_diff(direct) < 10_000,
+            "helper={helper} direct={direct}"
+        );
     }
 
     #[test]

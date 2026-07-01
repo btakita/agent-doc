@@ -3,14 +3,11 @@
 use super::*;
 use agent_doc_document_realtime::write_policy::{
     WholeBufferAuthority, WholeBufferAuthorityFacts, WholeBufferDelivery,
-    WholeBufferDeliveryAction, decide_whole_buffer_delivery,
+    WholeBufferDeliveryAction, decide_whole_buffer_delivery, normalize_patch_content,
 };
 use agent_doc_element_boundary::boundary::find_boundary_id;
-use agent_doc_element_exchange::{
-    extract_post_commit_normalization_targets, normalization_target_counts,
-};
+use agent_doc_element_exchange::extract_post_commit_normalization_targets;
 use agent_doc_ipc_protocol::{FullContentIpcMode, is_already_applied_ack_error_message};
-use agent_doc_prompt_lines::line_looks_like_plain_response_after_prompt;
 
 fn live_editor_delivery_target(file: &Path) -> Option<String> {
     let mut file_keys = Vec::new();
@@ -1923,43 +1920,6 @@ pub(crate) fn write_ipc_and_poll(
         ),
     );
     Ok(false)
-}
-
-/// Apply `❯ ` prefix to lines in `content` that appear in `normalize_prefix_lines`.
-///
-/// Bakes normalization into patch content before IPC delivery so the plugin
-/// receives already-prefixed lines. The plugin runs normalization *before*
-/// applying patches, so it cannot normalize lines the patch is about to append.
-pub(crate) fn normalize_patch_content(content: &str, prefix_lines: &[String]) -> String {
-    if prefix_lines.is_empty() {
-        return content.to_string();
-    }
-    let mut remaining = normalization_target_counts(prefix_lines);
-    let mut result = String::with_capacity(content.len() + 2 * prefix_lines.len());
-    for line in content.lines() {
-        let bare = line
-            .trim_end()
-            .strip_prefix("\u{276f} ")
-            .unwrap_or(line.trim_end());
-        if line_looks_like_plain_response_after_prompt(bare) {
-            result.push_str(line);
-            result.push('\n');
-            continue;
-        }
-        if !line.starts_with("\u{276f} ")
-            && let Some(remaining_count) = remaining.get_mut(bare)
-            && *remaining_count > 0
-        {
-            result.push_str("\u{276f} ");
-            *remaining_count -= 1;
-        }
-        result.push_str(line);
-        result.push('\n');
-    }
-    if !content.ends_with('\n') && result.ends_with('\n') {
-        result.truncate(result.len() - 1);
-    }
-    result
 }
 
 /// Build the IPC patches JSON array (shared between socket and file-based paths).

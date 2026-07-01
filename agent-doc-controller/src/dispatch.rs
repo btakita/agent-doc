@@ -1409,6 +1409,23 @@ pub fn route_busy_queued_diagnostic_message(facts: RouteBusyQueuedDiagnosticFact
     )
 }
 
+/// #route-busy-vs-starting-wording: word the authoritative-actor `FailClosed`
+/// wait context. When the live pane shows a harness busy cue the actor is busy
+/// on an active turn, not cold-starting, so the "(waited Ns for X startup)"
+/// phrasing is misleading.
+pub fn failclosed_wait_context(
+    harness_binary: &str,
+    busy_cue: Option<&str>,
+    startup_secs: u64,
+) -> String {
+    match busy_cue {
+        Some(cue) => format!(
+            "the pane is busy on an active {harness_binary} turn ({cue}), not cold-starting"
+        ),
+        None => format!("waited {startup_secs}s for {harness_binary} startup"),
+    }
+}
+
 pub fn format_busy_existing_pane_error(
     file_display: impl std::fmt::Display,
     pane: &str,
@@ -3214,6 +3231,18 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         );
         assert!(message.contains("No need to rerun"), "{message}");
         assert!(!message.contains("rerun `Run Agent Doc`"), "{message}");
+    }
+
+    #[test]
+    fn failclosed_wait_context_distinguishes_busy_turn_from_cold_startup() {
+        assert_eq!(
+            failclosed_wait_context("claude", None, 12),
+            "waited 12s for claude startup"
+        );
+        assert_eq!(
+            failclosed_wait_context("claude", Some("active claude turn"), 12),
+            "the pane is busy on an active claude turn (active claude turn), not cold-starting"
+        );
     }
 
     #[test]

@@ -862,6 +862,18 @@ should be deleted during extraction.
   favor of node-key APIs, and watch tests now call the current discovery API
   directly instead of a test-only compatibility helper. Static guards cover all
   removed Rust API names.
+- The next fan-out pass extracted harness policy and removed greenfield-dead
+  compatibility surfaces. New `agent-doc-harness` owns `HarnessConfig`, prompt
+  and chrome classification, busy/idle blocker detection, and harness restart
+  arguments; orchestration callers import it directly and the old
+  `agent-doc-orchestration::harness` facade module is deleted. The same pass
+  retires remaining obsolete active API names instead of preserving aliases:
+  preflight JSON exposes `user_intent_prompt_changes` without
+  `prompt_bearing_changes`, `replace:pending` is the only pending replacement
+  block syntax, `--allow-patch-pending` / `AGENT_DOC_ALLOW_PATCH_PENDING` are
+  removed, and tracked-work completion uses `--done` only rather than the old
+  `--pending-done` / `--backlog-done` spellings. Boundary tests assert the new
+  owner crate and reject the removed surfaces.
 
 ### Earlier closure finding
 

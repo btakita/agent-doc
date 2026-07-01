@@ -874,7 +874,7 @@ Two notes:
 - The cash+equity line is soft and optional by design; it signals belief in the product without committing you to a number. If you'd rather keep equity out of a first re-approach, cut that sentence and it still reads well.
 
 Say the word and I'll publish it via `corky`/LinkedIn as a draft (no auto-send), or adjust tone/length.
-<!-- agent:boundary:ee21c7d8 -->
+<!-- agent:boundary:78eca41e -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -885,7 +885,6 @@ Say the word and I'll publish it via `corky`/LinkedIn as a draft (no auto-send),
 ## Backlog
 
 <!-- agent:backlog -->
-- [x] [#reirengagenote] [recommended] Draft a short no-pressure re-engagement note to Arthur/REItrades: respect the overseas-Upwork decision, leave the door open if it stalls, and optionally signal openness to a blended cash+equity structure.
 <!-- /agent:backlog -->
 
 ## Icebox
@@ -897,4 +896,6 @@ Say the word and I'll publish it via `corky`/LinkedIn as a draft (no auto-send),
 
 <!-- agent:done -->
 - 2026-07-01 [#reibuyvsbuild] [recommended] Fold a "Build vs. Buy / vendor options" §3c into rei-trades/reitrades-v1.2-estimate-report.md (extraction: parser API vs LLM-native vs managed IDP; source-backed demographics; Stripe/MailerLite/geocode buys) + add a Phase-0 extraction bake-off line item, then regenerate the PDF.
+- 2026-07-01 [#reirengagenote] [recommended] Draft a short no-pressure re-engagement note to Arthur/REItrades: respect the overseas-Upwork decision, leave the door open if it stalls, and optionally signal openness to a blended cash+equity structure.
+- 2026-07-01 [#reirengagenote] [recommended] Draft a short no-pressure re-engagement note to Arthur/REItrades: respect the overseas-Upwork decision, leave the door open if it stalls, and optionally signal openness to a blended cash+equity structure.
 <!-- /agent:done -->

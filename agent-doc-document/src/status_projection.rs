@@ -8,6 +8,17 @@ use agent_doc_element::element::{is_backlog_component, is_tracked_work_component
 /// document is mapping a STALE agent-doc binary.
 pub const STALE_SUPERVISOR_STATUS_MARKER: &str = "🔴 (restart/recycle your supervisor)";
 
+/// Replace the `agent:status` component body with canonical status text.
+pub fn replace_status_content(content: &str, text: &str) -> Result<String> {
+    let components = element::parse(content).context("failed to parse components")?;
+    let status = components
+        .into_iter()
+        .find(|component| component.name == "status")
+        .context("document has no status component")?;
+    let new_content = format!("\n{}\n", text);
+    Ok(status.replace_content(content, &new_content))
+}
+
 fn first_live_backlog_id(content: &str) -> Result<Option<String>> {
     let components = element::parse(content).context("failed to parse components")?;
     for comp in components {
@@ -176,6 +187,38 @@ mod tests {
             .expect("stale status should be reconciled");
         assert!(out.contains("Logged follow-ups. Top backlog item: #new."));
         assert!(!out.contains("#old"));
+    }
+
+    #[test]
+    fn replace_status_content_replaces_only_status_body() {
+        let doc = concat!(
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "old status\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n",
+            "keep me\n",
+            "<!-- /agent:exchange -->\n"
+        );
+
+        let out = replace_status_content(doc, "new status").unwrap();
+        let status = element::parse(&out)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "status")
+            .unwrap();
+
+        assert_eq!(status.content(&out), "\nnew status\n");
+        assert!(!out.contains("old status"));
+        assert!(out.contains("keep me"));
+    }
+
+    #[test]
+    fn replace_status_content_requires_status_component() {
+        let err = replace_status_content("# No status\n", "new").unwrap_err();
+
+        assert!(err.to_string().contains("document has no status component"));
     }
 
     #[test]

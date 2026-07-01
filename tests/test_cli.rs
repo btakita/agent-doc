@@ -5017,6 +5017,39 @@ fn test_agent_doc_turn_cycle_phase_has_no_cycle_state_facade() {
         turn_source.contains("pub const fn as_str(self) -> &'static str"),
         "agent-doc-turn must own canonical cycle phase labels"
     );
+    assert!(
+        turn_source.contains("pub mod cycle_policy;"),
+        "agent-doc-turn should expose pure cycle-state policy through its owning module"
+    );
+    let cycle_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn/src/cycle_policy.rs")).unwrap();
+    for required in [
+        "pub fn is_stable_commit_event",
+        "pub fn is_noop_commit_event",
+        "pub fn normalize_checkpoint_task_id",
+        "pub fn normalize_checkpoint_text_list",
+    ] {
+        assert!(
+            cycle_policy.contains(required),
+            "agent-doc-turn must own pure cycle-state policy: {required}"
+        );
+    }
+    for forbidden in [
+        "fn is_stable_commit_event(",
+        "pub fn is_noop_commit_event(",
+        "fn normalize_checkpoint_task_id(",
+        "fn normalize_text_list(",
+    ] {
+        assert!(
+            !cycle_state_source.contains(forbidden),
+            "cycle_state must not re-own pure cycle policy: {forbidden}"
+        );
+    }
+    assert!(
+        cycle_state_source.contains("use agent_doc_turn::cycle_policy::{")
+            && cycle_state_source.contains("normalize_checkpoint_text_list(prompt_targets)"),
+        "cycle_state should call focused cycle policy directly"
+    );
 
     fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
         for entry in fs::read_dir(dir).unwrap() {
@@ -12332,6 +12365,7 @@ fn test_agent_doc_document_owns_status_projection_policy() {
             .unwrap();
     for required in [
         "pub const STALE_SUPERVISOR_STATUS_MARKER",
+        "pub fn replace_status_content",
         "pub fn reconcile_top_backlog_status_content",
         "pub fn apply_stale_supervisor_marker",
         "pub fn reconcile_stale_supervisor_status_content",
@@ -12346,6 +12380,9 @@ fn test_agent_doc_document_owns_status_projection_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/status_cmd.rs")).unwrap();
     for forbidden in [
         "STALE_SUPERVISOR_STATUS_MARKER",
+        "fn find_status_component",
+        "element::parse",
+        "replace_content(&full_content",
         "fn first_live_backlog_id",
         "fn extract_status_top_backlog_id",
         "fn replace_top_backlog_sentence",
@@ -12358,6 +12395,10 @@ fn test_agent_doc_document_owns_status_projection_policy() {
             "status_cmd must stay a writeback adapter, not a status projection facade: {forbidden}"
         );
     }
+    assert!(
+        status_cmd.contains("agent_doc_document::status_projection::replace_status_content"),
+        "status_cmd should call focused document status replacement directly"
+    );
 
     for relative in [
         "agent-doc-orchestration/src/compact.rs",
@@ -12376,6 +12417,93 @@ fn test_agent_doc_document_owns_status_projection_policy() {
             "{relative} must not route status projection through status_cmd"
         );
     }
+}
+
+#[test]
+fn test_agent_doc_document_owns_model_projection_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let model_projection =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/model_projection.rs"))
+            .unwrap();
+    for required in [
+        "pub fn overlay_state_from_markdown",
+        "pub fn project_overlay_state",
+        "pub fn project_overlay_roundtrip",
+        "pub fn overlay_projection_is_byte_stable",
+        "pub fn first_diff_byte",
+        "pub enum ModelBaselineSource",
+        "pub struct ModelBaselineResolution",
+        "pub fn resolve_model_baseline_projection",
+        "pub fn overlay_carries_unbaselined_content",
+    ] {
+        assert!(
+            model_projection.contains(required),
+            "agent-doc-document must own model projection policy: {required}"
+        );
+    }
+    let document_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/lib.rs")).unwrap();
+    assert!(
+        document_lib.contains("pub mod model_projection;"),
+        "agent-doc-document should expose model projection through its owning module"
+    );
+    let snapshot =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/snapshot.rs")).unwrap();
+    for forbidden in [
+        "fn project_overlay_roundtrip(",
+        "pub fn overlay_projection_is_byte_stable(",
+        "fn first_diff_byte(",
+        "fn overlay_carries_unbaselined_content(",
+    ] {
+        assert!(
+            !snapshot.contains(forbidden),
+            "snapshot.rs must not re-own or facade model projection policy: {forbidden}"
+        );
+    }
+    assert!(
+        snapshot.contains("use agent_doc_document::model_projection::{")
+            && snapshot.contains("resolve_model_baseline_projection")
+            && snapshot.contains("overlay_carries_unbaselined_content"),
+        "snapshot.rs should call focused model projection policy directly"
+    );
+}
+
+#[test]
+fn test_agent_doc_document_owns_tracked_work_projection_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let tracked_work =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/tracked_work_projection.rs"))
+            .unwrap();
+    for required in [
+        "pub struct TrackedWorkFingerprint",
+        "pub fn tracked_work_fingerprint",
+    ] {
+        assert!(
+            tracked_work.contains(required),
+            "agent-doc-document must own tracked-work projection policy: {required}"
+        );
+    }
+    let document_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/lib.rs")).unwrap();
+    assert!(
+        document_lib.contains("pub mod tracked_work_projection;"),
+        "agent-doc-document should expose tracked-work projection through its owning module"
+    );
+    let preflight =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    for forbidden in ["fn tracked_work_component_fingerprint("] {
+        assert!(
+            !preflight.contains(forbidden),
+            "preflight must not re-own tracked-work projection policy: {forbidden}"
+        );
+    }
+    assert!(
+        preflight.contains("agent_doc_document::tracked_work_projection::tracked_work_fingerprint")
+            && preflight.contains(
+                "agent_doc_document::tracked_work_projection::TrackedWorkFingerprint::empty"
+            ),
+        "preflight should call focused tracked-work projection policy directly"
+    );
 }
 
 #[test]

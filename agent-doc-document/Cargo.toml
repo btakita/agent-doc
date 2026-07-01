@@ -16,6 +16,7 @@ agent-doc-element-registry = { path = "../agent-doc-element-registry", version =
 agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.66" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.66" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.66" }
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.66" }
 agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.34.66" }
 anyhow = "1"
 pulldown-cmark = "0.13"

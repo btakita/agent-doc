@@ -95,6 +95,11 @@ use fs2::FileExt;
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 
+use agent_doc_document::model_projection::{
+    ModelBaselineSource, first_diff_byte, overlay_carries_unbaselined_content,
+    overlay_state_from_markdown, project_overlay_roundtrip, project_overlay_state,
+    resolve_model_baseline_projection,
+};
 use agent_doc_element_exchange::strip_exchange_content;
 use agent_doc_fs::find_project_root;
 
@@ -248,35 +253,6 @@ pub fn save(doc: &Path, content: &str) -> Result<()> {
 // itself drift. Rung 1 ships only the *instrument* that proves this on real
 // traffic; it never changes a persisted artifact or a merge outcome.
 
-/// Round-trip `content` through the exact persist→reload→project pipeline the
-/// merge base uses (`OverlayCrdtDoc::from_markdown → encode_state → decode_state →
-/// to_markdown`, mirroring [`crdt_merge_base_state`]). Returns the projected
-/// markdown, or `None` if the overlay failed to decode/project (logged, never
-/// swallowed). Pure (no I/O).
-fn project_overlay_roundtrip(content: &str) -> Option<String> {
-    let state = agent_doc_markdown_ast::crdt::OverlayCrdtDoc::from_markdown(content).encode_state();
-    match agent_doc_markdown_ast::crdt::OverlayCrdtDoc::decode_state(&state) {
-        Ok(overlay) => match overlay.to_markdown() {
-            Ok(markdown) => Some(markdown),
-            Err(e) => {
-                eprintln!("[mps] overlay projection (to_markdown) failed: {e}");
-                None
-            }
-        },
-        Err(e) => {
-            eprintln!("[mps] overlay projection (decode_state) failed: {e}");
-            None
-        }
-    }
-}
-
-/// Whether the structured overlay model can faithfully project `content` back to
-/// byte-identical markdown — the #mps byte-stable-projection gate. Pure; safe to
-/// call from evals and (future) cutover preconditions.
-pub fn overlay_projection_is_byte_stable(content: &str) -> bool {
-    project_overlay_roundtrip(content).as_deref() == Some(content)
-}
-
 /// `#mps` Rung 1 shadow probe, wired into [`save`]. **Off by default**; set
 /// `AGENT_DOC_MPS_PROJECTION_PROBE=1` during dog-fooding to emit a grep-able
 /// `mps_projection_equiv ok|drift …` ops.log marker on every snapshot save,
@@ -287,7 +263,7 @@ fn probe_overlay_projection(doc: &Path, content: &str) {
         return;
     }
     match project_overlay_roundtrip(content) {
-        Some(projected) if projected == content => {
+        Ok(projected) if projected == content => {
             crate::ops_log::log_op(
                 doc,
                 &format!(
@@ -297,7 +273,7 @@ fn probe_overlay_projection(doc: &Path, content: &str) {
                 ),
             );
         }
-        Some(projected) => {
+        Ok(projected) => {
             crate::ops_log::log_op(
                 doc,
                 &format!(
@@ -308,7 +284,8 @@ fn probe_overlay_projection(doc: &Path, content: &str) {
                 ),
             );
         }
-        None => {
+        Err(err) => {
+            eprintln!("[mps] overlay projection failed: {err:#}");
             crate::ops_log::log_op(
                 doc,
                 &format!(
@@ -392,7 +369,7 @@ pub fn save_baseline_model(doc: &Path, content: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let state = agent_doc_markdown_ast::crdt::OverlayCrdtDoc::from_markdown(content).encode_state();
+    let state = overlay_state_from_markdown(content);
     let parent = path.parent().unwrap_or(Path::new("."));
     let mut tmp = tempfile::NamedTempFile::new_in(parent)
         .with_context(|| format!("failed to create temp file in {}", parent.display()))?;
@@ -435,24 +412,20 @@ pub fn load_baseline_model(doc: &Path, md_baseline: Option<&str>) -> Result<Opti
         Some(b) => b,
         None => return Ok(None),
     };
-    let overlay =
-        agent_doc_markdown_ast::crdt::OverlayCrdtDoc::decode_state_or_migrate(&bytes, md_baseline)
-            .with_context(|| format!("failed to decode baseline overlay {}", path.display()))?;
-    let projection = overlay
-        .to_markdown()
+    let projection = project_overlay_state(&bytes, md_baseline)
         .with_context(|| format!("failed to project baseline overlay {}", path.display()))?;
-    let md_len = md_baseline.map(|m| m.len()).unwrap_or(0);
+    let resolution = resolve_model_baseline_projection(projection, md_baseline);
 
-    match md_baseline {
+    match resolution.source {
         // `.md` present and diverges — prefer the proven `.md` backstop, log loudly.
-        Some(md) if md != projection => {
+        ModelBaselineSource::MdBackstop => {
             crate::ops_log::log_op(
                 doc,
                 &format!(
                     "mps_baseline_resolve source=md_backstop file={} projected_len={} md_len={} diverged=true",
                     doc.display(),
-                    projection.len(),
-                    md_len,
+                    resolution.projected_len,
+                    resolution.md_len,
                 ),
             );
             crate::ops_log::log_op(
@@ -460,41 +433,27 @@ pub fn load_baseline_model(doc: &Path, md_baseline: Option<&str>) -> Result<Opti
                 &format!(
                     "mps_baseline_divergence file={} projected_len={} md_len={} first_diff_byte={:?}",
                     doc.display(),
-                    projection.len(),
-                    md_len,
-                    first_diff_byte(md, &projection)
+                    resolution.projected_len,
+                    resolution.md_len,
+                    resolution.first_diff_byte
                 ),
             );
-            Ok(Some(md.to_string()))
+            Ok(Some(resolution.content))
         }
         // `.md` agrees, or there is no `.md` — the model projection is authoritative.
-        _ => {
+        ModelBaselineSource::Model => {
             crate::ops_log::log_op(
                 doc,
                 &format!(
                     "mps_baseline_resolve source=model file={} projected_len={} md_len={} diverged=false",
                     doc.display(),
-                    projection.len(),
-                    md_len,
+                    resolution.projected_len,
+                    resolution.md_len,
                 ),
             );
-            Ok(Some(projection))
+            Ok(Some(resolution.content))
         }
     }
-}
-
-/// Byte offset of the first difference between `a` and `b` (or the shorter
-/// length when one is a prefix of the other). `None` when equal.
-fn first_diff_byte(a: &str, b: &str) -> Option<usize> {
-    a.as_bytes()
-        .iter()
-        .zip(b.as_bytes())
-        .position(|(x, y)| x != y)
-        .or(if a.len() == b.len() {
-            None
-        } else {
-            Some(a.len().min(b.len()))
-        })
 }
 
 /// Delete the model baseline sidecar for a document, if present. Idempotent.
@@ -1016,8 +975,7 @@ pub fn save_overlay_crdt(doc: &Path, state: &[u8]) -> Result<()> {
 }
 
 fn rebuild_overlay_crdt_locked(path: &Path, markdown: &str) -> Result<usize> {
-    let overlay_state =
-        agent_doc_markdown_ast::crdt::OverlayCrdtDoc::from_markdown(markdown).encode_state();
+    let overlay_state = overlay_state_from_markdown(markdown);
     write_crdt_state(path, &overlay_state)?;
     Ok(overlay_state.len())
 }
@@ -1138,24 +1096,6 @@ pub struct CrdtMergeBase {
 /// a stale subset. So when the projection differs from the baseline and ops are
 /// pending, the overlay is ahead/preserve (the deletion survives); with no
 /// pending ops it stays stale/discard (GC preserved).
-fn overlay_carries_unbaselined_content(doc: &Path, overlay_md: &str, baseline: &str) -> bool {
-    use std::collections::HashMap;
-    let mut baseline_lines: HashMap<&str, usize> = HashMap::new();
-    for line in baseline.lines() {
-        *baseline_lines.entry(line).or_insert(0) += 1;
-    }
-    for line in overlay_md.lines() {
-        if line.trim().is_empty() {
-            continue;
-        }
-        match baseline_lines.get_mut(line) {
-            Some(count) if *count > 0 => *count -= 1,
-            _ => return true,
-        }
-    }
-    overlay_md != baseline && crate::op_capture::has_pending_editor_ops(doc)
-}
-
 /// Rebuild the overlay sidecar from the cycle baseline (the stale/discard path).
 /// Best-effort: a rebuild failure is logged, never propagated, since the merge
 /// base itself is already resolved to the baseline.
@@ -1215,12 +1155,7 @@ pub fn crdt_merge_base_state(doc: &Path, fallback_markdown: &str) -> Result<Crdt
             fallback_markdown.to_string(),
             CrdtMergeBaseSource::FallbackNoOverlay,
         ),
-        Some(bytes) => match agent_doc_markdown_ast::crdt::OverlayCrdtDoc::decode_state_or_migrate(
-            &bytes,
-            Some(fallback_markdown),
-        )
-        .and_then(|overlay| overlay.to_markdown())
-        {
+        Some(bytes) => match project_overlay_state(&bytes, Some(fallback_markdown)) {
             Ok(markdown) if markdown == fallback_markdown => {
                 (markdown, CrdtMergeBaseSource::Overlay)
             }
@@ -1234,7 +1169,11 @@ pub fn crdt_merge_base_state(doc: &Path, fallback_markdown: &str) -> Result<Crdt
                         fallback_markdown.len()
                     ),
                 );
-                if overlay_carries_unbaselined_content(doc, &overlay_md, fallback_markdown) {
+                if overlay_carries_unbaselined_content(
+                    &overlay_md,
+                    fallback_markdown,
+                    crate::op_capture::has_pending_editor_ops(doc),
+                ) {
                     // Overlay-ahead / concurrent-divergent: the overlay carries
                     // live keystrokes not yet committed. The merge base must stay
                     // the committed baseline — it is the common ancestor of the
@@ -1327,8 +1266,7 @@ pub fn crdt_merge_base_state(doc: &Path, fallback_markdown: &str) -> Result<Crdt
 /// is still persisted for older binaries and editor plugins.
 pub fn save_document_crdt(doc: &Path, legacy_state: &[u8], markdown: &str) -> Result<()> {
     save_crdt(doc, legacy_state)?;
-    let overlay_state =
-        agent_doc_markdown_ast::crdt::OverlayCrdtDoc::from_markdown(markdown).encode_state();
+    let overlay_state = overlay_state_from_markdown(markdown);
     save_overlay_crdt(doc, &overlay_state)?;
     // Per-node successor to the whole-doc `<hash>.yrs` blob (`#qnodemerge2`).
     // Rebuilding from the snapshot markdown each cycle also GCs per node
@@ -2742,84 +2680,6 @@ Steps to take:
     }
 
     // -----------------------------------------------------------------------
-    // `#mps` Rung 1 — byte-stable projection evals
-    //
-    // Prove the structured overlay model projects each document shape agent-doc
-    // actually persists back to byte-identical markdown through the same
-    // encode→decode→to_markdown pipeline the merge base uses. These are the
-    // offline half of the #mps obstacle-2 gate; the env-gated `save` probe
-    // collects the live-traffic half.
-    // -----------------------------------------------------------------------
-
-    fn assert_projection_byte_stable(label: &str, content: &str) {
-        let projected = project_overlay_roundtrip(content);
-        assert_eq!(
-            projected.as_deref(),
-            Some(content),
-            "#mps overlay projection not byte-stable for {label}"
-        );
-        assert!(overlay_projection_is_byte_stable(content), "{label}");
-    }
-
-    #[test]
-    fn mps_projection_byte_stable_inline_shape() {
-        let inline = concat!(
-            "---\nagent_doc_format: inline\n---\n\n",
-            "## User\n\nDo the thing.\n\n",
-            "## Assistant\n\nDid the thing.\n"
-        );
-        assert_projection_byte_stable("inline", inline);
-    }
-
-    #[test]
-    fn mps_projection_byte_stable_template_queue_shape() {
-        let template = concat!(
-            "---\nagent_doc_format: template\n---\n\n",
-            "## Queue\n\n<!-- agent:queue -->\n",
-            "- do [#a]\n- do [#b]\n",
-            "<!-- /agent:queue -->\n"
-        );
-        assert_projection_byte_stable("template_queue", template);
-    }
-
-    #[test]
-    fn mps_projection_byte_stable_exchange_append_shape() {
-        let exchange = concat!(
-            "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
-            "## Exchange\n\n<!-- agent:exchange patch=append -->\n",
-            "\u{276f} first question\n\n",
-            "### Re: first question \u{2014} opus-4-8\n\n",
-            "First answer here.\n\n",
-            "\u{276f} second question\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        assert_projection_byte_stable("exchange_append", exchange);
-    }
-
-    #[test]
-    fn mps_projection_byte_stable_boundary_marker_shape() {
-        let with_boundary = concat!(
-            "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
-            "## Exchange\n\n<!-- agent:exchange patch=append -->\n",
-            "\u{276f} q\n\n### Re: q \u{2014} opus-4-8\n\nA.\n\n",
-            "<!-- agent:boundary:abc123 -->\n",
-            "<!-- /agent:exchange -->\n\n",
-            "## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n"
-        );
-        assert_projection_byte_stable("boundary_marker", with_boundary);
-    }
-
-    #[test]
-    fn mps_projection_byte_stable_empty_and_unicode() {
-        assert_projection_byte_stable("empty", "");
-        assert_projection_byte_stable("plain", "just a line of prose\n");
-        assert_projection_byte_stable(
-            "unicode",
-            "# T\u{e9}l\u{e9} \u{1f680}\n\n- caf\u{e9} \u{2014} r\u{e9}sum\u{e9}\n",
-        );
-    }
-
-    // -----------------------------------------------------------------------
     // `#mps` Rungs 2-4 — model-projected baseline store
     // -----------------------------------------------------------------------
 
@@ -2882,13 +2742,5 @@ Steps to take:
         delete_baseline_model(&doc).unwrap();
         assert!(!baseline_overlay_path_for(&doc).unwrap().exists());
         delete_baseline_model(&doc).unwrap();
-    }
-
-    #[test]
-    fn mps_first_diff_byte_locates_mismatch() {
-        assert_eq!(first_diff_byte("abc", "abc"), None);
-        assert_eq!(first_diff_byte("abc", "abx"), Some(2));
-        assert_eq!(first_diff_byte("abc", "ab"), Some(2)); // prefix → shorter len
-        assert_eq!(first_diff_byte("ab", "abcd"), Some(2));
     }
 }

@@ -45,6 +45,9 @@
 
 use agent_doc_document::transient_markers::replay_content_hash;
 use agent_doc_element_backlog::backlog::normalize_pending_id;
+use agent_doc_turn::cycle_policy::{
+    is_stable_commit_event, normalize_checkpoint_task_id, normalize_checkpoint_text_list,
+};
 use agent_doc_turn::{CycleEvent, CyclePhase, CyclePhaseMachine};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -465,7 +468,7 @@ pub fn record_turn_checkpoint(
         .map(str::trim)
         .filter(|path| !path.is_empty())
         .map(ToOwned::to_owned);
-    let normalized_prompt_targets = normalize_text_list(prompt_targets);
+    let normalized_prompt_targets = normalize_checkpoint_text_list(prompt_targets);
     let normalized_queue_task_id = queue_task_id
         .map(normalize_checkpoint_task_id)
         .filter(|id| !id.is_empty());
@@ -1334,49 +1337,12 @@ pub fn cycle_phase_label(phase: CyclePhase) -> &'static str {
     }
 }
 
-fn is_stable_commit_event(event: &str) -> bool {
-    matches!(
-        event,
-        "commit" | "commit_success" | "commit_already_current"
-    )
-}
-
-/// A no-op commit event: the closeout commit found the snapshot already equal to
-/// `HEAD`, so this cycle committed *no* new binary-owned work this turn. Distinct
-/// from `commit` / `commit_success`, which committed real content. Used by
-/// closeout guards that must not treat a no-op commit as committed-work-without-a-response.
-pub fn is_noop_commit_event(event: &str) -> bool {
-    event == "commit_already_current"
-}
-
 fn is_zero(value: &usize) -> bool {
     *value == 0
 }
 
 fn is_false(value: &bool) -> bool {
     !*value
-}
-
-fn normalize_checkpoint_task_id(id: &str) -> String {
-    let normalized = normalize_pending_id(id);
-    if normalized.is_empty() {
-        String::new()
-    } else {
-        format!("#{normalized}")
-    }
-}
-
-fn normalize_text_list(values: &[String]) -> Vec<String> {
-    values
-        .iter()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .fold(Vec::new(), |mut acc, value| {
-            if !acc.iter().any(|existing| existing == &value) {
-                acc.push(value);
-            }
-            acc
-        })
 }
 
 fn now_secs() -> u64 {

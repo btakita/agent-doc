@@ -5,27 +5,15 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use agent_doc_element::element;
-
-fn find_status_component(file: &Path) -> Result<(String, element::Component)> {
-    let content = std::fs::read_to_string(file).context("failed to read document")?;
-    let components = element::parse(&content).context("failed to parse components")?;
-    let comp = components
-        .into_iter()
-        .find(|c| c.name == "status")
-        .context("document has no status component")?;
-    Ok((content, comp))
-}
-
 /// Replace the status component content with the provided text.
 pub fn set(file: &Path, text: &str) -> Result<()> {
     set_with_options(file, text, false)
 }
 
 pub fn set_with_options(file: &Path, text: &str, force_disk: bool) -> Result<()> {
-    let (full_content, comp) = find_status_component(file)?;
-    let new_content = format!("\n{}\n", text);
-    let new_doc = comp.replace_content(&full_content, &new_content);
+    let full_content = std::fs::read_to_string(file).context("failed to read document")?;
+    let new_doc =
+        agent_doc_document::status_projection::replace_status_content(&full_content, text)?;
     if force_disk {
         std::fs::write(file, &new_doc)
             .with_context(|| format!("status_set: failed to write {}", file.display()))?;

@@ -517,39 +517,6 @@ fn remove_post_exchange_duplicate_prompt_comments_for_preflight(
     Ok(true)
 }
 
-fn tracked_work_component_fingerprint(
-    content: &str,
-) -> Result<(Option<String>, Option<String>, Vec<String>)> {
-    let components = agent_doc_element::element::parse(content)
-        .context("failed to parse document components")?;
-    let component = components
-        .iter()
-        .find(|component| is_backlog_component(&component.name))
-        .or_else(|| {
-            components
-                .iter()
-                .find(|component| is_tracked_work_component(&component.name))
-        });
-    let Some(component) = component else {
-        return Ok((None, None, Vec::new()));
-    };
-
-    let name = if is_backlog_component(&component.name) {
-        "backlog".to_string()
-    } else {
-        component.name.clone()
-    };
-    let hash = agent_doc_hash::content_hash(component.content(content));
-    let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(component.content(content));
-    let item_ids = items
-        .into_iter()
-        .filter(|item| !item.is_done())
-        .map(|item| item.id.trim().trim_start_matches('#').to_ascii_lowercase())
-        .filter(|id| !id.is_empty())
-        .collect();
-    Ok((Some(name), Some(hash), item_ids))
-}
-
 fn explicit_backlog_target_requirements(
     source_file: &Path,
     source_frontmatter: &frontmatter::Frontmatter,
@@ -577,18 +544,20 @@ fn explicit_backlog_target_requirements(
             target,
             target_frontmatter.as_ref(),
         )?;
-        let (component, baseline_hash, baseline_item_ids) = match target_existing.as_deref() {
-            Some(content) => tracked_work_component_fingerprint(content)?,
-            None => (None, None, Vec::new()),
+        let fingerprint = match target_existing.as_deref() {
+            Some(content) => {
+                agent_doc_document::tracked_work_projection::tracked_work_fingerprint(content)?
+            }
+            None => agent_doc_document::tracked_work_projection::TrackedWorkFingerprint::empty(),
         };
         requirements.push(crate::cycle_state::BacklogTargetRequirement {
             path: std::fs::canonicalize(target)
                 .unwrap_or_else(|_| target.to_path_buf())
                 .display()
                 .to_string(),
-            component,
-            baseline_hash,
-            baseline_item_ids,
+            component: fingerprint.component,
+            baseline_hash: fingerprint.baseline_hash,
+            baseline_item_ids: fingerprint.baseline_item_ids,
         });
     }
     Ok(requirements)

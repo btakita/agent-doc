@@ -918,6 +918,11 @@ should be deleted during extraction.
 - Drain-stall sidecar ownership was tightened as well: `agent-doc-turn` now
   owns continuation-pending marker construction, while orchestration keeps only
   path lookup, current-time capture, serialization, and sidecar file IO.
+- Route-submit sidecar policy was tightened too: `agent-doc-supervisor` now owns
+  route-submit marker JSON serialization plus fresh/stale/malformed
+  classification for in-flight and blocked markers. Orchestration keeps only
+  marker path resolution, file reads/writes/removal, guard drop cleanup, and
+  ops-log diagnostics.
 
 ### Earlier closure finding
 

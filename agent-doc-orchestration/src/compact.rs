@@ -240,6 +240,25 @@ pub fn run(
         compacted
     };
 
+    // `#jb-compact-editor-buffer-flush`: the editor-IPC convergence in
+    // `apply_compacted_document` updated only the live editor's in-memory buffer;
+    // the plugin never saves. Flush it to disk NOW — before the re-read below and
+    // the commit — so the working-tree file holds the compacted content. Otherwise
+    // the selective commit compares the stale pre-compact working tree against the
+    // compacted snapshot, treats the snapshot as historical exchange drift, and
+    // repairs it back to HEAD, leaving HEAD and disk pre-compact (the "JB Compact
+    // Exchange left an uncommitted summary" defect). Fail-open: if the editor
+    // cannot flush, `commit_compacted_authoritative` / `compact_dirty` still stage
+    // the authoritative snapshot and verify HEAD.
+    if commit && !force_disk {
+        let disk_is_pre_compact = std::fs::read_to_string(file)
+            .map(|disk| disk == content)
+            .unwrap_or(false);
+        if disk_is_pre_compact {
+            flush_editor_buffer_to_disk_after_compact(file, &content);
+        }
+    }
+
     if component_name.is_none() || component_name == Some("exchange") {
         crate::session_accretion::record_recent_exchange_compaction(file)?;
     }
@@ -268,15 +287,6 @@ pub fn run(
     if commit {
         if dirty {
             commit_compacted_authoritative(file, &authoritative)?;
-            if !force_disk {
-                // `#jb-compact-editor-buffer-flush`: the editor-IPC convergence
-                // above updated only the live editor's in-memory buffer; the
-                // plugin never saves it. HEAD now holds the compacted summary but
-                // the working-tree file still holds the pre-compact content, so
-                // `git status` is dirty — the "JB Compact Exchange left an
-                // uncommitted summary" defect. Ask the editor to flush its buffer.
-                flush_editor_buffer_to_disk_after_compact(file);
-            }
         }
     } else if dirty {
         // #jb-compact-repair-left-uncommitted: a compact/repair that rewrites the
@@ -392,12 +402,13 @@ fn verify_compact_head_landed(file: &Path, authoritative_snapshot: &str) -> Resu
 /// HEAD is already correct.
 ///
 /// Ask the live editor to flush its buffer to disk with the same `save_document`
-/// IPC that `preflight` uses to resolve `live_prompt_drift`. The plugin saves the
-/// buffer it already converged, so disk converges to HEAD. Fail-open: HEAD holds
-/// the authoritative compacted content regardless, so a flush failure only means
-/// the working tree lags until the editor saves on its own — never a lost
-/// compaction.
-fn flush_editor_buffer_to_disk_after_compact(file: &Path) {
+/// IPC that `preflight` uses to resolve `live_prompt_drift`, then wait (bounded)
+/// for the working-tree file to stop matching `pre_compact`. The plugin saves the
+/// buffer it already converged, so disk converges before the commit stages it.
+/// Returns `true` once disk no longer holds the pre-compact content. Fail-open:
+/// `commit_compacted_authoritative` still verifies HEAD after the commit and fails
+/// closed if the compacted content did not land.
+fn flush_editor_buffer_to_disk_after_compact(file: &Path, pre_compact: &str) -> bool {
     let canonical = match file.canonicalize() {
         Ok(canonical) => canonical,
         Err(e) => {
@@ -405,7 +416,7 @@ fn flush_editor_buffer_to_disk_after_compact(file: &Path) {
                 "[compact] warning: could not resolve {} to flush the editor buffer after compact: {e}",
                 file.display()
             );
-            return;
+            return false;
         }
     };
     let project_root = crate::write::resolve_ipc_project_root_pub(&canonical);
@@ -421,22 +432,40 @@ fn flush_editor_buffer_to_disk_after_compact(file: &Path) {
     } else {
         // No live editor owns the buffer; the guarded disk write already made the
         // working tree authoritative, so there is nothing to flush.
-        return;
+        return false;
     };
 
-    match flushed {
-        Ok(_) => crate::ops_log::log_op(
-            file,
-            &format!(
-                "compact_editor_buffer_flush file={} patch_id={} transport=save_document",
-                file.display(),
-                patch_id
-            ),
-        ),
-        Err(e) => eprintln!(
+    if let Err(e) = flushed {
+        eprintln!(
             "[compact] warning: editor buffer flush after compact failed for {} (working tree may lag HEAD until the editor saves): {e}",
             file.display()
-        ),
+        );
+        return false;
+    }
+
+    // The socket `save_document` acks after saving; a file-IPC signal is applied
+    // asynchronously, so poll the working tree until the flush lands (or time out).
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1000);
+    loop {
+        if std::fs::read_to_string(&canonical).is_ok_and(|disk| disk != pre_compact) {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "compact_editor_buffer_flush file={} patch_id={} transport=save_document",
+                    file.display(),
+                    patch_id
+                ),
+            );
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            eprintln!(
+                "[compact] warning: editor buffer flush requested for {} but the working tree still lags after 1s; the commit will fall back to the authoritative snapshot",
+                file.display()
+            );
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
     }
 }
 
@@ -3310,6 +3339,142 @@ mod tests {
                 Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
             });
         })
+    }
+
+    /// A live-editor listener that mimics the real JetBrains plugin: it applies a
+    /// convergence patch to an in-memory "buffer" and, critically, does NOT write
+    /// the working-tree file — it only flushes the buffer to disk when it receives
+    /// a `save_document` message. The disk-writing `start_component_patch_ack_listener`
+    /// hides `#jb-compact-editor-buffer-flush` because it saves on every patch.
+    fn start_buffer_only_patch_listener(root: &Path) -> std::thread::JoinHandle<()> {
+        use std::collections::HashMap;
+        use std::sync::{Arc, Mutex};
+        let root = root.to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::thread::spawn(move || {
+            let root_clone = root.clone();
+            // Per-file in-memory editor buffer, seeded lazily from the patch baseline.
+            let buffers: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
+            let _ = crate::ipc_socket::start_listener(&root, move |msg| {
+                let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
+                let patch_id = payload
+                    .get("patch_id")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("unknown");
+                let ack_dir = root_clone.join(".agent-doc/ack-content");
+                let _ = std::fs::create_dir_all(&ack_dir);
+
+                match payload.get("type").and_then(|value| value.as_str()) {
+                    Some("save_document") => {
+                        // Flush the in-memory buffer to disk, exactly like the real
+                        // plugin's `saveDocumentViaDocument`.
+                        let file_path = payload.get("file").and_then(|value| value.as_str())?;
+                        let content = buffers.lock().unwrap().get(file_path).cloned()?;
+                        std::fs::write(file_path, &content).ok()?;
+                        let _ = std::fs::write(ack_dir.join(format!("{patch_id}.md")), &content);
+                        Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
+                    }
+                    _ => {
+                        // Apply the convergence patch to the buffer only (no disk write).
+                        let mut content = payload.get("baseline")?.as_str()?.to_string();
+                        if let Some(frontmatter) =
+                            payload.get("frontmatter").and_then(|v| v.as_str())
+                        {
+                            content = replace_frontmatter(&content, frontmatter)?;
+                        }
+                        for patch in payload.get("patches")?.as_array()? {
+                            let name = patch.get("component")?.as_str()?;
+                            let replacement = patch.get("content")?.as_str()?;
+                            let components = element::parse(&content).ok()?;
+                            let target =
+                                components.iter().find(|component| component.name == name)?;
+                            content = target.replace_content(&content, replacement);
+                        }
+                        if let Some(file_path) = payload.get("file").and_then(|value| value.as_str())
+                        {
+                            buffers
+                                .lock()
+                                .unwrap()
+                                .insert(file_path.to_string(), content.clone());
+                        }
+                        let _ = std::fs::write(ack_dir.join(format!("{patch_id}.md")), &content);
+                        Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
+                    }
+                }
+            });
+        })
+    }
+
+    #[test]
+    fn compact_with_commit_flushes_editor_buffer_to_disk() {
+        // #jb-compact-editor-buffer-flush: a live editor applies the compact
+        // convergence to its in-memory buffer and does NOT save. Without the
+        // flush, the selective commit sees a stale pre-compact working tree, so
+        // HEAD never lands the summary and the working tree stays dirty — the
+        // "JB Compact Exchange left an uncommitted summary" defect.
+        use agent_doc_document::transient_markers::normalize_transient_agent_doc_markers;
+        use std::fs;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/archives")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/ack-content")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/patches")).unwrap();
+
+        git(root, &["init", "-q"]);
+        git(root, &["config", "user.email", "test@example.com"]);
+        git(root, &["config", "user.name", "Test"]);
+
+        let file = root.join("session.md");
+        let doc = concat!(
+            "---\nagent_doc_session: test-flush\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\nEarlier work.\n\n",
+            "### Re: newer — opus-4-8\n\nMore work.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&file, doc).unwrap();
+        snapshot::save(&file, doc).unwrap();
+        git(root, &["add", "session.md"]);
+        git(root, &["commit", "-q", "-m", "seed"]);
+
+        let _listener = start_buffer_only_patch_listener(root);
+        crate::test_support::wait_for_live_prompt_drift_listener(root);
+
+        run(
+            &file,
+            None,
+            Some("exchange"),
+            Some("Compacted summary."),
+            Some("skip"),
+            true,
+            false,
+        )
+        .expect("editor-IPC compact --commit must succeed");
+
+        let head = crate::git::show_head(&file).unwrap().unwrap();
+        assert!(
+            head.contains("Compacted summary."),
+            "HEAD should hold the compacted summary:\n{head}"
+        );
+
+        // The working-tree file on disk must equal HEAD — no uncommitted summary.
+        let disk = fs::read_to_string(&file).unwrap();
+        assert_eq!(
+            normalize_transient_agent_doc_markers(&disk),
+            normalize_transient_agent_doc_markers(&head),
+            "working tree must equal HEAD after compact once the editor buffer is flushed:\ndisk:\n{disk}\n---\nhead:\n{head}"
+        );
+
+        let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("compact_editor_buffer_flush")
+                && ops_log.contains("transport=save_document"),
+            "compact --commit must flush the editor buffer to disk:\n{ops_log}"
+        );
     }
 
     fn replace_frontmatter(content: &str, frontmatter: &str) -> Option<String> {

@@ -26,6 +26,7 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
+🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -34,49 +35,29 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260630-143239.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260630-235719.md`*
 
 Compacted content:
-- Archived 20 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); IPC proof diagnostic (interrupted-cycle recovery); recovery closeout; 17 more
-- Prior summary/context: prior compacted content: Archived 8 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); do #qeditdu...
+- Archived 3 response topic(s): continue; do [#qftlossproof]; do [#qftlossproof]
+- Prior summary/context: prior compacted content: Archived 20 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); IPC proof ...
+`/clear` prompt items are added to the agent without me running JB `Clear Session Context`. There seems to be a background or retry task doing this. Please continue to simplify.
 
-❯ Archived 20 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); IPC proof diagnostic (interrupted-cycle recovery); recovery closeout; 17 more
-Please note that a parallel codex 019f1131-5fa9-76c0-be8b-61c976b48177 working on extracting crates from agent-docs-orchestration. When I type in this document, my changes are reverted if I don't quickly save.
+JB `Run Agent Doc` error
+```
+[route] target tmux session: 0
+Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md into pane %67 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Summarize recent commits"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782863907349-direct_pane_protected_prompt_input-codex-_67-3390d64c34ee.txt
+```
 
-See /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-agent-doc-orchestration-extraction.md for context on the extraction effort.
+#spec-test-build-install-commit-push
 
-### Re: continue — gpt-5
+### Re: preflight exchange precedence — gpt-5
 
-Continuing from the stop-hook recovery. The IPC ACK-content write-through fix is committed in `src/agent-doc` as `0acf0c32 extract template response policy and ack write-through`, installed as `agent-doc v0.34.65`, and verified with the focused IPC test groups plus `cargo check -p agent-doc-orchestration`.
+You were right. The bad selection had two separate causes: preflight let an active queue head stay effective while an exchange prompt was waiting, and the continuous backlog refill path treated `queue: start` as if it were an explicit `go` opt-in even when the `agent:queue` tag had no `go` attribute.
 
-The remaining uncommitted `src/agent-doc` changes are the parallel exchange-policy extraction work, so I left them untouched.
+I fixed both in `src/agent-doc` and pushed commit `05cc1380` (`fix: prioritize exchange prompt over queue preflight`). Preflight now captures an unresolved exchange prompt before its commit/boundary-reposition step can hide it, synthesizes that as the effective exchange diff, clears effective selected queue prompts for the turn, and drops `queue_continuation_required` while the exchange prompt is pending. Queue refill/same-cycle pending-add sync now require explicit `go` (`queue: go` or marker-side `go`); plain `queue: start` remains durable active state only.
 
-### Re: do [#qftlossproof] — gpt-5
-
-I treated `#qftlossproof` as a failed proof, not a pass, but I could not safely close the backlog item in this live-editor state.
-
-The latest JetBrains live-buffer sidecar for `tasks/agent-doc/agent-doc-bugs2.md` is healthy: `.agent-doc/live-buffer/f6d9af4a09fc7ed8.jetbrains-1996528-698b0792-e4f9-4b27-b4ad-40edbd2ef430` records `operator_text_authority_v1`, `edit_epoch=89`, `last_synced_epoch=83`, `len=16669`, and hash `dc278d260b5b2a3efffeb12c428f0f81f5be1c8373fdd3ef044eee4b39adda4f`, matching disk.
-
-The problematic evidence is `.agent-doc/logs/ops.log:4338997`: `live_buffer_classify` suppressed a differing operator-capable buffer digest with `reason=write_provenance_newer_than_buffer`, `buffer_len=16676`, and `buffer_hash=83f08ab7e6be49a671f96f7c0ffbb71fe28bba858929b883c5904140cabd5192` behind agent write provenance `1700d253-b773-4070-beff-05da7a45634e` at `len=16669` / hash `dc278d260b5b2a3efffeb12c428f0f81f5be1c8373fdd3ef044eee4b39adda4f`. The provenance file exists at `.agent-doc/write-provenance/f6d9af4a09fc7ed8`; I found no durable sidecar preserving the suppressed 16676-byte buffer content.
-
-I attempted to file `#qftlossdelta` and mark `#qftlossproof` done through `agent-doc write --commit`, but the live editor repeatedly accepted the exchange patch and then rejected or reverted the tracked-work mutation, ending in `editor_convergence_required` / `retry_without_disk_write`. Because this document is live in the editor, I did not use `--force-disk`. `#qftlossproof` stays open until the operator either saves/closes the live editor buffer and retries, or explicitly authorizes a force-disk closeout for the backlog mutation.
-
-### Re: do [#qftlossproof] — gpt-5 (HEAD)
-
-I closed `#qftlossproof` as a failed proof and filed `#qftlossdelta` for the implementation fix.
-
-Evidence: `.agent-doc/logs/ops.log:4338964-4338997` shows ACK/live-buffer content at `len=16676` / hash `83f08ab7e6be49a671f96f7c0ffbb71fe28bba858929b883c5904140cabd5192`, then closeout committed `len=16669` / hash `dc278d260b5b2a3efffeb12c428f0f81f5be1c8373fdd3ef044eee4b39adda4f`. The failing marker is `live_buffer_classify decision=suppressed reason=write_provenance_newer_than_buffer`; I found no durable sidecar preserving the suppressed 16676-byte buffer content.
-
-Changed paths: `tasks/agent-doc/agent-doc-bugs2.md` only.
-
-Commands: `tsift status`; targeted `rg`/`sed` log inspection; live-buffer/provenance `wc -c` and `sha256sum`; `git status --short`; `agent-doc preflight`; `agent-doc finalize`.
-
-Verification: artifact evidence proves the operator-wins invariant did not hold; `#qftlossdelta` is now the focused follow-up. Full project tests were not run because this was document/log triage with no code changes.
-
-Confidence: high.
-
-Escalation: fix `#qftlossdelta` before treating the queue-edit race invariant as proven.
-<!-- agent:boundary:5e865b8c -->
+Verification: focused regressions passed, `make check` passed, `cargo install --path .` installed `agent-doc 0.34.65`, and the session supervisor is marked to recycle at the next idle boundary. The pushed CI run `28484451473` was still in progress at closeout. No JB plugin update is needed for this fix.
+<!-- agent:boundary:a2f03c0c -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -91,14 +72,14 @@ Escalation: fix `#qftlossdelta` before treating the queue-edit race invariant as
 - :pushpin: do [#nsfz]
 - :pushpin: do [#kj5flive]
 - :pushpin: do [#tmuxsynccrashlog]
-- :pushpin: do [#qftlossproof]
-- :pushpin: do [#midturnrecycleproof]
+- ~~:pushpin: do [#qftlossproof]~~
+- 🚧 :pushpin: do [#midturnrecycleproof]
 - :pushpin: do [#midturnresumeimpl]
 - :pushpin: do [#provauth3bimpl]
 - :pushpin: do [#supstaledetectverify]
 - :pushpin: do [#suptmuxstaleverify]
 - :pushpin: do [#tmuxsynccrashlog]
-- :pushpin: do [#qftlossproof]
+- ~~:pushpin: do [#qftlossproof]~~
 - :pushpin: do [#midturnrecycleproof]
 - :pushpin: do [#midturnresumeimpl]
 - :pushpin: do [#provauth3bimpl]
@@ -107,6 +88,11 @@ Escalation: fix `#qftlossdelta` before treating the queue-edit race invariant as
 - :pushpin: do [#60ev]
 - do [#suprestassoc-live]
 - do [#agentsignals]
+- do [#qftlossdelta]
+- do [#coredecomp]
+- do [#orchdecomp]
+- do [#skillharnessplugin]
+- do [#elementgraphprd]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.

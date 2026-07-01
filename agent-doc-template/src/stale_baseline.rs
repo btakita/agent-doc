@@ -4,9 +4,31 @@
 //! module only decides whether a candidate baseline is missing committed
 //! append-component content from a snapshot/head document.
 
+use std::collections::HashMap;
+
+use crate::PatchBlock;
+
 /// Components whose omitted `patch=` attribute defaults to append semantics.
 pub fn is_append_mode_component(name: &str) -> bool {
     matches!(name, "exchange" | "findings")
+}
+
+pub fn patch_touches_exchange(patches: &[PatchBlock], unmatched: &str) -> bool {
+    patches.iter().any(|patch| patch.name == "exchange") || !unmatched.trim().is_empty()
+}
+
+pub fn exchange_append_patch_can_rebase_to_head(
+    patches: &[PatchBlock],
+    unmatched: &str,
+    mode_overrides: &HashMap<String, String>,
+) -> bool {
+    if mode_overrides
+        .get("exchange")
+        .is_some_and(|mode| mode == "replace")
+    {
+        return false;
+    }
+    patch_touches_exchange(patches, unmatched)
 }
 
 /// Detect whether a baseline is stale relative to the current snapshot.
@@ -78,6 +100,42 @@ mod tests {
         assert!(!is_append_mode_component("status"));
         assert!(!is_append_mode_component("output"));
         assert!(!is_append_mode_component("todo"));
+    }
+
+    #[test]
+    fn exchange_patch_rebase_requires_exchange_patch_or_unmatched_content() {
+        let exchange = PatchBlock::new("exchange", "response");
+        let status = PatchBlock::new("status", "ok");
+        let mode_overrides = std::collections::HashMap::new();
+
+        assert!(exchange_append_patch_can_rebase_to_head(
+            &[exchange],
+            "",
+            &mode_overrides
+        ));
+        assert!(exchange_append_patch_can_rebase_to_head(
+            &[],
+            "plain response",
+            &mode_overrides
+        ));
+        assert!(!exchange_append_patch_can_rebase_to_head(
+            &[status],
+            "   ",
+            &mode_overrides
+        ));
+    }
+
+    #[test]
+    fn exchange_patch_rebase_respects_replace_override() {
+        let exchange = PatchBlock::new("exchange", "response");
+        let mut mode_overrides = std::collections::HashMap::new();
+        mode_overrides.insert("exchange".to_string(), "replace".to_string());
+
+        assert!(!exchange_append_patch_can_rebase_to_head(
+            &[exchange],
+            "plain response",
+            &mode_overrides
+        ));
     }
 
     #[test]

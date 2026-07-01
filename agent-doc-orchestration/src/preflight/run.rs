@@ -488,7 +488,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                 .unwrap_or(true); // if uncertain, try commit anyway
                 if snap_is_newer {
                     let sibling_owner = sweep_owner_for_doc(file, &root, &registry, &doc_path);
-                    if should_skip_foreign_owned_sweep(
+                    if log_and_skip_foreign_owned_sweep_if_needed(
                         file,
                         &doc_path,
                         current_owner.as_ref(),

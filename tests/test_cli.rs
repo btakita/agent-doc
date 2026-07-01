@@ -18143,6 +18143,8 @@ fn test_agent_doc_template_owns_stale_baseline_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-template/src/stale_baseline.rs")).unwrap();
     for required_snippet in [
         "pub fn is_append_mode_component",
+        "pub fn patch_touches_exchange",
+        "pub fn exchange_append_patch_can_rebase_to_head",
         "pub fn is_stale_baseline",
         "agent_doc_document::transient_markers::strip_boundary_markers",
     ] {
@@ -18167,6 +18169,8 @@ fn test_agent_doc_template_owns_stale_baseline_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
     for forbidden_snippet in [
         "fn is_append_mode_component(",
+        "fn patch_touches_exchange(",
+        "fn exchange_append_patch_can_rebase_to_head(",
         "pub fn is_stale_baseline(",
         "fn is_stale_baseline(",
     ] {

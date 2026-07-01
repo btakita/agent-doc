@@ -38,7 +38,9 @@ pub(crate) fn dispatch_only_starting_pane_not_ready_error(
         harness.binary,
         pane,
         file.display(),
-        blocked_with_unblocker_fields("wait_for_dispatch_ready_prompt")
+        agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(
+            "wait_for_dispatch_ready_prompt",
+        )
     )
 }
 
@@ -128,7 +130,9 @@ pub(crate) fn dispatch_only_recycle_inflight_error(
         harness.binary,
         pane,
         file.display(),
-        blocked_with_unblocker_fields("wait_for_supervisor_recycle_settle")
+        agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(
+            "wait_for_supervisor_recycle_settle",
+        )
     )
 }
 
@@ -356,7 +360,7 @@ pub(crate) fn dispatch_only_send_reopen(
                 queued.appended,
                 queued.already_present,
                 queued.superseded,
-                user_outcome_fields(
+                agent_doc_flow::outcome::user_outcome_fields(
                     agent_doc_flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner
                 )
             );

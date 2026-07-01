@@ -27,6 +27,7 @@ pub mod route_runtime;
 pub mod route_submit_inflight;
 pub mod run_loop;
 pub mod selfkill;
+pub mod session_owner;
 pub mod startup_miss;
 pub mod terminal_filter;
 

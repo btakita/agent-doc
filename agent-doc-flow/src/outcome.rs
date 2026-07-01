@@ -155,6 +155,18 @@ impl UserFacingOutcome {
     }
 }
 
+pub fn user_outcome_fields(kind: UserFacingOutcomeKind) -> String {
+    UserFacingOutcome::new(kind)
+        .expect("static user-facing outcome is valid")
+        .log_fields()
+}
+
+pub fn blocked_with_exact_unblocker_fields(unblocker: &str) -> String {
+    UserFacingOutcome::with_unblocker(UserFacingOutcomeKind::BlockedWithExactUnblocker, unblocker)
+        .expect("static user-facing unblocker is valid")
+        .log_fields()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BinaryOutcome {
     pub contract_version: String,
@@ -461,6 +473,20 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn user_outcome_field_helpers_emit_contract_fields() {
+        use UserFacingOutcomeKind as Kind;
+
+        assert_eq!(
+            user_outcome_fields(Kind::QueuedBehindOwner),
+            "ui_outcome_contract=ui-outcome-v1 ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain"
+        );
+        assert_eq!(
+            blocked_with_exact_unblocker_fields("run_recovery_command"),
+            "ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command"
+        );
     }
 
     #[test]

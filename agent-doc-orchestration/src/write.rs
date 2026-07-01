@@ -260,7 +260,10 @@ use agent_doc_frontmatter::frontmatter;
 use agent_doc_template as template;
 
 use crate::{merge, repair, sessions, snapshot};
-use agent_doc_template::stale_baseline::{is_append_mode_component, is_stale_baseline};
+use agent_doc_template::stale_baseline::{
+    exchange_append_patch_can_rebase_to_head, is_append_mode_component, is_stale_baseline,
+    patch_touches_exchange,
+};
 use agent_doc_turn::response_replay::{dedupe_responses, response_materialized_in_content};
 
 thread_local! {
@@ -2359,24 +2362,6 @@ pub use converge::*;
 
 mod exchange_reconcile;
 pub(crate) use exchange_reconcile::*;
-
-fn patch_touches_exchange(patches: &[template::PatchBlock], unmatched: &str) -> bool {
-    patches.iter().any(|patch| patch.name == "exchange") || !unmatched.trim().is_empty()
-}
-
-fn exchange_append_patch_can_rebase_to_head(
-    patches: &[template::PatchBlock],
-    unmatched: &str,
-    mode_overrides: &std::collections::HashMap<String, String>,
-) -> bool {
-    if mode_overrides
-        .get("exchange")
-        .is_some_and(|mode| mode == "replace")
-    {
-        return false;
-    }
-    patch_touches_exchange(patches, unmatched)
-}
 
 struct TemplatePatchApplicationBase<'a, 'b> {
     file: &'b Path,

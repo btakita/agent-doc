@@ -8,8 +8,8 @@ use agent_doc_document_realtime::write_policy::{
 use agent_doc_element_boundary::boundary::find_boundary_id;
 use agent_doc_element_exchange::extract_post_commit_normalization_targets;
 use agent_doc_ipc_protocol::{
-    FullContentIpcMode, existing_patch_is_reposition_only, is_already_applied_ack_error_message,
-    is_socket_ack_timeout_error,
+    FullContentIpcMode, effective_unmatched_for_patch_payload, existing_patch_is_reposition_only,
+    is_already_applied_ack_error_message, is_socket_ack_timeout_error,
 };
 
 fn live_editor_delivery_target(file: &Path) -> Option<String> {
@@ -346,14 +346,17 @@ pub fn try_ipc(
             build_ipc_node_patches_json(baseline.or(ipc_before_content.as_deref()), content_ours);
         // When unmatched content was synthesized into a patch (no explicit patch blocks),
         // don't also send it as "unmatched" — the plugin would apply both and duplicate.
-        let effective_unmatched_socket = if patches.is_empty() && !ipc_patches_json.is_empty() {
+        let effective_unmatched_socket =
+            effective_unmatched_for_patch_payload(unmatched, patches.len(), ipc_patches_json.len());
+        if effective_unmatched_socket.is_empty()
+            && !unmatched.trim().is_empty()
+            && patches.is_empty()
+            && !ipc_patches_json.is_empty()
+        {
             eprintln!(
                 "[write] synthesis consumed unmatched content — clearing from socket payload (prevent double-apply)"
             );
-            ""
-        } else {
-            unmatched.trim()
-        };
+        }
         let mut socket_payload = serde_json::json!({
             "type": "patch",
             "file": canonical.to_string_lossy(),
@@ -889,11 +892,8 @@ pub fn try_ipc(
         build_ipc_node_patches_json(baseline.or(ipc_before_content.as_deref()), content_ours);
 
     // Same dedup guard as socket path: don't send unmatched when it was synthesized into a patch.
-    let effective_unmatched_file = if patches.is_empty() && !ipc_patches.is_empty() {
-        ""
-    } else {
-        unmatched.trim()
-    };
+    let effective_unmatched_file =
+        effective_unmatched_for_patch_payload(unmatched, patches.len(), ipc_patches.len());
 
     let mut ipc_payload = serde_json::json!({
         "file": canonical.to_string_lossy(),

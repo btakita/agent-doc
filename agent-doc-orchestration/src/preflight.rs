@@ -1693,7 +1693,7 @@ fn current_sweep_owner(
     sweep_owner_for_doc(audit_file, root, registry, current_doc)
 }
 
-fn should_skip_foreign_owned_sweep(
+fn log_and_skip_foreign_owned_sweep_if_needed(
     audit_file: &Path,
     doc_path: &Path,
     current_owner: Option<&SweepOwner>,
@@ -1702,9 +1702,12 @@ fn should_skip_foreign_owned_sweep(
     let (Some(current_owner), Some(sibling_owner)) = (current_owner, sibling_owner) else {
         return false;
     };
-    if current_owner.pane == sibling_owner.pane {
+    if !agent_doc_workflow::preflight_policy::should_skip_foreign_owned_sweep(
+        Some(current_owner.pane.as_str()),
+        Some(sibling_owner.pane.as_str()),
+    ) {
         return false;
-    }
+    };
 
     eprintln!(
         "[preflight] sweep: skipping {} (foreign-owned by pane {}; current owner pane {})",

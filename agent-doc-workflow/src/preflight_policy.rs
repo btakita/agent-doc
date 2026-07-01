@@ -120,6 +120,19 @@ pub fn resolve_free_text_execution(
     }
 }
 
+pub fn should_skip_foreign_owned_sweep(
+    current_owner_pane: Option<&str>,
+    sibling_owner_pane: Option<&str>,
+) -> bool {
+    let (Some(current_owner_pane), Some(sibling_owner_pane)) =
+        (current_owner_pane, sibling_owner_pane)
+    else {
+        return false;
+    };
+
+    current_owner_pane != sibling_owner_pane
+}
+
 pub fn format_ipc_dogfood_note(diagnostic: &str) -> String {
     let diagnostic = diagnostic.replace("```", "'''");
     // The note opens with a `### Re:` response heading and folds the body into
@@ -360,6 +373,19 @@ mod tests {
         assert!(note.contains("Issue class: `ipc_proof_insufficient`"));
         assert!(!note.contains("```bad"));
         assert!(note.contains("'''bad"));
+    }
+
+    #[test]
+    fn foreign_owned_sweep_policy_requires_both_owners() {
+        assert!(!should_skip_foreign_owned_sweep(None, None));
+        assert!(!should_skip_foreign_owned_sweep(Some("%1"), None));
+        assert!(!should_skip_foreign_owned_sweep(None, Some("%2")));
+    }
+
+    #[test]
+    fn foreign_owned_sweep_policy_skips_only_different_panes() {
+        assert!(!should_skip_foreign_owned_sweep(Some("%1"), Some("%1")));
+        assert!(should_skip_foreign_owned_sweep(Some("%1"), Some("%2")));
     }
 
     #[test]

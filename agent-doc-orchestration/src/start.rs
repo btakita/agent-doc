@@ -155,6 +155,7 @@ use agent_doc_supervisor::route_owned::{
     RouteOwnedLivenessReason, RouteOwnedReapDecision, RouteOwnedReapPolicy,
     route_owned_liveness_reason_for_content, route_owned_reap_decision,
 };
+use agent_doc_supervisor::session_owner::ExistingSessionPaneAction;
 use agent_doc_supervisor_io::cwd;
 #[cfg(unix)]
 use agent_doc_supervisor_process::ReexecState;
@@ -1724,11 +1725,6 @@ fn surface_managed_capability_proof_status(
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-enum ExistingSessionPaneAction {
-    Refuse(String),
-}
-
 fn existing_session_pane_action(
     tmux: &tmux_router::Tmux,
     session_id: &str,
@@ -1756,17 +1752,16 @@ fn existing_session_pane_action_from_entry(
     entry: Option<&tmux_router::RegistryEntry>,
     live_owner: Option<&str>,
 ) -> Option<ExistingSessionPaneAction> {
-    if let Some(owner) = live_owner
-        && owner != current_pane
-    {
-        return Some(ExistingSessionPaneAction::Refuse(owner.to_string()));
-    }
-
-    let entry = entry?;
-    if entry.pane == current_pane || !tmux.pane_alive(&entry.pane) {
-        return None;
-    }
-    Some(ExistingSessionPaneAction::Refuse(entry.pane.clone()))
+    let registry_pane = entry.map(|entry| entry.pane.as_str());
+    let registry_pane_alive = registry_pane
+        .map(|pane| tmux.pane_alive(pane))
+        .unwrap_or(false);
+    agent_doc_supervisor::session_owner::existing_session_pane_action(
+        current_pane,
+        registry_pane,
+        registry_pane_alive,
+        live_owner,
+    )
 }
 
 fn format_existing_pane_conflict_error(

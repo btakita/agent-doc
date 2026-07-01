@@ -188,6 +188,23 @@ pub fn existing_patch_is_reposition_only(payload: &serde_json::Value) -> bool {
             .is_none_or(|content| content.is_empty())
 }
 
+/// Return the `unmatched` field that should be carried in a patch payload.
+///
+/// When unmatched content was synthesized into one or more IPC patches, the
+/// payload must not also carry the original unmatched body or the plugin will
+/// apply the same text twice.
+pub fn effective_unmatched_for_patch_payload(
+    unmatched: &str,
+    explicit_patch_count: usize,
+    ipc_patch_count: usize,
+) -> &str {
+    if explicit_patch_count == 0 && ipc_patch_count > 0 {
+        ""
+    } else {
+        unmatched.trim()
+    }
+}
+
 /// Tag a `patch` message with the `early_ack` opt-in when enabled.
 ///
 /// Non-patch traffic is returned unchanged so queue convergence, VCS refreshes,
@@ -398,12 +415,12 @@ mod tests {
         AckClassification, FullContentIpcMode, callback_request, callback_request_is_expired,
         callback_response, callback_response_matches_request, callback_urgency_for_elapsed,
         classify_ack, early_ack_line, early_ack_ops_marker, early_ack_tagged_message,
-        existing_patch_is_reposition_only, ipc_accept_thread_ops_marker,
-        is_already_applied_ack_error_message, is_socket_ack_timeout_error, is_socket_status_error,
-        message_requests_early_ack, normalization_repair_patch_message, patch_message,
-        pending_callback_from_request, publish_live_buffer_message, queue_convergence_message,
-        refresh_content_message, reposition_message, save_document_message, vcs_refresh_message,
-        vcs_refresh_probe_message,
+        effective_unmatched_for_patch_payload, existing_patch_is_reposition_only,
+        ipc_accept_thread_ops_marker, is_already_applied_ack_error_message,
+        is_socket_ack_timeout_error, is_socket_status_error, message_requests_early_ack,
+        normalization_repair_patch_message, patch_message, pending_callback_from_request,
+        publish_live_buffer_message, queue_convergence_message, refresh_content_message,
+        reposition_message, save_document_message, vcs_refresh_message, vcs_refresh_probe_message,
     };
 
     #[test]
@@ -623,6 +640,27 @@ mod tests {
             "unmatched": "",
             "fullContent": "",
         })));
+    }
+
+    #[test]
+    fn effective_unmatched_for_patch_payload_clears_synthesized_unmatched() {
+        assert_eq!(effective_unmatched_for_patch_payload(" body ", 0, 1), "");
+    }
+
+    #[test]
+    fn effective_unmatched_for_patch_payload_keeps_explicit_patch_unmatched() {
+        assert_eq!(
+            effective_unmatched_for_patch_payload(" body ", 1, 1),
+            "body"
+        );
+    }
+
+    #[test]
+    fn effective_unmatched_for_patch_payload_keeps_unsynthesized_unmatched() {
+        assert_eq!(
+            effective_unmatched_for_patch_payload(" body ", 0, 0),
+            "body"
+        );
     }
 
     #[test]

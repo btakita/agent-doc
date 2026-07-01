@@ -1694,21 +1694,6 @@ fn emit_busy_route_diagnostic(tmux: &Tmux, pane_id: &str, file: &Path, harness: 
     }
 }
 
-fn user_outcome_fields(kind: agent_doc_flow::outcome::UserFacingOutcomeKind) -> String {
-    agent_doc_flow::outcome::UserFacingOutcome::new(kind)
-        .expect("static user-facing outcome is valid")
-        .log_fields()
-}
-
-fn blocked_with_unblocker_fields(unblocker: &str) -> String {
-    agent_doc_flow::outcome::UserFacingOutcome::with_unblocker(
-        agent_doc_flow::outcome::UserFacingOutcomeKind::BlockedWithExactUnblocker,
-        unblocker,
-    )
-    .expect("static user-facing unblocker is valid")
-    .log_fields()
-}
-
 fn emit_busy_route_queued_diagnostic(
     tmux: &Tmux,
     pane_id: &str,
@@ -1716,8 +1701,9 @@ fn emit_busy_route_queued_diagnostic(
     harness: &HarnessConfig,
 ) {
     let file_display = file.display().to_string();
-    let user_outcome =
-        user_outcome_fields(agent_doc_flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner);
+    let user_outcome = agent_doc_flow::outcome::user_outcome_fields(
+        agent_doc_flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner,
+    );
     let msg = route_busy_queued_diagnostic_message(RouteBusyQueuedDiagnosticFacts {
         file_display: &file_display,
         harness_binary: &harness.binary,
@@ -2246,7 +2232,7 @@ fn route_closeout_user_outcome_fields(decision: &CloseoutRecoveryDecision) -> St
             return format!("{} recovery_command={}", outcome.log_fields(), command);
         }
     }
-    user_outcome_fields(UserFacingOutcomeKind::QueuedBehindOwner)
+    agent_doc_flow::outcome::user_outcome_fields(UserFacingOutcomeKind::QueuedBehindOwner)
 }
 
 /// Enqueue a routed dispatch prompt into a document's `agent:queue`.
@@ -3459,7 +3445,7 @@ fn route_via_authoritative_actor(
                         queued.prompt_text,
                         queued.already_present,
                         queued.activated,
-                        user_outcome_fields(
+                        agent_doc_flow::outcome::user_outcome_fields(
                             agent_doc_flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner
                         )
                     );
@@ -3496,7 +3482,7 @@ fn route_via_authoritative_actor(
                         file.display(),
                         dispatch_pane,
                         continuation.head_prompt,
-                        user_outcome_fields(
+                        agent_doc_flow::outcome::user_outcome_fields(
                             agent_doc_flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner
                         )
                     );
@@ -3524,7 +3510,8 @@ fn route_via_authoritative_actor(
                 } else {
                     "wait_for_dispatch_ready_prompt"
                 };
-                let blocked_outcome = blocked_with_unblocker_fields(unblocker);
+                let blocked_outcome =
+                    agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(unblocker);
                 anyhow::bail!(
                     "{}",
                     controller_dispatch_only_busy_refusal_message(DispatchOnlyBusyRefusalFacts {
@@ -3597,7 +3584,7 @@ fn route_via_authoritative_actor(
                     queued.appended,
                     queued.already_present,
                     queued.superseded,
-                    user_outcome_fields(
+                    agent_doc_flow::outcome::user_outcome_fields(
                         agent_doc_flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner
                     )
                 );
@@ -3624,7 +3611,7 @@ fn route_via_authoritative_actor(
                     file.display(),
                     dispatch_pane,
                     continuation.head_prompt,
-                    user_outcome_fields(
+                    agent_doc_flow::outcome::user_outcome_fields(
                         agent_doc_flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner
                     )
                 );
@@ -3637,7 +3624,8 @@ fn route_via_authoritative_actor(
                 } else {
                     "wait_for_dispatch_ready_prompt"
                 };
-                let blocked_outcome = blocked_with_unblocker_fields(unblocker);
+                let blocked_outcome =
+                    agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(unblocker);
                 anyhow::bail!(
                     "{}",
                     controller_dispatch_only_busy_refusal_message(DispatchOnlyBusyRefusalFacts {

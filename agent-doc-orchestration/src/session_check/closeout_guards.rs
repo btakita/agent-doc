@@ -359,42 +359,14 @@ pub(crate) fn open_cycle_message(
     let ipc_hint = latest_ipc_proof_diagnostic_hint(file)?
         .map(|hint| format!(" {hint}"))
         .unwrap_or_default();
-    if state.last_event.starts_with("direct_invocation_timeout")
-        || state
-            .last_event
-            .starts_with("recursive_direct_invocation_blocked")
-    {
-        return Ok(format!(
-            "[session-check] INTERRUPTED: cycle `{}` is still `{}` ({}) — direct invocation did not reach response capture. If the owning pane is now idle but the document still reports busy, reconcile it without killing the pane via `agent-doc session status {}` (or `agent-doc session clear {}`). Otherwise retry from outside the managed pane, restart the owner with `agent-doc start {}`, or abandon the stale cycle only after confirming no response exists.{}",
-            state.cycle_id,
-            state.phase.as_str(),
-            state.last_event,
-            state.file,
-            state.file,
-            state.file,
-            ipc_hint
-        ));
-    }
-    let detail = match state.phase {
-        agent_doc_turn::CyclePhase::PreflightStarted => {
-            "cycle started but no write/commit followed"
-        }
-        agent_doc_turn::CyclePhase::ResponseCaptured => {
-            "response was captured but no write/commit followed"
-        }
-        agent_doc_turn::CyclePhase::WriteApplied => {
-            "response write landed but no terminal commit followed"
-        }
-        agent_doc_turn::CyclePhase::Committed => "no terminal commit followed",
-        agent_doc_turn::CyclePhase::Abandoned => "cycle was abandoned",
-    };
-    Ok(format!(
-        "[session-check] INTERRUPTED: cycle `{}` is still `{}` ({}) — {}.{}",
-        state.cycle_id,
-        state.phase.as_str(),
-        state.last_event,
-        detail,
-        ipc_hint
+    Ok(agent_doc_workflow::session_check::open_cycle_message(
+        agent_doc_workflow::session_check::OpenCycleMessage {
+            file: &state.file,
+            cycle_id: &state.cycle_id,
+            phase: state.phase,
+            last_event: &state.last_event,
+            ipc_hint: &ipc_hint,
+        },
     ))
 }
 
@@ -408,14 +380,18 @@ pub(crate) fn open_cycle_manual_patchback_message(
     let Some(marker) = detect_bypassed_response_write(file)? else {
         return Ok(None);
     };
-    Ok(Some(format!(
-        "[session-check] INTERRUPTED: cycle `{}` is still `{}` ({}) — found visible response patchback {} that is still outside the commit boundary. This looks like a manual repair that stopped before commit; finish it with `agent-doc write --commit {}` if you still have the response body, or commit the repaired document manually once the response is correct.",
-        state.cycle_id,
-        state.phase.as_str(),
-        state.last_event,
-        marker,
-        file.display()
-    )))
+    let file_display = file.display().to_string();
+    Ok(Some(
+        agent_doc_workflow::session_check::open_cycle_manual_patchback_message(
+            agent_doc_workflow::session_check::OpenCycleManualPatchbackMessage {
+                file: &file_display,
+                cycle_id: &state.cycle_id,
+                phase: state.phase,
+                last_event: &state.last_event,
+                marker: &marker,
+            },
+        ),
+    ))
 }
 
 /// Return the message portion of the last non-empty line in `ops.log`,

@@ -1,7 +1,7 @@
-//! Sidecar adapter for binary-detected queue-stall policy (`#qstallguard`).
+//! Queue drain-stall marker storage.
 //!
-//! The pure stall classifier lives in `agent-doc-turn`; orchestration owns only
-//! the one-shot continuation-pending marker IO.
+//! The pure stall classifier lives in `agent-doc-turn`; this module owns the
+//! queue-related one-shot continuation-pending marker sidecar.
 
 use std::path::{Path, PathBuf};
 

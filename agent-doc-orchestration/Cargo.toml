@@ -39,6 +39,7 @@ agent-doc-ipc-protocol = { path = "../agent-doc-ipc-protocol", version = "0.34.6
 agent-doc-lease = { path = "../agent-doc-lease", version = "0.34.66" }
 agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.34.66" }
 agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.66" }
+agent-doc-memory = { path = "../agent-doc-memory", version = "0.34.66" }
 agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.66" }
 agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.34.66" }
 agent-doc-plugin-owner = { path = "../agent-doc-plugin-owner", version = "0.34.66" }

@@ -14,6 +14,9 @@
 
 use std::path::Path;
 
+use agent_doc_plugin_owner::stale_cleanup::{
+    should_reap_jetbrains_consumer_file, should_reap_jetbrains_live_buffer_sidecar,
+};
 use agent_doc_turn::response_text::{
     response_prompt_target_from_re_heading, summarize_response_for_hook,
 };
@@ -374,41 +377,6 @@ pub(crate) fn reap_local_model_leases(file: &Path) -> ReapOutcome {
     }
 }
 
-/// `#fccreap`: parse the IntelliJ-plugin consumer pid out of a per-instance
-/// patch filename.
-///
-/// The JetBrains plugin registers a per-instance consumer id
-/// `jetbrains-<pid>-<uuid>` (see
-/// `editors/jetbrains/.../TypingTracker.kt`), and per-instance patch files land
-/// in `.agent-doc/patches/` named `<doc_hash>.jetbrains-<pid>-<uuid>.json`.
-///
-/// Returns `Some(pid)` only for filenames that contain the literal `.jetbrains-`
-/// marker followed by a run of ASCII digits (the pid). Returns `None` for the
-/// base `<hash>.json`, `.vscode` variants, or any name where the pid cannot be
-/// parsed — callers must treat `None` as "do not reap".
-fn jetbrains_consumer_pid(filename: &str) -> Option<u32> {
-    if !filename.ends_with(".json") {
-        return None;
-    }
-    // The marker is `.jetbrains-` so the base `<hash>.json` (no per-instance
-    // suffix) and `.vscode` variants never match.
-    let after_marker = filename.split(".jetbrains-").nth(1)?;
-    let digits: String = after_marker
-        .chars()
-        .take_while(|c| c.is_ascii_digit())
-        .collect();
-    if digits.is_empty() {
-        return None;
-    }
-    // The pid must be followed by `-<uuid>` (a hyphen), never the file extension
-    // or end-of-string — otherwise the name is malformed.
-    let rest = &after_marker[digits.len()..];
-    if !rest.starts_with('-') {
-        return None;
-    }
-    digits.parse::<u32>().ok()
-}
-
 /// `#fccreap`: best-effort reap of stale dead-PID IntelliJ plugin consumer patch
 /// files from `<project_root>/.agent-doc/patches/`.
 ///
@@ -461,12 +429,7 @@ fn reap_stale_jetbrains_consumers_with(
         let Some(name) = file_name.to_str() else {
             continue;
         };
-        // Conservative: only consider files whose pid we can parse; never reap a
-        // non-`jetbrains-` patch file or this process's own pid.
-        let Some(pid) = jetbrains_consumer_pid(name) else {
-            continue;
-        };
-        if pid == self_pid || is_pid_live(pid) {
+        if !should_reap_jetbrains_consumer_file(name, self_pid, &is_pid_live) {
             continue;
         }
         let path = entry.path();
@@ -481,20 +444,6 @@ fn reap_stale_jetbrains_consumers_with(
         }
     }
     reaped
-}
-
-/// `#lbreap`: parse the owning pid from a live-buffer sidecar filename that
-/// embeds a `jetbrains-<pid>-<uuid>` editor id (`<stem>.jetbrains-<pid>-<uuid>`).
-/// Returns `None` for the legacy no-editor-id sidecar (`<stem>`) and any
-/// non-JetBrains editor id (no parseable pid), which are never reaped.
-fn jetbrains_live_buffer_pid(filename: &str) -> Option<u32> {
-    let idx = filename.find("jetbrains-")?;
-    let rest = &filename[idx + "jetbrains-".len()..];
-    let pid_str = rest.split('-').next()?;
-    if pid_str.is_empty() || !pid_str.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    pid_str.parse::<u32>().ok()
 }
 
 /// `#lbreap`: best-effort reap of stale dead-PID IntelliJ live-buffer sidecars
@@ -547,14 +496,9 @@ fn reap_stale_jetbrains_live_buffers_with(dir: &Path, is_pid_live: impl Fn(u32) 
         let Some(name) = file_name.to_str() else {
             continue;
         };
-        let Some(pid) = jetbrains_live_buffer_pid(name) else {
-            continue;
-        };
-        if pid == self_pid || is_pid_live(pid) {
-            continue;
-        }
         let path = entry.path();
-        if !path.is_file() {
+        if !should_reap_jetbrains_live_buffer_sidecar(name, path.is_file(), self_pid, &is_pid_live)
+        {
             continue;
         }
         match std::fs::remove_file(&path) {
@@ -708,27 +652,6 @@ mod tests {
     }
 
     #[test]
-    fn jetbrains_consumer_pid_parses_pid_and_rejects_non_matching() {
-        assert_eq!(
-            jetbrains_consumer_pid("abc123.jetbrains-12345-1f2e3d4c-uuid.json"),
-            Some(12345)
-        );
-        // Base patch file (no per-instance suffix) → None.
-        assert_eq!(jetbrains_consumer_pid("abc123.json"), None);
-        // VS Code variant → None.
-        assert_eq!(jetbrains_consumer_pid("abc123.vscode-99-uuid.json"), None);
-        // Malformed: pid not followed by `-<uuid>`.
-        assert_eq!(jetbrains_consumer_pid("abc123.jetbrains-12345.json"), None);
-        // Malformed: no digits after the marker.
-        assert_eq!(jetbrains_consumer_pid("abc123.jetbrains--uuid.json"), None);
-        // Not a json file.
-        assert_eq!(
-            jetbrains_consumer_pid("abc123.jetbrains-12345-uuid.txt"),
-            None
-        );
-    }
-
-    #[test]
     fn reap_removes_only_dead_pid_consumer_files() {
         let tmp = tempfile::TempDir::new().unwrap();
         let patches = tmp.path().join("patches");
@@ -755,21 +678,6 @@ mod tests {
         assert!(alive.exists(), "alive-pid file should survive");
         assert!(base.exists(), "base patch file should survive");
         assert!(unrelated.exists(), "unrelated file should survive");
-    }
-
-    #[test]
-    fn jetbrains_live_buffer_pid_parses_pid_from_sidecar_name() {
-        // Per-editor sidecar `<stem>.jetbrains-<pid>-<uuid>`.
-        assert_eq!(
-            jetbrains_live_buffer_pid("130a18479c134e03.jetbrains-3873180-bf4c9d87-uuid"),
-            Some(3873180)
-        );
-        // Legacy no-editor-id sidecar (bare stem) → None (never reaped).
-        assert_eq!(jetbrains_live_buffer_pid("130a18479c134e03"), None);
-        // VS Code / non-jetbrains → None.
-        assert_eq!(jetbrains_live_buffer_pid("stem.vscode-99-uuid"), None);
-        // Malformed: no digits after the marker.
-        assert_eq!(jetbrains_live_buffer_pid("stem.jetbrains--uuid"), None);
     }
 
     #[test]

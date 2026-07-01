@@ -1349,7 +1349,7 @@ fn clear_cooldown_blocks_auto_dispatch(
     session_log: &mut Option<std::fs::File>,
     logged: &mut bool,
 ) -> bool {
-    match crate::queue_continuation::clear_cooldown_active(path) {
+    match agent_doc_queue_io::continuation_marker::clear_cooldown_active(path) {
         Ok(true) => {
             if !*logged {
                 log_event(

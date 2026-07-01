@@ -53,6 +53,7 @@ dependencies = [
  "agent-doc-prompt-context",
  "agent-doc-prompt-contract",
  "agent-doc-queue",
+ "agent-doc-queue-io",
  "agent-doc-response-toc-io",
  "agent-doc-secret-redact",
  "agent-doc-session-accretion",
@@ -423,6 +424,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-doc-memory"
+version = "0.34.66"
+dependencies = [
+ "serde",
+ "tsift-memory",
+]
+
+[[package]]
 name = "agent-doc-merge"
 version = "0.34.66"
 dependencies = [
@@ -475,6 +484,7 @@ dependencies = [
  "agent-doc-lease",
  "agent-doc-log-time",
  "agent-doc-markdown-ast",
+ "agent-doc-memory",
  "agent-doc-merge",
  "agent-doc-model-tier",
  "agent-doc-plugin-owner",
@@ -628,10 +638,13 @@ dependencies = [
 name = "agent-doc-queue-io"
 version = "0.34.66"
 dependencies = [
+ "agent-doc-document-realtime",
  "agent-doc-fs",
  "agent-doc-hash",
  "agent-doc-queue",
+ "agent-doc-turn",
  "anyhow",
+ "serde",
  "serde_json",
  "tempfile",
 ]

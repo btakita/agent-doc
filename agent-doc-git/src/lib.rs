@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Output;
+use std::time::Duration;
 
 /// A pre-mutation recovery checkpoint tag for a document.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +38,15 @@ pub fn render_git_process_output(output: &Output) -> String {
     render_git_streams(&output.stderr, &output.stdout)
 }
 
+pub fn output_has_index_lock_contention(output: &Output) -> bool {
+    is_index_lock_contention_text(&String::from_utf8_lossy(&output.stderr))
+        || is_index_lock_contention_text(&String::from_utf8_lossy(&output.stdout))
+}
+
+pub fn commit_retry_backoff(attempt: u32) -> Duration {
+    Duration::from_millis(50 * (1u64 << attempt))
+}
+
 /// Parse the path field from non-`-z` `git status --porcelain=v1` output.
 pub fn parse_porcelain_path(line: &str) -> Option<String> {
     if line.len() < 4 {
@@ -52,6 +62,79 @@ pub fn parse_porcelain_path(line: &str) -> Option<String> {
     }
     let path = raw.rsplit(" -> ").next().unwrap_or(raw).trim();
     Some(path.trim_matches('"').to_string())
+}
+
+pub fn tracked_modified_paths_from_porcelain(
+    porcelain: &str,
+    submodule_paths: &std::collections::HashSet<String>,
+) -> Vec<String> {
+    let mut paths = Vec::new();
+    for line in porcelain.lines() {
+        let Some(path) = parse_porcelain_path(line) else {
+            continue;
+        };
+        if path.is_empty() || submodule_paths.contains(&path) {
+            continue;
+        }
+        paths.push(path);
+    }
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+pub fn parse_submodule_paths(status_output: &str) -> std::collections::HashSet<String> {
+    let mut set = std::collections::HashSet::new();
+    for line in status_output.lines() {
+        // ` <sha> <path> (<describe>)` / `+<sha> <path>` / `-<sha> <path>` /
+        // `U<sha> <path>` — the path is the second whitespace-separated field.
+        if let Some(path) = line
+            .trim_start_matches(['+', '-', 'U', ' '])
+            .split_whitespace()
+            .nth(1)
+        {
+            set.insert(path.to_string());
+        }
+    }
+    set
+}
+
+pub fn line_looks_like_explicit_post_commit_prompt_directive(line: &str) -> bool {
+    let mut trimmed = line.trim();
+    if let Some(rest) = trimmed.strip_prefix("- ") {
+        trimmed = rest.trim_start();
+    }
+    if let Some(rest) = trimmed
+        .strip_prefix("[ ]")
+        .or_else(|| trimmed.strip_prefix("[x]"))
+        .or_else(|| trimmed.strip_prefix("[X]"))
+        .or_else(|| trimmed.strip_prefix("[/]"))
+    {
+        trimmed = rest.trim_start();
+    }
+    if let Some(rest) = trimmed.strip_prefix("[#")
+        && let Some(close) = rest.find(']')
+    {
+        trimmed = rest[close + 1..].trim_start();
+    }
+
+    let lower = trimmed
+        .trim_start_matches('\u{276f}')
+        .trim_start()
+        .to_ascii_lowercase();
+    trimmed.starts_with('\u{276f}')
+        || trimmed.ends_with('?')
+        || lower.starts_with("do #")
+        || lower.starts_with("do [#")
+        || lower.starts_with("fix #")
+        || lower.starts_with("fix this")
+        || lower.starts_with("run tests")
+        || lower.starts_with("build + install")
+        || lower.starts_with("build and install")
+        || lower.starts_with("commit + push")
+        || lower.starts_with("commit and push")
+        || lower.contains(" spec-test")
+        || lower.contains(" spec test")
 }
 
 pub fn doc_stem(file: &Path) -> String {
@@ -141,11 +224,21 @@ fn render_git_streams(stderr: &[u8], stdout: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        doc_stem, is_index_lock_contention_text, parent_pointer_recovery_hint,
-        parent_submodule_pointer_message, parse_porcelain_path, parse_recovery_tags,
-        relative_to_root, render_git_streams, short_oid,
+        commit_retry_backoff, doc_stem, is_index_lock_contention_text,
+        line_looks_like_explicit_post_commit_prompt_directive, output_has_index_lock_contention,
+        parent_pointer_recovery_hint, parent_submodule_pointer_message, parse_porcelain_path,
+        parse_recovery_tags, parse_submodule_paths, relative_to_root, render_git_streams,
+        short_oid, tracked_modified_paths_from_porcelain,
     };
+    use std::collections::HashSet;
     use std::path::{Path, PathBuf};
+    use std::process::{ExitStatus, Output};
+
+    #[cfg(unix)]
+    fn exit_status(code: i32) -> ExitStatus {
+        use std::os::unix::process::ExitStatusExt;
+        ExitStatus::from_raw(code << 8)
+    }
 
     #[test]
     fn relative_to_root_strips_prefix_for_normal_paths() {
@@ -204,6 +297,38 @@ mod tests {
         assert_eq!(render_git_streams(b" \n", b"\n"), "no git output");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn output_has_index_lock_contention_checks_both_streams() {
+        let stderr_lock = Output {
+            status: exit_status(1),
+            stdout: Vec::new(),
+            stderr: b"fatal: Unable to create .git/index.lock".to_vec(),
+        };
+        assert!(output_has_index_lock_contention(&stderr_lock));
+
+        let stdout_lock = Output {
+            status: exit_status(1),
+            stdout: b"could not write index.lock".to_vec(),
+            stderr: Vec::new(),
+        };
+        assert!(output_has_index_lock_contention(&stdout_lock));
+
+        let unrelated = Output {
+            status: exit_status(1),
+            stdout: b"fatal: not a git repository".to_vec(),
+            stderr: Vec::new(),
+        };
+        assert!(!output_has_index_lock_contention(&unrelated));
+    }
+
+    #[test]
+    fn commit_retry_backoff_doubles_from_one_hundred_milliseconds() {
+        assert_eq!(commit_retry_backoff(0).as_millis(), 50);
+        assert_eq!(commit_retry_backoff(1).as_millis(), 100);
+        assert_eq!(commit_retry_backoff(3).as_millis(), 400);
+    }
+
     #[test]
     fn porcelain_path_parses_tracked_status_path() {
         assert_eq!(
@@ -245,6 +370,55 @@ mod tests {
             parse_porcelain_path("R  \"old name.rs\" -> \"new name.rs\""),
             Some("new name.rs".to_string())
         );
+    }
+
+    #[test]
+    fn tracked_modified_paths_from_porcelain_filters_sorts_and_dedupes() {
+        let mut submodules = HashSet::new();
+        submodules.insert("vendor/tool".to_string());
+        let paths = tracked_modified_paths_from_porcelain(
+            " M src/lib.rs\n\
+             ?? scratch.md\n\
+             R  old.rs -> new.rs\n\
+             M  vendor/tool\n\
+             M  src/lib.rs\n",
+            &submodules,
+        );
+        assert_eq!(paths, vec!["new.rs".to_string(), "src/lib.rs".to_string()]);
+    }
+
+    #[test]
+    fn parse_submodule_paths_reads_git_status_shapes() {
+        let paths = parse_submodule_paths(
+            " 0123456789abcdef vendor/clean (v1.0)\n\
+             +abcdef0123456789 vendor/dirty (heads/main)\n\
+             -fedcba9876543210 vendor/missing\n\
+             U1111111111111111 vendor/conflict\n",
+        );
+        assert!(paths.contains("vendor/clean"));
+        assert!(paths.contains("vendor/dirty"));
+        assert!(paths.contains("vendor/missing"));
+        assert!(paths.contains("vendor/conflict"));
+        assert_eq!(paths.len(), 4);
+    }
+
+    #[test]
+    fn explicit_post_commit_prompt_directive_detects_operator_prompts() {
+        assert!(line_looks_like_explicit_post_commit_prompt_directive(
+            "- [ ] [#abc] fix this regression"
+        ));
+        assert!(line_looks_like_explicit_post_commit_prompt_directive(
+            "\u{276f} run tests"
+        ));
+        assert!(line_looks_like_explicit_post_commit_prompt_directive(
+            "Can you check this?"
+        ));
+        assert!(line_looks_like_explicit_post_commit_prompt_directive(
+            "- [x] build + install"
+        ));
+        assert!(!line_looks_like_explicit_post_commit_prompt_directive(
+            "- [ ] [#abc] completed closeout bookkeeping"
+        ));
     }
 
     #[test]

@@ -1852,7 +1852,7 @@ pub fn run_with_tmux_with_options(
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
-    if let Err(err) = crate::queue_continuation::clear_cooldown_marker(file) {
+    if let Err(err) = agent_doc_queue_io::continuation_marker::clear_cooldown_marker(file) {
         eprintln!(
             "[route] warning: failed to clear queue cooldown marker for {}: {err:#}",
             file.display()

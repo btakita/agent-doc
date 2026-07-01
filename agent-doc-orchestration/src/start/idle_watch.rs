@@ -1163,7 +1163,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     clear_cooldown_idle_ticks = 0;
                 }
                 let deferred_operator_clear_pending =
-                    crate::queue_continuation::read_deferred_operator_clear(&path)
+                    agent_doc_queue_io::continuation_marker::read_deferred_operator_clear(&path)
                         .unwrap_or(None)
                         .is_some();
                 if clear_cooldown_resume_ready(
@@ -1175,7 +1175,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     clear_cooldown_idle_ticks,
                     CLEAR_COOLDOWN_RESUME_IDLE_TICKS,
                 ) {
-                    match crate::queue_continuation::clear_cooldown_marker(&path) {
+                    match agent_doc_queue_io::continuation_marker::clear_cooldown_marker(&path) {
                         Ok(()) => {
                             clear_cooldown_idle_ticks = 0;
                             clear_cooldown_logged = false;
@@ -2055,8 +2055,9 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // gap, then drop both markers to resume the loop. When no marker
                 // exists this is a complete no-op, so the existing drain path
                 // below is unchanged.
-                let deferred_clear = crate::queue_continuation::read_deferred_operator_clear(&path)
-                    .unwrap_or(None);
+                let deferred_clear =
+                    agent_doc_queue_io::continuation_marker::read_deferred_operator_clear(&path)
+                        .unwrap_or(None);
                 match agent_doc_queue::queue_preemption::plan_deferred_clear_step(
                     deferred_clear.is_some(),
                     prompt_visible && !turn_active,
@@ -2078,16 +2079,14 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 // Resume: drop the deferred-clear record AND the
                                 // pause cooldown so the next tick drains normally.
                                 if let Err(err) =
-                                    crate::queue_continuation::clear_deferred_operator_clear_marker(
-                                        &path,
-                                    )
+                                    agent_doc_queue_io::continuation_marker::clear_deferred_operator_clear_marker(&path)
                                 {
                                     eprintln!(
                                         "[agent-doc] idle-queue watch: failed to drop deferred-clear marker: {err:#}"
                                     );
                                 }
                                 if let Err(err) =
-                                    crate::queue_continuation::clear_cooldown_marker(&path)
+                                    agent_doc_queue_io::continuation_marker::clear_cooldown_marker(&path)
                                 {
                                     eprintln!(
                                         "[agent-doc] idle-queue watch: failed to clear cooldown after deferred clear: {err:#}"
@@ -2553,7 +2552,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         // agent's preflight would see the marker with no in-session drain
                         // lease and false-fire `queue_stall_detected` for a drain the
                         // supervisor is actively progressing.
-                        crate::drain_stall::clear_continuation_pending(&file);
+                        agent_doc_queue_io::drain_stall::clear_continuation_pending(&file);
                         // `#qflood2`: hold the trigger until a just-sent `/clear`
                         // has settled, so it is never injected into the in-flight
                         // clear (the concatenated `/clear /agent-doc <FILE>`).

@@ -1431,7 +1431,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // it so the diagnostic fires once per stall, not every preflight.
     {
         let file_str = file.to_string_lossy().to_string();
-        if crate::drain_stall::read_continuation_pending(&file_str).is_some() {
+        if agent_doc_queue_io::drain_stall::read_continuation_pending(&file_str).is_some() {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
@@ -1461,7 +1461,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             }
             // One-shot: clear the marker on every reconciliation outcome.
             if !options.probe {
-                crate::drain_stall::clear_continuation_pending(&file_str);
+                agent_doc_queue_io::drain_stall::clear_continuation_pending(&file_str);
             }
         }
     }

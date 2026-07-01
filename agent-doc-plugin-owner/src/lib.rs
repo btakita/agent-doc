@@ -33,6 +33,8 @@ use agent_doc_merge::ownership::{
 };
 use serde::{Deserialize, Serialize};
 
+pub mod stale_cleanup;
+
 /// Directory (relative to the project root) holding per-document plugin-owner
 /// leases. Mirrors the sibling `.agent-doc/drain-owner` sidecar layout.
 const PLUGIN_OWNER_DIR: &str = ".agent-doc/plugin-owner";

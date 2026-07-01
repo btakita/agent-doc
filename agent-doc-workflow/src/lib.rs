@@ -10,6 +10,7 @@ pub mod invariants;
 pub mod orchestrate_tasks;
 pub mod pending_capture;
 pub mod preflight_policy;
+pub mod session_check;
 pub mod session_cycle;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

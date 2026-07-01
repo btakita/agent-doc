@@ -24,6 +24,7 @@ use agent_doc_queue::{
     },
     queue_response::{free_text_head_answered_by_response, queue_prompt_text_is_free_text},
 };
+use agent_doc_workflow::preflight_policy::ResolvedFreeTextExecution;
 
 /// Resolve the live finalize-pipeline view surfaced in preflight output
 /// (`#fmrunid-wire`). Cycle-state is authoritative; the document
@@ -3224,21 +3225,6 @@ fn admit_free_text_work(
     }))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ResolvedFreeTextExecution {
-    Goal,
-    Queue,
-}
-
-impl ResolvedFreeTextExecution {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Goal => "goal",
-            Self::Queue => "queue",
-        }
-    }
-}
-
 fn resolve_free_text_execution(
     file: &Path,
     content: &str,
@@ -3257,38 +3243,22 @@ fn resolve_free_text_execution(
     let goal_available = harness.supports_goal_command(
         agent_doc_harness::opencode_goal_extension_available(file, project_root),
     );
-    let mut warnings = Vec::new();
-    let execution = match requested {
-        agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Queue => {
-            ResolvedFreeTextExecution::Queue
-        }
-        agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Auto
-        | agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Goal
-            if goal_available =>
-        {
-            ResolvedFreeTextExecution::Goal
-        }
-        agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Goal => {
-            warnings.push(PreflightWarning {
-                code: "free_text_goal_unavailable".to_string(),
-                message: format!(
-                    "{}: configured agent_doc_free_text_execution=goal, but harness `{}` has no available /goal command; queued backlog item(s) {} instead.",
-                    file.display(),
-                    harness.binary,
-                    ids.iter()
-                        .map(|id| format!("#{id}"))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-                document_agent: fm.agent.clone(),
-                active_harness: Some(harness.binary.clone()),
-            });
-            ResolvedFreeTextExecution::Queue
-        }
-        agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Auto => {
-            ResolvedFreeTextExecution::Queue
-        }
-    };
+    let (execution, warning) = agent_doc_workflow::preflight_policy::resolve_free_text_execution(
+        requested,
+        goal_available,
+        &file.display().to_string(),
+        &harness.binary,
+        ids,
+    );
+    let warnings = warning
+        .into_iter()
+        .map(|warning| PreflightWarning {
+            code: warning.code,
+            message: warning.message,
+            document_agent: fm.agent.clone(),
+            active_harness: Some(harness.binary.clone()),
+        })
+        .collect();
     Ok((execution, warnings))
 }
 

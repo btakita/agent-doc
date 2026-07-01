@@ -1065,6 +1065,7 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-orchestration/src/session_check/queue_head_guards.rs",
         "agent-doc-orchestration/src/session_check/response_guards.rs",
         "agent-doc-orchestration/src/session_check/detect.rs",
+        "agent-doc-workflow/src/session_check.rs",
         "agent-doc-orchestration/src/write.rs",
         "agent-doc-orchestration/src/write/queue_consume.rs",
         "agent-doc-orchestration/src/write/ipc.rs",
@@ -1383,12 +1384,16 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // guidance is provable/disprovable from the log (auto-verify keys on
         // `ops_log:queue_paused_continuation_guidance_emitted`). The recorded
         // `pause_reason=` is the controller pause text, not a new flow boundary.
-        // +2 (#closeoutstall): typed editor-convergence closeout interruption
-        // reports the blocked state as `reason=<no_ack|...>` in the canonical
-        // session-check diagnostic, plus the focused regression assertion for
-        // `reason=no_ack`. This routes the former ad hoc stall through the cycle
-        // state's `blocked_closeout` surface instead of a generic repair branch.
-        ("agent-doc-orchestration/src/session_check.rs", "reason=") => 3,
+        // 3 -> 2 (#session-check-workflow-extract): the canonical
+        // blocked-closeout message formatter moved to
+        // `agent_doc_workflow::session_check`, leaving orchestration with only
+        // the pause-guidance proof log and focused `reason=no_ack` regression
+        // assertion. The moved formatter is budgeted on the workflow owner below.
+        ("agent-doc-orchestration/src/session_check.rs", "reason=") => 2,
+        // #session-check-workflow-extract: focused workflow policy now owns the
+        // canonical blocked-closeout diagnostic text, including its audited
+        // `reason={}` field.
+        ("agent-doc-workflow/src/session_check.rs", "reason=") => 1,
         ("agent-doc-orchestration/src/session_check/closeout_guards.rs", "guard_") => 4,
         // +3 (#samplequeuepreserve): the audited
         // `queue_head_removal_guard_proof` diagnostic plus two regression test
@@ -4955,21 +4960,48 @@ fn test_agent_doc_turn_owns_drain_stall_policy() {
             .exists(),
         "queue-stall turn policy should live in the focused turn crate"
     );
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-queue-io")),
+        "agent-doc-queue-io must stay a first-class workspace crate for queue marker IO"
+    );
+    assert!(
+        manifest_dir
+            .join("agent-doc-queue-io/src/drain_stall.rs")
+            .exists(),
+        "queue-stall marker IO should live in the focused queue IO crate"
+    );
 
-    let orchestration_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/drain_stall.rs"))
-            .unwrap();
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/drain_stall.rs")
+            .exists(),
+        "orchestration must not keep a drain_stall marker-IO facade"
+    );
+    let queue_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/drain_stall.rs")).unwrap();
     for forbidden_snippet in [
         "pub use agent_doc_turn::drain_stall",
-        "ContinuationPending {",
         "pub fn classify_stall",
         "pub struct StallFacts",
         "pub enum StallVerdict",
         "pub const QUEUE_STALL_DETECTED",
     ] {
         assert!(
-            !orchestration_source.contains(forbidden_snippet),
-            "orchestration must not re-export or re-own pure drain-stall policy: {forbidden_snippet}"
+            !queue_io_source.contains(forbidden_snippet),
+            "queue IO must not re-export or re-own pure drain-stall policy: {forbidden_snippet}"
+        );
+    }
+    for required_snippet in [
+        "pub fn mark_continuation_pending(",
+        "pub fn read_continuation_pending(",
+        "pub fn clear_continuation_pending(",
+        "agent_doc_turn::drain_stall::",
+    ] {
+        assert!(
+            queue_io_source.contains(required_snippet),
+            "agent-doc-queue-io must own drain-stall marker IO and call turn policy: {required_snippet}"
         );
     }
 
@@ -4979,6 +5011,25 @@ fn test_agent_doc_turn_owns_drain_stall_policy() {
     assert!(
         preflight_source.contains("use agent_doc_turn::drain_stall::{"),
         "preflight must consume focused drain-stall policy directly"
+    );
+    assert!(
+        preflight_source.contains("agent_doc_queue_io::drain_stall::read_continuation_pending")
+            && preflight_source
+                .contains("agent_doc_queue_io::drain_stall::clear_continuation_pending"),
+        "preflight must consume focused drain-stall marker IO directly"
+    );
+    let session_check_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_check.rs"))
+            .unwrap();
+    let idle_watch_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
+            .unwrap();
+    assert!(
+        session_check_source
+            .contains("agent_doc_queue_io::drain_stall::mark_continuation_pending",)
+            && idle_watch_source
+                .contains("agent_doc_queue_io::drain_stall::clear_continuation_pending"),
+        "orchestration adapters must call focused drain-stall marker IO directly"
     );
     let turn_drain_stall =
         fs::read_to_string(manifest_dir.join("agent-doc-turn/src/drain_stall.rs")).unwrap();
@@ -5002,6 +5053,74 @@ fn test_agent_doc_turn_owns_drain_stall_policy() {
         assert!(
             !dependencies.contains_key(forbidden),
             "agent-doc-turn must stay pure and free of orchestration, git, editor IPC, sqlite, or tmux crates"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_queue_io_owns_write_queue_serialization_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let queue_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue-io/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&queue_io_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+
+    assert!(
+        manifest_dir
+            .join("agent-doc-queue-io/src/write_queue.rs")
+            .exists(),
+        "document write queue serialization policy should live in focused queue IO"
+    );
+    assert!(
+        dependencies.contains_key("agent-doc-document-realtime"),
+        "queue IO should depend on focused realtime vocabulary for SessionOpKind and owner scope"
+    );
+    assert!(
+        !dependencies.contains_key("agent-doc-orchestration"),
+        "queue IO must not depend back on orchestration"
+    );
+
+    let queue_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/write_queue.rs")).unwrap();
+    for required_snippet in [
+        "pub trait DocumentWriteQueueSubmitter",
+        "pub fn run_serialized_with",
+        "pub fn serialized_atomic_write_with",
+        "pub struct DocumentWriteQueue",
+        "owner_scope_guard",
+        "SessionOpKind::WriteSubmit",
+        "SessionOpKind::Closeout",
+        "SessionOpKind::Lifecycle",
+    ] {
+        assert!(
+            queue_io_source.contains(required_snippet),
+            "agent-doc-queue-io must own write-queue serialization policy: {required_snippet}"
+        );
+    }
+
+    let orchestration_write_queue =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write_queue.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "pub trait DocumentWriteQueueSubmitter",
+        "pub fn run_serialized",
+        "pub struct DocumentWriteQueue",
+        "pub use agent_doc_queue_io::write_queue",
+    ] {
+        assert!(
+            !orchestration_write_queue.contains(forbidden_snippet),
+            "orchestration write_queue must not re-own or facade focused queue policy: {forbidden_snippet}"
+        );
+    }
+    for required_snippet in [
+        "impl DocumentWriteQueueSubmitter for SessionActorWriteQueueSubmitter",
+        "serialized_atomic_write_with(",
+        "document_actor_in(",
+        "crate::write::atomic_write_pub",
+    ] {
+        assert!(
+            orchestration_write_queue.contains(required_snippet),
+            "orchestration write_queue should only adapt queue IO to local actor/write effects: {required_snippet}"
         );
     }
 }
@@ -6108,6 +6227,10 @@ fn test_agent_doc_plugin_owner_owns_editor_lease_policy() {
 
     let focused =
         fs::read_to_string(manifest_dir.join("agent-doc-plugin-owner/src/lib.rs")).unwrap();
+    assert!(
+        focused.contains("pub mod stale_cleanup;"),
+        "agent-doc-plugin-owner should expose focused stale cleanup policy without a root facade"
+    );
     for required in [
         "pub struct PluginOwnerLease",
         "pub fn plugin_owner_ttl(",
@@ -6130,6 +6253,20 @@ fn test_agent_doc_plugin_owner_owns_editor_lease_policy() {
             "agent-doc-plugin-owner must own editor plugin-owner lease policy: {required}"
         );
     }
+    let stale_cleanup =
+        fs::read_to_string(manifest_dir.join("agent-doc-plugin-owner/src/stale_cleanup.rs"))
+            .unwrap();
+    for required in [
+        "pub fn jetbrains_consumer_pid(",
+        "pub fn jetbrains_live_buffer_pid(",
+        "pub fn should_reap_jetbrains_consumer_file(",
+        "pub fn should_reap_jetbrains_live_buffer_sidecar(",
+    ] {
+        assert!(
+            stale_cleanup.contains(required),
+            "agent-doc-plugin-owner must own hook-side JetBrains cleanup policy: {required}"
+        );
+    }
 
     assert!(
         !manifest_dir
@@ -6143,6 +6280,79 @@ fn test_agent_doc_plugin_owner_owns_editor_lease_policy() {
         !orchestration_lib.contains("pub mod plugin_owner;")
             && !orchestration_lib.contains("pub use agent_doc_plugin_owner"),
         "orchestration must not expose a plugin-owner facade"
+    );
+    let hooks_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/hooks.rs")).unwrap();
+    assert!(
+        hooks_source.contains("use agent_doc_plugin_owner::stale_cleanup::{")
+            && hooks_source.contains("should_reap_jetbrains_consumer_file")
+            && hooks_source.contains("should_reap_jetbrains_live_buffer_sidecar"),
+        "orchestration hooks should call plugin-owner cleanup policy directly"
+    );
+    for forbidden in [
+        "fn jetbrains_consumer_pid(",
+        "fn jetbrains_live_buffer_pid(",
+        ".split(\".jetbrains-\")",
+        ".find(\"jetbrains-\")",
+    ] {
+        assert!(
+            !hooks_source.contains(forbidden),
+            "orchestration hooks must not re-own plugin cleanup parsing policy: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_memory_owns_semantic_memory_ranking_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-memory")),
+        "agent-doc-memory must stay a first-class workspace crate"
+    );
+    let memory_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-memory/src/lib.rs")).unwrap();
+    for required in [
+        "pub struct MemorySearchResult",
+        "pub fn count_insert_results(",
+        "pub fn rank_events(",
+        "pub fn dedupe_events(",
+        "pub fn trim_chars(",
+    ] {
+        assert!(
+            memory_source.contains(required),
+            "agent-doc-memory must own semantic memory ranking/result policy: {required}"
+        );
+    }
+
+    let orchestration_memory =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/memory_cmd.rs")).unwrap();
+    for forbidden in [
+        "pub struct MemorySearchResult",
+        "fn count_insert_results(",
+        "fn rank_events(",
+        "fn score_event(",
+        "fn search_result(",
+        "fn tokenize(",
+        "fn push_token(",
+        "fn dedupe_events(",
+        "fn trim_chars(",
+    ] {
+        assert!(
+            !orchestration_memory.contains(forbidden),
+            "memory_cmd must stay an adapter, not re-own semantic memory policy: {forbidden}"
+        );
+    }
+    assert!(
+        orchestration_memory.contains("use agent_doc_memory::{")
+            && orchestration_memory.contains("rank_events")
+            && orchestration_memory.contains("dedupe_events"),
+        "memory_cmd should call focused semantic memory policy directly"
     );
 }
 
@@ -10795,24 +11005,53 @@ fn test_agent_doc_queue_owns_operator_clear_preemption_policy() {
         );
     }
 
-    let orchestration_adapter =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/queue_continuation.rs"))
+    let queue_io_marker =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/continuation_marker.rs"))
             .unwrap();
+    for required in [
+        "pub struct ContinuationMarker",
+        "pub fn write_continuation_marker(",
+        "pub fn load_continuation_marker(",
+        "pub fn record_continuation_requested_head(",
+        "pub fn write_deferred_operator_clear(",
+        "pub fn read_deferred_operator_clear(",
+        "deferred_operator_clear_marker(",
+        "deferred_operator_clear_marker_json(",
+        "parse_deferred_operator_clear_marker_json(",
+    ] {
+        assert!(
+            queue_io_marker.contains(required),
+            "agent-doc-queue-io must own queue continuation marker IO: {required}"
+        );
+    }
     for forbidden in [
         "pub struct DeferredOperatorClear",
         "DeferredOperatorClear {",
     ] {
         assert!(
+            !queue_io_marker.contains(forbidden),
+            "queue continuation marker IO must not re-own deferred-clear payload policy: {forbidden}"
+        );
+    }
+    let orchestration_adapter =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/queue_continuation.rs"))
+            .unwrap();
+    for forbidden in [
+        "pub struct ContinuationMarker",
+        "pub struct DeferredOperatorClear",
+        "deferred_operator_clear_marker(",
+        "deferred_operator_clear_marker_json(",
+        "parse_deferred_operator_clear_marker_json(",
+    ] {
+        assert!(
             !orchestration_adapter.contains(forbidden),
-            "queue_continuation.rs must stay a marker IO adapter, not re-own deferred-clear payload policy: {forbidden}"
+            "queue_continuation.rs must not re-own marker IO or deferred-clear payload policy: {forbidden}"
         );
     }
     assert!(
-        orchestration_adapter.contains("use agent_doc_queue::queue_preemption::{")
-            && orchestration_adapter.contains("deferred_operator_clear_marker(")
-            && orchestration_adapter.contains("deferred_operator_clear_marker_json(")
-            && orchestration_adapter.contains("parse_deferred_operator_clear_marker_json("),
-        "queue_continuation.rs should call focused queue-preemption marker policy directly"
+        orchestration_adapter.contains("agent_doc_queue_io::continuation_marker")
+            && !orchestration_adapter.contains("use agent_doc_queue::queue_preemption::{"),
+        "queue_continuation.rs should use focused queue-io marker storage, not queue-preemption directly"
     );
 }
 

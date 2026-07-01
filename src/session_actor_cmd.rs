@@ -562,7 +562,7 @@ pub fn clear(file: &Path) -> Result<()> {
             harness_clear_command(&ctx.harness),
         )?;
     }
-    match agent_doc_orchestration::queue_continuation::write_clear_cooldown(&ctx.canonical_file) {
+    match agent_doc_queue_io::continuation_marker::write_clear_cooldown(&ctx.canonical_file) {
         Ok(()) => {
             agent_doc_orchestration::ops_log::log_op(
                 &ctx.canonical_file,
@@ -822,7 +822,7 @@ fn reconcile_idle_projection_before_clear(
                     .unwrap_or(None)
                     .is_some();
             let deferred_clear_pending =
-                agent_doc_orchestration::queue_continuation::read_deferred_operator_clear(
+                agent_doc_queue_io::continuation_marker::read_deferred_operator_clear(
                     &ctx.canonical_file,
                 )?
                 .is_some();
@@ -836,10 +836,10 @@ fn reconcile_idle_projection_before_clear(
                     // at the next idle gap and resumes (`#autoloop-command-preemption`
                     // Phase 2b). The two markers are the durable hand-off between
                     // this command path and the supervisor watch thread.
-                    agent_doc_orchestration::queue_continuation::write_clear_cooldown(
+                    agent_doc_queue_io::continuation_marker::write_clear_cooldown(
                         &ctx.canonical_file,
                     )?;
-                    agent_doc_orchestration::queue_continuation::write_deferred_operator_clear(
+                    agent_doc_queue_io::continuation_marker::write_deferred_operator_clear(
                         &ctx.canonical_file,
                         harness_clear_command(&ctx.harness),
                     )?;
@@ -1322,11 +1322,9 @@ pub fn interrupt_clear(file: &Path, force: bool) -> Result<()> {
     // supersedes any clear the non-interrupting path deferred to the idle gap —
     // drop the deferred-clear marker so the supervisor watch does not ALSO
     // deliver a second clear (`#autoloop-command-preemption` Phase 2b).
-    if let Err(err) =
-        agent_doc_orchestration::queue_continuation::clear_deferred_operator_clear_marker(
-            &ctx.canonical_file,
-        )
-    {
+    if let Err(err) = agent_doc_queue_io::continuation_marker::clear_deferred_operator_clear_marker(
+        &ctx.canonical_file,
+    ) {
         eprintln!(
             "[interrupt-clear] warning: failed to drop deferred-clear marker for {}: {err:#}",
             ctx.canonical_file.display()
@@ -1450,17 +1448,15 @@ fn force_interrupt_clear(file: &Path) -> Result<()> {
         ..ForceInterruptClearReport::default()
     };
 
-    if let Err(err) =
-        agent_doc_orchestration::queue_continuation::clear_deferred_operator_clear_marker(
-            &ctx.canonical_file,
-        )
-    {
+    if let Err(err) = agent_doc_queue_io::continuation_marker::clear_deferred_operator_clear_marker(
+        &ctx.canonical_file,
+    ) {
         eprintln!(
             "[interrupt-clear --force] warning: failed to drop deferred-clear marker for {}: {err:#}",
             ctx.canonical_file.display()
         );
     }
-    match agent_doc_orchestration::queue_continuation::write_clear_cooldown(&ctx.canonical_file) {
+    match agent_doc_queue_io::continuation_marker::write_clear_cooldown(&ctx.canonical_file) {
         Ok(()) => report.cooldown_written = true,
         Err(err) => eprintln!(
             "[interrupt-clear --force] warning: failed to write queue cooldown marker for {}: {err:#}",

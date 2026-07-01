@@ -3,6 +3,21 @@
 use indexmap::IndexMap;
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolvedFreeTextExecution {
+    Goal,
+    Queue,
+}
+
+impl ResolvedFreeTextExecution {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Goal => "goal",
+            Self::Queue => "queue",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreflightPolicyWarning {
     pub code: String,
@@ -56,6 +71,42 @@ pub fn preset_item_id_collision_warning(content: &str) -> Option<PreflightPolicy
             collisions.join("; ")
         ),
     })
+}
+
+pub fn resolve_free_text_execution(
+    requested: agent_doc_frontmatter::frontmatter::FreeTextExecutionMode,
+    goal_available: bool,
+    file_display: &str,
+    harness_binary: &str,
+    ids: &[String],
+) -> (ResolvedFreeTextExecution, Option<PreflightPolicyWarning>) {
+    match requested {
+        agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Queue => {
+            (ResolvedFreeTextExecution::Queue, None)
+        }
+        agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Auto
+        | agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Goal
+            if goal_available =>
+        {
+            (ResolvedFreeTextExecution::Goal, None)
+        }
+        agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Goal => (
+            ResolvedFreeTextExecution::Queue,
+            Some(PreflightPolicyWarning {
+                code: "free_text_goal_unavailable".to_string(),
+                message: format!(
+                    "{file_display}: configured agent_doc_free_text_execution=goal, but harness `{harness_binary}` has no available /goal command; queued backlog item(s) {} instead.",
+                    ids.iter()
+                        .map(|id| format!("#{id}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            }),
+        ),
+        agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Auto => {
+            (ResolvedFreeTextExecution::Queue, None)
+        }
+    }
 }
 
 pub fn format_ipc_dogfood_note(diagnostic: &str) -> String {
@@ -210,6 +261,69 @@ mod tests {
         assert_eq!(warning.code, "preset_item_id_collision");
         assert!(warning.message.contains("#same"));
         assert!(warning.message.contains("Ambiguous identities"));
+    }
+
+    #[test]
+    fn resolve_free_text_execution_uses_queue_when_explicit() {
+        let (execution, warning) = resolve_free_text_execution(
+            agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Queue,
+            true,
+            "session.md",
+            "codex",
+            &["alpha".to_string()],
+        );
+
+        assert_eq!(execution, ResolvedFreeTextExecution::Queue);
+        assert_eq!(execution.label(), "queue");
+        assert!(warning.is_none());
+    }
+
+    #[test]
+    fn resolve_free_text_execution_prefers_goal_when_available() {
+        for requested in [
+            agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Auto,
+            agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Goal,
+        ] {
+            let (execution, warning) =
+                resolve_free_text_execution(requested, true, "session.md", "codex", &[]);
+
+            assert_eq!(execution, ResolvedFreeTextExecution::Goal);
+            assert_eq!(execution.label(), "goal");
+            assert!(warning.is_none());
+        }
+    }
+
+    #[test]
+    fn resolve_free_text_execution_warns_when_goal_requested_but_unavailable() {
+        let ids = vec!["alpha".to_string(), "beta".to_string()];
+        let (execution, warning) = resolve_free_text_execution(
+            agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Goal,
+            false,
+            "session.md",
+            "opencode",
+            &ids,
+        );
+
+        let warning = warning.expect("goal fallback should explain queued ids");
+        assert_eq!(execution, ResolvedFreeTextExecution::Queue);
+        assert_eq!(warning.code, "free_text_goal_unavailable");
+        assert!(warning.message.contains("session.md"));
+        assert!(warning.message.contains("harness `opencode`"));
+        assert!(warning.message.contains("#alpha, #beta"));
+    }
+
+    #[test]
+    fn resolve_free_text_execution_silently_falls_back_for_auto() {
+        let (execution, warning) = resolve_free_text_execution(
+            agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Auto,
+            false,
+            "session.md",
+            "codex",
+            &["alpha".to_string()],
+        );
+
+        assert_eq!(execution, ResolvedFreeTextExecution::Queue);
+        assert!(warning.is_none());
     }
 
     #[test]

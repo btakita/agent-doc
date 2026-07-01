@@ -1,6 +1,10 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use agent_doc_document::write_normalization::{
+    MAX_NORMALIZE_USER_LINES, normalize_user_prompt_prefix_application_exceeds_threshold,
+    normalize_user_prompt_prefixes_applied,
+};
 #[cfg(test)]
 use agent_doc_element_exchange::{extract_normalization_targets, verify_sidecar_normalization};
 use agent_doc_element_exchange::{
@@ -76,15 +80,6 @@ pub(crate) fn template_mode_overrides_for_current_doc(
     overrides
 }
 
-/// Maximum number of `❯ `-prefix lines a single normalization cycle may add.
-///
-/// A legitimate user input rarely produces more than a few dozen prefixed lines
-/// in one write cycle. When this threshold is exceeded, it indicates snapshot/
-/// baseline divergence (stale baseline, boundary misalignment, or snapshot
-/// reset) rather than genuine user input — applying the prefix would corrupt
-/// the file at scale. See `normalize_user_prompts_in_exchange_safe`.
-pub const MAX_NORMALIZE_USER_LINES: usize = 50;
-
 /// Safe wrapper around [`normalize_user_prompts_in_exchange`] that adds:
 ///
 /// 1. **Forensic logging** — every call writes `normalize_user_prompts`
@@ -123,18 +118,7 @@ pub fn normalize_user_prompts_in_exchange_safe(
         }
     }
 
-    // Count `❯ ` prefixes before/after to measure how many lines this call applied.
-    // Note: also count a prefix at offset 0 (no leading newline).
-    fn count_prefixes(s: &str) -> usize {
-        let mut n = s.matches("\n❯ ").count();
-        if s.starts_with("❯ ") {
-            n += 1;
-        }
-        n
-    }
-    let before = count_prefixes(content);
-    let after = count_prefixes(&normalized);
-    let applied = after.saturating_sub(before);
+    let applied = normalize_user_prompt_prefixes_applied(content, &normalized);
 
     crate::ops_log::log_op(
         file,
@@ -146,7 +130,7 @@ pub fn normalize_user_prompts_in_exchange_safe(
         ),
     );
 
-    if applied > MAX_NORMALIZE_USER_LINES {
+    if normalize_user_prompt_prefix_application_exceeds_threshold(applied) {
         eprintln!(
             "[normalize] WARN: {} ❯-prefixes would be applied, exceeds threshold {} for {} — \
              suspected snapshot/baseline divergence. Skipping ❯ prefix application this cycle.",

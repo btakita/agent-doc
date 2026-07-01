@@ -268,6 +268,30 @@ pub fn lift_pending_from_exchange(content: &str) -> Option<String> {
     Some(result)
 }
 
+/// Maximum number of `❯ `-prefix lines a single normalization cycle may add.
+///
+/// A legitimate user input rarely produces more than a few dozen prefixed lines
+/// in one write cycle. When this threshold is exceeded, it indicates snapshot/
+/// baseline divergence rather than genuine user input.
+pub const MAX_NORMALIZE_USER_LINES: usize = 50;
+
+pub fn count_user_prompt_prefixes(content: &str) -> usize {
+    let mut count = content.matches("\n❯ ").count();
+    if content.starts_with("❯ ") {
+        count += 1;
+    }
+    count
+}
+
+pub fn normalize_user_prompt_prefixes_applied(before_content: &str, after_content: &str) -> usize {
+    count_user_prompt_prefixes(after_content)
+        .saturating_sub(count_user_prompt_prefixes(before_content))
+}
+
+pub fn normalize_user_prompt_prefix_application_exceeds_threshold(applied: usize) -> bool {
+    applied > MAX_NORMALIZE_USER_LINES
+}
+
 pub fn strip_boundary_for_dedup(content: &str) -> String {
     content
         .lines()
@@ -463,6 +487,35 @@ mod tests {
             exchange_close < pending_open,
             "pending component should be moved after exchange:\n{lifted}"
         );
+    }
+
+    #[test]
+    fn count_user_prompt_prefixes_includes_first_line_and_embedded_lines() {
+        assert_eq!(count_user_prompt_prefixes("❯ first\nplain\n❯ second\n"), 2);
+        assert_eq!(count_user_prompt_prefixes("plain\n❯ second\n"), 1);
+        assert_eq!(count_user_prompt_prefixes("plain\nnot ❯ prompt\n"), 0);
+    }
+
+    #[test]
+    fn normalize_user_prompt_prefixes_applied_saturates_on_fewer_prefixes() {
+        assert_eq!(
+            normalize_user_prompt_prefixes_applied("❯ old\n❯ other\n", "❯ old\n"),
+            0
+        );
+        assert_eq!(
+            normalize_user_prompt_prefixes_applied("❯ old\n", "❯ old\n❯ new\n"),
+            1
+        );
+    }
+
+    #[test]
+    fn normalize_user_prompt_prefix_application_threshold_is_strictly_greater() {
+        assert!(!normalize_user_prompt_prefix_application_exceeds_threshold(
+            MAX_NORMALIZE_USER_LINES
+        ));
+        assert!(normalize_user_prompt_prefix_application_exceeds_threshold(
+            MAX_NORMALIZE_USER_LINES + 1
+        ));
     }
 
     #[test]

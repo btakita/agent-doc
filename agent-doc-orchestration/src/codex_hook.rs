@@ -867,7 +867,10 @@ fn tracked_repeated_queue_recovery_response(
     next_state.last_auto_queue_head = Some(next_prompt.clone());
     next_state.updated_at = now_secs();
     save_state_across_roots(cleanup_roots, loaded_root, &next_state)?;
-    let _ = crate::queue_continuation::record_requested_head(file, &next_prompt);
+    let _ = agent_doc_queue_io::continuation_marker::record_continuation_requested_head(
+        file,
+        &next_prompt,
+    );
     let context_reset_reason = codex_continuation_clear_reason(file, state.last_context_clear_at);
     if let Some(response) = background_context_clear_suppression_response(
         file,
@@ -913,7 +916,10 @@ fn marker_repeated_queue_recovery_response(
             ),
         });
     }
-    crate::queue_continuation::record_requested_head(file, &next_prompt)?;
+    agent_doc_queue_io::continuation_marker::record_continuation_requested_head(
+        file,
+        &next_prompt,
+    )?;
     let context_reset_reason = codex_continuation_clear_reason(file, None);
     if let Some(response) = background_context_clear_suppression_response(
         file,
@@ -983,7 +989,8 @@ fn auto_queue_continuation_response(
     save_state_across_roots(cleanup_roots, loaded_root, &next_state)?;
     // Keep the durable marker's requested-head in sync so a later stop with
     // missing session state still applies the non-advancing-head guard.
-    let _ = crate::queue_continuation::record_requested_head(file, &prompt);
+    let _ =
+        agent_doc_queue_io::continuation_marker::record_continuation_requested_head(file, &prompt);
     let context_reset_reason = codex_continuation_clear_reason(file, state.last_context_clear_at);
     log_codex_stop_queue_continuation(file, &prompt, "tracked_state");
     if let Some(response) = background_context_clear_suppression_response(
@@ -1073,7 +1080,10 @@ fn marker_fallback_continuation_response(
         ));
     }
 
-    crate::queue_continuation::record_requested_head(&file, &continuation.head_prompt)?;
+    agent_doc_queue_io::continuation_marker::record_continuation_requested_head(
+        &file,
+        &continuation.head_prompt,
+    )?;
     let context_reset_reason = codex_continuation_clear_reason(&file, None);
     log_codex_stop_queue_continuation(&file, &continuation.head_prompt, "durable_marker");
     if let Some(response) = background_context_clear_suppression_response(
@@ -3559,7 +3569,11 @@ agent-doc {}\n",
         init_git_repo(dir.path(), &doc);
         crate::queue_continuation::reconcile_marker(&doc, "commit").unwrap();
         // The first continuation request recorded this head into the marker.
-        crate::queue_continuation::record_requested_head(&doc, "do [#seopdp] deploy").unwrap();
+        agent_doc_queue_io::continuation_marker::record_continuation_requested_head(
+            &doc,
+            "do [#seopdp] deploy",
+        )
+        .unwrap();
 
         let response = apply_stop(&StopInput {
             session_id: "untracked-session".to_string(),

@@ -115,7 +115,11 @@ use agent_doc_document_realtime::write_policy::{
 };
 use agent_doc_element::element::is_backlog_component;
 use agent_doc_element_exchange::post_commit_ipc_reposition_only_exchange_safe;
-use agent_doc_git::{is_index_lock_contention_text, relative_to_root, render_git_process_output};
+use agent_doc_git::{
+    commit_retry_backoff, line_looks_like_explicit_post_commit_prompt_directive,
+    output_has_index_lock_contention, parse_submodule_paths, relative_to_root,
+    render_git_process_output, tracked_modified_paths_from_porcelain,
+};
 use agent_doc_git_io::dirs::{
     commit_lock_path_for_git_root, commit_lock_scope_path, narrow_to_submodule, resolve_to_git_root,
 };
@@ -1817,10 +1821,6 @@ enum CommitTransactionError {
     Fatal(anyhow::Error),
 }
 
-fn commit_retry_backoff(attempt: u32) -> std::time::Duration {
-    std::time::Duration::from_millis(50 * (1u64 << attempt))
-}
-
 fn git_path_is_tracked(
     git_root: &Path,
     rel_path: &Path,
@@ -1863,11 +1863,6 @@ fn git_path_is_ignored_untracked(
         return Ok(false);
     }
     git_path_is_ignored(git_root, rel_path)
-}
-
-fn output_has_index_lock_contention(output: &std::process::Output) -> bool {
-    is_index_lock_contention_text(&String::from_utf8_lossy(&output.stderr))
-        || is_index_lock_contention_text(&String::from_utf8_lossy(&output.stdout))
 }
 
 fn git_add_force(
@@ -2029,44 +2024,6 @@ fn prompt_classifier_post_commit_drift_kind(
     } else {
         Some(PostCommitLocalDriftKind::WorkingTreeEdits)
     }
-}
-
-fn line_looks_like_explicit_post_commit_prompt_directive(line: &str) -> bool {
-    let mut trimmed = line.trim();
-    if let Some(rest) = trimmed.strip_prefix("- ") {
-        trimmed = rest.trim_start();
-    }
-    if let Some(rest) = trimmed
-        .strip_prefix("[ ]")
-        .or_else(|| trimmed.strip_prefix("[x]"))
-        .or_else(|| trimmed.strip_prefix("[X]"))
-        .or_else(|| trimmed.strip_prefix("[/]"))
-    {
-        trimmed = rest.trim_start();
-    }
-    if let Some(rest) = trimmed.strip_prefix("[#")
-        && let Some(close) = rest.find(']')
-    {
-        trimmed = rest[close + 1..].trim_start();
-    }
-
-    let lower = trimmed
-        .trim_start_matches('❯')
-        .trim_start()
-        .to_ascii_lowercase();
-    trimmed.starts_with('❯')
-        || trimmed.ends_with('?')
-        || lower.starts_with("do #")
-        || lower.starts_with("do [#")
-        || lower.starts_with("fix #")
-        || lower.starts_with("fix this")
-        || lower.starts_with("run tests")
-        || lower.starts_with("build + install")
-        || lower.starts_with("build and install")
-        || lower.starts_with("commit + push")
-        || lower.starts_with("commit and push")
-        || lower.contains(" spec-test")
-        || lower.contains(" spec test")
 }
 
 fn classify_post_commit_local_drift(
@@ -2664,26 +2621,10 @@ pub fn tracked_modified_paths(file: &Path) -> Result<Vec<String>> {
     // unrelated dirty submodules as if the cycle touched them.
     let submodules = submodule_paths(&git_root);
 
-    let mut paths = Vec::new();
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
-        if line.len() < 4 {
-            continue;
-        }
-        if line.starts_with("??") {
-            continue;
-        }
-        let mut path = line[3..].trim().to_string();
-        if let Some((_, renamed_to)) = path.rsplit_once(" -> ") {
-            path = renamed_to.trim().to_string();
-        }
-        if path.is_empty() || submodules.contains(&path) {
-            continue;
-        }
-        paths.push(path);
-    }
-    paths.sort();
-    paths.dedup();
-    Ok(paths)
+    Ok(tracked_modified_paths_from_porcelain(
+        &String::from_utf8_lossy(&output.stdout),
+        &submodules,
+    ))
 }
 
 /// Paths registered as git submodules under `git_root` (from `git submodule
@@ -2692,29 +2633,17 @@ pub fn tracked_modified_paths(file: &Path) -> Result<Vec<String>> {
 /// changes out of agent-doc cycle "side-effect" accounting
 /// (#side-effect-exclude-submodules).
 fn submodule_paths(git_root: &Path) -> std::collections::HashSet<String> {
-    let mut set = std::collections::HashSet::new();
     let Ok(output) = Command::new("git")
         .current_dir(git_root)
         .args(["submodule", "status"])
         .output()
     else {
-        return set;
+        return std::collections::HashSet::new();
     };
     if !output.status.success() {
-        return set;
+        return std::collections::HashSet::new();
     }
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
-        // ` <sha> <path> (<describe>)` / `+<sha> <path>` / `-<sha> <path>` /
-        // `U<sha> <path>` — the path is the second whitespace-separated field.
-        if let Some(path) = line
-            .trim_start_matches(['+', '-', 'U', ' '])
-            .split_whitespace()
-            .nth(1)
-        {
-            set.insert(path.to_string());
-        }
-    }
-    set
+    parse_submodule_paths(&String::from_utf8_lossy(&output.stdout))
 }
 
 /// Check whether the parent repo's committed submodule pointer is current for a file in a submodule.

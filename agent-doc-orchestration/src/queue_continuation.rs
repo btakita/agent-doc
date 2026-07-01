@@ -20,12 +20,10 @@
 //! consult it instead of duplicating the activation reasoning.
 
 use agent_doc_queue::queue_continuation as queue_policy;
-use agent_doc_queue::queue_preemption::{
-    DeferredOperatorClear, deferred_operator_clear_marker, deferred_operator_clear_marker_json,
-    parse_deferred_operator_clear_marker_json,
+use agent_doc_queue_io::continuation_marker::{
+    ContinuationMarker, clear_continuation_marker, write_continuation_marker,
 };
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 /// Detect whether `file` currently requires queue continuation.
@@ -145,36 +143,6 @@ pub fn document_queue_controller_pause_reason(file: &Path) -> Option<String> {
     }
 }
 
-/// Durable on-disk proof that a closed-out document still owes an auto-queue
-/// continuation. Survives missing Codex hook session state.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ContinuationMarker {
-    pub file: String,
-    pub head_prompt: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub head_id: Option<String>,
-    pub created_at: u64,
-    pub source_command: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub commit_head: Option<String>,
-    /// The head prompt last surfaced to a Codex Stop hook as a continuation
-    /// request. Lets the hook fail closed when a repeated stop sees the same,
-    /// non-advancing head.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_requested_head: Option<String>,
-}
-
-fn marker_path(file: &Path) -> Result<Option<PathBuf>> {
-    let Some(root) = agent_doc_fs::find_project_root(file) else {
-        return Ok(None);
-    };
-    let hash = crate::snapshot::doc_hash(file)?;
-    Ok(Some(
-        root.join(".agent-doc/queue-continuations")
-            .join(format!("{hash}.json")),
-    ))
-}
-
 /// Reconcile the durable continuation marker for `file` after a successful
 /// closeout: write it when a continuation is required, clear it otherwise
 /// (queue drained, `auto` removed, `queue_active` false, or head advanced).
@@ -186,7 +154,7 @@ pub fn reconcile_marker(
 ) -> Option<queue_policy::QueueContinuation> {
     match detect(file) {
         Ok(Some(continuation)) => {
-            if let Err(err) = write_marker(file, &continuation, source_command) {
+            if let Err(err) = write_continuation_marker(file, &continuation, source_command) {
                 eprintln!(
                     "[queue-continuation] WARNING: failed to write continuation marker for {}: {}",
                     file.display(),
@@ -196,7 +164,7 @@ pub fn reconcile_marker(
             Some(continuation)
         }
         Ok(None) => {
-            if let Err(err) = clear_marker(file) {
+            if let Err(err) = clear_continuation_marker(file) {
                 eprintln!(
                     "[queue-continuation] WARNING: failed to clear continuation marker for {}: {}",
                     file.display(),
@@ -214,179 +182,6 @@ pub fn reconcile_marker(
             None
         }
     }
-}
-
-pub fn write_marker(
-    file: &Path,
-    continuation: &queue_policy::QueueContinuation,
-    source_command: &str,
-) -> Result<()> {
-    let Some(path) = marker_path(file)? else {
-        return Ok(());
-    };
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
-    }
-    // Preserve the last continuation request across reconciles so the Stop-hook
-    // non-advancing-head guard still works after a re-detect.
-    let last_requested_head = load_marker(file)?.and_then(|marker| marker.last_requested_head);
-    let marker = ContinuationMarker {
-        file: file.display().to_string(),
-        head_prompt: continuation.head_prompt.clone(),
-        head_id: continuation.head_id.clone(),
-        created_at: now_secs(),
-        source_command: source_command.to_string(),
-        commit_head: head_oid(file),
-        last_requested_head,
-    };
-    let json = serde_json::to_string_pretty(&marker).context("serialize continuation marker")?;
-    std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
-    Ok(())
-}
-
-pub fn clear_marker(file: &Path) -> Result<()> {
-    let Some(path) = marker_path(file)? else {
-        return Ok(());
-    };
-    match std::fs::remove_file(&path) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(err).with_context(|| format!("remove {}", path.display())),
-    }
-}
-
-fn cooldown_marker_path(file: &Path) -> Result<Option<PathBuf>> {
-    let Some(root) = agent_doc_fs::find_project_root(file) else {
-        return Ok(None);
-    };
-    let hash = crate::snapshot::doc_hash(file)?;
-    Ok(Some(
-        root.join(".agent-doc/queue-cooldowns")
-            .join(format!("{hash}.json")),
-    ))
-}
-
-pub fn write_clear_cooldown(file: &Path) -> Result<()> {
-    let Some(path) = cooldown_marker_path(file)? else {
-        return Ok(());
-    };
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
-    }
-    let payload = serde_json::json!({
-        "file": file.to_string_lossy(),
-        "written_at": now_secs(),
-    });
-    let json = serde_json::to_string_pretty(&payload).context("serialize cooldown marker")?;
-    std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
-    Ok(())
-}
-
-pub fn clear_cooldown_marker(file: &Path) -> Result<()> {
-    let Some(path) = cooldown_marker_path(file)? else {
-        return Ok(());
-    };
-    match std::fs::remove_file(&path) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(err).with_context(|| format!("remove {}", path.display())),
-    }
-}
-
-pub fn clear_cooldown_active(file: &Path) -> Result<bool> {
-    let Some(path) = cooldown_marker_path(file)? else {
-        return Ok(false);
-    };
-    match std::fs::read_to_string(&path) {
-        Ok(_) => Ok(true),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(err) => Err(err).with_context(|| format!("read {}", path.display())),
-    }
-}
-
-fn deferred_clear_marker_path(file: &Path) -> Result<Option<PathBuf>> {
-    let Some(root) = agent_doc_fs::find_project_root(file) else {
-        return Ok(None);
-    };
-    let hash = crate::snapshot::doc_hash(file)?;
-    Ok(Some(
-        root.join(".agent-doc/deferred-clears")
-            .join(format!("{hash}.json")),
-    ))
-}
-
-/// Record that a non-interrupting operator clear was deferred while the pane was
-/// busy under an active auto-loop. Paired with [`clear_cooldown`] (which pauses
-/// the loop); the watch delivers `clear_command` once the pane is idle, then
-/// clears both markers to resume.
-pub fn write_deferred_operator_clear(file: &Path, clear_command: &str) -> Result<()> {
-    let Some(path) = deferred_clear_marker_path(file)? else {
-        return Ok(());
-    };
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
-    }
-    let payload = deferred_operator_clear_marker(
-        file.to_string_lossy().into_owned(),
-        clear_command,
-        now_secs(),
-    );
-    let json =
-        deferred_operator_clear_marker_json(&payload).context("serialize deferred clear marker")?;
-    std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
-    Ok(())
-}
-
-/// Read the pending deferred operator clear for `file`, if any.
-pub fn read_deferred_operator_clear(file: &Path) -> Result<Option<DeferredOperatorClear>> {
-    let Some(path) = deferred_clear_marker_path(file)? else {
-        return Ok(None);
-    };
-    match std::fs::read_to_string(&path) {
-        Ok(content) => Ok(parse_deferred_operator_clear_marker_json(&content)),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(err) => Err(err).with_context(|| format!("read {}", path.display())),
-    }
-}
-
-/// Remove the deferred-clear marker (after the watch delivers the clear, or when
-/// the operator runs an explicit interrupt-clear that supersedes it).
-pub fn clear_deferred_operator_clear_marker(file: &Path) -> Result<()> {
-    let Some(path) = deferred_clear_marker_path(file)? else {
-        return Ok(());
-    };
-    match std::fs::remove_file(&path) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(err).with_context(|| format!("remove {}", path.display())),
-    }
-}
-
-pub fn load_marker(file: &Path) -> Result<Option<ContinuationMarker>> {
-    let Some(path) = marker_path(file)? else {
-        return Ok(None);
-    };
-    match std::fs::read_to_string(&path) {
-        Ok(content) => Ok(serde_json::from_str(&content).ok()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(err) => Err(err).with_context(|| format!("read {}", path.display())),
-    }
-}
-
-/// Record that the head prompt was surfaced to a Codex Stop hook as a
-/// continuation request, so a subsequent stop with the same head can fail
-/// closed instead of looping. No-op when no marker exists.
-pub fn record_requested_head(file: &Path, head_prompt: &str) -> Result<()> {
-    let Some(mut marker) = load_marker(file)? else {
-        return Ok(());
-    };
-    marker.last_requested_head = Some(head_prompt.to_string());
-    let Some(path) = marker_path(file)? else {
-        return Ok(());
-    };
-    let json = serde_json::to_string_pretty(&marker).context("serialize continuation marker")?;
-    std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
-    Ok(())
 }
 
 /// Scan every project root for a durable continuation marker whose document
@@ -476,27 +271,6 @@ pub fn pending_marker_continuation_for_roots(
     Ok(None)
 }
 
-fn head_oid(file: &Path) -> Option<String> {
-    let dir = file.parent()?;
-    let output = std::process::Command::new("git")
-        .current_dir(dir)
-        .args(["rev-parse", "HEAD"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let oid = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    (!oid.is_empty()).then_some(oid)
-}
-
-fn now_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -507,6 +281,9 @@ mod tests {
         is_drainable_queue_head_with_context, is_recurring_imperative_head, live_continuation_head,
         live_drainable_continuation_head, open_review_item_count, queue_stale_noise_lines,
         review_phase_routed, supervisor_deferred_backlog_ids,
+    };
+    use agent_doc_queue_io::continuation_marker::{
+        continuation_marker_path, load_continuation_marker, record_continuation_requested_head,
     };
 
     fn write_doc(dir: &Path, prompts: &[&str], queue_active: bool, has_auto: bool) -> PathBuf {
@@ -611,34 +388,6 @@ mod tests {
         std::fs::write(&doc, &content).unwrap();
         crate::snapshot::save(&doc, &content).unwrap();
         doc
-    }
-
-    #[test]
-    fn deferred_operator_clear_marker_roundtrips_and_clears() {
-        // The durable hand-off between the `session clear` defer path and the
-        // supervisor watch (`#autoloop-command-preemption` Phase 2b).
-        let dir = tempfile::tempdir().unwrap();
-        let doc = write_doc(dir.path(), &["do [#a]"], true, true);
-
-        assert!(
-            read_deferred_operator_clear(&doc).unwrap().is_none(),
-            "no marker before a defer"
-        );
-
-        write_deferred_operator_clear(&doc, "/clear").unwrap();
-        let record = read_deferred_operator_clear(&doc)
-            .unwrap()
-            .expect("marker present after write");
-        assert_eq!(record.clear_command, "/clear");
-        assert!(record.file.contains("task.md"));
-
-        clear_deferred_operator_clear_marker(&doc).unwrap();
-        assert!(
-            read_deferred_operator_clear(&doc).unwrap().is_none(),
-            "marker dropped after delivery/supersede"
-        );
-        // Clearing an absent marker is a no-op, not an error.
-        clear_deferred_operator_clear_marker(&doc).unwrap();
     }
 
     fn doc_with_backlog(queue_prompts: &[&str], backlog_items: &[&str]) -> String {
@@ -1454,14 +1203,16 @@ mod tests {
         // Active continuation → marker written.
         let continuation = reconcile_marker(&doc, "commit").expect("continuation required");
         assert_eq!(continuation.head_prompt, "do [#seopdp]");
-        let marker = load_marker(&doc).unwrap().expect("marker persisted");
+        let marker = load_continuation_marker(&doc)
+            .unwrap()
+            .expect("marker persisted");
         assert_eq!(marker.head_prompt, "do [#seopdp]");
         assert_eq!(marker.source_command, "commit");
 
         // Drain the queue (queue_active flips false) → marker cleared.
         let _ = write_doc(dir.path(), &["do [#seopdp]"], false, true);
         assert!(reconcile_marker(&doc, "commit").is_none());
-        assert!(load_marker(&doc).unwrap().is_none());
+        assert!(load_continuation_marker(&doc).unwrap().is_none());
     }
 
     #[test]
@@ -1480,7 +1231,7 @@ mod tests {
 
         // Drain the queue but leave the marker file on disk (stale).
         let _ = write_doc(&root, &["do [#seopdp]"], false, true);
-        let path = marker_path(&doc).unwrap().unwrap();
+        let path = continuation_marker_path(&doc).unwrap().unwrap();
         assert!(path.exists(), "stale marker still on disk before scan");
         // Scan re-confirms against the document, finds it no longer owes
         // continuation, returns None, and prunes the stale marker.
@@ -1523,7 +1274,10 @@ mod tests {
         );
         // The foreign marker must NOT be pruned — it belongs to its own owner.
         assert!(
-            marker_path(&foreign).unwrap().unwrap().exists(),
+            continuation_marker_path(&foreign)
+                .unwrap()
+                .unwrap()
+                .exists(),
             "foreign marker must survive the skip (not stale)"
         );
 
@@ -1596,22 +1350,25 @@ mod tests {
 
         // The skipped foreign marker must survive for its own owner.
         assert!(
-            marker_path(&foreign).unwrap().unwrap().exists(),
+            continuation_marker_path(&foreign)
+                .unwrap()
+                .unwrap()
+                .exists(),
             "foreign marker must survive the skip (belongs to its own owner)"
         );
     }
 
     #[test]
-    fn record_requested_head_persists_for_nonadvancing_guard() {
+    fn record_continuation_requested_head_persists_for_nonadvancing_guard() {
         let dir = tempfile::tempdir().unwrap();
         let doc = write_doc(dir.path(), &["do [#seopdp]"], true, true);
         reconcile_marker(&doc, "commit").expect("marker written");
-        record_requested_head(&doc, "do [#seopdp]").unwrap();
-        let marker = load_marker(&doc).unwrap().unwrap();
+        record_continuation_requested_head(&doc, "do [#seopdp]").unwrap();
+        let marker = load_continuation_marker(&doc).unwrap().unwrap();
         assert_eq!(marker.last_requested_head.as_deref(), Some("do [#seopdp]"));
         // A re-detect/reconcile preserves the requested head.
         reconcile_marker(&doc, "commit");
-        let marker = load_marker(&doc).unwrap().unwrap();
+        let marker = load_continuation_marker(&doc).unwrap().unwrap();
         assert_eq!(marker.last_requested_head.as_deref(), Some("do [#seopdp]"));
     }
 }

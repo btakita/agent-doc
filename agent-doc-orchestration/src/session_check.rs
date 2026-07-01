@@ -69,6 +69,7 @@
 use agent_doc_turn::op_log::{
     PREFLIGHT_START_EVENT, event_name, is_write_completed_commit_missing_event,
 };
+use agent_doc_workflow::session_check::{BlockedCloseoutMessage, GuardResult};
 use anyhow::{Context, Result};
 use std::path::Path;
 
@@ -174,13 +175,6 @@ pub enum SessionCheckStatus {
 pub struct SessionCheckReport {
     pub status: SessionCheckStatus,
     pub warnings: Vec<String>,
-}
-
-#[derive(Debug)]
-pub(crate) enum GuardResult {
-    None,
-    Warn(Vec<String>),
-    Error(String),
 }
 
 /// CLI entry: check the end-of-cycle write invariant for `file`.
@@ -337,7 +331,7 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
                     .flatten()
                     .map(|s| s.cycle_id)
                     .unwrap_or_default();
-                if let Err(err) = crate::drain_stall::mark_continuation_pending(
+                if let Err(err) = agent_doc_queue_io::drain_stall::mark_continuation_pending(
                     &file.to_string_lossy(),
                     &stall_cycle_id,
                 ) {
@@ -1112,42 +1106,22 @@ fn blocked_closeout_message(
     state: &crate::cycle_state::CycleState,
     blocked: &crate::cycle_state::BlockedCloseout,
 ) -> String {
-    let patch = blocked
-        .patch_id
-        .as_deref()
-        .map(|id| format!(" patch_id={id}"))
-        .unwrap_or_default();
-    let recovery = blocked
-        .recovery
-        .as_deref()
-        .map(|value| format!(" recovery={value}"))
-        .unwrap_or_default();
-    let detail = blocked
-        .detail
-        .as_deref()
-        .map(|value| format!(" detail={value}"))
-        .unwrap_or_default();
-    let retry = blocked
-        .recovery_command
-        .as_deref()
-        .map(str::to_string)
-        .unwrap_or_else(|| format!("agent-doc write --commit {}", file.display()));
     let editor_authority = blocked_closeout_editor_authority_note(file, blocked);
-    format!(
-        "[session-check] INTERRUPTED: closeout blocked by `{}` for cycle `{}` (phase={} last_event={} source={} reason={}{}{}{}).{} The response/patch is retained for editor retry; save or resolve the live editor buffer, then run `{}`. Use `{} --force-disk` only after an explicit operator decision to override the live-editor safety guard.",
-        blocked.kind,
-        state.cycle_id,
-        state.phase.as_str(),
-        state.last_event,
-        blocked.source,
-        blocked.reason,
-        patch,
-        recovery,
-        detail,
-        editor_authority,
-        retry,
-        retry,
-    )
+    let file_display = file.display().to_string();
+    agent_doc_workflow::session_check::blocked_closeout_message(BlockedCloseoutMessage {
+        file: &file_display,
+        kind: &blocked.kind,
+        cycle_id: &state.cycle_id,
+        phase: state.phase,
+        last_event: &state.last_event,
+        source: &blocked.source,
+        reason: &blocked.reason,
+        patch_id: blocked.patch_id.as_deref(),
+        recovery: blocked.recovery.as_deref(),
+        detail: blocked.detail.as_deref(),
+        recovery_command: blocked.recovery_command.as_deref(),
+        editor_authority_note: &editor_authority,
+    })
 }
 
 fn blocked_closeout_editor_authority_note(

@@ -7241,12 +7241,12 @@ fn simworld_jb_run_and_clear_share_codex_enter_submit_contract() {
 ///
 /// Models ONE route-owned supervisor process per pane/session hosting response
 /// cycles in-process, backed by the *real* production state backbone
-/// (`agent_doc_orchestration::state_backbone::EventLedger`). The supervisor's
+/// (`agent_doc_state_backbone::EventLedger`). The supervisor's
 /// per-document in-memory state is exactly the backbone projection, so a
 /// document switch / fresh host that fails to reset would surface here as a
 /// sibling/stale overlay leaking into the next cycle — no live tmux required.
 mod hosting_sim {
-    use agent_doc_orchestration::state_backbone::{
+    use agent_doc_state_backbone::{
         EventLedger, RejectedStaleEvent, StateDomain, StateEvent, StateFact, StateOwner,
     };
 
@@ -7490,7 +7490,7 @@ mod hosting_sim {
 ///
 /// Models the additive authority layer
 /// (`agent_doc_document_realtime::crdt_authority`) riding the EXISTING per-document
-/// hosting-epoch backbone (`state_backbone::EventLedger`). The authority follows
+/// hosting-epoch backbone (`agent_doc_state_backbone::EventLedger`). The authority follows
 /// the live editor: a document with a proven live editor-IPC transport is
 /// `MultiReplica` (durable-projection semantics); a headless / detached / stale
 /// document is `GitAuthoritative` (ephemeral CRDT). Per-document isolation is
@@ -7500,7 +7500,7 @@ mod hosting_sim {
 mod crdt_authority_sim {
     use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
     use agent_doc_orchestration::crdt_authority::authority_for_document;
-    use agent_doc_orchestration::state_backbone::{
+    use agent_doc_state_backbone::{
         ActorLifecycleEvent, EventLedger, StateEvent, StateFact, StateOwner,
     };
 

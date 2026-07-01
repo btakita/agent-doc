@@ -583,6 +583,8 @@ fn active_queue_hash(doc: &str) -> Result<Option<String>> {
 }
 
 fn queue_task_batch(file: &Path, doc: &str) -> Result<ResolvedTaskBatch> {
+    use agent_doc_state_backbone::QueueWorklistEntryKind;
+
     let Some(current_queue_hash) = active_queue_hash(doc)? else {
         anyhow::bail!(
             "agent:queue is not active; add `auto`, a start fence, or queue_active=true before --from-queue dispatch"
@@ -636,11 +638,10 @@ fn queue_task_batch(file: &Path, doc: &str) -> Result<ResolvedTaskBatch> {
     let mut batch = ResolvedTaskBatch::default();
     for entry in projection.queue.worklist {
         match entry.kind {
-            agent_doc_orchestration::state_backbone::QueueWorklistEntryKind::Prompt => {
+            QueueWorklistEntryKind::Prompt => {
                 batch.tasks.push(normalize_task(&entry.text));
             }
-            agent_doc_orchestration::state_backbone::QueueWorklistEntryKind::Preset
-            | agent_doc_orchestration::state_backbone::QueueWorklistEntryKind::Dispatch => {
+            QueueWorklistEntryKind::Preset | QueueWorklistEntryKind::Dispatch => {
                 if !batch
                     .requested_presets
                     .iter()
@@ -1439,6 +1440,9 @@ pub(crate) use th::{
 mod tests {
     #![allow(unused_imports)]
     use super::*;
+    use agent_doc_state_backbone::{
+        QueueWorklistEntry, QueueWorklistEntryKind, StateEvent, StateFact,
+    };
     use std::cell::RefCell;
     use tempfile::TempDir;
 
@@ -1446,14 +1450,14 @@ mod tests {
         root: &Path,
         doc: &Path,
         queue_hash: &str,
-        entries: Vec<agent_doc_orchestration::state_backbone::QueueWorklistEntry>,
+        entries: Vec<QueueWorklistEntry>,
     ) {
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         let document_hash =
             agent_doc_fs::document_state_hash(&doc.canonicalize().unwrap()).unwrap();
-        let event = agent_doc_orchestration::state_backbone::StateEvent::new(
+        let event = StateEvent::new(
             format!("test-queue-worklist:{queue_hash}"),
-            agent_doc_orchestration::state_backbone::StateFact::QueueWorklistProjected {
+            StateFact::QueueWorklistProjected {
                 document_hash,
                 queue_hash: queue_hash.to_string(),
                 entries,
@@ -1566,22 +1570,22 @@ mod tests {
             &doc,
             &queue_hash,
             vec![
-                agent_doc_orchestration::state_backbone::QueueWorklistEntry {
-                    kind: agent_doc_orchestration::state_backbone::QueueWorklistEntryKind::Preset,
+                QueueWorklistEntry {
+                    kind: QueueWorklistEntryKind::Preset,
                     text: "spec-test".to_string(),
                     node_key: None,
                     backlog_id: None,
                     drainable: false,
                 },
-                agent_doc_orchestration::state_backbone::QueueWorklistEntry {
-                    kind: agent_doc_orchestration::state_backbone::QueueWorklistEntryKind::Prompt,
+                QueueWorklistEntry {
+                    kind: QueueWorklistEntryKind::Prompt,
                     text: "do #prep".to_string(),
                     node_key: Some("queue:entry:0:prep".to_string()),
                     backlog_id: Some("prep".to_string()),
                     drainable: true,
                 },
-                agent_doc_orchestration::state_backbone::QueueWorklistEntry {
-                    kind: agent_doc_orchestration::state_backbone::QueueWorklistEntryKind::Prompt,
+                QueueWorklistEntry {
+                    kind: QueueWorklistEntryKind::Prompt,
                     text: "do #report after #prep".to_string(),
                     node_key: Some("queue:entry:1:report".to_string()),
                     backlog_id: Some("report".to_string()),
@@ -1628,15 +1632,13 @@ mod tests {
             dir.path(),
             &doc,
             &old_hash,
-            vec![
-                agent_doc_orchestration::state_backbone::QueueWorklistEntry {
-                    kind: agent_doc_orchestration::state_backbone::QueueWorklistEntryKind::Prompt,
-                    text: "do #old".to_string(),
-                    node_key: Some("queue:entry:0:old".to_string()),
-                    backlog_id: Some("old".to_string()),
-                    drainable: true,
-                },
-            ],
+            vec![QueueWorklistEntry {
+                kind: QueueWorklistEntryKind::Prompt,
+                text: "do #old".to_string(),
+                node_key: Some("queue:entry:0:old".to_string()),
+                backlog_id: Some("old".to_string()),
+                drainable: true,
+            }],
         );
         let changed = original.replace("do #old", "do #new");
         fs::write(&doc, changed).unwrap();

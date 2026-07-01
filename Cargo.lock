@@ -59,6 +59,7 @@ dependencies = [
  "agent-doc-secret-redact",
  "agent-doc-session-accretion",
  "agent-doc-sqlite",
+ "agent-doc-state-backbone",
  "agent-doc-supervisor",
  "agent-doc-supervisor-io",
  "agent-doc-template",
@@ -514,6 +515,7 @@ dependencies = [
  "agent-doc-secret-redact",
  "agent-doc-session-accretion",
  "agent-doc-sqlite",
+ "agent-doc-state-backbone",
  "agent-doc-supervisor",
  "agent-doc-supervisor-io",
  "agent-doc-supervisor-process",
@@ -718,6 +720,16 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "agent-doc-state-backbone"
+version = "0.34.66"
+dependencies = [
+ "agent-doc-turn",
+ "lazily 0.13.1",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

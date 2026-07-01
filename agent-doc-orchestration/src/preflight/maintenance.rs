@@ -848,9 +848,9 @@ fn record_selected_queue_head_state(
     };
     let document_hash = agent_doc_hash::document_id_for_path(&canonical);
     let content_hash = agent_doc_hash::content_hash(head_text);
-    let event = crate::state_backbone::StateEvent::new(
+    let event = agent_doc_state_backbone::StateEvent::new(
         format!("queue-head-selected:{document_hash}:{node_key}:0:{content_hash}"),
-        crate::state_backbone::StateFact::QueueHeadSelected {
+        agent_doc_state_backbone::StateFact::QueueHeadSelected {
             document_hash: document_hash.clone(),
             node_key: node_key.clone(),
             backlog_id: agent_doc_queue::queue_response::queue_prompt_done_id(head_text),
@@ -897,9 +897,9 @@ fn record_deferred_queue_head_state(
     };
     let document_hash = agent_doc_hash::document_id_for_path(&canonical);
     let content_hash = agent_doc_hash::content_hash(head_text);
-    let selected_event = crate::state_backbone::StateEvent::new(
+    let selected_event = agent_doc_state_backbone::StateEvent::new(
         format!("queue-head-deferred-selected:{document_hash}:{node_key}:0:{content_hash}"),
-        crate::state_backbone::StateFact::QueueHeadSelected {
+        agent_doc_state_backbone::StateFact::QueueHeadSelected {
             document_hash: document_hash.clone(),
             node_key: node_key.clone(),
             backlog_id: agent_doc_queue::queue_response::queue_prompt_done_id(head_text),
@@ -911,9 +911,9 @@ fn record_deferred_queue_head_state(
     let selected_inserted =
         crate::project_controller::append_state_event(&project_root, &selected_event)?;
     let reason_hash = agent_doc_hash::content_hash(reason);
-    let deferred_event = crate::state_backbone::StateEvent::new(
+    let deferred_event = agent_doc_state_backbone::StateEvent::new(
         format!("queue-head-deferred:{document_hash}:{node_key}:0:{reason_hash}:{content_hash}"),
-        crate::state_backbone::StateFact::QueueHeadDeferred {
+        agent_doc_state_backbone::StateFact::QueueHeadDeferred {
             document_hash: document_hash.clone(),
             node_key: node_key.clone(),
             reason: reason.to_string(),
@@ -959,16 +959,16 @@ fn record_queue_worklist_state(
     let worklist_entries = if active {
         agent_doc_queue::queue_projection::queue_worklist_entries(content, entries)
             .into_iter()
-            .map(|entry| crate::state_backbone::QueueWorklistEntry {
+            .map(|entry| agent_doc_state_backbone::QueueWorklistEntry {
                 kind: match entry.kind {
                     agent_doc_queue::queue_projection::QueueWorklistEntryKind::Prompt => {
-                        crate::state_backbone::QueueWorklistEntryKind::Prompt
+                        agent_doc_state_backbone::QueueWorklistEntryKind::Prompt
                     }
                     agent_doc_queue::queue_projection::QueueWorklistEntryKind::Preset => {
-                        crate::state_backbone::QueueWorklistEntryKind::Preset
+                        agent_doc_state_backbone::QueueWorklistEntryKind::Preset
                     }
                     agent_doc_queue::queue_projection::QueueWorklistEntryKind::Dispatch => {
-                        crate::state_backbone::QueueWorklistEntryKind::Dispatch
+                        agent_doc_state_backbone::QueueWorklistEntryKind::Dispatch
                     }
                 },
                 text: entry.text,
@@ -980,9 +980,9 @@ fn record_queue_worklist_state(
     } else {
         Vec::new()
     };
-    let event = crate::state_backbone::StateEvent::new(
+    let event = agent_doc_state_backbone::StateEvent::new(
         format!("queue-worklist-projected:{document_hash}:{active}:{queue_hash}"),
-        crate::state_backbone::StateFact::QueueWorklistProjected {
+        agent_doc_state_backbone::StateFact::QueueWorklistProjected {
             document_hash: document_hash.clone(),
             queue_hash: queue_hash.clone(),
             entries: worklist_entries,
@@ -4910,7 +4910,10 @@ mod tests {
             .heads
             .get(&node_key)
             .expect("deferred queue head should be present in projection");
-        assert_eq!(head.phase, crate::state_backbone::QueueHeadPhase::Deferred);
+        assert_eq!(
+            head.phase,
+            agent_doc_state_backbone::QueueHeadPhase::Deferred
+        );
         assert_eq!(head.backlog_id.as_deref(), Some("alpha"));
         assert_eq!(head.prompt_text.as_deref(), Some("do [#alpha]"));
         assert_eq!(head.defer_reason.as_deref(), Some("stop_fence"));
@@ -4930,7 +4933,10 @@ mod tests {
             .heads
             .get(&node_key)
             .expect("reselected queue head should be present in projection");
-        assert_eq!(head.phase, crate::state_backbone::QueueHeadPhase::Selected);
+        assert_eq!(
+            head.phase,
+            agent_doc_state_backbone::QueueHeadPhase::Selected
+        );
         assert_eq!(head.defer_reason, None);
         assert!(head.drainable);
     }
@@ -5240,7 +5246,10 @@ mod tests {
             .heads
             .get(&node_key)
             .expect("selected queue head should be present in projection");
-        assert_eq!(head.phase, crate::state_backbone::QueueHeadPhase::Selected);
+        assert_eq!(
+            head.phase,
+            agent_doc_state_backbone::QueueHeadPhase::Selected
+        );
         assert_eq!(head.backlog_id.as_deref(), Some("alpha"));
         assert_eq!(head.prompt_text.as_deref(), Some("do [#alpha]"));
         assert!(head.drainable);
@@ -5248,12 +5257,12 @@ mod tests {
         assert_eq!(projection.queue.worklist.len(), 2);
         assert_eq!(
             projection.queue.worklist[0].kind,
-            crate::state_backbone::QueueWorklistEntryKind::Prompt
+            agent_doc_state_backbone::QueueWorklistEntryKind::Prompt
         );
         assert_eq!(projection.queue.worklist[0].text, "do [#alpha]");
         assert_eq!(
             projection.queue.worklist[1].kind,
-            crate::state_backbone::QueueWorklistEntryKind::Prompt
+            agent_doc_state_backbone::QueueWorklistEntryKind::Prompt
         );
         assert_eq!(projection.queue.worklist[1].text, "do [#beta]");
         assert!(projection.queue.worklist_queue_hash.is_some());

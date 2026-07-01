@@ -1,0 +1,16 @@
+[package]
+name = "agent-doc-state-backbone"
+version = "0.34.66"
+edition = "2024"
+description = "Typed state event ledger and projections for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_state_backbone"
+
+[dependencies]
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.66" }
+lazily = "0.13.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

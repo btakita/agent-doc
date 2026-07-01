@@ -130,9 +130,9 @@ pub fn route_event(
     };
     if let WatchDelivery::Change { generation } = delivery {
         let actor = document_actor_in(base_dir, file);
-        let event = crate::state_backbone::StateEvent::new(
+        let event = agent_doc_state_backbone::StateEvent::new(
             file_watch_event_id(doc_id, generation, &content_hash),
-            crate::state_backbone::StateFact::FileWatchChangeObserved {
+            agent_doc_state_backbone::StateFact::FileWatchChangeObserved {
                 document_hash: doc_id.to_string(),
                 path: file.to_string(),
                 watch_generation: generation,

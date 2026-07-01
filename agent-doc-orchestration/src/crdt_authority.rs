@@ -7,8 +7,8 @@
 
 use agent_doc_document_realtime::crdt_authority::{CrdtAuthority, authority_from_liveness};
 
-use crate::state_backbone::{DocumentStateProjection, EventLedger, TransportPatchPhase};
 use agent_doc_plugin_owner::ownership_liveness_for_file;
+use agent_doc_state_backbone::{DocumentStateProjection, EventLedger, TransportPatchPhase};
 
 /// Read the live editor-attachment facts for a document from its plugin-owner
 /// lease sidecar and resolve the CRDT authority. This is the write-path entry

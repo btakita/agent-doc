@@ -67,6 +67,7 @@
 //! - reposition_boundary_removes_stale: two boundary markers in exchange → exactly one marker at end
 //! - crdt_merge_no_base: identical `ours`/`theirs` with null base → merged text equals input
 
+use agent_doc_state_backbone::{EventLedger, StateEvent};
 use anyhow::Context as _;
 use serde::Serialize;
 use std::ffi::{CStr, CString, c_char};
@@ -1910,15 +1911,11 @@ pub extern "C" fn agent_doc_version() -> *mut c_char {
 /// state-projection exports. Phase 1 of `tasks/software/plan-lazily-ffi-state-projection.md`
 /// (`#lzffistate1`): plugins become thin event-reporters + projection-renderers while
 /// the binary owns the durable FSMs. Default-initialized on first access.
-static STATE_LEDGER: std::sync::OnceLock<
-    std::sync::Mutex<agent_doc_orchestration::state_backbone::EventLedger>,
-> = std::sync::OnceLock::new();
+static STATE_LEDGER: std::sync::OnceLock<std::sync::Mutex<EventLedger>> =
+    std::sync::OnceLock::new();
 
-fn state_ledger() -> &'static std::sync::Mutex<agent_doc_orchestration::state_backbone::EventLedger>
-{
-    STATE_LEDGER.get_or_init(|| {
-        std::sync::Mutex::new(agent_doc_orchestration::state_backbone::EventLedger::new())
-    })
+fn state_ledger() -> &'static std::sync::Mutex<EventLedger> {
+    STATE_LEDGER.get_or_init(|| std::sync::Mutex::new(EventLedger::new()))
 }
 
 /// Stamp a queue `StateFact` reported without an explicit `hosting_epoch` with
@@ -1927,11 +1924,8 @@ fn state_ledger() -> &'static std::sync::Mutex<agent_doc_orchestration::state_ba
 /// hosting carries that epoch and is rejected as stale after a host/switch.
 /// Facts that already carry an explicit `hosting_epoch` (e.g. an intentional
 /// stale-replay test) are left untouched, as are non-queue facts.
-fn stamp_queue_fact_hosting_epoch(
-    ledger: &agent_doc_orchestration::state_backbone::EventLedger,
-    event: &mut agent_doc_orchestration::state_backbone::StateEvent,
-) {
-    use agent_doc_orchestration::state_backbone::StateFact;
+fn stamp_queue_fact_hosting_epoch(ledger: &EventLedger, event: &mut StateEvent) {
+    use agent_doc_state_backbone::StateFact;
     let current = ledger.document_hosting_epoch(event.document_hash());
     let Some(current) = current else {
         return;
@@ -2030,9 +2024,7 @@ pub unsafe extern "C" fn agent_doc_record_state_event(
             return 0;
         }
     };
-    let mut event: agent_doc_orchestration::state_backbone::StateEvent = match serde_json::from_str(
-        fact_str,
-    ) {
+    let mut event: StateEvent = match serde_json::from_str(fact_str) {
         Ok(e) => e,
         Err(err) => {
             eprintln!(
@@ -2539,7 +2531,7 @@ mod tests {
 
     #[test]
     fn state_projection_ffi_round_trip() {
-        use agent_doc_orchestration::state_backbone::{StateEvent, StateFact};
+        use agent_doc_state_backbone::{StateEvent, StateFact};
 
         let doc_hash = "state_projection_ffi_round_trip_doc";
         let event = StateEvent::new(
@@ -2598,7 +2590,7 @@ mod tests {
 
     #[test]
     fn record_state_event_stamps_and_gates_queue_hosting_epoch() {
-        use agent_doc_orchestration::state_backbone::{StateEvent, StateFact};
+        use agent_doc_state_backbone::{StateEvent, StateFact};
 
         let doc_hash = "ffi_hosting_epoch_gate_doc";
         let doc_hash_c = CString::new(doc_hash).unwrap();
@@ -2674,7 +2666,7 @@ mod tests {
 
     #[test]
     fn state_subscribe_ffi_emits_snapshot_then_delta() {
-        use agent_doc_orchestration::state_backbone::{StateEvent, StateFact};
+        use agent_doc_state_backbone::{StateEvent, StateFact};
 
         let doc_hash = "state_subscribe_ffi_round_trip_doc";
         let doc_hash_c = CString::new(doc_hash).unwrap();

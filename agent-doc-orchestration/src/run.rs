@@ -922,14 +922,14 @@ fn typed_queue_prompt_state(file: &Path, content: &str) -> Option<ActiveQueuePro
     let current_head = current_nodes.iter().find(|node| !node.item.struck)?;
     let head = projection.queue.heads.get(&current_head.node_key)?;
     match head.phase {
-        crate::state_backbone::QueueHeadPhase::Selected => {
+        agent_doc_state_backbone::QueueHeadPhase::Selected => {
             if projection.queue.active_head.as_deref() != Some(current_head.node_key.as_str()) {
                 return None;
             }
             let prompt = head.prompt_text.clone()?;
             Some(ActiveQueuePromptState::Ready { prompt })
         }
-        crate::state_backbone::QueueHeadPhase::Deferred => {
+        agent_doc_state_backbone::QueueHeadPhase::Deferred => {
             let reason = head.defer_reason.as_deref()?;
             if reason == "stop_fence" {
                 eprintln!("[run] active queue halted by typed stop-fence state");
@@ -1920,9 +1920,9 @@ mod tests {
         let document_hash =
             agent_doc_fs::document_state_hash(&doc.canonicalize().unwrap()).unwrap();
         let prompt_hash = agent_doc_hash::content_hash(prompt_text);
-        let event = crate::state_backbone::StateEvent::new(
+        let event = agent_doc_state_backbone::StateEvent::new(
             format!("test-typed-selected-head:{node_key}:{prompt_hash}"),
-            crate::state_backbone::StateFact::QueueHeadSelected {
+            agent_doc_state_backbone::StateFact::QueueHeadSelected {
                 document_hash,
                 node_key: node_key.to_string(),
                 backlog_id: None,
@@ -2061,9 +2061,9 @@ mod tests {
             .expect("queue head should have a node key")
             .node_key;
         let document_hash = agent_doc_hash::document_id_for_path(&doc);
-        let event = crate::state_backbone::StateEvent::new(
+        let event = agent_doc_state_backbone::StateEvent::new(
             "typed-selected-plain-no-go",
-            crate::state_backbone::StateFact::QueueHeadSelected {
+            agent_doc_state_backbone::StateFact::QueueHeadSelected {
                 document_hash,
                 node_key,
                 backlog_id: Some("plainhead".to_string()),
@@ -2193,9 +2193,9 @@ mod tests {
             .expect("queue head should have a node key")
             .node_key;
         let document_hash = agent_doc_hash::document_id_for_path(&doc);
-        let event = crate::state_backbone::StateEvent::new(
+        let event = agent_doc_state_backbone::StateEvent::new(
             "typed-selected-head",
-            crate::state_backbone::StateFact::QueueHeadSelected {
+            agent_doc_state_backbone::StateFact::QueueHeadSelected {
                 document_hash,
                 node_key,
                 backlog_id: Some("typedhead".to_string()),
@@ -2242,9 +2242,9 @@ mod tests {
             .expect("queue head should have a node key")
             .node_key;
         let document_hash = agent_doc_hash::document_id_for_path(&doc);
-        let selected = crate::state_backbone::StateEvent::new(
+        let selected = agent_doc_state_backbone::StateEvent::new(
             "typed-selected-before-deferred",
-            crate::state_backbone::StateFact::QueueHeadSelected {
+            agent_doc_state_backbone::StateFact::QueueHeadSelected {
                 document_hash: document_hash.clone(),
                 node_key: node_key.clone(),
                 backlog_id: Some("typedhead".to_string()),
@@ -2254,9 +2254,9 @@ mod tests {
             },
         );
         crate::project_controller::append_state_event(dir.path(), &selected).unwrap();
-        let deferred = crate::state_backbone::StateEvent::new(
+        let deferred = agent_doc_state_backbone::StateEvent::new(
             "typed-deferred-stop-head",
-            crate::state_backbone::StateFact::QueueHeadDeferred {
+            agent_doc_state_backbone::StateFact::QueueHeadDeferred {
                 document_hash,
                 node_key,
                 reason: "stop_fence".to_string(),

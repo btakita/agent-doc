@@ -25,6 +25,20 @@ pub enum StateDomain {
     Proof,
 }
 
+impl StateDomain {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Document => "document",
+            Self::Queue => "queue",
+            Self::Closeout => "closeout",
+            Self::Transport => "transport",
+            Self::Supervisor => "supervisor",
+            Self::Route => "route",
+            Self::Proof => "proof",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StateEvent {
     pub event_id: String,
@@ -297,6 +311,38 @@ impl StateFact {
             Self::ProofMarkerObserved { .. } | Self::ProofMarkerDisproved { .. } => {
                 StateDomain::Proof
             }
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::PreflightStarted { .. } => "preflight_started",
+            Self::BaselineSaved { .. } => "baseline_saved",
+            Self::FileWatchChangeObserved { .. } => "file_watch_change_observed",
+            Self::QueueHeadSelected { .. } => "queue_head_selected",
+            Self::QueueHeadDeferred { .. } => "queue_head_deferred",
+            Self::QueueHeadCompleted { .. } => "queue_head_completed",
+            Self::QueueWorklistProjected { .. } => "queue_worklist_projected",
+            Self::SupervisorHosting { .. } => "supervisor_hosting",
+            Self::ResponseCaptured { .. } => "response_captured",
+            Self::WriteApplied { .. } => "write_applied",
+            Self::CommitObserved { .. } => "commit_observed",
+            Self::SessionCheckPassed { .. } => "session_check_passed",
+            Self::CycleAbandoned { .. } => "cycle_abandoned",
+            Self::OwnerGenerationChanged { .. } => "owner_generation_changed",
+            Self::EditorPatchQueued { .. } => "editor_patch_queued",
+            Self::EditorAckObserved { .. } => "editor_ack_observed",
+            Self::IpcProofInsufficient { .. } => "ipc_proof_insufficient",
+            Self::EditorPatchRetryRequested { .. } => "editor_patch_retry_requested",
+            Self::ForceDiskFallbackRecorded { .. } => "force_disk_fallback_recorded",
+            Self::ActorLifecycleObserved { .. } => "actor_lifecycle_observed",
+            Self::AgentRestartPerformed { .. } => "agent_restart_performed",
+            Self::CapabilityProofObserved { .. } => "capability_proof_observed",
+            Self::RoutePaneObserved { .. } => "route_pane_observed",
+            Self::RouteReadinessObserved { .. } => "route_readiness_observed",
+            Self::DispatchProofObserved { .. } => "dispatch_proof_observed",
+            Self::ProofMarkerObserved { .. } => "proof_marker_observed",
+            Self::ProofMarkerDisproved { .. } => "proof_marker_disproved",
         }
     }
 }

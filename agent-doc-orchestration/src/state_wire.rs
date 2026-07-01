@@ -27,7 +27,7 @@ use agent_doc_workflow::state_wire::{AgentDocNodeType, slot_id};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use serde::{Deserialize, Serialize};
 
-use crate::state_backbone::{DocumentStateProjection, EventLedger, StateOwner};
+use agent_doc_state_backbone::{DocumentStateProjection, EventLedger, StateOwner};
 
 fn b64_payload<T: Serialize>(value: &T) -> String {
     let json = serde_json::to_value(value).unwrap_or(serde_json::Value::Null);
@@ -241,7 +241,7 @@ fn collect_nodes(projection: &DocumentStateProjection) -> Vec<ProjectionNodeReco
         || projection.route.pane_id.is_some()
         || !matches!(
             projection.route.readiness,
-            crate::state_backbone::RouteReadinessPhase::Unknown
+            agent_doc_state_backbone::RouteReadinessPhase::Unknown
         )
         || !projection.route.dispatch_proofs.is_empty();
     if has_route_state {
@@ -540,7 +540,7 @@ pub fn subscribe(ledger: &EventLedger, document_hash: &str, last_epoch: u64) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state_backbone::{EventLedger, StateEvent, StateFact, StateOwner};
+    use agent_doc_state_backbone::{EventLedger, StateEvent, StateFact, StateOwner};
 
     fn baseline_event(id: &str, doc: &str, cycle: &str, baseline: &str) -> StateEvent {
         StateEvent::new(
@@ -844,7 +844,7 @@ mod tests {
     #[cfg(test)]
     mod conformance_parity {
         use super::super::*;
-        use crate::state_backbone::{EventLedger, StateEvent, StateFact};
+        use agent_doc_state_backbone::{EventLedger, StateEvent, StateFact};
         use serde_json::Value;
         use std::path::PathBuf;
 
@@ -963,7 +963,10 @@ mod tests {
                 .heads
                 .get("#gww8")
                 .expect("queue head present");
-            assert_eq!(head.phase, crate::state_backbone::QueueHeadPhase::Selected);
+            assert_eq!(
+                head.phase,
+                agent_doc_state_backbone::QueueHeadPhase::Selected
+            );
 
             // --- delta to epoch 6 (3 more accepted events) ---
             ledger.append(StateEvent::new(
@@ -1027,7 +1030,7 @@ mod tests {
                 .expect("queue head still present after completion");
             assert_eq!(
                 head_after.phase,
-                crate::state_backbone::QueueHeadPhase::Completed,
+                agent_doc_state_backbone::QueueHeadPhase::Completed,
                 "queue head must converge to completed"
             );
             // transport.patch phase = acked
@@ -1038,7 +1041,7 @@ mod tests {
                 .expect("transport patch present after ack");
             assert_eq!(
                 patch.phase,
-                crate::state_backbone::TransportPatchPhase::Acked,
+                agent_doc_state_backbone::TransportPatchPhase::Acked,
                 "transport patch must converge to acked"
             );
             assert_eq!(patch.actor_generation, 12);

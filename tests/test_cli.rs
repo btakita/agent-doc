@@ -2269,6 +2269,7 @@ fn test_manifest_uses_publishable_dependency_contract() {
         "agent-doc-prompt-contract",
         "agent-doc-queue",
         "agent-doc-response-toc-io",
+        "agent-doc-state-backbone",
         "agent-doc-template",
         "agent-doc-turn",
         "agent-doc-workflow",
@@ -2330,6 +2331,89 @@ fn test_manifest_uses_publishable_dependency_contract() {
         tmux_router.get("version").and_then(toml::Value::as_str),
         Some("0.3.11")
     );
+}
+
+#[test]
+fn test_state_backbone_extraction_stays_first_class_and_facade_free() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let package_version = workspace["package"]["version"].as_str();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-state-backbone")),
+        "agent-doc-state-backbone must stay a first-class workspace crate"
+    );
+
+    let root_dependencies = workspace["dependencies"].as_table().unwrap();
+    let root_dependency = root_dependencies["agent-doc-state-backbone"]
+        .as_table()
+        .unwrap();
+    assert_eq!(
+        root_dependency.get("path").and_then(toml::Value::as_str),
+        Some("agent-doc-state-backbone")
+    );
+    assert_eq!(
+        root_dependency.get("version").and_then(toml::Value::as_str),
+        package_version
+    );
+
+    let state_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-state-backbone/Cargo.toml")).unwrap();
+    let state_crate: toml::Value = toml::from_str(&state_manifest).unwrap();
+    let state_dependencies = state_crate["dependencies"].as_table().unwrap();
+    assert!(
+        !state_dependencies.contains_key("agent-doc-orchestration"),
+        "state backbone must stay free of orchestration/effect dependencies"
+    );
+
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    let orchestration_dependency = orchestration["dependencies"]["agent-doc-state-backbone"]
+        .as_table()
+        .unwrap();
+    assert_eq!(
+        orchestration_dependency
+            .get("path")
+            .and_then(toml::Value::as_str),
+        Some("../agent-doc-state-backbone")
+    );
+    assert_eq!(
+        orchestration_dependency
+            .get("version")
+            .and_then(toml::Value::as_str),
+        package_version
+    );
+
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/state_backbone.rs")
+            .exists(),
+        "orchestration must not keep a state_backbone source module facade"
+    );
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod state_backbone"),
+        "orchestration must not re-export state_backbone as a compatibility facade"
+    );
+
+    for relative_path in [
+        "src/orchestrate.rs",
+        "src/ffi.rs",
+        "src/sim_world.rs",
+        "tests/run_integration.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
+        assert!(
+            !source.contains("agent_doc_orchestration::state_backbone"),
+            "{relative_path} must use agent_doc_state_backbone directly"
+        );
+    }
 }
 
 #[test]

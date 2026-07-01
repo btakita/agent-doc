@@ -169,7 +169,7 @@ pub struct ControllerBootstrap {
 #[derive(Debug)]
 struct ControllerMemoryState {
     actor_store: BTreeMap<String, agent_doc_sqlite::state_store::ActorRecord>,
-    state_projection: crate::state_backbone::StateBackboneProjection,
+    state_projection: agent_doc_state_backbone::StateBackboneProjection,
     map_backend: &'static str,
 }
 
@@ -1186,7 +1186,7 @@ fn append_closeout_mutations<'a>(
 
 pub fn append_state_event(
     project_root: &Path,
-    event: &crate::state_backbone::StateEvent,
+    event: &agent_doc_state_backbone::StateEvent,
 ) -> Result<bool> {
     let conn = open_state_db(project_root)?;
     let payload_json = serde_json::to_string(event).context("serialize state backbone event")?;
@@ -1195,24 +1195,26 @@ pub fn append_state_event(
         &state_store::StateEventInsert {
             event_id: &event.event_id,
             document_hash: event.document_hash(),
-            domain: state_domain_label(event.domain()),
-            fact_type: state_fact_label(&event.fact),
+            domain: event.domain().label(),
+            fact_type: event.fact.label(),
             payload_json: &payload_json,
         },
     )
 }
 
-pub fn load_state_event_ledger(project_root: &Path) -> Result<crate::state_backbone::EventLedger> {
+pub fn load_state_event_ledger(
+    project_root: &Path,
+) -> Result<agent_doc_state_backbone::EventLedger> {
     let conn = open_state_db(project_root)?;
-    let mut ledger = crate::state_backbone::EventLedger::new();
+    let mut ledger = agent_doc_state_backbone::EventLedger::new();
     for row in load_state_events_from_db(&conn, None)? {
-        let event: crate::state_backbone::StateEvent = serde_json::from_str(&row.payload_json)
+        let event: agent_doc_state_backbone::StateEvent = serde_json::from_str(&row.payload_json)
             .with_context(|| {
-                format!(
-                    "parse state backbone event {} from controller state",
-                    row.event_id
-                )
-            })?;
+            format!(
+                "parse state backbone event {} from controller state",
+                row.event_id
+            )
+        })?;
         ledger.append(event);
     }
     Ok(ledger)
@@ -1220,68 +1222,8 @@ pub fn load_state_event_ledger(project_root: &Path) -> Result<crate::state_backb
 
 pub fn load_state_backbone_projection(
     project_root: &Path,
-) -> Result<crate::state_backbone::StateBackboneProjection> {
+) -> Result<agent_doc_state_backbone::StateBackboneProjection> {
     Ok(load_state_event_ledger(project_root)?.project())
-}
-
-pub(crate) fn state_domain_label(domain: crate::state_backbone::StateDomain) -> &'static str {
-    match domain {
-        crate::state_backbone::StateDomain::Document => "document",
-        crate::state_backbone::StateDomain::Queue => "queue",
-        crate::state_backbone::StateDomain::Closeout => "closeout",
-        crate::state_backbone::StateDomain::Transport => "transport",
-        crate::state_backbone::StateDomain::Supervisor => "supervisor",
-        crate::state_backbone::StateDomain::Route => "route",
-        crate::state_backbone::StateDomain::Proof => "proof",
-    }
-}
-
-pub(crate) fn state_fact_label(fact: &crate::state_backbone::StateFact) -> &'static str {
-    match fact {
-        crate::state_backbone::StateFact::PreflightStarted { .. } => "preflight_started",
-        crate::state_backbone::StateFact::BaselineSaved { .. } => "baseline_saved",
-        crate::state_backbone::StateFact::FileWatchChangeObserved { .. } => {
-            "file_watch_change_observed"
-        }
-        crate::state_backbone::StateFact::QueueHeadSelected { .. } => "queue_head_selected",
-        crate::state_backbone::StateFact::QueueHeadDeferred { .. } => "queue_head_deferred",
-        crate::state_backbone::StateFact::QueueHeadCompleted { .. } => "queue_head_completed",
-        crate::state_backbone::StateFact::QueueWorklistProjected { .. } => {
-            "queue_worklist_projected"
-        }
-        crate::state_backbone::StateFact::SupervisorHosting { .. } => "supervisor_hosting",
-        crate::state_backbone::StateFact::ResponseCaptured { .. } => "response_captured",
-        crate::state_backbone::StateFact::WriteApplied { .. } => "write_applied",
-        crate::state_backbone::StateFact::CommitObserved { .. } => "commit_observed",
-        crate::state_backbone::StateFact::SessionCheckPassed { .. } => "session_check_passed",
-        crate::state_backbone::StateFact::CycleAbandoned { .. } => "cycle_abandoned",
-        crate::state_backbone::StateFact::OwnerGenerationChanged { .. } => {
-            "owner_generation_changed"
-        }
-        crate::state_backbone::StateFact::EditorPatchQueued { .. } => "editor_patch_queued",
-        crate::state_backbone::StateFact::EditorAckObserved { .. } => "editor_ack_observed",
-        crate::state_backbone::StateFact::IpcProofInsufficient { .. } => "ipc_proof_insufficient",
-        crate::state_backbone::StateFact::EditorPatchRetryRequested { .. } => {
-            "editor_patch_retry_requested"
-        }
-        crate::state_backbone::StateFact::ForceDiskFallbackRecorded { .. } => {
-            "force_disk_fallback_recorded"
-        }
-        crate::state_backbone::StateFact::ActorLifecycleObserved { .. } => {
-            "actor_lifecycle_observed"
-        }
-        crate::state_backbone::StateFact::AgentRestartPerformed { .. } => "agent_restart_performed",
-        crate::state_backbone::StateFact::CapabilityProofObserved { .. } => {
-            "capability_proof_observed"
-        }
-        crate::state_backbone::StateFact::RoutePaneObserved { .. } => "route_pane_observed",
-        crate::state_backbone::StateFact::RouteReadinessObserved { .. } => {
-            "route_readiness_observed"
-        }
-        crate::state_backbone::StateFact::DispatchProofObserved { .. } => "dispatch_proof_observed",
-        crate::state_backbone::StateFact::ProofMarkerObserved { .. } => "proof_marker_observed",
-        crate::state_backbone::StateFact::ProofMarkerDisproved { .. } => "proof_marker_disproved",
-    }
 }
 
 pub fn load_actor_store(
@@ -5735,7 +5677,7 @@ agent:queue\n\
             bootstrap: Mutex::new(bootstrap),
             memory: Mutex::new(ControllerMemoryState {
                 actor_store: BTreeMap::new(),
-                state_projection: crate::state_backbone::StateBackboneProjection::default(),
+                state_projection: agent_doc_state_backbone::StateBackboneProjection::default(),
                 map_backend: "std_btree_map",
             }),
             recycle_requested: AtomicBool::new(false),

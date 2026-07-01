@@ -278,7 +278,7 @@ fn record_queue_consumption_state_event(args: QueueConsumptionStateEvent<'_>) ->
     let (event_id, fact) = match stage {
         QueueConsumptionProofStage::BeforeMutation => (
             format!("queue-head-selected:{document_hash}:{node_id}:{index}:{content_hash}"),
-            crate::state_backbone::StateFact::QueueHeadSelected {
+            agent_doc_state_backbone::StateFact::QueueHeadSelected {
                 document_hash: document_hash.to_string(),
                 node_key: node_id.to_string(),
                 backlog_id,
@@ -289,7 +289,7 @@ fn record_queue_consumption_state_event(args: QueueConsumptionStateEvent<'_>) ->
         ),
         QueueConsumptionProofStage::AfterMutation => (
             format!("queue-head-completed:{document_hash}:{node_id}:{index}:{content_hash}"),
-            crate::state_backbone::StateFact::QueueHeadCompleted {
+            agent_doc_state_backbone::StateFact::QueueHeadCompleted {
                 document_hash: document_hash.to_string(),
                 node_key: node_id.to_string(),
                 backlog_id,
@@ -297,7 +297,7 @@ fn record_queue_consumption_state_event(args: QueueConsumptionStateEvent<'_>) ->
             },
         ),
     };
-    let event = crate::state_backbone::StateEvent::new(event_id, fact);
+    let event = agent_doc_state_backbone::StateEvent::new(event_id, fact);
     let inserted = crate::project_controller::append_state_event(project_root, &event)?;
     crate::ops_log::log_op(
         file,
@@ -331,9 +331,9 @@ fn record_next_queue_head_selected_state(
             agent_doc_queue::queue_continuation::DrainScope::Supervisor,
         )
         .is_some();
-    let selected_event = crate::state_backbone::StateEvent::new(
+    let selected_event = agent_doc_state_backbone::StateEvent::new(
         format!("queue-head-selected:{document_hash}:{node_key}:0:{content_hash}"),
-        crate::state_backbone::StateFact::QueueHeadSelected {
+        agent_doc_state_backbone::StateFact::QueueHeadSelected {
             document_hash: document_hash.to_string(),
             node_key: node_key.clone(),
             backlog_id: queue_prompt_done_id(&head_text),
@@ -358,11 +358,11 @@ fn record_next_queue_head_selected_state(
     if stop_fence_at_head {
         let reason = "stop_fence";
         let reason_hash = agent_doc_hash::content_hash(reason);
-        let deferred_event = crate::state_backbone::StateEvent::new(
+        let deferred_event = agent_doc_state_backbone::StateEvent::new(
             format!(
                 "queue-head-deferred:{document_hash}:{node_key}:0:{reason_hash}:{content_hash}"
             ),
-            crate::state_backbone::StateFact::QueueHeadDeferred {
+            agent_doc_state_backbone::StateFact::QueueHeadDeferred {
                 document_hash: document_hash.to_string(),
                 node_key: node_key.clone(),
                 reason: reason.to_string(),
@@ -1890,8 +1890,8 @@ mod core_tests {
             .filter(|event| {
                 matches!(
                     &event.fact,
-                    crate::state_backbone::StateFact::QueueHeadSelected { .. }
-                        | crate::state_backbone::StateFact::QueueHeadCompleted { .. }
+                    agent_doc_state_backbone::StateFact::QueueHeadSelected { .. }
+                        | agent_doc_state_backbone::StateFact::QueueHeadCompleted { .. }
                 )
             })
             .collect::<Vec<_>>();
@@ -1899,7 +1899,7 @@ mod core_tests {
         assert!(
             matches!(
                 &queue_events[0].fact,
-                crate::state_backbone::StateFact::QueueHeadSelected { node_key, .. }
+                agent_doc_state_backbone::StateFact::QueueHeadSelected { node_key, .. }
                     if node_key == &node_id
             ),
             "first queue state event should select the consumed head: {queue_events:#?}"
@@ -1907,7 +1907,7 @@ mod core_tests {
         assert!(
             matches!(
                 &queue_events[1].fact,
-                crate::state_backbone::StateFact::QueueHeadCompleted { node_key, .. }
+                agent_doc_state_backbone::StateFact::QueueHeadCompleted { node_key, .. }
                     if node_key == &node_id
             ),
             "second queue state event should complete the consumed head: {queue_events:#?}"
@@ -1927,7 +1927,10 @@ mod core_tests {
             .heads
             .get(&node_id)
             .expect("completed head should be present in typed queue heads");
-        assert_eq!(head.phase, crate::state_backbone::QueueHeadPhase::Completed);
+        assert_eq!(
+            head.phase,
+            agent_doc_state_backbone::QueueHeadPhase::Completed
+        );
         assert_eq!(head.backlog_id, None);
         assert_eq!(head.prompt_text.as_deref(), Some("Run queued thing"));
     }
@@ -1992,7 +1995,10 @@ mod core_tests {
             .heads
             .get(&next_node)
             .expect("remaining head should be selected in typed projection");
-        assert_eq!(next.phase, crate::state_backbone::QueueHeadPhase::Selected);
+        assert_eq!(
+            next.phase,
+            agent_doc_state_backbone::QueueHeadPhase::Selected
+        );
         assert_eq!(next.backlog_id.as_deref(), Some("nextitem"));
         assert_eq!(next.prompt_text.as_deref(), Some("do [#nextitem]"));
         assert!(next.drainable);
@@ -2046,7 +2052,10 @@ mod core_tests {
             .heads
             .get(&next_node)
             .expect("remaining head should be tracked in typed projection");
-        assert_eq!(next.phase, crate::state_backbone::QueueHeadPhase::Deferred);
+        assert_eq!(
+            next.phase,
+            agent_doc_state_backbone::QueueHeadPhase::Deferred
+        );
         assert_eq!(next.defer_reason.as_deref(), Some("stop_fence"));
         assert_eq!(next.prompt_text.as_deref(), Some("do [#nextitem]"));
         assert!(!next.drainable);

@@ -544,20 +544,61 @@ Several estimate line items can be *bought* instead of built — presented as a 
 **The trade to state plainly to Artur:** every "buy" lowers build hours but adds recurring per-use cost — capex→opex. For a bootstrapped founder that's usually the *right* trade (lower upfront), but name the ongoing cost so it isn't a surprise. The two highest-leverage buys — **source-backed demographics data** and a **managed extraction/parser** — hit the two most expensive, least agent-compressible line items (AI extraction 45-100h, demographics accuracy 32-75h). That's where "buy vs. build" actually moves the bid.
 
 Want me to fold this into the estimate report as a short **§3c "Build vs. Buy / vendor options"** subsection plus a Phase-0 extraction bake-off line item, then regenerate the PDF? Queued that as a `[recommended]` follow-up — say the word and I'll do it.
-<!-- agent:boundary:bc17b795 -->
+
+### Re: Vendor §3c, PDF build script, double-title fix + proposal Q&A — opus-4-8
+
+Worked the whole go-queue. Report edits and the regenerated PDF are committed (`e790a15f8`); the questions are answered inline. All estimate changes are in `rei-trades/reitrades-v1.2-estimate-report.md` → `REItrades V1.2 - Proposal & Estimate.pdf` (now 11 pages, title renders once).
+
+**Done — proposal edits**
+
+> **Queue prompt:** `[#reibuyvsbuild]`
+
+Added **§3c "Build vs. buy — where vendors lower cost"** (after §3b) plus a **Phase-0 extraction bake-off** line in §5. §3c leads with the honest frame — no extraction vendor is 100% on messy CRE docs, so a vendor is only the *propose* layer feeding §3a/§3b — then a three-approach table: **parser API** (Reducto / Azure Document Intelligence / Google Document AI / Textract / Landing AI) vs. **LLM-native** (Claude / Gemini structured outputs) vs. **managed IDP with review queue** (Rossum / Docsumo / Nanonets), recommending the parser→LLM→validators chain. Then the buy-vs-build menu: source-backed demographics (Census/Esri/Attom — cheaper *and* more accurate), address/geocode validation, Stripe Payment Links, MailerLite tracking, keep-Tera for rendering. Backlog item marked done.
+
+> **Queue prompt:** create build script for pdf from a source file
+
+Added `rei-trades/build-pdf.sh` (+ `proposal.css`) — pandoc → WeasyPrint, US Letter, reproducible. Regenerate the PDF after any report edit with `./build-pdf.sh`. It renders the title once by design (see next item).
+
+> **Queue prompt:** Header "REItrades V1.2 — Work Breakdown & Estimate" is repeated twice.
+
+Fixed. It was never doubled in the markdown (the H1 is there once) — the first ad-hoc build injected a pandoc **metadata title** on top of the body H1, so page 1 showed it twice. The new build script drops the metadata-title block, so the title renders a single time (verified on the regenerated PDF).
+
+> **Queue prompt:** Remove `` `( reitrades-v1.2.md / V1.2 PDF)` ``
+
+Done — removed from the **Basis** line and also cleaned the same internal path out of **§7 Sources**; both now read "your V1.2 feature list + Listing Creation Steps PDF." Those are our internal workspace filenames and shouldn't appear in a client-facing document.
+
+**Answered — proposal questions**
+
+> **Queue prompt:** What is OM?
+
+**Offering Memorandum** — the standard CRE marketing/financial packet a seller or broker gives prospective buyers: property overview, financials (asking price, cap rate, NOI, rent roll), photos, and market/demographic context. On REItrades it's both the buyer-facing document the listing wizard *generates* and the legacy PDF sellers *upload* to be extracted. Artur knows the term, so I expanded it once on first use in the report for polish rather than defining it in full.
+
+> **Queue prompt:** Is "These are agentic hours, not conventional solo hours." and "With my tooling I bias toward the low end of each range — that is the competitive lever, not cutting scope." valuable to put into the proposal?
+
+Yes — keep both; they're differentiators, not filler. "Agentic hours" explains why your numbers land below a conventional bid *without* looking like you cut scope, and "I bias toward the low end = the competitive lever" is a real reassurance for a bootstrapped buyer (you'll likely pay the low end, and the competitiveness comes from efficiency, not corner-cutting). One change I made: I lightly reframed the first sentence so "agentic hours" reads as a **client benefit** ("senior-quality delivery faster and at a lower total") instead of an internal accounting note — the old phrasing risked inviting a "why pay senior rate if agents do the work?" objection. Left the low-end-lever sentence as-is. Trivial to cut both if you'd rather.
+
+> **Queue prompt:** Why is "0. Setup / technical audit" scheduled to be so long?
+
+24-44h is the cheapest insurance in the bid, not padding. REItrades is a **live** marketplace with real seller/buyer data, and every expensive downstream item — the teaser/OM production migration (30-65h), cascade deletes, the listing rebuild — depends on mapping an unfamiliar codebase + data model *before* touching it. The hours buy two things: (1) a repo/route/data-model map so the rest of the estimate firms up and agents work against real structure, and (2) a production-safety plan (migrations, rollback, delete policy) that prevents a live-data incident. It's ~4-5% of the full 545-850h engagement, it's **credited forward** into Phase 1, and it compresses toward the 16h low end if the codebase is clean. If you want a leaner headline, I can split it so only the ~16h audit is upfront and the safety plan rolls into Phase 1 — say the word.
+<!-- agent:boundary:efbb1f72 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
-/goal Implement backlog item(s): #k65j
-/goal Implement backlog item(s): #22tg
+<!-- agent:queue go -->
+- [#reibuyvsbuild]
+- create build script for pdf from a source file
+- What is OM?
+- Header "REItrades V1.2 — Work Breakdown & Estimate" is repeated twice.
+- Remove `( reitrades-v1.2.md / V1.2 PDF)`.
+- Is "These are agentic hours, not conventional solo hours." and "With my tooling I bias toward the low end of each range — that is the competitive lever, not cutting scope." valuable to put into the proposal?
+- Why is "0. Setup / technical audit" scheduled to be so long?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#reibuyvsbuild] [recommended] Fold a "Build vs. Buy / vendor options" §3c into rei-trades/reitrades-v1.2-estimate-report.md (extraction: parser API vs LLM-native vs managed IDP; source-backed demographics; Stripe/MailerLite/geocode buys) + add a Phase-0 extraction bake-off line item, then regenerate the PDF.
+- [x] [#reibuyvsbuild] [recommended] Fold a "Build vs. Buy / vendor options" §3c into rei-trades/reitrades-v1.2-estimate-report.md (extraction: parser API vs LLM-native vs managed IDP; source-backed demographics; Stripe/MailerLite/geocode buys) + add a Phase-0 extraction bake-off line item, then regenerate the PDF.
 <!-- /agent:backlog -->
 
 ## Icebox

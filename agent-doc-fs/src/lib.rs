@@ -194,6 +194,43 @@ pub fn rewrite_start_path(file: &Path, cwd: &Path, original: &str) -> String {
     }
 }
 
+/// The inode a process currently maps via `/proc/<pid>/exe`.
+///
+/// On Linux this magic symlink resolves to the real on-disk inode of the running
+/// executable even after the install path has been replaced. Returns `None`
+/// when `/proc` is unavailable, the process is gone, or the stat fails.
+pub fn running_exe_inode_for_pid(pid: u32) -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::MetadataExt;
+
+        std::fs::metadata(format!("/proc/{pid}/exe"))
+            .ok()
+            .map(|meta| meta.ino())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = pid;
+        None
+    }
+}
+
+/// Inode of the on-disk file at `path`. Returns `None` on non-Unix platforms or
+/// any stat error.
+pub fn inode_of_path(path: &Path) -> Option<u64> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+
+        std::fs::metadata(path).ok().map(|meta| meta.ino())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        None
+    }
+}
+
 pub fn referenced_markdown_path(current_file: &Path, text: &str) -> Option<PathBuf> {
     referenced_markdown_path_checked(current_file, text)
         .ok()
@@ -434,13 +471,13 @@ fn project_roots_for(path: &Path) -> Vec<PathBuf> {
 mod tests {
     use super::{
         baseline_overlay_path_for, baseline_path_for, crdt_flock_path_for, crdt_path_for,
-        cycle_state_path_for, document_state_hash, document_state_hash_from_str,
+        cycle_state_path_for, document_state_hash, document_state_hash_from_str, inode_of_path,
         multinode_crdt_path_for, overlay_crdt_path_for, pending_response_path_for,
         pre_response_path_for, read_optional, referenced_markdown_path,
-        referenced_markdown_path_checked, rewrite_start_path, same_document_path,
-        snapshot_flock_path_for, snapshot_path_for, startup_document_lock_path_for,
-        startup_session_lock_name, startup_session_lock_path_for, startup_starting_dir_for,
-        state_lock_path_for, turn_scope_path_for, write_atomic,
+        referenced_markdown_path_checked, rewrite_start_path, running_exe_inode_for_pid,
+        same_document_path, snapshot_flock_path_for, snapshot_path_for,
+        startup_document_lock_path_for, startup_session_lock_name, startup_session_lock_path_for,
+        startup_starting_dir_for, state_lock_path_for, turn_scope_path_for, write_atomic,
     };
     use std::path::Path;
 
@@ -468,6 +505,37 @@ mod tests {
             .filter_map(|e| e.ok())
             .any(|e| e.file_name().to_string_lossy().contains(".tmp-"));
         assert!(!leftover, "temp file leaked after atomic write");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn inode_of_path_reads_existing_file_inode() {
+        use std::os::unix::fs::MetadataExt;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("binary");
+        std::fs::write(&path, b"agent-doc").unwrap();
+
+        assert_eq!(
+            inode_of_path(&path),
+            Some(std::fs::metadata(&path).unwrap().ino())
+        );
+        assert_eq!(inode_of_path(&tmp.path().join("missing")), None);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn running_exe_inode_for_pid_reads_current_process_inode() {
+        use std::os::unix::fs::MetadataExt;
+
+        let expected = std::fs::metadata(format!("/proc/{}/exe", std::process::id()))
+            .unwrap()
+            .ino();
+
+        assert_eq!(
+            running_exe_inode_for_pid(std::process::id()),
+            Some(expected)
+        );
     }
 
     #[test]

@@ -901,6 +901,7 @@ dependencies = [
  "agent-doc-hash",
  "agent-doc-markdown-ast",
  "agent-doc-prompt-contract",
+ "agent-doc-queue",
  "agent-doc-turn",
  "anyhow",
  "htmd",

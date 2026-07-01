@@ -55,6 +55,26 @@ pub struct ControllerBinaryIdentity {
     pub modified_nanos: u32,
 }
 
+/// True when a recorded long-lived process identity matches the freshly
+/// resolved controller binary identity. Missing identity is a fail-open
+/// mismatch.
+pub fn controller_binary_identity_matches(
+    recorded: Option<&ControllerBinaryIdentity>,
+    current: Option<&ControllerBinaryIdentity>,
+) -> bool {
+    matches!((recorded, current), (Some(recorded), Some(current)) if recorded == current)
+}
+
+/// True when a long-lived process's recorded launch identity differs from the
+/// freshly resolved controller binary identity. Missing identities are
+/// fail-open and therefore not stale.
+pub fn process_binary_is_stale(
+    recorded: Option<&ControllerBinaryIdentity>,
+    current: Option<&ControllerBinaryIdentity>,
+) -> bool {
+    matches!((recorded, current), (Some(recorded), Some(current)) if recorded != current)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ControllerProcessFreshness {
     pub role: String,
@@ -544,6 +564,45 @@ impl Error for ParseControllerHandoffStateError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn identity(version: &str, len: u64) -> ControllerBinaryIdentity {
+        ControllerBinaryIdentity {
+            path: PathBuf::from("/tmp/agent-doc"),
+            version: version.to_string(),
+            len,
+            modified_secs: 1_000,
+            modified_nanos: 7,
+        }
+    }
+
+    #[test]
+    fn controller_binary_identity_match_is_strict_and_fail_open() {
+        let current = identity("1.2.3", 42);
+        let mut changed = current.clone();
+        changed.modified_nanos = changed.modified_nanos.wrapping_add(1);
+
+        assert!(controller_binary_identity_matches(
+            Some(&current),
+            Some(&current)
+        ));
+        assert!(!controller_binary_identity_matches(None, Some(&current)));
+        assert!(!controller_binary_identity_matches(Some(&current), None));
+        assert!(!controller_binary_identity_matches(
+            Some(&changed),
+            Some(&current)
+        ));
+    }
+
+    #[test]
+    fn process_binary_staleness_compares_recorded_and_current_identity() {
+        let current = identity("1.2.3", 42);
+        let stale = identity("1.2.2", 41);
+
+        assert!(!process_binary_is_stale(None, Some(&current)));
+        assert!(!process_binary_is_stale(Some(&current), None));
+        assert!(!process_binary_is_stale(Some(&current), Some(&current)));
+        assert!(process_binary_is_stale(Some(&stale), Some(&current)));
+    }
 
     #[test]
     fn controller_process_freshness_classifies_inode_identity() {

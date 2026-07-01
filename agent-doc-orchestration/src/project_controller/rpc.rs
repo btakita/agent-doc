@@ -976,57 +976,22 @@ pub fn status(project_root: &Path) -> Result<ControllerStatus> {
     }
 }
 
-pub(crate) fn controller_status_matches_current_binary(status: &ControllerStatus) -> Result<bool> {
-    Ok(status.controller_binary.as_ref() == Some(&current_binary_identity()?))
-}
-
-/// `#ctlstalebin` (#stuckhandoff2 follow-up) — is the SERVING controller's own
-/// recorded binary stale relative to the freshly-installed agent-doc binary?
-///
-/// `connect_or_launch` already hands a *cross-process* caller off to a fresh
-/// controller when the active controller's binary no longer matches (the common
-/// `cargo install` recycle path). This predicate is the dispatch-admission backstop
-/// for the residual gap: a dispatch that still reaches a stale controller's
-/// `handle_dispatch` — an in-process co-hosted call, or a narrow handoff race —
-/// must be refused so the stale process cannot keep driving session writes (the
-/// "already-running supervisor uses the OLD binary until restarted" churn class).
-///
-/// True only when both identities resolve and differ. Any stat/resolution error is
-/// treated as "not stale" so a transiently-unreadable binary path can never block a
-/// live dispatch (fail-open — staleness is a recycle hint, never a hard stop).
-pub(crate) fn controller_binary_is_stale(bootstrap: &ControllerBootstrap) -> bool {
-    process_binary_is_stale(bootstrap.controller_binary.as_ref())
-}
-
-/// `#ctlrecycle` — process-type-agnostic generalization of [`controller_binary_is_stale`].
-/// Compares a long-lived process's RECORDED launch identity against the
-/// freshly-installed binary (`current_binary_identity` stats the install *path*, so
-/// it reflects a `cargo install` even though this process still runs the old mapped
-/// inode). Shared by the controller serve loop (R1) and the `start` supervisor (R3).
-/// Fail-open: a missing recorded identity or any stat error reads as "not stale".
-pub(crate) fn process_binary_is_stale(recorded: Option<&ControllerBinaryIdentity>) -> bool {
-    let Some(recorded) = recorded else {
-        return false;
-    };
-    match current_binary_identity() {
-        Ok(current) => recorded != &current,
-        Err(_) => false,
-    }
-}
-
 /// `#fccsupwarn` — read-only operator WARN message when the LIVE controller/supervisor
 /// hosting this document is serving a stale agent-doc binary (a fresh `cargo install`
-/// hasn't been picked up). Pure over a [`ControllerStatus`] so it is unit-testable and
-/// has no IO; the caller (preflight / session-check) loads the status and surfaces the
-/// message. Returns `None` for an inactive controller (nothing is hosting), a status
-/// with no recorded launch identity, or a fresh binary — so the warning only fires for
-/// the exact "already-running supervisor uses the OLD binary until restarted" churn
-/// class that silently produces `#fcc0` / `#ipcdrift` File Cache Conflict dialogs.
+/// hasn't been picked up). The current binary identity is resolved at this IO boundary;
+/// the recorded-vs-current predicate lives in `agent-doc-controller::status`. Returns
+/// `None` for an inactive controller (nothing is hosting), a status with no recorded
+/// launch identity, an unreadable current binary, or a fresh binary — so the warning
+/// only fires for the exact "already-running supervisor uses the OLD binary until
+/// restarted" churn class that silently produces `#fcc0` / `#ipcdrift` File Cache
+/// Conflict dialogs.
 pub(crate) fn supervisor_stale_warning_message(status: &ControllerStatus) -> Option<String> {
     if !status.active {
         return None;
     }
-    if !process_binary_is_stale(status.controller_binary.as_ref()) {
+    let current_binary = current_binary_identity().ok();
+    if !status::process_binary_is_stale(status.controller_binary.as_ref(), current_binary.as_ref())
+    {
         return None;
     }
     let pid = status
@@ -1095,8 +1060,8 @@ pub(crate) fn host_supervisor_stale_warning_for_doc(file: &Path) -> Option<Strin
     // `/proc/<pid>/exe`) against the installed binary's inode. A supervisor that
     // hot-reloaded onto the fresh binary in place (`execve`) maps the install inode and
     // must read FRESH even though its process start time predates the install.
-    let installed_inode = inode_of_path(&current_binary_identity().ok()?.path)?;
-    let running_inode = running_exe_inode_for_pid(supervisor_pid);
+    let installed_inode = agent_doc_fs::inode_of_path(&current_binary_identity().ok()?.path)?;
+    let running_inode = agent_doc_fs::running_exe_inode_for_pid(supervisor_pid);
     if !agent_doc_supervisor::config::host_supervisor_is_stale(running_inode, installed_inode) {
         return None;
     }
@@ -1861,14 +1826,19 @@ fn connect_or_launch_with_lock_wait(
 ) -> Result<interprocess::local_socket::Stream> {
     if let Ok(active_status) = status(project_root)
         && active_status.active
-        && controller_status_matches_current_binary(&active_status).unwrap_or(false)
     {
-        reap_stale_duplicate_controllers(
-            project_root,
-            active_status.pid,
-            active_status.controller_generation.unwrap_or(1),
-        );
-        return connect(project_root);
+        let current_binary = current_binary_identity().ok();
+        if status::controller_binary_identity_matches(
+            active_status.controller_binary.as_ref(),
+            current_binary.as_ref(),
+        ) {
+            reap_stale_duplicate_controllers(
+                project_root,
+                active_status.pid,
+                active_status.controller_generation.unwrap_or(1),
+            );
+            return connect(project_root);
+        }
     }
 
     // Block (bounded) on launch-lock contention instead of failing fast: another
@@ -1882,15 +1852,20 @@ fn connect_or_launch_with_lock_wait(
         Err(err) => {
             if let Ok(active_status) = status(project_root)
                 && active_status.active
-                && controller_status_matches_current_binary(&active_status).unwrap_or(false)
             {
-                log_launch_lock_waiter_adopted(project_root, &active_status, "timeout");
-                reap_stale_duplicate_controllers(
-                    project_root,
-                    active_status.pid,
-                    active_status.controller_generation.unwrap_or(1),
-                );
-                return connect(project_root);
+                let current_binary = current_binary_identity().ok();
+                if status::controller_binary_identity_matches(
+                    active_status.controller_binary.as_ref(),
+                    current_binary.as_ref(),
+                ) {
+                    log_launch_lock_waiter_adopted(project_root, &active_status, "timeout");
+                    reap_stale_duplicate_controllers(
+                        project_root,
+                        active_status.pid,
+                        active_status.controller_generation.unwrap_or(1),
+                    );
+                    return connect(project_root);
+                }
             }
             return Err(err);
         }
@@ -1916,17 +1891,22 @@ fn connect_or_launch_with_lock_wait(
     );
     if let Ok(active_status) = status(project_root)
         && active_status.active
-        && controller_status_matches_current_binary(&active_status).unwrap_or(false)
     {
-        if waited_on_launch_lock {
-            log_launch_lock_waiter_adopted(project_root, &active_status, "acquired");
+        let current_binary = current_binary_identity().ok();
+        if status::controller_binary_identity_matches(
+            active_status.controller_binary.as_ref(),
+            current_binary.as_ref(),
+        ) {
+            if waited_on_launch_lock {
+                log_launch_lock_waiter_adopted(project_root, &active_status, "acquired");
+            }
+            reap_stale_duplicate_controllers(
+                project_root,
+                active_status.pid,
+                active_status.controller_generation.unwrap_or(1),
+            );
+            return connect(project_root);
         }
-        reap_stale_duplicate_controllers(
-            project_root,
-            active_status.pid,
-            active_status.controller_generation.unwrap_or(1),
-        );
-        return connect(project_root);
     }
     if connect(project_root).is_ok() {
         if let Ok(old_status) = status(project_root)
@@ -2285,7 +2265,13 @@ pub(crate) fn controller_wants_recycle(runtime: &ControllerRuntime) -> bool {
         return true;
     }
     match runtime.bootstrap_snapshot() {
-        Ok(bootstrap) => process_binary_is_stale(bootstrap.controller_binary.as_ref()),
+        Ok(bootstrap) => {
+            let current_binary = current_binary_identity().ok();
+            status::process_binary_is_stale(
+                bootstrap.controller_binary.as_ref(),
+                current_binary.as_ref(),
+            )
+        }
         Err(_) => false,
     }
 }
@@ -3063,7 +3049,11 @@ pub(crate) fn handle_dispatch(
     // observed "old binary churns for ~1h until manual restart" failure. The caller
     // (`authorize_dispatch`) re-runs the dispatch once; the retry's `connect_or_launch`
     // promotes the freshly-installed binary, then the dispatch admits normally.
-    if controller_binary_is_stale(bootstrap) {
+    let current_binary = current_binary_identity().ok();
+    if status::process_binary_is_stale(
+        bootstrap.controller_binary.as_ref(),
+        current_binary.as_ref(),
+    ) {
         let receipt = insert_dispatch_attempt_record(
             &bootstrap.project_root,
             ControllerDispatchReceiptInsert {
@@ -4850,7 +4840,11 @@ mod tests {
 
         assert!(status.active);
         assert_eq!(status.controller_binary, bootstrap.controller_binary);
-        assert!(controller_status_matches_current_binary(&status).unwrap());
+        let current_binary = current_binary_identity().unwrap();
+        assert!(status::controller_binary_identity_matches(
+            status.controller_binary.as_ref(),
+            Some(&current_binary)
+        ));
         let freshness = status
             .freshness
             .as_ref()
@@ -6021,23 +6015,6 @@ mod tests {
             !ops_log.contains(" is closed"),
             "redirectable stale dispatch must not degrade into a terminal generation-closed proof:\n{ops_log}"
         );
-    }
-    #[test]
-    fn process_binary_is_stale_matches_and_differs() {
-        // `#ctlrecycle` foundation. No recorded identity → never stale (fail-open).
-        assert!(!process_binary_is_stale(None));
-        // The freshly-installed identity matches itself → not stale.
-        let current = current_binary_identity().unwrap();
-        assert!(!process_binary_is_stale(Some(&current)));
-        // A different recorded identity (an old build) → stale.
-        let stale = ControllerBinaryIdentity {
-            path: current.path.clone(),
-            version: "0.0.0-stale".to_string(),
-            len: current.len.wrapping_add(1),
-            modified_secs: current.modified_secs.wrapping_add(1),
-            modified_nanos: 0,
-        };
-        assert!(process_binary_is_stale(Some(&stale)));
     }
     #[test]
     fn resolve_supervisor_auto_recycle_precedence() {

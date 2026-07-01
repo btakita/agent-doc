@@ -559,15 +559,15 @@ pub(crate) fn controller_freshness_facts(
     let installed_binary = current_binary_identity().ok();
     let installed_inode = installed_binary
         .as_ref()
-        .and_then(|identity| inode_of_path(&identity.path));
+        .and_then(|identity| agent_doc_fs::inode_of_path(&identity.path));
     ControllerFreshnessFacts {
         installed_binary,
         installed_inode,
         controller_pid,
-        controller_running_inode: controller_pid.and_then(running_exe_inode_for_pid),
+        controller_running_inode: controller_pid.and_then(agent_doc_fs::running_exe_inode_for_pid),
         route_owned_supervisor_pid,
         route_owned_supervisor_running_inode: route_owned_supervisor_pid
-            .and_then(running_exe_inode_for_pid),
+            .and_then(agent_doc_fs::running_exe_inode_for_pid),
     }
 }
 
@@ -1852,44 +1852,6 @@ fn process_start_age_secs(pid: u32) -> Option<u64> {
         .duration_since(modified)
         .ok()
         .map(|elapsed| elapsed.as_secs())
-}
-
-/// `#fccsupwarn2` — the inode a process currently maps via `/proc/<pid>/exe`. On Linux
-/// this magic symlink resolves to the real on-disk inode of the running executable even
-/// after a `cargo install` replaced the path: an original launch that never re-exec'd
-/// maps the OLD (now-unlinked) inode, while a supervisor that hot-reloaded in place via
-/// `execve` maps the FRESH install inode. `None` on non-Linux or any read error
-/// (fail-open — staleness must never block a cycle or spam a warning).
-pub(crate) fn running_exe_inode_for_pid(pid: u32) -> Option<u64> {
-    #[cfg(target_os = "linux")]
-    {
-        use std::os::unix::fs::MetadataExt;
-        // metadata() follows the /proc/<pid>/exe magic link to the mapped inode,
-        // resolving even when the original path was unlinked by a reinstall.
-        std::fs::metadata(format!("/proc/{pid}/exe"))
-            .ok()
-            .map(|meta| meta.ino())
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = pid;
-        None
-    }
-}
-
-/// `#fccsupwarn2` — inode of the on-disk binary at `path` (the freshly-installed
-/// agent-doc). `None` on non-unix or any stat error (fail-open).
-pub(crate) fn inode_of_path(path: &Path) -> Option<u64> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        std::fs::metadata(path).ok().map(|meta| meta.ino())
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = path;
-        None
-    }
 }
 
 /// True when `/proc/<pid>/cmdline` carries `--handoff-state preparing` — i.e. the
@@ -3269,7 +3231,12 @@ mod tests {
             freshness: None,
             control_plane: agent_doc_controller::status::default_control_plane_status(),
         };
-        assert!(!controller_status_matches_current_binary(&missing).unwrap());
+        assert!(
+            !agent_doc_controller::status::controller_binary_identity_matches(
+                missing.controller_binary.as_ref(),
+                Some(&current)
+            )
+        );
 
         let mut changed = current.clone();
         changed.modified_nanos = changed.modified_nanos.wrapping_add(1);
@@ -3277,13 +3244,23 @@ mod tests {
             controller_binary: Some(changed),
             ..missing
         };
-        assert!(!controller_status_matches_current_binary(&stale).unwrap());
+        assert!(
+            !agent_doc_controller::status::controller_binary_identity_matches(
+                stale.controller_binary.as_ref(),
+                Some(&current)
+            )
+        );
 
         let fresh = ControllerStatus {
-            controller_binary: Some(current),
+            controller_binary: Some(current.clone()),
             ..stale
         };
-        assert!(controller_status_matches_current_binary(&fresh).unwrap());
+        assert!(
+            agent_doc_controller::status::controller_binary_identity_matches(
+                fresh.controller_binary.as_ref(),
+                Some(&current)
+            )
+        );
     }
 
     #[test]

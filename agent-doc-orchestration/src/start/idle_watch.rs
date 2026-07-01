@@ -1349,8 +1349,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         }
                     }
                 }
-                let supervisor_stale = crate::project_controller::process_binary_is_stale(
+                let current_recycle_identity = crate::project_controller::current_binary_identity().ok();
+                let supervisor_stale = agent_doc_controller::status::process_binary_is_stale(
                     recycle_launch_identity.as_ref(),
+                    current_recycle_identity.as_ref(),
                 );
                 // `#supkill-bg` — publish the live staleness probe so the IPC `Restart`
                 // handler can decide drain-reexec vs immediate relaunch without

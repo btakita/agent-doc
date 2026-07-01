@@ -295,6 +295,42 @@ pub fn queue_response_contamination_guard_result(contaminated: &[String]) -> Gua
     ))
 }
 
+/// Free-text queue prompt candidates that appear copied from assistant response
+/// prose in the same exchange body.
+pub fn queue_response_contamination_candidates(
+    queue_body: &str,
+    exchange_body: &str,
+) -> Vec<String> {
+    let Ok(entries) = agent_doc_queue::document_queue::parse(queue_body) else {
+        return Vec::new();
+    };
+    let response_text = agent_doc_turn::closeout_signal::assistant_response_text(exchange_body);
+    if response_text.trim().is_empty() {
+        return Vec::new();
+    }
+
+    let mut contaminated = Vec::new();
+    for prompt in agent_doc_queue::document_queue::prompts(&entries) {
+        let text = prompt.text.trim();
+        if text.is_empty() || agent_doc_queue::queue_command::is_queue_directive_prompt(text) {
+            continue;
+        }
+        if agent_doc_queue::queue_command::mentions_slash_command_reference(text) {
+            continue;
+        }
+        let normalized = agent_doc_turn::closeout_signal::normalized_prompt_for_match(text);
+        if normalized.chars().count() < 20 {
+            continue;
+        }
+        let needle: String = normalized.chars().take(40).collect();
+        if response_text.contains(&needle) {
+            contaminated.push(text.chars().take(80).collect::<String>());
+        }
+    }
+
+    contaminated
+}
+
 pub fn dropped_exchange_prompt_guard_result(file: &str, still_missing: &[String]) -> GuardResult {
     GuardResult::Error(format!(
         "[session-check] INTERRUPTED: user-authored exchange prompt(s) were dropped during an IPC content_ours merge and are missing from the committed document: {}. The cycle committed `content_ours` without these prompt-bearing line(s); re-add them to `agent:exchange` and re-run `agent-doc finalize {file}` / `agent-doc write --commit {file}` so they are answered (see #exchange-prompt-dropped-on-merge).",
@@ -473,6 +509,54 @@ mod tests {
         assert!(message.contains("Live editor `jb` lacks capability."));
         assert!(message.contains("run `agent-doc write --commit task.md`"));
         assert!(message.contains("Use `agent-doc write --commit task.md --force-disk`"));
+    }
+
+    #[test]
+    fn queue_response_contamination_candidates_flags_response_prose() {
+        let prose = "Yes. I drove the already-authenticated Google Ads browser session with chromium-bridge to demote the campaign.";
+        let queue = format!("- do [#nbsearch]\n- {prose}\n");
+        let exchange = format!("### Re: #gads106demote\n\n{prose}\n");
+
+        assert_eq!(
+            queue_response_contamination_candidates(&queue, &exchange),
+            vec![
+                "Yes. I drove the already-authenticated Google Ads browser session with chromium-"
+                    .to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn queue_response_contamination_candidates_skips_directives_short_text_and_slash_references() {
+        let exchange = concat!(
+            "### Re: clear opt-in\n\n",
+            "JB Run Agent Doc /clear opt-in should pre-emptively run /clear at the configured threshold.\n",
+            "Short prompt.\n",
+            "Done with the implementation.\n",
+        );
+        let queue = concat!(
+            "- do [#nbsearch]\n",
+            "- short prompt\n",
+            "- JB Run Agent Doc /clear opt-in should pre-emptively run /clear when the context threshold is exceeded\n",
+        );
+
+        assert!(queue_response_contamination_candidates(queue, exchange).is_empty());
+    }
+
+    #[test]
+    fn queue_response_contamination_candidates_ignores_blockquoted_prompt_echo() {
+        let head = "The backlog has not been updating with the queue progress. Some queue items remain uncommitted over several runs.";
+        let exchange = format!(
+            concat!(
+                "### Re: Backlog freshness\n\n",
+                "> **Queue prompt:**\n>\n> {head}\n\n",
+                "Diagnosed the freshness symptom.\n",
+            ),
+            head = head
+        );
+        let queue = format!("- {head}\n");
+
+        assert!(queue_response_contamination_candidates(&queue, &exchange).is_empty());
     }
 
     #[test]

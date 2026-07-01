@@ -2906,6 +2906,10 @@ fn test_agent_doc_queue_owns_queue_convergence_policy() {
     for required_snippet in [
         "pub fn realign_baseline_to_converged_queue(",
         "pub fn queue_body_diff_is_non_selected_future_state(",
+        "pub fn selected_queue_head_unchanged_in_snapshot(",
+        "pub fn queue_region_differs_from_snapshot(",
+        "pub fn inactive_queue_changed_vs_snapshot(",
+        "pub fn queue_entries_are_drained_residue(",
         "fn first_queue_prompt_identity(",
         "fn content_without_queue_body(",
         "fn strip_exchange_boundary_lines(",
@@ -2941,6 +2945,29 @@ fn test_agent_doc_queue_owns_queue_convergence_policy() {
             && preflight_run.contains("realign_baseline_to_converged_queue")
             && preflight_run.contains("queue_body_diff_is_non_selected_future_state"),
         "preflight/run.rs should call focused queue convergence policy directly"
+    );
+    let preflight_maintenance = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
+    )
+    .unwrap();
+    for forbidden_snippet in [
+        "fn selected_queue_head_unchanged_in_snapshot(",
+        "fn queue_region_differs_from_snapshot(",
+        "fn inactive_queue_changed_vs_snapshot(",
+        "fn queue_entries_are_drained_residue(",
+    ] {
+        assert!(
+            !preflight_maintenance.contains(forbidden_snippet),
+            "preflight/maintenance.rs must not re-own queue snapshot convergence policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        preflight_maintenance.contains("queue_convergence::{")
+            && preflight_maintenance.contains("selected_queue_head_unchanged_in_snapshot(")
+            && preflight_maintenance.contains("queue_region_differs_from_snapshot(")
+            && preflight_maintenance.contains("inactive_queue_changed_vs_snapshot(")
+            && preflight_maintenance.contains("queue_entries_are_drained_residue("),
+        "preflight/maintenance.rs should adapt snapshot IO into focused queue convergence policy directly"
     );
 }
 
@@ -3022,20 +3049,36 @@ fn test_agent_doc_queue_owns_do_directive_target_parsing() {
         );
     }
 
-    for relative in [
-        "agent-doc-orchestration/src/preflight/run.rs",
-        "agent-doc-orchestration/src/session_check/response_guards.rs",
-    ] {
-        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
-        assert!(
-            source.contains("agent_doc_queue::queue_directive::do_directive_target_ids"),
-            "{relative} should call focused queue directive parsing directly"
-        );
-        assert!(
-            !source.contains("crate::session_check::do_directive_target_ids"),
-            "{relative} must not route queue directive parsing through session_check"
-        );
-    }
+    let preflight_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
+    assert!(
+        preflight_run.contains("agent_doc_queue::queue_directive::do_directive_target_ids"),
+        "preflight/run.rs should call focused queue directive parsing directly"
+    );
+    assert!(
+        !preflight_run.contains("crate::session_check::do_directive_target_ids"),
+        "preflight/run.rs must not route queue directive parsing through session_check"
+    );
+    let response_guards = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/response_guards.rs"),
+    )
+    .unwrap();
+    assert!(
+        response_guards
+            .contains("agent_doc_turn::closeout_signal::still_missing_dropped_queue_prompts"),
+        "response_guards should route dropped-queue prompt classification through focused closeout_signal policy"
+    );
+    let closeout_signal =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn/src/closeout_signal.rs")).unwrap();
+    assert!(
+        closeout_signal.contains("agent_doc_queue::queue_directive::do_directive_target_ids"),
+        "closeout_signal should call focused queue directive parsing directly"
+    );
+    assert!(
+        !response_guards.contains("crate::session_check::do_directive_target_ids"),
+        "response_guards must not route queue directive parsing through session_check"
+    );
     let project_controller =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/project_controller.rs"))
             .unwrap();
@@ -3490,13 +3533,20 @@ fn test_agent_doc_queue_owns_queue_command_classification() {
             "response_guards must not re-own queue command/prompt classification: {forbidden}"
         );
     }
+    assert!(
+        response_guards
+            .contains("agent_doc_workflow::session_check::queue_response_contamination_candidates"),
+        "response_guards should route queue contamination classification through focused workflow policy"
+    );
+    let workflow_session_check =
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/session_check.rs")).unwrap();
     for required in [
         "agent_doc_queue::queue_command::is_queue_directive_prompt",
         "agent_doc_queue::queue_command::mentions_slash_command_reference",
     ] {
         assert!(
-            response_guards.contains(required),
-            "response_guards should call focused queue command classification directly: {required}"
+            workflow_session_check.contains(required),
+            "workflow session_check should call focused queue command classification directly: {required}"
         );
     }
 }
@@ -3959,6 +4009,8 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub fn gated_phase_split_decision",
         "pub fn normalized_prompt_for_match",
         "pub fn exchange_contains_prompt_line",
+        "pub fn still_missing_dropped_queue_prompts",
+        "pub fn still_missing_dropped_exchange_prompts",
         "pub fn is_exchange_response_heading",
         "pub fn is_direct_response_patchback_heading",
         "pub fn has_new_response_heading_marker",
@@ -4184,13 +4236,13 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         );
     }
     for required in [
-        "agent_doc_turn::closeout_signal::exchange_contains_prompt_line",
-        "agent_doc_turn::closeout_signal::assistant_response_text",
-        "agent_doc_turn::closeout_signal::normalized_prompt_for_match",
+        "agent_doc_turn::closeout_signal::still_missing_dropped_queue_prompts",
+        "agent_doc_workflow::session_check::queue_response_contamination_candidates",
+        "agent_doc_turn::closeout_signal::still_missing_dropped_exchange_prompts",
     ] {
         assert!(
             response_guards.contains(required),
-            "response_guards should call focused closeout prompt/response text policy directly: {required}"
+            "response_guards should call focused response guard policy directly: {required}"
         );
     }
 
@@ -7718,6 +7770,7 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         "agent-doc-hash",
         "agent-doc-markdown-ast",
         "agent-doc-prompt-contract",
+        "agent-doc-queue",
         "agent-doc-turn",
         "anyhow",
         "htmd",
@@ -7739,6 +7792,7 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
                 | "agent-doc-hash"
                 | "agent-doc-markdown-ast"
                 | "agent-doc-prompt-contract"
+                | "agent-doc-queue"
                 | "agent-doc-turn"
                 | "anyhow"
                 | "htmd"
@@ -7758,6 +7812,7 @@ fn test_agent_doc_workflow_owns_session_check_response_messages() {
     for required in [
         "pub fn dropped_queue_prompt_guard_result(",
         "pub fn queue_response_contamination_guard_result(",
+        "pub fn queue_response_contamination_candidates(",
         "pub fn dropped_exchange_prompt_guard_result(",
         "pub fn completed_pending_reap_guard_message(",
         "pub fn snapshot_committed_guard_message(",
@@ -8618,6 +8673,36 @@ fn test_agent_doc_frontmatter_owns_session_id_and_document_gate_policy() {
 }
 
 #[test]
+fn test_agent_doc_fs_owns_process_inode_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fs_source = fs::read_to_string(manifest_dir.join("agent-doc-fs/src/lib.rs")).unwrap();
+    for required in ["pub fn running_exe_inode_for_pid(", "pub fn inode_of_path("] {
+        assert!(
+            fs_source.contains(required),
+            "agent-doc-fs must own process/file inode probes: {required}"
+        );
+    }
+
+    for relative in [
+        "agent-doc-orchestration/src/project_controller.rs",
+        "agent-doc-orchestration/src/project_controller/rpc.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        for forbidden in ["fn running_exe_inode_for_pid(", "fn inode_of_path("] {
+            assert!(
+                !source.contains(forbidden),
+                "{relative} must not re-own filesystem inode probes: {forbidden}"
+            );
+        }
+        assert!(
+            source.contains("agent_doc_fs::inode_of_path")
+                || source.contains("agent_doc_fs::running_exe_inode_for_pid"),
+            "{relative} should call agent-doc-fs inode probes directly"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_config_owns_env_expansion_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let config_env_source =
@@ -9471,6 +9556,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn controller_freshness_status(",
         "pub fn controller_process_freshness_from_inodes(",
         "pub fn parse_handoff_state(",
+        "pub fn controller_binary_identity_matches(",
+        "pub fn process_binary_is_stale(",
     ] {
         assert!(
             controller_status.contains(required_snippet),
@@ -9517,6 +9604,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn controller_freshness_status(",
         "fn controller_process_freshness_from_inodes(",
         "fn parse_handoff_state(",
+        "fn controller_binary_identity_matches(",
+        "fn process_binary_is_stale(",
+        "fn controller_binary_is_stale(",
         "pub use agent_doc_controller::status",
     ] {
         assert!(
@@ -9541,6 +9631,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         rpc_source.contains("use agent_doc_controller::status")
             && project_controller_source.contains("use agent_doc_controller::status::{"),
         "orchestration should call focused controller status/freshness helpers directly"
+    );
+    assert!(
+        rpc_source.contains("status::process_binary_is_stale("),
+        "project_controller::rpc should call focused controller binary staleness policy directly"
     );
     for forbidden_snippet in [
         "fn agent_doc_controller_serve_arg_index(args:",
@@ -11666,13 +11760,20 @@ fn test_agent_doc_queue_has_no_manual_addition_compatibility_shim() {
             "response_guards must not re-own queue prompt identity policy: {forbidden}"
         );
     }
+    assert!(
+        response_guards
+            .contains("agent_doc_turn::closeout_signal::still_missing_dropped_queue_prompts"),
+        "response_guards should call focused dropped-queue classifier directly"
+    );
+    let closeout_signal =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn/src/closeout_signal.rs")).unwrap();
     for required in [
         "agent_doc_queue::document_queue::queue_contains_prompt_line",
         "agent_doc_queue::document_queue::queue_ids_including_struck",
     ] {
         assert!(
-            response_guards.contains(required),
-            "response_guards should call focused queue identity policy directly: {required}"
+            closeout_signal.contains(required),
+            "closeout_signal should call focused queue identity policy directly: {required}"
         );
     }
     let queue_consume =

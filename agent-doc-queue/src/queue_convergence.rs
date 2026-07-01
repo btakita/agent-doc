@@ -69,6 +69,68 @@ pub fn queue_body_diff_is_non_selected_future_state(
     queue_body(previous) != queue_body(current)
 }
 
+/// True when the active queue head still matches the queue head captured in the
+/// snapshot content.
+pub fn selected_queue_head_unchanged_in_snapshot(
+    snapshot_content: &str,
+    current_entries: &[document_queue::QueueEntry],
+) -> bool {
+    let current_prompts = document_queue::prompts(current_entries);
+    let Some(current_head) = current_prompts.first() else {
+        return false;
+    };
+    let Some(snapshot_entries) = queue_entries(snapshot_content) else {
+        return false;
+    };
+    let snapshot_prompts = document_queue::prompts(&snapshot_entries);
+    let Some(snapshot_head) = snapshot_prompts.first() else {
+        return false;
+    };
+    strip_priority_markers(&snapshot_head.text) == strip_priority_markers(&current_head.text)
+}
+
+/// True when the full `agent:queue` component region differs between the
+/// snapshot and current document content.
+pub fn queue_region_differs_from_snapshot(snapshot_content: &str, current_content: &str) -> bool {
+    let Some(current_queue) = queue_region(current_content) else {
+        return false;
+    };
+    let Some(snapshot_queue) = queue_region(snapshot_content) else {
+        return false;
+    };
+    current_queue != snapshot_queue
+}
+
+/// True when an inactive queue's current entries differ from the queue body in
+/// snapshot content.
+///
+/// Comparison is normalized through queue parsing/rendering so insignificant
+/// body formatting churn does not register as an operator edit. Missing or
+/// unparseable snapshot queue content is treated as changed so a newly populated
+/// inactive queue still warns.
+pub fn inactive_queue_changed_vs_snapshot(
+    snapshot_content: &str,
+    current_entries: &[document_queue::QueueEntry],
+) -> bool {
+    let Some(snapshot_entries) = queue_entries(snapshot_content) else {
+        return true;
+    };
+    document_queue::render(&snapshot_entries) != document_queue::render(current_entries)
+}
+
+/// True when the queue body contains only drained non-live residue.
+pub fn queue_entries_are_drained_residue(entries: &[document_queue::QueueEntry]) -> bool {
+    !entries.is_empty()
+        && entries.iter().all(|entry| {
+            matches!(
+                entry,
+                document_queue::QueueEntry::Completed(_)
+                    | document_queue::QueueEntry::Preset(_)
+                    | document_queue::QueueEntry::Dispatch(_)
+            )
+        })
+}
+
 fn first_queue_prompt_identity(content: &str) -> Option<String> {
     let components = element::parse(content).ok()?;
     let queue = components
@@ -102,6 +164,18 @@ fn queue_body(content: &str) -> Option<&str> {
         .iter()
         .find(|component| component.name == "queue")?;
     Some(&content[queue.open_end..queue.close_start])
+}
+
+fn queue_region(content: &str) -> Option<&str> {
+    let components = element::parse(content).ok()?;
+    let queue = components
+        .iter()
+        .find(|component| component.name == "queue")?;
+    Some(&content[queue.open_start..queue.close_end])
+}
+
+fn queue_entries(content: &str) -> Option<Vec<document_queue::QueueEntry>> {
+    document_queue::parse(queue_body(content)?).ok()
 }
 
 fn strip_exchange_boundary_lines(content: &str) -> String {
@@ -184,6 +258,77 @@ mod tests {
             &current_with_exchange_edit,
             "do [#active]"
         ));
+    }
+
+    #[test]
+    fn snapshot_predicates_compare_queue_content_without_io() {
+        let snapshot = concat!(
+            "before\n",
+            "<!-- agent:queue priority -->\n",
+            "- :pushpin: do [#alpha]\n",
+            "- do [#old]\n",
+            "<!-- /agent:queue -->\n",
+            "after\n",
+        );
+        let current_entries = document_queue::parse("- do [#alpha]\n- do [#new]\n").unwrap();
+
+        assert!(selected_queue_head_unchanged_in_snapshot(
+            snapshot,
+            &current_entries
+        ));
+
+        let current_with_queue_edit = snapshot.replace("- do [#old]", "- do [#new]");
+        assert!(queue_region_differs_from_snapshot(
+            snapshot,
+            &current_with_queue_edit
+        ));
+
+        let current_with_outside_edit = snapshot.replace("before", "changed before");
+        assert!(!queue_region_differs_from_snapshot(
+            snapshot,
+            &current_with_outside_edit
+        ));
+    }
+
+    #[test]
+    fn inactive_queue_changed_vs_snapshot_normalizes_entries() {
+        let snapshot = concat!(
+            "<!-- agent:queue -->\n",
+            "- do [#alpha]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let same_entries = document_queue::parse("- do [#alpha]\n").unwrap();
+        let changed_entries = document_queue::parse("- do [#beta]\n").unwrap();
+
+        assert!(!inactive_queue_changed_vs_snapshot(snapshot, &same_entries));
+        assert!(inactive_queue_changed_vs_snapshot(
+            snapshot,
+            &changed_entries
+        ));
+        assert!(inactive_queue_changed_vs_snapshot(
+            "no queue component",
+            &same_entries
+        ));
+    }
+
+    #[test]
+    fn queue_entries_are_drained_residue_requires_non_live_entries() {
+        let completed = document_queue::QueueEntry::Completed(document_queue::QueuePrompt {
+            text: "do [#done]".to_string(),
+            multiline: false,
+        });
+        let prompt = document_queue::QueueEntry::Prompt(document_queue::QueuePrompt {
+            text: "do [#live]".to_string(),
+            multiline: false,
+        });
+
+        assert!(queue_entries_are_drained_residue(&[
+            completed.clone(),
+            document_queue::QueueEntry::Preset("#spec".to_string()),
+            document_queue::QueueEntry::Dispatch("@review".to_string()),
+        ]));
+        assert!(!queue_entries_are_drained_residue(&[]));
+        assert!(!queue_entries_are_drained_residue(&[completed, prompt]));
     }
 
     #[test]

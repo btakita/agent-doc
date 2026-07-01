@@ -21,6 +21,10 @@ use agent_doc_queue::{
         collect_actionable_free_text_prompts, prepare_free_text_admission,
         queue_currently_active_for_free_text_admission, queue_free_text_admission_scope,
     },
+    queue_convergence::{
+        inactive_queue_changed_vs_snapshot, queue_entries_are_drained_residue,
+        queue_region_differs_from_snapshot, selected_queue_head_unchanged_in_snapshot,
+    },
     queue_response::{free_text_head_answered_by_response, queue_prompt_text_is_free_text},
 };
 use agent_doc_workflow::preflight_policy::ResolvedFreeTextExecution;
@@ -2569,7 +2573,13 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         // leaves behind, where re-warning on every preflight with no user edit
         // drives the #adoc-queue-ipc-drift loop. Only warn when the inactive
         // queue body actually changed since the snapshot this cycle.
-        if inactive_queue_changed_vs_snapshot(file, &activation.entries_after) {
+        let inactive_queue_changed = match snapshot::load(file) {
+            Ok(Some(snapshot_content)) => {
+                inactive_queue_changed_vs_snapshot(&snapshot_content, &activation.entries_after)
+            }
+            _ => true,
+        };
+        if inactive_queue_changed {
             queue_warnings.push(PreflightWarning {
                 code: "inactive_queue_residue".to_string(),
                 message: "agent:queue is inactive but still contains directive/item residue; only active queue state is executable priority context".to_string(),
@@ -2691,10 +2701,19 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         mutated = true;
         in_progress_markers_changed = true;
     }
-    let need_sync_active_queue_future_state_snapshot = activation.active
-        && snapshot_was_active
-        && selected_queue_head_unchanged_in_snapshot(file, &activation.entries_after)
-        && queue_region_differs_from_snapshot(file, &current_content);
+    let need_sync_active_queue_future_state_snapshot = if activation.active && snapshot_was_active {
+        match snapshot::load(file) {
+            Ok(Some(snapshot_content)) => {
+                selected_queue_head_unchanged_in_snapshot(
+                    &snapshot_content,
+                    &activation.entries_after,
+                ) && queue_region_differs_from_snapshot(&snapshot_content, &current_content)
+            }
+            _ => false,
+        }
+    } else {
+        false
+    };
 
     // Persist file mutations.
     if mutated {
@@ -3259,108 +3278,6 @@ pub(crate) fn adopt_edited_queue_head_into_snapshot(file: &Path, current_content
     {
         eprintln!("[preflight] queue: adopt-head snapshot sync warning (non-fatal): {e}");
     }
-}
-
-fn selected_queue_head_unchanged_in_snapshot(
-    file: &Path,
-    current_entries: &[agent_doc_queue::document_queue::QueueEntry],
-) -> bool {
-    let current_prompts = agent_doc_queue::document_queue::prompts(current_entries);
-    let Some(current_head) = current_prompts.first() else {
-        return false;
-    };
-    let Ok(Some(snapshot_content)) = snapshot::load(file) else {
-        return false;
-    };
-    let Ok(snapshot_components) = agent_doc_element::element::parse(&snapshot_content) else {
-        return false;
-    };
-    let Some(snapshot_queue) = snapshot_components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
-        return false;
-    };
-    let snapshot_body = &snapshot_content[snapshot_queue.open_end..snapshot_queue.close_start];
-    let Ok(snapshot_entries) = agent_doc_queue::document_queue::parse(snapshot_body) else {
-        return false;
-    };
-    let snapshot_prompts = agent_doc_queue::document_queue::prompts(&snapshot_entries);
-    let Some(snapshot_head) = snapshot_prompts.first() else {
-        return false;
-    };
-    strip_priority_markers(&snapshot_head.text) == strip_priority_markers(&current_head.text)
-}
-
-fn queue_region_differs_from_snapshot(file: &Path, current_content: &str) -> bool {
-    let Ok(Some(snapshot_content)) = snapshot::load(file) else {
-        return false;
-    };
-    let Ok(current_components) = agent_doc_element::element::parse(current_content) else {
-        return false;
-    };
-    let Some(current_queue) = current_components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
-        return false;
-    };
-    let Ok(snapshot_components) = agent_doc_element::element::parse(&snapshot_content) else {
-        return false;
-    };
-    let Some(snapshot_queue) = snapshot_components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
-        return false;
-    };
-    current_content[current_queue.open_start..current_queue.close_end]
-        != snapshot_content[snapshot_queue.open_start..snapshot_queue.close_end]
-}
-
-/// True when the current inactive-queue entry set differs from the queue body
-/// recorded in the snapshot (the committed baseline for this cycle). Used to
-/// scope the `inactive_queue_residue` warning to genuine operator edits instead
-/// of re-warning every preflight on a stable, already-committed inactive queue
-/// (the steady state an `item_modified` halt leaves behind — #adoc-queue-ipc-drift).
-///
-/// Comparison is normalized through `queue::parse` + `queue::render` so trivial
-/// whitespace / boundary churn does not register as a change. A missing or
-/// unreadable snapshot, or a snapshot with no queue component, is treated as
-/// "changed" so a freshly-populated inactive queue still warns.
-pub(crate) fn inactive_queue_changed_vs_snapshot(
-    file: &Path,
-    current_entries: &[agent_doc_queue::document_queue::QueueEntry],
-) -> bool {
-    let Ok(Some(snapshot_content)) = snapshot::load(file) else {
-        return true;
-    };
-    let Ok(components) = agent_doc_element::element::parse(&snapshot_content) else {
-        return true;
-    };
-    let Some(snap_queue) = components.iter().find(|c| c.name == "queue") else {
-        return true;
-    };
-    let snap_body = &snapshot_content[snap_queue.open_end..snap_queue.close_start];
-    let Ok(snap_entries) = agent_doc_queue::document_queue::parse(snap_body) else {
-        return true;
-    };
-    agent_doc_queue::document_queue::render(&snap_entries)
-        != agent_doc_queue::document_queue::render(current_entries)
-}
-
-pub(crate) fn queue_entries_are_drained_residue(
-    entries: &[agent_doc_queue::document_queue::QueueEntry],
-) -> bool {
-    !entries.is_empty()
-        && entries.iter().all(|entry| {
-            matches!(
-                entry,
-                agent_doc_queue::document_queue::QueueEntry::Completed(_)
-                    | agent_doc_queue::document_queue::QueueEntry::Preset(_)
-                    | agent_doc_queue::document_queue::QueueEntry::Dispatch(_)
-            )
-        })
 }
 
 #[cfg(test)]

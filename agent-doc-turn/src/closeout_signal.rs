@@ -767,6 +767,57 @@ pub fn exchange_contains_prompt_line(doc: &str, prompt: &str) -> bool {
         .any(|line| normalized_prompt_for_match(line) == needle)
 }
 
+/// Dropped queue prompts that are still absent from visible/HEAD queue and
+/// exchange content, and whose directive ids were not resolved this cycle.
+pub fn still_missing_dropped_queue_prompts(
+    visible: &str,
+    head: &str,
+    dropped_prompts: &[String],
+    resolved_ids: &std::collections::HashSet<String>,
+) -> Vec<String> {
+    let visible_queue_ids = agent_doc_queue::document_queue::queue_ids_including_struck(visible);
+    let head_queue_ids = agent_doc_queue::document_queue::queue_ids_including_struck(head);
+    dropped_prompts
+        .iter()
+        .filter(|prompt| {
+            if agent_doc_queue::document_queue::queue_contains_prompt_line(visible, prompt)
+                || agent_doc_queue::document_queue::queue_contains_prompt_line(head, prompt)
+                || exchange_contains_prompt_line(visible, prompt)
+                || exchange_contains_prompt_line(head, prompt)
+            {
+                return false;
+            }
+
+            let dropped_ids = agent_doc_queue::queue_directive::do_directive_target_ids(
+                std::slice::from_ref(prompt),
+            );
+            if !dropped_ids.is_empty()
+                && dropped_ids
+                    .iter()
+                    .all(|id| visible_queue_ids.contains(id) || head_queue_ids.contains(id))
+            {
+                return false;
+            }
+
+            let consumed = dropped_ids.iter().any(|id| resolved_ids.contains(id));
+            !consumed
+        })
+        .cloned()
+        .collect()
+}
+
+/// Dropped exchange prompts that are still absent from the committed exchange.
+pub fn still_missing_dropped_exchange_prompts(
+    head: &str,
+    dropped_prompts: &[String],
+) -> Vec<String> {
+    dropped_prompts
+        .iter()
+        .filter(|prompt| !exchange_contains_prompt_line(head, prompt))
+        .cloned()
+        .collect()
+}
+
 pub fn is_exchange_response_heading(trimmed: &str) -> bool {
     trimmed == "## Assistant"
         || trimmed.starts_with("### Re:")
@@ -1808,6 +1859,74 @@ mod tests {
         assert!(exchange_contains_prompt_line(doc, "Keep this prompt"));
         assert!(exchange_contains_prompt_line(doc, "❯ Keep this prompt"));
         assert!(!exchange_contains_prompt_line(doc, "Different prompt"));
+    }
+
+    #[test]
+    fn still_missing_dropped_queue_prompts_keeps_preserved_or_consumed_prompts_clear() {
+        let visible = concat!(
+            "<!-- agent:exchange -->\n",
+            "answered in exchange\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue auto -->\n",
+            "- ~~do [#struck]~~\n",
+            "- preserved in queue\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let head = concat!(
+            "<!-- agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue auto -->\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let resolved = std::collections::HashSet::from(["done".to_string()]);
+        let dropped = vec![
+            "preserved in queue".to_string(),
+            "answered in exchange".to_string(),
+            "[#struck]".to_string(),
+            "do [#done]".to_string(),
+            "lost free text".to_string(),
+        ];
+
+        assert_eq!(
+            still_missing_dropped_queue_prompts(visible, head, &dropped, &resolved),
+            vec!["lost free text".to_string()]
+        );
+    }
+
+    #[test]
+    fn still_missing_dropped_queue_prompts_accepts_head_queue_id_preservation() {
+        let visible = concat!(
+            "<!-- agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue auto -->\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let head = concat!(
+            "<!-- agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue auto -->\n",
+            "- ~~do [#qpauseux]~~\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let dropped = vec!["[#qpauseux]".to_string()];
+        let resolved = std::collections::HashSet::new();
+
+        assert!(still_missing_dropped_queue_prompts(visible, head, &dropped, &resolved).is_empty());
+    }
+
+    #[test]
+    fn still_missing_dropped_exchange_prompts_reports_only_absent_head_prompts() {
+        let head = concat!(
+            "<!-- agent:exchange -->\n",
+            "  ❯ kept prompt\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let dropped = vec!["kept prompt".to_string(), "lost prompt".to_string()];
+
+        assert_eq!(
+            still_missing_dropped_exchange_prompts(head, &dropped),
+            vec!["lost prompt".to_string()]
+        );
     }
 
     #[test]

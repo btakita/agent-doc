@@ -31,47 +31,12 @@ pub(crate) fn check_dropped_queue_prompt_guard(
         .map(String::as_str)
         .unwrap_or_default();
     let resolved_ids = crate::cycle_state::resolved_pending_ids(file)?;
-    // #queue-user-edit-overwrite wedge auto-clear: id tokens preserved in the
-    // committed/visible queue in ANY form, including struck/consumed lines. A
-    // dropped `[#id]` whose id is present here visibly reached the document and
-    // was consumed in some cycle, so it is not a silent loss.
-    let visible_queue_ids = agent_doc_queue::document_queue::queue_ids_including_struck(&visible);
-    let head_queue_ids = agent_doc_queue::document_queue::queue_ids_including_struck(head);
-    let still_missing: Vec<String> = state
-        .dropped_queue_prompts
-        .iter()
-        .filter(|prompt| {
-            // Preserved in the visible/HEAD queue, or answered in the
-            // visible/HEAD exchange → kept, not lost.
-            if agent_doc_queue::document_queue::queue_contains_prompt_line(&visible, prompt)
-                || agent_doc_queue::document_queue::queue_contains_prompt_line(head, prompt)
-                || agent_doc_turn::closeout_signal::exchange_contains_prompt_line(&visible, prompt)
-                || agent_doc_turn::closeout_signal::exchange_contains_prompt_line(head, prompt)
-            {
-                return false;
-            }
-            let dropped_ids = agent_doc_queue::queue_directive::do_directive_target_ids(
-                std::slice::from_ref(prompt),
-            );
-            // Preserved by id: the dropped prompt's `[#id]` is present in the
-            // committed/visible queue (possibly as a struck `~~do [#id]~~` from a
-            // prior cycle). Text-identity matching above cannot bridge the bare
-            // `[#id]` record against the `do [#id]`/struck spelling, so without
-            // this the guard wedges `session-check` indefinitely.
-            if !dropped_ids.is_empty()
-                && dropped_ids
-                    .iter()
-                    .all(|id| visible_queue_ids.contains(id) || head_queue_ids.contains(id))
-            {
-                return false;
-            }
-            // Legitimately consumed this cycle: the queued `do [#id]` id reached
-            // a done/gate/reap outcome, so deleting the queue line is correct.
-            let consumed = dropped_ids.iter().any(|id| resolved_ids.contains(id));
-            !consumed
-        })
-        .cloned()
-        .collect();
+    let still_missing = agent_doc_turn::closeout_signal::still_missing_dropped_queue_prompts(
+        &visible,
+        head,
+        &state.dropped_queue_prompts,
+        &resolved_ids,
+    );
     if still_missing.is_empty() {
         crate::cycle_state::clear_dropped_queue_prompts(file)?;
         return Ok(GuardResult::None);
@@ -114,38 +79,10 @@ pub(crate) fn check_queue_response_contamination_guard(
     };
 
     let queue_body = &content[queue.open_end..queue.close_start];
-    let Ok(entries) = agent_doc_queue::document_queue::parse(queue_body) else {
-        return Ok(GuardResult::None);
-    };
-    let response_text =
-        agent_doc_turn::closeout_signal::assistant_response_text(exchange.content(&content));
-    if response_text.trim().is_empty() {
-        return Ok(GuardResult::None);
-    }
-
-    let mut contaminated: Vec<String> = Vec::new();
-    for prompt in agent_doc_queue::document_queue::prompts(&entries) {
-        let text = prompt.text.trim();
-        if text.is_empty() || agent_doc_queue::queue_command::is_queue_directive_prompt(text) {
-            continue;
-        }
-        // #queue-contamination-guard-false-positive: a queue prompt that
-        // references a slash command (/agent-doc, /clear, /compact, ...) is a
-        // user instruction, not copied answer prose — skip it.
-        if agent_doc_queue::queue_command::mentions_slash_command_reference(text) {
-            continue;
-        }
-        // Only treat substantial prose as a contamination candidate; short
-        // free-text prompts are legitimate (`#free-text-queue-head-consume`).
-        let normalized = agent_doc_turn::closeout_signal::normalized_prompt_for_match(text);
-        if normalized.chars().count() < 20 {
-            continue;
-        }
-        let needle: String = normalized.chars().take(40).collect();
-        if response_text.contains(&needle) {
-            contaminated.push(text.chars().take(80).collect::<String>());
-        }
-    }
+    let contaminated = agent_doc_workflow::session_check::queue_response_contamination_candidates(
+        queue_body,
+        exchange.content(&content),
+    );
 
     if contaminated.is_empty() {
         return Ok(GuardResult::None);
@@ -182,14 +119,10 @@ pub(crate) fn check_dropped_exchange_prompt_guard(
         .as_deref()
         .map(String::as_str)
         .unwrap_or_default();
-    let still_missing: Vec<String> = state
-        .dropped_exchange_prompts
-        .iter()
-        .filter(|prompt| {
-            !agent_doc_turn::closeout_signal::exchange_contains_prompt_line(head, prompt)
-        })
-        .cloned()
-        .collect();
+    let still_missing = agent_doc_turn::closeout_signal::still_missing_dropped_exchange_prompts(
+        head,
+        &state.dropped_exchange_prompts,
+    );
     if still_missing.is_empty() {
         // The dropped prompt reached the committed document — resolved.
         crate::cycle_state::clear_dropped_exchange_prompts(file)?;

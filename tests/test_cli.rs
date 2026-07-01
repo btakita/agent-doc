@@ -3345,6 +3345,60 @@ fn test_agent_doc_queue_owns_queue_command_classification() {
 }
 
 #[test]
+fn test_agent_doc_queue_owns_dispatch_item_classification_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let queue_lib = fs::read_to_string(manifest_dir.join("agent-doc-queue/src/lib.rs")).unwrap();
+    assert!(
+        queue_lib.contains("pub mod dispatch_item;"),
+        "agent-doc-queue should expose dispatch item classification policy"
+    );
+
+    let dispatch_item =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/dispatch_item.rs")).unwrap();
+    for required in [
+        "pub enum QueueItemKind",
+        "pub struct QueueItem",
+        "pub fn classify(",
+    ] {
+        assert!(
+            dispatch_item.contains(required),
+            "agent-doc-queue must own dispatch item classification policy: {required}"
+        );
+    }
+
+    let queue_dispatch_source =
+        fs::read_to_string(manifest_dir.join("src/queue_dispatch.rs")).unwrap();
+    for forbidden in [
+        "pub enum QueueItemKind",
+        "pub struct QueueItem",
+        "pub fn classify(",
+        "pub use agent_doc_queue::dispatch_item",
+        "pub(crate) use agent_doc_queue::dispatch_item",
+    ] {
+        assert!(
+            !queue_dispatch_source.contains(forbidden),
+            "queue_dispatch must stay an effect adapter and not re-own dispatch item classification: {forbidden}"
+        );
+    }
+    assert!(
+        queue_dispatch_source.contains("use agent_doc_queue::dispatch_item::QueueItem;"),
+        "queue_dispatch should depend on the focused dispatch item type directly"
+    );
+
+    let orchestrate_source = fs::read_to_string(manifest_dir.join("src/orchestrate.rs")).unwrap();
+    let orchestrate_dag_source =
+        fs::read_to_string(manifest_dir.join("src/orchestrate/dag.rs")).unwrap();
+    assert!(
+        orchestrate_source.contains("agent_doc_queue::dispatch_item::{")
+            && orchestrate_source.contains("QueueItemKind")
+            && orchestrate_source.contains("classify")
+            && !orchestrate_source.contains("queue_dispatch::classify(")
+            && !orchestrate_dag_source.contains("queue_dispatch::classify("),
+        "orchestration should use dispatch item classification from agent-doc-queue directly"
+    );
+}
+
+#[test]
 fn test_agent_doc_turn_owns_closeout_signal_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     assert!(

@@ -6,6 +6,7 @@
 
 pub mod backlog_sync;
 pub mod component_attrs;
+pub mod dispatch_item;
 pub mod document_queue;
 pub mod drain_owner;
 pub mod free_text_admission;

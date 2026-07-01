@@ -1,7 +1,7 @@
 //! # Module: queue_dispatch
 //!
 //! ## Spec
-//! - Classifies orchestration items as `Prompt` or `Command` based on leading `/`.
+//! - Dispatches items classified by `agent-doc-queue` as prompts or commands.
 //! - Commands are dispatched through three paths in priority order:
 //!   1. Supervisor IPC — if a supervisor socket is active for the document session
 //!   2. tmux send-keys — if the document's harness pane is alive
@@ -19,9 +19,6 @@
 //!   immediately with a descriptive error.
 //!
 //! ## Evals
-//! - classify_prompt_item
-//! - classify_command_item
-//! - classify_command_with_args
 //! - dispatch_inline_model_updates_override
 //! - dispatch_inline_compact_runs_subprocess
 //! - dispatch_tmux_sends_command_text
@@ -36,56 +33,9 @@ use anyhow::{Context, Result};
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_orchestration::sessions;
 use agent_doc_orchestration::supervisor::ipc as supervisor_ipc;
-
-/// Classification of a queue/orchestration item.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum QueueItemKind {
-    Prompt,
-    Command,
-}
-
-/// A classified queue item with its raw text and parsed components.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct QueueItem {
-    pub kind: QueueItemKind,
-    pub raw: String,
-    /// For commands: the command name without leading `/` (e.g., "clear", "model").
-    /// For prompts: same as `raw`.
-    pub command: Option<String>,
-    /// For commands: arguments after the command name. Empty for prompts.
-    pub args: Vec<String>,
-}
-
-/// Classify a text item as a prompt or command.
-pub fn classify(text: &str) -> QueueItem {
-    let trimmed = text.trim();
-    if let Some(command) = agent_doc_queue::queue_command::classify(trimmed) {
-        return QueueItem {
-            kind: QueueItemKind::Command,
-            raw: command.raw,
-            command: Some(command.name),
-            args: command.args,
-        };
-    }
-    if let Some(without_slash) = trimmed.strip_prefix('/') {
-        let mut parts = without_slash.split_whitespace();
-        let command = parts.next().unwrap_or("").to_string();
-        let args: Vec<String> = parts.map(String::from).collect();
-        QueueItem {
-            kind: QueueItemKind::Command,
-            raw: trimmed.to_string(),
-            command: Some(command),
-            args,
-        }
-    } else {
-        QueueItem {
-            kind: QueueItemKind::Prompt,
-            raw: trimmed.to_string(),
-            command: None,
-            args: Vec::new(),
-        }
-    }
-}
+use agent_doc_queue::dispatch_item::QueueItem;
+#[cfg(test)]
+use agent_doc_queue::dispatch_item::classify;
 
 /// Commands that can be executed inline without a harness session.
 const INLINE_COMMANDS: &[&str] = &["model", "compact"];
@@ -444,60 +394,6 @@ mod tests {
             pane_id: None,
             harness: "codex".to_string(),
         }
-    }
-
-    #[test]
-    fn classify_prompt_item() {
-        let item = classify("do #fix1");
-        assert_eq!(item.kind, QueueItemKind::Prompt);
-        assert_eq!(item.raw, "do #fix1");
-        assert!(item.command.is_none());
-        assert!(item.args.is_empty());
-    }
-
-    #[test]
-    fn classify_command_item() {
-        let item = classify("/clear");
-        assert_eq!(item.kind, QueueItemKind::Command);
-        assert_eq!(item.raw, "/clear");
-        assert_eq!(item.command.as_deref(), Some("clear"));
-        assert!(item.args.is_empty());
-    }
-
-    #[test]
-    fn classify_command_with_args() {
-        let item = classify("/model sonnet");
-        assert_eq!(item.kind, QueueItemKind::Command);
-        assert_eq!(item.command.as_deref(), Some("model"));
-        assert_eq!(item.args, vec!["sonnet"]);
-    }
-
-    #[test]
-    fn classify_command_with_multiple_args() {
-        let item = classify("/compact tasks/agent-doc/agent-doc-bugs.md");
-        assert_eq!(item.kind, QueueItemKind::Command);
-        assert_eq!(item.command.as_deref(), Some("compact"));
-        assert_eq!(item.args, vec!["tasks/agent-doc/agent-doc-bugs.md"]);
-    }
-
-    #[test]
-    fn classify_trims_whitespace() {
-        let item = classify("  /clear  ");
-        assert_eq!(item.kind, QueueItemKind::Command);
-        assert_eq!(item.raw, "/clear");
-    }
-
-    #[test]
-    fn classify_empty_slash() {
-        let item = classify("/");
-        assert_eq!(item.kind, QueueItemKind::Command);
-        assert_eq!(item.command.as_deref(), Some(""));
-    }
-
-    #[test]
-    fn classify_review_prompt() {
-        let item = classify("Review the pending items");
-        assert_eq!(item.kind, QueueItemKind::Prompt);
     }
 
     #[test]

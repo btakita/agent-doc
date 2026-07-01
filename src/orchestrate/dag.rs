@@ -261,7 +261,7 @@ pub(crate) fn run_ordered_tasks_internal(
             task.label
         );
 
-        let item = queue_dispatch::classify(&task.label);
+        let item = classify(&task.label);
         match item.kind {
             QueueItemKind::Command => {
                 let result = queue_dispatch::dispatch_command(&item, &dispatch_ctx)?;
@@ -507,7 +507,7 @@ pub(crate) fn run_scheduled_dag_tasks_internal(
                 AutoDagNodeState::Running,
             )?;
             let prompt = apply_prompt_preset_block(&node.prompt, options.prompt_preset_block);
-            let item = queue_dispatch::classify(&node.label);
+            let item = classify(&node.label);
             let graph_context = options
                 .graph_evidence
                 .and_then(|evidence| evidence.prompt_context_for_task(&node.label).transpose())

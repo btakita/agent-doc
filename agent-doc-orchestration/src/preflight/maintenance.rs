@@ -7,8 +7,12 @@ use agent_doc_element_backlog::backlog::{
     maintenance_surface_label, review_counts, should_reap_already_done_mirrors,
     should_reap_ops_proof_completions, tracked_body_for_reorder,
 };
-use agent_doc_queue::queue_response::{
-    free_text_head_answered_by_response, queue_prompt_text_is_free_text,
+use agent_doc_queue::{
+    free_text_admission::{
+        FreeTextAdmissionScope, free_text_prompt_is_backlog_task, normalize_admitted_free_text,
+        queue_currently_active_for_free_text_admission, queue_free_text_admission_scope,
+    },
+    queue_response::{free_text_head_answered_by_response, queue_prompt_text_is_free_text},
 };
 
 /// Resolve the live finalize-pipeline view surfaced in preflight output
@@ -1291,7 +1295,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         && collect_actionable_free_text_prompts(
             &current_content,
             &[],
-            &QueueFreeTextAdmissionScope::None,
+            &FreeTextAdmissionScope::None,
         )
         .has_work()
     {
@@ -1371,8 +1375,13 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     });
     let queue_active_for_free_text =
         queue_currently_active_for_free_text_admission(&current_content, &comp.attrs);
-    let queue_free_text_scope =
-        queue_origin_free_text_admission_scope(file, &current_content, &comp.attrs, &entries);
+    let snapshot_content = snapshot::load(file).ok().flatten();
+    let queue_free_text_scope = queue_free_text_admission_scope(
+        &current_content,
+        &comp.attrs,
+        &entries,
+        snapshot_content.as_deref(),
+    );
     if let Some(admission) = admit_free_text_work(
         file,
         &current_content,
@@ -3171,41 +3180,15 @@ struct FreeTextAdmission {
     execution_label: &'static str,
 }
 
-#[derive(Debug, Clone, Default)]
-enum QueueFreeTextAdmissionScope {
-    #[default]
-    None,
-    All,
-    NormalizedKeys(std::collections::HashSet<String>),
-}
-
-impl QueueFreeTextAdmissionScope {
-    fn allows_prompt(&self, content: &str, text: &str) -> bool {
-        if !free_text_prompt_is_backlog_task(content, text) {
-            return false;
-        }
-        match self {
-            Self::None => false,
-            Self::All => true,
-            Self::NormalizedKeys(keys) => {
-                let key = agent_doc_queue::queue_response::normalize_for_answer_match(
-                    &normalize_admitted_free_text(text),
-                );
-                keys.contains(&key)
-            }
-        }
-    }
-}
-
 fn collect_actionable_free_text_prompts(
     content: &str,
     entries: &[agent_doc_queue::document_queue::QueueEntry],
-    queue_scope: &QueueFreeTextAdmissionScope,
+    queue_scope: &FreeTextAdmissionScope,
 ) -> ActionableFreeTextPrompts {
     let mut prompts = Vec::new();
     if let Some(exchange_prompt) =
         agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(content)
-        && free_text_prompt_is_backlog_task(content, &exchange_prompt)
+        && free_text_prompt_is_backlog_task(&exchange_prompt)
     {
         prompts.push(FreeTextWorkPrompt {
             text: normalize_admitted_free_text(&exchange_prompt),
@@ -3213,7 +3196,7 @@ fn collect_actionable_free_text_prompts(
     }
     for entry in entries {
         if let agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) = entry
-            && queue_scope.allows_prompt(content, &prompt.text)
+            && queue_scope.allows_prompt(&prompt.text)
         {
             prompts.push(FreeTextWorkPrompt {
                 text: normalize_admitted_free_text(&prompt.text),
@@ -3226,108 +3209,6 @@ fn collect_actionable_free_text_prompts(
         !key.is_empty() && seen.insert(key)
     });
     ActionableFreeTextPrompts { prompts }
-}
-
-fn free_text_prompt_is_backlog_task(_content: &str, text: &str) -> bool {
-    let trimmed = normalize_admitted_free_text(text);
-    !trimmed.is_empty()
-        && !trimmed.starts_with('/')
-        && !trimmed.starts_with('#')
-        && !agent_doc_queue::queue_heads::is_do_directive(&trimmed)
-        && agent_doc_prompt_lines::text_line_looks_like_prompt_target(&trimmed)
-}
-
-fn queue_currently_active_for_free_text_admission(
-    content: &str,
-    queue_attrs: &std::collections::HashMap<String, String>,
-) -> bool {
-    let (fm, _) = frontmatter::parse(content).unwrap_or_default();
-    let frontmatter_active = match fm
-        .queue
-        .as_deref()
-        .and_then(agent_doc_frontmatter::frontmatter::QueueControl::parse)
-    {
-        Some(agent_doc_frontmatter::frontmatter::QueueControl::Start) => true,
-        Some(agent_doc_frontmatter::frontmatter::QueueControl::Stop) => false,
-        None => fm.queue_active.unwrap_or(false),
-    };
-    let marker_active = agent_doc_queue::document_queue::has_auto_attr(queue_attrs)
-        || matches!(
-            agent_doc_queue::document_queue::marker_control(queue_attrs),
-            Some(agent_doc_frontmatter::frontmatter::QueueControl::Start)
-        );
-    frontmatter_active || marker_active
-}
-
-fn queue_origin_free_text_admission_scope(
-    file: &Path,
-    content: &str,
-    queue_attrs: &std::collections::HashMap<String, String>,
-    entries: &[agent_doc_queue::document_queue::QueueEntry],
-) -> QueueFreeTextAdmissionScope {
-    if !queue_currently_active_for_free_text_admission(content, queue_attrs) {
-        return QueueFreeTextAdmissionScope::All;
-    }
-
-    let Ok(Some(snapshot_content)) = snapshot::load(file) else {
-        return QueueFreeTextAdmissionScope::None;
-    };
-    let snapshot_keys = snapshot_queue_free_text_prompt_keys(&snapshot_content);
-    let mut new_keys = std::collections::HashSet::new();
-    for entry in entries {
-        let agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) = entry else {
-            continue;
-        };
-        if !free_text_prompt_is_backlog_task(content, &prompt.text) {
-            continue;
-        }
-        let key = agent_doc_queue::queue_response::normalize_for_answer_match(
-            &normalize_admitted_free_text(&prompt.text),
-        );
-        if !key.is_empty() && !snapshot_keys.contains(&key) {
-            new_keys.insert(key);
-        }
-    }
-    if new_keys.is_empty() {
-        QueueFreeTextAdmissionScope::None
-    } else {
-        QueueFreeTextAdmissionScope::NormalizedKeys(new_keys)
-    }
-}
-
-fn snapshot_queue_free_text_prompt_keys(content: &str) -> std::collections::HashSet<String> {
-    let mut keys = std::collections::HashSet::new();
-    let Ok(components) = agent_doc_element::element::parse(content) else {
-        return keys;
-    };
-    let Some(queue) = components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
-        return keys;
-    };
-    let body = &content[queue.open_end..queue.close_start];
-    let Ok(entries) = agent_doc_queue::document_queue::parse(body) else {
-        return keys;
-    };
-    for entry in entries {
-        let agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) = entry else {
-            continue;
-        };
-        if free_text_prompt_is_backlog_task(content, &prompt.text) {
-            let key = agent_doc_queue::queue_response::normalize_for_answer_match(
-                &normalize_admitted_free_text(&prompt.text),
-            );
-            if !key.is_empty() {
-                keys.insert(key);
-            }
-        }
-    }
-    keys
-}
-
-fn normalize_admitted_free_text(text: &str) -> String {
-    text.trim().trim_start_matches('❯').trim().to_string()
 }
 
 fn append_empty_agent_component(content: &str, name: &str) -> String {
@@ -3348,7 +3229,7 @@ fn admit_free_text_work(
     content: &str,
     entries: &[agent_doc_queue::document_queue::QueueEntry],
     project_root: Option<&Path>,
-    queue_scope: &QueueFreeTextAdmissionScope,
+    queue_scope: &FreeTextAdmissionScope,
     queue_start_required: bool,
 ) -> Result<Option<FreeTextAdmission>> {
     let prompts = collect_actionable_free_text_prompts(content, entries, queue_scope);
@@ -3429,7 +3310,7 @@ fn admit_free_text_work(
         .clone();
     let mut queue_entries: Vec<agent_doc_queue::document_queue::QueueEntry> = entries
         .iter()
-        .filter(|entry| !queue_entry_is_admitted_free_text(content, entry, queue_scope))
+        .filter(|entry| !queue_entry_is_admitted_free_text(entry, queue_scope))
         .cloned()
         .collect();
 
@@ -3503,14 +3384,13 @@ fn admit_free_text_work(
 }
 
 fn queue_entry_is_admitted_free_text(
-    content: &str,
     entry: &agent_doc_queue::document_queue::QueueEntry,
-    queue_scope: &QueueFreeTextAdmissionScope,
+    queue_scope: &FreeTextAdmissionScope,
 ) -> bool {
     matches!(
         entry,
         agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
-            if queue_scope.allows_prompt(content, &prompt.text)
+            if queue_scope.allows_prompt(&prompt.text)
     )
 }
 

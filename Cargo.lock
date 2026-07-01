@@ -564,6 +564,7 @@ dependencies = [
  "agent-doc-hash",
  "agent-doc-lease",
  "agent-doc-markdown-ast",
+ "agent-doc-prompt-lines",
  "anyhow",
  "libc",
  "proptest",

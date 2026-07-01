@@ -3209,6 +3209,50 @@ fn test_agent_doc_queue_owns_free_text_response_proof_policy() {
 }
 
 #[test]
+fn test_agent_doc_queue_owns_free_text_admission_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let free_text_admission =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/free_text_admission.rs"))
+            .unwrap();
+    for required in [
+        "pub enum FreeTextAdmissionScope",
+        "pub fn normalize_admitted_free_text",
+        "pub fn free_text_prompt_is_backlog_task",
+        "pub fn queue_currently_active_for_free_text_admission",
+        "pub fn queue_free_text_admission_scope",
+        "pub fn snapshot_queue_free_text_prompt_keys",
+    ] {
+        assert!(
+            free_text_admission.contains(required),
+            "agent-doc-queue must own queue free-text admission policy: {required}"
+        );
+    }
+
+    let maintenance = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
+    )
+    .unwrap();
+    for forbidden in [
+        "enum QueueFreeTextAdmissionScope",
+        "fn normalize_admitted_free_text",
+        "fn free_text_prompt_is_backlog_task",
+        "fn queue_currently_active_for_free_text_admission",
+        "fn queue_origin_free_text_admission_scope",
+        "fn snapshot_queue_free_text_prompt_keys",
+    ] {
+        assert!(
+            !maintenance.contains(forbidden),
+            "preflight maintenance must not re-own queue free-text admission policy: {forbidden}"
+        );
+    }
+    assert!(
+        maintenance.contains("free_text_admission::{")
+            && maintenance.contains("queue_free_text_admission_scope("),
+        "preflight maintenance should adapt snapshots into focused queue free-text admission policy"
+    );
+}
+
+#[test]
 fn test_agent_doc_queue_owns_queue_prompt_echo_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let queue_response =

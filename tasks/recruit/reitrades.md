@@ -808,6 +808,12 @@ The current committed §5 now opens:
 > The work is structured in phases so you're never committing to the whole list at once. That keeps your spend controlled and lets us validate the new code structure against your live data before you commit the full budget.
 
 Reopen the PDF once more — the §5 heading should read **"5. Phasing & engagement options."** If it still shows "Recommended phasing," the viewer is caching an old file (the committed PDF on disk has the new heading — verified). If a different phrase inside §5 reads wrong, quote it and I'll fix that exact line.
+❯ Here is Arthur's response. I want to see what is current budget is for another freelancer.
+```
+Brian, I appreciate your proposal but we ended up hiring a freelancer from overseas via upwork as it was much more affordable given that we’re bootstrapped and at very early stages. 
+```
+
+❯ Here is the job posting https://www.linkedin.com/jobs/view/4433882516/
 ### Re: LinkedIn draft, plain-text for copy/paste — opus-4-8
 
 > **Queue prompt:** Format the linkedin draft so I can copy/paste into linkedin message.
@@ -829,7 +835,7 @@ The short version:
 
 • On "100% accurate" AI: I scope it honestly. Deterministic code owns every number and validation, the AI only proposes, and low-confidence values get human review before anything reaches buyers. The proposal lays out how.
 
-Full breakdown, phasing, and options are in the attached. Want to grab 20 minutes this week so I can walk you through it?
+Full breakdown, phasing, and options are in the attached. Want to grab some time this week so I can walk you through it?
 
 Best,
 Brian
@@ -839,7 +845,7 @@ Notes:
 - No markdown left — `•` and the line breaks paste as-is into LinkedIn.
 - Blank line between each bullet so it stays scannable in the narrow message pane.
 - If you'd rather send it more compact (no blank lines between bullets), say so and I'll tighten it. Or I can publish it via `corky`/LinkedIn as a draft (no auto-send).
-<!-- agent:boundary:d0132fb3 -->
+<!-- agent:boundary:9facdeb5 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -9,6 +9,8 @@ use std::process::Command;
 
 use agent_doc_tmux_commands::TmuxCommand;
 
+pub mod input_diag;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TmuxIoConfig {
     pub binary: String,

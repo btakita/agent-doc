@@ -232,8 +232,11 @@ fn try_supervisor_dispatch(
     // The harness interprets `/command` lines natively.
     let bytes = agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(&item.raw)
         .to_string();
-    agent_doc_orchestration::input_diag::log_text_submit(
-        Some(&ctx.file),
+    agent_doc_tmux_io::input_diag::log_text_submit(
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(
+            Some(&ctx.file),
+            agent_doc_orchestration::ops_log::log_op,
+        ),
         "queue_dispatch.supervisor_ipc",
         &format!("socket:{}", sock.display()),
         &bytes,
@@ -273,8 +276,11 @@ fn try_tmux_dispatch(item: &QueueItem, ctx: &DispatchContext) -> Result<Option<D
     let profile = agent_doc_tmux_commands::tmux_submit_profile_for_harness(&ctx.harness);
 
     // Send the command text through the canonical tmux submit path.
-    agent_doc_orchestration::input_diag::log_text_submit(
-        Some(&ctx.file),
+    agent_doc_tmux_io::input_diag::log_text_submit(
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(
+            Some(&ctx.file),
+            agent_doc_orchestration::ops_log::log_op,
+        ),
         "queue_dispatch.tmux_send_keys",
         &format!("pane:{pane_id}"),
         &item.raw,

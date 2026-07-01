@@ -382,8 +382,8 @@ fn idle_queue_resubmit_pending_payload(
         return AutoTriggerOutcome::SendFailed;
     };
     let submit_key = agent_doc_tmux_commands::tmux_submit_key_for_harness(&harness.binary);
-    crate::input_diag::log_text_submit(
-        Some(file),
+    agent_doc_tmux_io::input_diag::log_text_submit(
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), crate::ops_log::log_op),
         "supervisor.idle_queue_resubmit",
         &format!("pane:{pane}"),
         "",

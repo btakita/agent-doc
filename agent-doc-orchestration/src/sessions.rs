@@ -193,8 +193,8 @@ impl Multiplexer for Tmux {
     }
 
     fn send_key(&self, pane_id: &str, key: &str) -> Result<()> {
-        crate::input_diag::log_key_event(
-            None,
+        agent_doc_tmux_io::input_diag::log_key_event(
+            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
             "sessions.send_key",
             &format!("pane:{pane_id}"),
             "tmux_send_key",
@@ -207,8 +207,8 @@ impl Multiplexer for Tmux {
 
     fn send_submitted_text(&self, pane_id: &str, text: &str) -> Result<()> {
         let profile = tmux_submit_profile_for_harness("");
-        crate::input_diag::log_text_submit(
-            None,
+        agent_doc_tmux_io::input_diag::log_text_submit(
+            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
             "sessions.send_submitted_text",
             &format!("pane:{pane_id}"),
             text,
@@ -227,8 +227,8 @@ impl Multiplexer for Tmux {
         harness: &str,
     ) -> Result<()> {
         let profile = tmux_submit_profile_for_harness(harness);
-        crate::input_diag::log_text_submit(
-            None,
+        agent_doc_tmux_io::input_diag::log_text_submit(
+            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
             "sessions.send_submitted_text_for_harness",
             &format!("pane:{pane_id}"),
             text,

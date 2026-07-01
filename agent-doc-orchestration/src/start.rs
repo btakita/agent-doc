@@ -1032,8 +1032,8 @@ fn auto_trigger_inject_command(
     if let Some(pane_id) = shared.inject_pane.as_deref() {
         let profile =
             agent_doc_tmux_commands::tmux_submit_profile_for_harness(&shared.harness_binary);
-        crate::input_diag::log_text_submit(
-            None,
+        agent_doc_tmux_io::input_diag::log_text_submit(
+            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
             "supervisor.auto_trigger",
             &format!("pane:{pane_id}"),
             &submitted_text,
@@ -1056,8 +1056,8 @@ fn auto_trigger_inject_command(
     }
 
     let payload = crate::supervisor::ipc::submit_bytes(&submitted_text).into_bytes();
-    crate::input_diag::log_text_submit(
-        None,
+    agent_doc_tmux_io::input_diag::log_text_submit(
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
         "supervisor.auto_trigger",
         "child_pty",
         &submitted_text,
@@ -1100,8 +1100,8 @@ fn auto_trigger_clear_command(
     if let Some(pane_id) = shared.inject_pane.as_deref() {
         let profile =
             agent_doc_tmux_commands::tmux_submit_profile_for_harness(&shared.harness_binary);
-        crate::input_diag::log_text_submit(
-            None,
+        agent_doc_tmux_io::input_diag::log_text_submit(
+            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
             "supervisor.auto_trigger_clear",
             &format!("pane:{pane_id}"),
             &submitted_text,
@@ -1124,8 +1124,8 @@ fn auto_trigger_clear_command(
     }
 
     let payload = crate::supervisor::ipc::submit_bytes(&submitted_text).into_bytes();
-    crate::input_diag::log_text_submit(
-        None,
+    agent_doc_tmux_io::input_diag::log_text_submit(
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
         "supervisor.auto_trigger_clear",
         "child_pty",
         &submitted_text,

@@ -263,8 +263,11 @@ impl PtySession {
                         Ok(0) => break, // parent stdin closed
                         Ok(n) => {
                             if agent_doc_tmux_commands::input_diag::verbose_enabled() {
-                                crate::input_diag::log_byte_events(
-                                    None,
+                                agent_doc_tmux_io::input_diag::log_byte_events(
+                                    agent_doc_tmux_io::input_diag::InputDiagSink::new(
+                                        None,
+                                        crate::ops_log::log_op,
+                                    ),
                                     "supervisor.forward_stdio",
                                     "child_pty",
                                     "raw_forward",
@@ -779,8 +782,11 @@ impl PtyFilter {
                             } else {
                                 "kitty_progressive_enhancement"
                             };
-                            crate::input_diag::log_key_event_verbose(
-                                None,
+                            agent_doc_tmux_io::input_diag::log_key_event_verbose(
+                                agent_doc_tmux_io::input_diag::InputDiagSink::new(
+                                    None,
+                                    crate::ops_log::log_op,
+                                ),
                                 "supervisor.pty_filter",
                                 "stdout",
                                 if should_filter {
@@ -800,8 +806,11 @@ impl PtyFilter {
                                 },
                             );
                         } else if has_lt && final_byte == b'u' {
-                            crate::input_diag::log_key_event_verbose(
-                                None,
+                            agent_doc_tmux_io::input_diag::log_key_event_verbose(
+                                agent_doc_tmux_io::input_diag::InputDiagSink::new(
+                                    None,
+                                    crate::ops_log::log_op,
+                                ),
                                 "supervisor.pty_filter",
                                 "stdout",
                                 if should_filter {

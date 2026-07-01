@@ -82,8 +82,8 @@ pub(crate) fn protected_registered_pane_state_from_capture(
     let harness = resolve_harness_for_sync(file);
     let reason = harness.protected_prompt_input_reason(capture)?;
     if reason == "active permission prompt" {
-        crate::input_diag::log_prompt_detection(
-            Some(file),
+        agent_doc_tmux_io::input_diag::log_prompt_detection(
+            agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), crate::ops_log::log_op),
             "sync.protected_registered_pane",
             "registered_pane",
             &harness.binary,

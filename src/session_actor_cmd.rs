@@ -1755,8 +1755,11 @@ fn verify_context_clear_submit_after_delivery(
             _ => "direct_pane_resubmit_acceptance",
         };
         let submit_key = agent_doc_tmux_commands::tmux_submit_key_for_harness(harness);
-        agent_doc_orchestration::input_diag::log_text_submit(
-            Some(file),
+        agent_doc_tmux_io::input_diag::log_text_submit(
+            agent_doc_tmux_io::input_diag::InputDiagSink::new(
+                Some(file),
+                agent_doc_orchestration::ops_log::log_op,
+            ),
             resubmit_source,
             &format!("pane:{pane}"),
             "",

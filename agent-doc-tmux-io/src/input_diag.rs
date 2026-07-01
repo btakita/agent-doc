@@ -6,7 +6,21 @@
 use agent_doc_tmux_commands::input_diag::{self, KeyEventMeta};
 use std::path::Path;
 
-fn emit(file: Option<&Path>, message: String) {
+pub type OpsLogFn = fn(&Path, &str);
+
+#[derive(Clone, Copy)]
+pub struct InputDiagSink<'a> {
+    file: Option<&'a Path>,
+    log_op: OpsLogFn,
+}
+
+impl<'a> InputDiagSink<'a> {
+    pub fn new(file: Option<&'a Path>, log_op: OpsLogFn) -> Self {
+        Self { file, log_op }
+    }
+}
+
+fn emit(sink: InputDiagSink<'_>, message: String) {
     // Input-delivery diagnostics are debug-level. Writing them to stderr
     // unconditionally bleeds them in front of a full-screen harness TUI (e.g.
     // OpenCode), interleaving with its status line. Keep the durable record in
@@ -15,13 +29,13 @@ fn emit(file: Option<&Path>, message: String) {
     if input_diag::verbose_enabled() {
         eprintln!("[agent-doc] {message}");
     }
-    if let Some(file) = file {
-        crate::ops_log::log_op(file, &message);
+    if let Some(file) = sink.file {
+        (sink.log_op)(file, &message);
     }
 }
 
 pub fn log_key_event(
-    file: Option<&Path>,
+    sink: InputDiagSink<'_>,
     source: &str,
     destination: &str,
     transform: &str,
@@ -30,7 +44,7 @@ pub fn log_key_event(
     meta: KeyEventMeta<'_>,
 ) {
     emit(
-        file,
+        sink,
         input_diag::format_key_event(
             source,
             destination,
@@ -44,7 +58,7 @@ pub fn log_key_event(
 }
 
 pub fn log_key_event_verbose(
-    file: Option<&Path>,
+    sink: InputDiagSink<'_>,
     source: &str,
     destination: &str,
     transform: &str,
@@ -53,12 +67,12 @@ pub fn log_key_event_verbose(
     meta: KeyEventMeta<'_>,
 ) {
     if input_diag::verbose_enabled() {
-        log_key_event(file, source, destination, transform, key, bytes, meta);
+        log_key_event(sink, source, destination, transform, key, bytes, meta);
     }
 }
 
 pub fn log_text_submit(
-    file: Option<&Path>,
+    sink: InputDiagSink<'_>,
     source: &str,
     destination: &str,
     text: &str,
@@ -67,7 +81,7 @@ pub fn log_text_submit(
     submit_key: &str,
 ) {
     emit(
-        file,
+        sink,
         input_diag::format_payload_event(
             source,
             destination,
@@ -78,7 +92,7 @@ pub fn log_text_submit(
         ),
     );
     log_key_event(
-        file,
+        sink,
         source,
         destination,
         transform,
@@ -92,7 +106,7 @@ pub fn log_text_submit(
 }
 
 pub fn log_byte_events(
-    file: Option<&Path>,
+    sink: InputDiagSink<'_>,
     source: &str,
     destination: &str,
     transform: &str,
@@ -101,14 +115,14 @@ pub fn log_byte_events(
 ) {
     for byte in bytes {
         emit(
-            file,
+            sink,
             input_diag::format_byte_event(source, destination, transform, *byte, harness),
         );
     }
 }
 
 pub fn log_transform_event(
-    file: Option<&Path>,
+    sink: InputDiagSink<'_>,
     source: &str,
     destination: &str,
     transform: &str,
@@ -117,13 +131,13 @@ pub fn log_transform_event(
     harness: Option<&str>,
 ) {
     emit(
-        file,
+        sink,
         input_diag::format_transform_event(source, destination, transform, before, after, harness),
     );
 }
 
 pub fn log_prompt_detection(
-    file: Option<&Path>,
+    sink: InputDiagSink<'_>,
     source: &str,
     destination: &str,
     harness: &str,
@@ -131,7 +145,7 @@ pub fn log_prompt_detection(
     state: &str,
 ) {
     emit(
-        file,
+        sink,
         input_diag::format_prompt_detection(source, destination, harness, reason, state),
     );
 }

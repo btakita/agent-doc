@@ -413,8 +413,8 @@ pub(crate) fn auto_start_in_session_with_lock_mode(
 
     // Start agent-doc start in the new pane
     let start_cmd = format!("{} start --route-owned {}", agent_doc_bin, start_path);
-    crate::input_diag::log_text_submit(
-        Some(file),
+    agent_doc_tmux_io::input_diag::log_text_submit(
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), crate::ops_log::log_op),
         "route.auto_start",
         &format!("pane:{new_pane}"),
         &start_cmd,
@@ -735,8 +735,11 @@ pub(crate) fn wait_for_agent_ready_outcome(
                     blocker_streak = 1;
                     last_blocker = Some(reason.clone());
                     if reason == "active permission prompt" {
-                        crate::input_diag::log_prompt_detection(
-                            None,
+                        agent_doc_tmux_io::input_diag::log_prompt_detection(
+                            agent_doc_tmux_io::input_diag::InputDiagSink::new(
+                                None,
+                                crate::ops_log::log_op,
+                            ),
                             "route.wait_for_agent_ready",
                             &format!("pane:{pane_id}"),
                             &harness.binary,

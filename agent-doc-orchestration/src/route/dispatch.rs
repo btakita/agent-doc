@@ -195,8 +195,8 @@ fn send_direct_pane_enter_resubmit(
     attempt: usize,
 ) -> DirectPaneAcceptance {
     let submit_key = agent_doc_tmux_commands::tmux_submit_key_for_harness(&harness.binary);
-    crate::input_diag::log_text_submit(
-        Some(file),
+    agent_doc_tmux_io::input_diag::log_text_submit(
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), crate::ops_log::log_op),
         "route.direct_pane_resubmit",
         &format!("pane:{pane}"),
         "",
@@ -722,8 +722,11 @@ pub(crate) fn send_command_once_unchecked(
 
     let transform = agent_doc_tmux_commands::tmux_submit_transform_for_harness(&harness.binary);
     let submit_key = agent_doc_tmux_commands::tmux_submit_key_for_harness(&harness.binary);
-    crate::input_diag::log_text_submit(
-        Some(Path::new(file_path)),
+    agent_doc_tmux_io::input_diag::log_text_submit(
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(
+            Some(Path::new(file_path)),
+            crate::ops_log::log_op,
+        ),
         "route.direct_pane_submit",
         &format!("pane:{pane}"),
         &payload,
@@ -789,8 +792,8 @@ pub(crate) fn dispatch_via_supervisor_ipc_with_mode(
         bytes: agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(&payload)
             .to_string(),
     };
-    crate::input_diag::log_text_submit(
-        Some(file),
+    agent_doc_tmux_io::input_diag::log_text_submit(
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), crate::ops_log::log_op),
         "route.supervisor_ipc",
         &format!("socket:{}:pane:{pane}", sock.display()),
         &payload,

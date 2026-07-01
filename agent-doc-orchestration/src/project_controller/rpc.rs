@@ -4603,8 +4603,11 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
     if !work.pane_id.trim().is_empty() && tmux.pane_alive(&work.pane_id) {
         let agent_doc_bin = agent_doc_supervisor_process::agent_doc_start_bin();
         let start_cmd = supervisor_replacement_start_command(&agent_doc_bin, &work.file);
-        crate::input_diag::log_text_submit(
-            Some(&work.file),
+        agent_doc_tmux_io::input_diag::log_text_submit(
+            agent_doc_tmux_io::input_diag::InputDiagSink::new(
+                Some(&work.file),
+                crate::ops_log::log_op,
+            ),
             "controller.supervisor_replacement.cold_start_preserve_pane",
             &format!("pane:{}", work.pane_id),
             &start_cmd,

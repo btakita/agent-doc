@@ -14874,12 +14874,12 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
 }
 
 #[test]
-fn test_agent_doc_tmux_commands_owns_input_diag_policy() {
+fn test_agent_doc_tmux_commands_and_io_own_input_diag_layers() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let tmux_commands_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-tmux-commands/Cargo.toml")).unwrap();
     let parsed: toml::Value = toml::from_str(&tmux_commands_manifest).unwrap();
-    let dependencies = parsed["dependencies"].as_table().unwrap();
+    let tmux_commands_dependencies = parsed["dependencies"].as_table().unwrap();
 
     let tmux_commands_source =
         fs::read_to_string(manifest_dir.join("agent-doc-tmux-commands/src/lib.rs")).unwrap();
@@ -14904,8 +14904,54 @@ fn test_agent_doc_tmux_commands_owns_input_diag_policy() {
         );
     }
 
-    let orchestration_input_diag =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/input_diag.rs")).unwrap();
+    let tmux_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-tmux-io/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&tmux_io_manifest).unwrap();
+    let tmux_io_dependencies = parsed["dependencies"].as_table().unwrap();
+    assert!(
+        tmux_io_dependencies.contains_key("agent-doc-tmux-commands"),
+        "agent-doc-tmux-io input diagnostics must consume pure formatting from agent-doc-tmux-commands"
+    );
+    assert!(
+        !tmux_io_dependencies.contains_key("agent-doc-orchestration"),
+        "agent-doc-tmux-io must stay free of orchestration dependencies"
+    );
+
+    let tmux_io_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-tmux-io/src/lib.rs")).unwrap();
+    assert!(
+        tmux_io_lib.contains("pub mod input_diag;"),
+        "agent-doc-tmux-io must expose the effectful input diagnostic adapter"
+    );
+    let tmux_io_input_diag_path = manifest_dir.join("agent-doc-tmux-io/src/input_diag.rs");
+    assert!(
+        tmux_io_input_diag_path.exists(),
+        "agent-doc-tmux-io must own the input diagnostic adapter source"
+    );
+    let tmux_io_input_diag = fs::read_to_string(&tmux_io_input_diag_path).unwrap();
+    for required in [
+        "agent_doc_tmux_commands::input_diag::{self, KeyEventMeta}",
+        "pub type OpsLogFn = fn(&Path, &str);",
+        "pub fn log_key_event(",
+        "pub fn log_key_event_verbose(",
+        "pub fn log_text_submit(",
+        "pub fn log_byte_events(",
+        "pub fn log_transform_event(",
+        "pub fn log_prompt_detection(",
+        "pub struct InputDiagSink",
+        "pub fn new(file: Option<&'a Path>, log_op: OpsLogFn)",
+        "(sink.log_op)(file, &message);",
+        "input_diag::format_key_event(",
+        "input_diag::format_payload_event(",
+        "input_diag::format_byte_event(",
+        "input_diag::format_transform_event(",
+        "input_diag::format_prompt_detection(",
+    ] {
+        assert!(
+            tmux_io_input_diag.contains(required),
+            "agent-doc-tmux-io must own the effectful input diagnostic adapter: {required}"
+        );
+    }
     for forbidden in [
         "const PREFIX",
         "EDITOR_ROUTE_ATTEMPT_ID_ENV",
@@ -14921,26 +14967,37 @@ fn test_agent_doc_tmux_commands_owns_input_diag_policy() {
         "pub fn format_prompt_detection(",
         "pub use agent_doc_tmux_commands::input_diag",
         "use sha2::",
+        "agent_doc_orchestration::",
     ] {
         assert!(
-            !orchestration_input_diag.contains(forbidden),
-            "orchestration input_diag must stay an effectful adapter, not re-own pure policy: {forbidden}"
+            !tmux_io_input_diag.contains(forbidden),
+            "agent-doc-tmux-io input_diag must stay an effectful adapter, not re-own pure policy or reach into orchestration: {forbidden}"
         );
     }
+
+    let orchestration_input_diag_path =
+        manifest_dir.join("agent-doc-orchestration/src/input_diag.rs");
     assert!(
-        orchestration_input_diag.contains("input_diag::format_key_event(")
-            && orchestration_input_diag.contains("input_diag::format_payload_event(")
-            && orchestration_input_diag.contains("input_diag::format_byte_event(")
-            && orchestration_input_diag.contains("input_diag::format_transform_event(")
-            && orchestration_input_diag.contains("input_diag::format_prompt_detection("),
-        "orchestration input_diag should call focused formatters directly"
+        !orchestration_input_diag_path.exists(),
+        "orchestration must not keep an input_diag source module facade"
+    );
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod input_diag"),
+        "orchestration must not expose an input_diag facade"
     );
 
     for relative in [
         "src/queue_dispatch.rs",
+        "src/session_actor_cmd.rs",
+        "agent-doc-orchestration/src/project_controller/rpc.rs",
         "agent-doc-orchestration/src/run.rs",
         "agent-doc-orchestration/src/route.rs",
+        "agent-doc-orchestration/src/route/dispatch.rs",
+        "agent-doc-orchestration/src/route/startup.rs",
         "agent-doc-orchestration/src/sessions.rs",
+        "agent-doc-orchestration/src/sync/pane_repair.rs",
         "agent-doc-orchestration/src/start/run.rs",
         "agent-doc-orchestration/src/start.rs",
         "agent-doc-orchestration/src/start/idle_watch.rs",
@@ -14952,9 +15009,39 @@ fn test_agent_doc_tmux_commands_owns_input_diag_policy() {
             !source.contains("crate::input_diag::verbose_enabled(")
                 && !source.contains("agent_doc_orchestration::input_diag::verbose_enabled(")
                 && !source.contains("crate::input_diag::KeyEventMeta")
-                && !source.contains("agent_doc_orchestration::input_diag::KeyEventMeta"),
-            "{relative} should call focused input diagnostic gates/data directly"
+                && !source.contains("agent_doc_orchestration::input_diag::KeyEventMeta")
+                && !source.contains("crate::input_diag::")
+                && !source.contains("agent_doc_orchestration::input_diag::"),
+            "{relative} should call focused input diagnostic APIs directly"
         );
+    }
+    for relative in [
+        "src/queue_dispatch.rs",
+        "src/session_actor_cmd.rs",
+        "agent-doc-orchestration/src/project_controller/rpc.rs",
+        "agent-doc-orchestration/src/route/dispatch.rs",
+        "agent-doc-orchestration/src/route/startup.rs",
+        "agent-doc-orchestration/src/sessions.rs",
+        "agent-doc-orchestration/src/sync/pane_repair.rs",
+        "agent-doc-orchestration/src/start.rs",
+        "agent-doc-orchestration/src/start/idle_watch.rs",
+        "agent-doc-orchestration/src/start/supervisor_io.rs",
+        "agent-doc-orchestration/src/supervisor/pty.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("agent_doc_tmux_io::input_diag::log_"),
+            "{relative} should call agent-doc-tmux-io input diagnostic logging directly"
+        );
+        for forbidden in [
+            "crate::input_diag::log_",
+            "agent_doc_orchestration::input_diag::log_",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{relative} must not route input diagnostic logging through the removed orchestration facade: {forbidden}"
+            );
+        }
     }
     let route_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
@@ -14973,7 +15060,7 @@ fn test_agent_doc_tmux_commands_owns_input_diag_policy() {
         "tmux-router",
     ] {
         assert!(
-            !dependencies.contains_key(forbidden),
+            !tmux_commands_dependencies.contains_key(forbidden),
             "agent-doc-tmux-commands input diagnostic policy must stay free of orchestration, git, editor IPC, sqlite, or tmux-router effects"
         );
     }

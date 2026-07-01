@@ -68,6 +68,7 @@ dependencies = [
  "agent-doc-supervisor-io",
  "agent-doc-template",
  "agent-doc-tmux-commands",
+ "agent-doc-tmux-io",
  "agent-doc-turn",
  "agent-doc-turn-executor",
  "agent-doc-turn-executor-tmux",

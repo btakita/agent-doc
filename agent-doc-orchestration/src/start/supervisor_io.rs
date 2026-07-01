@@ -17,8 +17,8 @@ pub(crate) fn deliver_ipc_inject(
     if let Some(pane_id) = shared.inject_pane.as_deref() {
         let profile =
             agent_doc_tmux_commands::tmux_submit_profile_for_harness(&shared.harness_binary);
-        crate::input_diag::log_text_submit(
-            None,
+        agent_doc_tmux_io::input_diag::log_text_submit(
+            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
             &format!("supervisor.{diag_op}"),
             &format!("pane:{pane_id}"),
             bytes,
@@ -34,8 +34,8 @@ pub(crate) fn deliver_ipc_inject(
             Some(writer_arc) => {
                 let mut w = writer_arc.lock().unwrap();
                 let normalized = normalize_supervisor_inject_bytes(bytes);
-                crate::input_diag::log_transform_event(
-                    None,
+                agent_doc_tmux_io::input_diag::log_transform_event(
+                    agent_doc_tmux_io::input_diag::InputDiagSink::new(None, crate::ops_log::log_op),
                     &format!("supervisor.{diag_op}"),
                     "child_pty",
                     "normalize_lf_to_cr",
@@ -520,8 +520,11 @@ pub(crate) fn spawn_writer_thread(
                         shared.prompt_visible_once.load(Ordering::Relaxed),
                     );
                     if let Some(filtered) = maybe_filtered.as_deref() {
-                        crate::input_diag::log_transform_event(
-                            None,
+                        agent_doc_tmux_io::input_diag::log_transform_event(
+                            agent_doc_tmux_io::input_diag::InputDiagSink::new(
+                                None,
+                                crate::ops_log::log_op,
+                            ),
                             "supervisor.stdin",
                             "child_pty",
                             "drop_stale_ctrl_d_before_prompt",
@@ -542,16 +545,22 @@ pub(crate) fn spawn_writer_thread(
                     let maybe_translated =
                         normalize_stdin_for_harness_permission_prompt(&shared, &harness, data);
                     if let Some(translated) = maybe_translated.as_deref() {
-                        crate::input_diag::log_prompt_detection(
-                            None,
+                        agent_doc_tmux_io::input_diag::log_prompt_detection(
+                            agent_doc_tmux_io::input_diag::InputDiagSink::new(
+                                None,
+                                crate::ops_log::log_op,
+                            ),
                             "supervisor.stdin",
                             "child_pty",
                             &harness.binary,
                             "active permission prompt",
                             "active",
                         );
-                        crate::input_diag::log_transform_event(
-                            None,
+                        agent_doc_tmux_io::input_diag::log_transform_event(
+                            agent_doc_tmux_io::input_diag::InputDiagSink::new(
+                                None,
+                                crate::ops_log::log_op,
+                            ),
                             "supervisor.stdin",
                             "child_pty",
                             "opencode_permission_arrow_translation",
@@ -562,8 +571,11 @@ pub(crate) fn spawn_writer_thread(
                     }
                     let data = maybe_translated.as_deref().unwrap_or(data);
                     if agent_doc_tmux_commands::input_diag::verbose_enabled() {
-                        crate::input_diag::log_byte_events(
-                            None,
+                        agent_doc_tmux_io::input_diag::log_byte_events(
+                            agent_doc_tmux_io::input_diag::InputDiagSink::new(
+                                None,
+                                crate::ops_log::log_op,
+                            ),
                             "supervisor.stdin",
                             "child_pty",
                             "raw_forward",
@@ -653,8 +665,11 @@ pub(crate) fn spawn_writer_thread(
                             }
                         }
                         if agent_doc_tmux_commands::input_diag::verbose_enabled() {
-                            crate::input_diag::log_byte_events(
-                                None,
+                            agent_doc_tmux_io::input_diag::log_byte_events(
+                                agent_doc_tmux_io::input_diag::InputDiagSink::new(
+                                    None,
+                                    crate::ops_log::log_op,
+                                ),
                                 "supervisor.stdin",
                                 "child_pty",
                                 "raw_forward",

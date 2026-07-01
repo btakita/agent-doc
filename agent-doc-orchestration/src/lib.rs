@@ -35,7 +35,6 @@
 //! split into narrower crates.
 
 // Foundation utilities (increments 1–5).
-pub mod input_diag;
 pub mod ipc_socket;
 pub mod ops_log;
 

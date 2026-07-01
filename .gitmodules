@@ -142,3 +142,30 @@
 [submodule "src/lazily-js"]
 	path = src/lazily-js
 	url = git@github.com:lazily-hub/lazily-js.git
+[submodule "src/patchboard"]
+	path = src/patchboard
+	url = git@github.com:btakita/patchboard.git
+[submodule "src/signal-space-spec"]
+	path = src/signal-space-spec
+	url = git@github.com:signal-space/signal-space-spec.git
+[submodule "src/signal-space-rs"]
+	path = src/signal-space-rs
+	url = git@github.com:signal-space/signal-space-rs.git
+[submodule "src/signal-space-py"]
+	path = src/signal-space-py
+	url = git@github.com:signal-space/signal-space-py.git
+[submodule "src/signal-space-js"]
+	path = src/signal-space-js
+	url = git@github.com:signal-space/signal-space-js.git
+[submodule "src/signal-space-kt"]
+	path = src/signal-space-kt
+	url = git@github.com:signal-space/signal-space-kt.git
+[submodule "src/signal-space-zig"]
+	path = src/signal-space-zig
+	url = git@github.com:signal-space/signal-space-zig.git
+[submodule "src/signal-space-mcp"]
+	path = src/signal-space-mcp
+	url = git@github.com:signal-space/signal-space-mcp.git
+[submodule "src/agent-doc-signal-space"]
+	path = src/agent-doc-signal-space
+	url = git@github.com:signal-space/agent-doc-signal-space.git

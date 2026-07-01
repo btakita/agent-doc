@@ -2573,7 +2573,17 @@ pub(crate) fn guard_visible_write_idle_and_current(
     source: &str,
     expected_current: &str,
 ) -> Result<()> {
-    match guard_visible_write_reconcile(file, source, expected_current)? {
+    guard_visible_write_idle_current_or_target(file, source, expected_current, None)
+}
+
+pub(crate) fn guard_visible_write_idle_current_or_target(
+    file: &Path,
+    source: &str,
+    expected_current: &str,
+    target_content: Option<&str>,
+) -> Result<()> {
+    match guard_visible_write_reconcile_with_target(file, source, expected_current, target_content)?
+    {
         VisibleWriteReconcile::Clean => Ok(()),
         VisibleWriteReconcile::DiskDrifted { fresh_current } => {
             crate::flow::proof::log_flow_event(
@@ -2608,6 +2618,15 @@ fn guard_visible_write_reconcile(
     source: &str,
     expected_current: &str,
 ) -> Result<VisibleWriteReconcile> {
+    guard_visible_write_reconcile_with_target(file, source, expected_current, None)
+}
+
+fn guard_visible_write_reconcile_with_target(
+    file: &Path,
+    source: &str,
+    expected_current: &str,
+    target_content: Option<&str>,
+) -> Result<VisibleWriteReconcile> {
     guard_visible_write_idle(file, source)?;
     let indicator_path = file
         .canonicalize()
@@ -2640,6 +2659,27 @@ fn guard_visible_write_reconcile(
                     source,
                     expected_current.len(),
                     expected_hash,
+                    actual_current.len(),
+                    disk_hash,
+                    live.len,
+                    live.hash,
+                    live.timestamp_ms
+                ),
+            );
+        } else if let Some(target) = target_content
+            && actual_current == expected_current
+            && live_buffer_snapshot_matches_content(&live, target)
+        {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "visible_write_live_buffer_matches_target file={} source={} expected_len={} expected_hash={} target_len={} target_hash={} disk_len={} disk_hash={} live_len={} live_hash={} live_ts={}",
+                    file.display(),
+                    source,
+                    expected_current.len(),
+                    agent_doc_hash::content_hash(expected_current),
+                    target.len(),
+                    agent_doc_hash::content_hash(target),
                     actual_current.len(),
                     disk_hash,
                     live.len,
@@ -2694,6 +2734,16 @@ fn guard_visible_write_reconcile(
     })
 }
 
+fn live_buffer_snapshot_matches_content(
+    snapshot: &agent_doc_debounce::LiveBufferSnapshot,
+    content: &str,
+) -> bool {
+    snapshot.len == content.len()
+        && snapshot
+            .hash
+            .eq_ignore_ascii_case(&agent_doc_hash::content_hash(content))
+}
+
 /// Drive the visible-write reconcile loop (#ipc-drift-visbuf-reconcile).
 ///
 /// Starting from `initial_current`/`initial_payload` (the merge computed against
@@ -2711,14 +2761,14 @@ fn reconcile_visible_write<T>(
     initial_current: String,
     initial_payload: T,
     max_attempts: usize,
-    mut guard: impl FnMut(&Path, &str) -> Result<VisibleWriteReconcile>,
+    mut guard: impl FnMut(&Path, &str, &T) -> Result<VisibleWriteReconcile>,
     mut recompute: impl FnMut(&str) -> Result<T>,
-    fail_closed: impl FnOnce(&Path, &str) -> Result<()>,
+    fail_closed: impl FnOnce(&Path, &str, &T) -> Result<()>,
 ) -> Result<(String, T)> {
     let mut current = initial_current;
     let mut payload = initial_payload;
     for _ in 0..max_attempts {
-        match guard(file, &current)? {
+        match guard(file, &current, &payload)? {
             VisibleWriteReconcile::Clean => return Ok((current, payload)),
             VisibleWriteReconcile::DiskDrifted { fresh_current } => {
                 current = fresh_current;
@@ -2728,7 +2778,7 @@ fn reconcile_visible_write<T>(
     }
     // Document kept changing under us across every reconcile attempt; fall back
     // to the fail-closed guard so the operator retries.
-    fail_closed(file, &current)?;
+    fail_closed(file, &current, &payload)?;
     Ok((current, payload))
 }
 
@@ -4041,6 +4091,55 @@ scratch
         assert!(matches!(outcome, VisibleWriteReconcile::Clean));
     }
     #[test]
+    fn visible_write_reconcile_accepts_live_buffer_matching_target() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/live-buffer")).unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        let expected = "\
+<!-- agent:exchange patch=append -->
+❯ Fix the repair retry
+<!-- /agent:exchange -->
+";
+        let target = expected.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: Fix the repair retry - gpt-5\n\nDone.\n<!-- /agent:exchange -->",
+        );
+        fs::write(&doc, expected).unwrap();
+        let doc_str = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        agent_doc_debounce::record_live_buffer_digest(
+            &doc_str,
+            target.len(),
+            &agent_doc_hash::content_hash(&target),
+        )
+        .unwrap();
+
+        let outcome = guard_visible_write_reconcile_with_target(
+            &doc,
+            "test_live_buffer_matches_target",
+            expected,
+            Some(&target),
+        )
+        .unwrap();
+
+        assert!(matches!(outcome, VisibleWriteReconcile::Clean));
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            expected,
+            "the guard only classifies proof; the caller still owns the disk write"
+        );
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("visible_write_live_buffer_matches_target")
+                && log.contains("source=test_live_buffer_matches_target"),
+            "target-matching live-buffer proof should be logged:\n{log}"
+        );
+        assert!(
+            !log.contains("visible_write_deferred_live_buffer_changed"),
+            "a target-matching live buffer must not trip the drift guard:\n{log}"
+        );
+    }
+    #[test]
     fn visible_write_reconcile_reports_disk_drift_without_live_buffer_edit() {
         let dir = TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
@@ -4080,7 +4179,7 @@ scratch
         let guard_calls = std::cell::RefCell::new(0usize);
         let recompute_calls = std::cell::RefCell::new(0usize);
 
-        let guard = |_f: &Path, expected: &str| -> Result<VisibleWriteReconcile> {
+        let guard = |_f: &Path, expected: &str, _payload: &String| -> Result<VisibleWriteReconcile> {
             let mut n = guard_calls.borrow_mut();
             *n += 1;
             if *n == 1 {
@@ -4098,7 +4197,7 @@ scratch
             // The re-merge incorporates the foreign disk content + the response.
             Ok(format!("{current}+RESPONSE"))
         };
-        let fail_closed = |_f: &Path, _c: &str| -> Result<()> {
+        let fail_closed = |_f: &Path, _c: &str, _payload: &String| -> Result<()> {
             panic!("must not fail closed on a reconcilable foreign append");
         };
 
@@ -4127,7 +4226,7 @@ scratch
         fs::write(&doc, "seed\n").unwrap();
 
         let counter = std::cell::RefCell::new(0usize);
-        let guard = |_f: &Path, _e: &str| -> Result<VisibleWriteReconcile> {
+        let guard = |_f: &Path, _e: &str, _payload: &String| -> Result<VisibleWriteReconcile> {
             let mut n = counter.borrow_mut();
             *n += 1;
             Ok(VisibleWriteReconcile::DiskDrifted {
@@ -4135,7 +4234,7 @@ scratch
             })
         };
         let recompute = |current: &str| -> Result<String> { Ok(current.to_string()) };
-        let fail_closed = |_f: &Path, _c: &str| -> Result<()> {
+        let fail_closed = |_f: &Path, _c: &str, _payload: &String| -> Result<()> {
             anyhow::bail!("document still changing");
         };
 

@@ -4,6 +4,8 @@
 //! trigger or context clear. They do not read documents, inspect panes, or
 //! submit commands; callers provide the observed executor/document facts.
 
+use serde::{Deserialize, Serialize};
+
 pub const CLEAR_COOLDOWN_RESUME_IDLE_TICKS: u32 = 4;
 pub const CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS: u64 = 60;
 
@@ -69,6 +71,36 @@ pub struct IdleQueueContextClearInFlightSettleFacts {
 pub struct IdleQueueContextClearInFlightSettle {
     pub settled_idle_ticks: u32,
     pub settled_now: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextClearInFlight {
+    pub file: String,
+    pub target: String,
+    pub harness: String,
+    pub command: String,
+    pub head_sha256: Option<String>,
+    pub head_bytes: Option<usize>,
+    pub written_at: u64,
+}
+
+pub fn context_clear_in_flight_marker(
+    file: String,
+    target: &str,
+    harness: &str,
+    command: &str,
+    active_head: Option<&str>,
+    written_at: u64,
+) -> ContextClearInFlight {
+    ContextClearInFlight {
+        file,
+        target: target.to_string(),
+        harness: harness.to_string(),
+        command: command.to_string(),
+        head_sha256: active_head.map(agent_doc_hash::content_hash),
+        head_bytes: active_head.map(str::len),
+        written_at,
+    }
 }
 
 pub fn clean_session_head_forces_context_reset(
@@ -523,6 +555,29 @@ mod tests {
             context_clear_in_flight_marker_active(200, 100, CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS,),
             "clock skew must not underflow into a stale marker"
         );
+    }
+
+    #[test]
+    fn context_clear_in_flight_marker_records_head_hash_and_len() {
+        let marker = context_clear_in_flight_marker(
+            "plan.md".to_string(),
+            "%1",
+            "codex",
+            "/clear",
+            Some("do [#a]"),
+            42,
+        );
+
+        assert_eq!(marker.file, "plan.md");
+        assert_eq!(marker.target, "%1");
+        assert_eq!(marker.harness, "codex");
+        assert_eq!(marker.command, "/clear");
+        assert_eq!(marker.head_bytes, Some("do [#a]".len()));
+        assert_eq!(
+            marker.head_sha256.as_deref(),
+            Some(agent_doc_hash::content_hash("do [#a]").as_str())
+        );
+        assert_eq!(marker.written_at, 42);
     }
 
     #[test]

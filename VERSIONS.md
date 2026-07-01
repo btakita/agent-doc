@@ -15,7 +15,9 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   directly and keeps only git/process, snapshot, pane, registry, and actor-store
   adapters. Exchange-only post-commit IPC reposition safety now also lives in
   `agent-doc-element-exchange`, leaving git orchestration to provide only the
-  HEAD document inputs and signal decision.
+  HEAD document inputs and signal decision. Queue context-clear in-flight marker
+  payload construction now lives in `agent-doc-queue`, leaving orchestration to
+  provide marker storage and stale-file cleanup.
 
 - **Pure helper layer extracted from orchestration.** Exchange shrink/ack retry
   and prompt-dedupe helpers now live in `agent-doc-element-exchange`; preflight

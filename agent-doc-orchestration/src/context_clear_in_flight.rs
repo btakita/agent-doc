@@ -9,23 +9,12 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_doc_queue::queue::{
-    CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS, context_clear_in_flight_marker_active,
+    CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS, ContextClearInFlight, context_clear_in_flight_marker,
+    context_clear_in_flight_marker_active,
 };
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
 
 const CONTEXT_CLEAR_IN_FLIGHT_DIR: &str = ".agent-doc/context-clear-in-flight";
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ContextClearInFlight {
-    pub file: String,
-    pub target: String,
-    pub harness: String,
-    pub command: String,
-    pub head_sha256: Option<String>,
-    pub head_bytes: Option<usize>,
-    pub written_at: u64,
-}
 
 fn now_secs() -> u64 {
     SystemTime::now()
@@ -58,15 +47,14 @@ pub fn record_context_clear_in_flight(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
-    let marker = ContextClearInFlight {
-        file: file.to_string_lossy().into_owned(),
-        target: target.to_string(),
-        harness: harness.to_string(),
-        command: command.to_string(),
-        head_sha256: active_head.map(agent_doc_hash::content_hash),
-        head_bytes: active_head.map(str::len),
-        written_at: now_secs(),
-    };
+    let marker = context_clear_in_flight_marker(
+        file.to_string_lossy().into_owned(),
+        target,
+        harness,
+        command,
+        active_head,
+        now_secs(),
+    );
     let json = serde_json::to_string_pretty(&marker).context("serialize context-clear marker")?;
     std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
     Ok(())
@@ -126,11 +114,6 @@ mod tests {
         assert_eq!(marker.target, "%1");
         assert_eq!(marker.harness, "codex");
         assert_eq!(marker.command, "/clear");
-        assert_eq!(marker.head_bytes, Some("do [#a]".len()));
-        assert_eq!(
-            marker.head_sha256.as_deref(),
-            Some(agent_doc_hash::content_hash("do [#a]").as_str())
-        );
 
         clear_context_clear_in_flight(&doc).unwrap();
         assert!(context_clear_in_flight(&doc).unwrap().is_none());

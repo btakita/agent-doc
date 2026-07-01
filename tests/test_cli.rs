@@ -6002,6 +6002,8 @@ fn test_agent_doc_queue_owns_context_clear_in_flight_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-queue/src/queue.rs")).unwrap();
     for required in [
         "pub const CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS",
+        "pub struct ContextClearInFlight",
+        "pub fn context_clear_in_flight_marker(",
         "pub struct IdleQueueContextClearInFlightSettleFacts",
         "pub struct IdleQueueContextClearInFlightSettle",
         "pub fn context_clear_in_flight_marker_active(",
@@ -6018,6 +6020,9 @@ fn test_agent_doc_queue_owns_context_clear_in_flight_policy() {
     )
     .unwrap();
     for forbidden in [
+        "pub struct ContextClearInFlight",
+        "head_sha256: active_head.map",
+        "head_bytes: active_head.map",
         "const CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS",
         "saturating_sub(marker.written_at)",
     ] {
@@ -6028,6 +6033,8 @@ fn test_agent_doc_queue_owns_context_clear_in_flight_policy() {
     }
     assert!(
         context_clear_adapter.contains("agent_doc_queue::queue::{")
+            && context_clear_adapter.contains("ContextClearInFlight")
+            && context_clear_adapter.contains("context_clear_in_flight_marker")
             && context_clear_adapter.contains("context_clear_in_flight_marker_active"),
         "context_clear_in_flight.rs should call queue-owned marker policy directly"
     );

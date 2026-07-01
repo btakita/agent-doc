@@ -185,7 +185,19 @@ agent-doc write --commit tasks/agent-doc/agent-doc-bugs2.md
 ```
 
 Only use `--force-disk` if you explicitly want to override the live-editor safety guard.
-<!-- agent:boundary:b1f0f0bc -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=file_ipc patch_id=0c4fde76-ae00-4e2e-b9ec-ea2d2569924f invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0.json doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782881096099
+```
+<!-- agent:boundary:4ba735eb -->
 <!-- /agent:exchange -->
 ## Queue
 

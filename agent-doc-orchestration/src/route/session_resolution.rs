@@ -44,7 +44,8 @@ pub(crate) fn resolve_preferred_session_for_layout(
     }
 
     let focus_owned = focus.map(|path| path.to_string_lossy().into_owned());
-    if let Some(scope_root) = crate::sync::shared_sync_scope_root(col_args, focus_owned.as_deref())
+    if let Some(scope_root) =
+        agent_doc_sync::shared_sync_scope_root(col_args, focus_owned.as_deref())
         && let Some(session) = crate::sync::configured_session_for_root(tmux, &scope_root)
     {
         return Some(session);

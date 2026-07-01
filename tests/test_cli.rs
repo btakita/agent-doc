@@ -13781,6 +13781,111 @@ fn test_agent_doc_controller_owns_route_text_predicates() {
 }
 
 #[test]
+fn test_agent_doc_sync_owns_sync_scope_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let package_version = workspace["package"]["version"].as_str();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-sync")),
+        "agent-doc-sync must stay a first-class workspace crate"
+    );
+
+    let sync_manifest = fs::read_to_string(manifest_dir.join("agent-doc-sync/Cargo.toml")).unwrap();
+    let sync: toml::Value = toml::from_str(&sync_manifest).unwrap();
+    let dependencies = sync["dependencies"].as_table().unwrap();
+    assert!(
+        dependencies.contains_key("agent-doc-fs"),
+        "sync scope root policy may depend on focused filesystem root discovery"
+    );
+    for forbidden_dependency in [
+        "agent-doc-orchestration",
+        "agent-doc-tmux",
+        "agent-doc-tmux-commands",
+        "agent-doc-tmux-io",
+        "tmux-router",
+        "notify",
+        "rusqlite",
+        "interprocess",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden_dependency),
+            "agent-doc-sync scope policy must stay free of orchestration and tmux/effect crates: {forbidden_dependency}"
+        );
+    }
+
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    let orchestration: toml::Value = toml::from_str(&orchestration_manifest).unwrap();
+    let orchestration_dependencies = orchestration["dependencies"].as_table().unwrap();
+    let dependency = orchestration_dependencies["agent-doc-sync"]
+        .as_table()
+        .unwrap();
+    assert_eq!(
+        dependency.get("path").and_then(toml::Value::as_str),
+        Some("../agent-doc-sync")
+    );
+    assert_eq!(
+        dependency.get("version").and_then(toml::Value::as_str),
+        package_version
+    );
+
+    let sync_source = fs::read_to_string(manifest_dir.join("agent-doc-sync/src/lib.rs")).unwrap();
+    for required_snippet in [
+        "pub fn normalize_scope_arg",
+        "pub fn sync_candidate_files",
+        "pub fn canonical_sync_candidate_files",
+        "pub fn common_ancestor_dir",
+        "pub fn shared_sync_scope_root",
+        "pub fn sync_scope_root",
+        "pub fn layout_state_scope_root",
+        "pub fn layout_state_path",
+        "pub fn sync_prune_state_path",
+    ] {
+        assert!(
+            sync_source.contains(required_snippet),
+            "agent-doc-sync must own sync scope policy: {required_snippet}"
+        );
+    }
+
+    let sync_orchestration =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync.rs")).unwrap();
+    let route_session_resolution = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/route/session_resolution.rs"),
+    )
+    .unwrap();
+    for forbidden_snippet in [
+        "fn normalize_scope_arg",
+        "fn sync_candidate_files(",
+        "fn canonical_sync_candidate_files",
+        "fn common_ancestor_dir",
+        "pub fn shared_sync_scope_root",
+        "fn sync_scope_root",
+        "fn layout_state_scope_root_for_sync",
+        "fn layout_state_path_for_sync",
+        "fn sync_prune_state_path_for_sync",
+    ] {
+        assert!(
+            !sync_orchestration.contains(forbidden_snippet),
+            "orchestration sync.rs must not re-own or facade sync scope policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        sync_orchestration.contains("agent_doc_sync::normalize_scope_arg")
+            && sync_orchestration.contains("agent_doc_sync::shared_sync_scope_root")
+            && sync_orchestration.contains("agent_doc_sync::layout_state_scope_root")
+            && sync_orchestration.contains("agent_doc_sync::layout_state_path")
+            && sync_orchestration.contains("agent_doc_sync::sync_prune_state_path")
+            && route_session_resolution.contains("agent_doc_sync::shared_sync_scope_root"),
+        "orchestration should call sync scope policy through agent-doc-sync directly"
+    );
+}
+
+#[test]
 fn test_agent_doc_template_owns_patch_sanitization_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let template_sanitize =

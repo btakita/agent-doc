@@ -1316,17 +1316,6 @@ fn throttle_destructive_repair(tmux: &Tmux, session_name: &str) -> bool {
     false
 }
 
-fn normalize_scope_arg(value: Option<&str>) -> Option<&str> {
-    value.and_then(|s| {
-        let trimmed = s.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed)
-        }
-    })
-}
-
 fn current_tmux_session_name(tmux: &Tmux) -> Option<String> {
     tmux.current_session()
 }
@@ -1341,24 +1330,8 @@ fn session_name_for_target_window(tmux: &Tmux, window: &str) -> Option<String> {
         .filter(|name| !name.is_empty())
 }
 
-fn sync_candidate_files(col_args: &[String], focus: Option<&str>) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    if let Some(focused) = focus.map(str::trim).filter(|path| !path.is_empty()) {
-        files.push(PathBuf::from(focused));
-    }
-    files.extend(
-        col_args
-            .iter()
-            .flat_map(|arg| arg.split(','))
-            .map(str::trim)
-            .filter(|path| !path.is_empty())
-            .map(PathBuf::from),
-    );
-    files
-}
-
 fn sync_doctor_repair_candidate(col_args: &[String], focus: Option<&str>) -> Option<PathBuf> {
-    sync_candidate_files(col_args, focus)
+    agent_doc_sync::sync_candidate_files(col_args, focus)
         .into_iter()
         .find_map(|path| {
             if !path.exists() || frontmatter_io::read_session_id(&path).is_none() {
@@ -1366,80 +1339,6 @@ fn sync_doctor_repair_candidate(col_args: &[String], focus: Option<&str>) -> Opt
             }
             Some(path.canonicalize().unwrap_or(path))
         })
-}
-
-fn canonical_sync_candidate_files(col_args: &[String], focus: Option<&str>) -> Vec<PathBuf> {
-    sync_candidate_files(col_args, focus)
-        .into_iter()
-        .filter(|path| path.exists())
-        .map(|path| path.canonicalize().unwrap_or(path))
-        .collect()
-}
-
-fn common_ancestor_dir(paths: &[PathBuf]) -> Option<PathBuf> {
-    let mut iter = paths.iter();
-    let first = iter.next()?;
-    let mut common = if first.is_dir() {
-        first.clone()
-    } else {
-        first.parent()?.to_path_buf()
-    };
-
-    for path in iter {
-        let other = if path.is_dir() {
-            path.clone()
-        } else {
-            path.parent()?.to_path_buf()
-        };
-        while !other.starts_with(&common) {
-            common = common.parent()?.to_path_buf();
-        }
-    }
-
-    Some(common)
-}
-
-pub fn shared_sync_scope_root(col_args: &[String], focus: Option<&str>) -> Option<PathBuf> {
-    let files = canonical_sync_candidate_files(col_args, focus);
-    let mut current = common_ancestor_dir(&files)?;
-    loop {
-        if current.join(".agent-doc").is_dir() {
-            return Some(current);
-        }
-        current = current.parent()?.to_path_buf();
-    }
-}
-
-fn sync_scope_root(col_args: &[String], focus: Option<&str>) -> Option<PathBuf> {
-    shared_sync_scope_root(col_args, focus)
-        .or_else(|| {
-            focus
-                .map(str::trim)
-                .filter(|path| !path.is_empty())
-                .and_then(|path| agent_doc_fs::find_project_root(Path::new(path)))
-        })
-        .or_else(|| {
-            let cwd = std::env::current_dir().ok()?;
-            agent_doc_fs::find_project_root(&cwd)
-                .or_else(|| cwd.join(".agent-doc").is_dir().then_some(cwd))
-        })
-}
-
-fn layout_state_scope_root_for_sync(col_args: &[String], focus: Option<&str>) -> PathBuf {
-    sync_scope_root(col_args, focus)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
-}
-
-fn layout_state_path_for_sync(col_args: &[String], focus: Option<&str>) -> PathBuf {
-    layout_state_scope_root_for_sync(col_args, focus)
-        .join(".agent-doc")
-        .join("last_layout.json")
-}
-
-fn sync_prune_state_path_for_sync(col_args: &[String], focus: Option<&str>) -> PathBuf {
-    let base = sync_scope_root(col_args, focus)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    base.join(".agent-doc").join("sync-prune-state.json")
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
@@ -1508,7 +1407,8 @@ fn safe_passive_prune_cleanup_mode(
     // stale registry rows and retained dead non-stash panes, but it must not
     // spend the selection budget scanning stash panes before tmux-router can
     // detach any extra visible pane from the active editor projection.
-    let state_path = sync_prune_state_path_for_sync(col_args, focus);
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let state_path = agent_doc_sync::sync_prune_state_path(col_args, focus, &cwd);
     let _ = safe_passive_prune_cleanup_mode_at(&state_path, col_args, window, epoch_millis_now());
     agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
 }
@@ -1563,7 +1463,7 @@ fn resolve_sync_target_session(
         return crate::route::resolve_preferred_session(tmux, context_session.as_deref(), "[sync]");
     }
 
-    if let Some(scope_root) = shared_sync_scope_root(col_args, focus) {
+    if let Some(scope_root) = agent_doc_sync::shared_sync_scope_root(col_args, focus) {
         if let Some(session) = configured_session_for_root(tmux, &scope_root) {
             return Some(session);
         }
@@ -1870,8 +1770,8 @@ fn run_with_options_internal(
     exact_visible_projection: bool,
     tmux: &Tmux,
 ) -> Result<()> {
-    let window = normalize_scope_arg(window);
-    let focus = normalize_scope_arg(focus);
+    let window = agent_doc_sync::normalize_scope_arg(window);
+    let focus = agent_doc_sync::normalize_scope_arg(focus);
     tracing::debug!(
         cols = ?col_args,
         window,
@@ -1961,8 +1861,9 @@ fn run_with_options_internal(
     // Column memory: for columns with non-agent files, substitute the last known
     // agent doc so the reconciler preserves the pane from the previous layout.
     // When sync is called without explicit columns, fall back to that recorded layout.
-    let layout_state_root = layout_state_scope_root_for_sync(col_args, focus);
-    let layout_state_path = layout_state_path_for_sync(col_args, focus);
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let layout_state_root = agent_doc_sync::layout_state_scope_root(col_args, focus, &cwd);
+    let layout_state_path = agent_doc_sync::layout_state_path(col_args, focus, &cwd);
     let saved_layout = match crate::project_controller::load_layout_state(&layout_state_root) {
         Ok(layout) => layout,
         Err(err) => {
@@ -6366,42 +6267,12 @@ mod tests {
         assert_eq!(filtered, vec!["file1.md", "file2.md"]);
     }
     #[test]
-    fn layout_state_path_uses_shared_sync_scope_root() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let root = tmp.path();
-        let child = root.join("src/sample-app");
-        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
-        std::fs::create_dir_all(child.join(".agent-doc")).unwrap();
-        std::fs::create_dir_all(root.join("tasks")).unwrap();
-        std::fs::create_dir_all(child.join("tasks")).unwrap();
-
-        let root_doc = root.join("tasks/root.md");
-        let child_doc = child.join("tasks/child.md");
-        std::fs::write(&root_doc, "---\nagent_doc_session: root\n---\n").unwrap();
-        std::fs::write(&child_doc, "---\nagent_doc_session: child\n---\n").unwrap();
-
-        let _cwd = ScopedCurrentDir::set(root);
-        let layout_path = layout_state_path_for_sync(
-            &[format!("{},{}", root_doc.display(), child_doc.display())],
-            None,
-        );
-        assert_eq!(layout_path, root.join(".agent-doc/last_layout.json"));
-    }
-    #[test]
     fn effective_sync_columns_fall_back_to_recorded_layout() {
         let saved_layout = vec!["left.md".to_string(), "right.md".to_string()];
         let cols =
             effective_sync_columns(&[], &saved_layout, Path::new(".agent-doc/last_layout.json"))
                 .expect("recorded layout should satisfy a no-col sync");
         assert_eq!(cols, saved_layout);
-    }
-    #[test]
-    fn empty_window_arg_normalized_to_none() {
-        assert_eq!(normalize_scope_arg(None), None);
-        assert_eq!(normalize_scope_arg(Some("")), None);
-        assert_eq!(normalize_scope_arg(Some("   ")), None);
-        assert_eq!(normalize_scope_arg(Some("@12")), Some("@12"));
-        assert_eq!(normalize_scope_arg(Some("  @12  ")), Some("@12"));
     }
     /// Empty .md files should be auto-scaffolded by sync's resolve_file.
     /// This tests the scaffolding logic inline (resolve_file is a closure in run()).

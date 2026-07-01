@@ -445,6 +445,7 @@ dependencies = [
  "agent-doc-sqlite",
  "agent-doc-supervisor",
  "agent-doc-supervisor-process",
+ "agent-doc-sync",
  "agent-doc-template",
  "agent-doc-tmux",
  "agent-doc-tmux-commands",
@@ -649,6 +650,14 @@ dependencies = [
  "portable-pty",
  "serde",
  "signal-hook",
+]
+
+[[package]]
+name = "agent-doc-sync"
+version = "0.34.65"
+dependencies = [
+ "agent-doc-fs",
+ "tempfile",
 ]
 
 [[package]]

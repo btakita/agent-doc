@@ -93,6 +93,9 @@ use agent_doc_tmux_commands::{
 };
 #[cfg(test)]
 use tmux_router::IsolatedTmux;
+use tmux_router::registry::{
+    entry_session_id, find_registry_key_by_session_id, normalize_registry,
+};
 use tmux_router::{
     PaneMoveOp, Registry as SessionRegistry, RegistryEntry as SessionEntry, RegistryLock, Tmux,
 };
@@ -333,49 +336,6 @@ fn normalize_path(path: &Path) -> PathBuf {
         }
     }
     normalized
-}
-
-fn entry_session_id<'a>(registry_key: &'a str, entry: &'a SessionEntry) -> &'a str {
-    if entry.session_id.is_empty() {
-        registry_key
-    } else {
-        entry.session_id.as_str()
-    }
-}
-
-fn choose_preferred_entry(left: &SessionEntry, right: &SessionEntry) -> bool {
-    if right.session_id.is_empty() != left.session_id.is_empty() {
-        return !right.session_id.is_empty();
-    }
-    right.started >= left.started
-}
-
-fn normalize_registry(base_dir: &Path, registry: SessionRegistry) -> SessionRegistry {
-    let mut normalized = SessionRegistry::new();
-    for (legacy_key, mut entry) in registry {
-        if entry.session_id.is_empty() {
-            entry.session_id = legacy_key.clone();
-        }
-        let file_hint = if !entry.file.is_empty() {
-            entry.file.clone()
-        } else {
-            legacy_key.clone()
-        };
-        let normalized_key = canonical_registry_key_in(base_dir, &file_hint);
-        if let Some(existing) = normalized.get(&normalized_key)
-            && !choose_preferred_entry(existing, &entry)
-        {
-            continue;
-        }
-        normalized.insert(normalized_key, entry);
-    }
-    normalized
-}
-
-fn find_registry_key_by_session_id(registry: &SessionRegistry, session_id: &str) -> Option<String> {
-    registry
-        .iter()
-        .find_map(|(key, entry)| (entry_session_id(key, entry) == session_id).then(|| key.clone()))
 }
 
 // ---------------------------------------------------------------------------

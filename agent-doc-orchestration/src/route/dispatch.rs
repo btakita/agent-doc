@@ -3,6 +3,9 @@
 use super::*;
 
 use agent_doc_controller::dispatch::{
+    AutoStartDispatchBlock, AutoStartDispatchReadyFacts, DirectPaneFullResendFacts,
+    DirectPaneNotDispatchedFacts, DispatchInjectLogFacts, classify_auto_start_dispatch_ready_block,
+    direct_pane_can_full_resend_not_landed, direct_pane_not_dispatched, dispatch_inject_log_line,
     recent_lines_contain_trigger, route_trigger_visible_in_current_draft,
 };
 use agent_doc_harness::{pane_idle_dispatch_ready, protected_prompt_draft_preview};
@@ -41,16 +44,16 @@ static DISPATCH_INJECT_ATTEMPTS: std::sync::atomic::AtomicUsize =
 /// supervisor-IPC inject so a regression can be attributed to the right path.
 fn log_dispatch_inject(file: &Path, pane: &str, harness: &HarnessConfig, transport: &str) {
     let attempt = DISPATCH_INJECT_ATTEMPTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    let file_display = file.display().to_string();
     crate::ops_log::log_op(
         file,
-        &format!(
-            "dispatch_inject file={} pane={} harness={} transport={} attempt={}",
-            file.display(),
+        &dispatch_inject_log_line(DispatchInjectLogFacts {
+            file_display: &file_display,
             pane,
-            harness.binary,
+            harness_binary: &harness.binary,
             transport,
-            attempt
-        ),
+            attempt,
+        }),
     );
 }
 
@@ -107,11 +110,14 @@ pub(crate) fn poll_direct_pane_acceptance(
                     // starts a turn, a genuine submit leaves the pane PROCESSING (not
                     // idle), so empty+idle+never-seen means the send no-op'd into a
                     // not-ready pane — the prompt was not dispatched.
-                    let not_dispatched = !poll_state.saw_trigger_visible()
-                        && last_capture
-                            .as_ref()
-                            .map(|(_, _, _, content)| pane_idle_dispatch_ready(content, harness))
-                            .unwrap_or(false);
+                    let pane_idle_dispatch_ready = last_capture
+                        .as_ref()
+                        .map(|(_, _, _, content)| pane_idle_dispatch_ready(content, harness))
+                        .unwrap_or(false);
+                    let not_dispatched = direct_pane_not_dispatched(DirectPaneNotDispatchedFacts {
+                        saw_trigger_visible: poll_state.saw_trigger_visible(),
+                        pane_idle_dispatch_ready,
+                    });
                     return DirectPaneAcceptance {
                         status: CommandDispatchStatus::Accepted,
                         elapsed,
@@ -314,21 +320,6 @@ pub(crate) fn dead_harness_shell_dispatch_block(
     Some(current_command)
 }
 
-/// Why a `#jbtsiftnosub` cold-start re-verify refuses an auto-start dispatch. The
-/// distinction matters for diagnostics: a `StartingPane` is a freshly created
-/// pane whose harness is still booting (the composer accepts keystrokes but is
-/// not yet submit-ready), while a `DeadShell` is the issue-A case where the
-/// harness already crashed/exited to a bare interactive shell.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum AutoStartDispatchBlock {
-    /// The pane is still cold-starting: no harness dispatch-ready prompt yet, but
-    /// the foreground process is NOT a bare shell (the harness is coming up).
-    StartingPane,
-    /// The harness crashed/exited to a bare interactive shell (issue A). Carries
-    /// the shell command name reported by `#{pane_current_command}`.
-    DeadShell(String),
-}
-
 /// `#jbtsiftnosub`: re-verify, immediately before an auto-start send, that the
 /// freshly created pane has reached a harness dispatch-ready prompt. The
 /// cold-start race is that `wait_for_agent_ready` proved a transient dispatch-ready
@@ -344,26 +335,18 @@ pub(crate) fn auto_start_dispatch_ready_block(
     pane: &str,
     harness: &HarnessConfig,
 ) -> Option<AutoStartDispatchBlock> {
-    // A visible harness dispatch-ready prompt means the composer is submit-ready;
-    // let the send proceed.
     let pane_shows_dispatch_ready_prompt = sessions::capture_pane(tmux, pane)
         .ok()
         .and_then(|content| agent_doc_harness::ready_prompt_candidate(&content, harness))
         .is_some();
-    if pane_shows_dispatch_ready_prompt {
-        return None;
-    }
-    // No dispatch-ready prompt: distinguish a dead bare shell (issue A) from a
-    // still-starting harness composer (issue C) by the foreground command.
-    match super::pane_display_value(tmux, pane, "#{pane_current_command}")
+    let bare_shell_command = super::pane_display_value(tmux, pane, "#{pane_current_command}")
         .map(|c| c.trim().to_string())
         .filter(|c| !c.is_empty())
-    {
-        Some(cmd) if pane_current_command_is_bare_shell(&cmd) => {
-            Some(AutoStartDispatchBlock::DeadShell(cmd))
-        }
-        _ => Some(AutoStartDispatchBlock::StartingPane),
-    }
+        .filter(|cmd| pane_current_command_is_bare_shell(cmd));
+    classify_auto_start_dispatch_ready_block(AutoStartDispatchReadyFacts {
+        pane_shows_dispatch_ready_prompt,
+        bare_shell_command,
+    })
 }
 
 /// `#jbtsiftnosub`: gate an auto-start send behind a bounded re-verify that the
@@ -646,7 +629,12 @@ pub(crate) fn send_command_unchecked(
     // budget is exhausted. The bare-Enter resubmit below cannot recover this: there
     // is no drafted text in the composer to submit.
     let mut full_resends = 0usize;
-    while acceptance.not_dispatched && full_resends < direct_pane_max_enter_resubmits() {
+    let max_full_resends = direct_pane_max_enter_resubmits();
+    while direct_pane_can_full_resend_not_landed(DirectPaneFullResendFacts {
+        not_dispatched: acceptance.not_dispatched,
+        attempts_sent: full_resends,
+        max_attempts: max_full_resends,
+    }) {
         full_resends += 1;
         crate::ops_log::log_op(
             file,

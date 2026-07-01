@@ -1436,7 +1436,13 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         ("agent-doc-orchestration/src/session_check/pending_guards.rs", "guard_") => 13,
         ("agent-doc-orchestration/src/session_check/queue_head_guards.rs", "guard_") => 2,
         ("agent-doc-orchestration/src/session_check/partial_staging.rs", "guard_") => 2,
-        ("agent-doc-orchestration/src/session_check/response_guards.rs", "guard_") => 8,
+        // 8 -> 14 (#session-check-response-guard-message-extract):
+        // response_guards now calls the focused workflow result/message
+        // builders directly for dropped queue/exchange prompts, queue-response
+        // contamination, completed reap residue, snapshot mismatch, and
+        // committed-without-response diagnostics. These are adapter references
+        // to the owning policy crate, not new local guard branches.
+        ("agent-doc-orchestration/src/session_check/response_guards.rs", "guard_") => 14,
         ("agent-doc-orchestration/src/session_check/detect.rs", "guard_") => 1,
         // +1 for the audited `guard_visible_write_idle(..., "queue_done_id_mark")`
         // call: opportunistic done-id queue marking is a document write path and
@@ -3152,6 +3158,10 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
         "pub fn annotate_struck_free_text_line",
         "fn strip_list_bullet_prefix",
         "pub fn annotate_newly_struck_free_text_heads",
+        "pub struct QueueConsumptionPlan",
+        "pub struct IpcNodeOp",
+        "pub fn to_json(&self) -> serde_json::Value",
+        "pub fn queue_consume_node_ops(",
     ] {
         assert!(
             queue_consume_policy.contains(required),
@@ -3181,6 +3191,10 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
         "pub(crate) fn annotate_struck_free_text_line",
         "fn strip_list_bullet_prefix",
         "pub(crate) fn annotate_newly_struck_free_text_heads",
+        "pub(crate) struct QueueConsumptionPlan",
+        "pub struct IpcNodeOp",
+        "impl IpcNodeOp",
+        "IpcNodeOp::consume",
     ] {
         assert!(
             !orchestration_queue_consume.contains(forbidden),
@@ -7646,6 +7660,57 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
 }
 
 #[test]
+fn test_agent_doc_workflow_owns_session_check_response_messages() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workflow_session_check =
+        fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/session_check.rs")).unwrap();
+    for required in [
+        "pub fn dropped_queue_prompt_guard_result(",
+        "pub fn queue_response_contamination_guard_result(",
+        "pub fn dropped_exchange_prompt_guard_result(",
+        "pub fn completed_pending_reap_guard_message(",
+        "pub fn snapshot_committed_guard_message(",
+        "pub fn committed_without_response_body_guard_message(",
+    ] {
+        assert!(
+            workflow_session_check.contains(required),
+            "agent-doc-workflow must own session-check response message policy: {required}"
+        );
+    }
+
+    let response_guards = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/response_guards.rs"),
+    )
+    .unwrap();
+    for forbidden in [
+        "user-authored agent:queue edit(s) were dropped during an IPC",
+        "agent:queue contains assistant response prose copied",
+        "user-authored exchange prompt(s) were dropped during an IPC",
+        "document still contains completed tracked item(s) after closeout",
+        "cycle state is committed but the snapshot does not match HEAD",
+        "cycle committed binary-owned work this turn but no assistant",
+    ] {
+        assert!(
+            !response_guards.contains(forbidden),
+            "response_guards must not re-own session-check response message policy: {forbidden}"
+        );
+    }
+    for required in [
+        "agent_doc_workflow::session_check::dropped_queue_prompt_guard_result",
+        "agent_doc_workflow::session_check::queue_response_contamination_guard_result",
+        "agent_doc_workflow::session_check::dropped_exchange_prompt_guard_result",
+        "agent_doc_workflow::session_check::completed_pending_reap_guard_message",
+        "agent_doc_workflow::session_check::snapshot_committed_guard_message",
+        "agent_doc_workflow::session_check::committed_without_response_body_guard_message",
+    ] {
+        assert!(
+            response_guards.contains(required),
+            "response_guards should call focused workflow message policy directly: {required}"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_diff_owns_partial_staging_pure_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let diff_source = fs::read_to_string(manifest_dir.join("agent-doc-diff/src/lib.rs")).unwrap();
@@ -9993,7 +10058,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
 }
 
 #[test]
-fn test_agent_doc_controller_owns_editor_route_error_naming_policy() {
+fn test_agent_doc_controller_owns_editor_route_error_path_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let controller_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-controller/src/lib.rs")).unwrap();
@@ -10008,39 +10073,42 @@ fn test_agent_doc_controller_owns_editor_route_error_naming_policy() {
 
     assert!(
         controller_lib.contains("pub mod editor_route_error;"),
-        "agent-doc-controller should expose editor route-error naming policy as a focused module"
+        "agent-doc-controller should expose editor route-error path policy as a focused module"
     );
     for required in [
         "pub const EDITOR_ROUTE_ERROR_DIAGNOSTICS_DIR",
         "pub fn editor_route_error_diagnostic_name(",
         "pub fn editor_route_error_file_name(",
+        "pub fn editor_route_error_path_for_file(",
     ] {
         assert!(
             controller_policy.contains(required),
-            "agent-doc-controller must own editor route-error naming policy: {required}"
+            "agent-doc-controller must own editor route-error path policy: {required}"
         );
     }
     for forbidden in [
+        "fn route_error_path_for_file(",
         "fn sanitized_route_error_name(",
         "pub fn editor_route_error_diagnostic_name(",
         "pub fn editor_route_error_file_name(",
+        "pub fn editor_route_error_path_for_file(",
         "pub const EDITOR_ROUTE_ERROR_DIAGNOSTICS_DIR",
         "pub use agent_doc_controller::editor_route_error",
     ] {
         assert!(
             !orchestration_adapter.contains(forbidden),
-            "orchestration editor route-error adapter must not re-own or facade naming policy: {forbidden}"
+            "orchestration editor route-error adapter must not re-own or facade path policy: {forbidden}"
         );
         assert!(
             !orchestration_lib.contains(forbidden),
-            "orchestration lib must not facade editor route-error naming policy: {forbidden}"
+            "orchestration lib must not facade editor route-error path policy: {forbidden}"
         );
     }
     assert!(
-        orchestration_adapter.contains("use agent_doc_controller::editor_route_error::{")
-            && orchestration_adapter.contains("EDITOR_ROUTE_ERROR_DIAGNOSTICS_DIR")
-            && orchestration_adapter.contains("editor_route_error_file_name(&relative)"),
-        "orchestration should import focused editor route-error naming policy directly"
+        orchestration_adapter.contains(
+            "use agent_doc_controller::editor_route_error::editor_route_error_path_for_file;"
+        ) && orchestration_adapter.contains("editor_route_error_path_for_file(file)"),
+        "orchestration should import focused editor route-error path policy directly"
     );
 }
 
@@ -12558,6 +12626,50 @@ fn test_agent_doc_tmux_owns_stash_prune_policy() {
             "agent-doc-tmux stash prune policy must stay free of orchestration, git, editor IPC, sqlite, tmux command, or tmux-router effects"
         );
     }
+}
+
+#[test]
+fn test_tmux_router_owns_session_registry_normalization_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let router_registry = fs::read_to_string(
+        manifest_dir
+            .parent()
+            .unwrap()
+            .join("tmux-router/src/registry.rs"),
+    )
+    .unwrap();
+
+    for required in [
+        "pub fn entry_session_id",
+        "pub fn normalize_registry(",
+        "pub fn find_registry_key_by_session_id(",
+    ] {
+        assert!(
+            router_registry.contains(required),
+            "tmux-router registry must own session registry normalization policy: {required}"
+        );
+    }
+
+    let sessions_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sessions.rs")).unwrap();
+    for forbidden in [
+        "fn entry_session_id",
+        "fn choose_preferred_entry(",
+        "fn normalize_registry(",
+        "fn find_registry_key_by_session_id(",
+    ] {
+        assert!(
+            !sessions_source.contains(forbidden),
+            "sessions.rs must call tmux-router registry policy directly, not re-own it: {forbidden}"
+        );
+    }
+    assert!(
+        sessions_source.contains("use tmux_router::registry::{")
+            && sessions_source.contains("entry_session_id")
+            && sessions_source.contains("find_registry_key_by_session_id")
+            && sessions_source.contains("normalize_registry"),
+        "sessions.rs should import focused tmux-router registry policy directly"
+    );
 }
 
 #[test]

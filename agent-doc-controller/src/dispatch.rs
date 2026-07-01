@@ -936,6 +936,33 @@ pub fn startup_miss_should_fail_closed(facts: StartupMissRouteFacts) -> bool {
         && facts.latest_session_open
 }
 
+/// Why a cold-start re-verify refuses an auto-start dispatch. The distinction
+/// matters for diagnostics: a starting pane may still become submit-ready, while
+/// a dead shell needs operator claim/restart recovery.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AutoStartDispatchBlock {
+    StartingPane,
+    DeadShell(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutoStartDispatchReadyFacts {
+    pub pane_shows_dispatch_ready_prompt: bool,
+    pub bare_shell_command: Option<String>,
+}
+
+pub fn classify_auto_start_dispatch_ready_block(
+    facts: AutoStartDispatchReadyFacts,
+) -> Option<AutoStartDispatchBlock> {
+    if facts.pane_shows_dispatch_ready_prompt {
+        None
+    } else if let Some(command) = facts.bare_shell_command {
+        Some(AutoStartDispatchBlock::DeadShell(command))
+    } else {
+        Some(AutoStartDispatchBlock::StartingPane)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FreshStartAckOutcome {
     CycleAcknowledged,
@@ -1092,6 +1119,22 @@ pub fn routed_trigger_payload_rejection(facts: RoutedTriggerPayloadFacts<'_>) ->
     } else {
         None
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DispatchInjectLogFacts<'a> {
+    pub file_display: &'a str,
+    pub pane: &'a str,
+    pub harness_binary: &'a str,
+    pub transport: &'a str,
+    pub attempt: usize,
+}
+
+pub fn dispatch_inject_log_line(facts: DispatchInjectLogFacts<'_>) -> String {
+    format!(
+        "dispatch_inject file={} pane={} harness={} transport={} attempt={}",
+        facts.file_display, facts.pane, facts.harness_binary, facts.transport, facts.attempt
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1869,6 +1912,16 @@ pub fn direct_pane_acceptance_poll_status(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DirectPaneNotDispatchedFacts {
+    pub saw_trigger_visible: bool,
+    pub pane_idle_dispatch_ready: bool,
+}
+
+pub const fn direct_pane_not_dispatched(facts: DirectPaneNotDispatchedFacts) -> bool {
+    !facts.saw_trigger_visible && facts.pane_idle_dispatch_ready
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DirectPaneEnterResubmitFacts {
     pub profile_allows_pending_draft_enter_resubmit: bool,
     pub status: DirectPaneSubmitStatus,
@@ -1898,6 +1951,17 @@ pub fn direct_pane_can_continue_enter_resubmit(facts: DirectPaneEnterResubmitAtt
             status: facts.status,
             trigger_visible: facts.trigger_visible,
         })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DirectPaneFullResendFacts {
+    pub not_dispatched: bool,
+    pub attempts_sent: usize,
+    pub max_attempts: usize,
+}
+
+pub const fn direct_pane_can_full_resend_not_landed(facts: DirectPaneFullResendFacts) -> bool {
+    facts.not_dispatched && facts.attempts_sent < facts.max_attempts
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2499,6 +2563,32 @@ gpt-5.4 high - ~/work/btakita/agent-loop/src/session-share - Context 31% used
     }
 
     #[test]
+    fn auto_start_dispatch_ready_classification_distinguishes_starting_from_dead_shell() {
+        assert_eq!(
+            classify_auto_start_dispatch_ready_block(AutoStartDispatchReadyFacts {
+                pane_shows_dispatch_ready_prompt: true,
+                bare_shell_command: Some("zsh".to_string()),
+            }),
+            None,
+            "a visible dispatch-ready prompt wins over a shell-looking foreground command"
+        );
+        assert_eq!(
+            classify_auto_start_dispatch_ready_block(AutoStartDispatchReadyFacts {
+                pane_shows_dispatch_ready_prompt: false,
+                bare_shell_command: Some("bash".to_string()),
+            }),
+            Some(AutoStartDispatchBlock::DeadShell("bash".to_string()))
+        );
+        assert_eq!(
+            classify_auto_start_dispatch_ready_block(AutoStartDispatchReadyFacts {
+                pane_shows_dispatch_ready_prompt: false,
+                bare_shell_command: None,
+            }),
+            Some(AutoStartDispatchBlock::StartingPane)
+        );
+    }
+
+    #[test]
     fn fresh_start_ack_outcome_keeps_idle_no_op_and_reaps_genuine_miss() {
         assert_eq!(
             fresh_start_ack_outcome(true, false),
@@ -2702,6 +2792,21 @@ gpt-5.4 high - ~/work/btakita/agent-loop/src/session-share - Context 31% used
                 payload: "/agent-doc test.md\n",
             }),
             None
+        );
+    }
+
+    #[test]
+    fn dispatch_inject_log_line_records_attempt_and_transport() {
+        let message = dispatch_inject_log_line(DispatchInjectLogFacts {
+            file_display: "/tmp/plan.md",
+            pane: "%42",
+            harness_binary: "codex",
+            transport: "direct_pane",
+            attempt: 2,
+        });
+        assert_eq!(
+            message,
+            "dispatch_inject file=/tmp/plan.md pane=%42 harness=codex transport=direct_pane attempt=2"
         );
     }
 
@@ -3555,6 +3660,22 @@ gpt-5.4 high - ~/work/btakita/agent-loop/src/session-share - Context 31% used
     }
 
     #[test]
+    fn direct_pane_not_dispatched_requires_empty_idle_never_seen_trigger() {
+        assert!(direct_pane_not_dispatched(DirectPaneNotDispatchedFacts {
+            saw_trigger_visible: false,
+            pane_idle_dispatch_ready: true,
+        }));
+        assert!(!direct_pane_not_dispatched(DirectPaneNotDispatchedFacts {
+            saw_trigger_visible: true,
+            pane_idle_dispatch_ready: true,
+        }));
+        assert!(!direct_pane_not_dispatched(DirectPaneNotDispatchedFacts {
+            saw_trigger_visible: false,
+            pane_idle_dispatch_ready: false,
+        }));
+    }
+
+    #[test]
     fn direct_pane_resubmit_only_on_timeout_with_visible_trigger() {
         assert!(direct_pane_needs_enter_resubmit(
             DirectPaneEnterResubmitFacts {
@@ -3607,6 +3728,31 @@ gpt-5.4 high - ~/work/btakita/agent-loop/src/session-share - Context 31% used
                 trigger_visible: true,
                 attempts_sent: DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT,
                 max_attempts: DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT,
+            }
+        ));
+    }
+
+    #[test]
+    fn direct_pane_full_resend_not_landed_is_bounded() {
+        assert!(direct_pane_can_full_resend_not_landed(
+            DirectPaneFullResendFacts {
+                not_dispatched: true,
+                attempts_sent: 0,
+                max_attempts: 1,
+            }
+        ));
+        assert!(!direct_pane_can_full_resend_not_landed(
+            DirectPaneFullResendFacts {
+                not_dispatched: true,
+                attempts_sent: 1,
+                max_attempts: 1,
+            }
+        ));
+        assert!(!direct_pane_can_full_resend_not_landed(
+            DirectPaneFullResendFacts {
+                not_dispatched: false,
+                attempts_sent: 0,
+                max_attempts: 1,
             }
         ));
     }

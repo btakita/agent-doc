@@ -4,13 +4,14 @@ use super::*;
 use agent_doc_document::queue_projection::strip_priority_markers;
 use agent_doc_queue::{
     queue_consume::{
-        annotate_newly_struck_free_text_heads, answered_free_text_head_node_keys,
-        consume_queue_nodes_by_key, first_n_queue_prompt_texts, head_id_names_open_backlog_item,
-        id_backed_head_node_keys, mark_entries_completed_by_done_ids,
-        mark_first_matching_prompts_completed_by_texts, normalized_done_id_bag,
-        queue_consume_count_for_done_ids, queue_prompt_node_keys_for_count,
-        queue_prompt_node_keys_for_done_ids, queue_prompt_node_keys_for_texts,
-        should_consume_queue_prompt_for_diff_content, strike_all_noise_queue_heads,
+        IpcNodeOp, QueueConsumptionPlan, annotate_newly_struck_free_text_heads,
+        answered_free_text_head_node_keys, consume_queue_nodes_by_key, first_n_queue_prompt_texts,
+        head_id_names_open_backlog_item, id_backed_head_node_keys,
+        mark_entries_completed_by_done_ids, mark_first_matching_prompts_completed_by_texts,
+        normalized_done_id_bag, queue_consume_count_for_done_ids, queue_consume_node_ops,
+        queue_prompt_node_keys_for_count, queue_prompt_node_keys_for_done_ids,
+        queue_prompt_node_keys_for_texts, should_consume_queue_prompt_for_diff_content,
+        strike_all_noise_queue_heads,
     },
     queue_heads::active_queue_head_text,
     queue_response::{
@@ -28,43 +29,6 @@ use agent_doc_queue::{
     },
     queue_response::queue_head_is_bare_do_directive,
 };
-
-pub(crate) struct QueueConsumptionPlan {
-    pub(crate) consumed_text: String,
-    pub(crate) consumed_texts: Vec<String>,
-    pub(crate) node_ops: Vec<IpcNodeOp>,
-    pub(crate) remaining: usize,
-    pub(crate) drained: bool,
-    pub(crate) auto: bool,
-    pub(crate) new_document: String,
-    pub(crate) new_snapshot: String,
-    pub(crate) save_snapshot: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IpcNodeOp {
-    pub component: String,
-    pub node_id: String,
-    pub op: String,
-}
-
-impl IpcNodeOp {
-    fn consume(component: &str, node_id: String) -> Self {
-        Self {
-            component: component.to_string(),
-            node_id,
-            op: "consume".to_string(),
-        }
-    }
-
-    pub fn to_json(&self) -> serde_json::Value {
-        serde_json::json!({
-            "component": self.component,
-            "node_id": self.node_id,
-            "op": self.op,
-        })
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueueConsumptionOutcome {
@@ -945,12 +909,7 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
             })?;
             let consumed_node_keys =
                 queue_prompt_node_keys_for_done_ids(content, done_ids, &consumed_texts);
-            let node_ops = consumed_node_keys
-                .keys
-                .iter()
-                .cloned()
-                .map(|node_key| IpcNodeOp::consume("queue", node_key))
-                .collect::<Vec<_>>();
+            let node_ops = queue_consume_node_ops(&consumed_node_keys.keys);
 
             let has_auto = agent_doc_queue::document_queue::has_auto_attr(&comp.attrs);
             let remaining = agent_doc_queue::document_queue::prompts(&completed_entries).len();
@@ -1254,12 +1213,7 @@ pub(crate) fn plan_queue_prompt_consumption_with_snapshot(
             ),
         )
     };
-    let node_ops = consumed_node_keys
-        .keys
-        .iter()
-        .cloned()
-        .map(|node_key| IpcNodeOp::consume("queue", node_key))
-        .collect::<Vec<_>>();
+    let node_ops = queue_consume_node_ops(&consumed_node_keys.keys);
 
     let has_auto = agent_doc_queue::document_queue::has_auto_attr(&comp.attrs);
     let remaining = agent_doc_queue::document_queue::prompts(&completed_entries).len();

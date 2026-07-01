@@ -84,12 +84,13 @@ pub(crate) fn check_dropped_queue_prompt_guard(
             still_missing.len()
         ),
     );
-    Ok(GuardResult::Error(format!(
-        "[session-check] INTERRUPTED: user-authored agent:queue edit(s) were dropped during an IPC content_ours merge and are missing from the visible document without being consumed: {}. Convergence overwrote a newer visible queue; re-add them to `agent:queue` and re-run `agent-doc finalize {}` / `agent-doc write --commit {}` so the queued work is preserved (see #queue-user-edit-overwrite).",
-        still_missing.join("; "),
-        file.display(),
-        file.display()
-    )))
+    let file_display = file.display().to_string();
+    Ok(
+        agent_doc_workflow::session_check::dropped_queue_prompt_guard_result(
+            &file_display,
+            &still_missing,
+        ),
+    )
 }
 
 /// `#jb-run-agent-doc-response-queue-contamination`: `Run Agent Doc` / queue
@@ -157,14 +158,7 @@ pub(crate) fn check_queue_response_contamination_guard(
             contaminated.len()
         ),
     );
-    Ok(GuardResult::Error(format!(
-        "[session-check] INTERRUPTED: agent:queue contains assistant response prose copied from a `### Re:` body, not a user prompt or `do [#id]` directive: {}. Remove the contaminating line(s) from `agent:queue` (only user prompts, `do [#id]`, `preset`/`dispatch`, or backlog-derived entries are valid queue sources) and re-run finalize (see #jb-run-agent-doc-response-queue-contamination).",
-        contaminated
-            .iter()
-            .map(|t| format!("{:?}", t))
-            .collect::<Vec<_>>()
-            .join(", ")
-    )))
+    Ok(agent_doc_workflow::session_check::queue_response_contamination_guard_result(&contaminated))
 }
 
 /// `#exchange-prompt-dropped-on-merge`: fail closed when this cycle recorded a
@@ -209,12 +203,13 @@ pub(crate) fn check_dropped_exchange_prompt_guard(
             still_missing.len()
         ),
     );
-    Ok(GuardResult::Error(format!(
-        "[session-check] INTERRUPTED: user-authored exchange prompt(s) were dropped during an IPC content_ours merge and are missing from the committed document: {}. The cycle committed `content_ours` without these prompt-bearing line(s); re-add them to `agent:exchange` and re-run `agent-doc finalize {}` / `agent-doc write --commit {}` so they are answered (see #exchange-prompt-dropped-on-merge).",
-        still_missing.join("; "),
-        file.display(),
-        file.display()
-    )))
+    let file_display = file.display().to_string();
+    Ok(
+        agent_doc_workflow::session_check::dropped_exchange_prompt_guard_result(
+            &file_display,
+            &still_missing,
+        ),
+    )
 }
 
 pub(crate) fn check_completed_pending_reap_guard(
@@ -236,10 +231,9 @@ pub(crate) fn check_completed_pending_reap_guard(
     if refs.is_empty() {
         return Ok(None);
     }
-    Ok(Some(format!(
-        "[session-check] INTERRUPTED: document still contains completed tracked item(s) after closeout: {}. Re-run preflight/repair so the reap is persisted through the snapshot + commit boundary",
-        refs
-    )))
+    Ok(Some(
+        agent_doc_workflow::session_check::completed_pending_reap_guard_message(&refs),
+    ))
 }
 
 pub(crate) fn check_snapshot_committed_guard(
@@ -267,12 +261,12 @@ pub(crate) fn check_snapshot_committed_guard(
                 return Ok(GuardResult::None);
             }
             let side_effects = tracked_side_effect_note(file)?;
-            let msg = format!(
-                "[session-check] INTERRUPTED: cycle state is committed but the snapshot does not match HEAD in the owning repo (snapshot_len={}, head_len={}). The response patchback is visible but was never committed{} {}",
+            let recovery_hint = closeout_recovery_hint(file);
+            let msg = agent_doc_workflow::session_check::snapshot_committed_guard_message(
                 snapshot_len,
                 head_len,
-                side_effects,
-                closeout_recovery_hint(file)
+                &side_effects,
+                &recovery_hint,
             );
             eprintln!("{}", msg);
             crate::ops_log::log_op(
@@ -371,12 +365,12 @@ pub(crate) fn check_committed_without_response_body_guard(file: &Path) -> Result
         agent_doc_turn::closeout_guard::CommittedWithoutResponseBodyDecision::Interrupt => {}
     }
     let side_effects = tracked_side_effect_note(file)?;
-    let msg = format!(
-        "[session-check] INTERRUPTED: cycle committed binary-owned work this turn but no assistant `### Re:` response body is present in `agent:exchange` (cycle `{}`, last_event `{}`). The close-out response was never written into `agent:exchange`{} (#codex-queue-drain-no-response-body). {}",
-        state.cycle_id,
-        state.last_event,
-        side_effects,
-        closeout_recovery_hint(file)
+    let recovery_hint = closeout_recovery_hint(file);
+    let msg = agent_doc_workflow::session_check::committed_without_response_body_guard_message(
+        &state.cycle_id,
+        &state.last_event,
+        &side_effects,
+        &recovery_hint,
     );
     eprintln!("{}", msg);
     crate::ops_log::log_op(

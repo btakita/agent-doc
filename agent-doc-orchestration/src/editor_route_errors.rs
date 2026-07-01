@@ -1,31 +1,9 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use agent_doc_controller::editor_route_error::{
-    EDITOR_ROUTE_ERROR_DIAGNOSTICS_DIR, editor_route_error_file_name,
-};
-
-fn route_error_path_for_file(file: &Path) -> Option<PathBuf> {
-    let canonical = file
-        .canonicalize()
-        .ok()
-        .unwrap_or_else(|| file.to_path_buf());
-    let project_root = agent_doc_fs::find_project_root(&canonical)?;
-    let relative = canonical
-        .strip_prefix(&project_root)
-        .ok()
-        .unwrap_or(canonical.as_path())
-        .to_string_lossy()
-        .trim_start_matches(std::path::MAIN_SEPARATOR)
-        .replace(std::path::MAIN_SEPARATOR, "/");
-    Some(
-        project_root
-            .join(EDITOR_ROUTE_ERROR_DIAGNOSTICS_DIR)
-            .join(editor_route_error_file_name(&relative)),
-    )
-}
+use agent_doc_controller::editor_route_error::editor_route_error_path_for_file;
 
 pub fn clear_for_success(file: &Path, reason: &str) -> bool {
-    let Some(path) = route_error_path_for_file(file) else {
+    let Some(path) = editor_route_error_path_for_file(file) else {
         return false;
     };
     if !path.exists() {
@@ -65,31 +43,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn route_error_path_matches_editor_sanitization() {
-        let dir = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("tasks/agent-doc/agent-doc-bugs2.md");
-        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
-        std::fs::write(&doc, "body").unwrap();
-
-        let path = route_error_path_for_file(&doc).unwrap();
-
-        assert_eq!(
-            path,
-            dir.path().join(
-                ".agent-doc/state/editor-route-errors/tasks__agent-doc__agent-doc-bugs2.md.txt"
-            )
-        );
-    }
-
-    #[test]
     fn clear_for_success_removes_saved_diagnostic() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("tasks/agent-doc/agent-doc-bugs5.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         std::fs::write(&doc, "body").unwrap();
-        let path = route_error_path_for_file(&doc).unwrap();
+        let path = editor_route_error_path_for_file(&doc).unwrap();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(
             &path,

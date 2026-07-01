@@ -1,7 +1,7 @@
 //! Pure queue prompt consumption policy.
 //!
 //! This module owns entry-level consume planning helpers. Callers still own
-//! file IO, snapshots, IPC node operations, and editor convergence.
+//! file IO, snapshot persistence, IPC transport, and editor convergence.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -25,6 +25,51 @@ use crate::{
 /// head (`#qstrikenote`). It is fixed text and lives outside the `~~...~~`
 /// wrapper so the original head text stays struck and readable.
 pub const STRUCK_FREE_TEXT_NOTE: &str = "answered this cycle (#ftstrike)";
+
+pub struct QueueConsumptionPlan {
+    pub consumed_text: String,
+    pub consumed_texts: Vec<String>,
+    pub node_ops: Vec<IpcNodeOp>,
+    pub remaining: usize,
+    pub drained: bool,
+    pub auto: bool,
+    pub new_document: String,
+    pub new_snapshot: String,
+    pub save_snapshot: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IpcNodeOp {
+    pub component: String,
+    pub node_id: String,
+    pub op: String,
+}
+
+impl IpcNodeOp {
+    fn consume(component: &str, node_id: String) -> Self {
+        Self {
+            component: component.to_string(),
+            node_id,
+            op: "consume".to_string(),
+        }
+    }
+
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "component": self.component,
+            "node_id": self.node_id,
+            "op": self.op,
+        })
+    }
+}
+
+pub fn queue_consume_node_ops(node_keys: &[String]) -> Vec<IpcNodeOp> {
+    node_keys
+        .iter()
+        .cloned()
+        .map(|node_key| IpcNodeOp::consume("queue", node_key))
+        .collect()
+}
 
 pub fn first_n_queue_prompt_texts(entries: &[QueueEntry], count: usize) -> Vec<String> {
     entries

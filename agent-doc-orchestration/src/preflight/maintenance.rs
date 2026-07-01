@@ -2179,7 +2179,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         match crate::memory_cmd::semantic_queue_strike_matches(
             file,
             None,
-            crate::memory_cmd::QUEUE_STRIKE_THRESHOLD,
+            agent_doc_memory::QUEUE_STRIKE_THRESHOLD,
             16,
         ) {
             Ok(strike_matches) if !strike_matches.is_empty() => {
@@ -2191,12 +2191,12 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 // dedup uses).
                 let mut by_norm: std::collections::HashMap<
                     String,
-                    crate::memory_cmd::QueueStrikeMatch,
+                    agent_doc_memory::QueueStrikeMatch,
                 > = std::collections::HashMap::new();
                 for m in strike_matches {
                     by_norm.entry(gate_norm(&m.candidate_text)).or_insert(m);
                 }
-                let mut struck: Vec<(crate::memory_cmd::QueueStrikeMatch, String)> = Vec::new();
+                let mut struck: Vec<(agent_doc_memory::QueueStrikeMatch, String)> = Vec::new();
                 let new_entries: Vec<agent_doc_queue::document_queue::QueueEntry> = activation
                     .entries_after
                     .iter()
@@ -2209,10 +2209,10 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                                 Some(m) => {
                                     let id = m.matched_id.as_deref().unwrap_or("?");
                                     let reason = match m.matched_kind {
-                                        crate::memory_cmd::QueueStrikeMatchKind::Done => {
+                                        agent_doc_memory::QueueStrikeMatchKind::Done => {
                                             format!("auto-struck: completed by #{id} (#qftbklgstrike)")
                                         }
-                                        crate::memory_cmd::QueueStrikeMatchKind::Backlog => {
+                                        agent_doc_memory::QueueStrikeMatchKind::Backlog => {
                                             format!(
                                                 "auto-struck: tracked by backlog #{id} (#qftbklgstrike)"
                                             )
@@ -2255,8 +2255,8 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                     mutated = true;
                     for (m, _annotated) in &struck {
                         let kind = match m.matched_kind {
-                            crate::memory_cmd::QueueStrikeMatchKind::Done => "done",
-                            crate::memory_cmd::QueueStrikeMatchKind::Backlog => "backlog",
+                            agent_doc_memory::QueueStrikeMatchKind::Done => "done",
+                            agent_doc_memory::QueueStrikeMatchKind::Backlog => "backlog",
                         };
                         let display: String = m.candidate_text.chars().take(120).collect();
                         eprintln!(

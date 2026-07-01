@@ -19,6 +19,66 @@ pub struct MemorySearchResult {
     pub text: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SemanticCompletionMatch {
+    pub score: f64,
+    pub candidate_source: String,
+    pub candidate_ref: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub candidate_id: Option<String>,
+    pub candidate_text: String,
+    pub matched_done_ref: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matched_done_id: Option<String>,
+    pub matched_done_text: String,
+}
+
+/// Which corpus a free-text queue head matched for auto-strike.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QueueStrikeMatchKind {
+    Done,
+    Backlog,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct QueueStrikeMatch {
+    pub score: f64,
+    pub matched_kind: QueueStrikeMatchKind,
+    pub candidate_index: usize,
+    pub candidate_text: String,
+    pub matched_ref: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matched_id: Option<String>,
+    pub matched_text: String,
+}
+
+/// Conservative auto-strike threshold for free-text queue heads.
+pub const QUEUE_STRIKE_THRESHOLD: f64 = 1.6;
+
+pub fn format_semantic_completion_warning(candidate: &SemanticCompletionMatch) -> String {
+    let candidate_id = candidate
+        .candidate_id
+        .as_deref()
+        .map(|id| format!(" #{id}"))
+        .unwrap_or_default();
+    let done_id = candidate
+        .matched_done_id
+        .as_deref()
+        .map(|id| format!(" #{id}"))
+        .unwrap_or_else(|| " completed work".to_string());
+    format!(
+        "semantic completion candidate: {}{} may already be resolved by{} ({:.3}) at {}; candidate={:?}; match={:?}",
+        candidate.candidate_source,
+        candidate_id,
+        done_id,
+        candidate.score,
+        candidate.matched_done_ref,
+        candidate.candidate_text,
+        candidate.matched_done_text
+    )
+}
+
 pub fn count_insert_results(results: &[MemoryInsertResult]) -> (usize, usize) {
     let inserted = results.iter().filter(|result| result.inserted).count();
     (inserted, results.len().saturating_sub(inserted))
@@ -201,5 +261,23 @@ mod tests {
         let deduped = dedupe_events(vec![first, duplicate, other]);
 
         assert_eq!(deduped.len(), 2);
+    }
+
+    #[test]
+    fn formats_semantic_completion_warning() {
+        let warning = format_semantic_completion_warning(&SemanticCompletionMatch {
+            score: 1.75,
+            candidate_source: "queue".to_string(),
+            candidate_ref: "doc#queue:0".to_string(),
+            candidate_id: None,
+            candidate_text: "Repair cache duplication".to_string(),
+            matched_done_ref: "doc#done:cachefix".to_string(),
+            matched_done_id: Some("cachefix".to_string()),
+            matched_done_text: "#cachefix Repair cache duplication".to_string(),
+        });
+
+        assert!(warning.contains("semantic completion candidate"));
+        assert!(warning.contains("#cachefix"));
+        assert!(warning.contains("1.750"));
     }
 }

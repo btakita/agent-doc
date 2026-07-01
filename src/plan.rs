@@ -281,7 +281,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
             warnings.extend(
                 matches
                     .iter()
-                    .map(agent_doc_orchestration::memory_cmd::format_semantic_completion_warning),
+                    .map(agent_doc_memory::format_semantic_completion_warning),
             );
         }
         Err(err) => warnings.push(format!("semantic completion retrieval unavailable: {err}")),

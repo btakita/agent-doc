@@ -8,10 +8,13 @@
 
 use agent_doc_document::queue_projection::strip_in_progress_marker;
 use agent_doc_memory::{
-    MemorySearchResult, count_insert_results, dedupe_events, rank_events, trim_chars,
+    MemorySearchResult, QueueStrikeMatch, QueueStrikeMatchKind, SemanticCompletionMatch,
+    count_insert_results, dedupe_events, rank_events, trim_chars,
 };
+#[cfg(test)]
+use agent_doc_memory::{QUEUE_STRIKE_THRESHOLD, format_semantic_completion_warning};
 use anyhow::{Context, Result, bail};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use tsift_memory::{
@@ -49,57 +52,6 @@ pub struct MemorySearchReport {
     pub searched_events: usize,
     pub results: Vec<MemorySearchResult>,
     pub warnings: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SemanticCompletionMatch {
-    pub score: f64,
-    pub candidate_source: String,
-    pub candidate_ref: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub candidate_id: Option<String>,
-    pub candidate_text: String,
-    pub matched_done_ref: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub matched_done_id: Option<String>,
-    pub matched_done_text: String,
-}
-
-/// Which corpus a free-text queue head matched against for the
-/// `#qftbklgstrike` auto-strike: a completed `agent:done` item (`Done`) or an
-/// active `agent:backlog` item (`Backlog`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum QueueStrikeMatchKind {
-    /// The head is already complete — a matching item exists in `agent:done`.
-    Done,
-    /// The head is tracked — a matching active item exists in `agent:backlog`.
-    Backlog,
-}
-
-/// A free-text `agent:queue` head that the deterministic semantic scorer matched
-/// to either a completed (`agent:done`) or active-backlog (`agent:backlog`)
-/// tracked-work item above the conservative auto-strike threshold
-/// (`#qftbklgstrike`). Reuses the same lexical [`rank_events`] scorer that backs
-/// [`semantic_completion_matches`]; the only difference is the candidate corpus
-/// (done + active backlog instead of done only) and a `matched_kind`
-/// discriminator so the convergence strike can name the right reason.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct QueueStrikeMatch {
-    pub score: f64,
-    pub matched_kind: QueueStrikeMatchKind,
-    /// Zero-based queue entry index of the matched free-text head (the
-    /// `source_ref` suffix from [`collect_completion_candidates`]). Informational
-    /// only — convergence matches on normalized head text, not this index, since
-    /// earlier maintenance phases can shift entry positions.
-    pub candidate_index: usize,
-    /// The FULL (untruncated) free-text head prose. Convergence keys the strike
-    /// on this text, so it must not be display-truncated.
-    pub candidate_text: String,
-    pub matched_ref: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub matched_id: Option<String>,
-    pub matched_text: String,
 }
 
 #[derive(Debug, Clone)]
@@ -299,51 +251,6 @@ pub fn semantic_completion_matches(
     matches.truncate(limit.max(1));
     Ok(matches)
 }
-
-pub fn format_semantic_completion_warning(candidate: &SemanticCompletionMatch) -> String {
-    let candidate_id = candidate
-        .candidate_id
-        .as_deref()
-        .map(|id| format!(" #{id}"))
-        .unwrap_or_default();
-    let done_id = candidate
-        .matched_done_id
-        .as_deref()
-        .map(|id| format!(" #{id}"))
-        .unwrap_or_else(|| " completed work".to_string());
-    format!(
-        "semantic completion candidate: {}{} may already be resolved by{} ({:.3}) at {}; candidate={:?}; match={:?}",
-        candidate.candidate_source,
-        candidate_id,
-        done_id,
-        candidate.score,
-        candidate.matched_done_ref,
-        candidate.candidate_text,
-        candidate.matched_done_text
-    )
-}
-
-/// Conservative auto-strike threshold for `#qftbklgstrike`.
-///
-/// The [`rank_events`] scorer awards `+1.0` when the queue head is a full
-/// substring of the matched tracked-work item, plus the token-overlap fraction
-/// (`0.0..=1.0`), plus `+0.05` for the tracked-work surface. A genuine
-/// near-restatement of a done/backlog item therefore lands at ~1.7–1.9 (the
-/// range the existing `semantic_completion_match` *warning* fires in the wild),
-/// while an unrelated operator prompt that merely shares a stray common word
-/// scores only its small overlap fraction (well under `1.0`, since it does not
-/// contain the item as a substring).
-///
-/// We set the strike threshold at `1.6` — strictly **above** the `0.8` floor the
-/// warning path uses and high enough that the `+1.0` substring-contains bonus is
-/// effectively required (a head can only clear `1.6` without that bonus by
-/// matching essentially every token, which is itself a restatement). This is the
-/// false-strike safety margin: an unanswered operator prompt that is not a near
-/// restatement of a tracked item can never reach `1.6`, so it is never silently
-/// buried. Raising the corpus to include active backlog does not lower this bar —
-/// both corpora are scored by the identical deterministic scorer against the same
-/// threshold.
-pub const QUEUE_STRIKE_THRESHOLD: f64 = 1.6;
 
 /// Deterministically score every LIVE free-text `agent:queue` head against BOTH
 /// the completed `agent:done` archive (case **a**: already complete) AND the

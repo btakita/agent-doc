@@ -6349,6 +6349,11 @@ fn test_agent_doc_memory_owns_semantic_memory_ranking_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-memory/src/lib.rs")).unwrap();
     for required in [
         "pub struct MemorySearchResult",
+        "pub struct SemanticCompletionMatch",
+        "pub enum QueueStrikeMatchKind",
+        "pub struct QueueStrikeMatch",
+        "pub const QUEUE_STRIKE_THRESHOLD",
+        "pub fn format_semantic_completion_warning(",
         "pub fn count_insert_results(",
         "pub fn rank_events(",
         "pub fn dedupe_events(",
@@ -6372,6 +6377,11 @@ fn test_agent_doc_memory_owns_semantic_memory_ranking_policy() {
         "fn push_token(",
         "fn dedupe_events(",
         "fn trim_chars(",
+        "pub struct SemanticCompletionMatch",
+        "pub enum QueueStrikeMatchKind",
+        "pub struct QueueStrikeMatch",
+        "pub const QUEUE_STRIKE_THRESHOLD",
+        "pub fn format_semantic_completion_warning(",
     ] {
         assert!(
             !orchestration_memory.contains(forbidden),
@@ -6381,8 +6391,23 @@ fn test_agent_doc_memory_owns_semantic_memory_ranking_policy() {
     assert!(
         orchestration_memory.contains("use agent_doc_memory::{")
             && orchestration_memory.contains("rank_events")
-            && orchestration_memory.contains("dedupe_events"),
+            && orchestration_memory.contains("dedupe_events")
+            && orchestration_memory.contains("SemanticCompletionMatch")
+            && orchestration_memory.contains("QueueStrikeMatch"),
         "memory_cmd should call focused semantic memory policy directly"
+    );
+    let preflight_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
+    let preflight_maintenance = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
+    )
+    .unwrap();
+    assert!(
+        preflight_run.contains("agent_doc_memory::format_semantic_completion_warning(")
+            && preflight_maintenance.contains("agent_doc_memory::QUEUE_STRIKE_THRESHOLD")
+            && preflight_maintenance.contains("agent_doc_memory::QueueStrikeMatchKind"),
+        "preflight should use semantic-memory result vocabulary directly, not through memory_cmd"
     );
 }
 
@@ -8273,6 +8298,7 @@ fn test_snapshot_state_paths_are_owned_by_agent_doc_fs() {
         "pub fn state_lock_path_for(",
         "pub fn pending_response_path_for(",
         "pub fn turn_scope_path_for(",
+        "pub fn cycle_state_path_for(",
         "pub fn baseline_path_for(",
         "pub fn baseline_overlay_path_for(",
         "pub fn pre_response_path_for(",
@@ -8375,6 +8401,29 @@ fn test_snapshot_state_paths_are_owned_by_agent_doc_fs() {
     assert!(
         turn_scope_source.contains("agent_doc_fs::turn_scope_path_for("),
         "turn_scope_store.rs should call focused agent-doc-fs turn-scope path helper directly"
+    );
+
+    let cycle_state_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/cycle_state.rs"))
+            .unwrap();
+    let cycle_state_production = cycle_state_source
+        .split("#[cfg(test)]")
+        .next()
+        .unwrap_or(&cycle_state_source);
+    for forbidden_snippet in [
+        "fn state_path(",
+        "find_project_root(",
+        "document_state_hash(",
+        ".join(\".agent-doc/state/cycles\")",
+    ] {
+        assert!(
+            !cycle_state_production.contains(forbidden_snippet),
+            "cycle_state.rs production code must call agent-doc-fs for cycle state paths instead of deriving them locally: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        cycle_state_production.contains("agent_doc_fs::cycle_state_path_for(file)?"),
+        "cycle_state.rs should call focused agent-doc-fs cycle-state path helper directly"
     );
 
     let orchestration_lib =
@@ -14917,6 +14966,11 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
             .join("agent-doc-document-realtime/src/session_ops.rs")
             .exists()
     );
+    assert!(
+        manifest_dir
+            .join("agent-doc-document-realtime/src/broadcast.rs")
+            .exists()
+    );
     let realtime_session_ops =
         fs::read_to_string(manifest_dir.join("agent-doc-document-realtime/src/session_ops.rs"))
             .unwrap();
@@ -14924,6 +14978,23 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         realtime_session_ops.contains("pub enum SessionOpKind"),
         "agent-doc-document-realtime must own document session operation vocabulary"
     );
+    let realtime_broadcast =
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime/src/broadcast.rs"))
+            .unwrap();
+    for required_snippet in [
+        "pub struct BroadcastMerge",
+        "pub struct BroadcastPeer",
+        "pub struct BroadcastTarget",
+        "pub fn compute_broadcast(",
+        "pub fn compute_broadcast_plan(",
+        "fn text_delta_included(",
+        "fn line_counts(",
+    ] {
+        assert!(
+            realtime_broadcast.contains(required_snippet),
+            "agent-doc-document-realtime must own realtime broadcast merge/planning policy: {required_snippet}"
+        );
+    }
     assert!(
         manifest_dir
             .join("agent-doc-document-realtime/src/crdt_authority.rs")
@@ -14939,12 +15010,25 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         "pub fn reconcile_current_doc",
         "pub fn current_doc",
         "pub fn buffer_supersedes",
+        "pub struct BroadcastMerge",
+        "pub struct BroadcastPeer",
+        "pub struct BroadcastTarget",
+        "pub fn compute_broadcast(",
+        "pub fn compute_broadcast_plan(",
+        "fn text_delta_included(",
+        "fn line_counts(",
     ] {
         assert!(
             !orchestration_realtime.contains(forbidden_snippet),
-            "orchestration must not re-own pure realtime read-authority policy: {forbidden_snippet}"
+            "orchestration must not re-own pure realtime read/broadcast policy: {forbidden_snippet}"
         );
     }
+    assert!(
+        orchestration_realtime.contains("broadcast::{")
+            && orchestration_realtime.contains("BroadcastPeer")
+            && orchestration_realtime.contains("compute_broadcast_plan"),
+        "orchestration realtime delivery should import broadcast planning from the focused realtime crate directly"
+    );
     let orchestration_session_actor =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_actor.rs"))
             .unwrap();
@@ -15123,6 +15207,18 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
     );
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    for forbidden_snippet in [
+        "pub use agent_doc_document_realtime::broadcast",
+        "pub use realtime_model::{BroadcastMerge",
+        "pub use realtime_model::{BroadcastPeer",
+        "pub use realtime_model::{BroadcastTarget",
+        "pub use realtime_model::{compute_broadcast",
+    ] {
+        assert!(
+            !orchestration_lib.contains(forbidden_snippet),
+            "orchestration must not re-export realtime broadcast policy: {forbidden_snippet}"
+        );
+    }
     assert!(
         !orchestration_lib.contains("pub mod crdt_relay;"),
         "orchestration must not export a CRDT relay facade"

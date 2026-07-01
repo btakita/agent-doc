@@ -7,6 +7,7 @@
 use lazily::{ThreadSafeContext, ThreadSafeStateMachine};
 use serde::{Deserialize, Serialize};
 
+pub mod broadcast;
 pub mod convergence_gate;
 pub mod crdt_authority;
 pub mod crdt_relay;

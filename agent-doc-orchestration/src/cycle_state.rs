@@ -51,7 +51,7 @@ use agent_doc_turn::cycle_policy::{
 use agent_doc_turn::{CycleEvent, CyclePhase, CyclePhaseMachine};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BacklogTargetRequirement {
@@ -285,7 +285,7 @@ impl CycleState {
 }
 
 pub fn load(file: &Path) -> Result<Option<CycleState>> {
-    let Some(path) = state_path(file)? else {
+    let Some(path) = agent_doc_fs::cycle_state_path_for(file)? else {
         return Ok(None);
     };
     let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
@@ -1231,7 +1231,7 @@ fn append_phase_event_to_session_log(file: &Path, state: &CycleState) {
 }
 
 fn save(file: &Path, state: &CycleState) -> Result<()> {
-    let Some(path) = state_path(file)? else {
+    let Some(path) = agent_doc_fs::cycle_state_path_for(file)? else {
         return Ok(());
     };
     let json = serde_json::to_string_pretty(state)?;
@@ -1258,21 +1258,6 @@ fn write_atomic(path: &Path, bytes: &str) -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn state_path(file: &Path) -> Result<Option<PathBuf>> {
-    let canonical = match file.canonicalize() {
-        Ok(p) => p,
-        Err(_) => return Ok(None),
-    };
-    let Some(root) = agent_doc_fs::find_project_root(&canonical) else {
-        return Ok(None);
-    };
-    let hash = agent_doc_fs::document_state_hash(&canonical)?;
-    Ok(Some(
-        root.join(".agent-doc/state/cycles")
-            .join(format!("{hash}.json")),
-    ))
 }
 
 fn synthetic_state(file: &Path, phase: CyclePhase) -> CycleState {
@@ -1399,7 +1384,7 @@ mod tests {
         let doc = dir.path().join("doc.md");
         fs::write(&doc, "body").unwrap();
 
-        let cycles_dir = state_path(&doc)
+        let cycles_dir = agent_doc_fs::cycle_state_path_for(&doc)
             .unwrap()
             .unwrap()
             .parent()

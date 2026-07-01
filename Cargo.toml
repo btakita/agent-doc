@@ -114,6 +114,7 @@ agent-doc-git-io = { path = "agent-doc-git-io", version = "0.34.66" }
 agent-doc-harness = { path = "agent-doc-harness", version = "0.34.66" }
 agent-doc-ipc-protocol = { path = "agent-doc-ipc-protocol", version = "0.34.66" }
 agent-doc-markdown-ast = { path = "agent-doc-markdown-ast", version = "0.34.66" }
+agent-doc-memory = { path = "agent-doc-memory", version = "0.34.66" }
 agent-doc-merge = { path = "agent-doc-merge", version = "0.34.66" }
 agent-doc-model-tier = { path = "agent-doc-model-tier", version = "0.34.66" }
 agent-doc-orchestration = { path = "agent-doc-orchestration", version = "0.34.66" }

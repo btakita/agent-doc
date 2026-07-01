@@ -1295,7 +1295,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             for semantic_match in matches {
                 warnings.push(PreflightWarning {
                     code: "semantic_completion_match".to_string(),
-                    message: crate::memory_cmd::format_semantic_completion_warning(&semantic_match),
+                    message: agent_doc_memory::format_semantic_completion_warning(&semantic_match),
                     document_agent: None,
                     active_harness: None,
                 });

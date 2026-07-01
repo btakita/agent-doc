@@ -460,6 +460,7 @@ version = "0.34.66"
 name = "agent-doc-markdown-ast"
 version = "0.34.66"
 dependencies = [
+ "serde_json",
  "tree-sitter",
  "tree-sitter-md",
  "yrs",

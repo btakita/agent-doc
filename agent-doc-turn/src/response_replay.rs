@@ -278,6 +278,33 @@ pub fn response_materialized_in_content(response: &str, content: &str) -> bool {
             || response_already_applied_after_prefix_strip(&normalized_content, &probe))
 }
 
+/// Materialize a missing assistant response into the current exchange component.
+///
+/// Returns `Some(current)` unchanged when the response is already present, or
+/// `None` when the current document has no parseable exchange component.
+pub fn materialize_response_in_current_exchange(
+    current: &str,
+    expected_response: &str,
+) -> Option<String> {
+    let response =
+        agent_doc_template::response_materialization::response_materialization_probe_from_response(
+            expected_response,
+        );
+    if response.trim().is_empty() || response_materialized_in_content(&response, current) {
+        return Some(current.to_string());
+    }
+    let components = agent_doc_element::element::parse(current).ok()?;
+    let exchange = components
+        .iter()
+        .find(|component| component.name == "exchange")?;
+    let mut exchange_body = exchange.content(current).to_string();
+    agent_doc_template::response_materialization::push_materialization_segment(
+        &mut exchange_body,
+        &response,
+    );
+    Some(exchange.replace_content(current, &exchange_body))
+}
+
 /// Remove consecutive duplicate `### Re:` blocks from document content.
 pub fn dedupe_responses(content: &str) -> String {
     dedupe_responses_with_report(content).0
@@ -707,6 +734,53 @@ mod tests {
         );
 
         assert!(response_materialized_in_content(response, content));
+    }
+
+    #[test]
+    fn materialize_response_in_current_exchange_appends_missing_response() {
+        let current = concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ do #ship\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: do #ship — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+
+        let repaired = materialize_response_in_current_exchange(current, response)
+            .expect("exchange should be repairable");
+
+        assert!(repaired.contains("### Re: do #ship — gpt-5"));
+        assert!(repaired.contains("Done."));
+        assert!(response_materialized_in_content(response, &repaired));
+    }
+
+    #[test]
+    fn materialize_response_in_current_exchange_keeps_already_materialized_content() {
+        let current = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: do #ship — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert_eq!(
+            materialize_response_in_current_exchange(current, current).as_deref(),
+            Some(current)
+        );
+    }
+
+    #[test]
+    fn materialize_response_in_current_exchange_requires_exchange_component() {
+        let response = "### Re: do #ship — gpt-5\n\nDone.\n";
+
+        assert_eq!(
+            materialize_response_in_current_exchange("plain markdown", response),
+            None
+        );
     }
 
     #[test]

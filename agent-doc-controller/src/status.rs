@@ -159,6 +159,51 @@ pub struct ControllerStatus {
     pub control_plane: ControlPlaneStatus,
 }
 
+/// `#fccsupwarn` — read-only operator WARN message when the LIVE controller/supervisor
+/// hosting this document is serving a stale agent-doc binary. The caller owns resolving
+/// the current binary identity at its IO boundary; this pure policy renders only when
+/// the recorded launch identity differs from that current identity.
+pub fn supervisor_stale_warning_message(
+    status: &ControllerStatus,
+    current_binary: Option<&ControllerBinaryIdentity>,
+) -> Option<String> {
+    if !status.active {
+        return None;
+    }
+    if !process_binary_is_stale(status.controller_binary.as_ref(), current_binary) {
+        return None;
+    }
+    let pid = status
+        .pid
+        .map(|pid| format!(" (pid {pid})"))
+        .unwrap_or_default();
+    let launched = status
+        .controller_binary
+        .as_ref()
+        .map(|id| format!(" launched as {}", id.version))
+        .unwrap_or_default();
+    Some(format!(
+        "the live session controller/supervisor{pid}{launched} is running a STALE agent-doc binary \
+         (a newer build is installed) — restart it so the latest fixes take effect: \
+         `agent-doc admin recycle` (recycles at the next idle boundary) or \
+         `agent-doc session restart-supervisor <FILE>`. A stale supervisor silently keeps \
+         producing File Cache Conflict / IPC-drift dialogs (#fcc0/#ipcdrift)."
+    ))
+}
+
+/// `#fccsupwarn3` — user-facing warning for a stale route-owned host supervisor.
+/// Point at the routine non-destructive refresh: idle-boundary recycle or normal
+/// file-scoped restart.
+pub fn host_supervisor_stale_warning_message(supervisor_pid: u32) -> String {
+    format!(
+        "the route-owned host supervisor (pid {supervisor_pid}) serving this document is mapping \
+         a STALE agent-doc binary while a newer build is installed, so it can keep producing File \
+         Cache Conflict / IPC-drift dialogs (#fcc0/#ipcdrift). Refresh it without discarding the \
+         live turn: `agent-doc admin recycle` (recycles at the next idle boundary) or \
+         `agent-doc session restart-supervisor <FILE>` (refuses busy panes)."
+    )
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ControllerBootstrapStatusFacts {
     pub project_root: PathBuf,
@@ -575,6 +620,28 @@ mod tests {
         }
     }
 
+    fn test_controller_status(
+        active: bool,
+        controller_binary: Option<ControllerBinaryIdentity>,
+    ) -> ControllerStatus {
+        ControllerStatus {
+            active,
+            project_root: PathBuf::from("/tmp/project"),
+            socket_path: PathBuf::from("/tmp/project/.agent-doc/controller.sock"),
+            launch_mode: Some(LaunchMode::Lazy),
+            bootstrap_epoch: Some(1),
+            pid: Some(166599),
+            controller_binary,
+            controller_generation: Some(1),
+            handoff_state: Some(ControllerHandoffState::Stable),
+            handoff_started_at: None,
+            previous_controller_pid: None,
+            stale_duplicate_pids: Vec::new(),
+            freshness: None,
+            control_plane: default_control_plane_status(),
+        }
+    }
+
     #[test]
     fn controller_binary_identity_match_is_strict_and_fail_open() {
         let current = identity("1.2.3", 42);
@@ -602,6 +669,71 @@ mod tests {
         assert!(!process_binary_is_stale(Some(&current), None));
         assert!(!process_binary_is_stale(Some(&current), Some(&current)));
         assert!(process_binary_is_stale(Some(&stale), Some(&current)));
+    }
+
+    #[test]
+    fn stale_supervisor_warning_message_fires_for_active_stale_controller() {
+        let current = identity("1.2.3", 42);
+        let stale = identity("1.2.2", 41);
+        let status = test_controller_status(true, Some(stale));
+
+        let msg = supervisor_stale_warning_message(&status, Some(&current))
+            .expect("an active host on a stale binary must warn");
+        assert!(msg.contains("pid 166599"), "message: {msg}");
+        assert!(msg.contains("launched as 1.2.2"), "message: {msg}");
+        assert!(msg.contains("STALE"), "message: {msg}");
+        assert!(msg.contains("agent-doc admin recycle"), "message: {msg}");
+        assert!(
+            msg.contains("agent-doc session restart-supervisor <FILE>"),
+            "message: {msg}"
+        );
+        assert!(!msg.contains("--force"), "message: {msg}");
+        assert!(!msg.contains("interrupt-clear"), "message: {msg}");
+    }
+
+    #[test]
+    fn stale_supervisor_warning_message_is_none_for_inactive_or_fresh() {
+        let current = identity("1.2.3", 42);
+        let stale = identity("1.2.2", 41);
+
+        assert!(
+            supervisor_stale_warning_message(
+                &test_controller_status(false, Some(stale)),
+                Some(&current)
+            )
+            .is_none()
+        );
+        assert!(
+            supervisor_stale_warning_message(
+                &test_controller_status(true, Some(current.clone())),
+                Some(&current)
+            )
+            .is_none()
+        );
+        assert!(
+            supervisor_stale_warning_message(&test_controller_status(true, None), Some(&current))
+                .is_none()
+        );
+        assert!(
+            supervisor_stale_warning_message(&test_controller_status(true, Some(current)), None)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn stale_supervisor_host_warning_message_uses_non_destructive_refresh() {
+        let msg = host_supervisor_stale_warning_message(166599);
+        assert!(msg.contains("pid 166599"), "message: {msg}");
+        assert!(msg.contains("STALE"), "message: {msg}");
+        assert!(msg.contains("agent-doc admin recycle"), "message: {msg}");
+        assert!(
+            msg.contains("agent-doc session restart-supervisor <FILE>"),
+            "message: {msg}"
+        );
+        assert!(msg.contains("idle boundary"), "message: {msg}");
+        assert!(msg.contains("refuses busy panes"), "message: {msg}");
+        assert!(!msg.contains("--force"), "message: {msg}");
+        assert!(!msg.contains("interrupt-clear"), "message: {msg}");
     }
 
     #[test]

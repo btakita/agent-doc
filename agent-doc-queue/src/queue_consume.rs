@@ -39,6 +39,13 @@ pub struct QueueConsumptionPlan {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NextQueueHeadSelection {
+    pub node_key: String,
+    pub head_text: String,
+    pub stop_fence_at_head: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IpcNodeOp {
     pub component: String,
     pub node_id: String,
@@ -80,6 +87,35 @@ pub fn first_n_queue_prompt_texts(entries: &[QueueEntry], count: usize) -> Vec<S
         })
         .take(count)
         .collect()
+}
+
+pub fn next_queue_head_selection(content: &str) -> Result<Option<NextQueueHeadSelection>> {
+    let components = element::parse(content)?;
+    let Some(queue_component) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return Ok(None);
+    };
+    let body = &content[queue_component.open_end..queue_component.close_start];
+    let entries =
+        document_queue::parse(body).context("queue consume: failed to parse next queue head")?;
+    let stop_fence_at_head = document_queue::has_stop_fence_at_head(&entries);
+    let Some(head_text) = first_n_queue_prompt_texts(&entries, 1).into_iter().next() else {
+        return Ok(None);
+    };
+    let Some(node_key) = queue_prompt_node_keys_for_count(content, 1)?
+        .keys
+        .into_iter()
+        .next()
+    else {
+        return Ok(None);
+    };
+    Ok(Some(NextQueueHeadSelection {
+        node_key,
+        head_text,
+        stop_fence_at_head,
+    }))
 }
 
 pub fn queue_consume_count_for_done_ids(entries: &[QueueEntry], done_ids: &[String]) -> usize {
@@ -934,6 +970,44 @@ mod tests {
             queue_consume_count_for_done_ids(&entries, &["tail".to_string()]),
             0
         );
+    }
+
+    #[test]
+    fn next_queue_head_selection_returns_none_without_queue_component() {
+        let selection = next_queue_head_selection("plain document\n").unwrap();
+
+        assert_eq!(selection, None);
+    }
+
+    #[test]
+    fn next_queue_head_selection_returns_none_without_prompt() {
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "--- stop\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let selection = next_queue_head_selection(content).unwrap();
+
+        assert_eq!(selection, None);
+    }
+
+    #[test]
+    fn next_queue_head_selection_reports_stop_fence_at_head() {
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "--- stop\n",
+            "- do [#blocked]\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let selection = next_queue_head_selection(content)
+            .unwrap()
+            .expect("selection");
+
+        assert_eq!(selection.head_text, "do [#blocked]");
+        assert!(selection.stop_fence_at_head);
+        assert!(!selection.node_key.is_empty());
     }
 
     #[test]

@@ -976,58 +976,6 @@ pub fn status(project_root: &Path) -> Result<ControllerStatus> {
     }
 }
 
-/// `#fccsupwarn` — read-only operator WARN message when the LIVE controller/supervisor
-/// hosting this document is serving a stale agent-doc binary (a fresh `cargo install`
-/// hasn't been picked up). The current binary identity is resolved at this IO boundary;
-/// the recorded-vs-current predicate lives in `agent-doc-controller::status`. Returns
-/// `None` for an inactive controller (nothing is hosting), a status with no recorded
-/// launch identity, an unreadable current binary, or a fresh binary — so the warning
-/// only fires for the exact "already-running supervisor uses the OLD binary until
-/// restarted" churn class that silently produces `#fcc0` / `#ipcdrift` File Cache
-/// Conflict dialogs.
-pub(crate) fn supervisor_stale_warning_message(status: &ControllerStatus) -> Option<String> {
-    if !status.active {
-        return None;
-    }
-    let current_binary = current_binary_identity().ok();
-    if !status::process_binary_is_stale(status.controller_binary.as_ref(), current_binary.as_ref())
-    {
-        return None;
-    }
-    let pid = status
-        .pid
-        .map(|pid| format!(" (pid {pid})"))
-        .unwrap_or_default();
-    let launched = status
-        .controller_binary
-        .as_ref()
-        .map(|id| format!(" launched as {}", id.version))
-        .unwrap_or_default();
-    Some(format!(
-        "the live session controller/supervisor{pid}{launched} is running a STALE agent-doc binary \
-         (a newer build is installed) — restart it so the latest fixes take effect: \
-         `agent-doc admin recycle` (recycles at the next idle boundary) or \
-         `agent-doc session restart-supervisor <FILE>`. A stale supervisor silently keeps \
-         producing File Cache Conflict / IPC-drift dialogs (#fcc0/#ipcdrift)."
-    ))
-}
-
-/// `#fccsupwarn3` — user-facing warning for a stale route-owned host supervisor.
-/// Point at the routine non-destructive refresh: idle-boundary recycle or normal
-/// file-scoped restart. (`#recycledeadlock`: the prior "avoid force/discard recovery
-/// for stale-binary refresh" sentence was dropped — the recycle now self-heals the
-/// open-cycle deadlock that used to make force/discard the only escape, so a blanket
-/// warning against it was both unnecessary and misleading.)
-pub(crate) fn host_supervisor_stale_warning_message(supervisor_pid: u32) -> String {
-    format!(
-        "the route-owned host supervisor (pid {supervisor_pid}) serving this document is mapping \
-         a STALE agent-doc binary while a newer build is installed, so it can keep producing File \
-         Cache Conflict / IPC-drift dialogs (#fcc0/#ipcdrift). Refresh it without discarding the \
-         live turn: `agent-doc admin recycle` (recycles at the next idle boundary) or \
-         `agent-doc session restart-supervisor <FILE>` (refuses busy panes)."
-    )
-}
-
 /// `#fccsupwarn2` — IO check for the route-owned HOST supervisor that serves `file`.
 ///
 /// THE GAP behind `#fccsupwarn`: `stale_supervisor_warning_for_doc` only inspected the
@@ -1065,7 +1013,9 @@ pub(crate) fn host_supervisor_stale_warning_for_doc(file: &Path) -> Option<Strin
     if !agent_doc_supervisor::config::host_supervisor_is_stale(running_inode, installed_inode) {
         return None;
     }
-    Some(host_supervisor_stale_warning_message(supervisor_pid))
+    Some(status::host_supervisor_stale_warning_message(
+        supervisor_pid,
+    ))
 }
 
 /// `#fccsupwarn`/`#fccsupwarn2` — IO wrapper: resolve the live processes hosting `file`
@@ -1078,10 +1028,13 @@ pub(crate) fn host_supervisor_stale_warning_for_doc(file: &Path) -> Option<Strin
 /// read-only check can never block a cycle.
 pub(crate) fn stale_supervisor_warning_for_doc(file: &Path) -> Option<String> {
     let project_root = agent_doc_fs::find_project_root(file)?;
-    if let Ok(status) = status(&project_root)
-        && let Some(message) = supervisor_stale_warning_message(&status)
-    {
-        return Some(message);
+    if let Ok(controller_status) = status(&project_root) {
+        let current_binary = current_binary_identity().ok();
+        if let Some(message) =
+            status::supervisor_stale_warning_message(&controller_status, current_binary.as_ref())
+        {
+            return Some(message);
+        }
     }
     host_supervisor_stale_warning_for_doc(file)
 }
@@ -5228,46 +5181,6 @@ mod tests {
     }
 
     #[test]
-    fn supervisor_stale_warning_message_fires_only_for_active_stale_host() {
-        // #fccsupwarn — the read-only WARN must fire exactly for a live controller
-        // running a stale binary, and stay silent otherwise (fail-open).
-        let dir = tempfile::TempDir::new().unwrap();
-        let bootstrap = test_bootstrap(&dir);
-        let mut should_stop = false;
-        let response = handle_request(
-            &(serde_json::json!({ "command": "status" }).to_string() + "\n"),
-            &bootstrap,
-            &mut should_stop,
-        )
-        .unwrap();
-        let mut status: ControllerStatus = serde_json::from_str(&response).unwrap();
-
-        // Fresh, active controller — no warning.
-        assert!(status.active);
-        assert!(supervisor_stale_warning_message(&status).is_none());
-
-        // Stale launch identity on an active host → warning fires with the recycle hint.
-        let mut stale = current_binary_identity().unwrap();
-        stale.len = stale.len.wrapping_add(1);
-        status.controller_binary = Some(stale);
-        let msg = supervisor_stale_warning_message(&status)
-            .expect("an active host on a stale binary must warn");
-        assert!(msg.contains("STALE"), "message: {msg}");
-        assert!(msg.contains("admin recycle"), "message: {msg}");
-        assert!(!msg.contains("--force"), "message: {msg}");
-        assert!(!msg.contains("interrupt-clear"), "message: {msg}");
-
-        // Inactive controller (nothing hosting) → no warning even if stale.
-        status.active = false;
-        assert!(supervisor_stale_warning_message(&status).is_none());
-
-        // Active but no recorded launch identity → fail-open, no warning.
-        status.active = true;
-        status.controller_binary = None;
-        assert!(supervisor_stale_warning_message(&status).is_none());
-    }
-
-    #[test]
     fn host_supervisor_is_stale_compares_running_inode_against_installed_inode() {
         use agent_doc_supervisor::config::host_supervisor_is_stale;
 
@@ -5322,25 +5235,6 @@ mod tests {
             !host_supervisor_is_stale(Some(installed_inode), installed_inode),
             "after supervisor_binary_stale_self_recycled maps the installed inode, stale-supervisor content_ours refusal is no longer eligible"
         );
-    }
-
-    #[test]
-    fn host_supervisor_stale_warning_message_uses_non_destructive_refresh() {
-        // #fccsupwarn3 — a routine stale-binary refresh must never tell an agent to
-        // discard a live turn. Force/interrupt-clear remain explicit wedged-owner
-        // hatches, not stale-supervisor freshness guidance.
-        let msg = host_supervisor_stale_warning_message(166599);
-        assert!(msg.contains("pid 166599"), "message: {msg}");
-        assert!(msg.contains("STALE"), "message: {msg}");
-        assert!(msg.contains("agent-doc admin recycle"), "message: {msg}");
-        assert!(
-            msg.contains("agent-doc session restart-supervisor <FILE>"),
-            "message: {msg}"
-        );
-        assert!(msg.contains("idle boundary"), "message: {msg}");
-        assert!(msg.contains("refuses busy panes"), "message: {msg}");
-        assert!(!msg.contains("--force"), "message: {msg}");
-        assert!(!msg.contains("interrupt-clear"), "message: {msg}");
     }
 
     #[test]

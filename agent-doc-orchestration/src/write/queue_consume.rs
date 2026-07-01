@@ -8,10 +8,10 @@ use agent_doc_queue::{
         answered_free_text_head_node_keys, consume_queue_nodes_by_key, first_n_queue_prompt_texts,
         head_id_names_open_backlog_item, id_backed_head_node_keys,
         mark_entries_completed_by_done_ids, mark_first_matching_prompts_completed_by_texts,
-        normalized_done_id_bag, queue_consume_count_for_done_ids, queue_consume_node_ops,
-        queue_prompt_node_keys_for_count, queue_prompt_node_keys_for_done_ids,
-        queue_prompt_node_keys_for_texts, should_consume_queue_prompt_for_diff_content,
-        strike_all_noise_queue_heads,
+        next_queue_head_selection, normalized_done_id_bag, queue_consume_count_for_done_ids,
+        queue_consume_node_ops, queue_prompt_node_keys_for_count,
+        queue_prompt_node_keys_for_done_ids, queue_prompt_node_keys_for_texts,
+        should_consume_queue_prompt_for_diff_content, strike_all_noise_queue_heads,
     },
     queue_heads::active_queue_head_text,
     queue_response::{
@@ -323,10 +323,12 @@ fn record_next_queue_head_selected_state(
     document_hash: &str,
     content: &str,
 ) -> Result<()> {
-    let Some((node_key, head_text, stop_fence_at_head)) = next_queue_head_selection(content)?
-    else {
+    let Some(selection) = next_queue_head_selection(content)? else {
         return Ok(());
     };
+    let node_key = selection.node_key;
+    let head_text = selection.head_text;
+    let stop_fence_at_head = selection.stop_fence_at_head;
     let content_hash = agent_doc_hash::content_hash(&head_text);
     let drainable = !stop_fence_at_head
         && agent_doc_queue::queue_continuation::live_drainable_continuation_head(
@@ -388,31 +390,6 @@ fn record_next_queue_head_selected_state(
         );
     }
     Ok(())
-}
-
-fn next_queue_head_selection(content: &str) -> Result<Option<(String, String, bool)>> {
-    let components = element::parse(content)?;
-    let Some(queue_component) = components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
-        return Ok(None);
-    };
-    let body = &content[queue_component.open_end..queue_component.close_start];
-    let entries = agent_doc_queue::document_queue::parse(body)
-        .context("queue consume: failed to parse next queue head")?;
-    let stop_fence_at_head = agent_doc_queue::document_queue::has_stop_fence_at_head(&entries);
-    let Some(head_text) = first_n_queue_prompt_texts(&entries, 1).into_iter().next() else {
-        return Ok(None);
-    };
-    let Some(node_key) = queue_prompt_node_keys_for_count(content, 1)?
-        .keys
-        .into_iter()
-        .next()
-    else {
-        return Ok(None);
-    };
-    Ok(Some((node_key, head_text, stop_fence_at_head)))
 }
 
 fn now_millis() -> u64 {

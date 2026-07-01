@@ -695,11 +695,12 @@ fn convergence_recovered_editor_wins_for_payload(
         return false;
     }
 
-    let Some(node_patches) = parse_convergence_node_patches(payload) else {
+    let Some(node_patches) = agent_doc_markdown_ast::mutations::parse_node_patches_payload(payload)
+    else {
         return false;
     };
     if !node_patches.is_empty()
-        && !convergence_node_patches_already_landed(recovered, &node_patches)
+        && !agent_doc_markdown_ast::mutations::node_patches_already_landed(recovered, &node_patches)
     {
         return false;
     }
@@ -738,68 +739,6 @@ fn convergence_strict_components(payload: &serde_json::Value) -> Option<Vec<Stri
         }
     }
     Some(strict_components)
-}
-
-fn parse_convergence_node_patches(
-    payload: &serde_json::Value,
-) -> Option<Vec<agent_doc_markdown_ast::mutations::MutationNodePatch>> {
-    let Some(node_patches_value) = payload.get("node_patches") else {
-        return Some(Vec::new());
-    };
-    let node_patches = node_patches_value.as_array()?;
-    let mut parsed = Vec::with_capacity(node_patches.len());
-    for patch in node_patches {
-        let op = match patch.get("op").and_then(|value| value.as_str())? {
-            "insert" => agent_doc_markdown_ast::mutations::MutationNodePatchOp::Insert,
-            "remove" => agent_doc_markdown_ast::mutations::MutationNodePatchOp::Remove,
-            "replace" => agent_doc_markdown_ast::mutations::MutationNodePatchOp::Replace,
-            "move" => agent_doc_markdown_ast::mutations::MutationNodePatchOp::Move,
-            "strike" => agent_doc_markdown_ast::mutations::MutationNodePatchOp::Strike,
-            "unstrike" => agent_doc_markdown_ast::mutations::MutationNodePatchOp::Unstrike,
-            _ => return None,
-        };
-        let order = match patch.get("order") {
-            Some(value) => value
-                .as_array()?
-                .iter()
-                .map(|item| item.as_str().map(str::to_string))
-                .collect::<Option<Vec<_>>>()?,
-            None => Vec::new(),
-        };
-        parsed.push(agent_doc_markdown_ast::mutations::MutationNodePatch {
-            component: patch
-                .get("component")
-                .and_then(|value| value.as_str())?
-                .to_string(),
-            node_key: patch
-                .get("node_key")
-                .and_then(|value| value.as_str())?
-                .to_string(),
-            op,
-            content: optional_payload_string(patch, "content")?,
-            expected_content: None,
-            before: optional_payload_string(patch, "before")?,
-            after: optional_payload_string(patch, "after")?,
-            order,
-        });
-    }
-    Some(parsed)
-}
-
-fn optional_payload_string(value: &serde_json::Value, key: &str) -> Option<Option<String>> {
-    match value.get(key) {
-        None | Some(serde_json::Value::Null) => Some(None),
-        Some(value) => value.as_str().map(|s| Some(s.to_string())),
-    }
-}
-
-fn convergence_node_patches_already_landed(
-    recovered: &str,
-    node_patches: &[agent_doc_markdown_ast::mutations::MutationNodePatch],
-) -> bool {
-    agent_doc_markdown_ast::mutations::apply_node_patches(recovered, node_patches)
-        .map(|after| after == recovered)
-        .unwrap_or(false)
 }
 
 /// `#pcwcwarn` — reconcile the agent-owned `exchange` component of a carry-forward

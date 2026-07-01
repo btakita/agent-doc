@@ -3503,6 +3503,8 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
         "pub fn annotate_newly_struck_free_text_heads",
         "pub struct QueueConsumptionPlan",
         "pub struct IpcNodeOp",
+        "pub struct NextQueueHeadSelection",
+        "pub fn next_queue_head_selection",
         "pub fn to_json(&self) -> serde_json::Value",
         "pub fn queue_consume_node_ops(",
     ] {
@@ -3538,6 +3540,8 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
         "pub struct IpcNodeOp",
         "impl IpcNodeOp",
         "IpcNodeOp::consume",
+        "fn next_queue_head_selection(",
+        "pub(crate) fn next_queue_head_selection(",
     ] {
         assert!(
             !orchestration_queue_consume.contains(forbidden),
@@ -4857,6 +4861,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub fn response_already_applied",
         "pub fn response_already_applied_after_prefix_strip",
         "pub fn response_materialized_in_content",
+        "pub fn materialize_response_in_current_exchange",
         "pub fn first_response_heading_line",
         "pub fn live_exchange_answers_heading",
         "pub fn has_matching_orphan_prompt_for_committed_capture",
@@ -4919,6 +4924,19 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     assert!(
         dedupe_source.contains("use agent_doc_turn::response_replay::dedupe_responses;"),
         "orchestration dedupe adapter should call focused response replay policy directly"
+    );
+    let write_ipc =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+    assert!(
+        !write_ipc.contains("pub fn materialize_response_in_current_exchange")
+            && !write_ipc.contains("fn materialize_response_in_current_exchange"),
+        "write/ipc must not re-own response exchange materialization policy"
+    );
+    assert!(
+        write_ipc.contains(
+            "use agent_doc_turn::response_replay::materialize_response_in_current_exchange;"
+        ),
+        "write/ipc should call focused response exchange materialization policy directly"
     );
     let write_materialize =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/materialize.rs"))
@@ -10269,6 +10287,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn parse_handoff_state(",
         "pub fn controller_binary_identity_matches(",
         "pub fn process_binary_is_stale(",
+        "pub fn supervisor_stale_warning_message(",
+        "pub fn host_supervisor_stale_warning_message(",
     ] {
         assert!(
             controller_status.contains(required_snippet),
@@ -10296,6 +10316,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn dispatch_blocked_user_facing_outcome_fields(",
         "struct DispatchBlockedProofFacts",
         "fn dispatch_blocked_proof_fields(",
+        "fn supervisor_stale_warning_message(",
+        "fn host_supervisor_stale_warning_message(",
     ] {
         assert!(
             !rpc_source.contains(forbidden_snippet),
@@ -10317,6 +10339,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn parse_handoff_state(",
         "fn controller_binary_identity_matches(",
         "fn process_binary_is_stale(",
+        "fn supervisor_stale_warning_message(",
+        "fn host_supervisor_stale_warning_message(",
         "fn controller_binary_is_stale(",
         "pub use agent_doc_controller::status",
     ] {
@@ -12609,6 +12633,8 @@ fn test_agent_doc_markdown_ast_uses_current_node_key_mutation_api_names() {
         "pub fn dedup_node_keys(",
         "pub fn reorder_nodes(",
         "pub fn enqueue_node(",
+        "pub fn parse_node_patches_payload(",
+        "pub fn node_patches_already_landed(",
     ] {
         assert!(
             mutations.contains(required),
@@ -12627,6 +12653,28 @@ fn test_agent_doc_markdown_ast_uses_current_node_key_mutation_api_names() {
         assert!(
             !mutations.contains(forbidden),
             "agent-doc-markdown-ast must not preserve deprecated id-keyed mutation wrappers: {forbidden}"
+        );
+    }
+    let converge =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/converge.rs"))
+            .unwrap();
+    for forbidden in [
+        "fn parse_convergence_node_patches(",
+        "fn convergence_node_patches_already_landed(",
+        "fn optional_payload_string(",
+    ] {
+        assert!(
+            !converge.contains(forbidden),
+            "write/converge.rs must not re-own node-key mutation payload policy: {forbidden}"
+        );
+    }
+    for required in [
+        "agent_doc_markdown_ast::mutations::parse_node_patches_payload",
+        "agent_doc_markdown_ast::mutations::node_patches_already_landed",
+    ] {
+        assert!(
+            converge.contains(required),
+            "write/converge.rs should call focused node-key mutation payload policy directly: {required}"
         );
     }
 }

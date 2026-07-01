@@ -1852,7 +1852,7 @@ impl SimWorld {
         expected_response: &str,
     ) {
         if let Some(repaired) =
-            agent_doc_orchestration::write::materialize_response_in_current_exchange(
+            agent_doc_turn::response_replay::materialize_response_in_current_exchange(
                 &self.doc,
                 expected_response,
             )

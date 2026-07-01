@@ -301,6 +301,72 @@ pub fn apply_node_patches(source: &str, patches: &[MutationNodePatch]) -> Mutati
     Ok(out)
 }
 
+/// Parse a convergence IPC payload's `node_patches` field into mutation patches.
+///
+/// Missing `node_patches` is a valid no-op payload. Malformed entries or unknown
+/// operations return `None` so callers can fail closed.
+pub fn parse_node_patches_payload(payload: &serde_json::Value) -> Option<Vec<MutationNodePatch>> {
+    let Some(node_patches_value) = payload.get("node_patches") else {
+        return Some(Vec::new());
+    };
+    let node_patches = node_patches_value.as_array()?;
+    let mut parsed = Vec::with_capacity(node_patches.len());
+    for patch in node_patches {
+        let op = parse_node_patch_op(patch.get("op").and_then(|value| value.as_str())?)?;
+        let order = match patch.get("order") {
+            Some(value) => value
+                .as_array()?
+                .iter()
+                .map(|item| item.as_str().map(str::to_string))
+                .collect::<Option<Vec<_>>>()?,
+            None => Vec::new(),
+        };
+        parsed.push(MutationNodePatch {
+            component: patch
+                .get("component")
+                .and_then(|value| value.as_str())?
+                .to_string(),
+            node_key: patch
+                .get("node_key")
+                .and_then(|value| value.as_str())?
+                .to_string(),
+            op,
+            content: optional_payload_string(patch, "content")?,
+            expected_content: None,
+            before: optional_payload_string(patch, "before")?,
+            after: optional_payload_string(patch, "after")?,
+            order,
+        });
+    }
+    Some(parsed)
+}
+
+/// Return true when applying node patches would leave `source` unchanged.
+pub fn node_patches_already_landed(source: &str, patches: &[MutationNodePatch]) -> bool {
+    apply_node_patches(source, patches)
+        .map(|after| after == source)
+        .unwrap_or(false)
+}
+
+fn parse_node_patch_op(value: &str) -> Option<MutationNodePatchOp> {
+    match value {
+        "insert" => Some(MutationNodePatchOp::Insert),
+        "remove" => Some(MutationNodePatchOp::Remove),
+        "replace" => Some(MutationNodePatchOp::Replace),
+        "move" => Some(MutationNodePatchOp::Move),
+        "strike" => Some(MutationNodePatchOp::Strike),
+        "unstrike" => Some(MutationNodePatchOp::Unstrike),
+        _ => None,
+    }
+}
+
+fn optional_payload_string(value: &serde_json::Value, key: &str) -> Option<Option<String>> {
+    match value.get(key) {
+        None | Some(serde_json::Value::Null) => Some(None),
+        Some(value) => value.as_str().map(|s| Some(s.to_string())),
+    }
+}
+
 fn apply_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResult<String> {
     match patch.op {
         MutationNodePatchOp::Insert => insert_node_patch(source, patch),
@@ -865,6 +931,82 @@ operator note
 
         assert_eq!(once, twice);
         assert_eq!(once.matches("- do [#gamma]\n").count(), 1);
+    }
+
+    #[test]
+    fn parse_node_patches_payload_accepts_valid_node_patches_json() {
+        let payload = serde_json::json!({
+            "node_patches": [
+                {
+                    "component": "queue",
+                    "node_key": "queue:0:alpha:0",
+                    "op": "insert",
+                    "content": "- do [#alpha]\n",
+                    "before": null,
+                    "after": "queue:0:beta:0",
+                    "order": ["queue:0:alpha:0", "queue:0:beta:0"]
+                }
+            ]
+        });
+
+        let patches = parse_node_patches_payload(&payload).unwrap();
+
+        assert_eq!(patches.len(), 1);
+        assert_eq!(patches[0].component, "queue");
+        assert_eq!(patches[0].node_key, "queue:0:alpha:0");
+        assert_eq!(patches[0].op, MutationNodePatchOp::Insert);
+        assert_eq!(patches[0].content.as_deref(), Some("- do [#alpha]\n"));
+        assert_eq!(patches[0].before, None);
+        assert_eq!(patches[0].after.as_deref(), Some("queue:0:beta:0"));
+        assert_eq!(patches[0].order, ["queue:0:alpha:0", "queue:0:beta:0"]);
+    }
+
+    #[test]
+    fn parse_node_patches_payload_missing_node_patches_is_empty_vec() {
+        let payload = serde_json::json!({ "patches": [] });
+
+        let patches = parse_node_patches_payload(&payload).unwrap();
+
+        assert!(patches.is_empty());
+    }
+
+    #[test]
+    fn parse_node_patches_payload_invalid_op_returns_none() {
+        let payload = serde_json::json!({
+            "node_patches": [
+                {
+                    "component": "queue",
+                    "node_key": "queue:0:alpha:0",
+                    "op": "rewrite"
+                }
+            ]
+        });
+
+        assert!(parse_node_patches_payload(&payload).is_none());
+    }
+
+    #[test]
+    fn node_patches_already_landed_reports_idempotent_patch_payload() {
+        let doc = "\
+<!-- agent:queue -->
+- do [#alpha]
+- do [#beta]
+<!-- /agent:queue -->
+";
+        let payload = serde_json::json!({
+            "node_patches": [
+                {
+                    "component": "queue",
+                    "node_key": "queue:0:beta:0",
+                    "op": "strike"
+                }
+            ]
+        });
+        let patches = parse_node_patches_payload(&payload).unwrap();
+        let landed = apply_node_patches(doc, &patches).unwrap();
+
+        assert!(!node_patches_already_landed(doc, &patches));
+        assert!(node_patches_already_landed(&landed, &patches));
     }
 
     #[test]

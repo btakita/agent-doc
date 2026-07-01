@@ -19,6 +19,7 @@ use agent_doc_element_exchange::{
 use agent_doc_template::response_materialization::{
     extract_response_headings_from_patches, response_materialization_probe_from_response,
 };
+use agent_doc_turn::response_replay::materialize_response_in_current_exchange;
 
 /// Read the ack-content sidecar file written by the plugin after apply.
 /// Keyed by `patch_id` (same UUID the binary embedded in the patch payload).
@@ -1334,33 +1335,6 @@ pub(crate) fn preserve_ipcfullprompt_forensic(
     let stem = format!("{}-{}", ts, patch_id.unwrap_or("nopatch"));
     let _ = std::fs::write(dir.join(format!("{stem}.baseline.md")), baseline);
     let _ = std::fs::write(dir.join(format!("{stem}.candidate.md")), candidate);
-}
-
-/// Recover a divergent live buffer that dropped the assistant response: when the
-/// socket reports `already_applied` but the live buffer diverged with the
-/// response fragmented out of `exchange`, materialize `expected_response` back
-/// into the buffer's `exchange` so the response is never silently lost
-/// (`#samplepcdrift2` zero-UNRECOVERED-drift guarantee). Returns `Some(current)`
-/// unchanged when the response is already materialized (no duplication), and
-/// `None` when the buffer has no parseable `exchange` to repair into.
-pub fn materialize_response_in_current_exchange(
-    current: &str,
-    expected_response: &str,
-) -> Option<String> {
-    let response = response_materialization_probe_from_response(expected_response);
-    if response.trim().is_empty() || response_materialized_in_content(&response, current) {
-        return Some(current.to_string());
-    }
-    let components = element::parse(current).ok()?;
-    let exchange = components
-        .iter()
-        .find(|component| component.name == "exchange")?;
-    let mut exchange_body = exchange.content(current).to_string();
-    agent_doc_template::response_materialization::push_materialization_segment(
-        &mut exchange_body,
-        &response,
-    );
-    Some(exchange.replace_content(current, &exchange_body))
 }
 
 pub(crate) fn materialize_missing_response_for_socket_ack_drift(

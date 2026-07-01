@@ -773,5 +773,17 @@ Here are tightened versions for each path — want me to drop these into the doc
 > I respectfully explain the circumstances of my citation on Pacific Coast Highway. I was cited for driving 40 mph where the limit had recently been reduced to 25 mph. I was returning to the area for the first time since the fires to support a close friend affected by them, was unfamiliar with the abrupt change, and had no intent to drive unsafely. My prior court dates were postponed, most recently due to significant hip pain, with the judge's agreement. I ask the court's leniency and, if eligible, permission to attend traffic school.
 
 Tell me which path Karen wants and I'll finalize the exact filing text (and pull the current TR-205/TR-220 forms and Santa Monica courthouse filing details).
-<!-- agent:boundary:e8eeb49d -->
+
+### Re: Emailed Robert the suggestions — opus-4-8
+
+Sent. Drafted a casual, first-name email to Robert (**robertward3@yahoo.com**, from brian.takita@gmail.com) summarizing Karen's speeding-ticket options and, per your "auto-send," sent it via the Gmail API (status now `sent`).
+
+- **Subject:** Some ideas for Karen's speeding ticket
+- **Draft file:** `mail/drafts/2026-07-01-some-ideas-for-karen-s-speeding-ticket.md`
+
+It covers the same two paths from above, written for a friend to forward: (A) fight to dismiss via a **Trial by Written Declaration (TR-205)** built on the inadequate signage of the abrupt 45→25 limit + a records request, and (B) just ask for **traffic school / a reduction** on July 2. It flags the "July 2025 vs July 2026" date to double-check, and includes both ready-to-use statement versions (no-admission and leniency).
+
+Note I sent this straight through because you said "auto-send" — my default is to leave outbound email in Gmail Drafts for you to review first. Say the word if you'd rather I default to drafts going forward.
+
+<!-- agent:boundary:7993f0ad -->
 <!-- /agent:exchange -->

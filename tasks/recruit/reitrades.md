@@ -874,12 +874,33 @@ Two notes:
 - The cash+equity line is soft and optional by design; it signals belief in the product without committing you to a number. If you'd rather keep equity out of a first re-approach, cut that sentence and it still reads well.
 
 Say the word and I'll publish it via `corky`/LinkedIn as a draft (no auto-send), or adjust tone/length.
-<!-- agent:boundary:78eca41e -->
+❯ Should I be willing to lower my rate for a cash/equity blend?
+### Re: Should I lower my rate for a cash/equity blend? — opus-4-8
+
+Short answer: only under specific conditions, and never as a plain discount. The default posture is "full rate, equity on top" — not "cheaper cash because equity."
+
+**Discount equity hard.** REItrades is an unfunded, pre-revenue idea being pitched to one guy (Arthur) who just chose an overseas Upwork team. Equity there is a lottery ticket, not compensation. Value it near zero for cash-flow purposes. If lowering your rate would strain your own runway, the answer is simply no — don't subsidize someone else's unproven business with below-market labor unless you are a genuine co-founder with the control and upside that implies.
+
+**When a blend is worth it — all three must hold:**
+1. **You'd want to be a long-term partner anyway** (belief in the product + the person), not just closing a gig.
+2. **The equity is real and legible**: a signed instrument (SAFE or actual shares/options), a clear cap table, vesting, and defined terms — not a verbal "you'll get a piece."
+3. **The cash haircut is bounded and the equity over-compensates for it.** Rule of thumb: for every $1 of rate you give up, demand several dollars of *expected* equity value, because you're taking on illiquidity + total-loss risk + no diligence.
+
+**Structure it as a premium, not a discount:**
+- **Preferred:** charge your **full rate in cash** and negotiate equity as *additional* consideration for early-stage risk. Your labor is the most expensive capital he can raise; price it accordingly.
+- **Acceptable:** a *modest* cash haircut (say 10–20%, not 40%+) in exchange for a *meaningful* stake — enough that if it hits, the discount looks trivial in hindsight.
+- **Avoid:** deep cash cuts for token equity. That's the worst of both — you fund his risk and keep almost none of the upside.
+
+**For the Arthur re-approach specifically:** he hasn't even said yes to paid work yet, so leading with an equity ask is premature and can read as desperation. Keep the re-engagement note as drafted — signal *openness* to a blended structure as a door, not a discount you're pre-offering. Let him come back first; negotiate structure only once there's a real conversation. If it does progress, anchor on full rate and let *him* propose equity to bring the cash number down — then you're evaluating his offer, not giving away margin up front.
+
+Bottom line: be willing to *discuss* a blend, don't be willing to *cut your rate* for it. Equity is a bonus you accept on top of fair pay, not a reason to work cheap.
+<!-- agent:boundary:ca37e82e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue -->
+/goal Implement backlog item(s): #eeee
 <!-- /agent:queue -->
 
 ## Backlog
@@ -896,6 +917,5 @@ Say the word and I'll publish it via `corky`/LinkedIn as a draft (no auto-send),
 
 <!-- agent:done -->
 - 2026-07-01 [#reibuyvsbuild] [recommended] Fold a "Build vs. Buy / vendor options" §3c into rei-trades/reitrades-v1.2-estimate-report.md (extraction: parser API vs LLM-native vs managed IDP; source-backed demographics; Stripe/MailerLite/geocode buys) + add a Phase-0 extraction bake-off line item, then regenerate the PDF.
-- 2026-07-01 [#reirengagenote] [recommended] Draft a short no-pressure re-engagement note to Arthur/REItrades: respect the overseas-Upwork decision, leave the door open if it stalls, and optionally signal openness to a blended cash+equity structure.
 - 2026-07-01 [#reirengagenote] [recommended] Draft a short no-pressure re-engagement note to Arthur/REItrades: respect the overseas-Upwork decision, leave the door open if it stalls, and optionally signal openness to a blended cash+equity structure.
 <!-- /agent:done -->

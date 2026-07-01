@@ -266,7 +266,7 @@ Additional asset classes, full document extraction, OM polish, remaining integra
 - **Hourly at $100/hr with a weekly cap you set** — the lowest-risk option for both of us; you control the burn week to week and can pause anytime.
 - **Fixed price per phase** — for example, Phase 1 fixed in the **$30k-$34k** band against a frozen scope, with change-orders for additions. Predictable for budgeting; I carry the velocity risk.
 
-Either way, $100/hr sits at the lower end of the market for senior Rust + Vue contract work, and the AI-native workflow biases delivery toward the low end of each range — so you get senior production quality without paying twice for the migration and QA risk that a live marketplace carries.
+Either way, the phased structure means you only fund the next step after you've seen the last one work on your data — and the AI-native workflow biases delivery toward the low end of each range, so you get senior production quality without paying twice for the migration and QA risk a live marketplace carries.
 
 ---
 

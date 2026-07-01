@@ -21,9 +21,10 @@
 
 use agent_doc_queue::queue_continuation as queue_policy;
 use agent_doc_queue_io::continuation_marker::{
-    ContinuationMarker, clear_continuation_marker, write_continuation_marker,
+    ContinuationMarker, ContinuationMarkerScanAction, clear_continuation_marker,
+    scan_pending_marker_continuations_for_roots, write_continuation_marker,
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::path::{Path, PathBuf};
 
 /// Detect whether `file` currently requires queue continuation.
@@ -140,59 +141,32 @@ pub fn pending_marker_continuation_for_roots(
     roots: &[PathBuf],
     current_pane: Option<&str>,
 ) -> Result<Option<(PathBuf, queue_policy::QueueContinuation, ContinuationMarker)>> {
-    let mut seen = std::collections::HashSet::new();
-    for root in roots {
-        let dir = root.join(".agent-doc/queue-continuations");
-        let entries = match std::fs::read_dir(&dir) {
-            Ok(entries) => entries,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(err) => return Err(err).with_context(|| format!("read {}", dir.display())),
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
-                continue;
-            }
-            let Ok(content) = std::fs::read_to_string(&path) else {
-                continue;
-            };
-            let Ok(marker) = serde_json::from_str::<ContinuationMarker>(&content) else {
-                continue;
-            };
-            let doc = PathBuf::from(&marker.file);
-            if !seen.insert(doc.clone()) {
-                continue;
-            }
-            // `#codex-stop-cross-doc-queue-continuation`: skip a marker owned by
-            // another live actor (different pane) and keep scanning, so this
-            // Codex pane is never told to run a foreign-owned document. Does NOT
-            // remove the marker — it stays for that document's own owner.
-            if let Some(current) = current_pane
-                && is_foreign_owned_marker(root, &doc, current)
-            {
-                crate::ops_log::log_op(
-                    &doc,
-                    &format!(
-                        "codex_stop_foreign_queue_marker_skip file={} current_pane={}",
-                        doc.display(),
-                        current
-                    ),
-                );
-                continue;
-            }
-            // The marker is durable but advisory — re-confirm against the live
-            // document so a stale marker (queue since drained / edited) never
-            // forces a spurious continuation.
-            match detect(&doc)? {
-                Some(continuation) => return Ok(Some((doc, continuation, marker))),
-                None => {
-                    // Stale marker — clean it up so it cannot mislead later.
-                    let _ = std::fs::remove_file(&path);
-                }
-            }
+    scan_pending_marker_continuations_for_roots(roots, |root, doc, _marker| {
+        // `#codex-stop-cross-doc-queue-continuation`: skip a marker owned by
+        // another live actor (different pane) and keep scanning, so this
+        // Codex pane is never told to run a foreign-owned document. Does NOT
+        // remove the marker — it stays for that document's own owner.
+        if let Some(current) = current_pane
+            && is_foreign_owned_marker(root, doc, current)
+        {
+            crate::ops_log::log_op(
+                doc,
+                &format!(
+                    "codex_stop_foreign_queue_marker_skip file={} current_pane={}",
+                    doc.display(),
+                    current
+                ),
+            );
+            return Ok(ContinuationMarkerScanAction::Skip);
         }
-    }
-    Ok(None)
+        // The marker is durable but advisory — re-confirm against the live
+        // document so a stale marker (queue since drained / edited) never
+        // forces a spurious continuation.
+        match detect(doc)? {
+            Some(continuation) => Ok(ContinuationMarkerScanAction::Return(continuation)),
+            None => Ok(ContinuationMarkerScanAction::RemoveStale),
+        }
+    })
 }
 
 #[cfg(test)]

@@ -39,6 +39,17 @@ pub struct ContinuationMarker {
     pub last_requested_head: Option<String>,
 }
 
+/// Caller-owned decision for a parsed continuation marker during a directory
+/// scan.
+pub enum ContinuationMarkerScanAction {
+    /// Return this marker with the supplied live continuation.
+    Return(QueueContinuation),
+    /// Keep the marker and continue scanning.
+    Skip,
+    /// Remove the marker as stale and continue scanning.
+    RemoveStale,
+}
+
 fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -112,6 +123,55 @@ pub fn load_continuation_marker(file: &Path) -> Result<Option<ContinuationMarker
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(err) => Err(err).with_context(|| format!("read {}", path.display())),
     }
+}
+
+/// Scan roots for the first marker the caller confirms is still valid.
+///
+/// Owns marker directory traversal, JSON reads, invalid-marker skips,
+/// document-level dedupe, and stale marker cleanup. Callers own live document
+/// detection and actor/owner policy.
+pub fn scan_pending_marker_continuations_for_roots<F>(
+    roots: &[PathBuf],
+    mut decide: F,
+) -> Result<Option<(PathBuf, QueueContinuation, ContinuationMarker)>>
+where
+    F: FnMut(&Path, &Path, &ContinuationMarker) -> Result<ContinuationMarkerScanAction>,
+{
+    let mut seen = std::collections::HashSet::new();
+    for root in roots {
+        let dir = root.join(QUEUE_CONTINUATIONS_DIR);
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(err) => return Err(err).with_context(|| format!("read {}", dir.display())),
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(marker) = serde_json::from_str::<ContinuationMarker>(&content) else {
+                continue;
+            };
+            let doc = PathBuf::from(&marker.file);
+            if !seen.insert(doc.clone()) {
+                continue;
+            }
+            match decide(root, &doc, &marker)? {
+                ContinuationMarkerScanAction::Return(continuation) => {
+                    return Ok(Some((doc, continuation, marker)));
+                }
+                ContinuationMarkerScanAction::Skip => {}
+                ContinuationMarkerScanAction::RemoveStale => {
+                    let _ = remove_marker_file(&path);
+                }
+            }
+        }
+    }
+    Ok(None)
 }
 
 /// Record that the head prompt was surfaced to a Codex Stop hook as a
@@ -240,6 +300,13 @@ mod tests {
         doc
     }
 
+    fn write_named_doc(dir: &Path, name: &str) -> PathBuf {
+        std::fs::create_dir_all(dir.join(".agent-doc")).unwrap();
+        let doc = dir.join(name);
+        std::fs::write(&doc, "body").unwrap();
+        doc
+    }
+
     fn continuation() -> QueueContinuation {
         QueueContinuation {
             head_prompt: "do [#a]".to_string(),
@@ -267,6 +334,73 @@ mod tests {
 
         clear_continuation_marker(&doc).unwrap();
         assert!(load_continuation_marker(&doc).unwrap().is_none());
+    }
+
+    #[test]
+    fn scan_pending_marker_skips_noise_and_returns_valid_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let marker_dir = root.join(QUEUE_CONTINUATIONS_DIR);
+        std::fs::create_dir_all(&marker_dir).unwrap();
+        std::fs::write(marker_dir.join("note.txt"), "not json").unwrap();
+        std::fs::write(marker_dir.join("bad.json"), "{not json").unwrap();
+
+        let doc = write_doc(&root);
+        let continuation = continuation();
+        write_continuation_marker(&doc, &continuation, "commit").unwrap();
+
+        let found = scan_pending_marker_continuations_for_roots(&[root], |_, marker_doc, _| {
+            assert_eq!(marker_doc, doc.as_path());
+            Ok(ContinuationMarkerScanAction::Return(continuation.clone()))
+        })
+        .unwrap()
+        .expect("valid marker returned");
+
+        assert_eq!(found.0, doc);
+        assert_eq!(found.1.head_prompt, "do [#a]");
+        assert_eq!(found.2.source_command, "commit");
+    }
+
+    #[test]
+    fn scan_pending_marker_dedupes_documents() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let doc = write_doc(&root);
+        write_continuation_marker(&doc, &continuation(), "commit").unwrap();
+
+        let marker = load_continuation_marker(&doc).unwrap().unwrap();
+        let duplicate = root.join(QUEUE_CONTINUATIONS_DIR).join("duplicate.json");
+        std::fs::write(&duplicate, serde_json::to_string_pretty(&marker).unwrap()).unwrap();
+
+        let mut calls = 0;
+        let found = scan_pending_marker_continuations_for_roots(&[root], |_, marker_doc, _| {
+            calls += 1;
+            assert_eq!(marker_doc, doc.as_path());
+            Ok(ContinuationMarkerScanAction::Skip)
+        })
+        .unwrap();
+
+        assert!(found.is_none());
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn scan_pending_marker_prunes_stale_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let doc = write_named_doc(&root, "stale.md");
+        write_continuation_marker(&doc, &continuation(), "commit").unwrap();
+        let marker_path = continuation_marker_path(&doc).unwrap().unwrap();
+        assert!(marker_path.exists());
+
+        let found = scan_pending_marker_continuations_for_roots(&[root], |_, marker_doc, _| {
+            assert_eq!(marker_doc, doc.as_path());
+            Ok(ContinuationMarkerScanAction::RemoveStale)
+        })
+        .unwrap();
+
+        assert!(found.is_none());
+        assert!(!marker_path.exists());
     }
 
     #[test]

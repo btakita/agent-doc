@@ -1,5 +1,6 @@
 //! Editor route-error diagnostic naming policy.
 
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 pub const EDITOR_ROUTE_ERROR_DIAGNOSTICS_DIR: &str = ".agent-doc/state/editor-route-errors";
@@ -44,6 +45,30 @@ pub fn editor_route_error_path_for_file(file: &Path) -> Option<PathBuf> {
     )
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EditorRouteErrorClearResult {
+    Cleared { path: PathBuf },
+    NotFound { path: PathBuf },
+    PathUnavailable,
+    Failed { path: PathBuf, error: String },
+}
+
+pub fn clear_editor_route_error_for_file(file: &Path) -> EditorRouteErrorClearResult {
+    let Some(path) = editor_route_error_path_for_file(file) else {
+        return EditorRouteErrorClearResult::PathUnavailable;
+    };
+    match std::fs::remove_file(&path) {
+        Ok(()) => EditorRouteErrorClearResult::Cleared { path },
+        Err(err) if err.kind() == ErrorKind::NotFound => {
+            EditorRouteErrorClearResult::NotFound { path }
+        }
+        Err(err) => EditorRouteErrorClearResult::Failed {
+            path,
+            error: err.to_string(),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -82,5 +107,64 @@ mod tests {
                 ".agent-doc/state/editor-route-errors/tasks__agent-doc__agent-doc-bugs2.md.txt"
             )
         );
+    }
+
+    #[test]
+    fn clear_editor_route_error_removes_saved_diagnostic() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/agent-doc/agent-doc-bugs5.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let path = editor_route_error_path_for_file(&doc).unwrap();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            "Error: project controller returned ok response without data\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            clear_editor_route_error_for_file(&doc),
+            EditorRouteErrorClearResult::Cleared { path: path.clone() }
+        );
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn clear_editor_route_error_reports_not_found_without_error() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/agent-doc/agent-doc-bugs5.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let path = editor_route_error_path_for_file(&doc).unwrap();
+
+        assert_eq!(
+            clear_editor_route_error_for_file(&doc),
+            EditorRouteErrorClearResult::NotFound { path }
+        );
+    }
+
+    #[test]
+    fn clear_editor_route_error_reports_failures_with_path_and_error() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/agent-doc/agent-doc-bugs5.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let path = editor_route_error_path_for_file(&doc).unwrap();
+        std::fs::create_dir_all(&path).unwrap();
+
+        match clear_editor_route_error_for_file(&doc) {
+            EditorRouteErrorClearResult::Failed {
+                path: failed_path,
+                error,
+            } => {
+                assert_eq!(failed_path, path);
+                assert!(!error.is_empty());
+            }
+            other => panic!("expected Failed, got {other:?}"),
+        }
     }
 }

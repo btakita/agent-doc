@@ -1,6 +1,6 @@
 //! Pure semantic memory ranking and result-shaping helpers for agent-doc.
 
-use agent_doc_element_backlog::backlog::{PendingItem, PendingListMarker, PendingState};
+use agent_doc_element_backlog::backlog::{self, PendingItem, PendingListMarker, PendingState};
 use serde::Serialize;
 use std::collections::{BTreeSet, HashMap};
 use tsift_memory::{MemoryEvent, MemoryEventKind, MemoryInsertResult};
@@ -22,6 +22,16 @@ pub struct MemorySearchResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,
     pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletionCandidate {
+    pub source: String,
+    pub source_ref: String,
+    pub item_id: Option<String>,
+    pub text: String,
+    pub queue_index: Option<usize>,
+    pub exclude_from_queue_strike: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -96,6 +106,177 @@ pub fn format_semantic_completion_warning(candidate: &SemanticCompletionMatch) -
         candidate.candidate_text,
         candidate.matched_done_text
     )
+}
+
+pub fn semantic_completion_matches(
+    candidates: &[CompletionCandidate],
+    events: &[MemoryEvent],
+    limit: usize,
+) -> Vec<SemanticCompletionMatch> {
+    if candidates.is_empty() {
+        return Vec::new();
+    }
+
+    let done_events = events
+        .iter()
+        .filter(|event| is_done_tracked_work_event(event))
+        .cloned()
+        .collect::<Vec<_>>();
+    if done_events.is_empty() {
+        return Vec::new();
+    }
+
+    let mut seen = BTreeSet::new();
+    let mut matches = Vec::new();
+    for candidate in candidates {
+        let ranked = rank_events(&candidate.text, &done_events);
+        for result in ranked {
+            if result.score < 0.8 {
+                break;
+            }
+            if candidate.item_id.is_some() && candidate.item_id == result.item_id {
+                continue;
+            }
+            let key = (
+                candidate.source_ref.clone(),
+                result.source_ref.clone(),
+                result.item_id.clone(),
+            );
+            if !seen.insert(key) {
+                continue;
+            }
+            matches.push(SemanticCompletionMatch {
+                score: result.score,
+                candidate_source: candidate.source.clone(),
+                candidate_ref: candidate.source_ref.clone(),
+                candidate_id: candidate.item_id.clone(),
+                candidate_text: trim_chars(&candidate.text, 320),
+                matched_done_ref: result.source_ref,
+                matched_done_id: result.item_id,
+                matched_done_text: result.text,
+            });
+            break;
+        }
+    }
+
+    matches.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.candidate_ref.cmp(&b.candidate_ref))
+            .then_with(|| a.matched_done_ref.cmp(&b.matched_done_ref))
+    });
+    matches.truncate(limit.max(1));
+    matches
+}
+
+pub fn semantic_queue_strike_matches(
+    candidates: &[CompletionCandidate],
+    events: &[MemoryEvent],
+    threshold: f64,
+    limit: usize,
+) -> Vec<QueueStrikeMatch> {
+    if candidates.is_empty() {
+        return Vec::new();
+    }
+
+    let done_events = events
+        .iter()
+        .filter(|event| is_done_tracked_work_event(event))
+        .cloned()
+        .collect::<Vec<_>>();
+    let backlog_events = events
+        .iter()
+        .filter(|event| is_active_backlog_work_event(event))
+        .cloned()
+        .collect::<Vec<_>>();
+    if done_events.is_empty() && backlog_events.is_empty() {
+        return Vec::new();
+    }
+
+    let mut matches = Vec::new();
+    for candidate in candidates {
+        if candidate.source != "queue" || candidate.item_id.is_some() {
+            continue;
+        }
+        let Some(candidate_index) = candidate.queue_index else {
+            continue;
+        };
+        if candidate.exclude_from_queue_strike {
+            continue;
+        }
+
+        let best_done = rank_events(&candidate.text, &done_events)
+            .into_iter()
+            .next();
+        let best_backlog = rank_events(&candidate.text, &backlog_events)
+            .into_iter()
+            .next();
+        let chosen = match (best_done, best_backlog) {
+            (Some(d), Some(b)) => {
+                if d.score >= b.score {
+                    Some((QueueStrikeMatchKind::Done, d))
+                } else {
+                    Some((QueueStrikeMatchKind::Backlog, b))
+                }
+            }
+            (Some(d), None) => Some((QueueStrikeMatchKind::Done, d)),
+            (None, Some(b)) => Some((QueueStrikeMatchKind::Backlog, b)),
+            (None, None) => None,
+        };
+        let Some((matched_kind, result)) = chosen else {
+            continue;
+        };
+        if result.score < threshold {
+            continue;
+        }
+        matches.push(QueueStrikeMatch {
+            score: result.score,
+            matched_kind,
+            candidate_index,
+            candidate_text: candidate.text.clone(),
+            matched_ref: result.source_ref,
+            matched_id: result.item_id,
+            matched_text: result.text,
+        });
+    }
+
+    matches.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.candidate_index.cmp(&b.candidate_index))
+    });
+    matches.truncate(limit.max(1));
+    matches
+}
+
+pub fn is_done_tracked_work_event(event: &MemoryEvent) -> bool {
+    event
+        .metadata
+        .get("agent_doc_surface")
+        .is_some_and(|surface| surface == "tracked_work")
+        && event
+            .metadata
+            .get("state")
+            .is_some_and(|state| state == "done")
+}
+
+/// An active (non-done) tracked-work event sourced from an `agent:backlog`
+/// component. Review/icebox surfaces are intentionally excluded so only items the
+/// operator is actively tracking in the backlog count as "addresses it".
+pub fn is_active_backlog_work_event(event: &MemoryEvent) -> bool {
+    event
+        .metadata
+        .get("agent_doc_surface")
+        .is_some_and(|surface| surface == "tracked_work")
+        && event
+            .metadata
+            .get("state")
+            .is_none_or(|state| state != "done")
+        && event.metadata.get("component").is_some_and(|component| {
+            backlog::component_matches_tracked_surface(component, "backlog")
+        })
 }
 
 pub fn count_insert_results(results: &[MemoryInsertResult]) -> (usize, usize) {
@@ -391,16 +572,57 @@ mod tests {
     use super::*;
     use tsift_memory::MemoryEventKind;
 
-    fn tracked_event(source_ref: &str, item_id: &str, text: &str) -> MemoryEvent {
+    fn tracked_event_with_state(
+        source_ref: &str,
+        item_id: &str,
+        component: &str,
+        state: &str,
+        text: &str,
+    ) -> MemoryEvent {
         MemoryEvent::new(
             MemoryEventKind::ImportedObservation,
             source_ref.to_string(),
             text.to_string(),
         )
         .with_metadata("agent_doc_surface", "tracked_work")
-        .with_metadata("component", "backlog")
+        .with_metadata("component", component)
         .with_metadata("item_id", item_id)
-        .with_metadata("state", "open")
+        .with_metadata("state", state)
+    }
+
+    fn tracked_event(source_ref: &str, item_id: &str, text: &str) -> MemoryEvent {
+        tracked_event_with_state(source_ref, item_id, "backlog", "open", text)
+    }
+
+    fn done_event(source_ref: &str, item_id: &str, text: &str) -> MemoryEvent {
+        tracked_event_with_state(source_ref, item_id, "done", "done", text)
+    }
+
+    fn completion_candidate(
+        source: &str,
+        source_ref: &str,
+        item_id: Option<&str>,
+        text: &str,
+    ) -> CompletionCandidate {
+        CompletionCandidate {
+            source: source.to_string(),
+            source_ref: source_ref.to_string(),
+            item_id: item_id.map(str::to_string),
+            text: text.to_string(),
+            queue_index: None,
+            exclude_from_queue_strike: false,
+        }
+    }
+
+    fn queue_candidate(index: usize, text: &str, exclude: bool) -> CompletionCandidate {
+        CompletionCandidate {
+            source: "queue".to_string(),
+            source_ref: format!("doc#queue:{index}"),
+            item_id: None,
+            text: text.to_string(),
+            queue_index: Some(index),
+            exclude_from_queue_strike: exclude,
+        }
     }
 
     #[test]
@@ -443,6 +665,98 @@ mod tests {
         let deduped = dedupe_events(vec![first, duplicate, other]);
 
         assert_eq!(deduped.len(), 2);
+    }
+
+    #[test]
+    fn semantic_completion_matches_done_events_and_skips_same_item_id() {
+        let candidates = vec![
+            completion_candidate(
+                "backlog",
+                "doc#backlog:cachefix",
+                Some("cachefix"),
+                "Repair cache duplication on save",
+            ),
+            queue_candidate(0, "Repair cache duplication on save", false),
+        ];
+        let events = vec![done_event(
+            "doc#done:cachefix",
+            "cachefix",
+            "#cachefix Repair cache duplication on save",
+        )];
+
+        let matches = semantic_completion_matches(&candidates, &events, 5);
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].candidate_source, "queue");
+        assert_eq!(matches[0].matched_done_id.as_deref(), Some("cachefix"));
+    }
+
+    #[test]
+    fn semantic_queue_strike_prefers_done_over_equal_backlog_match() {
+        let candidates = vec![queue_candidate(
+            3,
+            "Repair cache duplication on save",
+            false,
+        )];
+        let events = vec![
+            done_event(
+                "doc#done:cachefix",
+                "cachefix",
+                "#cachefix Repair cache duplication on save",
+            ),
+            tracked_event(
+                "doc#backlog:cachefix",
+                "cachefix",
+                "#cachefix Repair cache duplication on save",
+            ),
+        ];
+
+        let matches =
+            semantic_queue_strike_matches(&candidates, &events, QUEUE_STRIKE_THRESHOLD, 5);
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].matched_kind, QueueStrikeMatchKind::Done);
+        assert_eq!(matches[0].candidate_index, 3);
+        assert_eq!(matches[0].matched_id.as_deref(), Some("cachefix"));
+    }
+
+    #[test]
+    fn semantic_queue_strike_skips_excluded_candidate() {
+        let candidates = vec![queue_candidate(0, "Repair cache duplication on save", true)];
+        let events = vec![done_event(
+            "doc#done:cachefix",
+            "cachefix",
+            "#cachefix Repair cache duplication on save",
+        )];
+
+        let matches =
+            semantic_queue_strike_matches(&candidates, &events, QUEUE_STRIKE_THRESHOLD, 5);
+
+        assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn semantic_event_classifiers_distinguish_done_and_active_backlog() {
+        let done = done_event("doc#done:cachefix", "cachefix", "Repair cache duplication");
+        let active_pending = tracked_event_with_state(
+            "doc#pending:cachefix",
+            "cachefix",
+            "pending",
+            "open",
+            "Repair cache duplication",
+        );
+        let review = tracked_event_with_state(
+            "doc#review:cachefix",
+            "cachefix",
+            "review",
+            "open",
+            "Repair cache duplication",
+        );
+
+        assert!(is_done_tracked_work_event(&done));
+        assert!(!is_active_backlog_work_event(&done));
+        assert!(is_active_backlog_work_event(&active_pending));
+        assert!(!is_active_backlog_work_event(&review));
     }
 
     #[test]

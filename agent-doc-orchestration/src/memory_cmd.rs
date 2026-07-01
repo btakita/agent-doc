@@ -8,15 +8,19 @@
 
 use agent_doc_document::queue_projection::strip_in_progress_marker;
 use agent_doc_memory::{
-    MemorySearchResult, QueueStrikeMatch, QueueStrikeMatchKind, SemanticCompletionMatch,
+    CompletionCandidate, MemorySearchResult, QueueStrikeMatch, SemanticCompletionMatch,
     count_insert_results, dedupe_events, parse_done_archive_items, queue_prompt_target_id,
-    rank_events, response_summary_events, tracked_work_events, trim_chars,
+    rank_events, response_summary_events,
+    semantic_completion_matches as match_semantic_completions,
+    semantic_queue_strike_matches as match_semantic_queue_strikes, tracked_work_events,
 };
 #[cfg(test)]
-use agent_doc_memory::{QUEUE_STRIKE_THRESHOLD, format_semantic_completion_warning};
+use agent_doc_memory::{
+    QUEUE_STRIKE_THRESHOLD, QueueStrikeMatchKind, format_semantic_completion_warning,
+};
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 #[cfg(test)]
 use tsift_memory::MemoryEventKind;
@@ -58,14 +62,6 @@ struct SessionEvents {
     events: Vec<MemoryEvent>,
     component_counts: BTreeMap<String, usize>,
     warnings: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-struct CompletionCandidate {
-    source: String,
-    source_ref: String,
-    item_id: Option<String>,
-    text: String,
 }
 
 pub fn run_index(file: &Path, db: Option<&Path>, json: bool) -> Result<()> {
@@ -199,56 +195,8 @@ pub fn semantic_completion_matches(
     let session = collect_session_events(file)?;
     let mut events = read_memory_events(&db_path, MAX_EVENT_READ_LIMIT)?;
     events.extend(session.events.clone());
-    let done_events = dedupe_events(events)
-        .into_iter()
-        .filter(is_done_tracked_work_event)
-        .collect::<Vec<_>>();
-    if done_events.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let mut seen = BTreeSet::new();
-    let mut matches = Vec::new();
-    for candidate in candidates {
-        let ranked = rank_events(&candidate.text, &done_events);
-        for result in ranked {
-            if result.score < 0.8 {
-                break;
-            }
-            if candidate.item_id.is_some() && candidate.item_id == result.item_id {
-                continue;
-            }
-            let key = (
-                candidate.source_ref.clone(),
-                result.source_ref.clone(),
-                result.item_id.clone(),
-            );
-            if !seen.insert(key) {
-                continue;
-            }
-            matches.push(SemanticCompletionMatch {
-                score: result.score,
-                candidate_source: candidate.source.clone(),
-                candidate_ref: candidate.source_ref.clone(),
-                candidate_id: candidate.item_id.clone(),
-                candidate_text: trim_chars(&candidate.text, 320),
-                matched_done_ref: result.source_ref,
-                matched_done_id: result.item_id,
-                matched_done_text: result.text,
-            });
-            break;
-        }
-    }
-
-    matches.sort_by(|a, b| {
-        b.score
-            .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.candidate_ref.cmp(&b.candidate_ref))
-            .then_with(|| a.matched_done_ref.cmp(&b.matched_done_ref))
-    });
-    matches.truncate(limit.max(1));
-    Ok(matches)
+    let events = dedupe_events(events);
+    Ok(match_semantic_completions(&candidates, &events, limit))
 }
 
 /// Deterministically score every LIVE free-text `agent:queue` head against BOTH
@@ -267,10 +215,7 @@ pub fn semantic_queue_strike_matches(
     threshold: f64,
     limit: usize,
 ) -> Result<Vec<QueueStrikeMatch>> {
-    let candidates: Vec<CompletionCandidate> = collect_completion_candidates(file)?
-        .into_iter()
-        .filter(|c| c.source == "queue" && c.item_id.is_none())
-        .collect();
+    let candidates = collect_completion_candidates(file)?;
     if candidates.is_empty() {
         return Ok(Vec::new());
     }
@@ -280,105 +225,12 @@ pub fn semantic_queue_strike_matches(
     let mut events = read_memory_events(&db_path, MAX_EVENT_READ_LIMIT)?;
     events.extend(session.events.clone());
     let events = dedupe_events(events);
-
-    // Two disjoint corpora, both scored by the identical deterministic scorer.
-    let done_events: Vec<MemoryEvent> = events
-        .iter()
-        .filter(|e| is_done_tracked_work_event(e))
-        .cloned()
-        .collect();
-    let backlog_events: Vec<MemoryEvent> = events
-        .iter()
-        .filter(|e| is_active_backlog_work_event(e))
-        .cloned()
-        .collect();
-    if done_events.is_empty() && backlog_events.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let mut matches = Vec::new();
-    for candidate in candidates {
-        let candidate_index = candidate
-            .source_ref
-            .rsplit_once(':')
-            .and_then(|(_, idx)| idx.parse::<usize>().ok());
-        let Some(candidate_index) = candidate_index else {
-            continue;
-        };
-        // `#qimpstrike`: a recurring imperative command head (`deploy`, `commit`,
-        // `push`, `commit + push`, the `#spec-test-commit-push` preset, …) is an
-        // executable directive, not a restatement of tracked work — it is valid
-        // every time it is queued. Never strike it as "already done"/backlog,
-        // even when a common verb is lexically close to many prior done items.
-        // It stays drainable and is retired only once actually dispatched this
-        // cycle (the answered-this-turn consume path), not by fuzzy matching.
-        if agent_doc_queue::queue_continuation::is_recurring_imperative_head(&candidate.text) {
-            continue;
-        }
-        // Score against both corpora; keep the single best match across both,
-        // preferring a completed (done) match on a tie since "already complete"
-        // is the stronger statement than "tracked".
-        let best_done = rank_events(&candidate.text, &done_events)
-            .into_iter()
-            .next();
-        let best_backlog = rank_events(&candidate.text, &backlog_events)
-            .into_iter()
-            .next();
-        let chosen = match (best_done, best_backlog) {
-            (Some(d), Some(b)) => {
-                if d.score >= b.score {
-                    Some((QueueStrikeMatchKind::Done, d))
-                } else {
-                    Some((QueueStrikeMatchKind::Backlog, b))
-                }
-            }
-            (Some(d), None) => Some((QueueStrikeMatchKind::Done, d)),
-            (None, Some(b)) => Some((QueueStrikeMatchKind::Backlog, b)),
-            (None, None) => None,
-        };
-        let Some((matched_kind, result)) = chosen else {
-            continue;
-        };
-        if result.score < threshold {
-            continue;
-        }
-        matches.push(QueueStrikeMatch {
-            score: result.score,
-            matched_kind,
-            candidate_index,
-            candidate_text: candidate.text.clone(),
-            matched_ref: result.source_ref,
-            matched_id: result.item_id,
-            matched_text: result.text,
-        });
-    }
-
-    matches.sort_by(|a, b| {
-        b.score
-            .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.candidate_index.cmp(&b.candidate_index))
-    });
-    matches.truncate(limit.max(1));
-    Ok(matches)
-}
-
-/// An active (non-done) tracked-work event sourced from an `agent:backlog`
-/// component. Review/icebox surfaces are intentionally excluded so only items the
-/// operator is actively tracking in the backlog count as "addresses it".
-fn is_active_backlog_work_event(event: &MemoryEvent) -> bool {
-    event
-        .metadata
-        .get("agent_doc_surface")
-        .is_some_and(|surface| surface == "tracked_work")
-        && event
-            .metadata
-            .get("state")
-            .is_none_or(|state| state != "done")
-        && event
-            .metadata
-            .get("component")
-            .is_some_and(|component| element::is_backlog_component(component))
+    Ok(match_semantic_queue_strikes(
+        &candidates,
+        &events,
+        threshold,
+        limit,
+    ))
 }
 
 fn collect_completion_candidates(file: &Path) -> Result<Vec<CompletionCandidate>> {
@@ -414,6 +266,8 @@ fn collect_completion_candidates(file: &Path) -> Result<Vec<CompletionCandidate>
                     source_ref: format!("{session_ref}#{}:{id_ref}", comp.name),
                     item_id,
                     text,
+                    queue_index: None,
+                    exclude_from_queue_strike: false,
                 });
             }
         } else if comp.name == "queue" {
@@ -434,28 +288,21 @@ fn collect_completion_candidates(file: &Path) -> Result<Vec<CompletionCandidate>
                 // the head is currently the in-progress head — otherwise an
                 // in-progress head can never be matched/struck and the marker
                 // lingers on a now-redundant head forever.
+                let text = strip_in_progress_marker(prompt.text.trim());
                 candidates.push(CompletionCandidate {
                     source: "queue".to_string(),
                     source_ref: format!("{session_ref}#queue:{index}"),
                     item_id: None,
-                    text: strip_in_progress_marker(prompt.text.trim()),
+                    exclude_from_queue_strike:
+                        agent_doc_queue::queue_continuation::is_recurring_imperative_head(&text),
+                    text,
+                    queue_index: Some(index),
                 });
             }
         }
     }
 
     Ok(candidates)
-}
-
-fn is_done_tracked_work_event(event: &MemoryEvent) -> bool {
-    event
-        .metadata
-        .get("agent_doc_surface")
-        .is_some_and(|surface| surface == "tracked_work")
-        && event
-            .metadata
-            .get("state")
-            .is_some_and(|state| state == "done")
 }
 
 fn collect_session_events(file: &Path) -> Result<SessionEvents> {

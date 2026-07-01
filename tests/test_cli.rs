@@ -7117,12 +7117,17 @@ fn test_agent_doc_memory_owns_semantic_memory_ranking_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-memory/src/lib.rs")).unwrap();
     for required in [
         "pub struct MemorySearchResult",
+        "pub struct CompletionCandidate",
         "pub struct SemanticCompletionMatch",
         "pub enum QueueStrikeMatchKind",
         "pub struct QueueStrikeMatch",
         "pub const QUEUE_STRIKE_THRESHOLD",
         "pub fn queue_prompt_target_id(",
         "pub fn format_semantic_completion_warning(",
+        "pub fn semantic_completion_matches(",
+        "pub fn semantic_queue_strike_matches(",
+        "pub fn is_done_tracked_work_event(",
+        "pub fn is_active_backlog_work_event(",
         "pub fn count_insert_results(",
         "pub fn rank_events(",
         "pub fn dedupe_events(",
@@ -7146,6 +7151,7 @@ fn test_agent_doc_memory_owns_semantic_memory_ranking_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/memory_cmd.rs")).unwrap();
     for forbidden in [
         "pub struct MemorySearchResult",
+        "struct CompletionCandidate",
         "fn count_insert_results(",
         "fn rank_events(",
         "fn score_event(",
@@ -7169,6 +7175,8 @@ fn test_agent_doc_memory_owns_semantic_memory_ranking_policy() {
         "pub const QUEUE_STRIKE_THRESHOLD",
         "fn queue_prompt_target_id(",
         "pub fn format_semantic_completion_warning(",
+        "fn is_done_tracked_work_event(",
+        "fn is_active_backlog_work_event(",
     ] {
         assert!(
             !orchestration_memory.contains(forbidden),
@@ -7177,12 +7185,17 @@ fn test_agent_doc_memory_owns_semantic_memory_ranking_policy() {
     }
     assert!(
         orchestration_memory.contains("use agent_doc_memory::{")
+            && orchestration_memory.contains("CompletionCandidate")
             && orchestration_memory.contains("rank_events")
             && orchestration_memory.contains("dedupe_events")
             && orchestration_memory.contains("queue_prompt_target_id")
             && orchestration_memory.contains("tracked_work_events")
             && orchestration_memory.contains("parse_done_archive_items")
             && orchestration_memory.contains("response_summary_events")
+            && orchestration_memory
+                .contains("semantic_completion_matches as match_semantic_completions")
+            && orchestration_memory
+                .contains("semantic_queue_strike_matches as match_semantic_queue_strikes")
             && orchestration_memory.contains("SemanticCompletionMatch")
             && orchestration_memory.contains("QueueStrikeMatch"),
         "memory_cmd should call focused semantic memory policy directly"
@@ -11151,13 +11164,15 @@ fn test_agent_doc_controller_owns_editor_route_error_path_policy() {
     );
     for required in [
         "pub const EDITOR_ROUTE_ERROR_DIAGNOSTICS_DIR",
+        "pub enum EditorRouteErrorClearResult",
         "pub fn editor_route_error_diagnostic_name(",
         "pub fn editor_route_error_file_name(",
         "pub fn editor_route_error_path_for_file(",
+        "pub fn clear_editor_route_error_for_file(",
     ] {
         assert!(
             controller_policy.contains(required),
-            "agent-doc-controller must own editor route-error path policy: {required}"
+            "agent-doc-controller must own editor route-error path/clear policy: {required}"
         );
     }
     for forbidden in [
@@ -11168,21 +11183,23 @@ fn test_agent_doc_controller_owns_editor_route_error_path_policy() {
         "pub fn editor_route_error_path_for_file(",
         "pub const EDITOR_ROUTE_ERROR_DIAGNOSTICS_DIR",
         "pub use agent_doc_controller::editor_route_error",
+        "std::fs::remove_file(",
+        "ErrorKind::NotFound",
     ] {
         assert!(
             !orchestration_adapter.contains(forbidden),
-            "orchestration editor route-error adapter must not re-own or facade path policy: {forbidden}"
+            "orchestration editor route-error adapter must not re-own or facade path/clear policy: {forbidden}"
         );
         assert!(
             !orchestration_lib.contains(forbidden),
-            "orchestration lib must not facade editor route-error path policy: {forbidden}"
+            "orchestration lib must not facade editor route-error path/clear policy: {forbidden}"
         );
     }
     assert!(
-        orchestration_adapter.contains(
-            "use agent_doc_controller::editor_route_error::editor_route_error_path_for_file;"
-        ) && orchestration_adapter.contains("editor_route_error_path_for_file(file)"),
-        "orchestration should import focused editor route-error path policy directly"
+        orchestration_adapter.contains("use agent_doc_controller::editor_route_error::{")
+            && orchestration_adapter.contains("clear_editor_route_error_for_file")
+            && orchestration_adapter.contains("EditorRouteErrorClearResult"),
+        "orchestration should import focused editor route-error clear policy directly"
     );
 }
 
@@ -13130,8 +13147,10 @@ fn test_agent_doc_queue_owns_operator_clear_preemption_policy() {
             .unwrap();
     for required in [
         "pub struct ContinuationMarker",
+        "pub enum ContinuationMarkerScanAction",
         "pub fn write_continuation_marker(",
         "pub fn load_continuation_marker(",
+        "pub fn scan_pending_marker_continuations_for_roots",
         "pub fn record_continuation_requested_head(",
         "pub fn write_deferred_operator_clear(",
         "pub fn read_deferred_operator_clear(",
@@ -13162,16 +13181,21 @@ fn test_agent_doc_queue_owns_operator_clear_preemption_policy() {
         "deferred_operator_clear_marker(",
         "deferred_operator_clear_marker_json(",
         "parse_deferred_operator_clear_marker_json(",
+        "std::fs::read_dir(",
+        "serde_json::from_str::<ContinuationMarker>",
+        "std::fs::remove_file(&path)",
     ] {
         assert!(
             !orchestration_adapter.contains(forbidden),
-            "queue_continuation.rs must not re-own marker IO or deferred-clear payload policy: {forbidden}"
+            "queue_continuation.rs must not re-own marker scan IO or deferred-clear payload policy: {forbidden}"
         );
     }
     assert!(
         orchestration_adapter.contains("agent_doc_queue_io::continuation_marker")
+            && orchestration_adapter.contains("scan_pending_marker_continuations_for_roots")
+            && orchestration_adapter.contains("ContinuationMarkerScanAction")
             && !orchestration_adapter.contains("use agent_doc_queue::queue_preemption::{"),
-        "queue_continuation.rs should use focused queue-io marker storage, not queue-preemption directly"
+        "queue_continuation.rs should use focused queue-io marker storage/scanning, not queue-preemption directly"
     );
 }
 

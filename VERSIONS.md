@@ -13,6 +13,16 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   `pending_*` aliases. `agent-doc-template` also imports boundary-id helpers
   directly from `agent-doc-element` instead of exposing a template id facade.
 
+- **Open agent-doc cycles now defer every supervisor recycle arm until commit or
+  bounded resume escalation.** The `#midturn-recycle-resume` interlock now wins
+  over explicit admin recycle, editor write-wedge recycle, and failed-reexec
+  escalation while a closeout cycle is still open. A forced recycle after the
+  bounded never-closing-cycle threshold preserves the open durable checkpoint
+  instead of marking it abandoned, so the fresh supervisor can adopt a surviving
+  child or re-dispatch the interrupted turn exactly once. Stalled-cycle cleanup
+  now runs only at a true turn boundary, preventing a long active Codex turn from
+  being force-abandoned mid-closeout.
+
 - **Editor prompt pollers removed.** The JetBrains plugin no longer starts the
   defensive `agent-doc prompt --all` timer, no longer registers submitted files
   for prompt polling, and no longer ships the bottom prompt panel. The VS Code

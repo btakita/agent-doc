@@ -925,6 +925,15 @@ should be deleted during extraction.
   the focused tmux IO adapter directly; the old
   `agent-doc-orchestration::input_diag` module was deleted rather than kept as a
   compatibility facade.
+- The next fan-out/local integration pass pulled three more seams out of
+  orchestration. `agent-doc-frontmatter-io::session` now owns file/config-backed
+  frontmatter parsing, session-id reads, session injection, and document opt-in
+  gate adapters; orchestration keeps only the `RunContext`-backed adapter.
+  `agent-doc-supervisor-process::start_command` owns route-owned supervisor start
+  command rendering and shell quoting; project-controller RPC imports it instead
+  of keeping local command-rendering helpers. `agent-doc-supervisor` now owns the
+  stateful PTY terminal escape filter and trace vocabulary; orchestration's PTY
+  layer only selects harness-specific config and emits verbose trace logs.
 - Route-submit sidecar policy was tightened too: `agent-doc-supervisor` now owns
   route-submit marker JSON serialization plus fresh/stale/malformed
   classification for in-flight and blocked markers. Orchestration keeps only

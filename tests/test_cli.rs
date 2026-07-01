@@ -3358,7 +3358,10 @@ fn test_agent_doc_queue_owns_dispatch_item_classification_policy() {
     for required in [
         "pub enum QueueItemKind",
         "pub struct QueueItem",
+        "pub enum InlineDispatchCommand",
         "pub fn classify(",
+        "pub fn inline_dispatch_command(",
+        "pub fn is_session_clear_command(",
         "pub fn sanitize_progress_field(",
         "pub fn item_fingerprint(",
     ] {
@@ -3373,9 +3376,14 @@ fn test_agent_doc_queue_owns_dispatch_item_classification_policy() {
     for forbidden in [
         "pub enum QueueItemKind",
         "pub struct QueueItem",
+        "pub enum InlineDispatchCommand",
         "pub fn classify(",
+        "fn inline_dispatch_command(",
+        "fn is_session_clear_command(",
         "fn sanitize_progress_field(",
         "fn item_fingerprint(",
+        "const INLINE_COMMANDS",
+        "INLINE_COMMANDS.contains",
         "pub use agent_doc_queue::dispatch_item",
         "pub(crate) use agent_doc_queue::dispatch_item",
     ] {
@@ -3387,6 +3395,9 @@ fn test_agent_doc_queue_owns_dispatch_item_classification_policy() {
     assert!(
         queue_dispatch_source.contains("agent_doc_queue::dispatch_item::{")
             && queue_dispatch_source.contains("QueueItem")
+            && queue_dispatch_source.contains("InlineDispatchCommand")
+            && queue_dispatch_source.contains("inline_dispatch_command")
+            && queue_dispatch_source.contains("is_session_clear_command")
             && queue_dispatch_source.contains("item_fingerprint")
             && queue_dispatch_source.contains("sanitize_progress_field"),
         "queue_dispatch should depend on focused dispatch item policy directly"

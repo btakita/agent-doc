@@ -35,10 +35,10 @@ use agent_doc_orchestration::sessions;
 use agent_doc_orchestration::supervisor::ipc as supervisor_ipc;
 #[cfg(test)]
 use agent_doc_queue::dispatch_item::classify;
-use agent_doc_queue::dispatch_item::{QueueItem, item_fingerprint, sanitize_progress_field};
-
-/// Commands that can be executed inline without a harness session.
-const INLINE_COMMANDS: &[&str] = &["model", "compact"];
+use agent_doc_queue::dispatch_item::{
+    InlineDispatchCommand, QueueItem, inline_dispatch_command, is_session_clear_command,
+    item_fingerprint, sanitize_progress_field,
+};
 
 /// Result of dispatching a command.
 #[derive(Debug)]
@@ -98,11 +98,11 @@ pub fn dispatch_command(item: &QueueItem, ctx: &DispatchContext) -> Result<Dispa
     let command = item.command.as_deref().unwrap_or("");
 
     // Try inline execution first for eligible commands
-    if INLINE_COMMANDS.contains(&command) {
-        return dispatch_inline(item, ctx);
+    if let Some(inline_command) = inline_dispatch_command(command) {
+        return dispatch_inline(inline_command, item, ctx);
     }
 
-    if command == "clear" {
+    if is_session_clear_command(command) {
         return dispatch_clear(ctx);
     }
 
@@ -137,10 +137,13 @@ fn dispatch_clear(ctx: &DispatchContext) -> Result<DispatchResult> {
 }
 
 /// Execute an inline-eligible command.
-fn dispatch_inline(item: &QueueItem, ctx: &DispatchContext) -> Result<DispatchResult> {
-    let command = item.command.as_deref().unwrap_or("");
+fn dispatch_inline(
+    command: InlineDispatchCommand,
+    item: &QueueItem,
+    ctx: &DispatchContext,
+) -> Result<DispatchResult> {
     match command {
-        "model" => {
+        InlineDispatchCommand::Model => {
             let tier = item
                 .args
                 .first()
@@ -155,7 +158,7 @@ fn dispatch_inline(item: &QueueItem, ctx: &DispatchContext) -> Result<DispatchRe
             );
             Ok(DispatchResult::ModelOverride(tier.clone()))
         }
-        "compact" => {
+        InlineDispatchCommand::Compact => {
             let default_file = ctx.file.to_string_lossy();
             let file_arg = item
                 .args
@@ -198,7 +201,6 @@ fn dispatch_inline(item: &QueueItem, ctx: &DispatchContext) -> Result<DispatchRe
             }
             Ok(DispatchResult::Ok)
         }
-        _ => anyhow::bail!("command `/{command}` is not inline-executable"),
     }
 }
 
@@ -378,7 +380,7 @@ mod tests {
     fn dispatch_inline_model_updates_override() {
         let item = classify("/model sonnet");
         let ctx = test_dispatch_context();
-        match dispatch_inline(&item, &ctx).unwrap() {
+        match dispatch_inline(InlineDispatchCommand::Model, &item, &ctx).unwrap() {
             DispatchResult::ModelOverride(tier) => assert_eq!(tier, "sonnet"),
             _ => panic!("expected ModelOverride"),
         }
@@ -388,7 +390,7 @@ mod tests {
     fn dispatch_inline_model_requires_arg() {
         let item = classify("/model");
         let ctx = test_dispatch_context();
-        assert!(dispatch_inline(&item, &ctx).is_err());
+        assert!(dispatch_inline(InlineDispatchCommand::Model, &item, &ctx).is_err());
     }
 
     #[test]

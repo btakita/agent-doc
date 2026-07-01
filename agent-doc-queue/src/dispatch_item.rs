@@ -23,6 +23,13 @@ pub struct QueueItem {
     pub args: Vec<String>,
 }
 
+/// Inline command variants whose effects are implemented by the dispatcher.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InlineDispatchCommand {
+    Model,
+    Compact,
+}
+
 /// Classify a text item as a prompt or command.
 pub fn classify(text: &str) -> QueueItem {
     let trimmed = text.trim();
@@ -52,6 +59,20 @@ pub fn classify(text: &str) -> QueueItem {
             args: Vec::new(),
         }
     }
+}
+
+/// Classify commands that can be executed inline without a harness session.
+pub fn inline_dispatch_command(command: &str) -> Option<InlineDispatchCommand> {
+    match command {
+        "model" => Some(InlineDispatchCommand::Model),
+        "compact" => Some(InlineDispatchCommand::Compact),
+        _ => None,
+    }
+}
+
+/// Return whether a command must use the guarded session clear path.
+pub fn is_session_clear_command(command: &str) -> bool {
+    command == "clear"
 }
 
 /// Sanitize a progress log field so it stays single-token and redaction-safe.
@@ -134,6 +155,26 @@ mod tests {
     fn classify_review_prompt() {
         let item = classify("Review the pending items");
         assert_eq!(item.kind, QueueItemKind::Prompt);
+    }
+
+    #[test]
+    fn inline_dispatch_command_classifies_inline_only_commands() {
+        assert_eq!(
+            inline_dispatch_command("model"),
+            Some(InlineDispatchCommand::Model)
+        );
+        assert_eq!(
+            inline_dispatch_command("compact"),
+            Some(InlineDispatchCommand::Compact)
+        );
+        assert_eq!(inline_dispatch_command("clear"), None);
+        assert_eq!(inline_dispatch_command("doctor"), None);
+    }
+
+    #[test]
+    fn is_session_clear_command_matches_only_clear() {
+        assert!(is_session_clear_command("clear"));
+        assert!(!is_session_clear_command("model"));
     }
 
     #[test]

@@ -1550,15 +1550,17 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 .and_then(|fm| fm.queue.as_deref()),
         );
         let sync_plan = agent_doc_queue::backlog_sync::plan_auto_backlog_queue_sync_ids(
-            &sync_request.ids,
-            &sync_request.enqueue_ids,
-            &done_ids,
-            &tombstones,
-            &entries,
-            persisted_active_incoming,
-            persisted_active_before_binding,
-            queue_go_mode,
-            queue_explicitly_stopped,
+            agent_doc_queue::backlog_sync::AutoBacklogQueueSyncInput {
+                requested_ids: &sync_request.ids,
+                enqueue_ids: &sync_request.enqueue_ids,
+                done_ids: &done_ids,
+                tombstones: &tombstones,
+                entries: &entries,
+                persisted_active_incoming,
+                persisted_active_before_binding,
+                queue_go_mode,
+                queue_explicitly_stopped,
+            },
         );
         if sync_plan.completed_excluded_count > 0 {
             eprintln!(

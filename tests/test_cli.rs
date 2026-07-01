@@ -1220,7 +1220,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `agent-doc-controller::dispatch`, and the route-local guard tests were
         // deleted instead of preserving a facade. The surviving route tokens are
         // adapter/logging references around the focused guard decisions.
-        ("agent-doc-orchestration/src/route.rs", "guard_") => 7,
+        // 7 -> 6 (#route-runtime-supervisor-policy): the remaining
+        // authoritative actor runtime eligibility wrapper moved to
+        // `agent-doc-supervisor::route_runtime`; route.rs now calls the focused
+        // supervisor policy directly.
+        ("agent-doc-orchestration/src/route.rs", "guard_") => 6,
         // 3 -> 0: route submit-observation proof rendering moved to
         // `agent-doc-controller::dispatch`; route now adapts proof facts into
         // the focused controller formatter instead of owning `proof=` log text.
@@ -8831,10 +8835,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("classify_authoritative_prompt_ready_barrier")
             && route_source.contains("RoutedReopenGuardReason")
             && route_source.contains("dispatch_only_blocked_guard_reason")
-            && route_source.contains("ActorLifecycleState")
             && route_source.contains("effective_authoritative_actor_state")
             && route_source.contains("DispatchRuntimeHealth")
-            && route_source.contains("controller_authoritative_actor_dispatch_guard_reason(")
             && route_source.contains("RoutedDispatchStartProof")
             && route_source.contains("classify_dispatch_start_proof")
             && route_source.contains("DirectPaneSubmitStatus as CommandDispatchStatus")
@@ -10508,6 +10510,7 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
         "pub fn backlog_queue_sync_report",
         "pub enum AutoBacklogQueueSyncPolicy",
         "pub struct AutoBacklogQueueSyncPlan",
+        "pub struct AutoBacklogQueueSyncInput",
         "pub fn plan_auto_backlog_queue_sync_ids",
         "pub fn reconcile_queue_tombstones",
         "pub fn format_queue_ids",

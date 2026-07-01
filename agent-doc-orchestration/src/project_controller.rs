@@ -694,6 +694,26 @@ pub struct DispatchAuthorization {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SupervisorReplacementRequest {
+    pub file: PathBuf,
+    pub mode: String,
+    pub force: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SupervisorReplacementReceipt {
+    pub record: agent_doc_sqlite::state_store::ActorRecord,
+    pub accepted_stage: String,
+    pub operator_receipt: ControllerDispatchReceipt,
+    pub background_started: bool,
+    pub mode: String,
+    pub force: bool,
+    pub session_id: String,
+    pub pane_id: String,
+    pub generation: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ControllerAdminReceipt {
     pub receipt_id: u64,
     pub operation_kind: String,

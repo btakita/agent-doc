@@ -905,6 +905,40 @@ pub fn authorize_operator_command(
     )
 }
 
+pub fn request_supervisor_replacement(
+    project_root: &Path,
+    request: SupervisorReplacementRequest,
+) -> Result<SupervisorReplacementReceipt> {
+    let diagnostic_payload = serde_json::json!({
+        "force": request.force,
+        "mode": request.mode.clone(),
+        "caller": "session_restart_supervisor",
+    })
+    .to_string();
+    request_controller(
+        project_root,
+        ControllerRequest {
+            command: "supervisor_replacement".to_string(),
+            file: Some(request.file),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: Some(request.mode),
+            caller: Some("session".to_string()),
+            reason: Some(if request.force {
+                "operator_force_request".to_string()
+            } else {
+                "operator_request".to_string()
+            }),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(diagnostic_payload),
+        },
+    )
+}
+
 pub fn status(project_root: &Path) -> Result<ControllerStatus> {
     match request(project_root, "status") {
         Ok(response) => {
@@ -2513,6 +2547,11 @@ pub(crate) fn handle_request_locked(
             Some(runtime.as_ref()),
             request,
         )),
+        "supervisor_replacement" => controller_envelope(handle_supervisor_replacement(
+            &bootstrap_snapshot,
+            Some(runtime.as_ref()),
+            request,
+        )),
         "admin_operation" => {
             controller_envelope(handle_admin_operation(&bootstrap_snapshot, request))
         }
@@ -4113,6 +4152,476 @@ pub(crate) fn handle_operator_command(
     })
 }
 
+#[cfg(not(any(test, feature = "test-support")))]
+const SUPERVISOR_REPLACEMENT_WAIT_SECS_ENV: &str = "AGENT_DOC_SUPERVISOR_REPLACEMENT_WAIT_SECS";
+#[cfg(not(any(test, feature = "test-support")))]
+const DEFAULT_SUPERVISOR_REPLACEMENT_WAIT_SECS: u64 = 20;
+#[cfg(not(any(test, feature = "test-support")))]
+const SUPERVISOR_REPLACEMENT_POLL_INTERVAL: Duration = Duration::from_millis(250);
+
+#[derive(Clone, Debug)]
+struct SupervisorReplacementWork {
+    project_root: PathBuf,
+    file: PathBuf,
+    session_id: String,
+    pane_id: String,
+    generation: u64,
+    mode: String,
+    force: bool,
+    operator_receipt_id: u64,
+}
+
+#[cfg(not(any(test, feature = "test-support")))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SupervisorReplacementIpcStatus {
+    Accepted,
+    Dead,
+    Failed,
+}
+
+pub(crate) fn handle_supervisor_replacement(
+    bootstrap: &ControllerBootstrap,
+    runtime: Option<&ControllerRuntime>,
+    request: ControllerRequest,
+) -> Result<SupervisorReplacementReceipt> {
+    let file = request_file(&request)?;
+    let mode = supervisor_replacement_mode(&request)?;
+    let force = supervisor_replacement_force_flag(&request);
+    let authorization = handle_operator_command(
+        bootstrap,
+        runtime,
+        ControllerRequest {
+            command: "operator_command".to_string(),
+            file: Some(file.clone()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: request.caller.clone(),
+            reason: request.reason.clone(),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("session_restart".to_string()),
+            diagnostic_payload: Some(format!(
+                "session supervisor replacement background mode={mode} force={force}"
+            )),
+        },
+    )?;
+    let record = authorization.record.clone();
+    let work = SupervisorReplacementWork {
+        project_root: bootstrap.project_root.clone(),
+        file: file.clone(),
+        session_id: record.session_id.clone(),
+        pane_id: record.pane_id.clone(),
+        generation: record.generation,
+        mode: mode.clone(),
+        force,
+        operator_receipt_id: authorization.receipt.receipt_id,
+    };
+    let background_started = spawn_supervisor_replacement_worker(work)?;
+    crate::ops_log::log_op(
+        &file,
+        &format!(
+            "controller_supervisor_replacement_accepted mode={} force={} session={} pane={} generation={} stage={} receipt_id={} background_started={}",
+            mode,
+            force,
+            record.session_id,
+            record.pane_id,
+            record.generation,
+            authorization.accepted_stage,
+            authorization.receipt.receipt_id,
+            background_started
+        ),
+    );
+    Ok(SupervisorReplacementReceipt {
+        record,
+        accepted_stage: authorization.accepted_stage,
+        operator_receipt: authorization.receipt,
+        background_started,
+        mode,
+        force,
+        session_id: authorization.record.session_id,
+        pane_id: authorization.record.pane_id,
+        generation: authorization.record.generation,
+    })
+}
+
+fn supervisor_replacement_mode(request: &ControllerRequest) -> Result<String> {
+    let mode = request.state.as_deref().unwrap_or("continue").trim();
+    match mode {
+        "continue" | "fresh" => Ok(mode.to_string()),
+        other => anyhow::bail!("unsupported supervisor replacement mode `{other}`"),
+    }
+}
+
+fn supervisor_replacement_force_flag(request: &ControllerRequest) -> bool {
+    if let Some(payload) = request.diagnostic_payload.as_deref()
+        && let Ok(value) = serde_json::from_str::<serde_json::Value>(payload)
+        && let Some(force) = value.get("force").and_then(|value| value.as_bool())
+    {
+        return force;
+    }
+    request
+        .reason
+        .as_deref()
+        .is_some_and(|reason| reason.contains("force"))
+}
+
+#[cfg(any(test, feature = "test-support"))]
+fn spawn_supervisor_replacement_worker(work: SupervisorReplacementWork) -> Result<bool> {
+    crate::ops_log::log_op(
+        &work.file,
+        &format!(
+            "controller_supervisor_replacement_background_stub mode={} force={} session={} pane={} generation={} receipt_id={} project_root={}",
+            work.mode,
+            work.force,
+            work.session_id,
+            work.pane_id,
+            work.generation,
+            work.operator_receipt_id,
+            work.project_root.display()
+        ),
+    );
+    Ok(false)
+}
+
+#[cfg(not(any(test, feature = "test-support")))]
+fn spawn_supervisor_replacement_worker(work: SupervisorReplacementWork) -> Result<bool> {
+    std::thread::Builder::new()
+        .name("agent-doc-supervisor-replacement".to_string())
+        .spawn(move || {
+            if let Err(err) = drive_supervisor_replacement_background(work.clone()) {
+                crate::ops_log::log_op(
+                    &work.file,
+                    &format!(
+                        "controller_supervisor_replacement_background_failed session={} pane={} generation={} receipt_id={} error={err:?}",
+                        work.session_id, work.pane_id, work.generation, work.operator_receipt_id
+                    ),
+                );
+            }
+        })
+        .context("failed to spawn supervisor replacement background worker")?;
+    Ok(true)
+}
+
+#[cfg(not(any(test, feature = "test-support")))]
+fn drive_supervisor_replacement_background(work: SupervisorReplacementWork) -> Result<()> {
+    let initial_pid = crate::supervisor_selfkill::supervisor_pid_for_doc(&work.file);
+    let initial_host_stale = host_supervisor_stale_warning_for_doc(&work.file).is_some();
+    let socket = crate::supervisor::ipc::socket_path(&work.project_root, &work.session_id);
+    crate::ops_log::log_op(
+        &work.file,
+        &format!(
+            "controller_supervisor_replacement_background_started mode={} force={} session={} pane={} generation={} receipt_id={} initial_pid={} initial_host_stale={} socket={}",
+            work.mode,
+            work.force,
+            work.session_id,
+            work.pane_id,
+            work.generation,
+            work.operator_receipt_id,
+            initial_pid
+                .map(|pid| pid.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            initial_host_stale,
+            socket.display()
+        ),
+    );
+
+    let ipc_status = request_supervisor_replacement_ipc(&work, &socket);
+    let needs_escalation = match ipc_status {
+        SupervisorReplacementIpcStatus::Accepted => work.force || initial_host_stale,
+        SupervisorReplacementIpcStatus::Dead => true,
+        SupervisorReplacementIpcStatus::Failed => work.force || initial_host_stale,
+    };
+    if !needs_escalation {
+        crate::ops_log::log_op(
+            &work.file,
+            &format!(
+                "controller_supervisor_replacement_background_completed stage=ipc_only mode={} session={} pane={} generation={} receipt_id={} reason=fresh_supervisor_restart_accepted",
+                work.mode, work.session_id, work.pane_id, work.generation, work.operator_receipt_id
+            ),
+        );
+        return Ok(());
+    }
+
+    if ipc_status == SupervisorReplacementIpcStatus::Accepted
+        && wait_for_supervisor_replacement_completion(&work.file, initial_pid, initial_host_stale)
+    {
+        crate::ops_log::log_op(
+            &work.file,
+            &format!(
+                "controller_supervisor_replacement_background_completed stage=ipc_reexec mode={} session={} pane={} generation={} receipt_id={} initial_host_stale={}",
+                work.mode,
+                work.session_id,
+                work.pane_id,
+                work.generation,
+                work.operator_receipt_id,
+                initial_host_stale
+            ),
+        );
+        return Ok(());
+    }
+
+    crate::ops_log::log_op(
+        &work.file,
+        &format!(
+            "controller_supervisor_replacement_background_escalating mode={} force={} session={} pane={} generation={} receipt_id={} ipc_status={ipc_status:?} initial_host_stale={}",
+            work.mode,
+            work.force,
+            work.session_id,
+            work.pane_id,
+            work.generation,
+            work.operator_receipt_id,
+            initial_host_stale
+        ),
+    );
+    let kill_outcome = crate::supervisor_selfkill::drive_supervisor_kill(
+        &work.file,
+        crate::supervisor_selfkill::selfkill_grace(),
+        false,
+    )?;
+    crate::ops_log::log_op(
+        &work.file,
+        &format!(
+            "controller_supervisor_replacement_kill_outcome mode={} session={} pane={} generation={} receipt_id={} outcome={kill_outcome:?}",
+            work.mode, work.session_id, work.pane_id, work.generation, work.operator_receipt_id
+        ),
+    );
+    reap_dead_supervisor_socket(&work.file, &socket);
+    let pane = cold_start_supervisor_replacement(&work)?;
+    crate::ops_log::log_op(
+        &work.file,
+        &format!(
+            "controller_supervisor_replacement_background_completed stage=cold_start mode={} session={} pane={} generation={} receipt_id={} replacement_pane={}",
+            work.mode,
+            work.session_id,
+            work.pane_id,
+            work.generation,
+            work.operator_receipt_id,
+            pane
+        ),
+    );
+    Ok(())
+}
+
+#[cfg(not(any(test, feature = "test-support")))]
+fn request_supervisor_replacement_ipc(
+    work: &SupervisorReplacementWork,
+    socket: &Path,
+) -> SupervisorReplacementIpcStatus {
+    if matches!(
+        crate::supervisor::ipc::probe_socket(socket),
+        crate::supervisor::ipc::SocketLiveness::Dead
+    ) {
+        crate::ops_log::log_op(
+            &work.file,
+            &format!(
+                "controller_supervisor_replacement_ipc_dead session={} pane={} generation={} receipt_id={} socket={}",
+                work.session_id,
+                work.pane_id,
+                work.generation,
+                work.operator_receipt_id,
+                socket.display()
+            ),
+        );
+        return SupervisorReplacementIpcStatus::Dead;
+    }
+    match crate::supervisor::ipc::send_command(
+        socket,
+        &crate::supervisor::ipc::IpcMethod::Restart {
+            mode: work.mode.clone(),
+        },
+    ) {
+        Ok(response) if response.ok => {
+            crate::ops_log::log_op(
+                &work.file,
+                &format!(
+                    "controller_supervisor_replacement_ipc_accepted mode={} session={} pane={} generation={} receipt_id={} socket={}",
+                    work.mode,
+                    work.session_id,
+                    work.pane_id,
+                    work.generation,
+                    work.operator_receipt_id,
+                    socket.display()
+                ),
+            );
+            SupervisorReplacementIpcStatus::Accepted
+        }
+        Ok(response) => {
+            crate::ops_log::log_op(
+                &work.file,
+                &format!(
+                    "controller_supervisor_replacement_ipc_failed mode={} session={} pane={} generation={} receipt_id={} error={}",
+                    work.mode,
+                    work.session_id,
+                    work.pane_id,
+                    work.generation,
+                    work.operator_receipt_id,
+                    response
+                        .error
+                        .unwrap_or_else(|| "supervisor restart request failed".to_string())
+                ),
+            );
+            SupervisorReplacementIpcStatus::Failed
+        }
+        Err(err) => {
+            let status = if matches!(
+                crate::supervisor::ipc::probe_socket(socket),
+                crate::supervisor::ipc::SocketLiveness::Dead
+            ) {
+                SupervisorReplacementIpcStatus::Dead
+            } else {
+                SupervisorReplacementIpcStatus::Failed
+            };
+            crate::ops_log::log_op(
+                &work.file,
+                &format!(
+                    "controller_supervisor_replacement_ipc_error mode={} session={} pane={} generation={} receipt_id={} status={status:?} error={err:?}",
+                    work.mode,
+                    work.session_id,
+                    work.pane_id,
+                    work.generation,
+                    work.operator_receipt_id
+                ),
+            );
+            status
+        }
+    }
+}
+
+#[cfg(not(any(test, feature = "test-support")))]
+fn wait_for_supervisor_replacement_completion(
+    file: &Path,
+    initial_pid: Option<u32>,
+    initial_host_stale: bool,
+) -> bool {
+    let deadline = Instant::now() + supervisor_replacement_wait_timeout();
+    while Instant::now() < deadline {
+        let current_pid = crate::supervisor_selfkill::supervisor_pid_for_doc(file);
+        if let (Some(initial), Some(current)) = (initial_pid, current_pid)
+            && initial != current
+        {
+            return true;
+        }
+        if initial_pid.is_some() && current_pid.is_none() {
+            return true;
+        }
+        if initial_host_stale && host_supervisor_stale_warning_for_doc(file).is_none() {
+            return true;
+        }
+        std::thread::sleep(SUPERVISOR_REPLACEMENT_POLL_INTERVAL);
+    }
+    false
+}
+
+#[cfg(not(any(test, feature = "test-support")))]
+fn supervisor_replacement_wait_timeout() -> Duration {
+    let secs = std::env::var(SUPERVISOR_REPLACEMENT_WAIT_SECS_ENV)
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_SUPERVISOR_REPLACEMENT_WAIT_SECS);
+    Duration::from_secs(secs)
+}
+
+#[cfg(not(any(test, feature = "test-support")))]
+fn reap_dead_supervisor_socket(file: &Path, socket: &Path) {
+    if !matches!(
+        crate::supervisor::ipc::probe_socket(socket),
+        crate::supervisor::ipc::SocketLiveness::Dead
+    ) || !socket.exists()
+    {
+        return;
+    }
+    match std::fs::remove_file(socket) {
+        Ok(()) => crate::ops_log::log_op(
+            file,
+            &format!(
+                "controller_supervisor_replacement_reaped_stale_socket socket={}",
+                socket.display()
+            ),
+        ),
+        Err(err) => crate::ops_log::log_op(
+            file,
+            &format!(
+                "controller_supervisor_replacement_reap_stale_socket_failed socket={} error={err}",
+                socket.display()
+            ),
+        ),
+    }
+}
+
+#[cfg(not(any(test, feature = "test-support")))]
+fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result<String> {
+    let tmux = tmux_router::Tmux::default_server();
+    if !work.pane_id.trim().is_empty() && tmux.pane_alive(&work.pane_id) {
+        let agent_doc_bin = agent_doc_start_bin_for_supervisor_replacement();
+        let start_cmd = supervisor_replacement_start_command(&agent_doc_bin, &work.file);
+        crate::input_diag::log_text_submit(
+            Some(&work.file),
+            "controller.supervisor_replacement.cold_start_preserve_pane",
+            &format!("pane:{}", work.pane_id),
+            &start_cmd,
+            None,
+            "route_owned_start_enter",
+            "Enter",
+        );
+        crate::sessions::send_submitted_text(&tmux, &work.pane_id, &start_cmd).with_context(
+            || {
+                format!(
+                    "failed to submit replacement supervisor start command into pane {}",
+                    work.pane_id
+                )
+            },
+        )?;
+        return Ok(work.pane_id.clone());
+    }
+    let file_str = work.file.to_string_lossy().to_string();
+    crate::route::auto_start(&tmux, &work.file, &work.session_id, &file_str, None).with_context(
+        || {
+            format!(
+                "failed to cold-start replacement supervisor for {}",
+                work.file.display()
+            )
+        },
+    )
+}
+
+#[cfg(not(any(test, feature = "test-support")))]
+fn agent_doc_start_bin_for_supervisor_replacement() -> String {
+    if let Ok(override_bin) = std::env::var("AGENT_DOC_ROUTE_BIN")
+        && !override_bin.trim().is_empty()
+    {
+        return override_bin;
+    }
+    std::env::current_exe()
+        .unwrap_or_else(|_| "agent-doc".into())
+        .to_string_lossy()
+        .to_string()
+}
+
+#[cfg(not(any(test, feature = "test-support")))]
+fn shell_quote_arg(raw: &str) -> String {
+    if !raw.is_empty()
+        && raw
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '_' | '-' | ':' | '+'))
+    {
+        return raw.to_string();
+    }
+    format!("'{}'", raw.replace('\'', "'\\''"))
+}
+
+#[cfg(not(any(test, feature = "test-support")))]
+fn supervisor_replacement_start_command(agent_doc_bin: &str, file: &Path) -> String {
+    format!(
+        "{} start --route-owned {}",
+        shell_quote_arg(agent_doc_bin),
+        shell_quote_arg(&file.to_string_lossy())
+    )
+}
+
 pub(crate) fn handle_admin_operation(
     bootstrap: &ControllerBootstrap,
     request: ControllerRequest,
@@ -4566,6 +5075,86 @@ mod tests {
         assert_eq!(attempt.proof_scope.as_deref(), Some("accepted_only"));
         assert!(!attempt.dispatch_start_proven);
     }
+
+    #[test]
+    fn supervisor_replacement_records_restart_and_returns_background_receipt() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/restart-supervisor.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-restart\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let mut should_stop = false;
+        crate::session_actor::record_session_start_direct(&doc, "session-restart", "%41", "@1", 1)
+            .unwrap();
+        crate::session_actor::transition_state_direct(
+            &doc,
+            "session-restart",
+            "%41",
+            Some(1),
+            agent_doc_sqlite::state_store::ActorState::Ready,
+            "supervisor",
+            "prompt_ready",
+        )
+        .unwrap();
+
+        let request = ControllerRequest {
+            command: "supervisor_replacement".to_string(),
+            file: Some(doc.clone()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: Some("continue".to_string()),
+            caller: Some("session".to_string()),
+            reason: Some("operator_request".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(serde_json::json!({"force": false}).to_string()),
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&request).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<SupervisorReplacementReceipt> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok, "{:?}", envelope.error);
+        let receipt = envelope.data.unwrap();
+        assert_eq!(receipt.accepted_stage, "operator_ready");
+        assert_eq!(receipt.operator_receipt.command_kind, "session_restart");
+        assert_eq!(
+            receipt.operator_receipt.status,
+            ControllerDispatchResultStatus::Accepted
+        );
+        assert_eq!(receipt.session_id, "session-restart");
+        assert_eq!(receipt.pane_id, "%41");
+        assert_eq!(receipt.generation, 1);
+        assert_eq!(receipt.mode, "continue");
+        assert!(!receipt.force);
+        assert!(
+            !receipt.background_started,
+            "unit tests use the no-spawn background stub"
+        );
+
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops_log.contains("controller_supervisor_replacement_accepted"),
+            "acceptance marker missing:\n{ops_log}"
+        );
+        assert!(
+            ops_log.contains("controller_supervisor_replacement_background_stub"),
+            "test background stub marker missing:\n{ops_log}"
+        );
+    }
+
     #[test]
     fn supervisor_stale_warning_message_fires_only_for_active_stale_host() {
         // #fccsupwarn — the read-only WARN must fire exactly for a live controller

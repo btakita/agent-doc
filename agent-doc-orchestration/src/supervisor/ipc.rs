@@ -38,7 +38,7 @@
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -124,6 +124,28 @@ pub fn active_supervisor_pids(project_root: &Path) -> Vec<(String, u32)> {
     active
 }
 
+/// Count of in-flight per-connection supervisor-IPC handler threads. Mirrors the
+/// editor-IPC listener (`ipc_socket.rs`, `#jbacceptwedge`): the accept loop
+/// spawns one short-lived thread per connection so a slow/half-open client can
+/// never wedge the whole accept loop (which would freeze ALL supervisor command
+/// dispatch — the route/finalize IPC wedge this guards against).
+static INFLIGHT_SUPERVISOR_HANDLERS: AtomicU64 = AtomicU64::new(0);
+
+/// RAII guard decrementing [`INFLIGHT_SUPERVISOR_HANDLERS`] on drop so a
+/// panicking handler thread still releases its slot.
+struct InflightSupervisorGuard;
+
+impl Drop for InflightSupervisorGuard {
+    fn drop(&mut self) {
+        INFLIGHT_SUPERVISOR_HANDLERS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Current number of in-flight supervisor-IPC handler threads (observability).
+pub fn inflight_supervisor_handler_count() -> u64 {
+    INFLIGHT_SUPERVISOR_HANDLERS.load(Ordering::SeqCst)
+}
+
 /// Running supervisor IPC listener. Owns the accept thread and cleans up
 /// the socket file on drop.
 pub struct SupervisorIpc {
@@ -140,12 +162,14 @@ impl SupervisorIpc {
     /// commands to `handler`.
     ///
     /// The handler receives an [`IpcMethod`] and returns an [`IpcResponse`].
-    /// It runs on the accept thread — callers that need to touch shared
-    /// state (PtySession, CrashPolicy) should use interior mutability
-    /// (Arc<Mutex<...>>).
+    /// It runs on a short-lived per-connection thread (not the accept thread),
+    /// so a slow or half-open client cannot wedge the accept loop and freeze all
+    /// supervisor command dispatch. Because connections are handled concurrently,
+    /// the handler must be `Sync` and touch shared state (PtySession, CrashPolicy)
+    /// through interior mutability (`Arc<Mutex<...>>`).
     pub fn start<F>(project_root: &Path, session_uuid: &str, handler: F) -> Result<Self>
     where
-        F: Fn(IpcMethod) -> IpcResponse + Send + 'static,
+        F: Fn(IpcMethod) -> IpcResponse + Send + Sync + 'static,
     {
         let sock = socket_path(project_root, session_uuid);
 
@@ -177,6 +201,9 @@ impl SupervisorIpc {
         let stop = Arc::new(AtomicBool::new(false));
         let stop_clone = stop.clone();
         let sock_clone = sock.clone();
+        // Share the handler across per-connection threads. `Sync` is required by
+        // `start`'s bound; shared state lives behind interior mutability.
+        let handler = Arc::new(handler);
 
         let handle = thread::Builder::new()
             .name("supervisor-ipc".into())
@@ -187,35 +214,27 @@ impl SupervisorIpc {
                     }
                     match listener.accept() {
                         Ok(stream) => {
-                            // One request-response per connection. The client
-                            // (send_command) connects, sends one NDJSON line,
-                            // reads one response line, and drops the stream.
-                            let (reader_half, mut writer_half) = stream.split();
-                            let mut reader = BufReader::new(reader_half);
-                            let mut line = String::new();
-
-                            if reader.read_line(&mut line).unwrap_or(0) > 0 {
-                                let trimmed = line.trim();
-                                if !trimmed.is_empty() {
-                                    let response = match serde_json::from_str::<IpcMethod>(trimmed)
-                                    {
-                                        Ok(method) => handler(method),
-                                        Err(e) => IpcResponse::err(format!("parse error: {e}")),
-                                    };
-
-                                    let mut resp_json = serde_json::to_string(&response)
-                                        .unwrap_or_else(|e| {
-                                            format!(
-                                                r#"{{"ok":false,"error":"serialize error: {e}"}}"#
-                                            )
-                                        });
-                                    resp_json.push('\n');
-
-                                    if let Err(e) = writer_half.write_all(resp_json.as_bytes()) {
-                                        eprintln!("[supervisor::ipc] write error: {e}");
-                                    }
-                                    let _ = writer_half.flush();
-                                }
+                            // Handle each connection on its own short-lived thread
+                            // so a slow/half-open client cannot wedge the accept
+                            // loop and freeze all supervisor command dispatch.
+                            // Mirrors the editor-IPC listener (#jbacceptwedge).
+                            let handler = Arc::clone(&handler);
+                            INFLIGHT_SUPERVISOR_HANDLERS.fetch_add(1, Ordering::SeqCst);
+                            if let Err(e) = thread::Builder::new()
+                                .name("supervisor-ipc-conn".into())
+                                .spawn(move || {
+                                    let _guard = InflightSupervisorGuard;
+                                    serve_supervisor_connection(stream, handler.as_ref());
+                                })
+                            {
+                                // Spawn failed (thread exhaustion / OOM — rare).
+                                // Release the slot and drop the connection; the
+                                // client's bounded recv timeout surfaces it as a
+                                // fail-closed timeout rather than a wedge.
+                                INFLIGHT_SUPERVISOR_HANDLERS.fetch_sub(1, Ordering::SeqCst);
+                                eprintln!(
+                                    "[supervisor::ipc] warning: failed to spawn connection thread ({e}); dropping connection"
+                                );
                             }
                         }
                         Err(e) => {
@@ -273,7 +292,40 @@ impl Drop for SupervisorIpc {
 
 // --- Client side ---
 
-/// Connect to a supervisor socket.
+/// Serve one supervisor-IPC request-response on an accepted connection. The
+/// client (`send_command`) connects, sends one NDJSON line, reads one response
+/// line, and drops the stream. Runs on a dedicated per-connection thread so a
+/// slow/half-open client only blocks its own thread, never the accept loop. A
+/// dead client surfaces as EOF (`read_line` returns 0), so the thread exits
+/// promptly instead of leaking.
+fn serve_supervisor_connection<F>(stream: interprocess::local_socket::Stream, handler: &F)
+where
+    F: Fn(IpcMethod) -> IpcResponse,
+{
+    let (reader_half, mut writer_half) = stream.split();
+    let mut reader = BufReader::new(reader_half);
+    let mut line = String::new();
+
+    if reader.read_line(&mut line).unwrap_or(0) > 0 {
+        let trimmed = line.trim();
+        if !trimmed.is_empty() {
+            let response = match serde_json::from_str::<IpcMethod>(trimmed) {
+                Ok(method) => handler(method),
+                Err(e) => IpcResponse::err(format!("parse error: {e}")),
+            };
+
+            let mut resp_json = serde_json::to_string(&response)
+                .unwrap_or_else(|e| format!(r#"{{"ok":false,"error":"serialize error: {e}"}}"#));
+            resp_json.push('\n');
+
+            if let Err(e) = writer_half.write_all(resp_json.as_bytes()) {
+                eprintln!("[supervisor::ipc] write error: {e}");
+            }
+            let _ = writer_half.flush();
+        }
+    }
+}
+
 fn try_connect(sock: &Path) -> Result<interprocess::local_socket::Stream> {
     let name = sock.to_fs_name::<GenericFilePath>()?;
     let opts = interprocess::local_socket::ConnectOptions::new().name(name);
@@ -672,10 +724,18 @@ mod tests {
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
 
         let call_count = Arc::new(AtomicU32::new(0));
+        let active_count = Arc::new(AtomicU32::new(0));
+        let max_active_count = Arc::new(AtomicU32::new(0));
         let count_clone = call_count.clone();
+        let active_clone = active_count.clone();
+        let max_active_clone = max_active_count.clone();
 
         let mut ipc = SupervisorIpc::start(root, "test-concurrent", move |method| {
             count_clone.fetch_add(1, Ordering::Relaxed);
+            let active = active_clone.fetch_add(1, Ordering::SeqCst) + 1;
+            max_active_clone.fetch_max(active, Ordering::SeqCst);
+            std::thread::sleep(Duration::from_millis(100));
+            active_clone.fetch_sub(1, Ordering::SeqCst);
             match method {
                 IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 1 })),
                 _ => IpcResponse::ok_empty(),
@@ -686,22 +746,25 @@ mod tests {
         std::thread::sleep(Duration::from_millis(50));
 
         let sock = socket_path(root, "test-concurrent");
+        let start_barrier = Arc::new(std::sync::Barrier::new(6));
         let mut handles = Vec::new();
         for _ in 0..5 {
             let s = sock.clone();
+            let barrier = start_barrier.clone();
             handles.push(std::thread::spawn(move || {
+                barrier.wait();
                 send_command(&s, &IpcMethod::Pid).unwrap()
             }));
         }
+        start_barrier.wait();
 
         for h in handles {
             let resp = h.join().unwrap();
             assert!(resp.ok);
         }
 
-        // Note: concurrent clients are serialized by the accept loop, but
-        // all should complete successfully.
         assert!(call_count.load(Ordering::Relaxed) >= 5);
+        assert!(max_active_count.load(Ordering::SeqCst) > 1);
 
         ipc.stop();
     }

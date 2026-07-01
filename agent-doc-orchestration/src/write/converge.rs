@@ -1211,14 +1211,21 @@ fn refuse_unproven_editor_delivery(
     reason: &str,
     patch_id: Option<&str>,
 ) -> Result<bool> {
-    let editor_endpoint =
-        if agent_doc_plugin_owner::disk_write_permitted_for_file(&file.to_string_lossy())
-            && !live_editor_sidecar_present(file)
-        {
-            "absent"
-        } else {
-            "live"
-        };
+    // The endpoint is "live" only when the socket listener actually answers AND
+    // an owner/sidecar is present. A dead/stale socket (JB restarted mid-turn)
+    // is "absent" even if a lease pid or sidecar still looks alive — this is the
+    // label that previously read "live" with no IDE running (#jbsocketrobust).
+    let owner_or_sidecar_live =
+        !agent_doc_plugin_owner::disk_write_permitted_for_file(&file.to_string_lossy())
+            || live_editor_sidecar_present(file);
+    let editor_endpoint = if should_refuse_disk_fallback(
+        editor_ipc_listener_active(file),
+        owner_or_sidecar_live,
+    ) {
+        "live"
+    } else {
+        "absent"
+    };
     crate::ops_log::log_op(
         file,
         &format!(
@@ -1257,6 +1264,34 @@ fn live_editor_sidecar_present(file: &Path) -> bool {
         .any(agent_doc_debounce::live_buffer_snapshot_editor_is_live)
 }
 
+/// Whether an IPC socket listener is actually answering for `file`'s project.
+///
+/// Unlike plugin-owner pid-liveness or live-buffer sidecar checks, this probes
+/// the socket itself (connect succeeds ⇒ listener present; a stale socket file
+/// is cleaned up and reported dead). So a JetBrains that restarted mid-turn — a
+/// stale/dead socket while a lease pid or sidecar can still look alive — is
+/// correctly seen as not-answering (#jbsocketrobust).
+fn editor_ipc_listener_active(file: &Path) -> bool {
+    file.canonicalize()
+        .ok()
+        .map(|c| resolve_ipc_project_root_pub(&c))
+        .map(|root| crate::ipc_socket::is_listener_active(&root))
+        .unwrap_or(false)
+}
+
+/// Decide whether to refuse the direct-disk fallback after an IPC send already
+/// failed (no_ack / send_failed).
+///
+/// We refuse (forcing continued editor convergence) ONLY when a live editor
+/// could actually receive the patch: the socket listener must be answering AND
+/// either the plugin owns the file or a live-buffer sidecar is present. A
+/// stale/dead socket — the JB-restarted-mid-turn case — cannot receive the
+/// patch, so the response must land on disk instead of wedging forever behind
+/// an unreachable editor (#jbsocketrobust).
+fn should_refuse_disk_fallback(listener_answering: bool, owner_or_sidecar_live: bool) -> bool {
+    listener_answering && owner_or_sidecar_live
+}
+
 fn try_detached_disk_write(
     file: &Path,
     current: &str,
@@ -1264,9 +1299,16 @@ fn try_detached_disk_write(
     source: &str,
     reason: &str,
 ) -> Result<bool> {
-    if !agent_doc_plugin_owner::disk_write_permitted_for_file(&file.to_string_lossy())
-        || live_editor_sidecar_present(file)
-    {
+    // A pid-alive plugin-owner lease or a live-buffer sidecar is NOT proof the
+    // editor can receive an IPC patch: a JetBrains restarted mid-turn (or a
+    // crashed FFI listener) leaves a stale/dead socket while a lease pid or
+    // sidecar can still look alive. We only reach here after an IPC send already
+    // failed, so re-probe the socket — if no listener answers, the endpoint is
+    // stale and the response must land on disk rather than wedge (#jbsocketrobust).
+    let owner_or_sidecar_live =
+        !agent_doc_plugin_owner::disk_write_permitted_for_file(&file.to_string_lossy())
+            || live_editor_sidecar_present(file);
+    if should_refuse_disk_fallback(editor_ipc_listener_active(file), owner_or_sidecar_live) {
         return Ok(false);
     }
 
@@ -2061,6 +2103,35 @@ mod core_tests {
     use std::fs::OpenOptions;
     use std::time::Duration;
     use tempfile::TempDir;
+
+    #[test]
+    fn dead_socket_allows_disk_fallback_even_with_live_owner() {
+        // #jbsocketrobust: a JetBrains restarted mid-turn leaves a stale/dead
+        // socket while a lease pid or live-buffer sidecar can still look alive.
+        // Since the socket cannot receive the patch, the disk fallback MUST be
+        // allowed (do not refuse) — otherwise the response wedges forever.
+        assert!(
+            !should_refuse_disk_fallback(false, true),
+            "dead socket + live owner/sidecar must allow the disk fallback"
+        );
+        // No editor at all: the socket cannot answer either → allow disk.
+        assert!(
+            !should_refuse_disk_fallback(false, false),
+            "no listener + no owner/sidecar must allow the disk fallback"
+        );
+        // Genuinely live editor: socket answering AND owner/sidecar present →
+        // keep using IPC, refuse the direct-disk fallback.
+        assert!(
+            should_refuse_disk_fallback(true, true),
+            "answering socket + live owner/sidecar must refuse the disk fallback"
+        );
+        // Socket answers but nothing claims the file → nothing to protect,
+        // allow the disk write.
+        assert!(
+            !should_refuse_disk_fallback(true, false),
+            "answering socket with no owner/sidecar must allow the disk fallback"
+        );
+    }
 
     #[test]
     fn stale_supervisor_write_short_circuit_passes_through_when_fresh() {

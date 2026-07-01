@@ -452,7 +452,19 @@ That stack is what turns "100% accurate" into something testable. An MLP sits no
 **The sales angle.** Artur is bootstrapped, "limited budget," and asked plainly about cost. Dropping "multi-layer perceptrons" into a first-contact proposal reads as over-engineering and adds a cost/complexity story that doesn't map to the accuracy bar you already framed (provenance grading + validation + review). It makes the bid *harder* to say yes to.
 
 **Recommendation:** leave it out. Keep the accuracy story as the rubric + source-backed extraction + confidence + admin review + eval harness — that's the honest, measurable, and defensible version. If Artur specifically pushes for "learned models," handle it on the call as a phase-2, data-dependent option, and note GBDTs (not MLPs) would be the likely tool once there's labeled data. No proposal edit needed.
-<!-- agent:boundary:6f6497a5 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/recruit/reitrades.md source=ipc_visible_repair patch_id=670d9bd5-d507-4fe1-8198-e29b2ff26935 invariant=live_prompt_drift recovery=retry_without_disk_write redeliver_editor=true bad_len=38508 bad_hash=560bbc87896b72d1b16121dc0232aea3b1f301d60f6cb029906f231f1f4a9cab repaired_len=41112 repaired_hash=5ac6724512293d92142098f890fc57f9c0ca2250386818e9ba36fcad82185e2a doc=reitrades session=62d195b8-b029-42a5-9c6c-836cb1b5b103 turn=cycle-1782887191073
+```
+<!-- agent:boundary:88022c28 -->
 <!-- /agent:exchange -->
 
 ## Queue

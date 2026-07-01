@@ -249,24 +249,24 @@ No document-extraction vendor is "100% accurate" on messy CRE source docs, so a 
 
 ---
 
-## 5. Recommended phasing (competitive bid)
+## 5. Recommended phasing
 
-I recommend leading with a scoped first tranche rather than a single fixed bid on the whole list — it controls Artur's spend and lets the team validate the new code structure on live data before committing the full budget.
+I'd suggest leading with a scoped first tranche rather than a single fixed bid on the whole list. It keeps your spend controlled and lets us validate the new code structure against your live data before you commit the full budget.
 
 **Phase 0 — Discovery (1 week)**
-Repo/data-model audit + production-safety plan + tight milestone plan, plus a short **document-extraction bake-off** — 2-3 vendors scored against a labeled sample of your real OMs on the §3a rubric, so the build-vs-buy call (§3c) is made on data, not vendor claims. **24-44h → $2.4k-$4.4k.** Credited toward Phase 1 if we proceed.
+A repo and data-model audit, a production-safety plan, and a tight milestone plan — plus a short document-extraction bake-off (2-3 vendors scored against a labeled sample of your real OMs on the §3a rubric, so the build-vs-buy call in §3c is made on data, not vendor claims). **24-44h → $2.4k-$4.4k**, credited toward Phase 1 if you proceed.
 
 **Phase 1 — First production tranche (260-380h → $26k-$38k)**
-Highest-value admin improvements + broker application/approval flow + one asset class of the listing/OM rebuild. Weekly demos and review points.
+The highest-value admin improvements, the broker application and approval flow, and one asset class of the listing/OM rebuild — with weekly demos and review points so you can re-prioritize as we go.
 
 **Phase 2+ — Remaining V1.2 (balance to 520-800h total)**
-Additional asset classes, full document extraction, OM polish, remaining integrations, production migrations, and hardening — sequenced after Phase 1 proves the structure.
+Additional asset classes, full document extraction, OM polish, remaining integrations, production migrations, and hardening — sequenced after Phase 1 proves the structure on your data.
 
-**Engagement options (pick one):**
-- **Hourly at $100/hr with a weekly cap** — lowest risk for both sides; Artur controls burn week to week.
-- **Fixed price per phase** — e.g. Phase 1 fixed in the **$30k-$34k** band (mid-range) against a frozen scope, change-orders for additions. Predictable for budgeting; I hold the velocity risk.
+**Engagement options — pick whichever fits your budgeting:**
+- **Hourly at $100/hr with a weekly cap you set** — the lowest-risk option for both of us; you control the burn week to week and can pause anytime.
+- **Fixed price per phase** — for example, Phase 1 fixed in the **$30k-$34k** band against a frozen scope, with change-orders for additions. Predictable for budgeting; I carry the velocity risk.
 
-**Competitive note:** $100/hr is at the lower-competitive end for senior Rust+Vue contract work ($100-175/hr market). Combined with agentic delivery biasing toward the low end of each range, this is a competitive bid without underpricing the production-QA and migration risk that a live marketplace actually carries.
+Either way, $100/hr sits at the lower end of the market for senior Rust + Vue contract work, and the AI-native workflow biases delivery toward the low end of each range — so you get senior production quality without paying twice for the migration and QA risk that a live marketplace carries.
 
 ---
 

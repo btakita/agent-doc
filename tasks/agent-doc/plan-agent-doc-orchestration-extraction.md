@@ -910,6 +910,11 @@ should be deleted during extraction.
   `agent-doc-model-tier` now owns Codex `session_meta.cwd` JSONL parsing for
   transcript/project matching. Orchestration still walks the Codex transcript
   tree and reads candidate files, but it no longer owns the JSON shape.
+- The same context adapter now delegates transcript-content context percentage
+  policy to `agent-doc-model-tier` as well. The focused crate owns the
+  Claude/Codex/OpenCode parsing decision, unknown-model diagnostic reason, and
+  unsupported-harness safe miss; orchestration only reads transcript files and
+  emits the existing operator warning text.
 - Drain-stall sidecar ownership was tightened as well: `agent-doc-turn` now
   owns continuation-pending marker construction, while orchestration keeps only
   path lookup, current-time capture, serialization, and sidecar file IO.

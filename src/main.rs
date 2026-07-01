@@ -3660,7 +3660,7 @@ fn main() -> anyhow::Result<()> {
             HookAction::Gc { root } => hook_cmd::gc(root.as_deref()),
             HookAction::CheckCallbacks { root } => {
                 let pending =
-                    agent_doc_orchestration::callback::scan_pending_callbacks(root.as_deref())?;
+                    agent_doc_callback_io::scan_pending_callbacks(root.as_deref())?;
                 let json = serde_json::to_string_pretty(
                     &serde_json::json!({"pending_callbacks": pending}),
                 )?;
@@ -3905,7 +3905,7 @@ fn main() -> anyhow::Result<()> {
                 ttl,
             } => {
                 let ops: Vec<&str> = operations.split(',').map(|s| s.trim()).collect();
-                let request = agent_doc_orchestration::callback::create_request(
+                let request = agent_doc_callback_io::create_request(
                     &file,
                     &ops,
                     context.as_deref(),
@@ -3915,7 +3915,7 @@ fn main() -> anyhow::Result<()> {
                 Ok(())
             }
             CallbackAction::Read { file } => {
-                match agent_doc_orchestration::callback::read_request(&file)? {
+                match agent_doc_callback_io::read_request(&file)? {
                     Some(request) => {
                         println!("{}", serde_json::to_string_pretty(&request)?);
                     }
@@ -3932,7 +3932,7 @@ fn main() -> anyhow::Result<()> {
                 status,
                 summary,
             } => {
-                agent_doc_orchestration::callback::write_response(
+                agent_doc_callback_io::write_response(
                     &file,
                     &request_id,
                     &status,
@@ -3948,7 +3948,7 @@ fn main() -> anyhow::Result<()> {
                     .map(PathBuf::from)
                     .or_else(|| agent_doc_fs::find_project_root(&cwd))
                     .context("could not find project root")?;
-                agent_doc_orchestration::callback::cleanup_expired(&root_path, 300)
+                agent_doc_callback_io::cleanup_expired(&root_path, 300)
             }
         },
     }

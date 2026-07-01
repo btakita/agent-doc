@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "agent-doc-hash",
+    "agent-doc-callback-io",
     "agent-doc-config",
     "agent-doc-harness",
     "agent-doc-log-time",
@@ -87,6 +88,7 @@ path = "src/main.rs"
 
 [dependencies]
 agent-doc-config = { path = "agent-doc-config", version = "0.34.65" }
+agent-doc-callback-io = { path = "agent-doc-callback-io", version = "0.34.65" }
 agent-doc-controller = { path = "agent-doc-controller", version = "0.34.65" }
 agent-doc-debounce = { path = "agent-doc-debounce", version = "0.34.65" }
 agent-doc-diff = { path = "agent-doc-diff", version = "0.34.65" }

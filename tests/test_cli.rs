@@ -11770,6 +11770,16 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         root_dependencies.contains_key("agent-doc-ipc-protocol"),
         "root crate callers should depend on agent-doc-ipc-protocol directly"
     );
+    assert!(
+        workspace_members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-callback-io")),
+        "agent-doc-callback-io must be a workspace member"
+    );
+    assert!(
+        root_dependencies.contains_key("agent-doc-callback-io"),
+        "root crate callback callers should depend on agent-doc-callback-io directly"
+    );
 
     let protocol_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-ipc-protocol/Cargo.toml")).unwrap();
@@ -11821,6 +11831,10 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         orchestration_dependencies.contains_key("agent-doc-ipc-protocol"),
         "agent-doc-orchestration should call the focused IPC protocol crate"
     );
+    assert!(
+        orchestration_dependencies.contains_key("agent-doc-callback-io"),
+        "agent-doc-orchestration should call the focused callback IO crate"
+    );
 
     let ipc_socket_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/ipc_socket.rs")).unwrap();
@@ -11847,13 +11861,13 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
     }
 
     let callback_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/callback.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-callback-io/src/lib.rs")).unwrap();
     assert!(
         callback_source.contains("use agent_doc_ipc_protocol::{")
             && callback_source.contains("callback_request_is_expired")
             && callback_source.contains("pending_callback_from_request")
             && callback_source.contains("callback_response_matches_request"),
-        "callback.rs should import focused callback protocol policy directly"
+        "agent-doc-callback-io should import focused callback protocol policy directly"
     );
     for forbidden in [
         "pub struct CallbackRequest",
@@ -11863,10 +11877,27 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "fn callback_request_is_expired(",
         "fn callback_urgency_for_elapsed(",
         "pub use agent_doc_ipc_protocol",
+        "agent_doc_orchestration::",
+        "crate::snapshot",
     ] {
         assert!(
             !callback_source.contains(forbidden),
-            "callback.rs must stay a filesystem adapter, not a callback protocol facade: {forbidden}"
+            "agent-doc-callback-io must stay a filesystem adapter, not a callback protocol facade or orchestration shim: {forbidden}"
+        );
+    }
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod callback;"),
+        "orchestration must not expose callback IO through a callback facade module"
+    );
+    for relative in ["src/main.rs", "src/cleanup_cmd.rs", "agent-doc-orchestration/src/preflight/run.rs"] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("agent_doc_callback_io")
+                && !source.contains("agent_doc_orchestration::callback")
+                && !source.contains("crate::callback::"),
+            "{relative} should call focused callback IO directly"
         );
     }
 

@@ -12,7 +12,7 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use agent_doc_orchestration::callback;
+use agent_doc_callback_io as callback;
 
 /// Main cleanup entry point.
 pub fn run(

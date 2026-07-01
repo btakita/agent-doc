@@ -23,6 +23,7 @@ dependencies = [
 name = "agent-doc"
 version = "0.34.65"
 dependencies = [
+ "agent-doc-callback-io",
  "agent-doc-config",
  "agent-doc-controller",
  "agent-doc-debounce",
@@ -90,6 +91,19 @@ dependencies = [
  "uuid",
  "windows-sys 0.61.2",
  "zip",
+]
+
+[[package]]
+name = "agent-doc-callback-io"
+version = "0.34.65"
+dependencies = [
+ "agent-doc-fs",
+ "agent-doc-hash",
+ "agent-doc-ipc-protocol",
+ "anyhow",
+ "serde_json",
+ "tempfile",
+ "uuid",
 ]
 
 [[package]]
@@ -409,6 +423,7 @@ dependencies = [
 name = "agent-doc-orchestration"
 version = "0.34.65"
 dependencies = [
+ "agent-doc-callback-io",
  "agent-doc-config",
  "agent-doc-controller",
  "agent-doc-debounce",

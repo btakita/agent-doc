@@ -54,7 +54,6 @@ pub mod admit;
 pub mod agent;
 pub mod autofix;
 pub mod backlog_cmd;
-pub mod callback;
 pub mod capture;
 pub mod checkpoint;
 pub mod claim;

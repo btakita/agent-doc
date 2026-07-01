@@ -1275,7 +1275,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     );
 
     // Step 5: Scan for pending callback requests from other processes.
-    let pending_callbacks = crate::callback::scan_pending_callbacks(None).unwrap_or_default();
+    let pending_callbacks = agent_doc_callback_io::scan_pending_callbacks(None).unwrap_or_default();
     if !pending_callbacks.is_empty() {
         eprintln!(
             "[preflight] found {} pending callback(s)",

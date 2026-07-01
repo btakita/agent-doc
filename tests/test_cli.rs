@@ -6632,10 +6632,35 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         "pub fn component_occurrence_from_node_key",
         "pub fn classify_execution_scope",
         "pub fn finalize_command",
+        "pub fn shell_quote_cli_arg",
+        "pub fn compact_command_hint",
+        "pub fn pending_kept_open_ids_from_mutations",
+        "pub fn parse_tracked_work_edits",
     ] {
         assert!(
             session_cycle_policy.contains(required),
             "agent-doc-workflow must own session-cycle workflow policy: {required}"
+        );
+    }
+    let write_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    assert!(
+        write_source.contains("use agent_doc_workflow::session_cycle::{")
+            && write_source.contains("compact_command_hint")
+            && write_source.contains("parse_tracked_work_edits")
+            && write_source.contains("pending_kept_open_ids_from_mutations")
+            && write_source.contains("shell_quote_cli_arg"),
+        "write.rs should call focused session-cycle command/tracked-work policy directly"
+    );
+    for forbidden in [
+        "fn shell_quote_cli_arg(",
+        "fn compact_command_hint(",
+        "fn pending_kept_open_ids_from_options(",
+        "fn parse_tracked_work_edits(",
+    ] {
+        assert!(
+            !write_source.contains(forbidden),
+            "write.rs must not re-own or facade session-cycle command/tracked-work policy: {forbidden}"
         );
     }
     let workflow_invariants =

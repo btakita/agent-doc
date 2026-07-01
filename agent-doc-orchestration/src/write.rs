@@ -243,6 +243,10 @@ use agent_doc_fs::find_project_root;
 use agent_doc_queue::queue_prompt_drift::{
     dropped_queue_prompt_lines_after_content_ours, preserve_content_ours_over_live_queue_deletions,
 };
+use agent_doc_workflow::session_cycle::{
+    compact_command_hint, parse_tracked_work_edits, pending_kept_open_ids_from_mutations,
+    shell_quote_cli_arg,
+};
 
 use crate::{
     flow::document_mutation::{TemplateStructureGuardReason, log_template_structure_guard_event},
@@ -404,19 +408,6 @@ fn log_splice_pending_component_warning(warning: &SplicePendingComponentWarning)
             );
         }
     }
-}
-
-fn shell_quote_cli_arg(arg: &str) -> String {
-    if arg.is_empty() {
-        return "''".to_string();
-    }
-    if arg
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '_' | '-' | ':' | '='))
-    {
-        return arg.to_string();
-    }
-    format!("'{}'", arg.replace('\'', "'\"'\"'"))
 }
 
 fn build_rerun_command_base(options: &CommandOptions, commit_mode: CommitMode) -> Option<String> {
@@ -831,47 +822,6 @@ fn resolve_commit_mode(
     Ok(CommitMode::BestEffort)
 }
 
-fn compact_command_hint(file: &Path) -> String {
-    format!("agent-doc compact {} --commit", file.display())
-}
-
-fn pending_kept_open_ids_from_options(options: &CommandOptions) -> Vec<String> {
-    let mut ids = Vec::new();
-
-    for pair in &options.pending_edit {
-        if let Some((id, _)) = pair.split_once('=') {
-            ids.push(id.to_string());
-        }
-    }
-    ids.extend(options.pending_gate.iter().cloned());
-    ids.extend(options.pending_ungate.iter().cloned());
-    for pair in &options.pending_set_gate_type {
-        if let Some((id, _)) = pair.split_once('=') {
-            ids.push(id.to_string());
-        }
-    }
-    for pair in &options.pending_set_verify {
-        if let Some((id, _)) = pair.split_once('=') {
-            ids.push(id.to_string());
-        }
-    }
-    for pair in &options.review_edit {
-        if let Some((id, _)) = pair.split_once('=') {
-            ids.push(id.to_string());
-        }
-    }
-    if let Some(order) = &options.pending_reorder {
-        ids.extend(
-            order
-                .split(',')
-                .map(|id| id.trim().to_string())
-                .filter(|id| !id.is_empty()),
-        );
-    }
-
-    ids
-}
-
 fn enforce_review_done_guard(file: &Path, id: &str) -> Result<()> {
     let mode = crate::session_check::resolve_review_done_guard_mode(file)?;
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {
@@ -985,17 +935,6 @@ fn consume_queue_prompts_for_done_ids_closeout(
     }
 }
 
-fn parse_tracked_work_edits(raw: &[String], flag: &str) -> Result<Vec<(String, String)>> {
-    raw.iter()
-        .map(|pair| {
-            let (id, text) = pair
-                .split_once('=')
-                .with_context(|| format!("{flag} expects 'id=text', got: {pair}"))?;
-            Ok((id.to_string(), text.to_string()))
-        })
-        .collect()
-}
-
 pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<()> {
     let file = options.file.as_path();
 
@@ -1096,6 +1035,15 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             "--commit-sibling requires --commit (or `agent-doc finalize`); the sibling trailer URL needs the session-document commit sha"
         );
     }
+    let pending_kept_open_ids = pending_kept_open_ids_from_mutations(
+        &options.pending_edit,
+        &options.pending_gate,
+        &options.pending_ungate,
+        &options.pending_set_gate_type,
+        &options.pending_set_verify,
+        &options.review_edit,
+        options.pending_reorder.as_deref(),
+    );
     let mut commit_mode = resolve_commit_mode(file, commit_mode, options.pending_only)?;
     if commit_mode == CommitMode::Required && !crate::git::is_in_git_repo(file) {
         if is_session_document(file)? {
@@ -1122,7 +1070,6 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
 
     if has_pending_ops {
         crate::backlog_cmd::with_force_disk_pending_writes(options.force_disk, || {
-            let pending_kept_open_ids = pending_kept_open_ids_from_options(&options);
             if options.pending_clear {
                 crate::backlog_cmd::clear(file)?;
             }
@@ -1334,7 +1281,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         has_pending_mutation: has_pending_ops,
         pending_done_ids: options.pending_done.clone(),
         queue_completion_ids: options.queue_completion_ids.clone(),
-        pending_kept_open_ids: pending_kept_open_ids_from_options(&options),
+        pending_kept_open_ids: pending_kept_open_ids.clone(),
         strict_closeout: commit_mode == CommitMode::Required,
         force_disk: options.force_disk,
         rerun_command_base: build_rerun_command_base(&options, commit_mode),

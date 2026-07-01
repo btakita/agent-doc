@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use indexmap::IndexMap;
 use std::collections::{HashSet, VecDeque};
 use std::path::Path;
@@ -215,6 +216,77 @@ pub fn finalize_command(
         finalize.push_str(" --template");
     }
     finalize
+}
+
+pub fn shell_quote_cli_arg(arg: &str) -> String {
+    if arg.is_empty() {
+        return "''".to_string();
+    }
+    if arg
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '_' | '-' | ':' | '='))
+    {
+        return arg.to_string();
+    }
+    format!("'{}'", arg.replace('\'', "'\"'\"'"))
+}
+
+pub fn compact_command_hint(file: &Path) -> String {
+    format!("agent-doc compact {} --commit", file.display())
+}
+
+pub fn pending_kept_open_ids_from_mutations(
+    pending_edit: &[String],
+    pending_gate: &[String],
+    pending_ungate: &[String],
+    pending_set_gate_type: &[String],
+    pending_set_verify: &[String],
+    review_edit: &[String],
+    pending_reorder: Option<&str>,
+) -> Vec<String> {
+    let mut ids = Vec::new();
+
+    for pair in pending_edit {
+        push_assignment_id(&mut ids, pair);
+    }
+    ids.extend(pending_gate.iter().cloned());
+    ids.extend(pending_ungate.iter().cloned());
+    for pair in pending_set_gate_type {
+        push_assignment_id(&mut ids, pair);
+    }
+    for pair in pending_set_verify {
+        push_assignment_id(&mut ids, pair);
+    }
+    for pair in review_edit {
+        push_assignment_id(&mut ids, pair);
+    }
+    if let Some(order) = pending_reorder {
+        ids.extend(
+            order
+                .split(',')
+                .map(|id| id.trim().to_string())
+                .filter(|id| !id.is_empty()),
+        );
+    }
+
+    ids
+}
+
+pub fn parse_tracked_work_edits(raw: &[String], flag: &str) -> Result<Vec<(String, String)>> {
+    raw.iter()
+        .map(|pair| {
+            let (id, text) = pair
+                .split_once('=')
+                .with_context(|| format!("{flag} expects 'id=text', got: {pair}"))?;
+            Ok((id.to_string(), text.to_string()))
+        })
+        .collect()
+}
+
+fn push_assignment_id(ids: &mut Vec<String>, pair: &str) {
+    if let Some((id, _)) = pair.split_once('=') {
+        ids.push(id.to_string());
+    }
 }
 
 fn prompt_targets_reference_preset(
@@ -623,5 +695,77 @@ mod tests {
         assert!(command.contains("--done abc1"));
         assert!(command.contains("--pending-add-to tasks/bugs.md \"<item>\""));
         assert!(command.ends_with(" --stream"));
+    }
+
+    #[test]
+    fn shell_quote_cli_arg_quotes_only_when_needed() {
+        assert_eq!(shell_quote_cli_arg("tasks/doc.md"), "tasks/doc.md");
+        assert_eq!(shell_quote_cli_arg(""), "''");
+        assert_eq!(shell_quote_cli_arg("two words"), "'two words'");
+        assert_eq!(shell_quote_cli_arg("it'll"), "'it'\"'\"'ll'");
+    }
+
+    #[test]
+    fn compact_command_hint_renders_binary_owned_closeout_command() {
+        assert_eq!(
+            compact_command_hint(Path::new("tasks/doc.md")),
+            "agent-doc compact tasks/doc.md --commit"
+        );
+    }
+
+    #[test]
+    fn pending_kept_open_ids_collects_edit_gate_and_reorder_targets() {
+        let pending_edit = vec!["fix1=keep writing".to_string()];
+        let pending_gate = vec!["gate1".to_string()];
+        let pending_ungate = vec!["ungate1".to_string()];
+        let pending_set_gate_type = vec!["gate2=blocked".to_string()];
+        let pending_set_verify = vec!["verify1=test".to_string()];
+        let review_edit = vec!["review1=still open".to_string()];
+
+        assert_eq!(
+            pending_kept_open_ids_from_mutations(
+                &pending_edit,
+                &pending_gate,
+                &pending_ungate,
+                &pending_set_gate_type,
+                &pending_set_verify,
+                &review_edit,
+                Some("ordered1, ordered2,, "),
+            ),
+            vec![
+                "fix1".to_string(),
+                "gate1".to_string(),
+                "ungate1".to_string(),
+                "gate2".to_string(),
+                "verify1".to_string(),
+                "review1".to_string(),
+                "ordered1".to_string(),
+                "ordered2".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_tracked_work_edits_preserves_id_and_text() {
+        assert_eq!(
+            parse_tracked_work_edits(
+                &["fix1=keep=a literal equals".to_string()],
+                "--backlog-edit"
+            )
+            .unwrap(),
+            vec![("fix1".to_string(), "keep=a literal equals".to_string())]
+        );
+    }
+
+    #[test]
+    fn parse_tracked_work_edits_names_the_failed_flag() {
+        let err = parse_tracked_work_edits(&["missing separator".to_string()], "--icebox-edit")
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("--icebox-edit expects 'id=text', got: missing separator"),
+            "{err:#}"
+        );
     }
 }

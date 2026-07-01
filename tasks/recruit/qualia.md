@@ -124,7 +124,19 @@ yes
 **Delivery notes:** lead with the *problem* (multi-party consistency), not the project names — the names are proof, not the point. Land it on "your multi-party model," so it's about Qualia, not a tour of your repos. And only deploy it once; it's a sharp differentiator, not a theme to repeat.
 
 Anything else you want prepped before the call — a comp-range talking point, or a tight "why Qualia" open?
-<!-- agent:boundary:87926286 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/recruit/qualia.md source=socket_already_applied patch_id=9abebc13-998c-4cef-a5ca-2aa5171b2038 invariant=disk_missing_response_probe recovery=content_ours_snapshot_visible_response_repair response_sha256=1bd97fddbfca53717c25c4dfaf8a7040dea89af7f237a1c00536231704fd232f current_len=2094 current_hash=033247efe9ccc71d46dada55fe8c29131cd0f7bfc792a4ef285effaa1e5ad404 repaired_len=5513 repaired_hash=c138ad97ae655e5163f8beef2f7f87f56637591d96cf9f95f1a5ebe02f243ade doc=qualia session=582d94f7-308c-4d9e-8dba-919c46d2c9ae turn=cycle-1782934039471
+```
+<!-- agent:boundary:815c4701 -->
 <!-- /agent:exchange -->
 
 ## Queue

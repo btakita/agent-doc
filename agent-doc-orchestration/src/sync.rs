@@ -2956,6 +2956,9 @@ fn run_with_options_internal(
     let tmux_router_options = tmux_router::SyncOptions {
         protect_pane: Some(&allow_open_cycle_detach),
         allow_unresolved_pane_assignment: Some(&allow_unresolved_pane_assignment),
+        // SafePassive = editor-driven poll / tab-selection: reconcile layout but
+        // don't steal the operator's active tmux pane (#panefocussteal).
+        passive: matches!(auto_start_mode, AutoStartMode::SafePassive),
     };
 
     // Open-cycle panes are logged during DETACH, but they are not kept visible.

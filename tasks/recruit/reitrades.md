@@ -1112,7 +1112,6 @@ This leans into what you actually like (real-time reactive — your lazily/signa
 
 Want me to fold one of these into the working draft? (And if you go with B, I'd keep the shared-libraries line as-is — it still fits.)
 Option B. Make it fix my voice...no AI tells. Print the entire linked in response.
-<!-- agent:boundary:20b97d36 -->
 ### Re: Option B folded in, voice-fixed, AI tells stripped — opus-4-8
 
 > **Queue prompt:** Option B. Make it fix my voice...no AI tells. Print the entire linked in response.
@@ -1143,6 +1142,31 @@ What I did:
 - **AI tells removed:** no em-dashes, no rule-of-three lists with the neat final beat, no "squarely the kind of problem." Reads like you typing it.
 
 Want me to drop this into `corky`/LinkedIn as a draft (no auto-send), or tighten anything further?
+<!-- agent:boundary:50f2959b -->
+Is REITrades a real-time reactive product? I'm concerned he will say it's more batch processing.
+### Re: Is REItrades actually real-time reactive? Mostly no — fix the lead — opus-4-8
+
+> **Queue prompt:** Is REITrades a real-time reactive product? I'm concerned he will say it's more batch processing.
+
+Your concern is right, and it's a good instinct. REItrades is **mostly batch/async, not real-time reactive.** If you lead with "real-time reactive systems, that's basically what a live marketplace is," Artur can reasonably push back with "actually most of what we do is generation and outreach," and then your opening line reads like you don't know his product. Don't hand him that.
+
+**What's actually what, from their own feature list:**
+- **Batch / async (the bulk of it):** AI listing/teaser/OM generation, buyer outreach and email campaigns (MailerLite), imports/exports, the listing-creation pipeline, analytics. This is the core "AI marketing engine."
+- **Genuinely real-time / reactive (minor):** buyer/seller chat, and maybe live notifications or a status dashboard. Real, but not the heart of the product.
+
+So "real-time reactive" as *the* description of REItrades overclaims. The chat is the only clearly real-time surface, and it's a side feature.
+
+**The fix: reframe your interest as reactive *data and state*, not real-time.** That's actually closer to your real strength anyway (lazily / signal-space is about reactive, incremental computation and derived state, not just live UI). Framed that way it applies directly to a batch product: keeping generated content correct and in sync as the underlying data changes, instead of regenerating everything and hoping it's consistent. Replace the second paragraph with:
+
+```
+I wanted to reach out anyway. REItrades is something I'd genuinely like to work on. I'm a generalist, and the work I enjoy most is keeping systems correct as the data underneath them changes. In your case that's things like the OM and teaser staying consistent when a listing's numbers change, and the buyer-facing pieces staying accurate as people act on them. The AI side is part of that too. Your "100% accurate" content is what's easiest to lose trust on, and making AI output reliable in production is the kind of problem I like solving.
+```
+
+That keeps your genuine interest, drops "real-time," and describes something that's true whether their pipeline is batch or live. It also quietly points at a real weakness of cheap batch generation (drift between the data and the generated OM), which is exactly where senior judgment pays off.
+
+**One honest fit note:** if what you *want* is to build real-time reactive systems, REItrades may not be the ideal product for it. It's generation-and-workflow heavy. That's fine for this engagement (the reactive-data framing above is real and useful to them), but worth knowing so you're not signing up expecting a live-systems playground.
+
+Want me to fold this revised paragraph into the working draft and reprint the full note?
 <!-- /agent:exchange -->
 
 ## Queue

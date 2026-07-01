@@ -9,8 +9,10 @@ use agent_doc_element_backlog::backlog::{
 };
 use agent_doc_queue::{
     free_text_admission::{
-        FreeTextAdmissionScope, free_text_prompt_is_backlog_task, normalize_admitted_free_text,
-        queue_currently_active_for_free_text_admission, queue_free_text_admission_scope,
+        FreeTextAdmissionScope, append_empty_agent_component, collect_actionable_free_text_prompts,
+        ensure_queue_priority_attr, explicit_queue_go_mode, goal_command_already_queued,
+        goal_command_for_ids, queue_currently_active_for_free_text_admission,
+        queue_entry_is_admitted_free_text, queue_free_text_admission_scope,
     },
     queue_response::{free_text_head_answered_by_response, queue_prompt_text_is_free_text},
 };
@@ -1291,9 +1293,11 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         Ok(cs) => cs,
         Err(_) => return Ok(QueueState::default()),
     };
+    let exchange_prompt =
+        agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(&current_content);
     if components.iter().all(|c| c.name != "queue")
         && collect_actionable_free_text_prompts(
-            &current_content,
+            exchange_prompt.as_deref(),
             &[],
             &FreeTextAdmissionScope::None,
         )
@@ -3148,80 +3152,12 @@ pub(crate) fn sync_same_cycle_pending_adds_into_go_queue(file: &Path) -> Result<
     Ok(synced_ids)
 }
 
-fn explicit_queue_go_mode(
-    attrs: &std::collections::HashMap<String, String>,
-    frontmatter_queue: Option<&str>,
-) -> bool {
-    attrs.contains_key("go")
-        || frontmatter_queue.is_some_and(|raw| raw.trim().eq_ignore_ascii_case("go"))
-}
-
-#[derive(Debug, Clone)]
-struct FreeTextWorkPrompt {
-    text: String,
-}
-
-#[derive(Debug, Clone, Default)]
-struct ActionableFreeTextPrompts {
-    prompts: Vec<FreeTextWorkPrompt>,
-}
-
-impl ActionableFreeTextPrompts {
-    fn has_work(&self) -> bool {
-        !self.prompts.is_empty()
-    }
-}
-
 struct FreeTextAdmission {
     content: String,
     queued_ids: Vec<String>,
     warnings: Vec<PreflightWarning>,
     admitted_count: usize,
     execution_label: &'static str,
-}
-
-fn collect_actionable_free_text_prompts(
-    content: &str,
-    entries: &[agent_doc_queue::document_queue::QueueEntry],
-    queue_scope: &FreeTextAdmissionScope,
-) -> ActionableFreeTextPrompts {
-    let mut prompts = Vec::new();
-    if let Some(exchange_prompt) =
-        agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(content)
-        && free_text_prompt_is_backlog_task(&exchange_prompt)
-    {
-        prompts.push(FreeTextWorkPrompt {
-            text: normalize_admitted_free_text(&exchange_prompt),
-        });
-    }
-    for entry in entries {
-        if let agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) = entry
-            && queue_scope.allows_prompt(&prompt.text)
-        {
-            prompts.push(FreeTextWorkPrompt {
-                text: normalize_admitted_free_text(&prompt.text),
-            });
-        }
-    }
-    let mut seen = std::collections::HashSet::new();
-    prompts.retain(|prompt| {
-        let key = agent_doc_queue::queue_response::normalize_for_answer_match(&prompt.text);
-        !key.is_empty() && seen.insert(key)
-    });
-    ActionableFreeTextPrompts { prompts }
-}
-
-fn append_empty_agent_component(content: &str, name: &str) -> String {
-    let mut out = content.trim_end_matches('\n').to_string();
-    if !out.is_empty() {
-        out.push_str("\n\n");
-    }
-    out.push_str("<!-- agent:");
-    out.push_str(name);
-    out.push_str(" -->\n<!-- /agent:");
-    out.push_str(name);
-    out.push_str(" -->\n");
-    out
 }
 
 fn admit_free_text_work(
@@ -3232,7 +3168,10 @@ fn admit_free_text_work(
     queue_scope: &FreeTextAdmissionScope,
     queue_start_required: bool,
 ) -> Result<Option<FreeTextAdmission>> {
-    let prompts = collect_actionable_free_text_prompts(content, entries, queue_scope);
+    let exchange_prompt =
+        agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(content);
+    let prompts =
+        collect_actionable_free_text_prompts(exchange_prompt.as_deref(), entries, queue_scope);
     if !prompts.has_work() {
         return Ok(None);
     }
@@ -3383,44 +3322,6 @@ fn admit_free_text_work(
     }))
 }
 
-fn queue_entry_is_admitted_free_text(
-    entry: &agent_doc_queue::document_queue::QueueEntry,
-    queue_scope: &FreeTextAdmissionScope,
-) -> bool {
-    matches!(
-        entry,
-        agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
-            if queue_scope.allows_prompt(&prompt.text)
-    )
-}
-
-fn ensure_queue_priority_attr(content: &str) -> Result<String> {
-    let components = agent_doc_element::element::parse(content)?;
-    let Some(queue) = components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
-        return Ok(content.to_string());
-    };
-    if queue.attrs.contains_key("priority") {
-        return Ok(content.to_string());
-    }
-    let raw_tag = &content[queue.open_start..queue.open_end];
-    let Some(close_idx) = raw_tag.rfind("-->") else {
-        return Ok(content.to_string());
-    };
-    let (head, tail) = raw_tag.split_at(close_idx);
-    let mut new_tag = head.trim_end().to_string();
-    new_tag.push_str(" priority ");
-    new_tag.push_str(tail);
-
-    let mut rebuilt = String::with_capacity(content.len() + " priority".len());
-    rebuilt.push_str(&content[..queue.open_start]);
-    rebuilt.push_str(&new_tag);
-    rebuilt.push_str(&content[queue.open_end..]);
-    Ok(rebuilt)
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ResolvedFreeTextExecution {
     Goal,
@@ -3486,31 +3387,6 @@ fn resolve_free_text_execution(
         }
     };
     Ok((execution, warnings))
-}
-
-fn goal_command_for_ids(ids: &[String]) -> String {
-    let refs = ids
-        .iter()
-        .map(|id| format!("#{id}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!("/goal Implement backlog item(s): {refs}")
-}
-
-fn goal_command_already_queued(
-    entries: &[agent_doc_queue::document_queue::QueueEntry],
-    ids: &[String],
-) -> bool {
-    entries.iter().any(|entry| {
-        let agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) = entry else {
-            return false;
-        };
-        let text = prompt.text.trim();
-        text.starts_with("/goal")
-            && ids
-                .iter()
-                .all(|id| text.contains(&format!("#{id}")) || text.contains(&format!("[#{id}]")))
-    })
 }
 
 fn opencode_goal_extension_available(file: &Path, project_root: Option<&Path>) -> bool {

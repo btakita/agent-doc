@@ -2773,6 +2773,12 @@ fn test_agent_doc_prompt_cache_owns_prompt_cache_policy() {
             .any(|member| member.as_str() == Some("agent-doc-prompt-cache")),
         "agent-doc-prompt-cache must stay a first-class workspace crate"
     );
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-prompt-cache-io")),
+        "agent-doc-prompt-cache-io must stay a first-class workspace crate"
+    );
 
     let prompt_cache_source =
         fs::read_to_string(manifest_dir.join("agent-doc-prompt-cache/src/lib.rs")).unwrap();
@@ -2840,9 +2846,23 @@ fn test_agent_doc_prompt_cache_owns_prompt_cache_policy() {
         package_version
     );
 
-    let orchestration_prompt_cache =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/prompt_cache.rs"))
-            .unwrap();
+    let prompt_cache_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-prompt-cache-io/Cargo.toml")).unwrap();
+    let prompt_cache_io: toml::Value = toml::from_str(&prompt_cache_io_manifest).unwrap();
+    let prompt_cache_io_dependencies = prompt_cache_io["dependencies"].as_table().unwrap();
+    assert!(
+        prompt_cache_io_dependencies.contains_key("agent-doc-prompt-cache"),
+        "prompt-cache IO must depend on the focused prompt-cache policy crate"
+    );
+    for forbidden in ["agent-doc-core", "agent-doc-orchestration"] {
+        assert!(
+            !prompt_cache_io_dependencies.contains_key(forbidden),
+            "prompt-cache IO must not depend on removed core/orchestration facades: {forbidden}"
+        );
+    }
+
+    let prompt_cache_io_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-prompt-cache-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
         "pub use agent_doc_prompt_cache",
         "pub const PROMPT_CACHE_BOUNDARY",
@@ -2864,13 +2884,27 @@ fn test_agent_doc_prompt_cache_owns_prompt_cache_policy() {
         "fn content_sha256",
     ] {
         assert!(
-            !orchestration_prompt_cache.contains(forbidden_snippet),
-            "orchestration must not define or re-export prompt-cache policy: {forbidden_snippet}"
+            !prompt_cache_io_source.contains(forbidden_snippet),
+            "prompt-cache IO must not define or re-export prompt-cache policy: {forbidden_snippet}"
         );
     }
     assert!(
-        orchestration_prompt_cache.contains("append_prompt_cache_effectiveness_sample"),
-        "orchestration may keep prompt-cache history file IO adapters"
+        prompt_cache_io_source.contains("append_prompt_cache_effectiveness_sample")
+            && prompt_cache_io_source.contains("load_prompt_cache_effectiveness_history"),
+        "prompt-cache history file IO adapters should live in the focused IO crate"
+    );
+
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/prompt_cache.rs")
+            .exists(),
+        "orchestration must not keep a prompt_cache source module facade"
+    );
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod prompt_cache"),
+        "orchestration must not export a prompt_cache facade"
     );
 
     let run_source =
@@ -12358,10 +12392,35 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
         "preflight maintenance should call backlog queue sync policy from agent-doc-queue directly"
     );
 
-    let queue_tombstone = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/preflight/queue_tombstone.rs"),
-    )
-    .unwrap();
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/preflight/queue_tombstone.rs")
+            .exists(),
+        "preflight must not keep a queue_tombstone IO facade module"
+    );
+    let preflight_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    assert!(
+        !preflight_lib.contains("mod queue_tombstone"),
+        "preflight must not expose a queue_tombstone IO facade"
+    );
+    let queue_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue-io/Cargo.toml")).unwrap();
+    let queue_io: toml::Value = toml::from_str(&queue_io_manifest).unwrap();
+    let queue_io_dependencies = queue_io["dependencies"].as_table().unwrap();
+    assert!(
+        queue_io_dependencies.contains_key("agent-doc-queue")
+            && queue_io_dependencies.contains_key("agent-doc-fs"),
+        "queue tombstone IO belongs in agent-doc-queue-io with queue policy plus filesystem helpers"
+    );
+    let queue_io_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/lib.rs")).unwrap();
+    assert!(
+        queue_io_lib.contains("pub mod queue_tombstone;"),
+        "agent-doc-queue-io must expose queue tombstone sidecar IO through its owning module"
+    );
+    let queue_tombstone =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/queue_tombstone.rs")).unwrap();
     for forbidden_snippet in [
         "pub(crate) fn reconcile(",
         "fn reconcile(",
@@ -12369,14 +12428,18 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
     ] {
         assert!(
             !queue_tombstone.contains(forbidden_snippet),
-            "preflight queue_tombstone must not re-own tombstone reconciliation policy: {forbidden_snippet}"
+            "queue tombstone IO must not re-own tombstone reconciliation policy: {forbidden_snippet}"
         );
     }
     assert!(
         queue_tombstone.contains("use agent_doc_queue::backlog_sync::reconcile_queue_tombstones;")
-            && queue_tombstone.contains("fn reconcile_for_file(")
+            && queue_tombstone.contains("pub fn reconcile_for_file(")
             && queue_tombstone.contains("reconcile_queue_tombstones("),
-        "preflight queue_tombstone should load/save sidecars and call focused queue tombstone policy directly"
+        "queue tombstone IO should load/save sidecars and call focused queue tombstone policy directly"
+    );
+    assert!(
+        preflight_maintenance.contains("agent_doc_queue_io::queue_tombstone::reconcile_for_file("),
+        "preflight maintenance should call focused queue tombstone IO directly"
     );
 
     let component_attrs =

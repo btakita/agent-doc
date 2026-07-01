@@ -1,8 +1,8 @@
-//! File-backed prompt-cache effectiveness history adapters.
+//! File-backed prompt-cache effectiveness history I/O.
 //!
 //! Pure prompt-cache boundary, replay-key, ranking, and trend policy lives in
-//! `agent_doc_prompt_cache`. This module only adapts those types to JSONL
-//! history files owned by orchestration.
+//! `agent_doc_prompt_cache`. This crate only adapts those types to JSONL
+//! history files.
 
 use agent_doc_prompt_cache::PromptCacheEffectivenessSample;
 use anyhow::{Context, Result};

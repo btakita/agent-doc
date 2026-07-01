@@ -24,6 +24,7 @@ members = [
     "agent-doc-plugin-owner",
     "agent-doc-project-config-io",
     "agent-doc-prompt-cache",
+    "agent-doc-prompt-cache-io",
     "agent-doc-prompt-contract",
     "agent-doc-prompt-context",
     "agent-doc-prompt-lines",

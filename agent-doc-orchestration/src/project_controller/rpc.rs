@@ -6272,10 +6272,8 @@ mod tests {
         std::fs::write(&file, "body").unwrap();
 
         assert!(
-            agent_doc_supervisor_io::recycle_request::read_recycle_request(
-                &file.to_string_lossy()
-            )
-            .is_none(),
+            agent_doc_supervisor_io::recycle_request::read_recycle_request(&file.to_string_lossy())
+                .is_none(),
             "no request before scheduling"
         );
 
@@ -6285,10 +6283,9 @@ mod tests {
         )
         .unwrap();
 
-        let request = agent_doc_supervisor_io::recycle_request::read_recycle_request(
-            &file.to_string_lossy(),
-        )
-        .expect("recycle-request present after scheduling");
+        let request =
+            agent_doc_supervisor_io::recycle_request::read_recycle_request(&file.to_string_lossy())
+                .expect("recycle-request present after scheduling");
         assert_eq!(
             request.reason,
             agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_INSTALL_FANOUT

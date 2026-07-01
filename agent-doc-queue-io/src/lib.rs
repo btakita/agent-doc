@@ -5,4 +5,5 @@ pub mod continuation_marker;
 pub mod controller_pause;
 pub mod drain_stall;
 pub mod queue_journal;
+pub mod queue_tombstone;
 pub mod write_queue;

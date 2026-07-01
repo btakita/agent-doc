@@ -28,7 +28,7 @@ const TOMBSTONE_DIR: &str = ".agent-doc/queue-tombstones";
 /// `<project_root>/.agent-doc/queue-tombstones/<sha256_hash>.json`, mirroring the
 /// snapshot/pending/crdt sidecar convention. Falls back to the document's parent
 /// directory when no `.agent-doc/` project root is found.
-pub(crate) fn tombstone_path_for(doc: &Path) -> Option<PathBuf> {
+fn tombstone_path_for(doc: &Path) -> Option<PathBuf> {
     let canonical = doc.canonicalize().ok()?;
     let hash = agent_doc_fs::document_state_hash_from_str(&canonical.to_string_lossy());
     let project_root = agent_doc_fs::find_project_root(&canonical)
@@ -43,7 +43,7 @@ pub(crate) fn tombstone_path_for(doc: &Path) -> Option<PathBuf> {
 /// Load the persisted operator-delete tombstone set (lowercased ids). Returns an
 /// empty set when the sidecar is absent or unreadable — tombstones are advisory,
 /// so a missing/corrupt file never blocks the mirror.
-pub(crate) fn load(doc: &Path) -> HashSet<String> {
+fn load(doc: &Path) -> HashSet<String> {
     let Some(path) = tombstone_path_for(doc) else {
         return HashSet::new();
     };
@@ -104,7 +104,7 @@ fn save(doc: &Path, ids: &HashSet<String>) {
 /// An id active in the snapshot but entirely gone now (not merely struck) was
 /// deleted by the operator → tombstone it. An id the operator re-added (active
 /// now) clears its tombstone. The updated set is persisted and returned.
-pub(crate) fn reconcile_for_file(
+pub fn reconcile_for_file(
     doc: &Path,
     snapshot_active_ids: &HashSet<String>,
     current_all_ids: &HashSet<String>,

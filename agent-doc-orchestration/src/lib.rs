@@ -78,7 +78,6 @@ pub mod memory_cmd;
 pub mod preflight;
 pub mod project_controller;
 pub mod prompt;
-pub mod prompt_cache;
 pub mod prompt_context;
 pub mod queue_cmd;
 pub mod queue_continuation;

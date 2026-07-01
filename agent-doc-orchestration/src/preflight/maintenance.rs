@@ -1513,7 +1513,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 .filter(|e| matches!(e, agent_doc_queue::document_queue::QueueEntry::Prompt(_)))
                 .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
                 .collect();
-            super::queue_tombstone::reconcile_for_file(
+            agent_doc_queue_io::queue_tombstone::reconcile_for_file(
                 file,
                 &snapshot_active_ids,
                 &current_all_ids,

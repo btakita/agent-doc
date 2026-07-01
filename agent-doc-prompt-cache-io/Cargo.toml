@@ -1,0 +1,18 @@
+[package]
+name = "agent-doc-prompt-cache-io"
+version = "0.34.66"
+edition = "2024"
+description = "Prompt-cache history file I/O for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_prompt_cache_io"
+
+[dependencies]
+agent-doc-prompt-cache = { path = "../agent-doc-prompt-cache", version = "0.34.66" }
+anyhow = "1"
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"

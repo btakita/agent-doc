@@ -51,12 +51,12 @@ fn recycle_request_path(file: &str) -> PathBuf {
 pub fn request_recycle(file: &str, reason: &str) -> Result<()> {
     let path = recycle_request_path(file);
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create recycle-request dir {}", parent.display()))?;
+        std::fs::create_dir_all(parent).with_context(|| {
+            format!("failed to create recycle-request dir {}", parent.display())
+        })?;
     }
     let request = recycle_request(reason, now_secs());
-    let body =
-        serde_json::to_string(&request).context("failed to serialize recycle-request")?;
+    let body = serde_json::to_string(&request).context("failed to serialize recycle-request")?;
     std::fs::write(&path, body)
         .with_context(|| format!("failed to write recycle-request {}", path.display()))?;
     Ok(())

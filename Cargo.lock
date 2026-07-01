@@ -619,6 +619,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-doc-prompt-cache-io"
+version = "0.34.66"
+dependencies = [
+ "agent-doc-prompt-cache",
+ "anyhow",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "agent-doc-prompt-context"
 version = "0.34.66"
 dependencies = [

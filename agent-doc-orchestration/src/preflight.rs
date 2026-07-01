@@ -1741,8 +1741,6 @@ pub use run::*;
 mod maintenance;
 pub use maintenance::*;
 
-mod queue_tombstone;
-
 fn collect_agent_done_ids_with_root(
     content: &str,
     project_root: Option<&Path>,

@@ -26,6 +26,7 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
+🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -56,7 +57,30 @@ You were right. The bad selection had two separate causes: preflight let an acti
 I fixed both in `src/agent-doc` and pushed commit `05cc1380` (`fix: prioritize exchange prompt over queue preflight`). Preflight now captures an unresolved exchange prompt before its commit/boundary-reposition step can hide it, synthesizes that as the effective exchange diff, clears effective selected queue prompts for the turn, and drops `queue_continuation_required` while the exchange prompt is pending. Queue refill/same-cycle pending-add sync now require explicit `go` (`queue: go` or marker-side `go`); plain `queue: start` remains durable active state only.
 
 Verification: focused regressions passed, `make check` passed, `cargo install --path .` installed `agent-doc 0.34.65`, and the session supervisor is marked to recycle at the next idle boundary. The pushed CI run `28484451473` was still in progress at closeout. No JB plugin update is needed for this fix.
-<!-- agent:boundary:4acb1322 -->
+
+### Re: terminal-proof abandoned preflight closeout — gpt-5
+
+Fixed and pushed in `src/agent-doc` as `fee78f7a` (`fix: close terminal proof after abandoned preflight`).
+
+The root cause was `cycle_state::mark_committed`: after the supervisor marked an interrupted/stale preflight as `abandoned`, a later successful closeout commit called `mark_committed`, but the transition table quite correctly refused `Abandoned -> Committed`. `mark_committed` then returned the stale abandoned state unchanged, so strict terminal proof failed later with `cycle ... is abandoned`.
+
+I kept terminal proof strict. The fix is that a real commit closeout now supersedes an abandoned stale preflight with a fresh synthetic `write_applied -> committed` cycle, while already-committed cycles stay idempotent and lower-rank abandoned bookkeeping still stays terminal.
+
+Red-green-refactor evidence:
+
+- Red: the new closeout regression failed before the fix with `terminal proof cannot record closeout ... is abandoned`.
+- Green: `cargo test -p agent-doc-orchestration abandoned` passes, including the new terminal-proof regression and the cycle-state unit regression.
+- Refactor: updated the cycle-state contract docs to distinguish abandoned stale preflight terminal state from a later real commit closeout that supersedes it.
+
+Verification completed:
+
+- `cargo test -p agent-doc-orchestration abandoned`
+- `cargo test -p agent-doc-queue in_progress_marker_detection_allows_priority_prefix`
+- `make check` — clippy, 6155 nextest tests, doctests, SimWorld medium seed, and Lean all passed.
+- `make install` — installed `agent-doc` and `libagent_doc.so`; installer marked 2 controllers to recycle at the next idle boundary.
+
+GitHub CI for `fee78f7a` is currently in progress: run `28485233701`.
+<!-- agent:boundary:1ce41454 -->
 <!-- /agent:exchange -->
 ## Queue
 

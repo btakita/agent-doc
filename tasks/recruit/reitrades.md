@@ -433,6 +433,7 @@ Brian
 
 Should we consider multi-layer perceptrons in the proposal for more accurate AI output?
 
+❯ Should we propose using some deterministic software for the 100% accuracy?
 ### Re: Multi-layer perceptrons in the proposal? — opus-4-8
 
 No — I'd keep MLPs out of the proposal. They don't address the accuracy problem REItrades actually has, and naming them would weaken the bid, not strengthen it.
@@ -451,8 +452,7 @@ That stack is what turns "100% accurate" into something testable. An MLP sits no
 **The sales angle.** Artur is bootstrapped, "limited budget," and asked plainly about cost. Dropping "multi-layer perceptrons" into a first-contact proposal reads as over-engineering and adds a cost/complexity story that doesn't map to the accuracy bar you already framed (provenance grading + validation + review). It makes the bid *harder* to say yes to.
 
 **Recommendation:** leave it out. Keep the accuracy story as the rubric + source-backed extraction + confidence + admin review + eval harness — that's the honest, measurable, and defensible version. If Artur specifically pushes for "learned models," handle it on the call as a phase-2, data-dependent option, and note GBDTs (not MLPs) would be the likely tool once there's labeled data. No proposal edit needed.
-
-<!-- agent:boundary:e4a9f7d2 -->
+<!-- agent:boundary:6f6497a5 -->
 <!-- /agent:exchange -->
 
 ## Queue

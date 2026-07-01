@@ -548,7 +548,7 @@ fn explicit_backlog_target_requirements(
         } else {
             None
         };
-        crate::security::enforce_cross_document_review(
+        agent_doc_frontmatter_io::security_review::enforce_cross_document_review(
             "preflight prompt contract",
             source_file,
             source_frontmatter,

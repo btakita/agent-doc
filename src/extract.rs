@@ -38,8 +38,9 @@ use std::process::Command;
 use agent_doc_element::element::{self, is_backlog_component, is_icebox_component};
 
 use agent_doc_frontmatter::frontmatter;
+use agent_doc_frontmatter_io::security_review::enforce_cross_document_review;
 use agent_doc_orchestration::frontmatter_io;
-use agent_doc_orchestration::{security, snapshot, write};
+use agent_doc_orchestration::{snapshot, write};
 
 /// Check pane ownership for the target file. Returns Ok if no conflict or if
 /// the target has no active session. Returns Err suggesting --bypass-claim
@@ -208,13 +209,7 @@ pub fn run(source: &Path, target: &Path, component_name: Option<&str>) -> Result
         .with_context(|| format!("failed to read {}", target.display()))?;
     let (source_fm, _) = frontmatter_io::parse_for_file(&source_content, source)?;
     let (target_fm, _) = frontmatter_io::parse_for_file(&target_content, target)?;
-    security::enforce_cross_document_review(
-        "extract",
-        source,
-        &source_fm,
-        target,
-        Some(&target_fm),
-    )?;
+    enforce_cross_document_review("extract", source, &source_fm, target, Some(&target_fm))?;
 
     let comp_name = component_name.unwrap_or("exchange");
 
@@ -360,13 +355,7 @@ pub fn transfer(
     } else {
         None
     };
-    security::enforce_cross_document_review(
-        "transfer",
-        source,
-        &source_fm,
-        target,
-        target_fm.as_ref(),
-    )?;
+    enforce_cross_document_review("transfer", source, &source_fm, target, target_fm.as_ref())?;
 
     if !bypass_claim {
         check_target_ownership(target)?;

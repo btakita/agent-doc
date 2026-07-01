@@ -31,6 +31,7 @@ agent-doc-element-exchange = { path = "../agent-doc-element-exchange", version =
 agent-doc-element-queue = { path = "../agent-doc-element-queue", version = "0.34.66" }
 agent-doc-element-review = { path = "../agent-doc-element-review", version = "0.34.66" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.66" }
+agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.34.66" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.66" }
 agent-doc-git = { path = "../agent-doc-git", version = "0.34.66" }
 agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.34.66" }

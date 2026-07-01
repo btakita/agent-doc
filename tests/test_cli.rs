@@ -2265,6 +2265,7 @@ fn test_manifest_uses_publishable_dependency_contract() {
         "agent-doc-markdown-ast",
         "agent-doc-ffi",
         "agent-doc-frontmatter",
+        "agent-doc-frontmatter-io",
         "agent-doc-fs",
         "agent-doc-merge",
         "agent-doc-model-tier",
@@ -6690,20 +6691,12 @@ fn test_agent_doc_fs_owns_markdown_reference_resolution() {
         );
     }
 
-    let security_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/security.rs")).unwrap();
-    for forbidden_snippet in [
-        "pub fn referenced_markdown_path(",
-        "pub fn referenced_markdown_path_checked(",
-        "fn strip_redundant_project_prefix(",
-        "fn project_roots_for(",
-        "pub use agent_doc_fs",
-    ] {
-        assert!(
-            !security_source.contains(forbidden_snippet),
-            "orchestration security must not re-own or facade markdown reference resolution: {forbidden_snippet}"
-        );
-    }
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/security.rs")
+            .exists(),
+        "orchestration must not keep security.rs as a markdown reference adapter or facade"
+    );
 
     for (path, required_snippet, forbidden_snippet) in [
         (
@@ -8889,6 +8882,16 @@ fn test_global_config_has_no_orchestration_facade() {
 #[test]
 fn test_agent_doc_frontmatter_owns_cross_document_security_review_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-frontmatter-io")),
+        "agent-doc-frontmatter-io must stay a first-class workspace crate for frontmatter file/path adapters"
+    );
+
     let frontmatter_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-frontmatter/src/lib.rs")).unwrap();
     let security_review =
@@ -8912,8 +8915,27 @@ fn test_agent_doc_frontmatter_owns_cross_document_security_review_policy() {
         );
     }
 
-    let orchestration_security =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/security.rs")).unwrap();
+    let frontmatter_io_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-frontmatter-io/src/lib.rs")).unwrap();
+    let frontmatter_io_security =
+        fs::read_to_string(manifest_dir.join("agent-doc-frontmatter-io/src/security_review.rs"))
+            .unwrap();
+    assert!(
+        frontmatter_io_lib.contains("pub mod security_review;"),
+        "agent-doc-frontmatter-io should expose the focused security-review file/path adapter"
+    );
+    for required in [
+        "pub fn enforce_cross_document_review(",
+        "agent_doc_frontmatter::security_review::{",
+        "cross_document_security_review_decision",
+        "SecurityReviewSubject",
+        "agent_doc_fs::same_document_path",
+    ] {
+        assert!(
+            frontmatter_io_security.contains(required),
+            "agent-doc-frontmatter-io must own the effectful cross-document security-review wrapper: {required}"
+        );
+    }
     for forbidden in [
         "CollaborationMode::Shared",
         "has_security_review()",
@@ -8924,15 +8946,66 @@ fn test_agent_doc_frontmatter_owns_cross_document_security_review_policy() {
         "pub(crate) use agent_doc_frontmatter::security_review",
     ] {
         assert!(
-            !orchestration_security.contains(forbidden),
-            "orchestration security must adapt paths/errors, not re-own or facade frontmatter security-review policy: {forbidden}"
+            !frontmatter_io_security.contains(forbidden),
+            "agent-doc-frontmatter-io security review must adapt paths/errors, not re-own or facade frontmatter security-review policy: {forbidden}"
         );
     }
+
+    let orchestration_security_path = manifest_dir.join("agent-doc-orchestration/src/security.rs");
     assert!(
-        orchestration_security.contains("use agent_doc_frontmatter::security_review::{")
-            && orchestration_security.contains("cross_document_security_review_decision"),
-        "orchestration security should call focused frontmatter security-review policy directly"
+        !orchestration_security_path.exists(),
+        "orchestration must not keep security.rs as a frontmatter security-review adapter or facade"
     );
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod security"),
+        "orchestration must not expose security as a module facade"
+    );
+    for relative in ["src/extract.rs", "agent-doc-orchestration/src/preflight.rs"] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains(
+                "agent_doc_frontmatter_io::security_review::enforce_cross_document_review"
+            ),
+            "{relative} should call the focused frontmatter-io security-review wrapper directly"
+        );
+        for forbidden in [
+            "agent_doc_orchestration::security",
+            "crate::security::enforce_cross_document_review",
+            "security::enforce_cross_document_review",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{relative} must not route cross-document security review through orchestration security: {forbidden}"
+            );
+        }
+    }
+
+    let frontmatter_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-frontmatter-io/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&frontmatter_io_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    for required in ["agent-doc-frontmatter", "agent-doc-fs", "anyhow"] {
+        assert!(
+            dependencies.contains_key(required),
+            "agent-doc-frontmatter-io should depend on {required} for cross-document security review adapters"
+        );
+    }
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-frontmatter-io security-review adapter must stay free of core, orchestration, git, editor IPC, sqlite, or tmux crates"
+        );
+    }
 
     let frontmatter_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-frontmatter/Cargo.toml")).unwrap();
@@ -9339,17 +9412,18 @@ fn test_snapshot_state_paths_are_owned_by_agent_doc_fs() {
     );
 
     let security_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/security.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-frontmatter-io/src/security_review.rs"))
+            .unwrap();
     for forbidden_snippet in ["fn same_document(", "fn normalize_path("] {
         assert!(
             !security_source.contains(forbidden_snippet),
-            "security.rs must not re-own same-document path comparison: {forbidden_snippet}"
+            "frontmatter-io security review must not re-own same-document path comparison: {forbidden_snippet}"
         );
     }
     assert!(
         security_source.contains("agent_doc_fs::same_document_path")
             || security_source.contains("use agent_doc_fs::same_document_path;"),
-        "security.rs should call focused agent-doc-fs same-document path helper directly"
+        "frontmatter-io security review should call focused agent-doc-fs same-document path helper directly"
     );
 
     fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {

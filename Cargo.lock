@@ -39,6 +39,7 @@ dependencies = [
  "agent-doc-element-review",
  "agent-doc-ffi",
  "agent-doc-frontmatter",
+ "agent-doc-frontmatter-io",
  "agent-doc-fs",
  "agent-doc-git-io",
  "agent-doc-harness",
@@ -367,6 +368,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-doc-frontmatter-io"
+version = "0.34.66"
+dependencies = [
+ "agent-doc-frontmatter",
+ "agent-doc-fs",
+ "anyhow",
+]
+
+[[package]]
 name = "agent-doc-fs"
 version = "0.34.66"
 dependencies = [
@@ -496,6 +506,7 @@ dependencies = [
  "agent-doc-element-queue",
  "agent-doc-element-review",
  "agent-doc-frontmatter",
+ "agent-doc-frontmatter-io",
  "agent-doc-fs",
  "agent-doc-git",
  "agent-doc-git-io",

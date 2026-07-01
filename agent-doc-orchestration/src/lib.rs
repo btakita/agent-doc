@@ -43,9 +43,6 @@ pub mod ops_log;
 pub mod frontmatter_io;
 pub mod template_io;
 
-// Path/security helpers.
-pub mod security;
-
 // The orchestration cluster + sessions/supervisor + neighbors (increment 6).
 pub mod admin;
 pub mod admit;

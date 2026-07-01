@@ -1,0 +1,15 @@
+[package]
+name = "agent-doc-frontmatter-io"
+version = "0.34.66"
+edition = "2024"
+description = "I/O adapters for agent-doc frontmatter policy"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_frontmatter_io"
+
+[dependencies]
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.66" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.66" }
+anyhow = "1"

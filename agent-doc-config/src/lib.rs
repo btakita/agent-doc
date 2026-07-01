@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use agent_doc_frontmatter::frontmatter::CodexNetworkAccess;
+use agent_doc_frontmatter::frontmatter::{CodexNetworkAccess, FreeTextExecutionMode};
 use agent_doc_model_tier::ModelConfig;
 
 /// Execution mode for skill-level parallelism.
@@ -89,6 +89,11 @@ pub struct Config {
     /// Frontmatter overrides this. Default `45`.
     #[serde(default)]
     pub managed_proof_probe_timeout_secs: Option<u64>,
+    /// Global default execution strategy for free text admitted from
+    /// `agent:exchange` or `agent:queue` after backlog item creation. Values:
+    /// `auto`, `goal`, `queue`; frontmatter and project config override this.
+    #[serde(default, alias = "free_text_execution")]
+    pub agent_doc_free_text_execution: Option<FreeTextExecutionMode>,
     /// Execution mode: hybrid (default), parallel, sequential.
     /// Controls how the skill handles concurrent /agent-doc invocations.
     #[serde(default)]
@@ -173,6 +178,7 @@ claude_args = "--dangerously-skip-permissions"
 codex_args = "-s danger-full-access"
 opencode_args = "--dangerously-skip-permissions"
 codex_network_access = "enabled"
+agent_doc_free_text_execution = "queue"
 "#;
         let cfg: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(cfg.agent_args.as_deref(), Some("--json -s workspace-write"));
@@ -186,6 +192,15 @@ codex_network_access = "enabled"
             Some("--dangerously-skip-permissions")
         );
         assert_eq!(cfg.codex_network_access, Some(CodexNetworkAccess::Enabled));
+        assert_eq!(
+            cfg.agent_doc_free_text_execution,
+            Some(FreeTextExecutionMode::Queue)
+        );
+        let alias: Config = toml::from_str("free_text_execution = \"goal\"").unwrap();
+        assert_eq!(
+            alias.agent_doc_free_text_execution,
+            Some(FreeTextExecutionMode::Goal)
+        );
     }
 
     #[test]

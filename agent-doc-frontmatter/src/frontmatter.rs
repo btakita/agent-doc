@@ -345,6 +345,18 @@ pub enum LintDialectMode {
     Off,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FreeTextExecutionMode {
+    /// Prefer `/goal` when the active harness supports it; otherwise use queue work.
+    #[default]
+    Auto,
+    /// Use a native `/goal` command when available, falling back to queue work.
+    Goal,
+    /// Always execute admitted free-text work through `agent:queue`.
+    Queue,
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Frontmatter {
     /// Document/routing UUID — permanent identifier for tmux pane routing.
@@ -645,6 +657,16 @@ pub struct Frontmatter {
     /// ```
     #[serde(default, skip_serializing_if = "indexmap::IndexMap::is_empty")]
     pub prompt_presets: indexmap::IndexMap<String, String>,
+    /// How free-text work admitted from `agent:exchange` or `agent:queue` should be
+    /// executed after the binary creates backlog items. Values: `auto`, `goal`,
+    /// `queue`. Project/global configs use the same key.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "agent_doc_free_text_execution",
+        alias = "free_text_execution"
+    )]
+    pub free_text_execution: Option<FreeTextExecutionMode>,
     /// Lower-agent dispatch policy for planning/job-packet generation.
     /// Values are currently interpreted by `plan` as manual/auto/off text;
     /// unknown values round-trip so newer policy names do not break older binaries.
@@ -777,6 +799,7 @@ impl Frontmatter {
             || self.opencode_args.is_some()
             || self.branch.is_some()
             || self.tmux_session.is_some()
+            || self.free_text_execution.is_some()
             || self.queue_active.is_some()
             || self.dispatch.is_some()
             || self.collaboration.is_some()
@@ -1254,6 +1277,14 @@ pub fn merge_fields(content: &str, yaml_fields: &str) -> Result<String> {
                     serde_yaml::from_value::<indexmap::IndexMap<String, String>>(value.clone())
                 {
                     fm.prompt_presets = presets;
+                }
+            }
+            "agent_doc_free_text_execution" | "free_text_execution" => {
+                if let Some(s) = value.as_str()
+                    && let Ok(mode) =
+                        serde_yaml::from_str::<FreeTextExecutionMode>(&format!("\"{}\"", s))
+                {
+                    fm.free_text_execution = Some(mode);
                 }
             }
             "agent_args" => fm.agent_args = val_str(),
@@ -1975,6 +2006,14 @@ mod tests {
     }
 
     #[test]
+    fn parse_free_text_execution_mode() {
+        let (fm, _) = parse("---\nagent_doc_free_text_execution: queue\n---\n\n").unwrap();
+        assert_eq!(fm.free_text_execution, Some(FreeTextExecutionMode::Queue));
+        let (fm, _) = parse("---\nfree_text_execution: goal\n---\n\n").unwrap();
+        assert_eq!(fm.free_text_execution, Some(FreeTextExecutionMode::Goal));
+    }
+
+    #[test]
     fn write_emits_canonical_queue_for_direct_set_queue_active() {
         // #writer-emits-deprecated-queue-active-false: a path that sets
         // `queue_active` directly on the struct (bypassing merge_queue_state) and
@@ -2258,6 +2297,7 @@ mod tests {
             hooks: std::collections::HashMap::new(),
             env: indexmap::IndexMap::new(),
             prompt_presets: indexmap::IndexMap::new(),
+            free_text_execution: None,
             dispatch: None,
             agent_doc_env_inherit: None,
             cwd: None,

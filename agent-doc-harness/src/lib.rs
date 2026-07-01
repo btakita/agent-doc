@@ -162,6 +162,14 @@ impl HarnessConfig {
         matches!(self.binary.as_str(), "claude" | "codex" | "opencode")
     }
 
+    pub fn supports_goal_command(&self, opencode_goal_extension_available: bool) -> bool {
+        match self.binary.as_str() {
+            "claude" | "codex" => true,
+            "opencode" => opencode_goal_extension_available,
+            _ => false,
+        }
+    }
+
     /// Harness-native command that starts a fresh conversation context.
     ///
     /// Claude Code and Codex use `/clear`; OpenCode has no `/clear` command and
@@ -986,6 +994,14 @@ mod tests {
         assert!(HarnessConfig::claude().is_tui_harness());
         assert!(HarnessConfig::codex().is_tui_harness());
         assert!(HarnessConfig::opencode().is_tui_harness());
+    }
+
+    #[test]
+    fn goal_command_support_is_harness_and_extension_aware() {
+        assert!(HarnessConfig::claude().supports_goal_command(false));
+        assert!(HarnessConfig::codex().supports_goal_command(false));
+        assert!(!HarnessConfig::opencode().supports_goal_command(false));
+        assert!(HarnessConfig::opencode().supports_goal_command(true));
     }
 
     #[test]

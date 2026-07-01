@@ -1281,16 +1281,30 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     };
     let adopted_live_queue_delete =
         adopt_live_buffer_queue_deletions(file, &mut content).unwrap_or(false);
-    let components = match agent_doc_element::element::parse(&content) {
+    let mut current_content = content.clone();
+    let mut mutated = adopted_live_queue_delete;
+    let mut components = match agent_doc_element::element::parse(&current_content) {
         Ok(cs) => cs,
         Err(_) => return Ok(QueueState::default()),
     };
-    let comp = match components.iter().find(|c| c.name == "queue") {
+    if components.iter().all(|c| c.name != "queue")
+        && collect_actionable_free_text_prompts(&current_content, &[], false).has_work()
+    {
+        current_content = append_empty_agent_component(&current_content, "queue");
+        content = current_content.clone();
+        components = match agent_doc_element::element::parse(&current_content) {
+            Ok(cs) => cs,
+            Err(_) => return Ok(QueueState::default()),
+        };
+        mutated = true;
+        eprintln!("[preflight] queue: created agent:queue for admitted free-text work");
+    }
+    let mut comp = match components.iter().find(|c| c.name == "queue").cloned() {
         Some(c) => c,
         None => return Ok(QueueState::default()),
     };
 
-    let body = &content[comp.open_end..comp.close_start];
+    let body = &current_content[comp.open_end..comp.close_start];
     let entries = match agent_doc_queue::document_queue::parse(body) {
         Ok(e) => e,
         Err(e) => {
@@ -1300,8 +1314,6 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     };
 
     let mut entries = entries;
-    let mut mutated = adopted_live_queue_delete;
-    let mut current_content = content.clone();
     let mut queue_warnings = Vec::new();
     let mut synced_queue_ids = Vec::new();
     let mut source_queue_priority = false;
@@ -1336,9 +1348,49 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         rebuilt.push_str(&normalized_queue_tag);
         rebuilt.push_str(&current_content[comp.open_end..]);
         current_content = rebuilt;
+        content = current_content.clone();
+        components = agent_doc_element::element::parse(&current_content)?;
+        comp = components
+            .iter()
+            .find(|c| c.name == "queue")
+            .context("queue maintenance: queue component vanished after tag normalization")?
+            .clone();
         mutated = true;
         queue_tag_attrs_normalized = true;
         eprintln!("[preflight] queue: normalized malformed queue marker attributes");
+    }
+
+    let project_root = file.canonicalize().ok().and_then(|canonical| {
+        agent_doc_fs::find_project_root(&canonical)
+            .or_else(|| canonical.parent().map(std::path::Path::to_path_buf))
+    });
+    let include_queue_free_text =
+        queue_origin_free_text_admission_allowed(&current_content, &comp.attrs);
+    if let Some(admission) = admit_free_text_work(
+        file,
+        &current_content,
+        &entries,
+        project_root.as_deref(),
+        include_queue_free_text,
+    )? {
+        current_content = admission.content;
+        content = current_content.clone();
+        components = agent_doc_element::element::parse(&current_content)?;
+        comp = components
+            .iter()
+            .find(|c| c.name == "queue")
+            .context("queue maintenance: queue component vanished after free-text admission")?
+            .clone();
+        let body = &current_content[comp.open_end..comp.close_start];
+        entries = agent_doc_queue::document_queue::parse(body)
+            .context("queue maintenance: failed to parse queue after free-text admission")?;
+        synced_queue_ids.extend(admission.queued_ids);
+        queue_warnings.extend(admission.warnings);
+        mutated = true;
+        eprintln!(
+            "[preflight] queue: admitted {} free-text prompt(s) into backlog ({})",
+            admission.admitted_count, admission.execution_label
+        );
     }
 
     // `#ynra`: collect `agent:done` ids ONCE up front. The backlog→queue sync
@@ -1347,10 +1399,6 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // cycle, the sync re-injects it the next cycle, and the queue churns forever
     // on a completed ref. `agent:done` is not mutated by any queue maintenance
     // step, so this set is valid for both the sync filter and the later strike.
-    let project_root = file.canonicalize().ok().and_then(|canonical| {
-        agent_doc_fs::find_project_root(&canonical)
-            .or_else(|| canonical.parent().map(std::path::Path::to_path_buf))
-    });
     let done_ids = collect_agent_done_ids_with_root(&content, project_root.as_deref());
 
     // Backlog→queue sync (#backlog-queue-sync-attr): when an `agent:backlog`
@@ -3091,6 +3139,396 @@ fn explicit_queue_go_mode(
         || frontmatter_queue.is_some_and(|raw| raw.trim().eq_ignore_ascii_case("go"))
 }
 
+#[derive(Debug, Clone)]
+struct FreeTextWorkPrompt {
+    text: String,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ActionableFreeTextPrompts {
+    prompts: Vec<FreeTextWorkPrompt>,
+}
+
+impl ActionableFreeTextPrompts {
+    fn has_work(&self) -> bool {
+        !self.prompts.is_empty()
+    }
+}
+
+struct FreeTextAdmission {
+    content: String,
+    queued_ids: Vec<String>,
+    warnings: Vec<PreflightWarning>,
+    admitted_count: usize,
+    execution_label: &'static str,
+}
+
+fn collect_actionable_free_text_prompts(
+    content: &str,
+    entries: &[agent_doc_queue::document_queue::QueueEntry],
+    include_queue_prompts: bool,
+) -> ActionableFreeTextPrompts {
+    let mut prompts = Vec::new();
+    if let Some(exchange_prompt) =
+        agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(content)
+        && free_text_prompt_is_backlog_task(content, &exchange_prompt)
+    {
+        prompts.push(FreeTextWorkPrompt {
+            text: normalize_admitted_free_text(&exchange_prompt),
+        });
+    }
+    if include_queue_prompts {
+        for entry in entries {
+            if let agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) = entry
+                && free_text_prompt_is_backlog_task(content, &prompt.text)
+            {
+                prompts.push(FreeTextWorkPrompt {
+                    text: normalize_admitted_free_text(&prompt.text),
+                });
+            }
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    prompts.retain(|prompt| {
+        let key = agent_doc_queue::queue_response::normalize_for_answer_match(&prompt.text);
+        !key.is_empty() && seen.insert(key)
+    });
+    ActionableFreeTextPrompts { prompts }
+}
+
+fn free_text_prompt_is_backlog_task(content: &str, text: &str) -> bool {
+    let trimmed = normalize_admitted_free_text(text);
+    !trimmed.is_empty()
+        && !trimmed.starts_with('/')
+        && !trimmed.starts_with('#')
+        && !agent_doc_queue::queue_heads::is_do_directive(&trimmed)
+        && agent_doc_prompt_lines::text_line_looks_like_prompt_target(&trimmed)
+        && queue_prompt_text_is_free_text(content, &trimmed)
+}
+
+fn queue_origin_free_text_admission_allowed(
+    content: &str,
+    queue_attrs: &std::collections::HashMap<String, String>,
+) -> bool {
+    let (fm, _) = frontmatter::parse(content).unwrap_or_default();
+    let frontmatter_active = match fm
+        .queue
+        .as_deref()
+        .and_then(agent_doc_frontmatter::frontmatter::QueueControl::parse)
+    {
+        Some(agent_doc_frontmatter::frontmatter::QueueControl::Start) => true,
+        Some(agent_doc_frontmatter::frontmatter::QueueControl::Stop) => false,
+        None => fm.queue_active.unwrap_or(false),
+    };
+    let marker_active = agent_doc_queue::document_queue::has_auto_attr(queue_attrs)
+        || matches!(
+            agent_doc_queue::document_queue::marker_control(queue_attrs),
+            Some(agent_doc_frontmatter::frontmatter::QueueControl::Start)
+        );
+    !frontmatter_active && !marker_active
+}
+
+fn normalize_admitted_free_text(text: &str) -> String {
+    text.trim().trim_start_matches('❯').trim().to_string()
+}
+
+fn append_empty_agent_component(content: &str, name: &str) -> String {
+    let mut out = content.trim_end_matches('\n').to_string();
+    if !out.is_empty() {
+        out.push_str("\n\n");
+    }
+    out.push_str("<!-- agent:");
+    out.push_str(name);
+    out.push_str(" -->\n<!-- /agent:");
+    out.push_str(name);
+    out.push_str(" -->\n");
+    out
+}
+
+fn admit_free_text_work(
+    file: &Path,
+    content: &str,
+    entries: &[agent_doc_queue::document_queue::QueueEntry],
+    project_root: Option<&Path>,
+    include_queue_prompts: bool,
+) -> Result<Option<FreeTextAdmission>> {
+    let prompts = collect_actionable_free_text_prompts(content, entries, include_queue_prompts);
+    if !prompts.has_work() {
+        return Ok(None);
+    }
+
+    let mut current = if agent_doc_element::element::parse(content)?
+        .iter()
+        .any(|c| c.name == "backlog")
+    {
+        content.to_string()
+    } else {
+        append_empty_agent_component(content, "backlog")
+    };
+    let mut components = agent_doc_element::element::parse(&current)?;
+    let backlog = components
+        .iter()
+        .find(|c| c.name == "backlog")
+        .context("free-text admission: backlog component missing after ensure")?
+        .clone();
+    let backlog_body = backlog.content(&current);
+    let (_, existing_items, _) = agent_doc_element_backlog::backlog::parse_items(backlog_body);
+    let mut id_by_text = std::collections::HashMap::new();
+    for item in existing_items {
+        if item.state != agent_doc_element_backlog::backlog::PendingState::Done {
+            let key = agent_doc_queue::queue_response::normalize_for_answer_match(&item.text);
+            if !key.is_empty() {
+                id_by_text.entry(key).or_insert(item.id);
+            }
+        }
+    }
+
+    let mut prompt_keys = Vec::new();
+    let mut texts_to_add = Vec::new();
+    for prompt in &prompts.prompts {
+        let key = agent_doc_queue::queue_response::normalize_for_answer_match(&prompt.text);
+        if !id_by_text.contains_key(&key) {
+            texts_to_add.push(prompt.text.clone());
+        }
+        prompt_keys.push(key);
+    }
+    if !texts_to_add.is_empty() {
+        let doc_id = agent_doc_hash::document_id_for_path(file);
+        let outcome = agent_doc_element_backlog::backlog::op_prepend_many_with_outcomes(
+            backlog_body,
+            &texts_to_add,
+            &doc_id,
+            false,
+        )?;
+        current = backlog.replace_content(&current, &outcome.body);
+        for (text, item_outcome) in texts_to_add.iter().zip(outcome.outcomes) {
+            let key = agent_doc_queue::queue_response::normalize_for_answer_match(text);
+            id_by_text.insert(key, item_outcome.id.clone());
+        }
+    }
+
+    let mut unique_ids = Vec::new();
+    let mut seen_ids = std::collections::HashSet::new();
+    for key in prompt_keys {
+        let Some(id) = id_by_text.get(&key) else {
+            continue;
+        };
+        let normalized = id.trim().to_ascii_lowercase();
+        if !normalized.is_empty() && seen_ids.insert(normalized.clone()) {
+            unique_ids.push(normalized);
+        }
+    }
+    if unique_ids.is_empty() {
+        return Ok(None);
+    }
+
+    components = agent_doc_element::element::parse(&current)?;
+    let queue = components
+        .iter()
+        .find(|c| c.name == "queue")
+        .context("free-text admission: queue component missing")?
+        .clone();
+    let mut queue_entries: Vec<agent_doc_queue::document_queue::QueueEntry> = entries
+        .iter()
+        .filter(|entry| {
+            !include_queue_prompts || !queue_entry_is_admitted_free_text(content, entry)
+        })
+        .cloned()
+        .collect();
+
+    let (execution, warnings) =
+        resolve_free_text_execution(file, &current, project_root, &unique_ids)?;
+    let queued_ids = match execution {
+        ResolvedFreeTextExecution::Goal => {
+            let command = goal_command_for_ids(&unique_ids);
+            if !goal_command_already_queued(&queue_entries, &unique_ids) {
+                queue_entries.insert(
+                    0,
+                    agent_doc_queue::document_queue::QueueEntry::Prompt(
+                        agent_doc_queue::document_queue::QueuePrompt {
+                            text: command,
+                            multiline: false,
+                        },
+                    ),
+                );
+                queue_entries.insert(
+                    0,
+                    agent_doc_queue::document_queue::QueueEntry::StartFence(None),
+                );
+            }
+            Vec::new()
+        }
+        ResolvedFreeTextExecution::Queue => {
+            let before_ids: std::collections::HashSet<String> = queue_entries
+                .iter()
+                .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
+                .collect();
+            let synced = agent_doc_queue::document_queue::sync_backlog_into_queue(
+                &queue_entries,
+                &unique_ids,
+                agent_doc_queue::document_queue::BacklogQueueSyncMode::Prepend,
+            )
+            .unwrap_or_else(|| queue_entries.clone());
+            queue_entries = synced;
+            if !matches!(
+                queue_entries.first(),
+                Some(agent_doc_queue::document_queue::QueueEntry::StartFence(_))
+            ) {
+                queue_entries.insert(
+                    0,
+                    agent_doc_queue::document_queue::QueueEntry::StartFence(None),
+                );
+            }
+            queue_entries
+                .iter()
+                .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
+                .filter(|id| !before_ids.contains(id))
+                .collect()
+        }
+    };
+
+    let new_queue_body = agent_doc_queue::document_queue::render(&queue_entries);
+    current = queue.replace_content(&current, &new_queue_body);
+    Ok(Some(FreeTextAdmission {
+        content: current,
+        queued_ids,
+        warnings,
+        admitted_count: prompts.prompts.len(),
+        execution_label: execution.label(),
+    }))
+}
+
+fn queue_entry_is_admitted_free_text(
+    content: &str,
+    entry: &agent_doc_queue::document_queue::QueueEntry,
+) -> bool {
+    matches!(
+        entry,
+        agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
+            if free_text_prompt_is_backlog_task(content, &prompt.text)
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResolvedFreeTextExecution {
+    Goal,
+    Queue,
+}
+
+impl ResolvedFreeTextExecution {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Goal => "goal",
+            Self::Queue => "queue",
+        }
+    }
+}
+
+fn resolve_free_text_execution(
+    file: &Path,
+    content: &str,
+    project_root: Option<&Path>,
+    ids: &[String],
+) -> Result<(ResolvedFreeTextExecution, Vec<PreflightWarning>)> {
+    let (fm, _) = agent_doc_frontmatter::frontmatter::parse(content).unwrap_or_default();
+    let project_config = agent_doc_project_config_io::load_project_for_doc(file);
+    let global_config = agent_doc_config::load().unwrap_or_default();
+    let requested = fm
+        .free_text_execution
+        .or(project_config.agent_doc_free_text_execution)
+        .or(global_config.agent_doc_free_text_execution)
+        .unwrap_or_default();
+    let harness = agent_doc_harness::HarnessConfig::from_context(&fm, &global_config);
+    let goal_available =
+        harness.supports_goal_command(opencode_goal_extension_available(file, project_root));
+    let mut warnings = Vec::new();
+    let execution = match requested {
+        agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Queue => {
+            ResolvedFreeTextExecution::Queue
+        }
+        agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Auto
+        | agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Goal
+            if goal_available =>
+        {
+            ResolvedFreeTextExecution::Goal
+        }
+        agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Goal => {
+            warnings.push(PreflightWarning {
+                code: "free_text_goal_unavailable".to_string(),
+                message: format!(
+                    "{}: configured agent_doc_free_text_execution=goal, but harness `{}` has no available /goal command; queued backlog item(s) {} instead.",
+                    file.display(),
+                    harness.binary,
+                    ids.iter()
+                        .map(|id| format!("#{id}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                document_agent: fm.agent.clone(),
+                active_harness: Some(harness.binary.clone()),
+            });
+            ResolvedFreeTextExecution::Queue
+        }
+        agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Auto => {
+            ResolvedFreeTextExecution::Queue
+        }
+    };
+    Ok((execution, warnings))
+}
+
+fn goal_command_for_ids(ids: &[String]) -> String {
+    let refs = ids
+        .iter()
+        .map(|id| format!("#{id}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("/goal Implement backlog item(s): {refs}")
+}
+
+fn goal_command_already_queued(
+    entries: &[agent_doc_queue::document_queue::QueueEntry],
+    ids: &[String],
+) -> bool {
+    entries.iter().any(|entry| {
+        let agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) = entry else {
+            return false;
+        };
+        let text = prompt.text.trim();
+        text.starts_with("/goal")
+            && ids
+                .iter()
+                .all(|id| text.contains(&format!("#{id}")) || text.contains(&format!("[#{id}]")))
+    })
+}
+
+fn opencode_goal_extension_available(file: &Path, project_root: Option<&Path>) -> bool {
+    let mut roots = Vec::new();
+    if let Some(root) = project_root {
+        roots.push(root.to_path_buf());
+    }
+    if let Some(parent) = file.parent() {
+        roots.push(parent.to_path_buf());
+    }
+    if let Some(config_home) = std::env::var_os("XDG_CONFIG_HOME") {
+        roots.push(std::path::PathBuf::from(config_home).join("opencode"));
+    } else if let Some(home) = std::env::var_os("HOME") {
+        roots.push(std::path::PathBuf::from(home).join(".config/opencode"));
+    }
+
+    roots.into_iter().any(|root| {
+        [
+            root.join(".opencode/commands/goal.md"),
+            root.join(".opencode/plugin/goal.js"),
+            root.join(".opencode/plugin/agent-doc-goal.js"),
+            root.join("commands/goal.md"),
+            root.join("plugin/goal.js"),
+            root.join("plugin/agent-doc-goal.js"),
+        ]
+        .into_iter()
+        .any(|path| path.is_file())
+    })
+}
+
 /// `#fccqueue`: persist a queue-maintenance document mutation without provoking
 /// an IntelliJ `File Cache Conflict`.
 ///
@@ -3369,6 +3807,22 @@ mod tests {
         panic!("typing indicator was not written for {}", file.display());
     }
 
+    fn component_body(content: &str, name: &str) -> String {
+        let comps = agent_doc_element::element::parse(content).unwrap();
+        let comp = comps.iter().find(|c| c.name == name).unwrap();
+        comp.content(content).to_string()
+    }
+
+    fn backlog_id_for_text(content: &str, text: &str) -> String {
+        let body = component_body(content, "backlog");
+        let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(&body);
+        items
+            .into_iter()
+            .find(|item| item.text == text)
+            .map(|item| item.id)
+            .unwrap()
+    }
+
     #[test]
     fn inspect_queue_state_simulates_activation_without_persisting() {
         let dir = setup_project();
@@ -3452,6 +3906,260 @@ mod tests {
                 .iter()
                 .any(|w| w.code == "backlog_queue_sync_pending"),
             "empty-queue-before-sync must emit backlog_queue_sync_pending warning, got {:?}",
+            state.warnings
+        );
+    }
+
+    #[test]
+    fn run_queue_maintenance_admits_exchange_free_text_to_native_goal() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "agent: codex\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Build the importer\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        let id = backlog_id_for_text(&updated, "Build the importer");
+        let queue = component_body(&updated, "queue");
+
+        assert!(
+            queue.contains(&format!("/goal Implement backlog item(s): #{id}")),
+            "native goal-capable harness must queue a /goal command:\n{updated}"
+        );
+        assert_eq!(
+            state.selected_queue_prompts,
+            vec![format!("/goal Implement backlog item(s): #{id}")]
+        );
+    }
+
+    #[test]
+    fn run_queue_maintenance_ignores_response_tail_for_free_text_admission() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "agent: codex\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- agent:boundary:head-boundary -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#ov1]\n",
+            "- [route] target tmux session: 0\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#ov1] [operator-verify] live drive needs a human editor\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        let queue = component_body(&updated, "queue");
+        let backlog = component_body(&updated, "backlog");
+
+        assert!(!queue.contains("/goal"), "{updated}");
+        assert!(
+            !backlog.contains("Done."),
+            "assistant closeout text must not become backlog work:\n{updated}"
+        );
+        assert_eq!(state.queue_drainable_head_count, 0);
+        assert!(!state.queue_continuation_required);
+    }
+
+    #[test]
+    fn run_queue_maintenance_keeps_do_directive_exchange_tail_unadmitted() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "agent: codex\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- agent:boundary:head -->\n",
+            "do #autocmp. spec-test-build-install-commit-push\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+
+        assert_eq!(updated, content);
+        assert!(state.queue_prompts.is_empty());
+        assert_eq!(state.queue_active, None);
+    }
+
+    #[test]
+    fn run_queue_maintenance_keeps_non_actionable_free_text_queue_head() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "agent: codex\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nAnswered.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do something\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        let queue = component_body(&updated, "queue");
+        let backlog = component_body(&updated, "backlog");
+
+        assert!(queue.contains("do something"), "{updated}");
+        assert!(!queue.contains("/goal"), "{updated}");
+        assert!(
+            !backlog.contains("do something"),
+            "non-actionable existing queue text should not be lifted into backlog:\n{updated}"
+        );
+        assert_eq!(state.selected_queue_prompts, vec!["do something"]);
+    }
+
+    #[test]
+    fn run_queue_maintenance_frontmatter_can_force_free_text_queue_execution() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "agent: codex\n",
+            "agent_doc_free_text_execution: queue\n",
+            "---\n\n",
+            "<!-- agent:queue -->\n",
+            "- Implement checkout flow\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        let id = backlog_id_for_text(&updated, "Implement checkout flow");
+        let queue = component_body(&updated, "queue");
+
+        assert!(
+            queue.contains(&format!("do [#{id}]")),
+            "queue mode must materialize a do head:\n{updated}"
+        );
+        assert!(
+            !queue.contains("Implement checkout flow"),
+            "free-text queue source should be replaced by the backlog-backed head:\n{updated}"
+        );
+        assert!(
+            !queue.contains("/goal"),
+            "frontmatter queue mode must not create a /goal command:\n{updated}"
+        );
+        assert!(state.synced_queue_ids.contains(&id));
+    }
+
+    #[test]
+    fn run_queue_maintenance_project_config_can_force_free_text_queue_execution() {
+        let dir = setup_project();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "agent_doc_free_text_execution = \"queue\"\n",
+        )
+        .unwrap();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "agent: codex\n",
+            "---\n\n",
+            "<!-- agent:queue -->\n",
+            "- Implement import mapping\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        let id = backlog_id_for_text(&updated, "Implement import mapping");
+        let queue = component_body(&updated, "queue");
+
+        assert!(queue.contains(&format!("do [#{id}]")), "{updated}");
+        assert!(!queue.contains("/goal"), "{updated}");
+    }
+
+    #[test]
+    fn run_queue_maintenance_opencode_goal_config_falls_back_to_queue_without_extension() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "agent: opencode\n",
+            "agent_doc_free_text_execution: goal\n",
+            "---\n\n",
+            "<!-- agent:queue -->\n",
+            "- Implement export retry\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        let id = backlog_id_for_text(&updated, "Implement export retry");
+        let queue = component_body(&updated, "queue");
+
+        assert!(queue.contains(&format!("do [#{id}]")), "{updated}");
+        assert!(!queue.contains("/goal"), "{updated}");
+        assert!(
+            state
+                .warnings
+                .iter()
+                .any(|warning| warning.code == "free_text_goal_unavailable"),
+            "OpenCode without a /goal extension must surface the fallback warning: {:?}",
             state.warnings
         );
     }

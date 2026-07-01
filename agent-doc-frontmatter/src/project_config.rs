@@ -24,7 +24,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use crate::frontmatter::{Frontmatter, PendingCaptureGuardMode};
+use crate::frontmatter::{FreeTextExecutionMode, Frontmatter, PendingCaptureGuardMode};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GuardConfig {
@@ -277,6 +277,12 @@ pub struct ProjectConfig {
     /// silently flip a human gate without this opt-in.
     #[serde(default, alias = "gate_autoverify")]
     pub agent_doc_gate_autoverify: Option<bool>,
+    /// Project-default execution strategy for free text admitted from
+    /// `agent:exchange` or `agent:queue` after the binary creates backlog items.
+    /// Values: `auto` (prefer `/goal` when available), `goal` (use `/goal` when
+    /// available, otherwise queue), `queue` (always queue).
+    #[serde(default, alias = "free_text_execution")]
+    pub agent_doc_free_text_execution: Option<FreeTextExecutionMode>,
     /// Project-default context-usage percentage (0–100) at or above which an
     /// opted-in editor pre-emptively runs `/clear` (`#clear-opt-in-threshold`).
     /// A per-document frontmatter `agent_doc_clear_threshold` takes precedence;
@@ -588,6 +594,31 @@ agent_doc_bug_target_document = "tasks/agent-doc/agent-doc-bugs2.md"
         assert_eq!(
             cfg.agent_doc_bug_target_document.as_deref(),
             Some("tasks/agent-doc/agent-doc-bugs2.md")
+        );
+    }
+
+    #[test]
+    fn parses_free_text_execution_mode() {
+        let cfg = parse_project_toml(
+            r#"
+agent_doc_free_text_execution = "queue"
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.agent_doc_free_text_execution,
+            Some(FreeTextExecutionMode::Queue)
+        );
+
+        let alias = parse_project_toml(
+            r#"
+free_text_execution = "goal"
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            alias.agent_doc_free_text_execution,
+            Some(FreeTextExecutionMode::Goal)
         );
     }
 

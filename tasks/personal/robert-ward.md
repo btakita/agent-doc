@@ -1,11 +1,11 @@
 ---
 agent_doc_session: aaca1487-6409-4c94-88d6-97b579485190
+claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
-claude_model: opus
 claude_args: --dangerously-skip-permissions
 links:
-  - ../professional/judith-krug.md
+- ../professional/judith-krug.md
 ---
 
 Robert Ward is a long time friend who lives in LA.
@@ -785,5 +785,18 @@ It covers the same two paths from above, written for a friend to forward: (A) fi
 
 Note I sent this straight through because you said "auto-send" — my default is to leave outbound email in Gmail Drafts for you to review first. Say the word if you'd rather I default to drafts going forward.
 
-<!-- agent:boundary:7993f0ad -->
+Send an email to robert-ward containing the suggestions.
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/personal/robert-ward.md source=socket_already_applied patch_id=cc19ef1d-5d3c-49c6-95a0-2ff22c046d93 invariant=disk_missing_response_probe recovery=content_ours_snapshot_visible_response_repair response_sha256=084cdf9f3f1c9e367788e3c712b64de7a647bb480b5ab82b67e4301867005974 current_len=48085 current_hash=a6ffafb12c644410a89604b93383584dec316e0dcfe8fd5d188570fc1c35391b repaired_len=53973 repaired_hash=05c31c3b45b4466eec4fa48fd22e4d63a62874cae55c3ca0327bf8c8121b1cb8 doc=robert-ward session=aaca1487-6409-4c94-88d6-97b579485190 turn=cycle-1782888231030
+```
+<!-- agent:boundary:a13e6dd7 -->
 <!-- /agent:exchange -->

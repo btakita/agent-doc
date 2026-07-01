@@ -657,6 +657,30 @@ My recommendation is **both, layered**: owner-review at data entry catches most 
 This is standard, proven practice (human-in-the-loop on low-confidence is how every serious document-extraction system works) and it's the **cheaper** path than chasing perfect extraction — you build the threshold + review queue once and it protects every field, which fits the bootstrapped budget.
 
 It's already covered in the proposal (§3a Grade C/D handling, §3b admin review, and the extraction line item lists "confidence flags, review UI"). If you'd like, I can pull the **user-facing review step** out into its own explicit callout so Artur sees it as a named feature rather than an implied part of the rubric — say the word and I'll add it + regenerate the PDF.
+❯ add it + regenerate the PDF
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/recruit/reitrades.md source=ipc_visible_repair patch_id=61361d5c-330e-45d6-98fb-2d457d0b4fd3 invariant=live_prompt_drift recovery=retry_without_disk_write redeliver_editor=true bad_len=63993 bad_hash=7550ae5f711a7549d1acc5eb1246c1acbf6586a0e43c6799d8564ba505fda489 repaired_len=67132 repaired_hash=b8c8ccbe1cb6277fc2faddc9c7352b7cdce80b87f4ab9f6e97596f42a8138ce6 doc=reitrades session=62d195b8-b029-42a5-9c6c-836cb1b5b103 turn=cycle-1782924135430
+```
+
+### Re: Manual review workflow added as a named feature — opus-4-8
+
+Done. Added a **"Manual review workflow (the human-in-the-loop step)"** callout to §3a so it reads as a first-class feature, not an implied part of the rubric — and regenerated the PDF (now 12 pages), committed `9da788019`.
+
+The callout spells out:
+- Every AI-touched field carries a **confidence score**; low-confidence readings (Grade C/D or below the calibrated threshold) are **flagged and routed to a review queue instead of auto-publishing**.
+- A two-row table naming the **two layered review points**: **listing-owner review** (seller/broker confirms/corrects autofilled fields at data-entry, before submitting to *Under Review* — scales because the owner knows the property) and the **admin review gate** (REItrades staff clear anything money-facing/buyer-facing before it ships — the trust backstop).
+- The dependency that makes it real: the flag is only trustworthy if confidence is **calibrated**, which the §3a eval harness measures and tunes.
+
+That gives Artur a named, buyer-facing "verified data with a human in the loop where the model is unsure" story he can point to, backed by the rubric and harness already in the doc.
 <!-- agent:boundary:60ddffc8 -->
 <!-- /agent:exchange -->
 

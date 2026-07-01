@@ -996,7 +996,7 @@ fn log_session_rebind(
     new_window: &str,
     transition_caller: &str,
     transition_reason: &str,
-    generations: crate::session_actor::OwnershipGeneration,
+    generations: agent_doc_supervisor::OwnershipGeneration,
 ) {
     if previous.pane == new_pane {
         return;
@@ -1014,8 +1014,8 @@ fn log_session_rebind(
         new_window
     };
 
-    let transition = crate::session_actor::format_transition_event(
-        crate::session_actor::OwnershipTransitionEvent {
+    let transition = agent_doc_supervisor::format_transition_event(
+        agent_doc_supervisor::OwnershipTransitionEvent {
             caller: transition_caller,
             reason: transition_reason,
             prior_generation: generations.prior_generation,

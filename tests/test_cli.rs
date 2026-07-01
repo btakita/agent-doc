@@ -6893,7 +6893,6 @@ fn test_project_config_io_tmux_helpers_have_no_config_facade() {
 
     for relative in [
         "src/session_cmd.rs",
-        "src/session_actor_cmd.rs",
         "src/orchestrate.rs",
         "src/describe_image.rs",
         "src/plan.rs",
@@ -7671,6 +7670,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn cmdline_is_agent_doc_owner_session(",
         "pub fn cmdline_references_md_document(",
         "pub fn owner_document_from_cmdline(",
+        "pub fn path_has_component_suffix(",
+        "pub fn cmdline_has_file_match(",
+        "pub fn agent_doc_cmdline_is_owner(",
+        "pub fn cmdline_owns_other_document(",
     ] {
         assert!(
             command_line_source.contains(required_snippet),
@@ -7790,16 +7793,24 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn cmdline_is_agent_doc_owner_session(",
         "fn cmdline_references_md_document(",
         "fn owner_document_from_cmdline(",
+        "fn path_has_component_suffix(",
+        "fn cmdline_has_file_match(",
+        "fn agent_doc_cmdline_is_owner(",
+        "fn cmdline_owns_other_document(",
     ] {
         assert!(
             !sync_source.contains(forbidden_snippet),
             "sync.rs must not re-own pure process command-line ownership policy: {forbidden_snippet}"
         );
     }
+    assert!(
+        sync_source.contains("use agent_doc_controller::command_line::{"),
+        "sync.rs should import focused controller command-line policy directly"
+    );
     for required_snippet in [
-        "agent_doc_controller::command_line::cmdline_is_agent_doc_owner_session",
-        "agent_doc_controller::command_line::cmdline_references_md_document",
-        "agent_doc_controller::command_line::owner_document_from_cmdline",
+        "agent_doc_cmdline_is_owner",
+        "cmdline_owns_other_document",
+        "owner_document_from_cmdline",
     ] {
         assert!(
             sync_source.contains(required_snippet),
@@ -8819,6 +8830,7 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         "pub struct HarnessConfig",
         "pub enum RestartBehavior",
         "pub enum CleanExitBehavior",
+        "pub fn normalize_harness_name(",
     ] {
         for source_path in &orchestration_sources {
             let source = fs::read_to_string(source_path).unwrap();
@@ -8836,6 +8848,7 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         "pub fn from_context(",
         "pub fn dispatch_blocker_reason(",
         "pub fn protected_prompt_input_reason(",
+        "pub fn normalize_harness_name(",
     ] {
         assert!(
             harness_crate.contains(required_snippet),
@@ -9045,6 +9058,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     let supervisor_mod =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/supervisor/mod.rs"))
             .unwrap();
+    let supervisor_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/lib.rs")).unwrap();
     assert!(
         !supervisor_mod.contains("pub mod state"),
         "orchestration supervisor module must not re-export crash policy state"
@@ -9061,6 +9076,36 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/run_loop.rs")).unwrap();
     let supervisor_input_policy =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/input.rs")).unwrap();
+    for required_snippet in [
+        "pub struct OwnershipGeneration",
+        "pub struct OwnershipTransitionEvent",
+        "pub fn infer_latest_generation_from_content(",
+        "pub fn format_transition_event(",
+    ] {
+        assert!(
+            supervisor_lib.contains(required_snippet),
+            "agent-doc-supervisor must own ownership generation/event vocabulary: {required_snippet}"
+        );
+    }
+    let session_actor_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_actor.rs"))
+            .unwrap();
+    for forbidden_snippet in [
+        "pub struct OwnershipGeneration",
+        "pub struct OwnershipTransitionEvent",
+        "pub fn infer_latest_generation_from_content(",
+        "pub fn format_transition_event(",
+    ] {
+        assert!(
+            !session_actor_source.contains(forbidden_snippet),
+            "session_actor must not re-own supervisor lifecycle vocabulary: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        session_actor_source.contains("use agent_doc_supervisor::{")
+            && session_actor_source.contains("infer_latest_generation_from_content(&content)"),
+        "session_actor should call focused supervisor lifecycle vocabulary directly"
+    );
     for required_snippet in [
         "pub struct AgentLaunchArgsSources",
         "pub fn resolve_agent_launch_args(",
@@ -11704,6 +11749,18 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
 
     let git_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/git.rs")).unwrap();
+    let git_policy_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-git/src/lib.rs")).unwrap();
+    for required in [
+        "pub fn relative_to_root(",
+        "pub fn is_index_lock_contention_text(",
+        "pub fn render_git_process_output(",
+    ] {
+        assert!(
+            git_policy_source.contains(required),
+            "agent-doc-git must own pure git command/path policy: {required}"
+        );
+    }
     for forbidden in [
         "mod normalize;",
         "pub use normalize",
@@ -11711,6 +11768,9 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         "pub(crate) fn normalize_component_content_for_absorb",
         "pub(crate) fn redact_component_contents_for_absorb",
         "pub(crate) fn canonicalize_answered_prompt_prefixes",
+        "fn relative_to(",
+        "fn is_index_lock_contention_text(",
+        "fn render_git_output(",
     ] {
         assert!(
             !git_source.contains(forbidden),
@@ -11720,6 +11780,10 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
     assert!(
         git_source.contains("use agent_doc_document::commit_normalization::{"),
         "git.rs should import focused commit normalization directly"
+    );
+    assert!(
+        git_source.contains("use agent_doc_git::{"),
+        "git.rs should import focused git command/path policy directly"
     );
 
     for relative in [
@@ -11748,6 +11812,7 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         "pub fn exchange_content_len",
         "pub fn exchange_content",
         "pub fn exchange_component",
+        "pub fn strip_exchange_content",
         "pub fn normalized_prompt_text",
         "pub fn is_markdown_heading_line",
         "pub fn normalized_prompt_counts",
@@ -11808,6 +11873,19 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
     assert!(
         write_exchange_reconcile.contains("use agent_doc_element_exchange::{"),
         "write exchange reconciliation should import exchange policy from the focused crate"
+    );
+    let snapshot_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/snapshot.rs")).unwrap();
+    assert!(
+        snapshot_source.contains("use agent_doc_element_exchange::strip_exchange_content;"),
+        "snapshot should import exchange stripping policy from the focused crate"
+    );
+    let claim_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/claim.rs")).unwrap();
+    assert!(
+        !claim_source.contains("fn strip_exchange_content(")
+            && !claim_source.contains("pub fn strip_exchange_content("),
+        "claim.rs must not retain the old exchange stripping helper path"
     );
 
     let write_normalize =

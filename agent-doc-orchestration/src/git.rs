@@ -112,6 +112,7 @@ use agent_doc_document_realtime::write_policy::{
     is_safe_user_follow_up_exchange_growth,
 };
 use agent_doc_element::element::is_backlog_component;
+use agent_doc_git::{is_index_lock_contention_text, relative_to_root, render_git_process_output};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommitOutcome {
@@ -1817,21 +1818,6 @@ fn commit_retry_backoff(attempt: u32) -> std::time::Duration {
     std::time::Duration::from_millis(50 * (1u64 << attempt))
 }
 
-fn is_index_lock_contention_text(text: &str) -> bool {
-    text.contains("index.lock") || text.contains("Unable to create")
-}
-
-fn render_git_output(output: &std::process::Output) -> String {
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    match (stderr.is_empty(), stdout.is_empty()) {
-        (false, true) => stderr,
-        (true, false) => stdout,
-        (false, false) => format!("{} | {}", stderr, stdout),
-        (true, true) => "no git output".to_string(),
-    }
-}
-
 fn git_path_is_tracked(
     git_root: &Path,
     rel_path: &Path,
@@ -1861,7 +1847,7 @@ fn git_path_is_ignored(
         _ => Err(CommitTransactionError::Fatal(anyhow::anyhow!(
             "git check-ignore failed for {}: {}",
             rel_path.display(),
-            render_git_output(&output)
+            render_git_process_output(&output)
         ))),
     }
 }
@@ -1885,14 +1871,14 @@ fn git_add_force(
     git_root: &Path,
     resolved: &Path,
 ) -> std::result::Result<(), CommitTransactionError> {
-    let rel_path = relative_to(resolved, git_root);
+    let rel_path = relative_to_root(resolved, git_root);
     let output = Command::new("git")
         .current_dir(git_root)
         .args(["add", "-f", &rel_path.to_string_lossy()])
         .output()
         .map_err(|e| CommitTransactionError::Fatal(e.into()))?;
     if !output.status.success() {
-        let detail = render_git_output(&output);
+        let detail = render_git_process_output(&output);
         if output_has_index_lock_contention(&output) {
             return Err(CommitTransactionError::RetryableIndexLock {
                 phase: "git add",
@@ -1912,7 +1898,7 @@ fn stage_snapshot_for_commit(
     resolved: &Path,
     snapshot_content: Option<&str>,
 ) -> std::result::Result<(), CommitTransactionError> {
-    let rel_path = relative_to(resolved, git_root);
+    let rel_path = relative_to_root(resolved, git_root);
     if git_path_is_ignored_untracked(git_root, &rel_path)? {
         return Err(CommitTransactionError::IgnoredPath {
             path: rel_path.to_string_lossy().into_owned(),
@@ -1939,7 +1925,7 @@ fn stage_snapshot_for_commit(
                 if output_has_index_lock_contention(&output) {
                     return Err(CommitTransactionError::RetryableIndexLock {
                         phase: "update-index",
-                        detail: render_git_output(&output),
+                        detail: render_git_process_output(&output),
                     });
                 }
                 eprintln!("[commit] update-index failed, falling back to git add");
@@ -1972,25 +1958,10 @@ fn stage_and_commit_once(
     if !output.status.success() && output_has_index_lock_contention(&output) {
         return Err(CommitTransactionError::RetryableIndexLock {
             phase: "git commit",
-            detail: render_git_output(&output),
+            detail: render_git_process_output(&output),
         });
     }
     Ok(output)
-}
-
-/// Compute `path` relative to `root`, canonicalizing both sides so symlinks
-/// don't cause `strip_prefix` mismatches. Falls back gracefully through
-/// non-canonical strip → original path.
-fn relative_to(path: &Path, root: &Path) -> PathBuf {
-    let canon_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let canon_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
-    if let Ok(rel) = canon_path.strip_prefix(&canon_root) {
-        return rel.to_path_buf();
-    }
-    if let Ok(rel) = path.strip_prefix(root) {
-        return rel.to_path_buf();
-    }
-    path.to_path_buf()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -7697,48 +7668,6 @@ Compacted content:\n\
             result.is_ok(),
             "stale-pre-compact-snapshot recovery must not fail closed: {:?}",
             result.err().map(|e| e.to_string())
-        );
-    }
-    #[test]
-    fn relative_to_strips_prefix_for_normal_paths() {
-        let root = Path::new("/home/user/project");
-        let file = Path::new("/home/user/project/src/main.rs");
-        let rel = relative_to(file, root);
-        assert_eq!(rel, PathBuf::from("src/main.rs"));
-    }
-    #[test]
-    fn relative_to_returns_original_when_no_common_prefix() {
-        let root = Path::new("/home/user/project");
-        let file = Path::new("/other/path/file.rs");
-        let rel = relative_to(file, root);
-        assert_eq!(rel, PathBuf::from("/other/path/file.rs"));
-    }
-    #[test]
-    fn relative_to_handles_symlinked_path() {
-        use std::fs;
-        let real_dir = tempfile::TempDir::new().unwrap();
-        let link_dir = tempfile::TempDir::new().unwrap();
-        let real_root = real_dir.path();
-        let link_path = link_dir.path().join("link");
-
-        // Create a real file
-        let subdir = real_root.join("tasks");
-        fs::create_dir_all(&subdir).unwrap();
-        fs::write(subdir.join("doc.md"), "content").unwrap();
-
-        // Create symlink: link -> real_root
-        std::os::unix::fs::symlink(real_root, &link_path).unwrap();
-
-        // Access the file through the symlink
-        let file_via_symlink = link_path.join("tasks/doc.md");
-        assert!(file_via_symlink.exists());
-
-        // relative_to should resolve symlinks and produce the correct relative path
-        let rel = relative_to(&file_via_symlink, real_root);
-        assert_eq!(
-            rel,
-            PathBuf::from("tasks/doc.md"),
-            "should produce submodule-relative path even when accessed via symlink"
         );
     }
     #[test]

@@ -95,6 +95,7 @@ use fs2::FileExt;
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 
+use agent_doc_element_exchange::strip_exchange_content;
 use agent_doc_fs::find_project_root;
 
 const SNAP_DIR: &str = ".agent-doc/snapshots";
@@ -805,7 +806,7 @@ pub fn ensure_snapshot(doc: &Path) -> Result<bool> {
         doc.display()
     );
     if let Ok(content) = std::fs::read_to_string(doc) {
-        let snapshot_content = crate::claim::strip_exchange_content(&content);
+        let snapshot_content = strip_exchange_content(&content);
         save(doc, &snapshot_content)?;
     }
     Ok(true)

@@ -67,6 +67,14 @@ pub struct HarnessConfig {
     pub process_names: Vec<String>,
 }
 
+pub fn normalize_harness_name(raw: &str) -> String {
+    match raw.trim() {
+        "" => "default".to_string(),
+        "claude" => "claude-code".to_string(),
+        other => other.to_string(),
+    }
+}
+
 impl HarnessConfig {
     pub fn claude() -> Self {
         Self {
@@ -905,6 +913,14 @@ fn is_managed_capability_proof_line(trimmed: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normalize_harness_name_maps_empty_and_claude() {
+        assert_eq!(normalize_harness_name(""), "default");
+        assert_eq!(normalize_harness_name("   "), "default");
+        assert_eq!(normalize_harness_name("claude"), "claude-code");
+        assert_eq!(normalize_harness_name(" codex "), "codex");
+    }
 
     #[test]
     fn manifest_does_not_depend_on_orchestration() {

@@ -193,6 +193,9 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tempfile::NamedTempFile;
 
+use agent_doc_controller::command_line::{
+    agent_doc_cmdline_is_owner, cmdline_owns_other_document, owner_document_from_cmdline,
+};
 use agent_doc_controller::dispatch::is_stash_window_name;
 use agent_doc_element::element;
 use agent_doc_tmux::{
@@ -4495,88 +4498,12 @@ fn pid_is_agent_session(pid: &str) -> bool {
         || cmdline.contains("opencode")
 }
 
-fn path_has_component_suffix(path: &Path, suffix: &Path) -> bool {
-    let path_components: Vec<_> = path
-        .components()
-        .filter_map(|component| match component {
-            std::path::Component::Normal(value) => Some(value.to_os_string()),
-            _ => None,
-        })
-        .collect();
-    let suffix_components: Vec<_> = suffix
-        .components()
-        .filter_map(|component| match component {
-            std::path::Component::Normal(value) => Some(value.to_os_string()),
-            _ => None,
-        })
-        .collect();
-
-    if suffix_components.is_empty() || suffix_components.len() > path_components.len() {
-        return false;
-    }
-
-    path_components[path_components.len() - suffix_components.len()..] == suffix_components[..]
-}
-
 fn should_skip_autostart_for_unresolved_startup_miss(
     registered_pane: Option<&str>,
     pane_alive: bool,
     miss: Option<&crate::startup_miss::StartupMiss>,
 ) -> bool {
     pane_alive && registered_pane.is_some_and(|pane| miss.is_some_and(|miss| miss.pane_id == pane))
-}
-
-fn cmdline_has_file_match(cmdline: &str, file_path: &str) -> bool {
-    if cmdline.contains(file_path) {
-        return true;
-    }
-
-    let target = Path::new(file_path);
-    let canonical_target = target.canonicalize().ok();
-    if let Some(ref canonical) = canonical_target
-        && cmdline.contains(canonical.to_string_lossy().as_ref())
-    {
-        return true;
-    }
-
-    for token in cmdline.split_whitespace() {
-        let candidate = Path::new(token);
-        if candidate.is_absolute() {
-            if let Some(ref canonical) = canonical_target
-                && candidate.canonicalize().ok().as_ref() == Some(canonical)
-            {
-                return true;
-            }
-            continue;
-        }
-
-        if path_has_component_suffix(target, candidate) {
-            return true;
-        }
-        if let Some(ref canonical) = canonical_target
-            && path_has_component_suffix(canonical, candidate)
-        {
-            return true;
-        }
-    }
-
-    false
-}
-
-fn agent_doc_cmdline_is_owner(cmdline: &str, file_path: &str) -> bool {
-    cmdline_has_file_match(cmdline, file_path)
-        && agent_doc_controller::command_line::cmdline_is_agent_doc_owner_session(cmdline)
-}
-
-/// True when `cmdline` is a live agent-doc/codex owner session for a document
-/// OTHER than `claimed_file`. Cross-root safe: it is keyed on the live process
-/// command line, so it recognizes a pane owned by a document rooted in another
-/// project/submodule whose session registry the calling root cannot see. Used to
-/// keep `claim`/`route` from commandeering such a pane.
-pub(crate) fn cmdline_owns_other_document(cmdline: &str, claimed_file: &str) -> bool {
-    agent_doc_controller::command_line::cmdline_is_agent_doc_owner_session(cmdline)
-        && agent_doc_controller::command_line::cmdline_references_md_document(cmdline)
-        && !agent_doc_cmdline_is_owner(cmdline, claimed_file)
 }
 
 /// Diagnostic sibling of [`pane_runs_other_document_owner`]: returns the foreign
@@ -4612,7 +4539,7 @@ fn pane_owned_document_other_than(
             _ => continue,
         };
         if cmdline_owns_other_document(&cmdline, &claimed) {
-            return agent_doc_controller::command_line::owner_document_from_cmdline(&cmdline);
+            return owner_document_from_cmdline(&cmdline);
         }
     }
     None
@@ -5307,147 +5234,6 @@ mod tests {
         );
     }
     #[test]
-    fn agent_doc_cmdline_owner_detection_only_accepts_start_supervisor() {
-        let file = "tasks/live-tmux-repro-codex.md";
-
-        assert!(agent_doc_cmdline_is_owner(
-            "/home/brian/.cargo/bin/agent-doc start tasks/live-tmux-repro-codex.md",
-            file
-        ));
-        assert!(agent_doc_cmdline_is_owner(
-            "/usr/bin/codex /home/brian/work/btakita/agent-loop/tasks/live-tmux-repro-codex.md",
-            file
-        ));
-        assert!(!agent_doc_cmdline_is_owner(
-            "/home/brian/.cargo/bin/agent-doc route tasks/live-tmux-repro-codex.md",
-            file
-        ));
-        assert!(!agent_doc_cmdline_is_owner(
-            "/home/brian/.cargo/bin/agent-doc claim tasks/live-tmux-repro-codex.md --pane %522",
-            file
-        ));
-    }
-    #[test]
-    fn cmdline_owns_other_document_blocks_cross_root_commandeer() {
-        // The exact awear/sampleorders cross-root repro: a brand-new
-        // superproject document is claimed onto a pane already running a live
-        // submodule Codex session for a different document.
-        let claimed = "tasks/recruit/awear.md";
-        assert!(
-            cmdline_owns_other_document(
-                "/home/brian/.cargo/bin/agent-doc start --route-owned tasks/sampleorders.md",
-                claimed,
-            ),
-            "a pane owning a different document must block commandeering"
-        );
-        assert!(
-            cmdline_owns_other_document(
-                "/usr/bin/codex /home/brian/work/btakita/agent-loop/src/sample-app/tasks/sampleorders.md",
-                claimed,
-            ),
-            "a harness session for another document must block commandeering"
-        );
-    }
-    #[test]
-    fn cmdline_owns_other_document_allows_same_doc_and_non_owner_panes() {
-        let claimed = "tasks/recruit/awear.md";
-        // The pane's own document — reuse, do not provision a new pane.
-        assert!(
-            !cmdline_owns_other_document(
-                "/home/brian/.cargo/bin/agent-doc start --route-owned tasks/recruit/awear.md",
-                claimed,
-            ),
-            "a pane owning the claimed document is reusable"
-        );
-        // A plain shell with no owned .md document — claimable.
-        assert!(
-            !cmdline_owns_other_document("-zsh", claimed),
-            "a bare shell does not own another document"
-        );
-        // An owner invocation with no .md document token — not provably another doc.
-        assert!(
-            !cmdline_owns_other_document("/home/brian/.cargo/bin/agent-doc start", claimed),
-            "an owner session with no document token is not a different-document conflict"
-        );
-        // A transient non-owner subcommand against another doc — not an owner session.
-        assert!(
-            !cmdline_owns_other_document(
-                "/home/brian/.cargo/bin/agent-doc route tasks/other.md",
-                claimed,
-            ),
-            "a non-owner subcommand is not a live owner session"
-        );
-    }
-    #[test]
-    fn cmdline_owns_other_document_blocks_navigation_to_wrong_document_pane() {
-        // #jb-tsift-pane-sync cross-document variant: navigating the editor to
-        // `tasks/software/tsift.md` must not surface or reuse the pane that is
-        // already running `tasks/agent-doc/agent-doc-bugs2.md`. The normal
-        // owner-resolution path (`find_normal_path_owner_pane_excluding_with_logging`
-        // -> `reject_cross_document_owner_pane` -> `pane_runs_other_document_owner`)
-        // relies on this decision to reject the wrong-document pane and cold-start
-        // a correct owner instead of aliasing two documents onto one pane.
-        let navigated = "tasks/software/tsift.md";
-        assert!(
-            cmdline_owns_other_document(
-                "/home/brian/.cargo/bin/agent-doc start --route-owned tasks/agent-doc/agent-doc-bugs2.md",
-                navigated,
-            ),
-            "a pane running a different document must not be surfaced as the navigated file's owner"
-        );
-        // The legitimate tsift owner is still reusable — the guard must not force
-        // a spurious cold-start when the surfaced pane already owns the file.
-        assert!(
-            !cmdline_owns_other_document(
-                "/home/brian/.cargo/bin/agent-doc start --route-owned tasks/software/tsift.md",
-                navigated,
-            ),
-            "the navigated document's own owner pane stays reusable under the cross-document guard"
-        );
-    }
-    #[test]
-    fn owner_document_from_cmdline_extracts_bound_document() {
-        assert_eq!(
-            agent_doc_controller::command_line::owner_document_from_cmdline(
-                "/home/brian/.cargo/bin/agent-doc start --route-owned tasks/software/tsift.md"
-            ),
-            Some("tasks/software/tsift.md".to_string())
-        );
-        // Quoted token is unwrapped.
-        assert_eq!(
-            agent_doc_controller::command_line::owner_document_from_cmdline(
-                "/usr/bin/codex \"tasks/agent-doc/agent-doc-bugs2.md\""
-            ),
-            Some("tasks/agent-doc/agent-doc-bugs2.md".to_string())
-        );
-        // A bare shell owns no document.
-        assert_eq!(
-            agent_doc_controller::command_line::owner_document_from_cmdline("-zsh"),
-            None
-        );
-    }
-    #[test]
-    fn cross_document_execution_identifies_foreign_owner_document() {
-        // #jb-tsift-pane-sync logging vector: an agent-doc cycle for bugs2 running
-        // inside a pane whose process owns tsift.md must be both detected
-        // (cmdline_owns_other_document) and name the foreign document
-        // (owner_document_from_cmdline) so log_cross_document_execution_context can
-        // emit `pane_owns=tasks/software/tsift.md`.
-        let pane_cmdline =
-            "/home/brian/.cargo/bin/agent-doc start --route-owned tasks/software/tsift.md";
-        let cycle_doc = "tasks/agent-doc/agent-doc-bugs2.md";
-        assert!(cmdline_owns_other_document(pane_cmdline, cycle_doc));
-        assert_eq!(
-            agent_doc_controller::command_line::owner_document_from_cmdline(pane_cmdline),
-            Some("tasks/software/tsift.md".to_string())
-        );
-        // No spurious cross-document signal when the pane owns the cycle's own doc.
-        assert!(!cmdline_owns_other_document(
-            "/home/brian/.cargo/bin/agent-doc start --route-owned tasks/agent-doc/agent-doc-bugs2.md",
-            cycle_doc,
-        ));
-    }
-    #[test]
     fn reject_cross_document_owner_pane_preserves_non_contaminated_candidates() {
         // #jb-tsift-pane-sync focus-path wiring: the heuristic resolver
         // (`find_live_owner_pane_excluding_with_logging`, used by `focus.rs` and
@@ -5473,26 +5259,6 @@ mod tests {
             reject_cross_document_owner_pane(&tmux, bare.clone(), file, false),
             bare,
             "guard must not reject a candidate it cannot prove owns another document"
-        );
-    }
-    #[test]
-    fn cmdline_file_match_accepts_submodule_relative_start_path() {
-        let file_path = "/tmp/agent-loop/src/session-share/tasks/docs.md";
-        let cmdline = "/home/brian/.cargo/bin/agent-doc start tasks/docs.md";
-
-        assert!(
-            cmdline_has_file_match(cmdline, file_path),
-            "root-relative target should match pane-relative start path"
-        );
-    }
-    #[test]
-    fn cmdline_file_match_rejects_different_relative_path() {
-        let file_path = "/tmp/agent-loop/src/session-share/tasks/docs.md";
-        let cmdline = "/home/brian/.cargo/bin/agent-doc start tasks/other.md";
-
-        assert!(
-            !cmdline_has_file_match(cmdline, file_path),
-            "different relative path should not match by basename alone"
         );
     }
     #[test]

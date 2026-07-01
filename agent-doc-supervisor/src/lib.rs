@@ -73,6 +73,87 @@ pub struct SupervisorBinding {
     pub supervisor_instance_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OwnershipGeneration {
+    pub prior_generation: u64,
+    pub new_generation: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnershipTransitionEvent<'a> {
+    pub caller: &'a str,
+    pub reason: &'a str,
+    pub prior_generation: u64,
+    pub new_generation: u64,
+    pub old_pane: Option<&'a str>,
+    pub new_pane: &'a str,
+    pub old_window: Option<&'a str>,
+    pub new_window: Option<&'a str>,
+}
+
+fn extract_event(raw_line: &str) -> &str {
+    raw_line
+        .split_once("] ")
+        .map(|(_, event)| event)
+        .unwrap_or(raw_line)
+        .trim()
+}
+
+fn parse_u64_field(event: &str, name: &str) -> Option<u64> {
+    event.split_whitespace().find_map(|part| {
+        part.strip_prefix(name)
+            .and_then(|value| value.parse::<u64>().ok())
+    })
+}
+
+fn render_field<'a>(value: Option<&'a str>, fallback: &'a str) -> &'a str {
+    value.filter(|value| !value.is_empty()).unwrap_or(fallback)
+}
+
+pub fn infer_latest_generation_from_content(content: &str) -> u64 {
+    let mut latest_explicit = 0u64;
+    let mut legacy_session_starts = 0u64;
+
+    for raw_line in content.lines() {
+        let event = extract_event(raw_line);
+        if event.is_empty() {
+            continue;
+        }
+        if event.starts_with("session_start ") {
+            legacy_session_starts += 1;
+            if let Some(generation) = parse_u64_field(event, "generation=") {
+                latest_explicit = latest_explicit.max(generation);
+            }
+            continue;
+        }
+        if event.starts_with("ownership_transition ")
+            && let Some(generation) = parse_u64_field(event, "new_generation=")
+        {
+            latest_explicit = latest_explicit.max(generation);
+        }
+    }
+
+    if latest_explicit > 0 {
+        latest_explicit
+    } else {
+        legacy_session_starts
+    }
+}
+
+pub fn format_transition_event(event: OwnershipTransitionEvent<'_>) -> String {
+    format!(
+        "ownership_transition caller={} reason={} prior_generation={} new_generation={} old_pane={} new_pane={} old_window={} new_window={}",
+        event.caller,
+        event.reason,
+        event.prior_generation,
+        event.new_generation,
+        render_field(event.old_pane, "none"),
+        render_field(Some(event.new_pane), "none"),
+        render_field(event.old_window, "none"),
+        render_field(event.new_window, "unknown"),
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SupervisorRecoveryAction {
@@ -136,5 +217,46 @@ mod tests {
         assert_eq!(machine.state(), SupervisorState::Busy);
         assert!(machine.send(SupervisorEvent::TurnFinished));
         assert_eq!(machine.state(), SupervisorState::Ready);
+    }
+
+    #[test]
+    fn infer_latest_generation_counts_legacy_session_starts() {
+        let content = concat!(
+            "[1] session_start file=doc.md pane=%41 session=session-1\n",
+            "[2] codex_start mode=fresh restart_count=0\n",
+            "[10] session_start file=doc.md pane=%52 session=session-1\n",
+        );
+
+        assert_eq!(infer_latest_generation_from_content(content), 2);
+    }
+
+    #[test]
+    fn infer_latest_generation_prefers_explicit_generation_markers() {
+        let content = concat!(
+            "[1] ownership_transition caller=start reason=session_start prior_generation=0 new_generation=1 old_pane=none new_pane=%41 old_window=none new_window=@1\n",
+            "[2] session_start file=doc.md pane=%41 session=session-1 generation=1\n",
+            "[10] ownership_transition caller=route reason=registry_rebind prior_generation=1 new_generation=2 old_pane=%41 new_pane=%52 old_window=@1 new_window=@2\n",
+        );
+
+        assert_eq!(infer_latest_generation_from_content(content), 2);
+    }
+
+    #[test]
+    fn format_transition_event_uses_stable_placeholders() {
+        let rendered = format_transition_event(OwnershipTransitionEvent {
+            caller: "start",
+            reason: "session_start",
+            prior_generation: 0,
+            new_generation: 1,
+            old_pane: None,
+            new_pane: "%41",
+            old_window: None,
+            new_window: Some("@1"),
+        });
+
+        assert_eq!(
+            rendered,
+            "ownership_transition caller=start reason=session_start prior_generation=0 new_generation=1 old_pane=none new_pane=%41 old_window=none new_window=@1"
+        );
     }
 }

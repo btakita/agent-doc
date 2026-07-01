@@ -36,7 +36,7 @@ pub(crate) fn load_authoritative_actor_binding(
     if !tmux.pane_alive(&record.pane_id) {
         return Ok(None);
     }
-    let expected_harness = crate::session_actor::normalize_harness_name(&harness.binary);
+    let expected_harness = agent_doc_harness::normalize_harness_name(&harness.binary);
     if !record.harness.trim().is_empty()
         && record.harness != "default"
         && record.harness != expected_harness
@@ -234,7 +234,7 @@ fn document_declares_expected_harness(file: &Path, expected_harness: &str) -> bo
     let Some(agent) = fm.agent.as_deref() else {
         return false;
     };
-    crate::session_actor::normalize_harness_name(agent) == expected_harness
+    agent_doc_harness::normalize_harness_name(agent) == expected_harness
 }
 
 pub(crate) fn promote_starting_authoritative_actor_if_dispatch_ready(

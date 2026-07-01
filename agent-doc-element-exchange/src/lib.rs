@@ -51,6 +51,15 @@ pub fn exchange_component(doc: &str) -> Option<Component> {
         .find(|component| component.name == "exchange")
 }
 
+/// Strip user content from the exchange component, leaving just the markers.
+///
+/// This creates a snapshot baseline that treats existing user text as a diff.
+pub fn strip_exchange_content(content: &str) -> String {
+    exchange_component(content)
+        .map(|exchange| exchange.replace_content(content, "\n"))
+        .unwrap_or_else(|| content.to_string())
+}
+
 pub fn normalized_prompt_text(line: &str) -> Option<String> {
     let trimmed = line.trim();
     if trimmed.is_empty()
@@ -2086,6 +2095,21 @@ ship it
         assert!(!repaired.contains(&format!("\n{shorter}\n")));
         assert!(repaired.contains(&format!("\n{longer}\n")));
         assert!(repaired.contains("<!-- agent:backlog -->\n- keep\n<!-- /agent:backlog -->"));
+    }
+
+    #[test]
+    fn strip_exchange_content_removes_user_text() {
+        let content = "---\nagent_doc_session: abc\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nUser prompt here.\n<!-- /agent:exchange -->\n";
+        let result = strip_exchange_content(content);
+        assert!(result.contains("<!-- agent:exchange"));
+        assert!(!result.contains("User prompt here."));
+    }
+
+    #[test]
+    fn strip_exchange_content_preserves_no_exchange() {
+        let content = "---\nagent_doc_session: abc\n---\n\nJust text.\n";
+        let result = strip_exchange_content(content);
+        assert_eq!(result, content);
     }
 
     #[test]

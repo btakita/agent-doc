@@ -95,6 +95,81 @@ pub fn owner_document_from_cmdline(cmdline: &str) -> Option<String> {
         .map(|token| token.to_string())
 }
 
+pub fn path_has_component_suffix(path: &Path, suffix: &Path) -> bool {
+    let path_components: Vec<_> = path
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(value) => Some(value.to_os_string()),
+            _ => None,
+        })
+        .collect();
+    let suffix_components: Vec<_> = suffix
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(value) => Some(value.to_os_string()),
+            _ => None,
+        })
+        .collect();
+
+    if suffix_components.is_empty() || suffix_components.len() > path_components.len() {
+        return false;
+    }
+
+    path_components[path_components.len() - suffix_components.len()..] == suffix_components[..]
+}
+
+pub fn cmdline_has_file_match(cmdline: &str, file_path: &str) -> bool {
+    if cmdline.contains(file_path) {
+        return true;
+    }
+
+    let target = Path::new(file_path);
+    let canonical_target = target.canonicalize().ok();
+    if let Some(ref canonical) = canonical_target
+        && cmdline.contains(canonical.to_string_lossy().as_ref())
+    {
+        return true;
+    }
+
+    for token in cmdline.split_whitespace() {
+        let candidate = Path::new(token);
+        if candidate.is_absolute() {
+            if let Some(ref canonical) = canonical_target
+                && candidate.canonicalize().ok().as_ref() == Some(canonical)
+            {
+                return true;
+            }
+            continue;
+        }
+
+        if path_has_component_suffix(target, candidate) {
+            return true;
+        }
+        if let Some(ref canonical) = canonical_target
+            && path_has_component_suffix(canonical, candidate)
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
+pub fn agent_doc_cmdline_is_owner(cmdline: &str, file_path: &str) -> bool {
+    cmdline_has_file_match(cmdline, file_path) && cmdline_is_agent_doc_owner_session(cmdline)
+}
+
+/// True when `cmdline` is a live agent-doc/codex owner session for a document
+/// OTHER than `claimed_file`. Cross-root safe: it is keyed on the live process
+/// command line, so it recognizes a pane owned by a document rooted in another
+/// project/submodule whose session registry the calling root cannot see. Used to
+/// keep `claim`/`route` from commandeering such a pane.
+pub fn cmdline_owns_other_document(cmdline: &str, claimed_file: &str) -> bool {
+    cmdline_is_agent_doc_owner_session(cmdline)
+        && cmdline_references_md_document(cmdline)
+        && !agent_doc_cmdline_is_owner(cmdline, claimed_file)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,5 +281,130 @@ mod tests {
             Some("tasks/agent-doc/agent-doc-bugs2.md".to_string())
         );
         assert_eq!(owner_document_from_cmdline("-zsh"), None);
+    }
+
+    #[test]
+    fn agent_doc_cmdline_owner_detection_only_accepts_start_supervisor() {
+        let file = "tasks/live-tmux-repro-codex.md";
+
+        assert!(agent_doc_cmdline_is_owner(
+            "/home/brian/.cargo/bin/agent-doc start tasks/live-tmux-repro-codex.md",
+            file
+        ));
+        assert!(agent_doc_cmdline_is_owner(
+            "/usr/bin/codex /home/brian/work/btakita/agent-loop/tasks/live-tmux-repro-codex.md",
+            file
+        ));
+        assert!(!agent_doc_cmdline_is_owner(
+            "/home/brian/.cargo/bin/agent-doc route tasks/live-tmux-repro-codex.md",
+            file
+        ));
+        assert!(!agent_doc_cmdline_is_owner(
+            "/home/brian/.cargo/bin/agent-doc claim tasks/live-tmux-repro-codex.md --pane %522",
+            file
+        ));
+    }
+
+    #[test]
+    fn cmdline_owns_other_document_blocks_cross_root_commandeer() {
+        let claimed = "tasks/recruit/awear.md";
+        assert!(
+            cmdline_owns_other_document(
+                "/home/brian/.cargo/bin/agent-doc start --route-owned tasks/sampleorders.md",
+                claimed,
+            ),
+            "a pane owning a different document must block commandeering"
+        );
+        assert!(
+            cmdline_owns_other_document(
+                "/usr/bin/codex /home/brian/work/btakita/agent-loop/src/sample-app/tasks/sampleorders.md",
+                claimed,
+            ),
+            "a harness session for another document must block commandeering"
+        );
+    }
+
+    #[test]
+    fn cmdline_owns_other_document_allows_same_doc_and_non_owner_panes() {
+        let claimed = "tasks/recruit/awear.md";
+        assert!(
+            !cmdline_owns_other_document(
+                "/home/brian/.cargo/bin/agent-doc start --route-owned tasks/recruit/awear.md",
+                claimed,
+            ),
+            "a pane owning the claimed document is reusable"
+        );
+        assert!(
+            !cmdline_owns_other_document("-zsh", claimed),
+            "a bare shell does not own another document"
+        );
+        assert!(
+            !cmdline_owns_other_document("/home/brian/.cargo/bin/agent-doc start", claimed),
+            "an owner session with no document token is not a different-document conflict"
+        );
+        assert!(
+            !cmdline_owns_other_document(
+                "/home/brian/.cargo/bin/agent-doc route tasks/other.md",
+                claimed,
+            ),
+            "a non-owner subcommand is not a live owner session"
+        );
+    }
+
+    #[test]
+    fn cmdline_owns_other_document_blocks_navigation_to_wrong_document_pane() {
+        let navigated = "tasks/software/tsift.md";
+        assert!(
+            cmdline_owns_other_document(
+                "/home/brian/.cargo/bin/agent-doc start --route-owned tasks/agent-doc/agent-doc-bugs2.md",
+                navigated,
+            ),
+            "a pane running a different document must not be surfaced as the navigated file's owner"
+        );
+        assert!(
+            !cmdline_owns_other_document(
+                "/home/brian/.cargo/bin/agent-doc start --route-owned tasks/software/tsift.md",
+                navigated,
+            ),
+            "the navigated document's own owner pane stays reusable under the cross-document guard"
+        );
+    }
+
+    #[test]
+    fn cmdline_cross_document_execution_identifies_foreign_owner_document() {
+        let pane_cmdline =
+            "/home/brian/.cargo/bin/agent-doc start --route-owned tasks/software/tsift.md";
+        let cycle_doc = "tasks/agent-doc/agent-doc-bugs2.md";
+        assert!(cmdline_owns_other_document(pane_cmdline, cycle_doc));
+        assert_eq!(
+            owner_document_from_cmdline(pane_cmdline),
+            Some("tasks/software/tsift.md".to_string())
+        );
+        assert!(!cmdline_owns_other_document(
+            "/home/brian/.cargo/bin/agent-doc start --route-owned tasks/agent-doc/agent-doc-bugs2.md",
+            cycle_doc,
+        ));
+    }
+
+    #[test]
+    fn cmdline_file_match_accepts_submodule_relative_start_path() {
+        let file_path = "/tmp/agent-loop/src/session-share/tasks/docs.md";
+        let cmdline = "/home/brian/.cargo/bin/agent-doc start tasks/docs.md";
+
+        assert!(
+            cmdline_has_file_match(cmdline, file_path),
+            "root-relative target should match pane-relative start path"
+        );
+    }
+
+    #[test]
+    fn cmdline_file_match_rejects_different_relative_path() {
+        let file_path = "/tmp/agent-loop/src/session-share/tasks/docs.md";
+        let cmdline = "/home/brian/.cargo/bin/agent-doc start tasks/other.md";
+
+        assert!(
+            !cmdline_has_file_match(cmdline, file_path),
+            "different relative path should not match by basename alone"
+        );
     }
 }

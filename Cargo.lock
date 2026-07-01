@@ -328,6 +328,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-doc-git"
+version = "0.34.65"
+dependencies = [
+ "tempfile",
+]
+
+[[package]]
 name = "agent-doc-harness"
 version = "0.34.65"
 dependencies = [
@@ -416,6 +423,7 @@ dependencies = [
  "agent-doc-element-review",
  "agent-doc-frontmatter",
  "agent-doc-fs",
+ "agent-doc-git",
  "agent-doc-harness",
  "agent-doc-hash",
  "agent-doc-ipc-protocol",

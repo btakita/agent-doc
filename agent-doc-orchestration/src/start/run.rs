@@ -519,15 +519,15 @@ pub fn run_with_reap_policy(
     // keeps the value handed to the controller aligned with the CAS contract.
     let start_generation = {
         let generations = crate::session_actor::next_generation(&canonical, &session_id).unwrap_or(
-            crate::session_actor::OwnershipGeneration {
+            agent_doc_supervisor::OwnershipGeneration {
                 prior_generation: 0,
                 new_generation: 1,
             },
         );
         log_event(
             &mut session_log,
-            &crate::session_actor::format_transition_event(
-                crate::session_actor::OwnershipTransitionEvent {
+            &agent_doc_supervisor::format_transition_event(
+                agent_doc_supervisor::OwnershipTransitionEvent {
                     caller: "start",
                     reason: "session_start",
                     prior_generation: generations.prior_generation,

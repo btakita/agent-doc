@@ -3155,18 +3155,16 @@ fn parse_actor_state(raw: &str) -> Option<ActorState> {
 }
 
 fn format_controller_transition(transition: &ActorTransitionStatus) -> String {
-    agent_doc_orchestration::session_actor::format_transition_event(
-        agent_doc_orchestration::session_actor::OwnershipTransitionEvent {
-            caller: &transition.caller,
-            reason: &transition.reason,
-            prior_generation: transition.prior_generation,
-            new_generation: transition.new_generation,
-            old_pane: transition.old_pane.as_deref(),
-            new_pane: &transition.new_pane,
-            old_window: transition.old_window.as_deref(),
-            new_window: transition.new_window.as_deref(),
-        },
-    )
+    agent_doc_supervisor::format_transition_event(agent_doc_supervisor::OwnershipTransitionEvent {
+        caller: &transition.caller,
+        reason: &transition.reason,
+        prior_generation: transition.prior_generation,
+        new_generation: transition.new_generation,
+        old_pane: transition.old_pane.as_deref(),
+        new_pane: &transition.new_pane,
+        old_window: transition.old_window.as_deref(),
+        new_window: transition.new_window.as_deref(),
+    })
 }
 
 fn print_status_summary(ctx: &SessionContext) {

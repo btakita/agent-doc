@@ -6,6 +6,15 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.34.65
 
+- **More orchestration helper seams moved to focused owners.** Snapshot exchange
+  stripping now lives in `agent-doc-element-exchange`; cross-document owner
+  command-line detection lives in `agent-doc-controller`; pure git path/output
+  interpretation lives in the new `agent-doc-git` crate; harness name
+  normalization lives in `agent-doc-harness`; and ownership generation/event
+  formatting lives in `agent-doc-supervisor`. Orchestration imports those owners
+  directly and keeps only git/process, snapshot, pane, registry, and actor-store
+  adapters.
+
 - **Pure helper layer extracted from orchestration.** Exchange shrink/ack retry
   and prompt-dedupe helpers now live in `agent-doc-element-exchange`; preflight
   prompt accumulator helpers now live in `agent-doc-prompt-contract`; harness

@@ -282,17 +282,24 @@ pub fn pull_replica_updates_for_file(file: &Path, identity: &str) -> Result<Opti
             .find(|entry| entry.client_id == client_id)
     })?
     .ok_or_else(|| anyhow::anyhow!("replica {client_id} is not registered"))?;
-    crate::ops_log::log_op(
-        file,
-        &format!(
-            "crdt_replica_pull file={} authority=multi_replica client_id={} updates={} current_generation={} last_ack_generation={}",
-            file.display(),
-            client_id,
-            updates.len(),
-            delivery.current_generation,
-            delivery.last_ack_generation,
-        ),
-    );
+    // Only log a pull that actually delivers work or advances the ack frontier.
+    // The editor replica forwarder polls this ~4×/second while attached; logging
+    // every empty steady-state poll floods ops.log (observed growing it to
+    // ~800MB and starving the session) without recording anything actionable
+    // (#crdtpullspam).
+    if !updates.is_empty() || delivery.current_generation != delivery.last_ack_generation {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "crdt_replica_pull file={} authority=multi_replica client_id={} updates={} current_generation={} last_ack_generation={}",
+                file.display(),
+                client_id,
+                updates.len(),
+                delivery.current_generation,
+                delivery.last_ack_generation,
+            ),
+        );
+    }
     Ok(Some(ReplicaPull {
         client_id,
         updates,

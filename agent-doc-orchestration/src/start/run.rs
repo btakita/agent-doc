@@ -1401,9 +1401,9 @@ pub fn run_with_reap_policy(
 
         // Idle-queue watch (#jb-run-agent-doc-busy-queue-dispatch-deadlock):
         // a long-lived sibling of the one-shot auto-trigger that drains a live
-        // `agent:queue auto` head (e.g. a busy-pane `Run Agent Doc` route
-        // enqueue) on each busy→idle transition, so the queued prompt is never
-        // stranded waiting for a harness-delegated drain that never comes.
+        // go-mode `agent:queue` head on each busy→idle transition, so the queued
+        // prompt is never stranded waiting for a harness-delegated drain that
+        // never comes.
         let idle_watch_stop = Arc::new(AtomicBool::new(false));
         let idle_watch_thread = {
             let watch_log = session_log.as_ref().and_then(|f| f.try_clone().ok());

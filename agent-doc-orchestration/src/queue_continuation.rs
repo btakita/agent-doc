@@ -12,15 +12,12 @@
 //! `session-check` is not enough either — a committed document can still owe an
 //! auto-queue continuation.
 //!
-//! The only durable proof after closeout is the document itself
-//! (`queue_active: true` and a ready head) plus the durable marker this module
-//! persists at successful closeout. `auto` is only a *start* trigger; once a
-//! queue is active, continuation is driven by `queue_active: true`, so a
-//! persisted-active `agent:queue` (no `auto` attribute) is equally eligible
-//! (`#active-queue-persisted-no-continue`). The detector here is the single
-//! shared source of truth; `session-check`, the `codex-stop` hook, and the
-//! closeout paths all consult it instead of duplicating the activation
-//! reasoning.
+//! The only durable proof after closeout is the document itself: explicit `go`
+//! mode plus `queue_active: true` plus a ready head. `auto`/`start` are start
+//! triggers; they do not silently opt a document into unattended continuation
+//! after the current closeout. The detector here is the single shared source of
+//! truth; `session-check`, the `codex-stop` hook, and the closeout paths all
+//! consult it instead of duplicating the activation reasoning.
 
 use agent_doc_queue::queue_continuation as queue_policy;
 use agent_doc_queue::queue_preemption::{
@@ -33,18 +30,15 @@ use std::path::{Path, PathBuf};
 
 /// Detect whether `file` currently requires queue continuation.
 ///
-/// True only when: frontmatter `queue_active: true`,
+/// True only when: frontmatter `queue_active: true`, explicit `go` mode,
 /// [`agent_doc_queue::document_queue::resolve_activation`] is active, the head is a real prompt
 /// (not a stop fence or future time gate), and the head was not edited between
 /// the committed snapshot and the file.
 ///
-/// `auto` is a *start* trigger only; once a queue is active (`queue_active:
-/// true`) continuation is driven by the active state, not the opening-tag
-/// attribute, so a persisted-active `agent:queue` (no `auto`) is equally
-/// eligible (`#active-queue-persisted-no-continue`). An inactive plain queue
-/// never reaches here because the `queue_active` guard above fails first. This
-/// mirrors the codex-hook `active_auto_queue_prompt` logic in one shared,
-/// testable place.
+/// `auto` and `start` are start triggers only. A persisted-active plain
+/// `agent:queue` without `queue: go` or marker-side `go` is not a self-driving
+/// loop. This mirrors the codex-hook `active_auto_queue_prompt` logic in one
+/// shared, testable place.
 pub fn detect(file: &Path) -> Result<Option<queue_policy::QueueContinuation>> {
     // `#qpausego` note: a controller `admin queue pause` does NOT short-circuit
     // continuation here. The pause suppresses the *unattended* supervisor
@@ -516,7 +510,7 @@ mod tests {
     };
 
     fn write_doc(dir: &Path, prompts: &[&str], queue_active: bool, has_auto: bool) -> PathBuf {
-        let queue_attrs = if has_auto { " auto" } else { "" };
+        let queue_attrs = if has_auto { " auto go" } else { "" };
         write_doc_with_queue_attrs(dir, prompts, queue_active, queue_attrs)
     }
 
@@ -654,7 +648,7 @@ mod tests {
             "---\nsession: sid\nagent_doc_format: template\nqueue_active: true\n---\n\n\
 ## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n\
 ## Backlog\n\n<!-- agent:backlog queue=sync -->\n{backlog}<!-- /agent:backlog -->\n\n\
-## Queue\n\n<!-- agent:queue auto -->\n{queue}<!-- /agent:queue -->\n"
+## Queue\n\n<!-- agent:queue auto go -->\n{queue}<!-- /agent:queue -->\n"
         )
     }
 
@@ -1125,7 +1119,7 @@ mod tests {
     }
 
     #[test]
-    fn detect_returns_head_for_active_auto_queue() {
+    fn detect_returns_head_for_active_auto_go_queue() {
         let dir = tempfile::tempdir().unwrap();
         let doc = write_doc(
             dir.path(),
@@ -1178,10 +1172,9 @@ mod tests {
     }
 
     #[test]
-    fn detect_returns_head_for_persisted_active_queue_without_auto() {
-        // `#active-queue-persisted-no-continue`: a persisted-active queue
-        // (queue_active: true) without the `auto` attribute still owes
-        // continuation — `auto` is a start trigger only.
+    fn detect_none_for_persisted_active_queue_without_go() {
+        // A persisted-active queue without explicit `go` is not an unattended
+        // continuation loop. `auto`/`start` are start triggers only.
         let dir = tempfile::tempdir().unwrap();
         let doc = write_doc(
             dir.path(),
@@ -1189,12 +1182,27 @@ mod tests {
             true,
             false,
         );
-        let continuation = detect(&doc).unwrap().expect("ready persisted-active head");
+        assert!(
+            detect(&doc).unwrap().is_none(),
+            "plain persisted-active queues must not continue without go"
+        );
+    }
+
+    #[test]
+    fn detect_returns_head_for_active_go_queue_without_auto() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc_with_queue_attrs(
+            dir.path(),
+            &["do [#persisted] next", "do [#third]"],
+            true,
+            " go",
+        );
+        let continuation = detect(&doc).unwrap().expect("ready go-mode head");
         assert_eq!(continuation.head_prompt, "do [#persisted] next");
         assert_eq!(continuation.head_id.as_deref(), Some("persisted"));
         assert!(
-            continuation.reason.contains("persisted"),
-            "persisted-active reason should name the persisted trigger, got: {}",
+            continuation.reason.contains("go"),
+            "go-mode reason should name the go trigger, got: {}",
             continuation.reason
         );
     }

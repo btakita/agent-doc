@@ -3659,8 +3659,7 @@ fn main() -> anyhow::Result<()> {
             HookAction::Listen { root } => hook_cmd::listen(root.as_deref()),
             HookAction::Gc { root } => hook_cmd::gc(root.as_deref()),
             HookAction::CheckCallbacks { root } => {
-                let pending =
-                    agent_doc_callback_io::scan_pending_callbacks(root.as_deref())?;
+                let pending = agent_doc_callback_io::scan_pending_callbacks(root.as_deref())?;
                 let json = serde_json::to_string_pretty(
                     &serde_json::json!({"pending_callbacks": pending}),
                 )?;
@@ -3905,12 +3904,8 @@ fn main() -> anyhow::Result<()> {
                 ttl,
             } => {
                 let ops: Vec<&str> = operations.split(',').map(|s| s.trim()).collect();
-                let request = agent_doc_callback_io::create_request(
-                    &file,
-                    &ops,
-                    context.as_deref(),
-                    ttl,
-                )?;
+                let request =
+                    agent_doc_callback_io::create_request(&file, &ops, context.as_deref(), ttl)?;
                 println!("{}", serde_json::to_string_pretty(&request)?);
                 Ok(())
             }
@@ -3932,13 +3927,7 @@ fn main() -> anyhow::Result<()> {
                 status,
                 summary,
             } => {
-                agent_doc_callback_io::write_response(
-                    &file,
-                    &request_id,
-                    &status,
-                    &summary,
-                    None,
-                )?;
+                agent_doc_callback_io::write_response(&file, &request_id, &status, &summary, None)?;
                 eprintln!("[callback] response written for request {}", request_id);
                 Ok(())
             }

@@ -2755,7 +2755,7 @@ mod core_tests {
             "<!-- agent:exchange -->\n",
             "### Re: First queued thing\n\nDone.\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue auto -->\n",
+            "<!-- agent:queue auto go -->\n",
             "- First queued thing\n",
             "- do [#nextitem]\n",
             "<!-- /agent:queue -->\n\n",

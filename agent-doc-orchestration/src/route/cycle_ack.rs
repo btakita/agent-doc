@@ -482,8 +482,8 @@ mod tests {
         assert_eq!(outcome.prompt_text, "/clear");
 
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("queue: start"));
-        assert!(updated.contains("<!-- agent:queue -->"));
+        assert!(updated.contains("queue: go"));
+        assert!(updated.contains("<!-- agent:queue go -->"));
         assert!(!updated.contains("agent:queue auto"));
         assert!(updated.contains("\n/clear\n"), "{updated}");
         assert!(
@@ -537,8 +537,8 @@ mod tests {
         assert_eq!(outcome.prompt_text, "/clear");
 
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("queue: start"));
-        assert!(updated.contains("<!-- agent:queue -->"));
+        assert!(updated.contains("queue: go"));
+        assert!(updated.contains("<!-- agent:queue go -->"));
         assert!(!updated.contains("agent:queue auto"));
         assert!(updated.contains("\n/clear\n"), "{updated}");
         assert_eq!(

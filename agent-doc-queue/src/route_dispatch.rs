@@ -3,7 +3,7 @@ use anyhow::Result;
 
 use crate::document_queue::{
     self, QueueEntry, QueuePrompt, has_auto_attr, has_stop_fence_at_head, marker_control, parse,
-    render, resolve_activation, strip_auto_from_tag, time_gate_at_head,
+    render, resolve_activation, set_control_in_tag, strip_auto_from_tag, time_gate_at_head,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -108,7 +108,7 @@ pub fn prepare_route_dispatch_queue_update(
         prompt_text
     };
     let prompt_identity = strip_priority_markers(&prompt_text);
-    let mut content = agent_doc_frontmatter::frontmatter::merge_queue_state(original, true)?;
+    let mut content = agent_doc_frontmatter::frontmatter::merge_queue_control(original, "go")?;
     let components = agent_doc_element::element::parse(&content)?;
     let mut component_created = false;
     let mut already_present = false;
@@ -186,7 +186,7 @@ pub fn prepare_route_dispatch_queue_update(
                 }
             }
         }
-        content = strip_queue_component_auto_attr(&content)?;
+        content = activate_queue_component_marker(&content)?;
     } else {
         component_created = true;
         appended = true;
@@ -205,8 +205,8 @@ pub fn prepare_route_dispatch_queue_update(
 }
 
 pub fn activate_existing_route_queue_content(original: &str) -> Result<String> {
-    let content = agent_doc_frontmatter::frontmatter::merge_queue_state(original, true)?;
-    strip_queue_component_auto_attr(&content)
+    let content = agent_doc_frontmatter::frontmatter::merge_queue_control(original, "go")?;
+    activate_queue_component_marker(&content)
 }
 
 pub fn inactive_route_queue_head(
@@ -283,7 +283,11 @@ pub fn committed_snapshot_backs_queue_head(
     })
 }
 
-fn strip_queue_component_auto_attr(content: &str) -> Result<String> {
+fn activate_route_queue_tag(tag: &str) -> String {
+    set_control_in_tag(&strip_auto_from_tag(tag), Some("go"))
+}
+
+fn activate_queue_component_marker(content: &str) -> Result<String> {
     let components = agent_doc_element::element::parse(content)?;
     let Some(queue_component) = components
         .iter()
@@ -291,11 +295,8 @@ fn strip_queue_component_auto_attr(content: &str) -> Result<String> {
     else {
         return Ok(content.to_string());
     };
-    if !has_auto_attr(&queue_component.attrs) {
-        return Ok(content.to_string());
-    }
     let open_tag = &content[queue_component.open_start..queue_component.open_end];
-    let new_tag = strip_auto_from_tag(open_tag);
+    let new_tag = activate_route_queue_tag(open_tag);
     let mut result = String::with_capacity(content.len());
     result.push_str(&content[..queue_component.open_start]);
     result.push_str(&new_tag);
@@ -308,7 +309,7 @@ fn insert_queue_component(content: &str, prompt_text: &str) -> Result<String> {
         multiline: prompt_text.contains('\n'),
         text: prompt_text.to_string(),
     })]);
-    let block = format!("<!-- agent:queue -->\n{}<!-- /agent:queue -->\n\n", body);
+    let block = format!("<!-- agent:queue go -->\n{}<!-- /agent:queue -->\n\n", body);
     let components = agent_doc_element::element::parse(content)?;
     let insert_at = components
         .iter()
@@ -457,14 +458,14 @@ mod tests {
         assert!(update.component_created);
         assert!(update.appended);
         assert_eq!(update.prompt_text, "do [#x]");
-        assert!(update.content.contains("queue: start"));
+        assert!(update.content.contains("queue: go"));
         assert!(
             update
                 .content
-                .contains("<!-- agent:queue -->\n- do [#x]\n<!-- /agent:queue -->")
+                .contains("<!-- agent:queue go -->\n- do [#x]\n<!-- /agent:queue -->")
         );
         assert!(
-            update.content.find("<!-- agent:queue -->").unwrap()
+            update.content.find("<!-- agent:queue go -->").unwrap()
                 < update.content.find("<!-- agent:backlog -->").unwrap()
         );
     }
@@ -482,7 +483,7 @@ mod tests {
         let update = prepare_route_dispatch_queue_update(original, "manual preempt", true).unwrap();
         assert!(update.appended);
         assert!(!update.superseded);
-        assert!(update.content.contains("<!-- agent:queue -->"));
+        assert!(update.content.contains("<!-- agent:queue go -->"));
         assert!(!update.content.contains("agent:queue auto"));
         assert!(
             update
@@ -504,6 +505,7 @@ mod tests {
         assert!(!update.appended);
         assert!(update.content.contains("- new"));
         assert!(!update.content.contains("- old"));
+        assert!(update.content.contains("<!-- agent:queue go -->"));
         assert!(!update.content.contains("agent:queue auto"));
     }
 
@@ -574,8 +576,8 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         let activated = activate_existing_route_queue_content(original).unwrap();
-        assert!(activated.contains("queue: start"));
-        assert!(activated.contains("<!-- agent:queue -->"));
+        assert!(activated.contains("queue: go"));
+        assert!(activated.contains("<!-- agent:queue go -->"));
         assert!(!activated.contains("agent:queue auto"));
     }
 }

@@ -292,7 +292,10 @@ pub fn run(
 /// HEAD. Treat that snapshot divergence as dirty so `--commit` still stages the
 /// compacted snapshot (`#jb-compact-commit-editor-ipc-async`). A `NotInGitRepo`
 /// document has no HEAD to diverge from, so it falls back to `changed_on_disk`.
-fn compact_dirty(changed_on_disk: bool, snapshot_status: &crate::git::SnapshotCommitStatus) -> bool {
+fn compact_dirty(
+    changed_on_disk: bool,
+    snapshot_status: &crate::git::SnapshotCommitStatus,
+) -> bool {
     changed_on_disk
         || matches!(
             snapshot_status,
@@ -2982,7 +2985,8 @@ mod tests {
 
         let err = commit_compacted_authoritative(&file, COMPACTED_DOC).unwrap_err();
         assert!(
-            err.to_string().contains("did not land the compacted content"),
+            err.to_string()
+                .contains("did not land the compacted content"),
             "expected fail-closed HEAD-mismatch error, got: {err}"
         );
         // HEAD is unchanged; the operator gets an explicit recovery path.

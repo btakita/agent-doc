@@ -111,9 +111,9 @@ pub fn effective_continuation_output(
     }
 }
 
-/// A required queue continuation: the document closed cleanly but a ready queue
-/// head remains, so an in-session loop must continue draining instead of
-/// sending a final answer.
+/// A required queue continuation: the document closed cleanly, explicit `go`
+/// mode is active, and a ready queue head remains, so an in-session loop must
+/// continue draining instead of sending a final answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueueContinuation {
     pub head_prompt: String,
@@ -143,6 +143,9 @@ pub fn required_continuation(
     else {
         return Ok(None);
     };
+    if !explicit_go_mode(&fm, &queue_component.attrs) {
+        return Ok(None);
+    }
     let has_auto = document_queue::has_auto_attr(&queue_component.attrs);
     let body = &content[queue_component.open_end..queue_component.close_start];
     let entries =
@@ -184,10 +187,12 @@ pub fn required_continuation(
     };
     let head_prompt = head.text;
     let head_id = extract_head_id(&head_prompt);
-    let reason = if has_auto {
-        "active `agent:queue auto` still has a ready head prompt after a clean closeout"
+    let reason = if queue_component.attrs.contains_key("go") {
+        "active `agent:queue go` still has a ready head prompt after a clean closeout"
+    } else if has_auto {
+        "active `agent:queue auto go` still has a ready head prompt after a clean closeout"
     } else {
-        "active persisted `agent:queue` (queue_active: true) still has a ready head prompt after a clean closeout"
+        "active `queue: go` still has a ready head prompt after a clean closeout"
     }
     .to_string();
 
@@ -385,7 +390,8 @@ pub fn live_continuation_head(content: &str) -> Option<String> {
 
 /// First drainable active queue prompt for `scope`.
 pub fn drainable_head_prompt_for_scope(content: &str, scope: DrainScope) -> Option<QueuePrompt> {
-    let (queue_facts, activation) = active_queue(content)?;
+    let (queue_facts, activation) =
+        active_queue_for_supervisor_start(content, matches!(scope, DrainScope::Supervisor))?;
     let open_backlog = open_backlog_ids_from_content(content);
     let deferred_ids = match scope {
         DrainScope::InSessionLoop => deferred_backlog_ids(content),
@@ -449,6 +455,8 @@ pub fn queue_stale_noise_lines(content: &str) -> usize {
 #[derive(Debug, Clone, Copy)]
 struct QueueFacts {
     has_auto: bool,
+    marker_go: bool,
+    marker_start: bool,
     preset_supplies_directive: bool,
 }
 
@@ -460,6 +468,8 @@ fn queue_component_entries(content: &str) -> Option<(QueueFacts, Vec<QueueEntry>
     Some((
         QueueFacts {
             has_auto: document_queue::has_auto_attr(&queue_component.attrs),
+            marker_go: queue_component.attrs.contains_key("go"),
+            marker_start: queue_component.attrs.contains_key("start"),
             preset_supplies_directive: queue_component.attrs.contains_key("preset"),
         },
         entries,
@@ -467,11 +477,32 @@ fn queue_component_entries(content: &str) -> Option<(QueueFacts, Vec<QueueEntry>
 }
 
 fn active_queue(content: &str) -> Option<(QueueFacts, document_queue::QueueActivation)> {
+    active_queue_for_supervisor_start(content, false)
+}
+
+fn active_queue_for_supervisor_start(
+    content: &str,
+    allow_supervisor_start: bool,
+) -> Option<(QueueFacts, document_queue::QueueActivation)> {
     let (fm, _) = frontmatter::parse(content).ok()?;
     if fm.queue_active != Some(true) {
         return None;
     }
     let (queue_facts, entries) = queue_component_entries(content)?;
+    let explicit_go = queue_facts.marker_go
+        || fm
+            .queue
+            .as_deref()
+            .is_some_and(|raw| raw.trim().eq_ignore_ascii_case("go"));
+    let explicit_start = allow_supervisor_start
+        && (queue_facts.marker_start
+            || fm
+                .queue
+                .as_deref()
+                .is_some_and(|raw| raw.trim().eq_ignore_ascii_case("start")));
+    if !explicit_go && !explicit_start {
+        return None;
+    }
     let activation =
         document_queue::resolve_activation(&entries, queue_facts.has_auto, false, true);
     if !activation.active
@@ -481,6 +512,17 @@ fn active_queue(content: &str) -> Option<(QueueFacts, document_queue::QueueActiv
         return None;
     }
     Some((queue_facts, activation))
+}
+
+fn explicit_go_mode(
+    fm: &frontmatter::Frontmatter,
+    attrs: &std::collections::HashMap<String, String>,
+) -> bool {
+    attrs.contains_key("go")
+        || fm
+            .queue
+            .as_deref()
+            .is_some_and(|raw| raw.trim().eq_ignore_ascii_case("go"))
 }
 
 fn first_drainable_head<'a>(
@@ -856,7 +898,7 @@ mod tests {
         format!(
             "---\nsession: sid\nagent_doc_format: template\nqueue_active: true\n---\n\n\
 ## Backlog\n\n<!-- agent:backlog queue=sync -->\n{backlog}<!-- /agent:backlog -->\n\n\
-## Queue\n\n<!-- agent:queue auto -->\n{queue}<!-- /agent:queue -->\n"
+## Queue\n\n<!-- agent:queue auto go -->\n{queue}<!-- /agent:queue -->\n"
         )
     }
 
@@ -943,7 +985,7 @@ mod tests {
     }
 
     #[test]
-    fn required_continuation_returns_ready_auto_head() {
+    fn required_continuation_returns_ready_auto_go_head() {
         let content = doc_with_backlog(
             &["do [#a]", "do [#b]"],
             &["- [ ] [#a] first", "- [ ] [#b] second"],
@@ -955,20 +997,32 @@ mod tests {
 
         assert_eq!(continuation.head_prompt, "do [#a]");
         assert_eq!(continuation.head_id.as_deref(), Some("a"));
-        assert!(continuation.reason.contains("agent:queue auto"));
+        assert!(continuation.reason.contains("agent:queue go"));
     }
 
     #[test]
-    fn required_continuation_returns_persisted_active_head_without_auto() {
+    fn required_continuation_none_for_persisted_active_head_without_go() {
         let content = doc_with_backlog(&["do [#persisted]"], &["- [ ] [#persisted] first"])
-            .replace("<!-- agent:queue auto -->", "<!-- agent:queue -->");
+            .replace("<!-- agent:queue auto go -->", "<!-- agent:queue -->");
+
+        assert!(
+            required_continuation(&content, Some(&content))
+                .unwrap()
+                .is_none(),
+            "plain persisted-active queues are not self-driving without explicit go"
+        );
+    }
+
+    #[test]
+    fn required_continuation_returns_queue_go_head_without_auto() {
+        let content = doc_with_backlog(&["do [#persisted]"], &["- [ ] [#persisted] first"])
+            .replace("<!-- agent:queue auto go -->", "<!-- agent:queue go -->");
 
         let continuation = required_continuation(&content, Some(&content))
             .unwrap()
-            .expect("persisted-active queue head");
-
+            .expect("go-mode queue head");
         assert_eq!(continuation.head_id.as_deref(), Some("persisted"));
-        assert!(continuation.reason.contains("persisted"));
+        assert!(continuation.reason.contains("agent:queue go"));
     }
 
     #[test]
@@ -1117,6 +1171,24 @@ mod tests {
             Some("f")
         );
         assert_eq!(drainable_head_count(&content), 0);
+    }
+
+    #[test]
+    fn supervisor_drains_explicit_start_without_marking_continuation_required() {
+        let content = concat!(
+            "---\nqueue_active: true\nqueue: start\n---\n\n",
+            "<!-- agent:queue -->\n",
+            "/clear\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        assert_eq!(live_continuation_head(content), None);
+        assert_eq!(drainable_head_count(content), 0);
+        assert_eq!(
+            live_drainable_continuation_head(content, DrainScope::Supervisor).as_deref(),
+            Some("/clear"),
+            "supervisor idle drain may honor explicit one-shot start without making it a go continuation"
+        );
     }
 
     #[test]

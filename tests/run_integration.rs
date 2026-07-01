@@ -336,7 +336,7 @@ fn template_doc_with_model() -> String {
 }
 
 fn active_auto_queue_doc() -> String {
-    "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: mock\nmodel: gpt-5\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue auto -->\n- do #fix1\n- do #fix2\n- do #fix3\n<!-- /agent:queue -->\n\n## Pending\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n".to_string()
+    "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: mock\nmodel: gpt-5\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue auto go -->\n- do #fix1\n- do #fix2\n- do #fix3\n<!-- /agent:queue -->\n\n## Pending\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n".to_string()
 }
 
 fn active_large_auto_queue_doc_with_resume() -> String {
@@ -350,7 +350,7 @@ fn active_large_auto_queue_doc_with_resume() -> String {
     // so it must explicitly opt in; without it the run path never starts a fresh
     // agent session before the next queue head.
     format!(
-        "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: mock\nmodel: gpt-5\nresume: old-session\nqueue_active: true\nagent_doc_queue_context_reset: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n{exchange_lines}\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue auto -->\n- do #fix1\n- do #fix2\n<!-- /agent:queue -->\n\n## Pending\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n"
+        "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: mock\nmodel: gpt-5\nresume: old-session\nqueue_active: true\nagent_doc_queue_context_reset: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n{exchange_lines}\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue auto go -->\n- do #fix1\n- do #fix2\n<!-- /agent:queue -->\n\n## Pending\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n"
     )
 }
 
@@ -564,15 +564,15 @@ fn queue_section_of(content: &str) -> String {
 
 fn active_persisted_queue_doc() -> String {
     // Persisted-active queue: `queue_active: true` but the opening tag is plain
-    // `<!-- agent:queue -->` (no `auto`). `#active-queue-persisted-no-continue`.
+    // `<!-- agent:queue -->` (no `go`). `#active-queue-persisted-no-continue`.
     "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: mock\nmodel: gpt-5\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n- do #fix1\n- do #fix2\n- do #fix3\n<!-- /agent:queue -->\n\n## Pending\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n".to_string()
 }
 
 #[test]
-fn run_persisted_active_queue_continues_until_drained_without_auto() {
-    // `#active-queue-persisted-no-continue`: an already-active queue with no
-    // `auto` attribute must keep draining after each clean closeout — `auto` is
-    // a start trigger only; `queue_active: true` is the continuation signal.
+fn run_persisted_active_plain_queue_without_go_does_not_continue() {
+    // `#active-queue-persisted-no-continue`: an already-active queue without
+    // explicit `go` mode is inert. `queue_active: true` is persisted state, not a
+    // continuation signal by itself.
     let tmp = TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");
     let active_doc = active_persisted_queue_doc();
@@ -584,58 +584,36 @@ fn run_persisted_active_queue_continues_until_drained_without_auto() {
     let (script, counter) = write_counting_queue_agent(tmp.path());
     let config_root = write_config(tmp.path(), &script);
 
-    agent_doc()
+    let assert = agent_doc()
         .current_dir(tmp.path())
         .env("XDG_CONFIG_HOME", &config_root)
         .args(["run", "--force-disk", doc.to_str().unwrap()])
         .assert()
-        .success()
-        .stderr(predicate::str::contains(
-            "[run] active queue head synthesized as prompt diff",
-        ))
-        .stderr(predicate::str::contains(
-            "[queue] queue continuation: completed 1 item(s); launching next prompt: \"do #fix2\"",
-        ))
-        .stderr(predicate::str::contains(
-            "[queue] queue continuation: completed 2 item(s); launching next prompt: \"do #fix3\"",
-        ));
+        .success();
+    let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
+    assert!(
+        !stderr.contains("[run] active queue head synthesized as prompt diff"),
+        "plain persisted queue must not synthesize a queue prompt:\n{stderr}"
+    );
 
     let content = fs::read_to_string(&doc).unwrap();
-    assert!(
-        content.contains("### Re: queue item 1 — gpt-5"),
-        "first queue response should be written"
-    );
-    assert!(
-        content.contains("### Re: queue item 3 — gpt-5"),
-        "third queue response should be written"
-    );
-    assert!(
-        content.contains("queue: stop"),
-        "queue should clear active state after all prompts are consumed"
-    );
+    assert_eq!(content, active_doc);
     let queue_section = queue_section_of(&content);
     assert!(
-        !queue_section.contains("do #fix1"),
+        queue_section.contains("do #fix1"),
         "queue:\n{queue_section}"
     );
     assert!(
-        !queue_section.contains("do #fix2"),
-        "queue:\n{queue_section}"
+        !counter.exists(),
+        "mock queue agent must not be invoked for a non-go persisted queue"
     );
-    assert!(
-        !queue_section.contains("do #fix3"),
-        "queue:\n{queue_section}"
-    );
-    assert!(content.contains("> do #fix1"), "response echo:\n{content}");
-    assert!(content.contains("> do #fix3"), "response echo:\n{content}");
-    assert_eq!(fs::read_to_string(counter).unwrap(), "3");
 }
 
 #[test]
 fn run_auto_queue_stop_fence_halts_continuation_before_next_prompt() {
     let tmp = TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");
-    let active_doc = "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: mock\nmodel: gpt-5\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue auto -->\n- do #fix1\n--- stop\n- do #fix2\n<!-- /agent:queue -->\n\n## Pending\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n";
+    let active_doc = "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: mock\nmodel: gpt-5\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue auto go -->\n- do #fix1\n--- stop\n- do #fix2\n<!-- /agent:queue -->\n\n## Pending\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n";
     fs::write(&doc, active_doc).unwrap();
     init_git_repo(tmp.path(), &doc);
     seed_snapshot(tmp.path(), &doc);
@@ -1011,7 +989,7 @@ fn codex_owned_pane_active_auto_queue_hands_off_without_drift() {
     // recursive-deadlock guard abandon an empty cycle with the head still stuck.
     let tmp = TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");
-    let committed = "---\nagent_doc_session: session-recursive\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nAnswered.\n<!-- agent:boundary:committed -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto -->\n- do something\n<!-- /agent:queue -->\n";
+    let committed = "---\nagent_doc_session: session-recursive\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nAnswered.\n<!-- agent:boundary:committed -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto go -->\n- do something\n<!-- /agent:queue -->\n";
     fs::write(&doc, committed).unwrap();
     init_git_repo(tmp.path(), &doc);
     seed_snapshot(tmp.path(), &doc);
@@ -1064,7 +1042,7 @@ fn codex_owned_pane_active_auto_queue_hands_off_without_drift() {
         "owner-pane queue handoff must not mutate the document"
     );
     assert!(content.contains("- do something"));
-    assert!(content.contains("<!-- agent:queue auto -->"));
+    assert!(content.contains("<!-- agent:queue auto go -->"));
 }
 
 #[test]
@@ -1076,7 +1054,7 @@ fn codex_owned_pane_independent_queue_edit_defers_until_closeout() {
     // owner-pane queue handoff or increment the wedge counter.
     let tmp = TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");
-    let committed = "---\nagent_doc_session: session-recursive\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nAnswered.\n<!-- agent:boundary:committed -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto -->\n- do [#active]\n<!-- /agent:queue -->\n";
+    let committed = "---\nagent_doc_session: session-recursive\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nAnswered.\n<!-- agent:boundary:committed -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto go -->\n- do [#active]\n<!-- /agent:queue -->\n";
     fs::write(&doc, committed).unwrap();
     init_git_repo(tmp.path(), &doc);
     seed_snapshot(tmp.path(), &doc);
@@ -1227,14 +1205,14 @@ fn preflight_owned_pane_self_invocation_absent_for_non_owner_pane() {
 fn preflight_emits_owned_pane_self_invocation_for_active_queue_head() {
     // #codex-owned-pane-prompt-miss-followups (guidance): when the Codex owner
     // pane re-invokes the document with no unresolved exchange prompt but an
-    // active `agent:queue auto` head, preflight surfaces the structured contract
+    // active `agent:queue auto go` head, preflight surfaces the structured contract
     // with kind=active_queue_head so the in-pane guidance can drive the next
     // queue continuation instead of launching a recursive child.
     let tmp = TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");
     fs::write(
         &doc,
-        "---\nagent_doc_session: session-recursive\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nAnswered.\n<!-- agent:boundary:committed -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto -->\n- do something\n<!-- /agent:queue -->\n",
+        "---\nagent_doc_session: session-recursive\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nAnswered.\n<!-- agent:boundary:committed -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto go -->\n- do something\n<!-- /agent:queue -->\n",
     )
     .unwrap();
     init_git_repo(tmp.path(), &doc);
@@ -1282,7 +1260,7 @@ fn preflight_suppresses_owned_pane_self_invocation_for_independent_queue_edit() 
     // busy owner pane.
     let tmp = TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");
-    let committed = "---\nagent_doc_session: session-recursive\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nAnswered.\n<!-- agent:boundary:committed -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto -->\n- do [#active]\n<!-- /agent:queue -->\n";
+    let committed = "---\nagent_doc_session: session-recursive\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nAnswered.\n<!-- agent:boundary:committed -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto go -->\n- do [#active]\n<!-- /agent:queue -->\n";
     fs::write(&doc, committed).unwrap();
     init_git_repo(tmp.path(), &doc);
     seed_snapshot(tmp.path(), &doc);

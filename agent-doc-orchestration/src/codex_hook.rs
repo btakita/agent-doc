@@ -1827,7 +1827,7 @@ queue_active: true\n\
 Done.\n\
 <!-- /agent:exchange -->\n\n\
 ## Queue\n\n\
-<!-- agent:queue auto -->\n\
+<!-- agent:queue auto go -->\n\
 {queue}\
 <!-- /agent:queue -->\n"
         );
@@ -3615,7 +3615,7 @@ agent-doc {}\n",
         }
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("### Re: #next-steps — gpt-5"));
-        assert!(content.contains("<!-- agent:queue auto -->"));
+        assert!(content.contains("<!-- agent:queue auto go -->"));
         assert!(content.contains("queue_active: true"));
         assert!(content.contains("- do #fix1"));
         assert!(!content.contains("- ~~do #fix1~~"));

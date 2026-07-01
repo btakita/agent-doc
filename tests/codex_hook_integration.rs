@@ -57,7 +57,7 @@ fn auto_queue_doc_content_with_prompts(prompts: &[&str]) -> String {
         .map(|prompt| format!("- {prompt}\n"))
         .collect::<String>();
     format!(
-        "---\nagent_doc_session: testsid\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n### Re: prior — gpt-5\n\nDone.\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto -->\n{queue}<!-- /agent:queue -->\n"
+        "---\nagent_doc_session: testsid\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n### Re: prior — gpt-5\n\nDone.\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto go -->\n{queue}<!-- /agent:queue -->\n"
     )
 }
 

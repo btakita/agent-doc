@@ -36,8 +36,12 @@ pub fn create_request(
     let doc_path = doc
         .canonicalize()
         .context("could not canonicalize document path")?;
-    let hash = agent_doc_hash::path_hash(&doc_path)
-        .with_context(|| format!("canonicalize document path for hash: {}", doc_path.display()))?;
+    let hash = agent_doc_hash::path_hash(&doc_path).with_context(|| {
+        format!(
+            "canonicalize document path for hash: {}",
+            doc_path.display()
+        )
+    })?;
     let dir = callback_dir_for(&doc_path)?;
 
     std::fs::create_dir_all(&dir)?;

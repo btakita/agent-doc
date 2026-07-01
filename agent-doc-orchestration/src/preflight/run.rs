@@ -1822,7 +1822,7 @@ mod tests {
             "### Re: prior — gpt-5\n\n",
             "Done.\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue auto -->\n",
+            "<!-- agent:queue auto go -->\n",
             "- do [#oobpmt]\n",
             "<!-- /agent:queue -->\n\n",
             "## Backlog\n\n",
@@ -1862,7 +1862,7 @@ mod tests {
             "### Re: prior — gpt-5\n\n",
             "Done.\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue -->\n",
+            "<!-- agent:queue go -->\n",
             "- 🚧 do [#active]\n",
             "- do [#future-old]\n",
             "<!-- /agent:queue -->\n\n",
@@ -1914,7 +1914,7 @@ mod tests {
             "### Re: prior — gpt-5\n\n",
             "Done.\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue priority -->\n",
+            "<!-- agent:queue priority go -->\n",
             "- 🚧 do [#active] after=#blocker\n",
             "- do [#old]\n",
             "<!-- /agent:queue -->\n\n",
@@ -1959,7 +1959,7 @@ mod tests {
             "### Re: prior — gpt-5\n\n",
             "Done.\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue -->\n",
+            "<!-- agent:queue go -->\n",
             "- 🚧 do [#active]\n",
             "- do [#future-old]\n",
             "<!-- /agent:queue -->\n\n",
@@ -2063,7 +2063,7 @@ mod tests {
             "### Re: prior — gpt-5\n\n",
             "Done.\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue auto -->\n",
+            "<!-- agent:queue auto go -->\n",
             "-   /clear  \n",
             "<!-- /agent:queue -->\n"
         );
@@ -2160,7 +2160,7 @@ mod tests {
             "<!-- agent:exchange patch=append -->\n",
             "### Re: prior — gpt-5\n\nDone.\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue -->\n",
+            "<!-- agent:queue go -->\n",
             "<!-- /agent:queue -->\n\n",
             "<!-- agent:backlog priority queue -->\n",
             "- [ ] [#alpha] run the alpha task\n",
@@ -2402,7 +2402,7 @@ mod tests {
         assert!(!updated.contains("preset #spec-test-build-install-commit-push"));
         assert!(!updated.contains("[#crossdocpend]"));
         assert!(!updated.contains("[#spfxnorm]"));
-        assert!(updated.contains("queue_active: false"));
+        assert!(updated.contains("queue: stop"));
 
         let snap = snapshot::load(&doc).unwrap().unwrap();
         assert!(snap.contains("<!-- agent:queue -->\n<!-- /agent:queue -->"));
@@ -2443,7 +2443,7 @@ mod tests {
         );
         assert!(!updated.contains("[#item-a]"));
         assert!(!updated.contains("[#item-b]"));
-        assert!(updated.contains("queue_active: false"));
+        assert!(updated.contains("queue: stop"));
     }
     #[test]
     fn preflight_does_not_clear_live_inactive_queue_without_snapshot_proof() {
@@ -2511,7 +2511,7 @@ mod tests {
         );
         assert!(!updated.contains("dispatch #spec-test-build-install-commit-push"));
         assert!(!updated.contains("[#cspe]"));
-        assert!(updated.contains("queue_active: false"));
+        assert!(updated.contains("queue: stop"));
 
         let snap = snapshot::load(&doc).unwrap().unwrap();
         assert!(snap.contains("<!-- agent:queue -->\n<!-- /agent:queue -->"));

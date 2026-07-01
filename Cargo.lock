@@ -573,7 +573,9 @@ dependencies = [
  "agent-doc-diff",
  "agent-doc-element",
  "agent-doc-element-backlog",
+ "agent-doc-hash",
  "agent-doc-session-accretion",
+ "lazily 0.13.1",
 ]
 
 [[package]]

@@ -619,7 +619,7 @@ mod tests {
     fn metadata_drift_authority_head_when_local_drops_live_continuation() {
         let head = concat!(
             "---\nagent_doc_session: test\nagent_doc_format: template\nqueue_active: true\n---\n\n",
-            "<!-- agent:queue -->\n- do [#a]\n- do [#b]\n<!-- /agent:queue -->\n",
+            "<!-- agent:queue auto go -->\n- do [#a]\n- do [#b]\n<!-- /agent:queue -->\n",
         );
         let local = head.replace("queue_active: true", "queue_active: false");
         assert_eq!(
@@ -632,7 +632,7 @@ mod tests {
     fn metadata_drift_authority_local_when_no_live_head_continuation() {
         let head = concat!(
             "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-            "<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n",
+            "<!-- agent:queue auto go -->\n- do [#a]\n<!-- /agent:queue -->\n",
         );
         let local = head.replace("- do [#a]\n", "- do [#a]\n- do [#b]\n");
         assert_eq!(
@@ -645,7 +645,7 @@ mod tests {
     fn metadata_drift_authority_ambiguous_when_live_heads_diverge() {
         let head = concat!(
             "---\nagent_doc_session: test\nagent_doc_format: template\nqueue_active: true\n---\n\n",
-            "<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n",
+            "<!-- agent:queue auto go -->\n- do [#a]\n<!-- /agent:queue -->\n",
         );
         let local = head.replace("- do [#a]", "- do [#z]");
         assert_eq!(

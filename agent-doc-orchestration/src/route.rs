@@ -5101,11 +5101,11 @@ mod tests {
             "do [#qipc]. #spec-test-build-install-commit-push"
         );
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("queue: start"));
-        assert!(updated.contains("<!-- agent:queue -->"));
+        assert!(updated.contains("queue: go"));
+        assert!(updated.contains("<!-- agent:queue go -->"));
         assert!(!updated.contains("agent:queue auto"));
         assert!(updated.contains("- do [#qipc]. #spec-test-build-install-commit-push"));
-        let queue_pos = updated.find("<!-- agent:queue -->").unwrap();
+        let queue_pos = updated.find("<!-- agent:queue go -->").unwrap();
         let backlog_pos = updated.find("<!-- agent:backlog -->").unwrap();
         assert!(
             queue_pos < backlog_pos,
@@ -5130,11 +5130,11 @@ mod tests {
         let content = concat!(
             "---\n",
             "agent_doc_format: template\n",
-            "queue: start\n",
+            "queue_active: true\n",
             "---\n\n",
             "<!-- agent:exchange -->\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue -->\n",
+            "<!-- agent:queue go -->\n",
             "- existing queued prompt\n",
             "<!-- /agent:queue -->\n\n",
             "<!-- agent:backlog -->\n",
@@ -5143,11 +5143,11 @@ mod tests {
         let expected = concat!(
             "---\n",
             "agent_doc_format: template\n",
-            "queue: start\n",
+            "queue: go\n",
             "---\n\n",
             "<!-- agent:exchange -->\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue -->\n",
+            "<!-- agent:queue go -->\n",
             "- :pushpin: manual preempt prompt\n",
             "- existing queued prompt\n",
             "<!-- /agent:queue -->\n\n",
@@ -5279,8 +5279,8 @@ mod tests {
         assert!(!outcome.component_created);
         assert!(outcome.activated);
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("queue: start"));
-        assert!(updated.contains("<!-- agent:queue -->"));
+        assert!(updated.contains("queue: go"));
+        assert!(updated.contains("<!-- agent:queue go -->"));
         assert!(!updated.contains("agent:queue auto"));
         assert_eq!(
             updated
@@ -5291,7 +5291,7 @@ mod tests {
         );
     }
     #[test]
-    fn route_activates_existing_inactive_auto_queue_head_as_plain_queue_for_busy_deferral() {
+    fn route_activates_existing_inactive_auto_go_queue_head_as_go_queue_for_busy_deferral() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("session.md");
@@ -5302,7 +5302,7 @@ mod tests {
             "---\n\n",
             "<!-- agent:exchange -->\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue auto -->\n",
+            "<!-- agent:queue auto go -->\n",
             "- do [#shipstationaudit]. #spec-test-commit-push\n",
             "<!-- /agent:queue -->\n\n",
             "<!-- agent:backlog -->\n",
@@ -5320,7 +5320,7 @@ mod tests {
         let _force_disk_guard = super::ForceDiskRouteWritesGuard::set(true);
         let outcome = activate_existing_route_queue_head(&doc, "busy actor")
             .unwrap()
-            .expect("legacy inactive auto queue head should activate");
+            .expect("legacy inactive auto go queue head should activate");
 
         assert_eq!(
             outcome.prompt_text,
@@ -5333,8 +5333,8 @@ mod tests {
         assert!(outcome.activated);
 
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("queue: start"));
-        assert!(updated.contains("<!-- agent:queue -->"));
+        assert!(updated.contains("queue: go"));
+        assert!(updated.contains("<!-- agent:queue go -->"));
         assert!(!updated.contains("agent:queue auto"));
         assert_eq!(
             updated
@@ -5346,7 +5346,7 @@ mod tests {
         assert_eq!(
             agent_doc_queue::queue_continuation::live_continuation_head(&updated).as_deref(),
             Some("shipstationaudit"),
-            "activated queue should become drainable by the idle-queue watch"
+            "activated go queue should become drainable by the idle-queue watch"
         );
         let snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
         assert_eq!(snapshot, updated, "route activation must sync the snapshot");
@@ -5396,7 +5396,7 @@ mod tests {
             "---\n\n",
             "<!-- agent:exchange -->\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue auto -->\n",
+            "<!-- agent:queue auto go -->\n",
             "- do [#committed]\n",
             "<!-- /agent:queue -->\n"
         );
@@ -5409,7 +5409,7 @@ mod tests {
             "---\n\n",
             "<!-- agent:exchange -->\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue auto -->\n",
+            "<!-- agent:queue auto go -->\n",
             "- do [#fresh]\n",
             "- do [#committed]\n",
             "<!-- /agent:queue -->\n"
@@ -5465,7 +5465,7 @@ mod tests {
             "---\n\n",
             "<!-- agent:exchange -->\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue auto -->\n",
+            "<!-- agent:queue auto go -->\n",
             "- do [#committed]\n",
             "<!-- /agent:queue -->\n"
         );
@@ -5526,19 +5526,19 @@ mod tests {
         );
     }
     #[test]
-    fn busy_route_defers_to_active_auto_loop_instead_of_refusing() {
+    fn busy_route_defers_to_active_go_loop_instead_of_refusing() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
         let doc = dir.path().join("session.md");
         let content = concat!(
             "---\n",
             "agent_doc_format: template\n",
-            "queue: start\n",
+            "queue_active: true\n",
             "---\n\n",
             "<!-- agent:exchange -->\n",
             "### Re: prior — gpt-5\n\nDone.\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue auto -->\n",
+            "<!-- agent:queue auto go -->\n",
             "- do [#regional]\n",
             "<!-- /agent:queue -->\n"
         );
@@ -5549,18 +5549,18 @@ mod tests {
         assert_eq!(
             inactive_route_queue_head(&doc).unwrap(),
             None,
-            "an already-active auto-queue exposes no inactive head to activate"
+            "an already-active go queue exposes no inactive head to activate"
         );
         assert_eq!(
             activate_existing_route_queue_head(&doc, "busy actor").unwrap(),
             None,
-            "activate path returns None when the queue is already auto-looping"
+            "activate path returns None when the queue is already go-looping"
         );
         // But the active-loop continuation signal IS present — this is what the busy
         // route path uses to defer (report success) instead of failing closed.
         let continuation = crate::queue_continuation::detect(&doc)
             .unwrap()
-            .expect("active auto-loop must expose a continuation head for busy deferral");
+            .expect("active go-loop must expose a continuation head for busy deferral");
         assert_eq!(continuation.head_prompt, "do [#regional]");
     }
     #[test]
@@ -5608,8 +5608,8 @@ mod tests {
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("queue: start"),
-            "activation must flip the canonical control to start:\n{updated}"
+            updated.contains("queue: go"),
+            "activation must flip the canonical control to go:\n{updated}"
         );
         assert_eq!(
             agent_doc_queue::queue_continuation::live_continuation_head(&updated).as_deref(),
@@ -5735,7 +5735,7 @@ mod tests {
         assert!(!outcome.component_created);
         assert!(outcome.activated);
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("<!-- agent:queue -->"));
+        assert!(updated.contains("<!-- agent:queue go -->"));
         assert!(!updated.contains("agent:queue auto"));
         assert!(
             !updated.contains("- Run Agent Doc queued the first prompt."),
@@ -5784,7 +5784,7 @@ mod tests {
         assert!(!outcome.component_created);
         assert!(outcome.activated);
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("<!-- agent:queue -->"));
+        assert!(updated.contains("<!-- agent:queue go -->"));
         assert!(!updated.contains("agent:queue auto"));
         assert!(
             updated
@@ -5824,7 +5824,7 @@ mod tests {
         assert!(!outcome.already_present);
         assert!(!outcome.superseded);
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("<!-- agent:queue -->"));
+        assert!(updated.contains("<!-- agent:queue go -->"));
         assert!(!updated.contains("agent:queue auto"));
         assert!(
             updated.contains(
@@ -5867,7 +5867,7 @@ mod tests {
         assert!(outcome.appended);
         assert!(!outcome.superseded, "priority dispatch must not supersede");
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("<!-- agent:queue -->"));
+        assert!(updated.contains("<!-- agent:queue go -->"));
         assert!(!updated.contains("agent:queue auto"));
         assert!(
             updated.contains("- :pushpin: manual preempt prompt\n- pending auto-loop item"),
@@ -5903,7 +5903,7 @@ mod tests {
             .expect("priority route dispatch should insert after leading directives");
 
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("<!-- agent:queue -->"));
+        assert!(updated.contains("<!-- agent:queue go -->"));
         assert!(!updated.contains("agent:queue auto"));
         let preset_pos = updated
             .find("preset #spec")
@@ -6323,7 +6323,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             "queue_active: true\n",
             "---\n\n",
             "## Queue\n\n",
-            "<!-- agent:queue auto -->\n",
+            "<!-- agent:queue auto go -->\n",
             "- :pushpin: [#jbruncloseoutstate]\n",
             "<!-- /agent:queue -->\n"
         );

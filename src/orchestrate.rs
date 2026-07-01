@@ -1463,6 +1463,7 @@ mod tests {
         agent_doc_orchestration::project_controller::append_state_event(root, &event).unwrap();
     }
 
+    #[test]
     fn extract_tasks_prefers_last_fenced_list() {
         let text = "Notes\n\n- old one\n\n```md\n- do first\n- do second\n```\n";
         assert_eq!(
@@ -1716,6 +1717,7 @@ mod tests {
     .unwrap();
         assert_eq!(quoted_later, source);
     }
+    #[test]
     fn send_fresh_response_uses_no_resume() {
         let agent = CaptureAgent {
             seen_prompt: RefCell::new(Vec::new()),

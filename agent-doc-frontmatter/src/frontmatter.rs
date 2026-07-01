@@ -1342,6 +1342,22 @@ pub fn merge_queue_state(content: &str, active: bool) -> Result<String> {
     write(&fm, body)
 }
 
+/// Persist an explicit canonical `queue:` control value, clearing the deprecated
+/// `queue_active:` line so the queue marker/frontmatter binding has one written
+/// frontmatter source.
+pub fn merge_queue_control(content: &str, control: &str) -> Result<String> {
+    let normalized = match control.trim().to_ascii_lowercase().as_str() {
+        "go" => "go",
+        "start" => "start",
+        "stop" => "stop",
+        other => anyhow::bail!("unsupported queue control `{other}`"),
+    };
+    let (mut fm, body) = parse(content)?;
+    fm.queue = Some(normalized.to_string());
+    fm.queue_active = None;
+    write(&fm, body)
+}
+
 /// Update the tmux_session name in a document string.
 ///
 /// **Deprecated.** `tmux_session` in frontmatter is deprecated — session is now

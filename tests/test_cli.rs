@@ -15347,7 +15347,7 @@ fn test_preflight_warns_but_does_not_target_inactive_queue_edit() {
         json.get("prompt_bearing_changes").is_none(),
         "preflight JSON must not expose removed prompt_bearing_changes field: {json}"
     );
-    assert_eq!(json["queue_active"], serde_json::Value::Null);
+    assert_eq!(json["queue_active"], serde_json::Value::Bool(false));
 }
 
 #[test]

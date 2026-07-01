@@ -874,6 +874,9 @@ fn active_queue_prompt_state(file: &Path) -> Result<ActiveQueuePromptState> {
     else {
         return Ok(ActiveQueuePromptState::Inactive);
     };
+    if !explicit_queue_go_mode(&queue_component.attrs, fm.queue.as_deref()) {
+        return Ok(ActiveQueuePromptState::Inactive);
+    }
     let body = &content[queue_component.open_end..queue_component.close_start];
     let entries = agent_doc_queue::document_queue::parse(body)
         .context("run queue resume: failed to parse document queue")?;
@@ -900,6 +903,14 @@ fn active_queue_prompt_state(file: &Path) -> Result<ActiveQueuePromptState> {
         reason: "missing_or_stale_typed_queue_head".to_string(),
         document_head,
     })
+}
+
+fn explicit_queue_go_mode(
+    attrs: &std::collections::HashMap<String, String>,
+    frontmatter_queue: Option<&str>,
+) -> bool {
+    attrs.contains_key("go")
+        || frontmatter_queue.is_some_and(|raw| raw.trim().eq_ignore_ascii_case("go"))
 }
 
 fn typed_queue_prompt_state(file: &Path, content: &str) -> Option<ActiveQueuePromptState> {
@@ -960,12 +971,12 @@ fn should_continue_auto_queue(
     let Some(queue) = outcome.queue_consumption.as_ref() else {
         return Ok(AutoQueueContinuation::Stop);
     };
-    // `auto` is a start trigger only. Continuation is driven by typed active
-    // queue state: consumption only runs when `queue_active: true`, so an active
-    // persisted queue (no `auto`) continues on the same evidence as `auto`
-    // (`#active-queue-persisted-no-continue`). The `active_queue_prompt_state`
-    // re-check below still halts on typed stop fence / time gate /
-    // head-modified / inactive / empty, and refuses markdown-only fallback.
+    // `auto` and `start` are start triggers only. Continuation is driven by
+    // typed active queue state plus explicit `go` mode; a persisted
+    // `queue_active: true` plain queue stays inert. The
+    // `active_queue_prompt_state` re-check below still halts on typed stop fence
+    // / time gate / head-modified / inactive / empty, and refuses markdown-only
+    // fallback.
     if queue.drained || queue.remaining == 0 {
         return Ok(AutoQueueContinuation::Stop);
     }
@@ -1970,7 +1981,7 @@ mod tests {
             "<!-- agent:exchange patch=append -->\n",
             "### Re: prior — gpt-5\n\nDone.\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue auto -->\n",
+            "<!-- agent:queue auto go -->\n",
             "-   /clear  \n",
             "<!-- /agent:queue -->\n"
         );
@@ -2001,7 +2012,7 @@ mod tests {
             "<!-- agent:exchange patch=append -->\n",
             "### Re: prior — gpt-5\n\nDone.\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue auto -->\n",
+            "<!-- agent:queue auto go -->\n",
             "- do [#markdownhead]\n",
             "<!-- /agent:queue -->\n"
         );
@@ -2023,6 +2034,54 @@ mod tests {
     }
 
     #[test]
+    fn active_queue_prompt_state_ignores_persisted_plain_queue_without_go() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#plainhead]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+        let node_key = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+            .unwrap()
+            .into_iter()
+            .find(|node| !node.item.struck)
+            .expect("queue head should have a node key")
+            .node_key;
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
+        let event = crate::state_backbone::StateEvent::new(
+            "typed-selected-plain-no-go",
+            crate::state_backbone::StateFact::QueueHeadSelected {
+                document_hash,
+                node_key,
+                backlog_id: Some("plainhead".to_string()),
+                prompt_text: Some("do [#plainhead]".to_string()),
+                drainable: true,
+                hosting_epoch: None,
+            },
+        );
+        crate::project_controller::append_state_event(dir.path(), &event).unwrap();
+
+        assert_eq!(
+            active_queue_prompt_state(&doc).unwrap(),
+            ActiveQueuePromptState::Inactive
+        );
+        assert_eq!(active_queue_prompt_diff(&doc).unwrap(), None);
+    }
+
+    #[test]
     fn should_continue_auto_queue_stops_without_typed_head_projection() {
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
@@ -2037,7 +2096,7 @@ mod tests {
             "<!-- agent:exchange patch=append -->\n",
             "### Re: prior — gpt-5\n\nDone.\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue auto -->\n",
+            "<!-- agent:queue auto go -->\n",
             "- do [#markdownhead]\n",
             "<!-- /agent:queue -->\n"
         );
@@ -2078,7 +2137,7 @@ mod tests {
             "<!-- agent:exchange patch=append -->\n",
             "### Re: prior — gpt-5\n\nDone.\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue auto -->\n",
+            "<!-- agent:queue auto go -->\n",
             "- do [#markdownhead]\n",
             "<!-- /agent:queue -->\n"
         );
@@ -2121,7 +2180,7 @@ mod tests {
             "<!-- agent:exchange patch=append -->\n",
             "### Re: prior — gpt-5\n\nDone.\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue auto -->\n",
+            "<!-- agent:queue auto go -->\n",
             "- do [#markdownhead]\n",
             "<!-- /agent:queue -->\n"
         );
@@ -2170,7 +2229,7 @@ mod tests {
             "<!-- agent:exchange patch=append -->\n",
             "### Re: prior — gpt-5\n\nDone.\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue auto -->\n",
+            "<!-- agent:queue auto go -->\n",
             "- do [#markdownhead]\n",
             "<!-- /agent:queue -->\n"
         );

@@ -284,7 +284,10 @@ mod tests {
 
     #[test]
     fn sanitize_stamp_component_replaces_path_separators() {
-        assert_eq!(sanitize_stamp_component("/tmp/socket:name"), "_tmp_socket_name");
+        assert_eq!(
+            sanitize_stamp_component("/tmp/socket:name"),
+            "_tmp_socket_name"
+        );
         assert_eq!(sanitize_stamp_component("safe-name_1"), "safe-name_1");
     }
 

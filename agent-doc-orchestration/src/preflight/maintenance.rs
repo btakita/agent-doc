@@ -1097,6 +1097,7 @@ pub(crate) fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<Que
         Ok(content) => content,
         Err(_) => return Ok(QueueState::default()),
     };
+    let (content, _) = project_queue_control_binding_content(file, &content)?;
     let components = match agent_doc_element::element::parse(&content) {
         Ok(components) => components,
         Err(_) => return Ok(QueueState::default()),
@@ -1133,12 +1134,16 @@ pub(crate) fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<Que
         .unwrap_or(false);
     let (fm, _) = frontmatter::parse(&content).unwrap_or_default();
     let persisted_active = fm.queue_active.unwrap_or(false);
+    let explicit_stop = explicit_queue_stop_mode(&comp.attrs, fm.queue.as_deref());
+    let persisted_activation = persisted_active
+        && (explicit_queue_go_mode(&comp.attrs, fm.queue.as_deref())
+            || explicit_queue_start_mode(&comp.attrs, fm.queue.as_deref()));
 
     let mut activation = agent_doc_queue::document_queue::resolve_activation(
         &entries,
         has_auto,
         exchange_triggered,
-        persisted_active,
+        persisted_activation,
     );
     if marker_stop && activation.active {
         activation = agent_doc_queue::document_queue::QueueActivation {
@@ -1243,7 +1248,7 @@ pub(crate) fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<Que
             Some(true)
         } else if activation.deferred {
             None
-        } else if persisted_active {
+        } else if persisted_active || explicit_stop {
             Some(false)
         } else {
             None
@@ -1338,7 +1343,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // #qprtloss: journal the live queue as soon as it is parsed, before any
     // convergence/normalization branch can return early and erase an
     // uncommitted operator prompt from the visible queue.
-    if let Err(err) = crate::queue_journal::record(file, &content) {
+    if let Err(err) = crate::queue_journal::record(file, &current_content) {
         eprintln!(
             "[agent-doc] queue_journal: early record failed for {} ({err:#})",
             file.display()
@@ -1374,6 +1379,22 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         mutated = true;
         queue_tag_attrs_normalized = true;
         eprintln!("[preflight] queue: normalized malformed queue marker attributes");
+    }
+    let persisted_active_before_binding = frontmatter::parse(&current_content)
+        .ok()
+        .and_then(|(fm, _)| fm.queue_active)
+        .unwrap_or(false);
+    if let (projected, true) = project_queue_control_binding_content(file, &current_content)? {
+        current_content = projected;
+        content = current_content.clone();
+        components = agent_doc_element::element::parse(&current_content)?;
+        comp = components
+            .iter()
+            .find(|c| c.name == "queue")
+            .context("queue maintenance: queue component vanished after control binding sync")?
+            .clone();
+        mutated = true;
+        eprintln!("[preflight] queue: synchronized queue marker/frontmatter control binding");
     }
 
     let project_root = file.canonicalize().ok().and_then(|canonical| {
@@ -1609,6 +1630,12 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 .as_ref()
                 .and_then(|fm| fm.queue.as_deref()),
         );
+        let queue_explicitly_stopped = explicit_queue_stop_mode(
+            &comp.attrs,
+            incoming_frontmatter
+                .as_ref()
+                .and_then(|fm| fm.queue.as_deref()),
+        );
         // `#backlog-queue-attr-populates-in-go-mode`: a plain persisted-active
         // queue (no explicit `go`) still holds freshly-added backlog ids out of the
         // running loop to avoid mid-loop amplification. But a `go`-mode queue
@@ -1618,7 +1645,15 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         // Append/Prepend stay idempotent (existing + struck `Completed` ids are
         // never re-added) and processed items drop out of `active_item_ids` once
         // marked `[/]`/`[x]`, so the queue stays bounded by the open backlog.
-        if persisted_active_incoming && !queue_go_mode {
+        if queue_explicitly_stopped {
+            let held = backlog_ids.len();
+            backlog_ids.clear();
+            if held > 0 {
+                eprintln!(
+                    "[preflight] queue: held {held} backlog id(s) out of explicitly stopped queue binding"
+                );
+            }
+        } else if persisted_active_incoming && persisted_active_before_binding && !queue_go_mode {
             let existing_queue_ids: std::collections::HashSet<String> = entries
                 .iter()
                 .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
@@ -1828,12 +1863,16 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         .unwrap_or(false);
     let (fm, _) = frontmatter::parse(&current_content).unwrap_or_default();
     let persisted_active = fm.queue_active.unwrap_or(false);
+    let explicit_stop = explicit_queue_stop_mode(&comp.attrs, fm.queue.as_deref());
+    let persisted_activation = persisted_active
+        && (explicit_queue_go_mode(&comp.attrs, fm.queue.as_deref())
+            || explicit_queue_start_mode(&comp.attrs, fm.queue.as_deref()));
 
     let mut activation = agent_doc_queue::document_queue::resolve_activation(
         &entries,
         has_auto,
         exchange_triggered,
-        persisted_active,
+        persisted_activation,
     );
     // A `stop` marker control forces the queue inactive this cycle regardless of
     // any other activation signal (#queue-state-unify), so the later
@@ -2296,21 +2335,8 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                 let q = comps.iter().find(|c| c.name == "queue").unwrap();
                 q.replace_content(&current_content, &new_body)
             };
-            // Strip auto and clear queue_active
-            if has_auto {
-                let comps = agent_doc_element::element::parse(&current_content)?;
-                if let Some(q) = comps.iter().find(|c| c.name == "queue") {
-                    let raw = &current_content[q.open_start..q.open_end];
-                    let new_tag = agent_doc_queue::document_queue::strip_auto_from_tag(raw);
-                    if new_tag != raw {
-                        let mut rebuilt = String::with_capacity(current_content.len());
-                        rebuilt.push_str(&current_content[..q.open_start]);
-                        rebuilt.push_str(&new_tag);
-                        rebuilt.push_str(&current_content[q.open_end..]);
-                        current_content = rebuilt;
-                    }
-                }
-            }
+            // Strip ephemeral activation controls and clear queue state.
+            current_content = strip_queue_activation_tokens_in_content(&current_content)?;
             if persisted_active {
                 current_content = frontmatter::merge_queue_state(&current_content, false)?;
             }
@@ -2328,20 +2354,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                     && let Some(sq) = sc.iter().find(|c| c.name == "queue")
                 {
                     new_snap = sq.replace_content(&new_snap, &new_body);
-                    if has_auto
-                        && let Ok(sc2) = agent_doc_element::element::parse(&new_snap)
-                        && let Some(sq2) = sc2.iter().find(|c| c.name == "queue")
-                    {
-                        let raw = &new_snap[sq2.open_start..sq2.open_end];
-                        let new_tag = agent_doc_queue::document_queue::strip_auto_from_tag(raw);
-                        if new_tag != raw {
-                            let mut rebuilt = String::with_capacity(new_snap.len());
-                            rebuilt.push_str(&new_snap[..sq2.open_start]);
-                            rebuilt.push_str(&new_tag);
-                            rebuilt.push_str(&new_snap[sq2.open_end..]);
-                            new_snap = rebuilt;
-                        }
-                    }
+                    new_snap = strip_queue_activation_tokens_in_content(&new_snap)?;
                     if persisted_active
                         && let Ok(m) = frontmatter::merge_queue_state(&new_snap, false)
                     {
@@ -2472,21 +2485,8 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                     eprintln!(
                         "[preflight] queue: pause — head prompt modified mid-edit (buffer not settled); not grabbing a half-typed head"
                     );
-                    // Strip auto and clear queue_active
-                    if has_auto {
-                        let comps = agent_doc_element::element::parse(&current_content)?;
-                        if let Some(q) = comps.iter().find(|c| c.name == "queue") {
-                            let raw = &current_content[q.open_start..q.open_end];
-                            let new_tag = agent_doc_queue::document_queue::strip_auto_from_tag(raw);
-                            if new_tag != raw {
-                                let mut rebuilt = String::with_capacity(current_content.len());
-                                rebuilt.push_str(&current_content[..q.open_start]);
-                                rebuilt.push_str(&new_tag);
-                                rebuilt.push_str(&current_content[q.open_end..]);
-                                current_content = rebuilt;
-                            }
-                        }
-                    }
+                    // Strip ephemeral activation controls and clear queue state.
+                    current_content = strip_queue_activation_tokens_in_content(&current_content)?;
                     if persisted_active {
                         current_content = frontmatter::merge_queue_state(&current_content, false)?;
                     }
@@ -2499,20 +2499,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
                     // Update snapshot
                     if let Ok(Some(snap2)) = snapshot::load(file) {
                         let mut ns = snap2.clone();
-                        if has_auto
-                            && let Ok(sc) = agent_doc_element::element::parse(&ns)
-                            && let Some(sq) = sc.iter().find(|c| c.name == "queue")
-                        {
-                            let raw = &ns[sq.open_start..sq.open_end];
-                            let new_tag = agent_doc_queue::document_queue::strip_auto_from_tag(raw);
-                            if new_tag != raw {
-                                let mut rebuilt = String::with_capacity(ns.len());
-                                rebuilt.push_str(&ns[..sq.open_start]);
-                                rebuilt.push_str(&new_tag);
-                                rebuilt.push_str(&ns[sq.open_end..]);
-                                ns = rebuilt;
-                            }
-                        }
+                        ns = strip_queue_activation_tokens_in_content(&ns)?;
                         if persisted_active
                             && let Ok(m) = frontmatter::merge_queue_state(&ns, false)
                         {
@@ -2798,12 +2785,14 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
             };
             new_snap = snap_q.replace_content(&new_snap, &new_body);
 
-            if need_strip_auto
+            if (need_strip_auto || marker_stop)
                 && let Ok(snap_comps2) = agent_doc_element::element::parse(&new_snap)
                 && let Some(snap_q2) = snap_comps2.iter().find(|c| c.name == "queue")
             {
                 let raw_tag = &new_snap[snap_q2.open_start..snap_q2.open_end];
-                let new_tag = agent_doc_queue::document_queue::strip_auto_from_tag(raw_tag);
+                let new_tag = agent_doc_queue::document_queue::strip_control_from_tag(
+                    &agent_doc_queue::document_queue::strip_auto_from_tag(raw_tag),
+                );
                 if new_tag != raw_tag {
                     let mut rebuilt = String::with_capacity(new_snap.len());
                     rebuilt.push_str(&new_snap[..snap_q2.open_start]);
@@ -2880,7 +2869,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
         crate::queue_continuation::document_queue_controller_pause_reason(file);
     let queue_paused = queue_pause_reason.is_some();
     let queue_drainable_head_count = if activation.active {
-        agent_doc_queue::queue_continuation::drainable_head_count(&content)
+        agent_doc_queue::queue_continuation::drainable_head_count(&current_content)
     } else {
         0
     };
@@ -2890,7 +2879,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
     // (or otherwise non-actionable) head stops perpetually reporting `no_changes:false`.
     let queue_supervisor_drainable = activation.active
         && agent_doc_queue::queue_continuation::live_drainable_continuation_head(
-            &content,
+            &current_content,
             agent_doc_queue::queue_continuation::DrainScope::Supervisor,
         )
         .is_some();
@@ -2923,7 +2912,7 @@ pub(crate) fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<Q
             Some(true)
         } else if activation.deferred {
             None
-        } else if persisted_active {
+        } else if persisted_active || explicit_stop {
             Some(false)
         } else {
             None
@@ -3097,6 +3086,223 @@ pub(crate) fn sync_same_cycle_pending_adds_into_go_queue(file: &Path) -> Result<
     Ok(synced_ids)
 }
 
+fn explicit_queue_start_mode(
+    attrs: &std::collections::HashMap<String, String>,
+    frontmatter_queue: Option<&str>,
+) -> bool {
+    attrs.contains_key("start")
+        || frontmatter_queue.is_some_and(|raw| raw.trim().eq_ignore_ascii_case("start"))
+}
+
+fn explicit_queue_stop_mode(
+    attrs: &std::collections::HashMap<String, String>,
+    frontmatter_queue: Option<&str>,
+) -> bool {
+    attrs.contains_key("stop")
+        || frontmatter_queue.is_some_and(|raw| raw.trim().eq_ignore_ascii_case("stop"))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QueueBindingMode {
+    Start,
+    Go,
+    Stop,
+}
+
+impl QueueBindingMode {
+    fn from_frontmatter(raw: Option<&str>) -> Option<Self> {
+        match raw?.trim().to_ascii_lowercase().as_str() {
+            "start" => Some(Self::Start),
+            "go" => Some(Self::Go),
+            "stop" => Some(Self::Stop),
+            _ => None,
+        }
+    }
+
+    fn from_marker(attrs: &std::collections::HashMap<String, String>) -> Option<Self> {
+        if attrs.contains_key("stop") {
+            Some(Self::Stop)
+        } else if attrs.contains_key("go") {
+            Some(Self::Go)
+        } else if attrs.contains_key("start") {
+            Some(Self::Start)
+        } else {
+            None
+        }
+    }
+
+    fn frontmatter_value(self) -> &'static str {
+        match self {
+            Self::Start => "start",
+            Self::Go => "go",
+            Self::Stop => "stop",
+        }
+    }
+
+    fn marker_token(self) -> Option<&'static str> {
+        match self {
+            Self::Start => Some("start"),
+            Self::Go => Some("go"),
+            Self::Stop => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct QueueBindingState {
+    marker_mode: Option<QueueBindingMode>,
+    frontmatter_mode: Option<QueueBindingMode>,
+    legacy_queue_active: Option<bool>,
+    has_auto: bool,
+}
+
+fn project_queue_control_binding_content(file: &Path, content: &str) -> Result<(String, bool)> {
+    let snapshot_content = snapshot::load(file).ok().flatten();
+    converge_queue_control_binding_content(content, snapshot_content.as_deref())
+}
+
+fn converge_queue_control_binding_content(
+    content: &str,
+    snapshot_content: Option<&str>,
+) -> Result<(String, bool)> {
+    let Some(current) = queue_binding_state(content) else {
+        return Ok((content.to_string(), false));
+    };
+    let previous = snapshot_content.and_then(queue_binding_state);
+    let Some(target) = queue_binding_target(current, previous) else {
+        return Ok((content.to_string(), false));
+    };
+
+    let mut updated = set_queue_marker_binding(content, target.marker_token())?;
+    updated = frontmatter::merge_queue_control(&updated, target.frontmatter_value())?;
+    let changed = updated != content;
+    Ok((updated, changed))
+}
+
+fn queue_binding_state(content: &str) -> Option<QueueBindingState> {
+    let (fm, _) = frontmatter::parse(content).ok()?;
+    let components = agent_doc_element::element::parse(content).ok()?;
+    let queue_component = components
+        .iter()
+        .find(|component| component.name == "queue")?;
+    Some(QueueBindingState {
+        marker_mode: QueueBindingMode::from_marker(&queue_component.attrs),
+        frontmatter_mode: QueueBindingMode::from_frontmatter(fm.queue.as_deref()),
+        legacy_queue_active: if fm.queue.is_none() {
+            fm.queue_active
+        } else {
+            None
+        },
+        has_auto: agent_doc_queue::document_queue::has_auto_attr(&queue_component.attrs),
+    })
+}
+
+fn queue_binding_target(
+    current: QueueBindingState,
+    previous: Option<QueueBindingState>,
+) -> Option<QueueBindingMode> {
+    let has_current_control = current.marker_mode.is_some()
+        || current.frontmatter_mode.is_some()
+        || current.legacy_queue_active.is_some()
+        || current.has_auto;
+    if !has_current_control && previous.is_none() {
+        return None;
+    }
+
+    let marker_changed = previous.is_some_and(|prev| current.marker_mode != prev.marker_mode);
+    let frontmatter_changed = previous.is_some_and(|prev| {
+        current.frontmatter_mode != prev.frontmatter_mode
+            || current.legacy_queue_active != prev.legacy_queue_active
+    });
+
+    if marker_changed && !frontmatter_changed {
+        return Some(current.marker_mode.unwrap_or(QueueBindingMode::Stop));
+    }
+    if frontmatter_changed && !marker_changed {
+        return current
+            .frontmatter_mode
+            .or_else(|| {
+                current.legacy_queue_active.map(|active| {
+                    if active {
+                        QueueBindingMode::Start
+                    } else {
+                        QueueBindingMode::Stop
+                    }
+                })
+            })
+            .or(current.marker_mode)
+            .or(Some(QueueBindingMode::Stop));
+    }
+    if marker_changed && frontmatter_changed {
+        return current
+            .frontmatter_mode
+            .or(current.marker_mode)
+            .or(Some(QueueBindingMode::Stop));
+    }
+    if let Some(marker_mode) = current.marker_mode {
+        return Some(marker_mode);
+    }
+    if current.has_auto {
+        return Some(QueueBindingMode::Start);
+    }
+    if previous.is_none() {
+        return current.frontmatter_mode.or_else(|| {
+            current.legacy_queue_active.map(|active| {
+                if active {
+                    QueueBindingMode::Start
+                } else {
+                    QueueBindingMode::Stop
+                }
+            })
+        });
+    }
+    if current.frontmatter_mode.is_some() || current.legacy_queue_active.is_some() {
+        return Some(QueueBindingMode::Stop);
+    }
+    None
+}
+
+fn set_queue_marker_binding(content: &str, marker_token: Option<&str>) -> Result<String> {
+    let components = agent_doc_element::element::parse(content)?;
+    let Some(queue_component) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return Ok(content.to_string());
+    };
+    let raw_tag = &content[queue_component.open_start..queue_component.open_end];
+    let new_tag = agent_doc_queue::document_queue::set_control_in_tag(raw_tag, marker_token);
+    if new_tag == raw_tag {
+        return Ok(content.to_string());
+    }
+    let mut rebuilt = String::with_capacity(content.len());
+    rebuilt.push_str(&content[..queue_component.open_start]);
+    rebuilt.push_str(&new_tag);
+    rebuilt.push_str(&content[queue_component.open_end..]);
+    Ok(rebuilt)
+}
+
+fn strip_queue_activation_tokens_in_content(content: &str) -> Result<String> {
+    let components = agent_doc_element::element::parse(content)?;
+    let Some(queue_component) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return Ok(content.to_string());
+    };
+    let raw_tag = &content[queue_component.open_start..queue_component.open_end];
+    let new_tag = agent_doc_queue::document_queue::strip_control_from_tag(
+        &agent_doc_queue::document_queue::strip_auto_from_tag(raw_tag),
+    );
+    if new_tag == raw_tag {
+        return Ok(content.to_string());
+    }
+    let mut rebuilt = String::with_capacity(content.len());
+    rebuilt.push_str(&content[..queue_component.open_start]);
+    rebuilt.push_str(&new_tag);
+    rebuilt.push_str(&content[queue_component.open_end..]);
+    Ok(rebuilt)
+}
 struct FreeTextAdmission {
     content: String,
     queued_ids: Vec<String>,
@@ -3651,7 +3857,7 @@ mod tests {
         let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(&body);
         items
             .into_iter()
-            .find(|item| item.text == text)
+            .find(|item| strip_in_progress_marker(&item.text) == text)
             .map(|item| item.id)
             .unwrap()
     }
@@ -3669,7 +3875,7 @@ mod tests {
             "<!-- agent:exchange patch=append -->\n",
             "### Re: prior - gpt-5\n\nDone.\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue auto -->\n",
+            "<!-- agent:queue auto go -->\n",
             "- do [#alpha]\n",
             "<!-- /agent:queue -->\n\n",
             "<!-- agent:backlog -->\n",
@@ -3706,7 +3912,7 @@ mod tests {
             "<!-- agent:exchange patch=append -->\n",
             "### Re: prior — gpt-5\n\nDone.\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue -->\n",
+            "<!-- agent:queue go -->\n",
             "<!-- /agent:queue -->\n\n",
             "<!-- agent:backlog queue=sync -->\n",
             "- [ ] [#alpha] first\n",
@@ -3725,7 +3931,7 @@ mod tests {
             vec!["alpha".to_string(), "beta".to_string()]
         );
         assert!(
-            updated.contains("- do [#alpha]"),
+            updated.contains("- 🚧 do [#alpha]"),
             "synced queue:\n{updated}"
         );
         assert!(updated.contains("- do [#beta]"));
@@ -4160,7 +4366,7 @@ mod tests {
             "<!-- agent:exchange patch=append -->\n",
             "### Re: prior — gpt-5\n\nDone.\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue -->\n",
+            "<!-- agent:queue go -->\n",
             "<!-- /agent:queue -->\n\n",
             "<!-- agent:backlog queue=sync -->\n",
             "- [ ] [#alpha] first\n",
@@ -4199,7 +4405,7 @@ mod tests {
         assert!(
             std::fs::read_to_string(&doc)
                 .unwrap()
-                .contains("- do [#alpha]")
+                .contains("do [#alpha]")
         );
     }
 
@@ -4400,7 +4606,7 @@ mod tests {
             "<!-- agent:exchange patch=append -->\n",
             "### Re: prior — gpt-5\n\nDone.\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue -->\n",
+            "<!-- agent:queue go -->\n",
             "- do [#opv]\n",
             "<!-- /agent:queue -->\n\n",
             "<!-- agent:backlog queue=append -->\n",
@@ -4440,7 +4646,7 @@ mod tests {
             "<!-- agent:exchange patch=append -->\n",
             "### Re: prior — gpt-5\n\nDone.\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue -->\n",
+            "<!-- agent:queue go -->\n",
             "- do [#foc]\n",
             "<!-- /agent:queue -->\n\n",
             "<!-- agent:backlog queue=append -->\n",
@@ -4577,7 +4783,7 @@ mod tests {
             "<!-- agent:exchange patch=append -->\n",
             "### Re: prior — gpt-5\n\nDone.\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue -->\n",
+            "<!-- agent:queue go -->\n",
             "<!-- /agent:queue -->\n\n",
             "<!-- agent:backlog queue=append -->\n",
             "- [ ] [#alpha] first\n",
@@ -4626,7 +4832,7 @@ mod tests {
             "<!-- agent:exchange patch=append -->\n",
             "### Re: prior — gpt-5\n\nDone.\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue -->\n",
+            "<!-- agent:queue go -->\n",
             "- do [#alpha]\n",
             "<!-- /agent:queue -->\n\n",
             "<!-- agent:backlog queue=append -->\n",
@@ -4726,7 +4932,7 @@ mod tests {
             "<!-- agent:exchange patch=append -->\n",
             "### Re: prior — gpt-5\n\nDone.\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue -->\n",
+            "<!-- agent:queue go -->\n",
             "- do [#alpha]\n",
             "<!-- /agent:queue -->\n\n",
             "<!-- agent:backlog queue=append -->\n",
@@ -4771,7 +4977,7 @@ mod tests {
             "<!-- agent:exchange patch=append -->\n",
             "### Re: prior - gpt-5\n\nDone.\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue priority preset=\"#spec-test-build-install-commit-push\" -->\n",
+            "<!-- agent:queue priority start preset=\"#spec-test-build-install-commit-push\" -->\n",
             "- do [#alpha]\n",
             "<!-- /agent:queue -->\n\n",
             "<!-- agent:backlog queue=append -->\n",
@@ -5092,8 +5298,13 @@ mod tests {
                 Some(agent_doc_queue::document_queue::QueueTrigger::Auto)
             );
             let updated = std::fs::read_to_string(&doc).unwrap();
+            let expected_queue = if token == "go" {
+                "queue: go"
+            } else {
+                "queue: start"
+            };
             assert!(
-                updated.contains("queue: start"),
+                updated.contains(expected_queue),
                 "marker `{token}` must persist queue_active:\n{updated}"
             );
         }
@@ -5132,6 +5343,79 @@ mod tests {
     }
 
     #[test]
+    fn run_queue_maintenance_removed_marker_go_stops_frontmatter_queue() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let snapshot_content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n",
+            "agent_doc_write: crdt\nqueue: go\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n- do [#alpha]\n<!-- /agent:queue -->\n",
+        );
+        let current_content =
+            snapshot_content.replace("<!-- agent:queue go -->", "<!-- agent:queue -->");
+        std::fs::write(&doc, current_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        assert_eq!(state.queue_active, Some(false));
+        assert!(!state.queue_continuation_required);
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("queue: stop"), "{updated}");
+        assert!(updated.contains("<!-- agent:queue -->"), "{updated}");
+        assert!(!updated.contains("agent:queue go"), "{updated}");
+    }
+
+    #[test]
+    fn run_queue_maintenance_frontmatter_go_adds_marker_go() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let snapshot_content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n",
+            "agent_doc_write: crdt\nqueue: stop\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n- do [#alpha]\n<!-- /agent:queue -->\n",
+        );
+        let current_content = snapshot_content.replace("queue: stop", "queue: go");
+        std::fs::write(&doc, current_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        assert_eq!(state.queue_active, Some(true));
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("queue: go"), "{updated}");
+        assert!(updated.contains("<!-- agent:queue go -->"), "{updated}");
+    }
+
+    #[test]
+    fn run_queue_maintenance_frontmatter_stop_removes_marker_go() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let snapshot_content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n",
+            "agent_doc_write: crdt\nqueue: go\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n- do [#alpha]\n<!-- /agent:queue -->\n",
+        );
+        let current_content = snapshot_content.replace("queue: go", "queue: stop");
+        std::fs::write(&doc, current_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        assert_eq!(state.queue_active, Some(false));
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("queue: stop"), "{updated}");
+        assert!(updated.contains("<!-- agent:queue -->"), "{updated}");
+        assert!(!updated.contains("agent:queue go"), "{updated}");
+    }
+
+    #[test]
     fn run_queue_maintenance_stop_fence_records_typed_deferred_head() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
@@ -5140,7 +5424,7 @@ mod tests {
             "agent_doc_write: crdt\nqueue_active: true\n---\n\n",
             "<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue -->\n--- stop\n- do [#alpha]\n<!-- /agent:queue -->\n",
+            "<!-- agent:queue go -->\n--- stop\n- do [#alpha]\n<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
@@ -5454,7 +5738,7 @@ mod tests {
             "agent_doc_write: crdt\n",
             "queue_active: true\n",
             "---\n\n",
-            "<!-- agent:queue -->\n",
+            "<!-- agent:queue go -->\n",
             "- do [#alpha]\n",
             "- 🚧 do [#beta]\n",
             "<!-- /agent:queue -->\n\n",
@@ -5531,7 +5815,7 @@ mod tests {
             "agent_doc_write: crdt\n",
             "queue_active: true\n",
             "---\n\n",
-            "<!-- agent:queue -->\n",
+            "<!-- agent:queue go -->\n",
             "- do [#verify]\n",
             "- do [#focused]\n",
             "- do [#ready]\n",
@@ -5594,7 +5878,7 @@ mod tests {
             "agent_doc_write: crdt\n",
             "queue_active: true\n",
             "---\n\n",
-            "<!-- agent:queue priority -->\n",
+            "<!-- agent:queue priority go -->\n",
             "- do [#ops]\n",
             "- 🚧 do [#ship]\n",
             "- do [#setup]\n",
@@ -5677,7 +5961,7 @@ mod tests {
             "agent_doc_write: crdt\n",
             "queue_active: true\n",
             "---\n\n",
-            "<!-- agent:queue -->\n",
+            "<!-- agent:queue go -->\n",
             "- do [#alpha]\n",
             "- ~~🚧 do [#done]~~\n",
             "<!-- /agent:queue -->\n\n",
@@ -5841,14 +6125,14 @@ mod tests {
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(updated.contains("queue: start"));
-        assert!(updated.contains("<!-- agent:queue auto -->"));
+        assert!(updated.contains("<!-- agent:queue auto start -->"));
         assert!(updated.contains("- 🚧 do [#newhead]"));
         assert!(!updated.contains("- do [#oldhead]"));
 
         let snap = snapshot::load(&doc).unwrap().unwrap();
         assert!(
             snap.contains("queue: start")
-                && snap.contains("<!-- agent:queue auto -->")
+                && snap.contains("<!-- agent:queue auto start -->")
                 && snap.contains("do [#newhead]")
                 && !snap.contains("- do [#oldhead]"),
             "newly activated queue must be snapshotted as the closeout baseline:\n{snap}"
@@ -5981,7 +6265,7 @@ mod tests {
         );
         assert!(updated.contains("- 🚧 do [#beta]"));
         assert!(updated.contains("agent:queue auto"));
-        assert!(updated.contains("queue_active: true"));
+        assert!(updated.contains("queue: start"));
     }
     #[test]
     fn queue_maintenance_converges_live_ipc_buffer_on_item_modified_halt() {
@@ -6258,7 +6542,7 @@ mod tests {
             "auto preserved: {updated}"
         );
         assert!(
-            updated.contains("queue_active: true"),
+            updated.contains("queue: start"),
             "active preserved: {updated}"
         );
         assert!(updated.contains("- 🚧 do [#newhead]"));

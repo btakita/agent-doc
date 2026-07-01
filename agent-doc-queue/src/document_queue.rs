@@ -19,7 +19,10 @@
 //! Activation resolution (Phase 2):
 //! - `resolve_activation()` determines whether the queue should be active
 //!   based on (in priority order): `auto` attribute, inline start fence,
-//!   exchange trigger (`do queue`/`run queue`), persisted `queue_active` state.
+//!   exchange trigger (`do queue`/`run queue`), and a caller-supplied persisted
+//!   active signal. Callers must decide whether raw persisted `queue_active`
+//!   is eligible for their scope; unattended continuation requires explicit
+//!   `go` mode and must not pass plain `queue_active: true` through directly.
 //!
 //! Halt detection (Phase 3):
 //! - `detect_head_prompt_modified()` compares the head prompt between snapshot
@@ -92,7 +95,7 @@ pub struct QueueActivation {
 /// 1. `auto` attribute on `<!-- agent:queue auto -->` → immediate if prompts exist
 /// 2. Start fence at head of entries → consume bare `--- start`; defer `--- start at <time>`
 /// 3. Exchange trigger (`do queue` / `run queue` detected in diff)
-/// 4. Persisted `queue_active: true` from frontmatter
+/// 4. Caller-approved persisted active state
 ///
 /// Returns the resolved activation state including whether a start fence was consumed.
 pub fn resolve_activation(
@@ -1569,6 +1572,25 @@ pub fn marker_control(
 /// control token (`start` / `go` / `stop`). Mirrors [`strip_auto_from_tag`].
 pub fn strip_control_from_tag(tag: &str) -> String {
     rewrite_queue_tag_attrs(tag, |token| !matches!(token, "start" | "go" | "stop"))
+}
+
+/// Reconstruct an `<!-- agent:queue -->` opening tag with exactly one optional
+/// marker-side control token (`start` / `go`). `None` strips marker-side queue
+/// control, which is the stopped marker spelling.
+pub fn set_control_in_tag(tag: &str, control: Option<&str>) -> String {
+    let tag = strip_control_from_tag(tag);
+    let Some(control) = control
+        .map(str::trim)
+        .filter(|control| matches!(*control, "start" | "go"))
+    else {
+        return tag;
+    };
+    let Some(close_idx) = tag.find("-->") else {
+        return tag;
+    };
+    let inner = tag[..close_idx].trim_start_matches("<!--").trim();
+    let tail = &tag[close_idx + 3..];
+    format!("<!-- {inner} {control} -->{tail}")
 }
 
 /// Normalize malformed boolean marker attributes on an `agent:queue` opening tag.

@@ -3292,6 +3292,7 @@ mod tests {
         assert!(controller_status_matches_current_binary(&fresh).unwrap());
     }
 
+    #[test]
     fn controller_start_register_and_lifecycle_update_actor_and_lease() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();

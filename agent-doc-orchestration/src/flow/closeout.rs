@@ -1924,7 +1924,7 @@ mod tests {
             "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
             "## Exchange\n\n",
             "<!-- agent:exchange -->\n### Re: x — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n",
+            "<!-- agent:queue auto go -->\n- do [#a]\n<!-- /agent:queue -->\n",
         );
         let snapshot = head.replace("- do [#a]\n", "- do [#a]\n- do [#b]\n");
         let (_dir, doc) = setup_git_project_with_doc(head);
@@ -2112,7 +2112,7 @@ mod tests {
             "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
             "## Exchange\n\n",
             "<!-- agent:exchange -->\n### Re: x — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n",
+            "<!-- agent:queue auto go -->\n- do [#a]\n<!-- /agent:queue -->\n",
         );
         let snapshot = head.replace("- do [#a]\n", "- do [#a]\n- do [#b]\n");
         let (dir, doc) = setup_git_project_with_doc(head);
@@ -2154,14 +2154,14 @@ mod tests {
 
     #[test]
     fn apply_recovery_restores_from_head_when_local_drops_live_continuation() {
-        // The live bug: HEAD has an active `queue_active` continuation; a spurious
-        // local snapshot drift flipped it to `false`. Auto-apply must restore from
-        // HEAD (not commit the snapshot), preserving the live queue.
+        // The live bug: HEAD has an active go-mode `queue_active` continuation; a
+        // spurious local snapshot drift flipped it to `false`. Auto-apply must
+        // restore from HEAD (not commit the snapshot), preserving the live queue.
         let head = concat!(
             "---\nagent_doc_session: test\nagent_doc_format: template\nqueue_active: true\n---\n\n",
             "## Exchange\n\n",
             "<!-- agent:exchange -->\n### Re: x — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue -->\n- do [#a]\n- do [#b]\n<!-- /agent:queue -->\n",
+            "<!-- agent:queue auto go -->\n- do [#a]\n- do [#b]\n<!-- /agent:queue -->\n",
         );
         let snapshot = head.replace("queue_active: true", "queue_active: false");
         let (dir, doc) = setup_git_project_with_doc(head);
@@ -2206,7 +2206,7 @@ mod tests {
             "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
             "## Exchange\n\n",
             "<!-- agent:exchange -->\n### Re: x — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n",
+            "<!-- agent:queue auto go -->\n- do [#a]\n<!-- /agent:queue -->\n",
         );
         let visible = head.replace("- do [#a]\n", "- do [#a]\n- do [#b]\n");
         let (dir, doc) = setup_git_project_with_doc(head);
@@ -2251,7 +2251,7 @@ mod tests {
             "---\nagent_doc_session: test\nagent_doc_format: template\nqueue_active: true\n---\n\n",
             "## Exchange\n\n",
             "<!-- agent:exchange -->\n### Re: x — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n",
+            "<!-- agent:queue auto go -->\n- do [#a]\n<!-- /agent:queue -->\n",
         );
         let snapshot = head.replace("- do [#a]", "- do [#z]");
         let (_dir, doc) = setup_git_project_with_doc(head);

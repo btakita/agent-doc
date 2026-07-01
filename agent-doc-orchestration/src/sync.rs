@@ -197,11 +197,11 @@ use agent_doc_controller::command_line::{
     agent_doc_cmdline_is_owner, cmdline_owns_other_document, owner_document_from_cmdline,
 };
 use agent_doc_controller::dispatch::is_stash_window_name;
+use agent_doc_element::element;
 use agent_doc_sync::{
     effective_sync_columns, is_file_rename, latency_budget_status, sanitize_stamp_component,
     sync_latency_message, sync_prune_fingerprint,
 };
-use agent_doc_element::element;
 use agent_doc_tmux::{
     AssociatedPaneCandidate, AssociatedPaneResolution, AssociatedPaneSource,
     parse_pane_inventory_line, resolve_associated_panes,

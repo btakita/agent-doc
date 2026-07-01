@@ -57,31 +57,7 @@ pub(crate) fn current_child_prompt_visible(
     harness: &agent_doc_harness::HarnessConfig,
 ) -> bool {
     let output = child_output_for_detection(shared);
-    child_output_prompt_visible(harness, &output)
-}
-
-pub(crate) fn child_output_prompt_visible(
-    harness: &agent_doc_harness::HarnessConfig,
-    output: &str,
-) -> bool {
-    // #opencode-idle-detection-post-turn: for OpenCode, check only the bottom
-    // N lines for idle chrome instead of requiring the entire scrollback to be
-    // ignorable chrome. After a turn completes the pane keeps completed-turn
-    // output in scrollback above the idle bottom chrome; the all-lines
-    // is_idle_chrome_only_output returns false for those non-ignorable
-    // scrollback lines, preventing idle detection. The bottom-N approach
-    // mirrors dispatch_blocker_reason's strategy.
-    if harness.binary == "opencode" && harness.is_bottom_idle_chrome(output, 12) {
-        return true;
-    }
-    if harness.is_idle_chrome_only_output(output) {
-        return true;
-    }
-    let Some(line) = harness.last_prompt_candidate(output) else {
-        return false;
-    };
-    let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(&line);
-    harness.matches_prompt(stripped.trim())
+    harness.output_prompt_visible(&output)
 }
 
 pub(crate) fn idle_queue_prompt_visible(
@@ -116,7 +92,7 @@ pub(crate) fn idle_queue_prompt_visible(
     // prove a submit-ready prompt fails closed (defers the drain this tick); a
     // failed/absent capture (`None`) falls back to the pty-buffer signal so an
     // unreadable pane never permanently suppresses a legitimate drain.
-    if !child_output_prompt_visible(harness, &output) {
+    if !harness.output_prompt_visible(&output) {
         return false;
     }
     // A fresh capture proving submit-ready dispatches; one that is only a
@@ -245,89 +221,20 @@ pub(crate) fn supervisor_pane_payload_already_pending(
     ))
 }
 
-/// Decide whether the idle-queue watch should reconcile a stale-busy actor back
-/// to ready (`#stale-busy-after-auto-inject-no-clear`).
-///
-/// The supervisor's one-shot pty completion transition (busy→ready on
-/// `prompt_ready`, see the pty→stdout thread) is edge-triggered on the latest
-/// output chunk. When an injected turn returns but its composer redraw lands
-/// split so the final chunk carries no detectable prompt, the actor can stay
-/// wedged `busy` over an idle pane with no further bytes to retrigger the
-/// transition. The session then presents as "truly stuck" and a pane kill +
-/// restart re-enters the same state.
-///
-/// This polling backstop self-heals it: reconcile only when the actor is
-/// projected busy/starting, the live pane shows no busy cue, no clear cooldown
-/// is pausing the loop, and the idle-over-busy condition has held for
-/// `STALE_BUSY_RECONCILE_TICKS` consecutive polls (debounce so a turn that is
-/// still spinning up is never cut short). Pure for unit testing the gate.
-pub(crate) fn opencode_permission_prompt_active(shared: &SupervisorShared) -> bool {
-    // Primary: parse terminal screen for the structured permission dialog
-    let output = child_output_for_detection(shared);
-    let prompt = agent_doc_turn_executor_tmux::prompt::parse_prompt(&output);
-    if prompt.active
-        && prompt.options.as_ref().is_some_and(|options| {
-            options.iter().any(|option| option.label == "Allow once")
-                && options.iter().any(|option| option.label == "Allow always")
-                && options.iter().any(|option| option.label == "Reject")
-        })
-    {
-        return true;
-    }
-    // Fallback: detect via the orange selection highlight in raw output bytes.
-    // OpenCode uses ANSI 48;2;245;167;66 (amber) to mark the selected permission
-    // option. This fires even when the footer text changes across OpenCode versions.
-    let raw = shared.recent_output.lock().unwrap();
-    let raw_str = String::from_utf8_lossy(&raw);
-    raw_str.contains("\x1b[48;2;245;167;66m")
-        && (raw_str.contains("Allow once")
-            || raw_str.contains("Allow always")
-            || raw_str.contains("Reject"))
-}
-
-pub(crate) fn translate_opencode_permission_arrow_keys(data: &[u8]) -> Option<Vec<u8>> {
-    let mut translated = Vec::with_capacity(data.len());
-    let mut changed = false;
-    let mut i = 0;
-    while i < data.len() {
-        let replacement = if data[i..].starts_with(b"\x1b[C")
-            || data[i..].starts_with(b"\x1b[B")
-            || data[i..].starts_with(b"\x1bOC")
-            || data[i..].starts_with(b"\x1bOB")
-        {
-            Some((&b"\t"[..], 3))
-        } else if data[i..].starts_with(b"\x1b[D")
-            || data[i..].starts_with(b"\x1b[A")
-            || data[i..].starts_with(b"\x1bOD")
-            || data[i..].starts_with(b"\x1bOA")
-        {
-            Some((&b"\x1b[Z"[..], 3))
-        } else {
-            None
-        };
-
-        if let Some((bytes, consumed)) = replacement {
-            translated.extend_from_slice(bytes);
-            i += consumed;
-            changed = true;
-        } else {
-            translated.push(data[i]);
-            i += 1;
-        }
-    }
-
-    changed.then_some(translated)
-}
-
+/// Normalize raw stdin bytes while OpenCode's permission prompt is active.
+/// Orchestration owns the live buffers; the deterministic prompt/key logic
+/// lives in `agent-doc-turn-executor-tmux`.
 pub(crate) fn normalize_stdin_for_harness_permission_prompt(
     shared: &SupervisorShared,
     harness: &agent_doc_harness::HarnessConfig,
     data: &[u8],
 ) -> Option<Vec<u8>> {
-    if harness.binary != "opencode" || !opencode_permission_prompt_active(shared) {
+    if harness.binary != "opencode" {
         return None;
     }
-    translate_opencode_permission_arrow_keys(data)
+    let output = child_output_for_detection(shared);
+    let raw = shared.recent_output.lock().unwrap();
+    agent_doc_turn_executor_tmux::prompt::normalize_opencode_permission_stdin(&output, &raw, data)
 }
 
 pub(crate) fn is_help_screen_visible(
@@ -463,192 +370,6 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         );
     }
 
-    #[test]
-    fn opencode_permission_prompt_translates_legacy_arrows_to_tab_controls() {
-        let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = agent_doc_harness::HarnessConfig::opencode();
-        record_recent_output(
-        &shared,
-        b"\x1b[48;2;245;167;66mAllow once\x1b[0m Allow always Reject ctrl+f fullscreen \xe2\x87\x86 select enter confirm\n",
-    );
-
-        let translated = normalize_stdin_for_harness_permission_prompt(
-            &shared,
-            &harness,
-            b"\x1b[C\x1b[C\x1b[D\x1b[Atext",
-        )
-        .expect("OpenCode permission prompt should translate legacy arrow escapes");
-
-        assert_eq!(translated, b"\t\t\x1b[Z\x1b[Ztext");
-    }
-    #[test]
-    fn opencode_permission_prompt_translation_is_gated_to_permission_dialog() {
-        let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = agent_doc_harness::HarnessConfig::opencode();
-        record_recent_output(&shared, b"Ask anything...\n");
-
-        assert!(
-            normalize_stdin_for_harness_permission_prompt(&shared, &harness, b"\x1b[C").is_none(),
-            "normal OpenCode prompt editing must keep arrow keys unchanged"
-        );
-
-        let codex = agent_doc_harness::HarnessConfig::codex();
-        record_recent_output(
-        &shared,
-        b"\x1b[48;2;245;167;66mAllow once\x1b[0m Allow always Reject ctrl+f fullscreen \xe2\x87\x86 select enter confirm\n",
-    );
-        assert!(
-            normalize_stdin_for_harness_permission_prompt(&shared, &codex, b"\x1b[C").is_none(),
-            "non-OpenCode harnesses must not receive OpenCode permission key translation"
-        );
-    }
-    #[test]
-    fn opencode_permission_prompt_fallback_detects_orange_highlight_without_footer() {
-        let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = agent_doc_harness::HarnessConfig::opencode();
-        // Simulate a newer OpenCode version where the footer text changed but the
-        // orange selection highlight (48;2;245;167;66) is still present.
-        record_recent_output(
-            &shared,
-            b"\x1b[48;2;245;167;66mAllow once\x1b[0m Allow always Reject\n",
-        );
-        let translated = normalize_stdin_for_harness_permission_prompt(
-            &shared, &harness, b"\x1b[C",
-        )
-        .expect("fallback detection must translate arrows even without the standard footer text");
-        assert_eq!(translated, b"\t");
-    }
-    #[test]
-    fn opencode_permission_prompt_fallback_requires_allow_or_reject_label() {
-        let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = agent_doc_harness::HarnessConfig::opencode();
-        // Orange highlight alone (no permission labels) must not trigger translation.
-        record_recent_output(
-            &shared,
-            b"\x1b[48;2;245;167;66msome other highlighted text\x1b[0m\n",
-        );
-        assert!(
-            normalize_stdin_for_harness_permission_prompt(&shared, &harness, b"\x1b[C").is_none(),
-            "orange highlight without permission labels must not trigger arrow translation"
-        );
-    }
-    #[test]
-    fn current_child_prompt_visible_uses_latest_nonempty_line() {
-        let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = agent_doc_harness::HarnessConfig::codex();
-        record_recent_output(&shared, b"old output\n");
-        record_recent_output(&shared, "❯\n".as_bytes());
-        record_recent_output(&shared, b"resumed child still printing\n");
-        assert!(
-            !current_child_prompt_visible(&shared, &harness),
-            "an earlier prompt in the current child transcript should not count once newer non-prompt output follows it"
-        );
-    }
-    #[test]
-    fn current_child_prompt_visible_accepts_prompt_from_current_child_output() {
-        let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = agent_doc_harness::HarnessConfig::codex();
-        record_recent_output(&shared, b"resumed child ready\n");
-        record_recent_output(&shared, "❯\n".as_bytes());
-        assert!(current_child_prompt_visible(&shared, &harness));
-    }
-    #[test]
-    fn current_child_prompt_visible_handles_suffix_prompt_line() {
-        let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = agent_doc_harness::HarnessConfig::codex();
-        record_recent_output(&shared, "/tmp/project ❯\n".as_bytes());
-        assert!(current_child_prompt_visible(&shared, &harness));
-    }
-    #[test]
-    fn current_child_prompt_visible_skips_codex_footer_line() {
-        let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = agent_doc_harness::HarnessConfig::codex();
-        record_recent_output(&shared, "›\n".as_bytes());
-        record_recent_output(
-            &shared,
-            "gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used\n".as_bytes(),
-        );
-        assert!(current_child_prompt_visible(&shared, &harness));
-    }
-    #[test]
-    fn current_child_prompt_visible_rejects_busy_output_above_codex_footer() {
-        let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = agent_doc_harness::HarnessConfig::codex();
-        record_recent_output(&shared, "›\n".as_bytes());
-        record_recent_output(&shared, b"resumed child still printing\n");
-        record_recent_output(
-            &shared,
-            "gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used\n".as_bytes(),
-        );
-        assert!(!current_child_prompt_visible(&shared, &harness));
-    }
-    #[test]
-    fn current_child_prompt_visible_accepts_opencode_status_chrome_without_proof_output() {
-        let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = agent_doc_harness::HarnessConfig::opencode();
-        record_recent_output(
-            &shared,
-            "zai/glm-5 · ~/work/btakita/agent-loop · context 0% used\n".as_bytes(),
-        );
-        assert!(current_child_prompt_visible(&shared, &harness));
-    }
-    #[test]
-    fn current_child_prompt_visible_accepts_opencode_idle_splash_without_prompt_glyph() {
-        let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = agent_doc_harness::HarnessConfig::opencode();
-        record_recent_output(
-        &shared,
-        "\
-                                                                                                 ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▄ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀
-                                                                               ┃  Ask anything... \"What is the tech stack of this project?\"
-                                                                               ┃  Build · GLM-5.1 Z.AI Coding Plan
-                                                                               ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-                                                                                                                               tab agents  ctrl+p commands
-                                                                                    ● Tip Toggle username display in chat via command palette (Ctrl+P)
-  ~/work/btakita/agent-loop:main                                                                                                                                                                                                       1.14.48
-"
-        .as_bytes(),
-    );
-        assert!(current_child_prompt_visible(&shared, &harness));
-    }
-    #[test]
-    fn current_child_prompt_visible_detects_opencode_post_turn_idle() {
-        let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = agent_doc_harness::HarnessConfig::opencode();
-        record_recent_output(
-        &shared,
-        "\
-$ cargo test -p agent-doc-orchestration
-   Compiling agent-doc-orchestration
-Finished test profile
- Running unittests src/lib.rs
-test result: ok. 2219 passed; 0 failed
-Thought: 7.6s
-Click to expand
-The change is complete and all tests pass.
-src/harness.rs: added is_bottom_idle_chrome method
-src/harness.rs: tests for is_bottom_idle_chrome
-src/start.rs: updated child_output_prompt_visible
-src/start.rs: test for post-turn idle detection
-cargo test -p agent-doc-orchestration — 2219 passed
-cargo check --bin agent-doc — clean
-cargo install — installed agent-doc 0.34.0
-                                                                               ┃
-                                                                               ┃  Ask anything... \"What is the tech stack of this project?\"
-                                                                               ┃
-                                                                               ┃  Build · GLM-5.1 Z.AI Coding Plan
-                                                                               ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-                                                                                                                tab agents  ctrl+p commands
-                                                                                     ● Tip Toggle username display in chat via command palette (Ctrl+P)
-  ~/work/btakita/agent-loop:main                                                                                                                                                                                                       1.14.48
-"
-        .as_bytes(),
-    );
-        assert!(
-            current_child_prompt_visible(&shared, &harness),
-            "post-turn OpenCode pane with idle bottom chrome must be detected as prompt-visible"
-        );
-    }
     #[test]
     fn idle_queue_prompt_visible_trusts_ready_actor_over_stale_renderer_tail() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());

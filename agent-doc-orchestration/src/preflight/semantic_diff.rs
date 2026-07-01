@@ -41,22 +41,3 @@ pub(crate) fn op_log_timestamp() -> u64 {
         .map(|d| d.as_secs())
         .unwrap_or_default()
 }
-
-pub(crate) fn push_unique_strings(target: &mut Vec<String>, extras: Vec<String>) {
-    for value in extras {
-        if !target.iter().any(|existing| existing == &value) {
-            target.push(value);
-        }
-    }
-}
-
-pub(crate) fn push_unique_prompt_bearing_changes(
-    target: &mut Vec<agent_doc_diff::PromptBearingChange>,
-    extras: Vec<agent_doc_diff::PromptBearingChange>,
-) {
-    for value in extras {
-        if !target.iter().any(|existing| existing == &value) {
-            target.push(value);
-        }
-    }
-}

@@ -1,14 +1,13 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
-#[cfg(test)]
-use agent_doc_element_exchange::normalized_prompt_counts;
 use agent_doc_element_exchange::{
-    dedupe_adjacent_prompt_prefix_duplicates_in_exchange,
-    dedupe_live_prompt_prefix_variants_in_exchange_tail,
-    dedupe_prompt_lines_against_before_exchange, exchange_component, exchange_content,
-    exchange_content_len, exchange_has_live_user_edit,
+    dedupe_adjacent_prompt_prefix_duplicates_in_doc, dedupe_live_prompt_prefix_variants_in_doc,
+    dedupe_prompt_lines_against_before_doc, exchange_shrink_guard_block,
+    live_exchange_without_ack_content_retry_required,
 };
+#[cfg(test)]
+use agent_doc_element_exchange::{exchange_content, normalized_prompt_counts};
 
 /// Guard against accidental exchange content truncation.
 ///
@@ -21,32 +20,29 @@ pub(crate) fn check_exchange_shrink_guard(
     content_ours: &str,
     file: &Path,
 ) -> Result<()> {
-    let old_exchange_len = exchange_content_len(content_at_start);
-    let new_exchange_len = exchange_content_len(content_ours);
-
-    if old_exchange_len < SHRINK_GUARD_MIN_BYTES {
-        return Ok(());
-    }
-
-    let ratio = new_exchange_len as f64 / old_exchange_len as f64;
-    if ratio < SHRINK_GUARD_MAX_RATIO {
+    if let Some(block) = exchange_shrink_guard_block(
+        content_at_start,
+        content_ours,
+        SHRINK_GUARD_MIN_BYTES,
+        SHRINK_GUARD_MAX_RATIO,
+    ) {
         crate::ops_log::log_op(
             file,
             &format!(
                 "shrink_guard_blocked file={} old_len={} new_len={} ratio={:.3}",
                 file.display(),
-                old_exchange_len,
-                new_exchange_len,
-                ratio
+                block.old_exchange_len,
+                block.new_exchange_len,
+                block.ratio
             ),
         );
         anyhow::bail!(
             "exchange content would shrink from {} to {} bytes ({:.0}% of original) — \
              refusing write to prevent accidental truncation. If this is intentional, \
              use `agent-doc compact` or re-run with meaningful content.",
-            old_exchange_len,
-            new_exchange_len,
-            ratio * 100.0
+            block.old_exchange_len,
+            block.new_exchange_len,
+            block.ratio * 100.0
         );
     }
 
@@ -62,21 +58,15 @@ pub(crate) fn file_ipc_consumed_without_live_exchange_ack(
     after: &str,
     ack_content_proven: bool,
 ) -> bool {
-    if ack_content_proven {
-        return false;
-    }
     let Some(before) = before else {
         return false;
     };
-    if !exchange_has_live_user_edit(baseline, before) {
-        return false;
-    }
-    let (Some(before_exchange), Some(after_exchange)) =
-        (exchange_content(before), exchange_content(after))
-    else {
-        return false;
-    };
-    if strip_boundary_for_dedup(before_exchange) != strip_boundary_for_dedup(after_exchange) {
+    if !live_exchange_without_ack_content_retry_required(
+        baseline,
+        Some(before),
+        after,
+        ack_content_proven,
+    ) {
         return false;
     }
 
@@ -112,15 +102,9 @@ pub(crate) fn dedupe_live_prompt_prefix_variants_in_tail(
     content: &str,
     file: &Path,
 ) -> (String, bool) {
-    let Some(exchange) = exchange_component(content) else {
+    let Some(repaired) = dedupe_live_prompt_prefix_variants_in_doc(content) else {
         return (content.to_string(), false);
     };
-    let Some(repaired_exchange) =
-        dedupe_live_prompt_prefix_variants_in_exchange_tail(exchange.content(content))
-    else {
-        return (content.to_string(), false);
-    };
-    let repaired = exchange.replace_content(content, &repaired_exchange);
     crate::ops_log::log_op(
         file,
         &format!(
@@ -135,15 +119,9 @@ pub(crate) fn dedupe_adjacent_prompt_prefix_duplicates(
     content: &str,
     file: &Path,
 ) -> (String, bool) {
-    let Some(exchange) = exchange_component(content) else {
+    let Some(repaired) = dedupe_adjacent_prompt_prefix_duplicates_in_doc(content) else {
         return (content.to_string(), false);
     };
-    let Some(repaired_exchange) =
-        dedupe_adjacent_prompt_prefix_duplicates_in_exchange(exchange.content(content))
-    else {
-        return (content.to_string(), false);
-    };
-    let repaired = exchange.replace_content(content, &repaired_exchange);
     crate::ops_log::log_op(
         file,
         &format!(
@@ -159,18 +137,9 @@ pub(crate) fn dedupe_prompt_lines_against_before(
     after: &str,
     file: &Path,
 ) -> (String, bool) {
-    let Some(before_exchange) = exchange_content(before) else {
+    let Some(repaired) = dedupe_prompt_lines_against_before_doc(before, after) else {
         return (after.to_string(), false);
     };
-    let Some(after_exchange) = exchange_component(after) else {
-        return (after.to_string(), false);
-    };
-    let Some(repaired_exchange) =
-        dedupe_prompt_lines_against_before_exchange(before_exchange, after_exchange.content(after))
-    else {
-        return (after.to_string(), false);
-    };
-    let repaired = after_exchange.replace_content(after, &repaired_exchange);
     crate::ops_log::log_op(
         file,
         &format!(
@@ -215,10 +184,7 @@ pub(crate) fn remove_post_exchange_duplicate_prompt_comments_with_log(
 mod core_tests {
     #![allow(unused_imports)]
     use super::*;
-    use fs2::FileExt;
     use std::fs;
-    use std::fs::OpenOptions;
-    use std::time::Duration;
     use tempfile::TempDir;
 
     #[test]
@@ -486,80 +452,5 @@ mod core_tests {
         assert!(repaired.contains("Done."));
         let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(log.contains("ipc_prompt_duplicate_repaired"));
-    }
-    #[test]
-    fn shrink_guard_blocks_truncation() {
-        let dir = TempDir::new().unwrap();
-        let doc = dir.path().join("test.md");
-
-        let long_exchange = "a]".repeat(250); // 500 bytes
-        let old = format!(
-            "<!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n",
-            long_exchange
-        );
-        let new = "<!-- agent:exchange -->\n.\n<!-- /agent:exchange -->\n";
-
-        let result = check_exchange_shrink_guard(&old, new, &doc);
-        assert!(
-            result.is_err(),
-            "shrink guard should block truncation from 500 to ~1 byte"
-        );
-        let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("shrink"), "error should mention shrink: {msg}");
-    }
-    #[test]
-    fn shrink_guard_allows_normal_write() {
-        let dir = TempDir::new().unwrap();
-        let doc = dir.path().join("test.md");
-
-        let old_text = "x".repeat(200);
-        let new_text = "y".repeat(100); // 50% — well above 10%
-        let old = format!(
-            "<!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n",
-            old_text
-        );
-        let new = format!(
-            "<!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n",
-            new_text
-        );
-
-        let result = check_exchange_shrink_guard(&old, &new, &doc);
-        assert!(
-            result.is_ok(),
-            "shrink guard should allow 50% reduction: {:?}",
-            result.err()
-        );
-    }
-    #[test]
-    fn shrink_guard_skips_small_exchange() {
-        let dir = TempDir::new().unwrap();
-        let doc = dir.path().join("test.md");
-
-        // Old exchange is only 50 bytes — below SHRINK_GUARD_MIN_BYTES
-        let old =
-            "<!-- agent:exchange -->\nSmall content here, not much.\n<!-- /agent:exchange -->\n";
-        let new = "<!-- agent:exchange -->\n.\n<!-- /agent:exchange -->\n";
-
-        let result = check_exchange_shrink_guard(old, new, &doc);
-        assert!(
-            result.is_ok(),
-            "shrink guard should skip small exchanges: {:?}",
-            result.err()
-        );
-    }
-    #[test]
-    fn shrink_guard_passes_no_exchange() {
-        let dir = TempDir::new().unwrap();
-        let doc = dir.path().join("test.md");
-
-        // No exchange component at all
-        let old = "# Just a heading\nSome content.\n";
-        let new = "# Just a heading\n.\n";
-
-        let result = check_exchange_shrink_guard(old, new, &doc);
-        assert!(
-            result.is_ok(),
-            "shrink guard should pass when no exchange component exists"
-        );
     }
 }

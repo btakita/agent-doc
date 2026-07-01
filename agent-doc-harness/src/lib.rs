@@ -359,6 +359,29 @@ impl HarnessConfig {
         (chrome_count >= min_chrome && has_status) || has_dispatch_ready_prompt
     }
 
+    /// Return true when a captured child transcript shows an idle harness
+    /// prompt or prompt-equivalent idle chrome.
+    pub fn output_prompt_visible(&self, output: &str) -> bool {
+        // #opencode-idle-detection-post-turn: for OpenCode, check only the bottom
+        // N lines for idle chrome instead of requiring the entire scrollback to be
+        // ignorable chrome. After a turn completes the pane keeps completed-turn
+        // output in scrollback above the idle bottom chrome; the all-lines
+        // is_idle_chrome_only_output returns false for those non-ignorable
+        // scrollback lines, preventing idle detection. The bottom-N approach
+        // mirrors dispatch_blocker_reason's strategy.
+        if self.binary == "opencode" && self.is_bottom_idle_chrome(output, 12) {
+            return true;
+        }
+        if self.is_idle_chrome_only_output(output) {
+            return true;
+        }
+        let Some(line) = self.last_prompt_candidate(output) else {
+            return false;
+        };
+        let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(&line);
+        self.matches_prompt(stripped.trim())
+    }
+
     /// Same logic as [`is_bottom_idle_chrome`] but without the `has_busy_cue()`
     /// guard. Used by `dispatch_blocker_reason()` to detect stale busy cues:
     /// when the very bottom of the pane shows a contiguous idle-composer chrome
@@ -882,6 +905,15 @@ fn is_managed_capability_proof_line(trimmed: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn manifest_does_not_depend_on_orchestration() {
+        let manifest = include_str!("../Cargo.toml");
+        assert!(
+            !manifest.contains("agent-doc-orchestration"),
+            "agent-doc-harness must stay below orchestration"
+        );
+    }
 
     #[test]
     fn claude_defaults() {
@@ -1678,6 +1710,114 @@ Working (45s - esc to interrupt)
     fn is_bottom_idle_chrome_rejects_empty_output() {
         let h = HarnessConfig::opencode();
         assert!(!h.is_bottom_idle_chrome("", 12));
+    }
+
+    #[test]
+    fn output_prompt_visible_uses_latest_nonempty_line() {
+        let h = HarnessConfig::codex();
+        let output = "\
+old output
+❯
+resumed child still printing
+";
+        assert!(
+            !h.output_prompt_visible(output),
+            "an earlier prompt in the current child transcript should not count once newer non-prompt output follows it"
+        );
+    }
+
+    #[test]
+    fn output_prompt_visible_accepts_prompt_from_current_child_output() {
+        let h = HarnessConfig::codex();
+        let output = "\
+resumed child ready
+❯
+";
+        assert!(h.output_prompt_visible(output));
+    }
+
+    #[test]
+    fn output_prompt_visible_handles_suffix_prompt_line() {
+        let h = HarnessConfig::codex();
+        assert!(h.output_prompt_visible("/tmp/project ❯\n"));
+    }
+
+    #[test]
+    fn output_prompt_visible_skips_codex_footer_line() {
+        let h = HarnessConfig::codex();
+        let output = "\
+›
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
+";
+        assert!(h.output_prompt_visible(output));
+    }
+
+    #[test]
+    fn output_prompt_visible_rejects_busy_output_above_codex_footer() {
+        let h = HarnessConfig::codex();
+        let output = "\
+›
+resumed child still printing
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used
+";
+        assert!(!h.output_prompt_visible(output));
+    }
+
+    #[test]
+    fn output_prompt_visible_accepts_opencode_status_chrome_without_proof_output() {
+        let h = HarnessConfig::opencode();
+        assert!(
+            h.output_prompt_visible("zai/glm-5 · ~/work/btakita/agent-loop · context 0% used\n")
+        );
+    }
+
+    #[test]
+    fn output_prompt_visible_accepts_opencode_idle_splash_without_prompt_glyph() {
+        let h = HarnessConfig::opencode();
+        let output = "\
+                                                                                                 ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▄ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀
+                                                                               ┃  Ask anything... \"What is the tech stack of this project?\"
+                                                                               ┃  Build · GLM-5.1 Z.AI Coding Plan
+                                                                               ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                                               tab agents  ctrl+p commands
+                                                                                    ● Tip Toggle username display in chat via command palette (Ctrl+P)
+  ~/work/btakita/agent-loop:main                                                                                                                                                                                                       1.14.48
+";
+        assert!(h.output_prompt_visible(output));
+    }
+
+    #[test]
+    fn output_prompt_visible_detects_opencode_post_turn_idle() {
+        let h = HarnessConfig::opencode();
+        let output = "\
+$ cargo test -p agent-doc-orchestration
+   Compiling agent-doc-orchestration
+Finished test profile
+ Running unittests src/lib.rs
+test result: ok. 2219 passed; 0 failed
+Thought: 7.6s
+Click to expand
+The change is complete and all tests pass.
+src/harness.rs: added is_bottom_idle_chrome method
+src/harness.rs: tests for is_bottom_idle_chrome
+src/start.rs: updated child_output_prompt_visible
+src/start.rs: test for post-turn idle detection
+cargo test -p agent-doc-orchestration -- 2219 passed
+cargo check --bin agent-doc -- clean
+cargo install -- installed agent-doc 0.34.0
+                                                                               ┃
+                                                                               ┃  Ask anything... \"What is the tech stack of this project?\"
+                                                                               ┃
+                                                                               ┃  Build · GLM-5.1 Z.AI Coding Plan
+                                                                               ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                                tab agents  ctrl+p commands
+                                                                                     ● Tip Toggle username display in chat via command palette (Ctrl+P)
+  ~/work/btakita/agent-loop:main                                                                                                                                                                                                       1.14.48
+";
+        assert!(
+            h.output_prompt_visible(output),
+            "post-turn OpenCode pane with idle bottom chrome must be detected as prompt-visible"
+        );
     }
 
     #[test]

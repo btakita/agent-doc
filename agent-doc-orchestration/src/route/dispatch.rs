@@ -71,26 +71,6 @@ fn log_dispatch_inject(file: &Path, pane: &str, harness: &HarnessConfig, transpo
     );
 }
 
-/// Max bare-Enter resubmits while the trigger is still visible (drafted, not
-/// submitted) — the supervisor "retry until the prompt is submitted" budget
-/// (`#jbclaudesubmit`). Each resubmit re-polls for the 1s acceptance window, so
-/// a visibly drafted trigger gets another submit key at least once/second.
-/// Raised from 3 → 30 (and made env-tunable via
-/// `AGENT_DOC_DIRECT_PANE_MAX_ENTER_RESUBMITS`) because a slow-to-ready Claude Code
-/// composer — which has no submit-proof hook, so dispatch is accepted-only — could
-/// exhaust the old 3-nudge budget before the pane focused and consumed the Enter,
-/// leaving the Run-Agent-Doc trigger sitting unsent ("doesn't submit to Claude Code").
-/// (Claude dispatch is accepted-only — text+Enter delivered without a submit-proof
-/// hook.) The loop still exits the moment the trigger is consumed (submitted), so the
-/// higher cap only costs extra wall-clock on a genuinely stuck pane.
-fn direct_pane_max_enter_resubmits() -> usize {
-    std::env::var("AGENT_DOC_DIRECT_PANE_MAX_ENTER_RESUBMITS")
-        .ok()
-        .and_then(|v| v.trim().parse::<usize>().ok())
-        .filter(|n| *n > 0)
-        .unwrap_or(DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT)
-}
-
 /// Poll the pane capture until the trigger text is consumed or the acceptance
 /// window expires, logging the resulting submit observation. Pure detection —
 /// it never sends input — so callers can re-run it after a re-submit attempt.

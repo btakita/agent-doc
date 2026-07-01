@@ -157,6 +157,79 @@ pub fn opencode_option_requires_confirmation(option: &PromptOption) -> bool {
     option.label == "Allow always"
 }
 
+pub fn opencode_permission_prompt_active(content: &str, raw_output: &[u8]) -> bool {
+    let prompt = parse_prompt(content);
+    if prompt.active
+        && prompt.options.as_ref().is_some_and(|options| {
+            options.iter().any(|option| option.label == "Allow once")
+                && options.iter().any(|option| option.label == "Allow always")
+                && options.iter().any(|option| option.label == "Reject")
+        })
+    {
+        return true;
+    }
+
+    // Fallback: detect via the orange selection highlight in raw output bytes.
+    // OpenCode uses ANSI 48;2;245;167;66 (amber) to mark the selected permission
+    // option. This fires even when the footer text changes across OpenCode versions.
+    bytes_contains(raw_output, b"\x1b[48;2;245;167;66m")
+        && (bytes_contains(raw_output, b"Allow once")
+            || bytes_contains(raw_output, b"Allow always")
+            || bytes_contains(raw_output, b"Reject"))
+}
+
+pub fn normalize_opencode_permission_stdin(
+    content: &str,
+    raw_output: &[u8],
+    data: &[u8],
+) -> Option<Vec<u8>> {
+    if !opencode_permission_prompt_active(content, raw_output) {
+        return None;
+    }
+    translate_opencode_permission_arrow_keys(data)
+}
+
+pub fn translate_opencode_permission_arrow_keys(data: &[u8]) -> Option<Vec<u8>> {
+    let mut translated = Vec::with_capacity(data.len());
+    let mut changed = false;
+    let mut i = 0;
+    while i < data.len() {
+        let replacement = if data[i..].starts_with(b"\x1b[C")
+            || data[i..].starts_with(b"\x1b[B")
+            || data[i..].starts_with(b"\x1bOC")
+            || data[i..].starts_with(b"\x1bOB")
+        {
+            Some((&b"\t"[..], 3))
+        } else if data[i..].starts_with(b"\x1b[D")
+            || data[i..].starts_with(b"\x1b[A")
+            || data[i..].starts_with(b"\x1bOD")
+            || data[i..].starts_with(b"\x1bOA")
+        {
+            Some((&b"\x1b[Z"[..], 3))
+        } else {
+            None
+        };
+
+        if let Some((bytes, consumed)) = replacement {
+            translated.extend_from_slice(bytes);
+            i += consumed;
+            changed = true;
+        } else {
+            translated.push(data[i]);
+            i += 1;
+        }
+    }
+
+    changed.then_some(translated)
+}
+
+fn bytes_contains(haystack: &[u8], needle: &[u8]) -> bool {
+    !needle.is_empty()
+        && haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
+}
+
 fn strip_box_prefix(line: &str) -> &str {
     line.trim()
         .trim_start_matches('┃')
@@ -452,6 +525,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn manifest_does_not_depend_on_orchestration() {
+        let manifest = include_str!("../Cargo.toml");
+        assert!(
+            !manifest.contains("agent-doc-orchestration"),
+            "agent-doc-turn-executor-tmux must stay below orchestration"
+        );
+    }
+
+    #[test]
     fn parse_permission_prompt() {
         let content = r#"
   ⎿  Running…
@@ -680,6 +762,54 @@ printf '\\033[48;2;245;167;66mAllow once\\033[0m Allow always Reject ⇆ select 
         let info = parse_prompt(content);
         assert!(info.active);
         assert_eq!(info.selected, Some(1));
+    }
+
+    #[test]
+    fn opencode_permission_prompt_translates_legacy_arrows_to_tab_controls() {
+        let content = "\x1b[48;2;245;167;66mAllow once\x1b[0m Allow always Reject ctrl+f fullscreen ⇆ select enter confirm\n";
+
+        let translated = normalize_opencode_permission_stdin(
+            content,
+            content.as_bytes(),
+            b"\x1b[C\x1b[C\x1b[D\x1b[Atext",
+        )
+        .expect("OpenCode permission prompt should translate legacy arrow escapes");
+
+        assert_eq!(translated, b"\t\t\x1b[Z\x1b[Ztext");
+    }
+
+    #[test]
+    fn opencode_permission_prompt_translation_is_gated_to_permission_dialog() {
+        assert!(
+            normalize_opencode_permission_stdin(
+                "Ask anything...\n",
+                b"Ask anything...\n",
+                b"\x1b[C"
+            )
+            .is_none(),
+            "normal OpenCode prompt editing must keep arrow keys unchanged"
+        );
+    }
+
+    #[test]
+    fn opencode_permission_prompt_fallback_detects_orange_highlight_without_footer() {
+        // Simulate a newer OpenCode version where the footer text changed but the
+        // orange selection highlight (48;2;245;167;66) is still present.
+        let raw = b"\x1b[48;2;245;167;66mAllow once\x1b[0m Allow always Reject\n";
+        let translated = normalize_opencode_permission_stdin("", raw, b"\x1b[C").expect(
+            "fallback detection must translate arrows even without the standard footer text",
+        );
+        assert_eq!(translated, b"\t");
+    }
+
+    #[test]
+    fn opencode_permission_prompt_fallback_requires_allow_or_reject_label() {
+        // Orange highlight alone (no permission labels) must not trigger translation.
+        let raw = b"\x1b[48;2;245;167;66msome other highlighted text\x1b[0m\n";
+        assert!(
+            normalize_opencode_permission_stdin("", raw, b"\x1b[C").is_none(),
+            "orange highlight without permission labels must not trigger arrow translation"
+        );
     }
 
     #[test]

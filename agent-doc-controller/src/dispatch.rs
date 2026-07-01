@@ -1777,6 +1777,18 @@ pub enum DirectPaneSubmitStatus {
 pub const DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR: Duration = Duration::from_millis(900);
 pub const DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT: usize = 30;
 
+pub fn direct_pane_max_enter_resubmits_from_env_value(value: Option<&str>) -> usize {
+    value
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT)
+}
+
+pub fn direct_pane_max_enter_resubmits() -> usize {
+    let value = std::env::var("AGENT_DOC_DIRECT_PANE_MAX_ENTER_RESUBMITS").ok();
+    direct_pane_max_enter_resubmits_from_env_value(value.as_deref())
+}
+
 pub fn direct_pane_submit_acceptance_timeout() -> Duration {
     Duration::from_secs(1)
 }
@@ -3572,6 +3584,30 @@ gpt-5.4 high - ~/work/btakita/agent-loop/src/session-share - Context 31% used
                 max_attempts: DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT,
             }
         ));
+    }
+
+    #[test]
+    fn direct_pane_max_enter_resubmits_parses_positive_env_value() {
+        assert_eq!(
+            direct_pane_max_enter_resubmits_from_env_value(Some("42")),
+            42
+        );
+        assert_eq!(
+            direct_pane_max_enter_resubmits_from_env_value(Some(" 7 ")),
+            7
+        );
+        assert_eq!(
+            direct_pane_max_enter_resubmits_from_env_value(Some("0")),
+            DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT
+        );
+        assert_eq!(
+            direct_pane_max_enter_resubmits_from_env_value(Some("nope")),
+            DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT
+        );
+        assert_eq!(
+            direct_pane_max_enter_resubmits_from_env_value(None),
+            DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT
+        );
     }
 
     #[test]

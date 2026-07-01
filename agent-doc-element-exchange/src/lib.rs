@@ -127,6 +127,63 @@ pub fn exchange_has_live_user_edit(baseline: Option<&str>, before: &str) -> bool
         != strip_exchange_boundary_markers_for_dedup(before_exchange)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ExchangeShrinkGuardBlock {
+    pub old_exchange_len: usize,
+    pub new_exchange_len: usize,
+    pub ratio: f64,
+}
+
+/// Return shrink details when a candidate document would truncate the exchange
+/// below the caller's accepted ratio.
+pub fn exchange_shrink_guard_block(
+    content_at_start: &str,
+    content_ours: &str,
+    min_bytes: usize,
+    max_ratio: f64,
+) -> Option<ExchangeShrinkGuardBlock> {
+    let old_exchange_len = exchange_content_len(content_at_start);
+    let new_exchange_len = exchange_content_len(content_ours);
+
+    if old_exchange_len < min_bytes {
+        return None;
+    }
+
+    let ratio = new_exchange_len as f64 / old_exchange_len as f64;
+    (ratio < max_ratio).then_some(ExchangeShrinkGuardBlock {
+        old_exchange_len,
+        new_exchange_len,
+        ratio,
+    })
+}
+
+/// True when a file-IPC apply consumed the patch while live exchange edits were
+/// present, but the caller lacks ack-content proof and the resulting exchange
+/// text did not materialize those live edits.
+pub fn live_exchange_without_ack_content_retry_required(
+    baseline: Option<&str>,
+    before: Option<&str>,
+    after: &str,
+    ack_content_proven: bool,
+) -> bool {
+    if ack_content_proven {
+        return false;
+    }
+    let Some(before) = before else {
+        return false;
+    };
+    if !exchange_has_live_user_edit(baseline, before) {
+        return false;
+    }
+    let (Some(before_exchange), Some(after_exchange)) =
+        (exchange_content(before), exchange_content(after))
+    else {
+        return false;
+    };
+    strip_exchange_boundary_markers_for_dedup(before_exchange)
+        == strip_exchange_boundary_markers_for_dedup(after_exchange)
+}
+
 fn strip_exchange_boundary_markers_for_dedup(content: &str) -> String {
     content
         .lines()
@@ -817,6 +874,13 @@ pub fn dedupe_live_prompt_prefix_variants_in_exchange_tail(exchange: &str) -> Op
     Some(format!("{}{}", &exchange[..tail_start], repaired_tail))
 }
 
+pub fn dedupe_live_prompt_prefix_variants_in_doc(content: &str) -> Option<String> {
+    let exchange = exchange_component(content)?;
+    let repaired_exchange =
+        dedupe_live_prompt_prefix_variants_in_exchange_tail(exchange.content(content))?;
+    Some(exchange.replace_content(content, &repaired_exchange))
+}
+
 pub fn dedupe_adjacent_prompt_prefix_duplicates_in_exchange(exchange: &str) -> Option<String> {
     let mut lines = exchange_prompt_reconciliation_infos(exchange, None);
     let mut changed = false;
@@ -852,6 +916,13 @@ pub fn dedupe_adjacent_prompt_prefix_duplicates_in_exchange(exchange: &str) -> O
             .map(|line| line.segment)
             .collect::<String>(),
     )
+}
+
+pub fn dedupe_adjacent_prompt_prefix_duplicates_in_doc(content: &str) -> Option<String> {
+    let exchange = exchange_component(content)?;
+    let repaired_exchange =
+        dedupe_adjacent_prompt_prefix_duplicates_in_exchange(exchange.content(content))?;
+    Some(exchange.replace_content(content, &repaired_exchange))
 }
 
 pub fn dedupe_prompt_lines_against_before_exchange(
@@ -920,6 +991,16 @@ pub fn dedupe_prompt_lines_against_before_exchange(
             .map(|line| line.segment)
             .collect::<String>(),
     )
+}
+
+pub fn dedupe_prompt_lines_against_before_doc(before: &str, after: &str) -> Option<String> {
+    let before_exchange = exchange_content(before)?;
+    let after_exchange = exchange_component(after)?;
+    let repaired_exchange = dedupe_prompt_lines_against_before_exchange(
+        before_exchange,
+        after_exchange.content(after),
+    )?;
+    Some(after_exchange.replace_content(after, &repaired_exchange))
 }
 
 /// Compare the committed/snapshot document against the working tree and return
@@ -1684,6 +1765,103 @@ new prompt
     }
 
     #[test]
+    fn exchange_shrink_guard_block_reports_substantial_truncation() {
+        let old_exchange = "a]".repeat(250);
+        let old = format!(
+            "<!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n",
+            old_exchange
+        );
+        let new = "<!-- agent:exchange -->\n.\n<!-- /agent:exchange -->\n";
+
+        let block = exchange_shrink_guard_block(&old, new, 100, 0.10).unwrap();
+
+        assert_eq!(block.old_exchange_len, 500);
+        assert_eq!(block.new_exchange_len, 1);
+        assert!(block.ratio < 0.01);
+    }
+
+    #[test]
+    fn exchange_shrink_guard_allows_normal_small_or_missing_exchange() {
+        let old_text = "x".repeat(200);
+        let new_text = "y".repeat(100);
+        let old = format!(
+            "<!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n",
+            old_text
+        );
+        let new = format!(
+            "<!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n",
+            new_text
+        );
+        assert!(exchange_shrink_guard_block(&old, &new, 100, 0.10).is_none());
+
+        let small = "\
+<!-- agent:exchange -->
+Small content here, not much.
+<!-- /agent:exchange -->
+";
+        assert!(exchange_shrink_guard_block(small, new.as_str(), 100, 0.10).is_none());
+        assert!(exchange_shrink_guard_block("# Heading\nbody\n", ".\n", 100, 0.10).is_none());
+    }
+
+    #[test]
+    fn live_exchange_without_ack_content_retry_requires_unmaterialized_live_edit() {
+        let baseline = "\
+<!-- agent:exchange -->
+same prompt
+<!-- agent:boundary:old -->
+<!-- /agent:exchange -->
+";
+        let before = "\
+<!-- agent:exchange -->
+same prompt
+new prompt
+<!-- agent:boundary:before -->
+<!-- /agent:exchange -->
+";
+        let after_same = "\
+<!-- agent:exchange -->
+same prompt
+new prompt
+<!-- agent:boundary:after -->
+<!-- /agent:exchange -->
+";
+        let after_changed = "\
+<!-- agent:exchange -->
+same prompt
+new prompt
+### Re: new prompt
+Done.
+<!-- agent:boundary:after -->
+<!-- /agent:exchange -->
+";
+
+        assert!(live_exchange_without_ack_content_retry_required(
+            Some(baseline),
+            Some(before),
+            after_same,
+            false
+        ));
+        assert!(!live_exchange_without_ack_content_retry_required(
+            Some(baseline),
+            Some(before),
+            after_same,
+            true
+        ));
+        assert!(!live_exchange_without_ack_content_retry_required(
+            Some(baseline),
+            Some(before),
+            after_changed,
+            false
+        ));
+        assert!(!live_exchange_without_ack_content_retry_required(
+            Some(before),
+            Some(before),
+            after_same,
+            false
+        ));
+    }
+
+    #[test]
     fn prompt_duplication_and_prefix_counts_are_response_aware() {
         let before = "\
 <!-- agent:exchange -->
@@ -1896,10 +2074,42 @@ ship it
     }
 
     #[test]
+    fn document_exchange_tail_repair_replaces_component_content() {
+        let shorter = "agent-doc on corky running opencode, the key log shows re";
+        let longer = "agent-doc on corky running opencode, the key log shows received";
+        let doc = format!(
+            "<!-- agent:exchange -->\nold\n<!-- agent:boundary:x -->\n{shorter}\n{longer}\n<!-- /agent:exchange -->\n\n<!-- agent:backlog -->\n- keep\n<!-- /agent:backlog -->\n"
+        );
+
+        let repaired = dedupe_live_prompt_prefix_variants_in_doc(&doc).unwrap();
+
+        assert!(!repaired.contains(&format!("\n{shorter}\n")));
+        assert!(repaired.contains(&format!("\n{longer}\n")));
+        assert!(repaired.contains("<!-- agent:backlog -->\n- keep\n<!-- /agent:backlog -->"));
+    }
+
+    #[test]
     fn adjacent_prompt_duplicate_repair_prefers_prefixed_line() {
         let exchange = "❯ do #item\ndo #item\n### Re: item\nDone.\n";
 
         let repaired = dedupe_adjacent_prompt_prefix_duplicates_in_exchange(exchange).unwrap();
+
+        assert!(repaired.contains("❯ do #item\n### Re: item"));
+        assert!(!repaired.contains("❯ do #item\ndo #item"));
+    }
+
+    #[test]
+    fn document_adjacent_prompt_duplicate_repair_replaces_component_content() {
+        let doc = "\
+<!-- agent:exchange -->
+❯ do #item
+do #item
+### Re: item
+Done.
+<!-- /agent:exchange -->
+";
+
+        let repaired = dedupe_adjacent_prompt_prefix_duplicates_in_doc(doc).unwrap();
 
         assert!(repaired.contains("❯ do #item\n### Re: item"));
         assert!(!repaired.contains("❯ do #item\ndo #item"));
@@ -1916,6 +2126,34 @@ ship it
         assert!(!repaired.contains("❯ live prompt\nlive prompt"));
         assert_eq!(
             response_aware_user_prompt_counts(&repaired)
+                .get("live prompt")
+                .copied(),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn document_prompt_lines_against_before_repair_replaces_component_content() {
+        let before = "\
+<!-- agent:exchange -->
+live prompt
+<!-- /agent:exchange -->
+";
+        let after = "\
+<!-- agent:exchange -->
+❯ live prompt
+live prompt
+### Re: response
+Done.
+<!-- /agent:exchange -->
+";
+
+        let repaired = dedupe_prompt_lines_against_before_doc(before, after).unwrap();
+
+        assert!(repaired.contains("❯ live prompt\n### Re: response"));
+        assert!(!repaired.contains("❯ live prompt\nlive prompt"));
+        assert_eq!(
+            response_aware_user_prompt_counts(exchange_content(&repaired).unwrap())
                 .get("live prompt")
                 .copied(),
             Some(1)

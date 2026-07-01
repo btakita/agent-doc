@@ -297,7 +297,21 @@ pub fn collect_added_diff_lines(diff_text: &str) -> Vec<String> {
     lines
 }
 
-fn push_unique_strings(target: &mut Vec<String>, values: impl IntoIterator<Item = String>) {
+/// Append strings not already present in `target`, preserving first-seen order.
+pub fn push_unique_strings(target: &mut Vec<String>, values: impl IntoIterator<Item = String>) {
+    for value in values {
+        if !target.iter().any(|existing| existing == &value) {
+            target.push(value);
+        }
+    }
+}
+
+/// Append prompt-bearing changes not already present in `target`, preserving
+/// first-seen order across multiple prompt diff sources.
+pub fn push_unique_prompt_bearing_changes(
+    target: &mut Vec<agent_doc_diff::PromptBearingChange>,
+    values: impl IntoIterator<Item = agent_doc_diff::PromptBearingChange>,
+) {
     for value in values {
         if !target.iter().any(|existing| existing == &value) {
             target.push(value);
@@ -755,6 +769,55 @@ mod tests {
             ]
         );
         assert!(resolution.missing.is_empty());
+    }
+
+    #[test]
+    fn push_unique_strings_preserves_first_seen_order() {
+        let mut target = vec!["first".to_string(), "second".to_string()];
+
+        push_unique_strings(
+            &mut target,
+            vec![
+                "second".to_string(),
+                "third".to_string(),
+                "first".to_string(),
+                "fourth".to_string(),
+            ],
+        );
+
+        assert_eq!(
+            target,
+            vec![
+                "first".to_string(),
+                "second".to_string(),
+                "third".to_string(),
+                "fourth".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn push_unique_prompt_bearing_changes_preserves_first_seen_order() {
+        let first = agent_doc_diff::PromptBearingChange {
+            kind: agent_doc_diff::PromptBearingChangeKind::PromptTarget,
+            text: "do first".to_string(),
+        };
+        let second = agent_doc_diff::PromptBearingChange {
+            kind: agent_doc_diff::PromptBearingChangeKind::ContentEdit,
+            text: "edit second".to_string(),
+        };
+        let third = agent_doc_diff::PromptBearingChange {
+            kind: agent_doc_diff::PromptBearingChangeKind::PromptTarget,
+            text: "do third".to_string(),
+        };
+        let mut target = vec![first.clone(), second.clone()];
+
+        push_unique_prompt_bearing_changes(
+            &mut target,
+            vec![second.clone(), third.clone(), first.clone()],
+        );
+
+        assert_eq!(target, vec![first, second, third]);
     }
 
     #[test]

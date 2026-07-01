@@ -426,9 +426,7 @@ pub struct PreflightOutput {
 }
 
 mod semantic_diff;
-pub(crate) use semantic_diff::{
-    is_zero_usize, persist_op_log, push_unique_prompt_bearing_changes, push_unique_strings,
-};
+pub(crate) use semantic_diff::{is_zero_usize, persist_op_log};
 
 fn relocate_out_of_exchange_prompt_before_diff(
     file: &Path,
@@ -604,7 +602,7 @@ fn post_exchange_comment_prompt_preset_warning(
     let mut referenced = Vec::new();
     for comment in agent_doc_diff::post_exchange_ordinary_html_comments(content) {
         if !prompt_presets.is_empty() {
-            push_unique_strings(
+            agent_doc_prompt_contract::push_unique_strings(
                 &mut referenced,
                 agent_doc_prompt_contract::requested_prompt_presets(
                     std::slice::from_ref(&comment),
@@ -613,7 +611,7 @@ fn post_exchange_comment_prompt_preset_warning(
                 ),
             );
         }
-        push_unique_strings(
+        agent_doc_prompt_contract::push_unique_strings(
             &mut referenced,
             agent_doc_diff::post_exchange_comment_directive_signals(&comment),
         );

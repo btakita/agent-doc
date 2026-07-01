@@ -1474,7 +1474,10 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `agent_doc_turn::response_replay` ownership move removed the duplicate
         // materialization-policy copy and its final guard-marker token.
         ("agent-doc-orchestration/src/write/materialize.rs", "guard_") => 1,
-        ("agent-doc-orchestration/src/write/exchange_reconcile.rs", "guard_") => 5,
+        // 5 -> 3 (#pure-helper-extraction): the shrink guard predicate moved to
+        // `agent-doc-element-exchange`; orchestration keeps the effect adapter
+        // log entry and imports the focused pure policy directly.
+        ("agent-doc-orchestration/src/write/exchange_reconcile.rs", "guard_") => 3,
         // -2 `guard_`, -1 `reason=` (#nodiskipc): active IPC timeout/no-proof
         // paths no longer enter the direct document-write fallback, so the removed
         // visible-write guard/reason tokens are retired rather than rerouted.
@@ -5341,6 +5344,8 @@ fn test_agent_doc_prompt_contract_owns_prompt_contract_policy() {
         "pub fn required_plan_reference_count(",
         "pub fn ordered_issue_units_for_agent_doc_bug(",
         "pub fn collect_added_diff_lines(",
+        "pub fn push_unique_strings(",
+        "pub fn push_unique_prompt_bearing_changes(",
         "fn effective_prompt_texts(",
         "fn referenced_presets_in_text(",
         "fn issue_units_in_text(",
@@ -5379,6 +5384,19 @@ fn test_agent_doc_prompt_contract_owns_prompt_contract_policy() {
         !orchestration_lib.contains("pub mod prompt_contract"),
         "orchestration must not expose prompt_contract as a module facade"
     );
+    let preflight_semantic_diff = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/preflight/semantic_diff.rs"),
+    )
+    .unwrap();
+    for forbidden_snippet in [
+        "pub(crate) fn push_unique_strings(",
+        "pub(crate) fn push_unique_prompt_bearing_changes(",
+    ] {
+        assert!(
+            !preflight_semantic_diff.contains(forbidden_snippet),
+            "orchestration semantic_diff must not re-own prompt accumulator policy: {forbidden_snippet}"
+        );
+    }
 
     for (path, required_snippets, forbidden_snippets) in [
         (
@@ -5396,13 +5414,17 @@ fn test_agent_doc_prompt_contract_owns_prompt_contract_policy() {
         ),
         (
             "agent-doc-orchestration/src/preflight.rs",
-            vec!["agent_doc_prompt_contract::requested_prompt_presets"],
+            vec![
+                "agent_doc_prompt_contract::requested_prompt_presets",
+                "agent_doc_prompt_contract::push_unique_strings",
+            ],
             vec!["crate::prompt_contract"],
         ),
         (
             "agent-doc-orchestration/src/preflight/run.rs",
             vec![
                 "agent_doc_prompt_contract::collect_added_diff_lines",
+                "use agent_doc_prompt_contract::{push_unique_prompt_bearing_changes, push_unique_strings};",
                 "agent_doc_prompt_contract::resolve_prompt_preset_requests",
                 "agent_doc_prompt_contract::prompt_requests_backlog_work",
                 "agent_doc_prompt_contract::explicit_backlog_targets",
@@ -7903,6 +7925,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub struct DirectPaneAcceptancePollState",
         "pub fn direct_pane_acceptance_poll_status(",
         "pub const DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT",
+        "pub fn direct_pane_max_enter_resubmits_from_env_value(",
+        "pub fn direct_pane_max_enter_resubmits(",
         "pub struct DirectPaneEnterResubmitFacts",
         "pub fn direct_pane_needs_enter_resubmit(",
         "pub struct DirectPaneEnterResubmitAttemptFacts",
@@ -8140,7 +8164,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_source.contains("direct_pane_should_await_dispatch_start_proof")
             && route_source.contains("DirectPaneAcceptancePollState")
             && route_source.contains("direct_pane_acceptance_poll_status")
-            && route_source.contains("DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT")
+            && route_source.contains("direct_pane_max_enter_resubmits")
             && route_source.contains("DirectPaneEnterResubmitAttemptFacts")
             && route_source.contains("DirectPaneExistingDraftSubmitFacts")
             && route_source.contains("direct_pane_can_continue_enter_resubmit")
@@ -8211,6 +8235,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "struct DirectPaneAcceptancePollState",
         "fn direct_pane_acceptance_poll_status(",
         "const DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT",
+        "fn direct_pane_max_enter_resubmits(",
         "fn direct_pane_needs_enter_resubmit(",
         "fn direct_pane_can_continue_enter_resubmit(",
         "fn direct_pane_can_enter_existing_draft(",
@@ -11731,6 +11756,9 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         "pub fn response_aware_user_prompt_counts",
         "pub fn user_prompt_count_growth",
         "pub fn exchange_has_live_user_edit",
+        "pub struct ExchangeShrinkGuardBlock",
+        "pub fn exchange_shrink_guard_block",
+        "pub fn live_exchange_without_ack_content_retry_required",
         "pub fn exchange_prompt_prefix_count",
         "pub fn exchange_prompt_text_duplicated",
         "pub fn normalization_target_counts",
@@ -11745,8 +11773,11 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         "pub fn last_exchange_boundary_tail_start",
         "pub fn probable_live_prompt_prefix_variant",
         "pub fn dedupe_live_prompt_prefix_variants_in_exchange_tail",
+        "pub fn dedupe_live_prompt_prefix_variants_in_doc",
         "pub fn dedupe_adjacent_prompt_prefix_duplicates_in_exchange",
+        "pub fn dedupe_adjacent_prompt_prefix_duplicates_in_doc",
         "pub fn dedupe_prompt_lines_against_before_exchange",
+        "pub fn dedupe_prompt_lines_against_before_doc",
         "pub fn response_precedes_prompt_in_exchange",
         "pub fn repair_response_precedes_prompt_in_exchange",
         "pub fn strip_prompt_prefix_from_response_body_first_lines",
@@ -11844,6 +11875,9 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         "pub(crate) fn response_aware_user_prompt_counts",
         "pub(crate) fn user_prompt_count_growth",
         "pub(crate) fn exchange_has_live_user_edit",
+        "pub(crate) struct ExchangeShrinkGuardBlock",
+        "pub(crate) fn exchange_shrink_guard_block",
+        "pub(crate) fn live_exchange_without_ack_content_retry_required",
         "pub(crate) fn exchange_prompt_prefix_count",
         "pub(crate) fn exchange_prompt_text_duplicated",
         "pub(crate) fn exchange_user_region",
@@ -11860,8 +11894,11 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         "pub(crate) fn last_exchange_boundary_tail_start",
         "pub(crate) fn probable_live_prompt_prefix_variant",
         "pub(crate) fn dedupe_live_prompt_prefix_variants_in_exchange_tail",
+        "pub(crate) fn dedupe_live_prompt_prefix_variants_in_doc",
         "pub(crate) fn dedupe_adjacent_prompt_prefix_duplicates_in_exchange",
+        "pub(crate) fn dedupe_adjacent_prompt_prefix_duplicates_in_doc",
         "pub(crate) fn dedupe_prompt_lines_against_before_exchange",
+        "pub(crate) fn dedupe_prompt_lines_against_before_doc",
         "struct ExchangeLineSegment",
         "fn split_exchange_line_segments",
         "fn line_is_exchange_boundary",

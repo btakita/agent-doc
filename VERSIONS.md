@@ -6,6 +6,15 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.34.65
 
+- **Pure helper layer extracted from orchestration.** Exchange shrink/ack retry
+  and prompt-dedupe helpers now live in `agent-doc-element-exchange`; preflight
+  prompt accumulator helpers now live in `agent-doc-prompt-contract`; harness
+  output prompt visibility now lives in `agent-doc-harness`; OpenCode permission
+  prompt stdin normalization now lives in `agent-doc-turn-executor-tmux`; and the
+  direct-pane retry budget parser now lives in `agent-doc-controller`.
+  Orchestration imports these focused owners directly and keeps only the effect
+  adapters for file IO, supervisor state, pane capture, and logging.
+
 - **Harness policy extracted and legacy API surfaces removed.** Harness config,
   prompt/chrome classification, busy/idle blockers, and restart argument policy
   now live in the focused `agent-doc-harness` crate. Orchestration imports that

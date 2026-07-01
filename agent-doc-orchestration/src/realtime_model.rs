@@ -355,8 +355,11 @@ fn broadcast_component_delta_for_peer(
     }
     let node_patches = crate::write::build_ipc_node_patches_json(Some(&peer.content), Some(merged));
     let patches = broadcast_convergence_patches(&peer.content, merged)?;
-    let frontmatter = raw_frontmatter_yaml(merged)
-        .filter(|merged_fm| raw_frontmatter_yaml(&peer.content) != Some(*merged_fm))
+    let frontmatter = agent_doc_frontmatter::frontmatter::raw_frontmatter_yaml(merged)
+        .filter(|merged_fm| {
+            agent_doc_frontmatter::frontmatter::raw_frontmatter_yaml(&peer.content)
+                != Some(*merged_fm)
+        })
         .map(ToString::to_string);
     if patches.is_empty() && node_patches.is_empty() && frontmatter.is_none() {
         crate::ops_log::log_op(
@@ -408,12 +411,6 @@ fn broadcast_convergence_patches(
         }));
     }
     Ok(patches)
-}
-
-fn raw_frontmatter_yaml(content: &str) -> Option<&str> {
-    let rest = content.strip_prefix("---\n")?;
-    let end = rest.find("\n---")?;
-    Some(&rest[..end])
 }
 
 #[cfg(test)]

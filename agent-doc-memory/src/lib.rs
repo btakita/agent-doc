@@ -56,6 +56,20 @@ pub struct QueueStrikeMatch {
 /// Conservative auto-strike threshold for free-text queue heads.
 pub const QUEUE_STRIKE_THRESHOLD: f64 = 1.6;
 
+pub fn queue_prompt_target_id(text: &str) -> Option<String> {
+    let marker = text.find('#')?;
+    let tail = &text[marker + 1..];
+    let id = tail
+        .chars()
+        .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+        .collect::<String>();
+    if id.is_empty() {
+        None
+    } else {
+        Some(id.to_ascii_lowercase())
+    }
+}
+
 pub fn format_semantic_completion_warning(candidate: &SemanticCompletionMatch) -> String {
     let candidate_id = candidate
         .candidate_id
@@ -261,6 +275,38 @@ mod tests {
         let deduped = dedupe_events(vec![first, duplicate, other]);
 
         assert_eq!(deduped.len(), 2);
+    }
+
+    #[test]
+    fn queue_prompt_target_id_parses_bracketed_id_like_prose() {
+        assert_eq!(
+            queue_prompt_target_id("[ ] #Cache-Fix_7 repair duplicate cache writes").as_deref(),
+            Some("cache-fix_7")
+        );
+    }
+
+    #[test]
+    fn queue_prompt_target_id_returns_none_when_missing_id() {
+        assert_eq!(
+            queue_prompt_target_id("repair duplicate cache writes"),
+            None
+        );
+    }
+
+    #[test]
+    fn queue_prompt_target_id_returns_none_for_empty_hash() {
+        assert_eq!(
+            queue_prompt_target_id("# repair duplicate cache writes"),
+            None
+        );
+    }
+
+    #[test]
+    fn queue_prompt_target_id_normalizes_to_lowercase() {
+        assert_eq!(
+            queue_prompt_target_id("#ABC_Def-12").as_deref(),
+            Some("abc_def-12")
+        );
     }
 
     #[test]

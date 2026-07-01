@@ -9,7 +9,7 @@
 use agent_doc_document::queue_projection::strip_in_progress_marker;
 use agent_doc_memory::{
     MemorySearchResult, QueueStrikeMatch, QueueStrikeMatchKind, SemanticCompletionMatch,
-    count_insert_results, dedupe_events, rank_events, trim_chars,
+    count_insert_results, dedupe_events, queue_prompt_target_id, rank_events, trim_chars,
 };
 #[cfg(test)]
 use agent_doc_memory::{QUEUE_STRIKE_THRESHOLD, format_semantic_completion_warning};
@@ -457,20 +457,6 @@ fn is_done_tracked_work_event(event: &MemoryEvent) -> bool {
             .metadata
             .get("state")
             .is_some_and(|state| state == "done")
-}
-
-fn queue_prompt_target_id(text: &str) -> Option<String> {
-    let marker = text.find('#')?;
-    let tail = &text[marker + 1..];
-    let id = tail
-        .chars()
-        .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
-        .collect::<String>();
-    if id.is_empty() {
-        None
-    } else {
-        Some(id.to_ascii_lowercase())
-    }
 }
 
 fn collect_session_events(file: &Path) -> Result<SessionEvents> {

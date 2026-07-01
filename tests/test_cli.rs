@@ -6387,6 +6387,7 @@ fn test_agent_doc_memory_owns_semantic_memory_ranking_policy() {
         "pub enum QueueStrikeMatchKind",
         "pub struct QueueStrikeMatch",
         "pub const QUEUE_STRIKE_THRESHOLD",
+        "pub fn queue_prompt_target_id(",
         "pub fn format_semantic_completion_warning(",
         "pub fn count_insert_results(",
         "pub fn rank_events(",
@@ -6415,6 +6416,7 @@ fn test_agent_doc_memory_owns_semantic_memory_ranking_policy() {
         "pub enum QueueStrikeMatchKind",
         "pub struct QueueStrikeMatch",
         "pub const QUEUE_STRIKE_THRESHOLD",
+        "fn queue_prompt_target_id(",
         "pub fn format_semantic_completion_warning(",
     ] {
         assert!(
@@ -6426,6 +6428,7 @@ fn test_agent_doc_memory_owns_semantic_memory_ranking_policy() {
         orchestration_memory.contains("use agent_doc_memory::{")
             && orchestration_memory.contains("rank_events")
             && orchestration_memory.contains("dedupe_events")
+            && orchestration_memory.contains("queue_prompt_target_id")
             && orchestration_memory.contains("SemanticCompletionMatch")
             && orchestration_memory.contains("QueueStrikeMatch"),
         "memory_cmd should call focused semantic memory policy directly"
@@ -8317,6 +8320,29 @@ fn test_agent_doc_frontmatter_owns_lint_mode_policy() {
             source.contains("agent_doc_frontmatter::lint::LintCliMode")
                 && !source.contains("lint_gate::LintCliMode"),
             "{relative_path} should use the frontmatter-owned LintCliMode directly"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_frontmatter_owns_raw_frontmatter_yaml_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let frontmatter_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-frontmatter/src/frontmatter.rs")).unwrap();
+    assert!(
+        frontmatter_source.contains("pub fn raw_frontmatter_yaml("),
+        "agent-doc-frontmatter must own raw frontmatter YAML extraction"
+    );
+
+    for relative in [
+        "agent-doc-orchestration/src/realtime_model.rs",
+        "agent-doc-orchestration/src/write/converge.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            !source.contains("fn raw_frontmatter_yaml(")
+                && source.contains("agent_doc_frontmatter::frontmatter::raw_frontmatter_yaml("),
+            "{relative} should call frontmatter-owned raw frontmatter extraction directly"
         );
     }
 }

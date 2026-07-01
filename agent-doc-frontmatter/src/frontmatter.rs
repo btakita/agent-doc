@@ -888,6 +888,18 @@ pub fn normalize_queue_control(fm: &mut Frontmatter) {
     }
 }
 
+/// Return the raw YAML bytes from a document's leading frontmatter block.
+///
+/// This intentionally preserves the legacy byte-level behavior used by
+/// orchestration drift checks: the opening marker must be exactly `---\n` at
+/// byte zero, the closing marker is the first `\n---`, and missing or
+/// unterminated frontmatter returns `None`.
+pub fn raw_frontmatter_yaml(content: &str) -> Option<&str> {
+    let rest = content.strip_prefix("---\n")?;
+    let end = rest.find("\n---")?;
+    Some(&rest[..end])
+}
+
 /// Parse YAML frontmatter from a document. Returns (frontmatter, body).
 /// If no frontmatter block is present, returns defaults and the full content as body.
 pub fn parse(content: &str) -> Result<(Frontmatter, &str)> {
@@ -1825,6 +1837,29 @@ mod tests {
         assert!(fm.model.is_none());
         assert!(fm.branch.is_none());
         assert_eq!(body, content);
+    }
+
+    #[test]
+    fn raw_frontmatter_yaml_no_frontmatter() {
+        assert_eq!(raw_frontmatter_yaml("# Hello\n\nBody\n"), None);
+        assert_eq!(
+            raw_frontmatter_yaml(" ---\nagent_doc_session: abc-123\n---\nBody\n"),
+            None
+        );
+    }
+
+    #[test]
+    fn raw_frontmatter_yaml_valid_block() {
+        let content = "---\nagent_doc_session: abc-123\nagent: codex\n---\nBody\n";
+        assert_eq!(
+            raw_frontmatter_yaml(content),
+            Some("agent_doc_session: abc-123\nagent: codex")
+        );
+    }
+
+    #[test]
+    fn raw_frontmatter_yaml_unterminated_no_close() {
+        assert_eq!(raw_frontmatter_yaml("---\nsession: abc\nBody\n"), None);
     }
 
     #[test]

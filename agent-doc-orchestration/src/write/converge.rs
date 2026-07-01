@@ -1936,19 +1936,13 @@ pub(crate) fn live_prompt_drift_convergence_frontmatter(
     file_content: &str,
     snapshot: &str,
 ) -> Option<String> {
-    let file_frontmatter = raw_frontmatter_yaml(file_content);
-    let snapshot_frontmatter = raw_frontmatter_yaml(snapshot)?;
+    let file_frontmatter = agent_doc_frontmatter::frontmatter::raw_frontmatter_yaml(file_content);
+    let snapshot_frontmatter = agent_doc_frontmatter::frontmatter::raw_frontmatter_yaml(snapshot)?;
     if file_frontmatter == Some(snapshot_frontmatter) {
         None
     } else {
         Some(snapshot_frontmatter.to_string())
     }
-}
-
-pub(crate) fn raw_frontmatter_yaml(content: &str) -> Option<&str> {
-    let rest = content.strip_prefix("---\n")?;
-    let end = rest.find("\n---")?;
-    Some(&rest[..end])
 }
 
 #[cfg(test)]

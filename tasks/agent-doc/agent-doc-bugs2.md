@@ -40,7 +40,7 @@ Compacted content:
 - Archived 10 response topic(s): preflight exchange precedence; preflight exchange precedence; terminal-proof abandoned preflight closeout; 7 more
 - Prior summary/context: prior compacted content: Archived 3 response topic(s): continue; do [#qftlossproof]; do [#qftlossproof]
 JB `Compact Exchange` should not leave uncommitted changes. The compact exchange summary should be committed. #spec-test-build-install-commit-push
-<!-- agent:boundary:ad0223b4 -->
+<!-- agent:boundary:f7b75f69 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -65,7 +65,7 @@ JB `Compact Exchange` should not leave uncommitted changes. The compact exchange
 - ~~:pushpin: do [#qftlossproof]~~
 - ~~:pushpin: do [#provauth3bimpl]~~
 - ~~:pushpin: do [#suptmuxstaleverify]~~
-- 🚧 :pushpin: do [#60ev]
+- :pushpin: do [#60ev]
 - :pushpin: do [#suprestassoc-live]
 - :pushpin: do [#agentsignals]
 - :pushpin: do [#qftlossdelta]
@@ -99,6 +99,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#jbcompactcommit] [operator-verify] Live JB Compact Exchange no-uncommitted-changes proof: after the fixed binary is installed + recycled, run JB Compact Exchange on a large session doc and confirm HEAD lands the compacted content (no green git gutter / no snapshot>visible drift on next preflight). Grep ops.log for compact_commit_head_mismatch (must be ABSENT on success; present = the new fail-closed guard fired with a reset --from-current recovery). Rust fix shipped in agent-doc-orchestration/src/compact.rs commit_compacted_authoritative (#jb-compact-commit-left-uncommitted).
 - [ ] [#kjw0] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=tasks/agent-doc/agent-doc-bugs2.md stage=dispatch_start_proof pane=%69 actor_generation=1161 editor_attempt_id=1782871961019-10 dispatch_proof_state=none elapsed_ms=21174 diagnostic_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782872116210-direct_pane_dispatch_start_unproven-codex-_69-a2246a0e8c6f.txt ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0 component=route/dispatch_start_proof content_hash=sha256:15e835a6e0f770b814aa68069d2a7354628b2401ea485f84d2a929ae58cc6554]
 - [ ] [#restartstderrbleed] #agent-doc-bug Diagnose binary-restart stderr bleed into the agent after supervisor/PCP restart; capture the stderr source and add regression/proof that restart diagnostics stay out of the agent prompt/UI. Related JB Run Agent Doc route failure remains tracked by #kjw0.
 - [ ] [#qftlossdelta] #agent-doc-bug focused invariant-loss follow-up from failed #qftlossproof live proof: `.agent-doc/logs/ops.log:4338964-4338997` shows ACK/live-buffer content at len 16676 hash `83f08ab7e6be49a671f96f7c0ffbb71fe28bba858929b883c5904140cabd5192`, then closeout committed len 16669 hash `dc278d260b5b2a3efffeb12c428f0f81f5be1c8373fdd3ef044eee4b39adda4f`; `live_buffer_classify` suppressed the differing operator-capable buffer with `reason=write_provenance_newer_than_buffer` and no durable sidecar preserving the 16676-byte content was found. Fix the operator-wins merge/write-provenance path so concurrent operator text is preserved end-to-end or the write fails closed with a recoverable artifact. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md

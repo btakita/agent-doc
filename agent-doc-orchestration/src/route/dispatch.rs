@@ -743,6 +743,94 @@ pub(crate) fn send_command_once_unchecked(
     Ok(trigger)
 }
 
+/// Short re-probe window used when the pane is already mid-turn, in case the
+/// pane is busy BECAUSE our own routed prompt just started (so its dispatch
+/// -start proof is not discarded). Kept small so a trigger genuinely queued
+/// behind a *prior* turn short-circuits fast instead of burning the full proof
+/// budget (#kjw0 / #jbrunautobug).
+fn dispatch_start_busy_probe_timeout() -> Duration {
+    if cfg!(test) {
+        Duration::from_millis(50)
+    } else {
+        Duration::from_millis(600)
+    }
+}
+
+/// If the target pane is mid-turn, the routed trigger is queued behind that
+/// active turn and harness dispatch-start proof cannot arrive within the proof
+/// budget. Detect that up front and short-circuit to a queued outcome instead
+/// of blocking on the full `wait_for_routed_dispatch_start` budget (twice, via
+/// the late-resubmit retry) and then filing a false
+/// `accepted_without_dispatch_start_proof` bug (#kjw0 / #jbrunautobug).
+///
+/// Returns `Ok(Some(proof))` when the pane is busy — either because our own
+/// routed prompt already produced dispatch-start proof (busy because it
+/// started) or because the trigger is queued behind a prior active turn
+/// (`AcceptedQueuedBehindActiveTurn`). Returns `Ok(None)` when the pane is not
+/// mid-turn, so the caller proceeds to the normal proof wait. On pane-capture
+/// failure it returns `Ok(None)` (never falsely claims queued).
+fn short_circuit_dispatch_start_when_pane_busy(
+    tmux: &Tmux,
+    file: &Path,
+    pane: &str,
+    harness: &HarnessConfig,
+    tracker: &RoutedDispatchStartTracker,
+) -> Result<Option<RoutedDispatchStartProof>> {
+    let content = match sessions::capture_pane(tmux, pane) {
+        Ok(content) => content,
+        Err(err) => {
+            eprintln!(
+                "[route] warning: failed to capture pane {} for busy dispatch-start check: {}",
+                pane, err
+            );
+            return Ok(None);
+        }
+    };
+    let Some(busy_line) = harness.busy_proof_line(&content) else {
+        return Ok(None);
+    };
+    // The pane is mid-turn. Give the harness one short chance to prove the
+    // active turn IS our routed prompt (so a real proof is not discarded),
+    // then short-circuit to the queued outcome.
+    let probe_proof = wait_for_routed_dispatch_start(
+        tmux,
+        file,
+        tracker,
+        harness,
+        dispatch_start_busy_probe_timeout(),
+    )?;
+    let outcome = busy_dispatch_start_outcome(true, probe_proof);
+    if outcome == Some(RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn) {
+        emit_busy_route_queued_diagnostic(tmux, pane, file, harness);
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_dispatch_start_queued_behind_active_turn file={} pane={} harness={} busy_proof={:?}",
+                file.display(),
+                pane,
+                harness.binary,
+                busy_line.trim(),
+            ),
+        );
+    }
+    Ok(outcome)
+}
+
+/// Pure decision for the busy dispatch-start short-circuit. When the pane is not
+/// mid-turn, returns `None` (caller runs the normal proof wait). When the pane
+/// is mid-turn, returns the short-probe proof if the active turn already proved
+/// to be our routed prompt, otherwise `AcceptedQueuedBehindActiveTurn` — the
+/// trigger is queued behind the active turn and dispatches when it finishes.
+fn busy_dispatch_start_outcome(
+    pane_busy: bool,
+    probe_proof: Option<RoutedDispatchStartProof>,
+) -> Option<RoutedDispatchStartProof> {
+    if !pane_busy {
+        return None;
+    }
+    Some(probe_proof.unwrap_or(RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn))
+}
+
 pub(crate) fn dispatch_via_supervisor_ipc_with_mode(
     tmux: &Tmux,
     file: &Path,
@@ -845,6 +933,16 @@ pub(crate) fn dispatch_via_supervisor_ipc_with_mode(
     let Some(tracker) = tracker else {
         return Ok(RoutedDispatchStartProof::CommandAcceptedOnly);
     };
+
+    // Busy short-circuit (#kjw0 / #jbrunautobug): if the pane is mid-turn the
+    // routed trigger is queued behind that active turn and dispatch-start proof
+    // cannot arrive within budget — resolve to a queued outcome instead of
+    // burning the full proof budget and filing a false unproven bug.
+    if let Some(proof) =
+        short_circuit_dispatch_start_when_pane_busy(tmux, file, pane, harness, &tracker)?
+    {
+        return Ok(proof);
+    }
 
     let timeout =
         routed_dispatch_start_timeout_for_binary(Some(harness.binary.as_str()), cfg!(test));
@@ -1427,6 +1525,26 @@ pub(crate) fn dispatch_routed_reopen_with_mode(
         return Ok(RoutedDispatchStartProof::CommandAcceptedOnly);
     }
 
+    // Busy short-circuit (#kjw0 / #jbrunautobug): if the pane is mid-turn the
+    // routed trigger is queued behind that active turn and dispatch-start proof
+    // cannot arrive within budget — resolve to a queued outcome instead of
+    // burning the full proof budget (twice, via late-resubmit) and filing a
+    // false accepted_without_dispatch_start_proof bug.
+    if let Some(proof) =
+        short_circuit_dispatch_start_when_pane_busy(tmux, file, pane, harness, &tracker)?
+    {
+        log_route_latency(
+            file,
+            "direct_pane_submit",
+            submit_result.elapsed,
+            direct_pane_submit_acceptance_budget(),
+            pane,
+            harness,
+            direct_pane_submit_outcome(submit_result.status, Some(proof)),
+        );
+        return Ok(proof);
+    }
+
     let timeout =
         routed_dispatch_start_timeout_for_binary(Some(harness.binary.as_str()), cfg!(test));
     let proof_start = Instant::now();
@@ -1615,6 +1733,49 @@ mod tests {
     use crate::supervisor::ipc::SupervisorIpc;
     use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
+
+    #[test]
+    fn busy_dispatch_start_outcome_short_circuits_queued_when_busy_without_probe_proof() {
+        // #kjw0 / #jbrunautobug: pane mid-turn, short probe finds no proof →
+        // queue behind the active turn (fast) instead of the 21s proof-wait hang.
+        assert_eq!(
+            busy_dispatch_start_outcome(true, None),
+            Some(RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn)
+        );
+    }
+
+    #[test]
+    fn busy_dispatch_start_outcome_prefers_real_probe_proof_over_queued() {
+        // If the pane is busy BECAUSE our own routed prompt already started, the
+        // short probe proves it — don't discard that proof by mislabeling queued.
+        assert_eq!(
+            busy_dispatch_start_outcome(true, Some(RoutedDispatchStartProof::HookPromptMatched)),
+            Some(RoutedDispatchStartProof::HookPromptMatched)
+        );
+    }
+
+    #[test]
+    fn busy_dispatch_start_outcome_defers_to_normal_wait_when_idle() {
+        // Pane not mid-turn → no short-circuit; caller runs the normal proof wait.
+        assert_eq!(busy_dispatch_start_outcome(false, None), None);
+        assert_eq!(
+            busy_dispatch_start_outcome(false, Some(RoutedDispatchStartProof::HookStateAdvanced)),
+            None
+        );
+    }
+
+    #[test]
+    fn dispatch_start_busy_probe_timeout_is_much_smaller_than_full_budget() {
+        // The busy probe must be a fraction of the full dispatch-start budget so
+        // a queued-behind-active-turn trigger resolves fast instead of hanging.
+        let probe = dispatch_start_busy_probe_timeout();
+        let full = routed_dispatch_start_timeout_for_binary(Some("codex"), false);
+        assert!(
+            probe * 4 < full,
+            "probe {probe:?} should be far below the full proof budget {full:?}"
+        );
+    }
+
     #[test]
     fn authoritative_actor_starting_hint_names_reroute_and_restart() {
         let file = std::path::Path::new("/tmp/session.md");

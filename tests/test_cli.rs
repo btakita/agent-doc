@@ -1274,7 +1274,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         ("agent-doc-orchestration/src/route/authoritative_actor.rs", "reason=") => 2,
         ("agent-doc-orchestration/src/route/pane_resolution.rs", "guard_") => 1,
         ("agent-doc-orchestration/src/route/pane_resolution.rs", "reason=") => 4,
-        ("agent-doc-orchestration/src/route/dispatch.rs", "proof=") => 2,
+        // +1 (#kjw0 / #jbrunautobug): the busy-pane short-circuit logs the
+        // existing busy proof line before returning the typed queued outcome,
+        // so an accepted trigger queued behind an active turn is auditable
+        // without waiting through the full dispatch-start proof budget.
+        ("agent-doc-orchestration/src/route/dispatch.rs", "proof=") => 3,
         // +1 (#1vhn `reason=harness_exited_to_bare_shell`): the pre-send
         // dead-harness guard logs `route_dispatch_into_dead_shell_blocked` when
         // the harness has crashed/exited to a bare interactive shell, so route

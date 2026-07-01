@@ -2857,6 +2857,53 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     }
 
     #[test]
+    fn queued_behind_active_turn_is_accepted_even_when_proof_required() {
+        // #kjw0 / #jbrunautobug: a trigger accepted into a busy pane is queued
+        // behind the active turn — treat it as accepted (it will dispatch when
+        // the turn finishes), NOT fail-closed, even when proof is required
+        // (codex). This is what lets the route short-circuit the 21s proof-wait
+        // hang instead of filing a false accepted_without_dispatch_start_proof.
+        assert_eq!(
+            decide_dispatch_start_proof(
+                RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn,
+                true
+            ),
+            DispatchStartProofDecision::Accepted
+        );
+        assert_eq!(
+            decide_dispatch_start_proof(
+                RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn,
+                false
+            ),
+            DispatchStartProofDecision::Accepted
+        );
+        assert_eq!(
+            classify_dispatch_start_proof(DispatchStartProofFacts {
+                proof: RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn,
+                dispatch_start_proof_required: true,
+            })
+            .decision,
+            DispatchStartProofDecision::Accepted
+        );
+        assert!(
+            RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn.is_queued_behind_active_turn()
+        );
+        assert!(!RoutedDispatchStartProof::DispatchStartUnproven.is_queued_behind_active_turn());
+        assert_eq!(
+            RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn.dispatch_stage_label(),
+            "queued_behind_active_turn"
+        );
+        assert_eq!(
+            RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn.proof_scope_label(),
+            "accepted_only"
+        );
+        assert_eq!(
+            RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn.startup_miss_label(),
+            "queued-behind-active-turn"
+        );
+    }
+
+    #[test]
     fn dispatch_only_start_proof_policy_accepts_enter_delivery_for_all_harnesses() {
         assert!(!dispatch_only_dispatch_start_proof_required("codex"));
         assert!(!dispatch_only_dispatch_start_proof_required("opencode"));

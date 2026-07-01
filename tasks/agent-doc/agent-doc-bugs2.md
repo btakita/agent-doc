@@ -38,7 +38,21 @@ done
 
 Compacted content:
 - Archived 2 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); Pre-run queue edits partially reverted (only first added head kept)
-<!-- agent:boundary:c463cfbe-057a-469c-84ca-474e224276cd -->
+
+### Re: Pre-run queue edits partially reverted (only first added head kept) — opus-4-8
+
+Thanks for the correction — pre-run (not mid-turn) narrows this a lot. It's the concurrent-writer queue race tracked as #qeditrace (#0bmv, plan-queue-edit-race-consolidated.md), and the "only the first added head survived" signature points specifically at the preflight queue-maintenance reconcile, not the during-turn finalize path.
+
+**What happens on the run:** JB "Run Agent Doc" starts with `agent-doc preflight`, which runs a queue-maintenance pass over your already-edited queue. That pass journals the visible/live-buffer queue (#qftloss mode-6, meant to make pre-observation operator adds crash-durable), then runs the #mirrorall backlog→queue mirror, the #rz3a freshly-added hold-out, #7r2s manual-add pinning, and #qdedupsync dedup — all in `preflight/maintenance.rs`. My leading hypothesis is that this convergence keeps the first operator-added head (it matches the pin/anchor against the prior snapshot) but treats the remaining new lines as re-mirror/dedup churn and reverts them to the pre-edit snapshot: the journal *records* them, but the reconcile does not *replay* them back into the visible queue. That exactly matches "only the first item I added was kept."
+
+**Live evidence in this doc:** the queue already carries duplicate heads — `do [#tmuxsynccrashlog]` twice and `do [#60ev]` twice — the collision fingerprint of old-restored + new-added.
+
+The plan's core convergence already shipped on main, but this fresh pre-run repro shows the multi-line operator-add case still leaks, so I've filed it as an actionable focused-cycle item (#qeditrace) with the exact code path and a SimWorld requirement for multi-line pre-run add survival.
+
+I did **not** attempt the merge fix inline: root-causing + fixing the reconcile is a focused cycle (live-CRDT / two-writer, needs `make tmux-ci` across live panes) per the existing plan. And I deliberately did **not** hand-edit this doc's duplicate heads — a direct queue edit is precisely what re-triggers the churn, so that cleanup belongs to the fix, not a manual patch.
+
+Next step (the focused cycle): instrument the maintenance reconcile to log which operator-added heads it keeps vs reverts, confirm the exact drop point, then make the reconcile replay ALL journaled operator adds (not just the first) — or fail closed with a recoverable artifact instead of silently reverting.
+<!-- agent:boundary:d0dd7c4e -->
 <!-- /agent:exchange -->
 ## Queue
 

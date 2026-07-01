@@ -7,6 +7,8 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
+
 /// Trim an optional CLI scope argument and treat empty strings as absent.
 pub fn normalize_scope_arg(value: Option<&str>) -> Option<&str> {
     value.and_then(|s| {
@@ -159,6 +161,60 @@ pub fn sync_prune_fingerprint(col_args: &[String], window: Option<&str>) -> Stri
     .to_string()
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct SyncPruneState {
+    pub fingerprint: String,
+    pub last_full_cleanup_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncPruneStateUpdate {
+    pub state: SyncPruneState,
+    pub should_write: bool,
+}
+
+pub fn sync_prune_state_update(
+    raw_state: Option<&str>,
+    col_args: &[String],
+    window: Option<&str>,
+    now_ms: u64,
+    throttle_ms: u64,
+) -> SyncPruneStateUpdate {
+    let fingerprint = sync_prune_fingerprint(col_args, window);
+    let parsed = raw_state.and_then(|raw| serde_json::from_str::<SyncPruneState>(raw).ok());
+    let fresh_unchanged = parsed.as_ref().is_some_and(|state| {
+        state.fingerprint == fingerprint
+            && now_ms.saturating_sub(state.last_full_cleanup_ms) < throttle_ms
+    });
+
+    if fresh_unchanged {
+        SyncPruneStateUpdate {
+            state: parsed.expect("fresh_unchanged requires parsed state"),
+            should_write: false,
+        }
+    } else {
+        SyncPruneStateUpdate {
+            state: SyncPruneState {
+                fingerprint,
+                last_full_cleanup_ms: now_ms,
+            },
+            should_write: true,
+        }
+    }
+}
+
+pub fn planned_stash_window_indices(
+    windows: &[(String, String, String)],
+    is_stash_window_name: fn(&str) -> bool,
+) -> Vec<(String, usize)> {
+    windows
+        .iter()
+        .filter(|(_, _, name)| is_stash_window_name(name))
+        .enumerate()
+        .map(|(offset, (_, id, _))| (id.clone(), offset + 1))
+        .collect()
+}
+
 pub fn effective_sync_columns(
     col_args: &[String],
     saved_layout: &[String],
@@ -298,6 +354,50 @@ mod tests {
         assert!(fingerprint.contains("@1"), "{fingerprint}");
         assert!(fingerprint.contains("left.md"), "{fingerprint}");
         assert!(fingerprint.contains("right.md"), "{fingerprint}");
+    }
+
+    #[test]
+    fn sync_prune_state_update_skips_write_for_recent_same_layout() {
+        let cols = vec!["left.md".to_string(), "right.md".to_string()];
+        let initial = sync_prune_state_update(None, &cols, Some("@1"), 1_000, 2_000);
+        assert!(initial.should_write);
+        let raw = serde_json::to_string(&initial.state).unwrap();
+
+        let next = sync_prune_state_update(Some(&raw), &cols, Some("@1"), 1_500, 2_000);
+        assert!(!next.should_write);
+        assert_eq!(next.state, initial.state);
+    }
+
+    #[test]
+    fn sync_prune_state_update_rewrites_on_layout_change_or_expiry() {
+        let cols = vec!["left.md".to_string(), "right.md".to_string()];
+        let initial = sync_prune_state_update(None, &cols, Some("@1"), 1_000, 2_000);
+        let raw = serde_json::to_string(&initial.state).unwrap();
+
+        let changed_cols = vec!["left.md".to_string()];
+        let changed = sync_prune_state_update(Some(&raw), &changed_cols, Some("@1"), 1_500, 2_000);
+        assert!(changed.should_write);
+        assert_eq!(changed.state.last_full_cleanup_ms, 1_500);
+
+        let expired = sync_prune_state_update(Some(&raw), &cols, Some("@1"), 3_000, 2_000);
+        assert!(expired.should_write);
+        assert_eq!(expired.state.last_full_cleanup_ms, 3_000);
+    }
+
+    #[test]
+    fn planned_stash_window_indices_packs_stash_windows_after_agent_doc() {
+        let windows = vec![
+            ("0".to_string(), "@10".to_string(), "agent-doc".to_string()),
+            ("3".to_string(), "@11".to_string(), "stash".to_string()),
+            ("7".to_string(), "@12".to_string(), "stash-2".to_string()),
+            ("8".to_string(), "@13".to_string(), "work".to_string()),
+        ];
+
+        assert_eq!(
+            planned_stash_window_indices(&windows, |name| name == "stash"
+                || name.starts_with("stash-")),
+            vec![("@11".to_string(), 1), ("@12".to_string(), 2)]
+        );
     }
 
     #[test]

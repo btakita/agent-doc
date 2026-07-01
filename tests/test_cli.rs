@@ -14794,6 +14794,10 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         "pub fn sync_latency_message",
         "pub fn sanitize_stamp_component",
         "pub fn sync_prune_fingerprint",
+        "pub struct SyncPruneState",
+        "pub struct SyncPruneStateUpdate",
+        "pub fn sync_prune_state_update",
+        "pub fn planned_stash_window_indices",
         "pub fn effective_sync_columns",
         "pub fn is_file_rename",
     ] {
@@ -14823,6 +14827,10 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         "fn sync_latency_message",
         "fn sanitize_stamp_component",
         "fn sync_prune_fingerprint",
+        "struct SyncPruneState",
+        "fn sync_prune_state_update",
+        "fn planned_stash_window_indices",
+        "serde_json::from_str::<SyncPruneState>",
         "fn effective_sync_columns",
         "pub fn is_file_rename",
     ] {
@@ -14843,7 +14851,8 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
             && sync_orchestration.contains("latency_budget_status")
             && sync_orchestration.contains("sanitize_stamp_component")
             && sync_orchestration.contains("sync_latency_message")
-            && sync_orchestration.contains("sync_prune_fingerprint")
+            && sync_orchestration.contains("sync_prune_state_update")
+            && sync_orchestration.contains("planned_stash_window_indices")
             && route_session_resolution.contains("agent_doc_sync::shared_sync_scope_root"),
         "orchestration should call sync scope policy through agent-doc-sync directly"
     );

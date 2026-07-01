@@ -715,6 +715,7 @@ version = "0.34.66"
 dependencies = [
  "agent-doc-fs",
  "anyhow",
+ "serde",
  "serde_json",
  "tempfile",
 ]

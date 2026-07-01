@@ -199,8 +199,8 @@ use agent_doc_controller::command_line::{
 use agent_doc_controller::dispatch::is_stash_window_name;
 use agent_doc_element::element;
 use agent_doc_sync::{
-    effective_sync_columns, is_file_rename, latency_budget_status, sanitize_stamp_component,
-    sync_latency_message, sync_prune_fingerprint,
+    effective_sync_columns, is_file_rename, latency_budget_status, planned_stash_window_indices,
+    sanitize_stamp_component, sync_latency_message, sync_prune_state_update,
 };
 use agent_doc_tmux::{
     AssociatedPaneCandidate, AssociatedPaneResolution, AssociatedPaneSource,
@@ -1104,7 +1104,10 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
         normalize_window_to_index(tmux, session_name, &target_window_id, 0, "repair");
     }
 
-    let stash_index_plan = planned_stash_window_indices(&list_session_windows(tmux, session_name));
+    let stash_index_plan = planned_stash_window_indices(
+        &list_session_windows(tmux, session_name),
+        is_stash_window_name,
+    );
     for (stash_window_id, desired_index) in stash_index_plan {
         normalize_stash_window_name(tmux, &stash_window_id);
         normalize_window_to_index(
@@ -1191,15 +1194,6 @@ fn consolidate_duplicate_target_windows(tmux: &Tmux, session_name: &str, target_
             let _ = tmux.raw_cmd(&["kill-window", "-t", &duplicate_window]);
         }
     }
-}
-
-fn planned_stash_window_indices(windows: &[(String, String, String)]) -> Vec<(String, usize)> {
-    windows
-        .iter()
-        .filter(|(_, _, name)| is_stash_window_name(name))
-        .enumerate()
-        .map(|(offset, (_, id, _))| (id.clone(), offset + 1))
-        .collect()
 }
 
 fn normalize_stash_window_name(tmux: &Tmux, window_id: &str) {
@@ -1309,12 +1303,6 @@ fn sync_doctor_repair_candidate(col_args: &[String], focus: Option<&str>) -> Opt
         })
 }
 
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
-struct SyncPruneState {
-    fingerprint: String,
-    last_full_cleanup_ms: u64,
-}
-
 fn epoch_millis_now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1329,25 +1317,16 @@ fn safe_passive_prune_cleanup_mode_at(
     window: Option<&str>,
     now_ms: u64,
 ) -> agent_doc_tmux::PruneCleanupMode {
-    let fingerprint = sync_prune_fingerprint(col_args, window);
     let throttle_ms = SAFE_PASSIVE_STASH_CLEANUP_THROTTLE.as_millis() as u64;
-    let fresh_unchanged = std::fs::read_to_string(state_path)
-        .ok()
-        .and_then(|raw| serde_json::from_str::<SyncPruneState>(&raw).ok())
-        .is_some_and(|state| {
-            state.fingerprint == fingerprint
-                && now_ms.saturating_sub(state.last_full_cleanup_ms) < throttle_ms
-        });
+    let raw_state = std::fs::read_to_string(state_path).ok();
+    let update =
+        sync_prune_state_update(raw_state.as_deref(), col_args, window, now_ms, throttle_ms);
 
-    if !fresh_unchanged {
+    if update.should_write {
         if let Some(parent) = state_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let state = SyncPruneState {
-            fingerprint,
-            last_full_cleanup_ms: now_ms,
-        };
-        if let Ok(raw) = serde_json::to_string(&state) {
+        if let Ok(raw) = serde_json::to_string(&update.state) {
             let _ = std::fs::write(state_path, raw);
         }
     }
@@ -4737,7 +4716,7 @@ mod tests {
     use std::time::Duration;
     use tmux_router::IsolatedTmux;
     #[test]
-    fn planned_stash_window_indices_packs_overflow_after_agent_doc() {
+    fn stash_window_index_plan_packs_overflow_after_agent_doc() {
         let windows = vec![
             ("0".to_string(), "@10".to_string(), "agent-doc".to_string()),
             ("3".to_string(), "@11".to_string(), "stash".to_string()),
@@ -4746,7 +4725,7 @@ mod tests {
         ];
 
         assert_eq!(
-            planned_stash_window_indices(&windows),
+            planned_stash_window_indices(&windows, is_stash_window_name),
             vec![("@11".to_string(), 1), ("@12".to_string(), 2)],
             "repair_layout must keep overflow stash windows adjacent after agent-doc"
         );

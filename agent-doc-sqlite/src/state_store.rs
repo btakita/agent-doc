@@ -495,17 +495,33 @@ pub fn initialize_state_db(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str) -> Result<()> {
+fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
     let mut rows = stmt.query([])?;
     while let Some(row) = rows.next()? {
         let existing: String = row.get(1)?;
         if existing == column {
-            return Ok(());
+            return Ok(true);
         }
     }
-    conn.execute(&format!("ALTER TABLE {table} ADD COLUMN {definition}"), [])?;
-    Ok(())
+    Ok(false)
+}
+
+fn sqlite_duplicate_column_error(err: &rusqlite::Error) -> bool {
+    err.to_string().contains("duplicate column name")
+}
+
+fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str) -> Result<()> {
+    if column_exists(conn, table, column)? {
+        return Ok(());
+    }
+    match conn.execute(&format!("ALTER TABLE {table} ADD COLUMN {definition}"), []) {
+        Ok(_) => Ok(()),
+        Err(err) if sqlite_duplicate_column_error(&err) && column_exists(conn, table, column)? => {
+            Ok(())
+        }
+        Err(err) => Err(err.into()),
+    }
 }
 
 fn ensure_dispatch_attempt_receipt_columns(conn: &Connection) -> Result<()> {
@@ -2039,6 +2055,28 @@ pub fn layout_scope_exists(conn: &Connection, scope: &str) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ensure_column_tolerates_duplicate_column_after_race() -> Result<()> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute(
+            "CREATE TABLE projection_diagnostics (id INTEGER PRIMARY KEY, intended_hash TEXT)",
+            [],
+        )?;
+        let err = conn
+            .execute(
+                "ALTER TABLE projection_diagnostics ADD COLUMN intended_hash TEXT",
+                [],
+            )
+            .unwrap_err();
+        assert!(sqlite_duplicate_column_error(&err));
+        ensure_column(
+            &conn,
+            "projection_diagnostics",
+            "intended_hash",
+            "intended_hash TEXT",
+        )
+    }
 
     #[test]
     fn control_plane_store_counts_extended_fact_categories() -> Result<()> {

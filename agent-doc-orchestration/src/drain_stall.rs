@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use agent_doc_turn::drain_stall::ContinuationPending;
+use agent_doc_turn::drain_stall::{ContinuationPending, continuation_pending_marker};
 use anyhow::{Context, Result};
 
 /// Directory (relative to the project root) holding per-document continuation
@@ -52,10 +52,7 @@ pub fn mark_continuation_pending(file: &str, cycle_id: &str) -> Result<()> {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("failed to create drain-stall dir {}", parent.display()))?;
     }
-    let marker = ContinuationPending {
-        cycle_id: cycle_id.to_string(),
-        recorded_secs: now_secs(),
-    };
+    let marker = continuation_pending_marker(cycle_id, now_secs());
     let body = serde_json::to_string(&marker).context("failed to serialize drain-stall marker")?;
     std::fs::write(&path, body)
         .with_context(|| format!("failed to write drain-stall marker {}", path.display()))?;

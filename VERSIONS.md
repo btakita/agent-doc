@@ -19,7 +19,9 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   payload construction now lives in `agent-doc-queue`, leaving orchestration to
   provide marker storage and stale-file cleanup. Codex transcript
   `session_meta.cwd` parsing now lives in `agent-doc-model-tier`, leaving
-  orchestration to handle only transcript file discovery and reads.
+  orchestration to handle only transcript file discovery and reads. Drain-stall
+  continuation-pending marker construction now lives in `agent-doc-turn`, with
+  orchestration retaining only marker path, clock, JSON, and file IO.
 
 - **Pure helper layer extracted from orchestration.** Exchange shrink/ack retry
   and prompt-dedupe helpers now live in `agent-doc-element-exchange`; preflight

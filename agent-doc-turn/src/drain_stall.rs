@@ -20,6 +20,13 @@ pub struct ContinuationPending {
     pub recorded_secs: u64,
 }
 
+pub fn continuation_pending_marker(cycle_id: &str, recorded_secs: u64) -> ContinuationPending {
+    ContinuationPending {
+        cycle_id: cycle_id.to_string(),
+        recorded_secs,
+    }
+}
+
 /// Facts the stall classifier reasons over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StallFacts {
@@ -114,6 +121,13 @@ mod tests {
             ..base()
         };
         assert_eq!(classify_stall(&facts), StallVerdict::NoMarker);
+    }
+
+    #[test]
+    fn continuation_pending_marker_records_cycle_and_timestamp() {
+        let marker = continuation_pending_marker("cycle-123", 42);
+        assert_eq!(marker.cycle_id, "cycle-123");
+        assert_eq!(marker.recorded_secs, 42);
     }
 
     #[test]

@@ -4637,6 +4637,7 @@ fn test_agent_doc_turn_owns_drain_stall_policy() {
             .unwrap();
     for forbidden_snippet in [
         "pub use agent_doc_turn::drain_stall",
+        "ContinuationPending {",
         "pub fn classify_stall",
         "pub struct StallFacts",
         "pub enum StallVerdict",
@@ -4654,6 +4655,12 @@ fn test_agent_doc_turn_owns_drain_stall_policy() {
     assert!(
         preflight_source.contains("use agent_doc_turn::drain_stall::{"),
         "preflight must consume focused drain-stall policy directly"
+    );
+    let turn_drain_stall =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn/src/drain_stall.rs")).unwrap();
+    assert!(
+        turn_drain_stall.contains("pub fn continuation_pending_marker("),
+        "agent-doc-turn must own continuation-pending marker construction"
     );
 
     let turn_manifest = fs::read_to_string(manifest_dir.join("agent-doc-turn/Cargo.toml")).unwrap();

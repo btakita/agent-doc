@@ -48,6 +48,13 @@
 //! - `commit: true` uses `git::commit_with_outcome` after a successful mutation. If the commit
 //!   path reports that a VCS refresh signal target existed but writing it failed, compact fails
 //!   closed instead of silently accepting the closeout.
+//! - `commit: true` stages the AUTHORITATIVE in-memory compacted content, not a re-loaded snapshot
+//!   or the working-tree re-read: a stale-supervisor CRDT overlay replay can revert the snapshot,
+//!   and an editor-IPC convergence can leave the working tree lagging, either of which would leave
+//!   HEAD at the pre-compact content (`#jb-compact-commit-left-uncommitted`). `commit_compacted_authoritative`
+//!   re-asserts the compacted snapshot immediately before the commit and then FAILS CLOSED (with a
+//!   `reset --from-current` recovery command) if the post-commit HEAD did not actually land the
+//!   compacted content, so `--commit` can never silently leave uncommitted compaction drift.
 //! - `apply_compacted_document` is the single replacement boundary used by inline, full component,
 //!   and partial component compaction.
 //!
@@ -66,6 +73,12 @@
 //!   includes an archive pointer and compacted exchange digest
 //! - compact_with_commit_writes_vcs_refresh_signal: `--commit` closeout creates an `agent-doc`
 //!   commit and updates `.agent-doc/patches/vcs-refresh.signal` when that refresh channel exists
+//! - compact_dirty_treats_diverged_snapshot_as_committable: a diverged snapshot with an unflushed
+//!   working-tree file is still committable (`#jb-compact-commit-editor-ipc-async`)
+//! - compact_commit_lands_head_when_snapshot_replayed_stale: authoritative-content commit lands the
+//!   compacted content in HEAD even when a CRDT replay reverted the on-disk snapshot to pre-compact
+//! - compact_commit_fails_closed_when_head_cannot_land: `--commit` fails closed with a recovery
+//!   command instead of silently leaving uncommitted compaction drift (`#jb-compact-commit-left-uncommitted`)
 //! - component_compact_uses_guarded_direct_write_when_patches_dir_exists: compact does not emit a
 //!   fullContent IPC patch for template exchange compaction and uses the guarded disk path instead
 //! - message_dash_reads_stdin: `--message -` reads from stdin instead of using literal "-"
@@ -140,7 +153,12 @@ pub fn run(
     let (fm, body) = frontmatter::parse(&content)?;
 
     let resolved = fm.resolve_mode();
-    if resolved.is_template() {
+    // `authoritative` is the compacted snapshot content the compaction just
+    // produced. It is the single source of truth for the `--commit` closeout —
+    // never a re-loaded snapshot (a concurrent stale-supervisor CRDT overlay
+    // replay can revert it, `#compact-overlay-crdt-staleness`) nor the working-tree
+    // re-read (it lags an editor-IPC convergence, `#jb-compact-commit-editor-ipc-async`).
+    let authoritative: String = if resolved.is_template() {
         // NOTE (#compact-overlay-crdt-staleness): the legacy CRDT/overlay refresh
         // is deferred to `apply_compacted_document(..., refresh_crdt=true)`, which
         // is the single authoritative CRDT writer. An earlier
@@ -163,7 +181,7 @@ pub fn run(
             None => run_component_compact_with_options(
                 file, &content, target, message, is_crdt, force_disk,
             ),
-        }?;
+        }?
     } else {
         let keep_n = keep.unwrap_or(2);
 
@@ -210,7 +228,8 @@ pub fn run(
             to_keep.len(),
             file.display()
         );
-    }
+        compacted
+    };
 
     if component_name.is_none() || component_name == Some("exchange") {
         crate::session_accretion::record_recent_exchange_compaction(file)?;
@@ -224,11 +243,24 @@ pub fn run(
     // staging the corrupted snapshot into HEAD.
     assert_non_exchange_items_preserved(file, &content, &updated, "post_write")?;
     let changed = updated != content;
+    // `#jb-compact-commit-editor-ipc-async`: the post-compact on-disk re-read
+    // (`updated`) can lag the editor-converged buffer when the compaction wrote
+    // through the live editor IPC (`transport=editor_ipc`): the editor owns the
+    // buffer and flushes to disk on its own schedule, so `updated` still equals
+    // the pre-compact `content` and `changed` is false even though the compaction
+    // produced committable state. `apply_compacted_document` saved the compacted
+    // SNAPSHOT synchronously and `commit_with_outcome` stages that snapshot, so
+    // treat a snapshot that diverges from HEAD as committable/dirty too. Without
+    // this, `--commit` is silently skipped and the compacted document is left
+    // uncommitted (HEAD stale, editor/visible buffer compacted) — the exact
+    // "JB Compact Exchange left uncommitted changes" defect.
+    let snapshot_status = crate::git::verify_snapshot_committed(file)?;
+    let dirty = compact_dirty(changed, &snapshot_status);
     if commit {
-        if changed {
-            closeout_compact_with_commit(file)?;
+        if dirty {
+            commit_compacted_authoritative(file, &authoritative)?;
         }
-    } else if changed {
+    } else if dirty {
         // #jb-compact-repair-left-uncommitted: a compact/repair that rewrites the
         // exchange but does not cross a commit boundary leaves the document dirty
         // (corrected visible content, stale HEAD). Later JetBrains/route actions
@@ -246,6 +278,83 @@ pub fn run(
         );
     }
 
+    Ok(())
+}
+
+/// Decide whether a compaction left committable/dirty state.
+///
+/// `changed_on_disk` is the pre-commit on-disk re-read comparison
+/// (`updated != content`). It is authoritative when the compaction wrote through
+/// the guarded disk path, but it lags the editor-converged buffer when the write
+/// went through the live editor IPC (`transport=editor_ipc`). In that window the
+/// disk file still equals the pre-compact content, so `changed_on_disk` is false
+/// even though the synchronously-saved compacted snapshot already diverges from
+/// HEAD. Treat that snapshot divergence as dirty so `--commit` still stages the
+/// compacted snapshot (`#jb-compact-commit-editor-ipc-async`). A `NotInGitRepo`
+/// document has no HEAD to diverge from, so it falls back to `changed_on_disk`.
+fn compact_dirty(changed_on_disk: bool, snapshot_status: &crate::git::SnapshotCommitStatus) -> bool {
+    changed_on_disk
+        || matches!(
+            snapshot_status,
+            crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead { .. }
+        )
+}
+
+/// Commit a compaction, staging the authoritative in-memory compacted content.
+///
+/// `#jb-compact-commit-left-uncommitted`: the live "JB Compact Exchange left
+/// uncommitted changes" defect had two desync mechanisms that both left HEAD at
+/// the pre-compact content while the editor/visible buffer held the compacted
+/// document:
+///  1. a concurrent stale-supervisor CRDT overlay replay reverted the on-disk
+///     snapshot back to pre-compact before the selective commit staged it
+///     (`#compact-overlay-crdt-staleness`); and
+///  2. the working-tree file lagged an editor-IPC convergence, so the selective
+///     commit misclassified the newer snapshot as stale historical exchange drift
+///     and repaired it back to HEAD (`#jb-compact-commit-editor-ipc-async`).
+///
+/// Defeat both by re-asserting the authoritative compacted snapshot immediately
+/// before the commit (inside the commit lock window), then FAIL CLOSED if HEAD did
+/// not actually land the compacted content — turning a silent "left uncommitted
+/// changes" into a loud, recoverable error with the exact recovery command.
+fn commit_compacted_authoritative(file: &Path, authoritative_snapshot: &str) -> Result<()> {
+    // Re-assert the authoritative snapshot so a replay/lag between
+    // `apply_compacted_document` and here cannot leave a pre-compact snapshot for
+    // the selective commit to stage.
+    snapshot::save(file, authoritative_snapshot)?;
+    closeout_compact_with_commit(file)?;
+    verify_compact_head_landed(file, authoritative_snapshot)
+}
+
+/// Fail closed if the post-commit HEAD does not hold the compacted content.
+///
+/// Comparing HEAD directly against the authoritative compacted content (not merely
+/// snapshot==HEAD) is what distinguishes a real compact commit from a selective
+/// commit that no-oped / repaired the snapshot back to the pre-compact HEAD.
+fn verify_compact_head_landed(file: &Path, authoritative_snapshot: &str) -> Result<()> {
+    use agent_doc_document::transient_markers::normalize_transient_agent_doc_markers;
+    let head = crate::git::show_head(file)?;
+    let landed = head.as_deref().is_some_and(|head| {
+        normalize_transient_agent_doc_markers(head)
+            == normalize_transient_agent_doc_markers(authoritative_snapshot)
+    });
+    if !landed {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "compact_commit_head_mismatch file={} head_len={} authoritative_len={}",
+                file.display(),
+                head.as_deref().map(str::len).unwrap_or(0),
+                authoritative_snapshot.len()
+            ),
+        );
+        anyhow::bail!(
+            "compact --commit did not land the compacted content in HEAD for {} (a stale-supervisor CRDT replay or an unflushed editor buffer desynced the commit surface). The document is left with uncommitted compaction drift. Recover with `agent-doc reset --from-current {}` then `agent-doc compact {} --component exchange --commit` (#jb-compact-commit-left-uncommitted).",
+            file.display(),
+            file.display(),
+            file.display()
+        );
+    }
     Ok(())
 }
 
@@ -510,7 +619,7 @@ fn run_component_compact(
     target: &str,
     message: Option<&str>,
     is_crdt: bool,
-) -> Result<()> {
+) -> Result<String> {
     run_component_compact_with_options(file, content, target, message, is_crdt, false)
 }
 
@@ -521,10 +630,14 @@ fn run_component_compact_force_disk(
     target: &str,
     message: Option<&str>,
     is_crdt: bool,
-) -> Result<()> {
+) -> Result<String> {
     run_component_compact_with_options(file, content, target, message, is_crdt, true)
 }
 
+/// Returns the authoritative compacted snapshot content that was written, so the
+/// `--commit` closeout can stage it directly instead of re-loading a snapshot that
+/// a concurrent CRDT replay may have reverted. When the component is already empty
+/// (nothing to compact), returns the original `content` unchanged.
 fn run_component_compact_with_options(
     file: &Path,
     content: &str,
@@ -532,7 +645,7 @@ fn run_component_compact_with_options(
     message: Option<&str>,
     is_crdt: bool,
     force_disk: bool,
-) -> Result<()> {
+) -> Result<String> {
     let components = element::parse(content)?;
     let comp = components
         .iter()
@@ -549,7 +662,7 @@ fn run_component_compact_with_options(
 
     if trimmed.is_empty() {
         eprintln!("[compact] Component '{}' is already empty", target);
-        return Ok(());
+        return Ok(content.to_string());
     }
 
     // Archive old content
@@ -620,7 +733,7 @@ fn run_component_compact_with_options(
         archive_path.display()
     );
 
-    Ok(())
+    Ok(snapshot_compacted)
 }
 
 /// Partial compact a named component in a template/stream-mode document.
@@ -635,7 +748,7 @@ fn run_component_compact_partial(
     message: Option<&str>,
     is_crdt: bool,
     force_disk: bool,
-) -> Result<()> {
+) -> Result<String> {
     let components = element::parse(content)?;
     let comp = components
         .iter()
@@ -655,7 +768,7 @@ fn run_component_compact_partial(
             sections.len(),
             keep
         );
-        return Ok(());
+        return Ok(content.to_string());
     }
 
     let to_archive = &sections[..sections.len() - keep];
@@ -762,7 +875,7 @@ fn run_component_compact_partial(
         file.display()
     );
 
-    Ok(())
+    Ok(snapshot_compacted)
 }
 
 /// Parse a component's content into a preamble and a list of `### Re:` topic sections.
@@ -2735,6 +2848,146 @@ mod tests {
         let committed = crate::git::show_head(&file).unwrap().unwrap();
         assert!(committed.contains("Compacted summary."));
         assert!(!committed.contains("### Re: topic one"));
+    }
+
+    #[test]
+    fn compact_dirty_treats_diverged_snapshot_as_committable() {
+        use crate::git::SnapshotCommitStatus;
+        // `#jb-compact-commit-editor-ipc-async`: the regression. When the compact
+        // converged through the live editor IPC, the on-disk re-read still equals
+        // the pre-compact content (`changed_on_disk == false`), but the
+        // synchronously-saved compacted snapshot already diverges from HEAD. The
+        // commit gate MUST treat that as dirty — the old gate keyed only off
+        // `changed_on_disk` and silently skipped the `--commit` closeout, leaving
+        // the compacted document uncommitted.
+        assert!(
+            compact_dirty(
+                false,
+                &SnapshotCommitStatus::SnapshotDiffersFromHead {
+                    snapshot_len: 15_000,
+                    head_len: 33_000,
+                }
+            ),
+            "diverged snapshot with an unflushed disk file must still be committable"
+        );
+        // Disk already shows the change → dirty regardless of snapshot status.
+        assert!(compact_dirty(true, &SnapshotCommitStatus::Committed));
+        // Snapshot matches HEAD and disk unchanged → nothing to commit.
+        assert!(!compact_dirty(false, &SnapshotCommitStatus::Committed));
+        // No git HEAD to diverge from → fall back to the on-disk comparison.
+        assert!(!compact_dirty(false, &SnapshotCommitStatus::NotInGitRepo));
+        assert!(compact_dirty(true, &SnapshotCommitStatus::NotInGitRepo));
+    }
+
+    fn init_compact_test_repo(root: &std::path::Path) {
+        use std::fs;
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/patches")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        for args in [
+            vec!["init"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "Test"],
+        ] {
+            std::process::Command::new("git")
+                .current_dir(root)
+                .args(&args)
+                .output()
+                .unwrap();
+        }
+    }
+
+    fn git_commit_file(root: &std::path::Path, name: &str) {
+        for args in [
+            vec!["add", name],
+            vec!["commit", "-m", "commit", "--no-verify"],
+        ] {
+            std::process::Command::new("git")
+                .current_dir(root)
+                .args(&args)
+                .output()
+                .unwrap();
+        }
+    }
+
+    const PRECOMPACT_DOC: &str = concat!(
+        "---\nagent_doc_session: test-lag\nagent_doc_format: template\n---\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: topic one\n\nResponse one.\n\n",
+        "### Re: topic two\n\nResponse two.\n",
+        "<!-- /agent:exchange -->\n",
+    );
+    const COMPACTED_DOC: &str = concat!(
+        "---\nagent_doc_session: test-lag\nagent_doc_format: template\n---\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "*Compacted. Content archived.*\n",
+        "<!-- /agent:exchange -->\n",
+    );
+
+    #[test]
+    fn compact_commit_lands_head_when_snapshot_replayed_stale() {
+        use std::fs;
+        // `#jb-compact-commit-left-uncommitted`, real incident: a stale-supervisor
+        // CRDT replay reverted the on-disk snapshot back to pre-compact after the
+        // compaction converged the compacted content to the editor + disk. HEAD =
+        // pre-compact, disk = compacted, snapshot = pre-compact (replayed). The
+        // authoritative-content commit must re-assert the compacted snapshot and
+        // land it in HEAD instead of staging the stale snapshot.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        init_compact_test_repo(root);
+
+        let file = root.join("session.md");
+        fs::write(&file, PRECOMPACT_DOC).unwrap();
+        snapshot::save(&file, PRECOMPACT_DOC).unwrap();
+        git_commit_file(root, "session.md"); // HEAD = pre-compact
+
+        // Editor/plugin flushed the compacted content to disk...
+        fs::write(&file, COMPACTED_DOC).unwrap();
+        // ...but a stale-supervisor CRDT replay reverted the snapshot to pre-compact.
+        snapshot::save(&file, PRECOMPACT_DOC).unwrap();
+
+        // Authoritative content is known in run() from the compaction itself.
+        commit_compacted_authoritative(&file, COMPACTED_DOC).unwrap();
+
+        let committed = crate::git::show_head(&file).unwrap().unwrap();
+        assert!(
+            committed.contains("*Compacted. Content archived.*"),
+            "HEAD must hold the compacted content after --commit, got:\n{committed}"
+        );
+        assert!(
+            !committed.contains("### Re: topic one"),
+            "pre-compact content must not remain in HEAD:\n{committed}"
+        );
+    }
+
+    #[test]
+    fn compact_commit_fails_closed_when_head_cannot_land() {
+        use std::fs;
+        // `#jb-compact-commit-left-uncommitted`, fail-closed path: when the
+        // working-tree file still equals HEAD (a pure editor-IPC lag with no flush),
+        // the selective commit cannot safely stage the compacted content, so the
+        // authoritative-content commit must FAIL CLOSED with a recovery command
+        // rather than silently leaving uncommitted compaction drift.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        init_compact_test_repo(root);
+
+        let file = root.join("session.md");
+        fs::write(&file, PRECOMPACT_DOC).unwrap();
+        snapshot::save(&file, PRECOMPACT_DOC).unwrap();
+        git_commit_file(root, "session.md"); // HEAD = pre-compact
+        // Disk still lags (editor holds the compacted buffer, no flush yet).
+        assert_eq!(fs::read_to_string(&file).unwrap(), PRECOMPACT_DOC);
+
+        let err = commit_compacted_authoritative(&file, COMPACTED_DOC).unwrap_err();
+        assert!(
+            err.to_string().contains("did not land the compacted content"),
+            "expected fail-closed HEAD-mismatch error, got: {err}"
+        );
+        // HEAD is unchanged; the operator gets an explicit recovery path.
+        let committed = crate::git::show_head(&file).unwrap().unwrap();
+        assert!(committed.contains("### Re: topic one"));
     }
 
     #[test]

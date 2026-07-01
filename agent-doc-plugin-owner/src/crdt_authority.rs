@@ -1,13 +1,12 @@
-//! Orchestration adapters for CRDT-authority facts.
+//! Plugin-owner adapters for CRDT-authority facts.
 //!
 //! The pure CRDT-authority policy lives in
 //! [`agent_doc_document_realtime::crdt_authority`]. This module owns the
-//! orchestration-specific observation points that need plugin-owner sidecar IO or
-//! the supervisor-side plugin-owner liveness probe.
+//! plugin-owner observation point that needs lease-sidecar IO.
 
 use agent_doc_document_realtime::crdt_authority::{CrdtAuthority, authority_from_liveness};
 
-use agent_doc_plugin_owner::ownership_liveness_for_file;
+use crate::ownership_liveness_for_file;
 
 /// Read the live editor-attachment facts for a document from its plugin-owner
 /// lease sidecar and resolve the CRDT authority. This is the write-path entry

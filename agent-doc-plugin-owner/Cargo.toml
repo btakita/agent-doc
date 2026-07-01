@@ -10,6 +10,7 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_plugin_owner"
 
 [dependencies]
+agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.34.66" }
 agent-doc-lease = { path = "../agent-doc-lease", version = "0.34.66" }
 agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.66" }
 libc = "0.2"

@@ -722,7 +722,7 @@ mod tests {
         // lease for the CURRENT pid so `authority_for_file` resolves MultiReplica.
         crate::test_support::seed_live_plugin_owner_lease(&file_str);
         assert!(
-            crate::crdt_authority::authority_for_file(&file_str).editor_attached(),
+            agent_doc_plugin_owner::crdt_authority::authority_for_file(&file_str).editor_attached(),
             "test setup: the document must be editor-attached"
         );
 
@@ -881,7 +881,8 @@ mod tests {
         let file_str = doc.display().to_string();
         // No lease seeded → authority is GitAuthoritative.
         assert!(
-            !crate::crdt_authority::authority_for_file(&file_str).editor_attached(),
+            !agent_doc_plugin_owner::crdt_authority::authority_for_file(&file_str)
+                .editor_attached(),
             "test setup: the document must be detached"
         );
 

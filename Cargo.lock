@@ -603,6 +603,7 @@ dependencies = [
 name = "agent-doc-plugin-owner"
 version = "0.34.66"
 dependencies = [
+ "agent-doc-document-realtime",
  "agent-doc-lease",
  "agent-doc-merge",
  "libc",

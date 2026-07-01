@@ -83,7 +83,8 @@ pub fn complete_required_closeout(file: &Path) -> Result<bool> {
     // to protect, so use the explicit force-disk maintenance path there; keep
     // editor-attached closeout on the guarded IPC convergence path.
     let editor_attached =
-        crate::crdt_authority::authority_for_file(&file.display().to_string()).editor_attached();
+        agent_doc_plugin_owner::crdt_authority::authority_for_file(&file.display().to_string())
+            .editor_attached();
     let pending_maintenance = if editor_attached {
         crate::preflight::run_pending_maintenance(file)
     } else {
@@ -1557,7 +1558,9 @@ mod tests {
         // for the current test process makes `authority_for_file` take the real
         // editor-attached path.
         crate::test_support::seed_live_plugin_owner_lease(&file_str);
-        assert!(crate::crdt_authority::authority_for_file(&file_str).editor_attached());
+        assert!(
+            agent_doc_plugin_owner::crdt_authority::authority_for_file(&file_str).editor_attached()
+        );
 
         let (a_id, a_bootstrap) =
             crate::crdt_relay_host::register_replica_for_file(&doc, "vscode:a")

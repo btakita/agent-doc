@@ -1596,7 +1596,8 @@ fn replay_orphaned_response_through_strict_write(
 }
 
 fn repair_replay_force_disk(file: &Path) -> bool {
-    !crate::crdt_authority::authority_for_file(&file.display().to_string()).editor_attached()
+    !agent_doc_plugin_owner::crdt_authority::authority_for_file(&file.display().to_string())
+        .editor_attached()
 }
 
 fn repair_replay_commit_mode(file: &Path) -> write::CommitMode {

@@ -33,6 +33,7 @@ use agent_doc_merge::ownership::{
 };
 use serde::{Deserialize, Serialize};
 
+pub mod crdt_authority;
 pub mod stale_cleanup;
 
 /// Directory (relative to the project root) holding per-document plugin-owner

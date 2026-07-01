@@ -6862,8 +6862,8 @@ fn test_agent_doc_plugin_owner_owns_editor_lease_policy() {
     let focused =
         fs::read_to_string(manifest_dir.join("agent-doc-plugin-owner/src/lib.rs")).unwrap();
     assert!(
-        focused.contains("pub mod stale_cleanup;"),
-        "agent-doc-plugin-owner should expose focused stale cleanup policy without a root facade"
+        focused.contains("pub mod stale_cleanup;") && focused.contains("pub mod crdt_authority;"),
+        "agent-doc-plugin-owner should expose focused stale cleanup and CRDT authority adapters without a root facade"
     );
     for required in [
         "pub struct PluginOwnerLease",
@@ -6885,6 +6885,58 @@ fn test_agent_doc_plugin_owner_owns_editor_lease_policy() {
         assert!(
             focused.contains(required),
             "agent-doc-plugin-owner must own editor plugin-owner lease policy: {required}"
+        );
+    }
+    let crdt_authority =
+        fs::read_to_string(manifest_dir.join("agent-doc-plugin-owner/src/crdt_authority.rs"))
+            .unwrap();
+    for required in [
+        "pub fn authority_for_file(",
+        "agent_doc_document_realtime::crdt_authority::{",
+        "authority_from_liveness",
+        "CrdtAuthority",
+        "ownership_liveness_for_file",
+    ] {
+        assert!(
+            crdt_authority.contains(required),
+            "agent-doc-plugin-owner must own plugin-owner CRDT authority observation: {required}"
+        );
+    }
+    for forbidden in [
+        "pub enum CrdtAuthority",
+        "pub fn authority_for(",
+        "pub fn authority_from_liveness(",
+        "pub fn authority_for_projection(",
+        "pub fn authority_for_document(",
+        "pub fn sync_under_authority(",
+        "pub fn commit_barrier_under_authority(",
+        "pub use agent_doc_document_realtime::crdt_authority",
+    ] {
+        assert!(
+            !crdt_authority.contains(forbidden),
+            "agent-doc-plugin-owner CRDT authority adapter must not re-own or facade pure realtime authority policy: {forbidden}"
+        );
+    }
+    let plugin_owner_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-plugin-owner/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&plugin_owner_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    assert!(
+        dependencies.contains_key("agent-doc-document-realtime"),
+        "agent-doc-plugin-owner CRDT authority adapter should depend on focused realtime authority policy"
+    );
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-plugin-owner must stay free of core/orchestration/git/editor IPC/sqlite/tmux facades: {forbidden}"
         );
     }
     let stale_cleanup =
@@ -16681,9 +16733,18 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
             "orchestration must not re-own or facade realtime write policy: {forbidden_snippet}"
         );
     }
-    let orchestration_crdt_authority =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/crdt_authority.rs"))
-            .unwrap();
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/crdt_authority.rs")
+            .exists(),
+        "orchestration must not keep a CRDT authority module or facade"
+    );
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod crdt_authority"),
+        "orchestration must not expose a CRDT authority facade"
+    );
     for forbidden_snippet in [
         "pub enum CrdtAuthority",
         "pub fn authority_for(",
@@ -16695,7 +16756,7 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         "pub use agent_doc_document_realtime::crdt_authority",
     ] {
         assert!(
-            !orchestration_crdt_authority.contains(forbidden_snippet),
+            !orchestration_document_mutation.contains(forbidden_snippet),
             "orchestration must not re-own or facade CRDT authority policy: {forbidden_snippet}"
         );
     }
@@ -16847,6 +16908,27 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
                 && !source.contains("use crate::crdt_authority::CrdtAuthority"),
             "{relative} must not import CrdtAuthority through orchestration"
         );
+    }
+    for relative in [
+        "agent-doc-orchestration/src/crdt_relay_host.rs",
+        "agent-doc-orchestration/src/flow/closeout.rs",
+        "agent-doc-orchestration/src/repair.rs",
+        "agent-doc-orchestration/src/start/supervisor_io.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("agent_doc_plugin_owner::crdt_authority::authority_for_file"),
+            "{relative} should call the focused plugin-owner CRDT authority adapter directly"
+        );
+        for forbidden in [
+            "crate::crdt_authority::authority_for_file",
+            "agent_doc_orchestration::crdt_authority::authority_for_file",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{relative} must not route CRDT authority through orchestration: {forbidden}"
+            );
+        }
     }
     for forbidden in [
         "agent-doc-core",

@@ -14,7 +14,7 @@
 //!
 //! Every entry point here resolves the document's [`CrdtAuthority`] first (cheaply,
 //! per-document, fail-safe to `GitAuthoritative`) via
-//! [`crate::crdt_authority::authority_for_file`]:
+//! [`agent_doc_plugin_owner::crdt_authority::authority_for_file`]:
 //!
 //! - [`CrdtAuthority::GitAuthoritative`] (**Detached** — no live editor): every
 //!   entry point is a **no-op** that returns the trivially-ready / unchanged
@@ -54,11 +54,11 @@ use std::sync::{Mutex, OnceLock};
 
 use anyhow::Result;
 
-use crate::crdt_authority::authority_for_file;
 use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
 use agent_doc_document_realtime::crdt_relay::{
     AwarenessState, PendingReplicaUpdate, RelayHub, ReplicaDeliverySnapshot, mint_client_id,
 };
+use agent_doc_plugin_owner::crdt_authority::authority_for_file;
 
 /// The canonical replica's reserved yrs client-id for every per-document hub. The
 /// supervisor's canonical replica is the hub authority; editor replicas mint

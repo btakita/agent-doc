@@ -249,9 +249,9 @@ No document-extraction vendor is "100% accurate" on messy CRE source docs, so a 
 
 ---
 
-## 5. Recommended phasing
+## 5. Phasing & engagement options
 
-I'd suggest leading with a scoped first tranche rather than a single fixed bid on the whole list. It keeps your spend controlled and lets us validate the new code structure against your live data before you commit the full budget.
+The work is structured in phases so you're never committing to the whole list at once. That keeps your spend controlled and lets us validate the new code structure against your live data before you commit the full budget.
 
 **Phase 0 — Discovery (1 week)**
 A repo and data-model audit, a production-safety plan, and a tight milestone plan — plus a short document-extraction bake-off (2-3 vendors scored against a labeled sample of your real OMs on the §3a rubric, so the build-vs-buy call in §3c is made on data, not vendor claims). **24-44h → $2.4k-$4.4k**, credited toward Phase 1 if you proceed.

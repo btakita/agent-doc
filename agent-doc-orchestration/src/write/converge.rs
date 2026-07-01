@@ -290,6 +290,13 @@ pub fn try_auto_recover_live_prompt_drift(
     if !cycle.ipc_snapshot_adoption_blocked {
         return Ok(None);
     }
+    // `#turnsaferecycle` Goal 2 — an `ipc_snapshot_adoption_blocked` drift against a
+    // STALE supervisor is doomed to keep drifting; schedule an immediate forced PCP
+    // recycle now (fail-open, gated on proven staleness) instead of only retrying the
+    // buffer. This does not abort the in-flight recovery below — the recycle fires at
+    // the controller's next serve-loop tick — it just guarantees the stale process is
+    // replaced rather than thrashed.
+    schedule_stale_supervisor_pcp_recycle(file, "live_prompt_drift_after_preflight");
     // #exch-intermix-falsedrop: a recorded dropped exchange/queue prompt only
     // represents real user-content loss when it is genuinely ABSENT from the
     // response candidate. A queue item consumed (struck) this cycle, or a user
@@ -468,6 +475,83 @@ pub(crate) fn log_write_wedge_requests_supervisor_recycle(file: &Path, source: &
             source
         ),
     );
+}
+
+/// `#turnsaferecycle` Goal 2 — pure: given stale-supervisor evidence at a proven
+/// IPC drift, does the workflow kernel say to schedule an IMMEDIATE forced PCP
+/// recycle (`RecycleNow`) rather than only surface advisory guidance? Routes through
+/// the shared `decide_stale_supervisor` kernel so the stale-IPC path and the idle
+/// watch make the same decision. An active IPC-drift closeout is treated as a
+/// `turn_boundary` with pending work, so the only remaining gate is the operator's
+/// auto-recycle opt-out.
+pub(crate) fn stale_ipc_drift_forces_pcp_recycle(stale: bool, auto_recycle: bool) -> bool {
+    matches!(
+        agent_doc_workflow::decide_stale_supervisor(agent_doc_workflow::StaleSupervisorEvidence {
+            stale,
+            auto_recycle,
+            turn_boundary: true,
+            queue_head_pending: true,
+        })
+        .decision,
+        agent_doc_workflow::WorkflowDecision::Supervisor(
+            agent_doc_workflow::SupervisorWorkflowDecision::RecycleNow
+        )
+    )
+}
+
+/// `#turnsaferecycle` Goal 2 — when a stale-supervisor IPC drift is proven at write
+/// closeout, immediately schedule a FORCED PCP recycle (`recycle_controller_force(..,
+/// true)`) instead of only retrying the doomed buffer or emitting advisory guidance.
+/// Fail-open: a missing project root, a fresh supervisor, or an opted-out auto-recycle
+/// leaves the existing retry/advisory behavior in place. Returns `true` only when a
+/// forced recycle was scheduled.
+pub(crate) fn schedule_stale_supervisor_pcp_recycle(file: &Path, source: &str) -> bool {
+    let Some(project_root) = agent_doc_fs::find_project_root(file) else {
+        return false;
+    };
+    if crate::project_controller::stale_supervisor_warning_for_doc(file).is_none() {
+        return false;
+    }
+    let auto_recycle = crate::project_controller::supervisor_auto_recycle_enabled(file);
+    if !stale_ipc_drift_forces_pcp_recycle(true, auto_recycle) {
+        // Auto-recycle opted out → SurfaceStale: record advisory guidance, do not
+        // force. The existing stale-supervisor warning already surfaces the manual
+        // refresh path to the operator.
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "stale_supervisor_ipc_drift_surfaced file={} source={} action=advisory_only reason=auto_recycle_opted_out",
+                file.display(),
+                source
+            ),
+        );
+        return false;
+    }
+    match crate::project_controller::recycle_controller_force(&project_root, true) {
+        Ok(scheduled) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "stale_supervisor_ipc_drift_forced_recycle file={} source={} scheduled={} action=recycle_controller_force reason=stale_supervisor_ipc",
+                    file.display(),
+                    source,
+                    scheduled
+                ),
+            );
+            eprintln!(
+                "[write] stale-supervisor IPC drift for {} ({source}); scheduling an immediate forced PCP recycle instead of thrashing the doomed write",
+                file.display()
+            );
+            scheduled
+        }
+        Err(err) => {
+            eprintln!(
+                "[write] warning: failed to schedule forced PCP recycle on stale-supervisor IPC drift for {}: {err:#}",
+                file.display()
+            );
+            false
+        }
+    }
 }
 
 /// The agent's response component in template mode: the single AST node the agent
@@ -1921,6 +2005,25 @@ mod core_tests {
     use std::fs::OpenOptions;
     use std::time::Duration;
     use tempfile::TempDir;
+
+    #[test]
+    fn stale_ipc_drift_forces_pcp_recycle_only_when_stale_and_auto_recycle_on() {
+        // `#turnsaferecycle` Goal 2: a proven stale-supervisor IPC drift with
+        // auto-recycle ON schedules an immediate forced PCP recycle (RecycleNow);
+        // opted-out auto-recycle stays advisory; a fresh supervisor never recycles.
+        assert!(
+            stale_ipc_drift_forces_pcp_recycle(true, true),
+            "stale + auto-recycle must force RecycleNow"
+        );
+        assert!(
+            !stale_ipc_drift_forces_pcp_recycle(true, false),
+            "auto-recycle opted out must stay advisory (SurfaceStale)"
+        );
+        assert!(
+            !stale_ipc_drift_forces_pcp_recycle(false, true),
+            "a fresh supervisor is never a recycle candidate"
+        );
+    }
 
     fn doc_with_queue_and_exchange(queue_body: &str, response: &str) -> String {
         format!(

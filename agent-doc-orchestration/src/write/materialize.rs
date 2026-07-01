@@ -93,6 +93,14 @@ pub(crate) fn log_ipc_proof_failure(
             detail
         ),
     );
+    // `#turnsaferecycle` Goal 2 — a `retry_without_disk_write` proof failure against a
+    // STALE supervisor is a doomed IPC write; schedule an immediate forced PCP recycle
+    // (fail-open, gated on proven staleness inside the helper) rather than let the
+    // caller keep thrashing the buffer. Only the retry-without-disk recovery class is a
+    // candidate; genuine disk-fallback failures are not stale-supervisor drift.
+    if recovery.contains("retry_without_disk_write") {
+        super::converge::schedule_stale_supervisor_pcp_recycle(file, source);
+    }
 }
 
 pub(crate) fn log_partial_response_materialization_for_retry(

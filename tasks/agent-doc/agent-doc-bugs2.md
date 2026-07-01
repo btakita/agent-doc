@@ -40,7 +40,30 @@ Compacted content:
 - Archived 10 response topic(s): preflight exchange precedence; preflight exchange precedence; terminal-proof abandoned preflight closeout; 7 more
 - Prior summary/context: prior compacted content: Archived 3 response topic(s): continue; do [#qftlossproof]; do [#qftlossproof]
 JB `Compact Exchange` should not leave uncommitted changes. The compact exchange summary should be committed. #spec-test-build-install-commit-push
-<!-- agent:boundary:fd7cc1c1 -->
+
+agent-doc Claude Code has stderr bleeding ![img_57.png](img_57.png)
+
+### Re: JB Compact Exchange should not leave uncommitted changes — opus-4-8
+
+Fixed and shipped (agent-doc `c4ea1b48` on origin/main). The root cause was deeper than a missing commit: `agent-doc compact --commit` already ran the commit closeout, but two desync mechanisms both left HEAD at the pre-compact content while the editor/visible buffer held the compacted document — the exact drift this session opened in (snapshot 33KB, visible 15KB, HEAD 33KB):
+
+- `#compact-overlay-crdt-staleness`: a stale-supervisor CRDT overlay replay reverted the on-disk snapshot back to pre-compact before the selective commit staged it (the mechanism the live incident hit — ops.log `compact_writeback ... transport=editor_ipc` at 06:23:38Z with no commit after).
+- `#jb-compact-commit-editor-ipc-async`: an editor-IPC convergence left the working-tree re-read lagging, so the old gate `changed = updated != content` was false and skipped the commit; and even when reached, `commit_with_outcome` misclassified the newer snapshot as stale historical drift (working-tree == HEAD) and repaired it back to HEAD.
+
+Fix: the inner compact functions now return the authoritative in-memory compacted content, and the `--commit` path (`commit_compacted_authoritative`) re-asserts that snapshot immediately before the commit, then fails closed with a `reset --from-current` recovery command if the post-commit HEAD did not land the compacted content. `--commit` can no longer silently leave uncommitted drift; the selective commit still stages the snapshot, never arbitrary working-tree drift.
+
+Tests (red→green): `compact_dirty_treats_diverged_snapshot_as_committable`, `compact_commit_lands_head_when_snapshot_replayed_stale`, `compact_commit_fails_closed_when_head_cannot_land`. `make check` green — 6255 passed, clippy clean, Lean built. Local `make install` was intentionally deferred (see next answer); live JB proof tracked as `#jbcompactcommit`.
+
+### Re: agent-doc Claude Code has stderr bleeding (img_57.png) — opus-4-8
+
+Confirmed `#restartstderrbleed`. The screenshot shows the auto-install command landing in the Claude Code **input** box (the `>` prompt, "Opus 4.8 ctx:17%" status line, "bypass permissions on" footer):
+
+`CARGO_INCREMENTAL=1 RUSTFLAGS="-C link-arg=-fuse-ld=lld" cargo install --path . --profile "release-local" --target-dir "target/local-install" --force`
+
+So the supervisor/PCP auto-install runs that `cargo install` in — or echoes it into — the agent's own tmux pane instead of an isolated build pane, and the command text bleeds into the harness input. This is a distinct bug from the compact fix with its own backlog item, so I captured the concrete repro (exact command + surface) onto `#restartstderrbleed` rather than folding an unrelated change into this turn; it needs a focused cycle to locate the auto-install spawn surface, route it to a dedicated pane/stream, and add a regression that install diagnostics never reach the agent prompt/UI.
+
+This is also why I did not run `make install` this turn: it would reproduce this bleed and, as it did, wedge the closeout. The install at 02:43:52 (that same bled command) left this doc's supervisor (PID 486778, started 02:23) on a now-deleted stale binary, which mangled the live buffer (reversed list, duplicate prompts) and forced a `--force-disk` recovery for this very response. I queued `agent-doc admin recycle` to promote the current binary; the fixed compact binary should be installed at a clean boundary (dedicated pane, then recycle), not mid-session in the live pane.
+<!-- agent:boundary:6e3251ec -->
 <!-- /agent:exchange -->
 ## Queue
 

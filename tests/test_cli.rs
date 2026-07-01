@@ -11891,7 +11891,11 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         !orchestration_lib.contains("pub mod callback;"),
         "orchestration must not expose callback IO through a callback facade module"
     );
-    for relative in ["src/main.rs", "src/cleanup_cmd.rs", "agent-doc-orchestration/src/preflight/run.rs"] {
+    for relative in [
+        "src/main.rs",
+        "src/cleanup_cmd.rs",
+        "agent-doc-orchestration/src/preflight/run.rs",
+    ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
             source.contains("agent_doc_callback_io")
@@ -12727,6 +12731,44 @@ fn test_agent_doc_document_owns_active_identity_projection_policy() {
 #[test]
 fn test_agent_doc_element_boundary_owns_boundary_id_lookup() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    assert!(
+        workspace_manifest.contains("\"agent-doc-boundary-io\""),
+        "agent-doc-boundary-io should be a workspace member"
+    );
+    assert!(
+        workspace_manifest.contains("agent-doc-boundary-io = { path = \"agent-doc-boundary-io\""),
+        "CLI shell should depend on boundary IO directly"
+    );
+
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod boundary_io;"),
+        "orchestration must not expose a boundary_io facade"
+    );
+
+    let boundary_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-boundary-io/src/lib.rs")).unwrap();
+    assert!(
+        boundary_io.contains("pub fn run(file: &Path, component: Option<&str>)"),
+        "agent-doc-boundary-io should own the boundary CLI file-I/O path"
+    );
+    assert!(
+        !boundary_io.contains("agent_doc_orchestration::"),
+        "boundary IO must not reach back through orchestration"
+    );
+
+    let main = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
+    assert!(
+        main.contains("agent_doc_boundary_io::run(&file, component.as_deref())"),
+        "boundary command should call the focused IO crate directly"
+    );
+    assert!(
+        !main.contains("agent_doc_orchestration::boundary_io::"),
+        "boundary command must not route through orchestration"
+    );
+
     let boundary =
         fs::read_to_string(manifest_dir.join("agent-doc-element-boundary/src/boundary.rs"))
             .unwrap();

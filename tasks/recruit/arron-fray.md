@@ -8,7 +8,6 @@ claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 pending_done_guard: warn
 agent_doc_lint_dialect: off
-queue: start
 ---
 
 ## Status
@@ -46,6 +45,7 @@ Thanks,
 Arron Fray
 Director at Velocity Tech | Scaling technology teams by reliably providing support
 ```
+<!-- agent:boundary:8c37810b -->
 ### Re: Contact created + should you apologize for replying today — opus-4.8
 
 **Contact created** at `mail/contacts/arron-fray/` (committed in the `mail` submodule):
@@ -61,17 +61,58 @@ Quick read on the opportunity: agency recruiter (Velocity Tech), not the hiring 
 - Opening with an apology cedes leverage — it signals over-eagerness and frames you as the one who was tardy, when he's the one asking you for something. Reply from mild scarcity, not deference.
 
 Just reply normally and warmly, no apology. If you want a softener, "Thanks for reaching out" does all the work an apology would, without the downside. Want me to draft the reply? I'd lead by asking the client name and flagging your availability/comp expectations before committing a call slot.
-<!-- agent:boundary:1f13cbe5 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/recruit/arron-fray.md source=ipc_visible_repair patch_id=db532af7-a633-47bb-949d-5a9f0f971361 invariant=ipc_dedupe recovery=retry_without_disk_write redeliver_editor=true bad_len=3247 bad_hash=31ffca1ac4d2bb6009a8494d26d87af91fffea218c619e15e8ded9bda6f11fbb repaired_len=4209 repaired_hash=fca71769775e5f63d8a187350117ea1bcf674634a574d00316eb58ce32c22b1d doc=arron-fray session=4dd0cfdc-f430-467f-ba22-548021de0004 turn=cycle-1782928216412
+```
+
+### Re: Resume queue drained (rename + Open Source reorder + custom JD resume + LinkedIn draft) — opus-4.8
+
+All 9 queue items done. Resume changes are committed in the `resume/` submodule (2 commits); `data.toml` is the authoritative build source and `BrianTakita.md` was kept in sync.
+
+**Resume content (`data.toml` + `BrianTakita.md`):**
+1. Heading renamed: *Independent Software Consultant — Current Client Work* → *— Client Work*.
+2. **lazily** now leads Open Source — all ports (lazily-rs/py/zig/js/dart/kt) plus the `lazily-spec` conformance spec and `lazily-formal` model; interop-as-one-system over FFI, IPC, WebSockets, WebRTC, and WASM; primitives = Harel statechart-style reactive state machines and state planes.
+3. **signal-space** second — new entry: the shared surface layer for live signal graphs (topology, timelines, inspectors, intents), bound to the matching lazily runtime, with `signal-space-spec`.
+4. **agent-doc** third, **tsift** fourth — tsift reframed as a MemGraphRAG engine (BM25 + vector + call-graph) over a provider-neutral GraphDB (SQLite/LibSQL).
+5. **corky "fourth" conflicts with "tsift fourth"** — I read it as *corky right after tsift* and placed it fifth (lazily → signal-space → agent-doc → tsift → corky). Say the word if you want corky above tsift instead.
+
+**Custom JD resume (item 8):** `profiles/arron-fray.toml` → `BrianTakita-arron-fray.pdf` — Python-first summary rewrite, tight section order (Presence AI → current client work → open source → data-at-scale), and highlights matched to the JD (distributed real-time, REST/GraphQL, GCP, reliability/BDD). Default `BrianTakita.pdf` rebuilt too. (Other job-specific PDFs are stale vs the new source — regenerate any you need with `make PROFILE=<name>`.)
+
+**LinkedIn draft for Arron (item 9) — no auto-send, your call to send:**
+
+> Hi Arron — thanks for reaching out; this looks like a strong fit. I've got 20+ years building production backend systems, Python-first (also Rust and TypeScript), with real-time and distributed work at scale — I architected Presence AI's real-time avatar pipeline on H100s over WebRTC and scaled it with Ray, and I've built and deployed on Google Cloud. Testing and operational reliability are things I lead on, not afterthoughts.
+>
+> Before I send a CV and we book a call: who's the client company? Happy to share a tailored resume once I know who it's for.
+>
+> On logistics — the fully-remote, $220k framing works for me. I can do an intro call this week; afternoons ET are easiest.
+>
+> Best,
+> Brian
+
+Want me to send it via corky/LinkedIn, or adjust the tone/availability first?
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue go -->
-- 🚧 In resumes, rename "INDEPENDENT SOFTWARE CONSULTANT — CURRENT CLIENT WORK", to "INDEPENDENT SOFTWARE CONSULTANT — CLIENT WORK"
-- Resume: Under Open Source: Make lazily first. Mention all projects, including lazily-spec and lazily-formal. Include FFI, IPC, Web Sockets, WebRTC, and WASM. Mention primitives including state machines and state planes.
-- resume: Under Open Source: Make signal-space second.
-- resume: Under Open Source: Make agent-doc third.
-- resume: Under Open Source: Make tsift fourth.
+<!-- agent:queue -->
+- [x] ~~In resumes, rename "INDEPENDENT SOFTWARE CONSULTANT — CURRENT CLIENT WORK", to "INDEPENDENT SOFTWARE CONSULTANT — CLIENT WORK"~~ — done (data.toml + BrianTakita.md)
+- [x] ~~Resume: Under Open Source: Make lazily first. Mention all projects, including lazily-spec and lazily-formal. Include FFI, IPC, Web Sockets, WebRTC, and WASM. Mention primitives including state machines and state planes.~~ — done
+- [x] ~~resume: Under Open Source: Make signal-space second.~~ — done (new entry)
+- [x] ~~resume: Under Open Source: Make agent-doc third.~~ — done
+- [x] ~~resume: Under Open Source: Make tsift fourth. Mention MemGraphRag, GraphDB, BM25, Sqlite/LibSql.~~ — done (MemGraphRAG/GraphDB/BM25/SQLite·LibSQL)
+- [x] ~~resume: Under Open Source: Make corky fourth.~~ — corky placed 5th (right after tsift); conflicts with "tsift fourth" — see response
+- [x] ~~Ensure the lazily description mentions Harel Statecharts. Highlight the interoperability of the lazily family.~~ — done
+- [x] ~~Create a custom resume for the job description.~~ — profiles/arron-fray.toml → BrianTakita-arron-fray.pdf
+- [x] ~~Draft a linked in message for arron-fray.~~ — drafted in response (no auto-send)
 <!-- /agent:queue -->
 
 ## Backlog

@@ -90,6 +90,24 @@ Reviewed [the Greenhouse posting](https://job-boards.greenhouse.io/qualia/jobs/6
 **One-liner for "why you":** *"You move money in high-stakes, high-liability closings — that's exactly the surface I've been hardening: Stripe/PayPal payments, fraud mitigation, and reliability under real financial risk."*
 
 Want me to spin up a tailored resume profile (`resume/profiles/qualia.toml`) emphasizing payments/fraud + Node, or draft an application note?
+Should I mention multi-layer perceptron models? And my signal-space work?
+
+### Re: MLP models + signal-space — mention them? — opus-4-8
+
+Short answer: **signal-space yes (selectively), MLP mostly no.** Match each to the audience.
+
+**Today's recruiter screen with Alana — skip both.** Keep the narrative sharp and on-target: payments/fraud + full-stack Node in a high-liability domain. Both topics are technical and niche; with a non-technical recruiter they dilute a clean story and invite "why isn't this on the resume for *this* role" questions. Save them for the technical rounds.
+
+**Signal-space — yes, in technical rounds, because it has a real hook here.** Signal-space is realtime reactive signal/graph mirroring (snapshot/delta, CRDT-adjacent) — and Qualia's whole product is **multiple parties collaborating on one live closing** (title agent, escrow, lender, buyer/seller). Realtime state sync and conflict-free collaboration is a genuine domain overlap. Pair it with **agent-doc's CRDT co-editing** (human + agent editing the same doc without conflicts) — together they show you think hard about realtime multi-user consistency, which is exactly the hard part of a shared closing platform. That's a *stronger, more on-point* angle than MLP. Keep it to ~30 seconds and tie it to their multi-party workflow, not to your framework's lineage.
+
+**MLP / ML — only if *they* bring up AI, and frame it honestly.** Qualia does have AI surfaces (Qualia Clear AI, **Shield** wire-fraud detection), so ML *can* come up. If it does:
+- Lead with your **real production ML experience — Presence AI** (real-time inference pipelines: facial-landmark detection, lip-sync inference on H100s via WebRTC). That's concrete and shippable, not academic.
+- **Do not** imply you've built ML-based fraud models. Your fraud work (MonsterRodHolders) was **rule/heuristic-based** — Turnstile, WAF, ModSecurity, order-data forensics — not trained models. Conflating them is the kind of overclaim a technical interviewer will probe and you'll lose credibility. It's fine (better, even) to say "my fraud work was heuristic/rules; my ML production work was the Presence AI inference stack."
+- Naming "multi-layer perceptron models" specifically reads academic and invites depth you may not want to defend for a web-platform role. Say "production ML/inference systems" and only go deeper if they push.
+
+**Bottom line:** For the win today, don't volunteer either — stay on payments/fraud + Node. In technical rounds, **lead with signal-space + agent-doc CRDT when realtime/collaboration/frontend architecture comes up** (best fit), and reach for ML only if they raise their AI stack, anchored on Presence AI and honest about the fraud distinction.
+
+Want me to draft a tight 30-second signal-space + CRDT talking point you can drop in when collaboration architecture comes up?
 <!-- agent:boundary:87926286 -->
 <!-- /agent:exchange -->
 

@@ -39,12 +39,24 @@ done
 Compacted content:
 - Archived 2 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); "I was not typing"
 - Prior summary/context: prior compacted content: Archived 2 response topic(s): JB Compact Exchange should not leave uncommitted changes; agen...
-<!-- agent:boundary:9de20a2c -->
+<!-- agent:boundary:a7267d23 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=file_ipc patch_id=5f1613c1-930a-42ff-abbe-23d330f857c4 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/5f1613c1-930a-42ff-abbe-23d330f857c4.json doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782893508520
+```
 <!-- /agent:exchange -->
 ## Queue
 
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
 /goal Implement backlog item(s): #jq4f
 - :pushpin: do [#restartstderrbleed]
 Error: timed out waiting for project controller at /home/brian/work/btakita/agent-loop/.agent-doc/controller.sock`
@@ -93,7 +105,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#jq4f] Fix crashed session and issue during startup ` /home/brian/.cargo/bin/agent-doc start --route-owned tasks/agent-doc/agent-doc-bugs2.md
+- [ ] [#falsetyping-guard] [focused-cycle] #agent-doc-bug Make the binary-side visible-write guard provenance-aware: guard_visible_write_idle_current_or_target fails closed ('visible editor buffer differs from expected disk state; save or discard') when the live buffer diverges due to CRDT-replica churn rather than a real operator edit, wedging finalize/write. The JB plugin fix #falsetyping (0.2.203) stops marking typing on remoteCrdtApply, but the binary still cannot distinguish replica-driven live-buffer content from unsaved operator edits. Plumb remoteCrdtApply provenance through the live-buffer report and re-merge on replica churn instead of demanding save/discard. Deep/live-CRDT-critical; focused cycle + operator live proof.
 - [ ] [#jbcompactcommit] [operator-verify] Live JB Compact Exchange no-uncommitted-changes proof: after the fixed binary is installed + recycled, run JB Compact Exchange on a large session doc and confirm HEAD lands the compacted content (no green git gutter / no snapshot>visible drift on next preflight). Grep ops.log for compact_commit_head_mismatch (must be ABSENT on success; present = the new fail-closed guard fired with a reset --from-current recovery). Rust fix shipped in agent-doc-orchestration/src/compact.rs commit_compacted_authoritative (#jb-compact-commit-left-uncommitted).
 - [ ] [#kjw0] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=tasks/agent-doc/agent-doc-bugs2.md stage=dispatch_start_proof pane=%69 actor_generation=1161 editor_attempt_id=1782871961019-10 dispatch_proof_state=none elapsed_ms=21174 diagnostic_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782872116210-direct_pane_dispatch_start_unproven-codex-_69-a2246a0e8c6f.txt ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0 component=route/dispatch_start_proof content_hash=sha256:15e835a6e0f770b814aa68069d2a7354628b2401ea485f84d2a929ae58cc6554]
 - [ ] [#restartstderrbleed] #agent-doc-bug Diagnose binary-restart stderr bleed into the agent after supervisor/PCP restart; capture the stderr source and add regression/proof that restart diagnostics stay out of the agent prompt/UI. Related JB Run Agent Doc route failure remains tracked by #kjw0.

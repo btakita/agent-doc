@@ -40,31 +40,19 @@ Compacted content:
 - Archived 10 response topic(s): preflight exchange precedence; preflight exchange precedence; terminal-proof abandoned preflight closeout; 7 more
 - Prior summary/context: prior compacted content: Archived 3 response topic(s): continue; do [#qftlossproof]; do [#qftlossproof]
 JB `Compact Exchange` should not leave uncommitted changes. The compact exchange summary should be committed. #spec-test-build-install-commit-push
-<!-- agent:boundary:f7b75f69 -->
+<!-- agent:boundary:fd7cc1c1 -->
 <!-- /agent:exchange -->
 ## Queue
 
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
-- ~~:pushpin: do [#syncbarrier]~~
-- ~~:pushpin: do [#qheadstrikeauto]~~
-- ~~:pushpin: do [#suprestassoc]~~
 - :pushpin: do [#2y8j]
 - :pushpin: do [#cdtcutover]
 - :pushpin: do [#crdtauth6]
 - :pushpin: do [#nsfz]
 - :pushpin: do [#kj5flive]
 - :pushpin: do [#tmuxsynccrashlog]
-- ~~:pushpin: do [#qftlossproof]~~
-- ~~:pushpin: do [#midturnrecycleproof]~~
-- ~~:pushpin: do [#midturnresumeimpl]~~
-- ~~:pushpin: do [#provauth3bimpl]~~
-- ~~:pushpin: do [#supstaledetectverify]~~
-- ~~:pushpin: do [#suptmuxstaleverify]~~
 - :pushpin: do [#tmuxsynccrashlog]
-- ~~:pushpin: do [#qftlossproof]~~
-- ~~:pushpin: do [#provauth3bimpl]~~
-- ~~:pushpin: do [#suptmuxstaleverify]~~
 - :pushpin: do [#60ev]
 - :pushpin: do [#suprestassoc-live]
 - :pushpin: do [#agentsignals]
@@ -73,6 +61,7 @@ JB `Compact Exchange` should not leave uncommitted changes. The compact exchange
 - :pushpin: do [#orchdecomp]
 - :pushpin: do [#skillharnessplugin]
 - :pushpin: do [#elementgraphprd]
+- :pushpin: do [#60ev]
 <!-- /agent:queue -->
 <!--
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
@@ -104,7 +93,7 @@ What are #next-steps to fix bugs?
 - [ ] [#restartstderrbleed] #agent-doc-bug Diagnose binary-restart stderr bleed into the agent after supervisor/PCP restart; capture the stderr source and add regression/proof that restart diagnostics stay out of the agent prompt/UI. Related JB Run Agent Doc route failure remains tracked by #kjw0.
 - [ ] [#qftlossdelta] #agent-doc-bug focused invariant-loss follow-up from failed #qftlossproof live proof: `.agent-doc/logs/ops.log:4338964-4338997` shows ACK/live-buffer content at len 16676 hash `83f08ab7e6be49a671f96f7c0ffbb71fe28bba858929b883c5904140cabd5192`, then closeout committed len 16669 hash `dc278d260b5b2a3efffeb12c428f0f81f5be1c8373fdd3ef044eee4b39adda4f`; `live_buffer_classify` suppressed the differing operator-capable buffer with `reason=write_provenance_newer_than_buffer` and no durable sidecar preserving the 16676-byte content was found. Fix the operator-wins merge/write-provenance path so concurrent operator text is preserved end-to-end or the write fails closed with a recoverable artifact. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#tmuxsynccrashlog] [operator-verify] Replacement for #tmuxsynccrash: JB Sync Tmux Layout live repro log review. After the operator runs repeated JB Sync Tmux Layout against the repro layout, inspect idea.log, agent-doc ops.log, and tmux server pid/session evidence; close only if the server pid stays stable with repair_layout no-op/passive supersede markers, otherwise file a follow-up bug with the failing log markers. Plan: tasks/agent-doc/plan-sync-tmux-layout-crash.md
-- [ ] 🚧 [#60ev] plan-dynamic-context-injection-ledger.md
+- [ ] [#60ev] plan-dynamic-context-injection-ledger.md
 - [ ] [#2y8j] [operator-verify] #qbasehashmemo live typing proof: after the supervisor auto-installs 0.34.49 and recycles, type a sustained burst in a large doc (equityfundingsource.md or agent-doc-bugs2.md) in the JB editor and confirm typing is smooth; grep ops.log to confirm crdt_merge_base no longer fires per keystroke during a typing burst.
 - [ ] [#cdtcutover] [focused-cycle] #agent-doc-feature FUTURE/SEPARATE rung — wire the evented CellDocTree model into the live finalize/write path (replace whole-tree reconcile at finalize with update_to per-node deltas; expose SemTree queries to preflight/supervisor drainable computations). Large, live-supervisor-critical, gated, own focused cycle + operator live proof. Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md
 - [ ] [#coredecomp] [focused-cycle] Keep the former `agent-doc-core` God-crate surface decomposed into owned pure crates. Audit `pending.rs`, `queue_item_lifecycle.rs`, `template.rs`, `crdt_sync.rs`, `component.rs`, and related modules; move element-local semantics into `agent-doc-element-*`, document composition into `agent-doc-document`, merge/CRDT merge policy into `agent-doc-merge`, and FFI ABI into `agent-doc-ffi`. Do not recreate `agent-doc-core` as a compatibility facade or migration alias, and do not move runtime IO, snapshots, commits, IPC, tmux, or controller effects into pure crates.

@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 pending_done_guard: warn
 agent_doc_lint_dialect: off
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -1084,7 +1084,34 @@ Brian
 That's the AI-led note with the library offer folded in. It now carries all three levers without touching your rate: senior hours on the AI accuracy problem, low-cost reusable plumbing, and a budget question to anchor the number.
 
 One thing to watch: the note now has two "low cost" ideas close together (the few senior hours, and the low-rate plumbing). It reads fine, but if it starts to feel like you're stacking discounts, cut the "at a low rate" from the plumbing line and let "so you're not paying full custom price for the plumbing" carry it. Say the word if you want that trim, or I'll drop it into `corky`/LinkedIn as a draft (no auto-send).
-<!-- agent:boundary:3a0fcea8 -->
+"Getting an AI to actually be accurate in front of buyers, not just plausible, is the specific problem I work on."
+I'm more of a generalist. I have done work on AI accuracy. But is this how it should be phrased. I personally like working on real-time reactive AI. Should we phrase this differently so I'm not under the scrutiny of being a specialist in this particular niche?
+### Re: Reframe the AI line so it doesn't over-claim a niche — opus-4-8
+
+> **Queue prompt:** "Getting an AI to actually be accurate in front of buyers, not just plausible, is the specific problem I work on." I'm more of a generalist. I have done work on AI accuracy... I personally like working on real-time reactive AI. Should we phrase this differently so I'm not under the scrutiny of being a specialist in this particular niche?
+
+Good catch, and yes — reframe it. "The specific problem I work on" is a specialist claim, and it does two things you don't want: it slightly over-states your focus (you're a generalist who's done accuracy work, not an accuracy specialist), and it invites him to test you as *the AI-accuracy expert*. Better to claim the judgment, not the niche.
+
+**The move: position as a senior generalist whose edge is making production systems correct, with AI accuracy as one application — not your one trick.** That's honest, it still hits REItrades' biggest risk (their "100% accurate" claim), and it doesn't put you on a specialist's witness stand.
+
+Two ways to phrase it, pick by how much you want to foreground the real-time/reactive interest:
+
+**Option A — de-specialize, keep the AI emphasis (smallest change):**
+```
+I wanted to reach out anyway. REItrades is something I'd genuinely like to work on. I'm a generalist, and the place I think I'd add the most is around the AI. Your whole pitch rests on the automated marketing and the "100% accurate" listing and OM content, and that's the hardest thing to get right and the easiest to lose trust on. Making AI output reliable in front of buyers, not just plausible, is the kind of production problem I'm good at.
+```
+Changed "the specific problem I work on" → "the kind of production problem I'm good at." Generalist competence, not a niche badge.
+
+**Option B — broaden to generalist + real-time reactive, tied to their marketplace:**
+```
+I wanted to reach out anyway. REItrades is something I'd genuinely like to work on. I'm a generalist, and what I enjoy most is real-time, reactive systems — the kind a live marketplace runs on: listings, buyer/seller chat, and engagement that updates as it happens. The AI overlaps that too. Your "100% accurate" content is the part that's easiest to lose trust on, and making AI output reliable in production is squarely the kind of problem I like solving.
+```
+This leans into what you actually like (real-time reactive — your lazily/signal-space wheelhouse) and connects it to something REItrades genuinely needs (a live marketplace *is* a reactive system), while keeping the AI as a related strength rather than your headline specialty.
+
+**One tradeoff to weigh:** Option B is more *you*, but it shifts the lead from "their biggest risk" to "what I like." That's fine here — a live marketplace really does need reactive engineering, and it differentiates you from a generalist billing hours — but if the goal is purely to hook him on his stated pain, Option A stays closer to his "100% accurate" anxiety. My lean: **Option B** if you want the note to attract the kind of work you actually want; **Option A** if you just want the highest reply rate on his terms.
+
+Want me to fold one of these into the working draft? (And if you go with B, I'd keep the shared-libraries line as-is — it still fits.)
+<!-- agent:boundary:da2a97aa -->
 <!-- /agent:exchange -->
 
 ## Queue

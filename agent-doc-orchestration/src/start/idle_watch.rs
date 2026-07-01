@@ -383,7 +383,7 @@ fn record_context_clear_in_flight_marker(
                 .map(|runtime| runtime.pane_id.as_str())
         })
         .unwrap_or("child_pty");
-    if let Err(err) = crate::context_clear_in_flight::record_context_clear_in_flight(
+    if let Err(err) = agent_doc_queue_io::context_clear_in_flight::record_context_clear_in_flight(
         file,
         target,
         &harness.binary,
@@ -929,7 +929,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 editor_typing_active_logged = false;
             }
             let mut context_clear_marker =
-                match crate::context_clear_in_flight::context_clear_in_flight(&path) {
+                match agent_doc_queue_io::context_clear_in_flight::context_clear_in_flight(&path) {
                     Ok(marker) => marker,
                     Err(err) => {
                         log_event(
@@ -971,7 +971,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         marker.command
                     ),
                 );
-                if let Err(err) = crate::context_clear_in_flight::clear_context_clear_in_flight(&path)
+                if let Err(err) =
+                    agent_doc_queue_io::context_clear_in_flight::clear_context_clear_in_flight(&path)
                 {
                     eprintln!(
                         "[agent-doc] idle-queue watch: failed to drop unsupported context-clear marker for {}: {err:#}",
@@ -1102,7 +1103,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     | IdleQueueContextClearInFlightDecision::AwaitSettle => continue,
                     IdleQueueContextClearInFlightDecision::Settled => {
                         if let Err(err) =
-                            crate::context_clear_in_flight::clear_context_clear_in_flight(&path)
+                            agent_doc_queue_io::context_clear_in_flight::clear_context_clear_in_flight(&path)
                         {
                             eprintln!(
                                 "[agent-doc] idle-queue watch: failed to clear context-clear marker for {}: {err:#}",

@@ -57,7 +57,6 @@ pub mod capture;
 pub mod claim;
 pub mod codex_hook;
 pub mod compact;
-pub mod context_clear_in_flight;
 pub mod context_pct;
 pub mod convergence_playback;
 pub mod crdt_authority;

@@ -6236,20 +6236,41 @@ fn test_agent_doc_queue_owns_context_clear_in_flight_policy() {
         );
     }
 
-    let context_clear_adapter = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/context_clear_in_flight.rs"),
-    )
-    .unwrap();
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    assert!(
+        workspace_manifest.contains("\"agent-doc-queue-io\""),
+        "agent-doc-queue-io should be a workspace member"
+    );
+
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    assert!(
+        orchestration_manifest.contains("agent-doc-queue-io = { path = \"../agent-doc-queue-io\""),
+        "orchestration should depend on queue IO directly"
+    );
+
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod context_clear_in_flight;"),
+        "orchestration must not expose a context-clear marker IO facade"
+    );
+
+    let context_clear_adapter =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/context_clear_in_flight.rs"))
+            .unwrap();
     for forbidden in [
         "pub struct ContextClearInFlight",
         "head_sha256: active_head.map",
         "head_bytes: active_head.map",
         "const CONTEXT_CLEAR_IN_FLIGHT_TTL_SECS",
         "saturating_sub(marker.written_at)",
+        "agent_doc_orchestration::",
+        "crate::snapshot",
     ] {
         assert!(
             !context_clear_adapter.contains(forbidden),
-            "context_clear_in_flight.rs must stay marker storage, not re-own stale-marker policy: {forbidden}"
+            "queue IO context_clear_in_flight.rs must stay marker storage, not re-own stale-marker policy: {forbidden}"
         );
     }
     assert!(
@@ -6257,7 +6278,7 @@ fn test_agent_doc_queue_owns_context_clear_in_flight_policy() {
             && context_clear_adapter.contains("ContextClearInFlight")
             && context_clear_adapter.contains("context_clear_in_flight_marker")
             && context_clear_adapter.contains("context_clear_in_flight_marker_active"),
-        "context_clear_in_flight.rs should call queue-owned marker policy directly"
+        "queue IO context_clear_in_flight.rs should call queue-owned marker policy directly"
     );
 
     let idle_watch =
@@ -6274,8 +6295,9 @@ fn test_agent_doc_queue_owns_context_clear_in_flight_policy() {
     }
     assert!(
         idle_watch.contains("idle_queue_context_clear_in_flight_settle_ticks")
-            && idle_watch.contains("IdleQueueContextClearInFlightSettleFacts"),
-        "idle_watch.rs should call queue-owned context-clear settle policy directly"
+            && idle_watch.contains("IdleQueueContextClearInFlightSettleFacts")
+            && idle_watch.contains("agent_doc_queue_io::context_clear_in_flight::"),
+        "idle_watch.rs should call queue policy and focused queue IO directly"
     );
 }
 

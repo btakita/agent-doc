@@ -42,6 +42,7 @@ members = [
     "agent-doc-element-status",
     "agent-doc-element-unknown",
     "agent-doc-queue",
+    "agent-doc-queue-io",
     "agent-doc-sqlite",
     "agent-doc-sync",
     "agent-doc-document",

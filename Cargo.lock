@@ -477,6 +477,7 @@ dependencies = [
  "agent-doc-prompt-contract",
  "agent-doc-prompt-lines",
  "agent-doc-queue",
+ "agent-doc-queue-io",
  "agent-doc-response-toc-io",
  "agent-doc-secret-redact",
  "agent-doc-session-accretion",
@@ -610,6 +611,18 @@ dependencies = [
  "libc",
  "proptest",
  "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "agent-doc-queue-io"
+version = "0.34.65"
+dependencies = [
+ "agent-doc-fs",
+ "agent-doc-hash",
+ "agent-doc-queue",
+ "anyhow",
  "serde_json",
  "tempfile",
 ]

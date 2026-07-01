@@ -28,7 +28,8 @@ fn marker_path(file: &Path) -> Result<Option<PathBuf>> {
     let Some(root) = agent_doc_fs::find_project_root(file) else {
         return Ok(None);
     };
-    let hash = crate::snapshot::doc_hash(file)?;
+    let hash = agent_doc_hash::path_hash(file)
+        .with_context(|| format!("canonicalize document path for hash: {}", file.display()))?;
     Ok(Some(
         root.join(CONTEXT_CLEAR_IN_FLIGHT_DIR)
             .join(format!("{hash}.json")),

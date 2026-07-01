@@ -26,7 +26,6 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
-🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -240,7 +239,7 @@ I fixed the queue/IP converger issue in `src/agent-doc`: continuation now requir
 The live interrupted closeout was recovered through preflight. It normalized this document to an inactive queue state with `queue_continuation_required=false`, converged the editor buffer over IPC, installed the rebuilt binary and cdylib with `make install`, and requested supervisor recycle/replacement so the stale process does not keep running pre-fix code.
 
 Verification: `make check` passed locally, including clippy, 6252 nextest tests, doctests, the ignored SimWorld budget test, and the Lean build. Latest GitHub CI run `28497705469` was still in progress when checked.
-<!-- agent:boundary:b2f0c098 -->
+<!-- agent:boundary:6fe4bccc -->
 <!-- /agent:exchange -->
 ## Queue
 

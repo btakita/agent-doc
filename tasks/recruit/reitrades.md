@@ -378,7 +378,52 @@ Added an **AI accuracy rubric + evaluation harness** to the report (§3a, commit
 **Why this matters for the bid:** it turns "100% accurate" into a test the harness runs on every release of the extraction/generation code, gating merge on the thresholds. That protects you (you're not on the hook for an impossible absolute), protects Artur (money fields facing buyers can't ship wrong silently), and gives admin review a queue driven by grade instead of guesswork.
 
 **Cost impact:** new line item **AI accuracy rubric + evaluation harness, 14–28h**, front-loaded into the first tranche so the bar is enforced from day one rather than retrofitted. Roll-up nudges to full V1.2 **545–850h** ($54.5k–$85k) and first tranche **270–400h** ($27k–$40k); the round-number **$52k–$80k / $26k–$38k** headline still holds for the bid.
-<!-- agent:boundary:af527a1a -->
+From Arthur's response
+```
+Thanks for applying to our job post Brian. Please see attached the detailed list of features we’re looking to build for this next phase of our platform. Let me know if this is a fit and if so, I would like to know roughly how long you think it would take you to build those. We are a bootstrapped start-up so limited budget but would be great to know what you would cost. We’re looking to move forward soon with the right person. Thanks in advance and look forward to your reply.
+```
+
+Please draft a reply for linkedin.
+
+### Re: LinkedIn reply draft for Artur — opus-4-8
+
+Here's a LinkedIn-length reply — tight and scannable, budget-conscious given "bootstrapped / limited budget," but still answering his three questions (fit, how long, cost). It leads with phasing so the full-scope number doesn't cause sticker shock, and offers the detailed breakdown as the follow-up.
+
+---
+
+Hi Artur,
+
+Thanks for the detailed feature list. I went through the full V1.2 brief, the live site, and the platform demo. Short answer: yes, this is a strong fit. It's squarely what I do... Rust backend, Vue/admin UI, Postgres data modeling and migrations, permissions, document/OM generation, and AI-assisted extraction.
+
+Two things shaped my estimate:
+
+- REItrades is already live, so I'd treat this as post-launch expansion and production hardening, not a greenfield build. Sequencing around your existing seller/buyer workflows matters.
+- The three workstreams (admin DBMS, broker segment, listing/OM rebuild) share data models and permissions, so I'd build the shared pieces once and phase delivery.
+
+On timeline and cost: I work at $100/hr, and I build with an AI-native workflow, so these hours are already compressed:
+
+- A short paid discovery (about a week) to map the repo and give you a firm milestone plan.
+- A first production tranche (highest-value admin work, broker approval flow, and one asset class of the listing/OM rebuild): roughly 270-400 hours, about $27k-$40k.
+- The full V1.2 list: roughly 545-850 hours once migrations, QA, OM/document extraction, and AI-accuracy work are included.
+
+Since you're bootstrapped, I'd structure this to protect your budget: hourly at $100 with a weekly cap you set, phased so you're never committing to the whole list upfront, with weekly demos so you can re-prioritize or pause anytime. I can also fix-price the first phase against a frozen scope if you'd prefer predictability.
+
+One thing I'd flag up front: I wouldn't promise "100% accurate" AI output as an absolute. I'd build it to a measurable accuracy rubric... source-backed data, confidence scoring, and admin review before anything reaches buyers. Happy to walk you through it.
+
+I've put together a task-by-task breakdown with the estimates. Want me to send it over, or grab 20 minutes on a call this week?
+
+Best,
+Brian
+
+---
+
+**Notes for you (not part of the message):**
+
+- I gave the first-tranche dollar figure ($27k-$40k) since he asked cost directly, but kept the full range in hours to soften it — the detailed report has the full $54.5k-$85k breakdown when he asks.
+- "Limited budget" is the signal to lead with discovery + weekly-cap hourly. That's the lowest-commitment on-ramp for a bootstrapped founder and lets you both de-risk before he spends real money.
+- If you'd rather not put dollar figures in a first LinkedIn message at all, cut the "about $27k-$40k" clause and let the call surface it — but since he explicitly asked what you'd cost, I'd keep it.
+- Tone matches your prior drafts (first-person, no hype, honest about the AI-accuracy caveat).
+<!-- agent:boundary:b49eda43 -->
 <!-- /agent:exchange -->
 
 ## Queue

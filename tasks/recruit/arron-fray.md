@@ -45,7 +45,6 @@ Thanks,
 Arron Fray
 Director at Velocity Tech | Scaling technology teams by reliably providing support
 ```
-<!-- agent:boundary:8c37810b -->
 ### Re: Contact created + should you apologize for replying today — opus-4.8
 
 **Contact created** at `mail/contacts/arron-fray/` (committed in the `mail` submodule):
@@ -108,14 +107,15 @@ We are just going to send the resume. Arron will tell me who the company is. Mak
 
 **Tailored LinkedIn message** — drops the "who's the client?" question (Arron will name it), leads Python + real-time, mentions the lazily family, says the resume is attached:
 
-> Hi Arron — thanks for reaching out; this looks like a strong fit. I've spent 20+ years building production backend systems, Python-first, with deep real-time and distributed experience. I architected Presence AI's real-time multimodal avatar pipeline — NVIDIA H100 GPUs over WebRTC, scaled with Ray for distributed real-time compute — and I build the lazily family: cross-language reactive signals (Rust, Python, Zig, JS, Dart, Kotlin) that interoperate as one live system over FFI, IPC, WebSockets, WebRTC, and WASM. Testing and operational reliability are things I lead on, not afterthoughts.
->
-> I've attached my resume. I can do an intro call this week — afternoons ET are easiest — and the fully-remote, $220k framing works for me. Looking forward to hearing which client it's for.
->
-> Best,
-> Brian
+Hi Arron — thanks for reaching out; this looks like a strong fit. I've spent 20+ years building production backend systems, Python-first, with deep real-time and distributed experience. I architected Presence AI's real-time multimodal avatar pipeline — NVIDIA H100 GPUs over WebRTC, scaled with Ray for distributed real-time compute — and I build the lazily family: cross-language reactive signals (Rust, Python, Zig, JS, Dart, Kotlin) that interoperate as one live system over FFI, IPC, WebSockets, WebRTC, and WASM. Testing and operational reliability are things I lead on, not afterthoughts.
+
+I've attached my resume. I can do an intro call this week — afternoons ET are easiest — and the fully-remote, $220k framing works for me. Looking forward to hearing which client it's for.
+
+Best,
+Brian
 
 Both are ready to send. Say the word if you want me to send the message via corky/LinkedIn, or tweak the availability/tone first.
+<!-- agent:boundary:764a2286 -->
 <!-- /agent:exchange -->
 
 ## Queue

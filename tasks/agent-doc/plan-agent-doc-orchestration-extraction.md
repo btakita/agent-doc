@@ -927,6 +927,9 @@ should be deleted during extraction.
   payload construction and JSON parsing in `agent-doc-queue`; orchestration only
   resolves project-scoped marker paths, reads/writes/removes sidecar files, and
   lets the supervisor idle-watch deliver the recorded clear command.
+- Tmux layout policy gained the editor-column split classifier:
+  `agent-doc-tmux` now owns `is_first_column`, while route orchestration only
+  forwards file/column facts to decide split-before placement.
 
 ### Earlier closure finding
 

@@ -114,6 +114,30 @@ fn pending_alias_still_works_with_deprecation_warning() {
 }
 
 #[test]
+fn tracked_work_prune_legacy_alias_is_rejected() {
+    let (_tmp, doc) = setup_doc_with_icebox(
+        "- [x] [#done1] completed backlog task\n",
+        "- [x] [#done2] completed icebox task\n",
+    );
+
+    for component in ["backlog", "icebox"] {
+        let assert_result = agent_doc()
+            .args([component, doc.to_str().unwrap(), "--force-disk", "prune"])
+            .assert()
+            .failure();
+        let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
+        assert!(
+            stderr.contains("unexpected argument") || stderr.contains("unrecognized subcommand"),
+            "expected prune to be rejected for {component}, got: {stderr}"
+        );
+        assert!(
+            stderr.contains("prune"),
+            "expected stderr to name prune for {component}, got: {stderr}"
+        );
+    }
+}
+
+#[test]
 fn pending_add_accepts_custom_id_prefix() {
     let (_tmp, doc) = setup_doc("");
     agent_doc()
@@ -1250,7 +1274,7 @@ fn write_review_done_guard_strict_allows_gate_then_done() {
 }
 
 #[test]
-fn preflight_emits_pending_reordered_flag() {
+fn preflight_emits_backlog_reordered_flag() {
     // Create a doc with a fully-migrated pending component.
     let (_tmp, doc) = setup_doc("- [ ] [#aaaa] one\n- [ ] [#bbbb] two");
 
@@ -1282,16 +1306,15 @@ fn preflight_emits_pending_reordered_flag() {
         "expected backlog_reordered: true, full output: {}",
         stdout
     );
-    assert_eq!(
-        parsed.get("pending_reordered").and_then(|v| v.as_bool()),
-        Some(true),
-        "expected pending_reordered: true, full output: {}",
+    assert!(
+        parsed.get("pending_reordered").is_none(),
+        "pending_reordered alias should not be emitted, full output: {}",
         stdout
     );
 }
 
 #[test]
-fn preflight_emits_pending_gated_count() {
+fn preflight_emits_backlog_gated_count() {
     // Doc with one open + two gated + one done item. Reap drops [x],
     // leaving one open + two gated → expected count = 2.
     let (_tmp, doc) = setup_doc(
@@ -1311,10 +1334,9 @@ fn preflight_emits_pending_gated_count() {
         "expected backlog_gated_count: 2, full output: {}",
         stdout
     );
-    assert_eq!(
-        parsed.get("pending_gated_count").and_then(|v| v.as_u64()),
-        Some(2),
-        "expected pending_gated_count: 2, full output: {}",
+    assert!(
+        parsed.get("pending_gated_count").is_none(),
+        "pending_gated_count alias should not be emitted, full output: {}",
         stdout
     );
 }
@@ -1368,7 +1390,7 @@ fn preflight_warns_for_legacy_gated_backlog_items() {
 }
 
 #[test]
-fn preflight_omits_pending_gated_count_when_zero() {
+fn preflight_omits_backlog_gated_count_when_zero() {
     let (_tmp, doc) = setup_doc("- [ ] [#aaaa] open\n- [ ] [#bbbb] also open");
     let output = agent_doc()
         .args(["preflight", doc.to_str().unwrap()])
@@ -1385,7 +1407,7 @@ fn preflight_omits_pending_gated_count_when_zero() {
     );
     assert!(
         parsed.get("pending_gated_count").is_none(),
-        "expected pending_gated_count to be omitted at zero, got: {}",
+        "pending_gated_count alias should not be emitted, got: {}",
         stdout
     );
 }

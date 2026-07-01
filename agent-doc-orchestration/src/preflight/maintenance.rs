@@ -32,7 +32,7 @@ pub(crate) fn resolve_pipeline_state(
 #[derive(Debug, Clone, Default)]
 pub struct PendingMaintenanceReport {
     pub reordered: bool,
-    pub pending_gated_count: usize,
+    pub backlog_gated_count: usize,
     pub review_count: usize,
     pub review_gated_count: usize,
     pub legacy_gated_in_backlog_count: usize,
@@ -458,11 +458,11 @@ fn run_pending_maintenance_with_options(
         None => false,
     };
     if reordered {
-        eprintln!("[preflight] pending: reorder detected (skill must not reorder this cycle)");
+        eprintln!("[preflight] backlog: reorder detected (skill must not reorder this cycle)");
     }
 
     // 5. Count legacy gated items in backlog and review items in review.
-    let pending_gated_count = current_body
+    let backlog_gated_count = current_body
         .map(|body| {
             let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(body);
             items
@@ -476,8 +476,8 @@ fn run_pending_maintenance_with_options(
                 .count()
         })
         .unwrap_or(0);
-    if pending_gated_count > 0 {
-        eprintln!("[preflight] pending: {} gated item(s)", pending_gated_count);
+    if backlog_gated_count > 0 {
+        eprintln!("[preflight] backlog: {} gated item(s)", backlog_gated_count);
     }
 
     let (review_count, review_gated_count) = review_counts(&current_content);
@@ -490,10 +490,10 @@ fn run_pending_maintenance_with_options(
 
     Ok(PendingMaintenanceReport {
         reordered,
-        pending_gated_count,
+        backlog_gated_count,
         review_count,
         review_gated_count,
-        legacy_gated_in_backlog_count: pending_gated_count,
+        legacy_gated_in_backlog_count: backlog_gated_count,
     })
 }
 
@@ -5794,7 +5794,7 @@ mod tests {
 
         let report = run_pending_maintenance_force_disk(&doc).unwrap();
         assert!(!report.reordered);
-        assert_eq!(report.pending_gated_count, 0);
+        assert_eq!(report.backlog_gated_count, 0);
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
         let file_backlog_after = agent_doc_element::element::parse(&file_after)
@@ -5848,7 +5848,7 @@ mod tests {
         snapshot::save(&doc, content).unwrap();
 
         let report = run_pending_maintenance_force_disk(&doc).unwrap();
-        assert_eq!(report.pending_gated_count, 0);
+        assert_eq!(report.backlog_gated_count, 0);
         assert_eq!(report.review_count, 1);
         assert_eq!(report.review_gated_count, 1);
 
@@ -6062,7 +6062,7 @@ mod tests {
         snapshot::save(&doc, content).unwrap();
 
         let report = run_pending_maintenance_force_disk(&doc).unwrap();
-        assert_eq!(report.pending_gated_count, 0);
+        assert_eq!(report.backlog_gated_count, 0);
         assert_eq!(report.review_count, 1);
         assert_eq!(report.review_gated_count, 1);
 
@@ -6205,7 +6205,7 @@ mod tests {
 
         let report = run_pending_maintenance_force_disk(&doc).unwrap();
         assert!(!report.reordered);
-        assert_eq!(report.pending_gated_count, 0);
+        assert_eq!(report.backlog_gated_count, 0);
         let rc = crate::graph::RunContext::new(doc.clone());
         enforce_no_dropped_backlog(&doc, &rc)
             .expect("same-cycle reap should count as intentional completion");
@@ -6231,7 +6231,7 @@ mod tests {
 
         let report = run_pending_maintenance_force_disk(&doc).unwrap();
         assert!(!report.reordered);
-        assert_eq!(report.pending_gated_count, 0);
+        assert_eq!(report.backlog_gated_count, 0);
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
         let file_icebox_after = agent_doc_element::element::parse(&file_after)

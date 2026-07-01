@@ -6,6 +6,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.34.65
 
+- **Deprecated tracked-work aliases removed from active APIs.** The `backlog` and
+  `icebox` CLI surfaces now expose `reap` as the only completed-item removal
+  command; the old `prune` subcommand is rejected. Preflight JSON now emits only
+  `backlog_reordered` and `backlog_gated_count`, dropping the legacy
+  `pending_*` aliases. `agent-doc-template` also imports boundary-id helpers
+  directly from `agent-doc-element` instead of exposing a template id facade.
+
 - **Editor prompt pollers removed.** The JetBrains plugin no longer starts the
   defensive `agent-doc prompt --all` timer, no longer registers submitted files
   for prompt polling, and no longer ships the bottom prompt panel. The VS Code

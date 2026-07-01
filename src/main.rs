@@ -1918,8 +1918,6 @@ enum PendingAction {
         #[arg(long, short)]
         contains: bool,
     },
-    /// Remove completed items (legacy — alias for `reap`)
-    Prune,
     /// Reap `[x]` items and print removed ids
     Reap,
     /// Run lazy backfill — assign missing hash ids and checkboxes
@@ -3718,7 +3716,6 @@ fn main() -> anyhow::Result<()> {
                     PendingAction::Remove { target, contains } => {
                         agent_doc_orchestration::backlog_cmd::remove(&file, &target, contains)
                     }
-                    PendingAction::Prune => agent_doc_orchestration::backlog_cmd::reap(&file),
                     PendingAction::Reap => agent_doc_orchestration::backlog_cmd::reap(&file),
                     PendingAction::Backfill => {
                         agent_doc_orchestration::backlog_cmd::backfill(&file)
@@ -3770,9 +3767,6 @@ fn main() -> anyhow::Result<()> {
                         agent_doc_orchestration::backlog_cmd::icebox_remove(
                             &file, &target, contains,
                         )
-                    }
-                    PendingAction::Prune => {
-                        agent_doc_orchestration::backlog_cmd::icebox_reap(&file)
                     }
                     PendingAction::Reap => agent_doc_orchestration::backlog_cmd::icebox_reap(&file),
                     PendingAction::Backfill => {

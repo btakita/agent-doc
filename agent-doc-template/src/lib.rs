@@ -3,10 +3,6 @@
 //! This crate owns template document policy directly. File-backed config and
 //! document IO stay in orchestration adapters.
 
-pub mod id {
-    pub use agent_doc_element::id::*;
-}
-
 mod template;
 
 pub mod patchback;

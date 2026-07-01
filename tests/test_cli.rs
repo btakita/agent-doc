@@ -9817,6 +9817,22 @@ fn test_agent_doc_element_backlog_owns_tracked_line_remove_and_reap_policy() {
     let backlog_cmd =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/backlog_cmd.rs"))
             .unwrap();
+    let preflight =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let preflight_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
+    for forbidden in [
+        "pub pending_reordered:",
+        "pub pending_gated_count:",
+        "let pending_reordered =",
+        "let pending_gated_count =",
+    ] {
+        assert!(
+            !preflight.contains(forbidden) && !preflight_run.contains(forbidden),
+            "preflight must not preserve deprecated pending_* JSON aliases: {forbidden}"
+        );
+    }
     for forbidden in [
         "enum TrackedWorkList",
         "enum TrackedList",
@@ -12514,6 +12530,35 @@ fn test_agent_doc_template_owns_patchback_policy() {
             .contains("agent_doc_template::patchback::enforce_orchestrate_patchback_contract"),
         "write run entry should enforce orchestrate patchback contracts through the focused template API"
     );
+}
+
+#[test]
+fn test_agent_doc_template_has_no_boundary_id_facade() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let template_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-template/src/lib.rs")).unwrap();
+    for forbidden_snippet in [
+        "pub mod id {",
+        "pub mod id;",
+        "pub use agent_doc_element::id",
+        "pub use agent_doc_element :: id",
+    ] {
+        assert!(
+            !template_lib.contains(forbidden_snippet),
+            "agent-doc-template must not facade agent-doc-element boundary ids: {forbidden_snippet}"
+        );
+    }
+
+    for relative_path in [
+        "agent-doc-template/src/template.rs",
+        "agent-doc-template/src/template/tail_repair.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
+        assert!(
+            !source.contains("crate::id::"),
+            "{relative_path} must call agent_doc_element::id directly, not the removed template id facade"
+        );
+    }
 }
 
 #[test]

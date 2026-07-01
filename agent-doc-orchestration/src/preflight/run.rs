@@ -346,9 +346,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         run_pending_maintenance(file)?
     };
     let backlog_reordered = pending_report.reordered;
-    let pending_reordered = backlog_reordered;
-    let backlog_gated_count = pending_report.pending_gated_count;
-    let pending_gated_count = backlog_gated_count;
+    let backlog_gated_count = pending_report.backlog_gated_count;
 
     // `#optverify`: opportunistic gated-review auto-verification. Runs before the
     // step-2 commit so any opt-in `[/]→[x]` flip is staged atomically (the
@@ -1492,9 +1490,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         owned_pane_self_invocation,
         env: frontmatter_env,
         backlog_reordered,
-        pending_reordered,
         backlog_gated_count,
-        pending_gated_count,
         review_count: pending_report.review_count,
         review_gated_count: pending_report.review_gated_count,
         gate_verify: gate_verify_results,

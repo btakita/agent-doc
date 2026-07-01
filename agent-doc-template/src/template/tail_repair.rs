@@ -1,6 +1,7 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
+use agent_doc_element::id::{format_boundary_marker, new_boundary_id};
 
 pub(crate) fn is_exchange_turn_heading(trimmed: &str) -> bool {
     trimmed == "## User"
@@ -627,9 +628,7 @@ pub(crate) fn append_tail_to_exchange_end(prefix: &str, tail: &str) -> Result<St
     }
     new_content.push_str(tail.trim_end());
     new_content.push('\n');
-    new_content.push_str(&crate::id::format_boundary_marker(
-        &crate::id::new_boundary_id(),
-    ));
+    new_content.push_str(&format_boundary_marker(&new_boundary_id()));
     new_content.push('\n');
     Ok(exchange.replace_content(&prefix_without_boundaries, &new_content))
 }

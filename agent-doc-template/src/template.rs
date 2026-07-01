@@ -84,6 +84,9 @@ use serde::Serialize;
 use std::collections::HashSet;
 
 use agent_doc_element::element::{self, Component, find_comment_end, is_backlog_component};
+use agent_doc_element::id::{
+    format_boundary_marker, new_boundary_id, new_boundary_id_with_summary,
+};
 
 /// A parsed patch directive from an agent response.
 #[derive(Debug, Clone)]
@@ -1008,8 +1011,8 @@ fn append_exchange_patch_after_prompt_anchor(
         ),
     };
 
-    let new_id = crate::id::new_boundary_id();
-    let new_marker = crate::id::format_boundary_marker(&new_id);
+    let new_id = new_boundary_id();
+    let new_marker = format_boundary_marker(&new_id);
     let mut new_content =
         String::with_capacity(content_region.len() + patch_content.len() + new_marker.len() + 2);
     new_content.push_str(&user_region[..insert_at]);
@@ -1049,8 +1052,8 @@ pub fn apply_patches_with_overrides_pure(
     if let Ok(components) = element::parse(&result)
         && let Some(exchange) = components.iter().find(|c| c.name == "exchange")
     {
-        let id = crate::id::new_boundary_id_with_summary(summary);
-        let marker = crate::id::format_boundary_marker(&id);
+        let id = new_boundary_id_with_summary(summary);
+        let marker = format_boundary_marker(&id);
         let content = exchange.content(&result);
         let new_content = format!("{}\n{}\n", content.trim_end(), marker);
         result = exchange.replace_content(&result, &new_content);
@@ -1334,8 +1337,8 @@ fn reposition_boundary_to_end_clean_internal(
     {
         let id = boundary_id
             .map(ToOwned::to_owned)
-            .unwrap_or_else(|| crate::id::new_boundary_id_with_summary(summary));
-        let marker = crate::id::format_boundary_marker(&id);
+            .unwrap_or_else(|| new_boundary_id_with_summary(summary));
+        let marker = format_boundary_marker(&id);
         let content = exchange.content(&result).to_string();
         let new_content = format!("{}\n{}\n", content.trim_end(), marker);
         result = exchange.replace_content(&result, &new_content);
@@ -1362,8 +1365,8 @@ pub fn reposition_boundary_to_end_preserve_head_with_id(
     {
         let id = boundary_id
             .map(ToOwned::to_owned)
-            .unwrap_or_else(crate::id::new_boundary_id);
-        let marker = crate::id::format_boundary_marker(&id);
+            .unwrap_or_else(new_boundary_id);
+        let marker = format_boundary_marker(&id);
         let content = exchange.content(&result).to_string();
         let new_content = format!("{}\n{}\n", content.trim_end(), marker);
         result = exchange.replace_content(&result, &new_content);
@@ -1426,8 +1429,8 @@ pub fn reposition_boundary_to_end_with_baseline(
     if let Ok(components) = element::parse(&result)
         && let Some(exchange) = components.iter().find(|c| c.name == "exchange")
     {
-        let id = crate::id::new_boundary_id_with_summary(summary);
-        let marker = crate::id::format_boundary_marker(&id);
+        let id = new_boundary_id_with_summary(summary);
+        let marker = format_boundary_marker(&id);
         let content = exchange.content(&result).to_string();
         let annotated = annotate_re_headings_with_head(&content, baseline_headings);
         let new_content = format!("{}\n{}\n", annotated.trim_end(), marker);

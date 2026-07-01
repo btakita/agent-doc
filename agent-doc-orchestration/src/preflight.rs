@@ -287,19 +287,9 @@ pub struct PreflightOutput {
     /// When set, the skill MUST NOT reorder backlog this cycle; user intent wins.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub backlog_reordered: bool,
-    /// Legacy alias for `backlog_reordered`.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub pending_reordered: bool,
     /// Count of backlog items currently in `[/]` gated state.
     #[serde(default, skip_serializing_if = "is_zero_usize")]
     pub backlog_gated_count: usize,
-    /// Legacy alias for `backlog_gated_count`.
-    ///
-    /// Surfaced so the skill can highlight blocked items in its response and
-    /// decide whether to address gated work this cycle. Zero is omitted from
-    /// JSON to keep the common case quiet.
-    #[serde(default, skip_serializing_if = "is_zero_usize")]
-    pub pending_gated_count: usize,
     /// Count of non-done items currently in `agent:review`.
     #[serde(default, skip_serializing_if = "is_zero_usize")]
     pub review_count: usize,

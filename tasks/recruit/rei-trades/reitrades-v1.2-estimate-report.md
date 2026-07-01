@@ -48,7 +48,7 @@ Three workstreams against a launched (post-beta, 10/14/2025) production platform
 
 | Task | Hours | Notes |
 |---|---:|---|
-| Delete listing from action dropdown; cascade related data | 16-28 | Prefer soft-delete/archive + cleanup jobs unless hard delete is explicitly required; hard cascade through NDA/LOI/files/analytics is riskier. |
+| Delete listing from action dropdown; cascade related data | 16-28 | A bare soft-delete flag is ~4-8h; the 16-28h is the **cascade** — safely handling related NDAs/LOIs/files/analytics + cleanup jobs, audit trail, and tests against live production data. Drops to the low end if scope is a simple archive without cascade cleanup. |
 | View NDAs and LOIs signed on each listing | 8-16 | Mostly query/UI if documents are stored consistently. |
 
 ### 1.2 User Management

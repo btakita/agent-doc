@@ -5,11 +5,16 @@
 //! narrower CLI surface than the original `codex exec` launch.
 
 use agent_doc_frontmatter::frontmatter::CodexNetworkAccess;
+use anyhow::Result;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
+use std::path::PathBuf;
 
 pub const CODEX_SANDBOX_NETWORK_DISABLED_ENV: &str = "CODEX_SANDBOX_NETWORK_DISABLED";
+pub const CODEX_CHILD_NETWORK_PROBE_MARKER: &str = "AGENT_DOC_NETWORK_PROBE_OK";
+pub const CODEX_CHILD_WRITABLE_ROOT_PROBE_MARKER: &str = "AGENT_DOC_WRITABLE_ROOT_PROBE_OK";
+pub const OPENCODE_CHILD_SSH_PROBE_MARKER: &str = "AGENT_DOC_OPENCODE_SSH_PROBE_OK";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CodexResumeRestartArgsError {
@@ -319,6 +324,345 @@ pub fn codex_resume_restart_args(
         }
     }
     Ok(args)
+}
+
+pub fn codex_exec_args_for_probe(launch_args: &[String]) -> Vec<String> {
+    if launch_args.first().is_some_and(|arg| arg == "exec") {
+        let mut args = launch_args.to_vec();
+        if !args.iter().any(|arg| arg == "--json") {
+            args.insert(1, "--json".to_string());
+        }
+        return args;
+    }
+
+    let mut args = vec!["exec".to_string(), "--json".to_string()];
+    args.extend(launch_args.iter().cloned());
+    args
+}
+
+pub fn opencode_run_args_for_probe(launch_args: &[String], prompt: String) -> Vec<String> {
+    let mut args = vec![
+        "run".to_string(),
+        "--format".to_string(),
+        "json".to_string(),
+    ];
+    let mut iter = launch_args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--model" | "-m" | "--agent" | "--log-level" | "--variant" | "--command" | "--file"
+            | "-f" | "--title" | "--attach" | "--password" | "-p" | "--username" | "-u" => {
+                args.push(arg.clone());
+                if let Some(value) = iter.next() {
+                    args.push(value.clone());
+                }
+            }
+            "--pure" | "--print-logs" | "--dangerously-skip-permissions" | "--thinking" => {
+                args.push(arg.clone());
+            }
+            "--session" | "-s" | "--dir" | "--port" | "--hostname" | "--mdns-domain" | "--cors" => {
+                let _ = iter.next();
+            }
+            "--continue" | "-c" | "--fork" | "--interactive" | "-i" | "--mdns" => {}
+            _ if arg.starts_with("--model=")
+                || arg.starts_with("-m=")
+                || arg.starts_with("--agent=")
+                || arg.starts_with("--log-level=")
+                || arg.starts_with("--variant=")
+                || arg.starts_with("--command=")
+                || arg.starts_with("--file=")
+                || arg.starts_with("-f=")
+                || arg.starts_with("--title=")
+                || arg.starts_with("--attach=")
+                || arg.starts_with("--password=")
+                || arg.starts_with("-p=")
+                || arg.starts_with("--username=")
+                || arg.starts_with("-u=") =>
+            {
+                args.push(arg.clone());
+            }
+            _ => {}
+        }
+    }
+    args.push(prompt);
+    args
+}
+
+pub fn codex_child_network_probe_prompt() -> String {
+    "Run exactly this command:\n\n\
+         sh -lc 'set -eu; \
+         if command -v getent >/dev/null 2>&1; then getent hosts github.com >/dev/null; \
+         else python3 -c \"import socket; socket.getaddrinfo(\\\"github.com\\\", 443)\"; fi; \
+         if command -v curl >/dev/null 2>&1; then curl -fsSIL --max-time 10 https://github.com >/dev/null; \
+         else python3 -c \"import urllib.request; urllib.request.urlopen(\\\"https://github.com\\\", timeout=10).close()\"; fi; \
+         printf \"%s%s\\n\" AGENT_DOC_NETWORK _PROBE_OK'"
+        .to_string()
+}
+
+pub fn opencode_child_network_probe_prompt() -> String {
+    "Run exactly this shell command. Return the command output only.\n\n\
+         sh -lc 'set -eu; \
+         if command -v getent >/dev/null 2>&1; then getent hosts github.com >/dev/null; \
+         else python3 -c \"import socket; socket.getaddrinfo(\\\"github.com\\\", 443)\"; fi; \
+         if command -v curl >/dev/null 2>&1; then curl -fsSIL --max-time 10 https://github.com >/dev/null; \
+         else python3 -c \"import urllib.request; urllib.request.urlopen(\\\"https://github.com\\\", timeout=10).close()\"; fi; \
+         printf \"%s%s\\n\" AGENT_DOC_NETWORK _PROBE_OK'"
+        .to_string()
+}
+
+fn strip_ansi_for_probe_output(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let bytes = text.as_bytes();
+    let mut idx = 0usize;
+    while idx < bytes.len() {
+        if bytes[idx] == 0x1b && bytes.get(idx + 1) == Some(&b'[') {
+            idx += 2;
+            while idx < bytes.len() {
+                let byte = bytes[idx];
+                idx += 1;
+                if (0x40..=0x7e).contains(&byte) {
+                    break;
+                }
+            }
+        } else {
+            out.push(bytes[idx] as char);
+            idx += 1;
+        }
+    }
+    out
+}
+
+pub fn looks_like_opencode_usage_output(output: &str) -> bool {
+    let lower = strip_ansi_for_probe_output(output).to_ascii_lowercase();
+    (lower.contains("opencode run [message..]")
+        && (lower.contains("positionals:") || lower.contains("options:")))
+        || lower.contains("unknown argument")
+        || lower.contains("unknown option")
+}
+
+pub fn validate_codex_child_network_probe_output(
+    stdout: &str,
+    stderr: &str,
+    harness: &str,
+) -> Result<()> {
+    let mut saw_command_execution = false;
+    let mut failure_detail: Option<String> = None;
+
+    for line in stdout.lines().filter(|line| !line.trim().is_empty()) {
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let Some(item) = json.get("item") else {
+            continue;
+        };
+        if item.get("type").and_then(|value| value.as_str()) != Some("command_execution") {
+            continue;
+        }
+
+        saw_command_execution = true;
+        let command = item
+            .get("command")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let output = item
+            .get("aggregated_output")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let exit_code = item.get("exit_code").and_then(|value| value.as_i64());
+        if exit_code == Some(0) && output.contains(CODEX_CHILD_NETWORK_PROBE_MARKER) {
+            return Ok(());
+        }
+
+        failure_detail.get_or_insert_with(|| {
+            format!(
+                "command={command:?} exit_code={} output={}",
+                exit_code
+                    .map(|code| code.to_string())
+                    .unwrap_or_else(|| "unknown".to_string()),
+                output.trim()
+            )
+        });
+    }
+
+    let detail = failure_detail.unwrap_or_else(|| {
+        if saw_command_execution {
+            format!("{harness} command execution did not emit the network probe success marker")
+        } else {
+            format!(
+                "{harness} child did not run a command_execution event; stderr={}",
+                stderr.trim()
+            )
+        }
+    });
+    let classification = classify_child_network_probe_failure(&detail, harness, false);
+    anyhow::bail!("{classification}: {detail}");
+}
+
+fn collect_json_strings(value: &serde_json::Value, output: &mut Vec<String>) {
+    match value {
+        serde_json::Value::String(text) => {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                output.push(trimmed.to_string());
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for value in values {
+                collect_json_strings(value, output);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for value in map.values() {
+                collect_json_strings(value, output);
+            }
+        }
+        _ => {}
+    }
+}
+
+pub fn validate_opencode_child_probe_marker_output(
+    stdout: &str,
+    stderr: &str,
+    marker: &str,
+    probe_name: &str,
+    harness: &str,
+) -> Result<()> {
+    let combined = format!("{stdout}\n{stderr}");
+    if combined.contains(marker) {
+        return Ok(());
+    }
+    if looks_like_opencode_usage_output(&combined) {
+        anyhow::bail!(
+            "{harness} child probe printed CLI usage/help instead of running the {probe_name} probe: {}",
+            combined.trim()
+        );
+    }
+
+    let mut extracted = Vec::new();
+    for line in stdout.lines().filter(|line| !line.trim().is_empty()) {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(line) {
+            collect_json_strings(&value, &mut extracted);
+        }
+    }
+    let detail = if extracted.is_empty() {
+        format!(
+            "{harness} child did not emit the {probe_name} probe marker; stderr={}",
+            stderr.trim()
+        )
+    } else {
+        extracted.join("\n")
+    };
+    let classification = if probe_name == "network" {
+        classify_child_network_probe_failure(&detail, harness, false)
+    } else {
+        classify_child_required_ssh_probe_failure(&detail, harness, false)
+    };
+    anyhow::bail!("{classification}: {detail}");
+}
+
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+pub fn opencode_child_required_ssh_probe_prompt(targets: &[String]) -> String {
+    let targets = targets
+        .iter()
+        .map(|target| shell_single_quote(target))
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!(
+        "Run exactly this shell command. Return the command output only.\n\n\
+         sh -lc 'set -eu; \
+         for target do \
+           ssh -o BatchMode=yes -o ConnectTimeout=5 -o ControlMaster=no -o ControlPath=none -o ClearAllForwardings=yes -o PermitLocalCommand=no \"$target\" true; \
+         done; \
+         printf \"%s%s\\n\" AGENT_DOC_OPENCODE_SSH _PROBE_OK' sh {}",
+        targets
+    )
+}
+
+pub fn codex_child_writable_roots_probe_prompt(roots: &[PathBuf]) -> String {
+    let roots = roots
+        .iter()
+        .map(|root| shell_single_quote(&root.to_string_lossy()))
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!(
+        "Run exactly this command:\n\n\
+         sh -lc 'set -eu; \
+         for dir do \
+           test -d \"$dir\"; \
+           probe=\"$dir/.agent-doc-write-probe-$$\"; \
+           printf \"%s\" agent-doc > \"$probe\"; \
+           rm -f \"$probe\"; \
+           if test -f \"$dir/HEAD\" || test -f \"$dir/commondir\" || test -d \"$dir/objects\"; then \
+             lock=\"$dir/index.lock\"; \
+             set -C; : > \"$lock\"; set +C; \
+             rm -f \"$lock\"; \
+           fi; \
+         done; \
+         printf \"{}\\n\"' sh {roots}",
+        CODEX_CHILD_WRITABLE_ROOT_PROBE_MARKER
+    )
+}
+
+pub fn validate_codex_child_writable_root_probe_output(
+    stdout: &str,
+    stderr: &str,
+    harness: &str,
+) -> Result<()> {
+    let mut saw_command_execution = false;
+    let mut failure_detail: Option<String> = None;
+
+    for line in stdout.lines().filter(|line| !line.trim().is_empty()) {
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let Some(item) = json.get("item") else {
+            continue;
+        };
+        if item.get("type").and_then(|value| value.as_str()) != Some("command_execution") {
+            continue;
+        }
+
+        saw_command_execution = true;
+        let command = item
+            .get("command")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let output = item
+            .get("aggregated_output")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let exit_code = item.get("exit_code").and_then(|value| value.as_i64());
+        if exit_code == Some(0) && output.contains(CODEX_CHILD_WRITABLE_ROOT_PROBE_MARKER) {
+            return Ok(());
+        }
+
+        failure_detail.get_or_insert_with(|| {
+            format!(
+                "command={command:?} exit_code={} output={}",
+                exit_code
+                    .map(|code| code.to_string())
+                    .unwrap_or_else(|| "unknown".to_string()),
+                output.trim()
+            )
+        });
+    }
+
+    let detail = failure_detail.unwrap_or_else(|| {
+        if saw_command_execution {
+            format!(
+                "{harness} command execution did not emit the writable-root probe success marker"
+            )
+        } else {
+            format!(
+                "{harness} child did not run a command_execution event; stderr={}",
+                stderr.trim()
+            )
+        }
+    });
+    let classification = classify_child_writable_root_probe_failure(&detail, harness);
+    anyhow::bail!("{classification}: {detail}");
 }
 
 pub fn looks_like_codex_transport_403_429(text: &str) -> bool {

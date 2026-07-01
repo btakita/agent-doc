@@ -9017,6 +9017,16 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         "pub struct CodexStderrNoiseReport",
         "pub fn codex_stderr_noise_report(",
         "pub fn filter_codex_stderr_noise(",
+        "pub fn codex_exec_args_for_probe(",
+        "pub fn opencode_run_args_for_probe(",
+        "pub fn codex_child_network_probe_prompt(",
+        "pub fn opencode_child_network_probe_prompt(",
+        "pub fn opencode_child_required_ssh_probe_prompt(",
+        "pub fn codex_child_writable_roots_probe_prompt(",
+        "pub fn looks_like_opencode_usage_output(",
+        "pub fn validate_codex_child_network_probe_output(",
+        "pub fn validate_opencode_child_probe_marker_output(",
+        "pub fn validate_codex_child_writable_root_probe_output(",
         "pub fn classify_child_network_probe_failure(",
         "pub fn classify_child_required_ssh_probe_failure(",
         "pub fn classify_child_writable_root_probe_failure(",
@@ -9235,6 +9245,18 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         "fn is_codex_marketplace_manifest_noise(",
         "fn codex_stderr_noise_report(",
         "fn filter_codex_stderr_noise(",
+        "fn codex_exec_args_for_probe(",
+        "fn opencode_run_args_for_probe(",
+        "fn codex_child_network_probe_prompt(",
+        "fn opencode_child_network_probe_prompt(",
+        "fn opencode_child_required_ssh_probe_prompt(",
+        "fn codex_child_writable_roots_probe_prompt(",
+        "fn looks_like_opencode_usage_output(",
+        "fn validate_codex_child_network_probe_output(",
+        "fn validate_opencode_child_probe_marker_output(",
+        "fn validate_codex_child_writable_root_probe_output(",
+        "fn collect_json_strings(",
+        "fn shell_single_quote(",
         "fn classify_child_network_probe_failure(",
         "fn classify_child_required_ssh_probe_failure(",
         "fn classify_child_writable_root_probe_failure(",
@@ -9258,6 +9280,16 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
             && codex.contains("looks_like_codex_transport_403_429")
             && codex.contains("codex_transport_403_429_diagnostic")
             && codex.contains("filter_codex_stderr_noise")
+            && codex.contains("codex_exec_args_for_probe")
+            && codex.contains("opencode_run_args_for_probe")
+            && codex.contains("codex_child_network_probe_prompt")
+            && codex.contains("opencode_child_network_probe_prompt")
+            && codex.contains("opencode_child_required_ssh_probe_prompt")
+            && codex.contains("codex_child_writable_roots_probe_prompt")
+            && codex.contains("looks_like_opencode_usage_output")
+            && codex.contains("validate_codex_child_network_probe_output")
+            && codex.contains("validate_opencode_child_probe_marker_output")
+            && codex.contains("validate_codex_child_writable_root_probe_output")
             && codex.contains("classify_child_network_probe_failure")
             && codex.contains("classify_child_required_ssh_probe_failure")
             && codex.contains("classify_child_writable_root_probe_failure")

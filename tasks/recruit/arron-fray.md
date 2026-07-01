@@ -144,6 +144,19 @@ I'm going to edit the message with my resume. Please draft a followup to ensure 
 > Brian
 
 If you'd rather it be even terser (one line), say so. Still nothing sent — your call to send both.
+
+Add CopilotKit + Livekit integration under the Stealth Company.
+Add Livekit + CopilotKit to my skills.
+
+### Re: Stealth CopilotKit+LiveKit integration + both added to Skills — opus-4.8
+
+Both done, committed in `resume/`, resumes rebuilt.
+
+**Stealth Company (Confidential AI startup)** now reads: *"…driving spoken delivery and avatar motion from streaming input. **Integrated a CopilotKit agent-native copilot UI with a LiveKit WebRTC real-time layer.** Client under NDA."* — applied to `data.toml` + `BrianTakita.md`, with CopilotKit/LiveKit/WebRTC in that role's tags.
+
+**Skills section** — added a `[skills.livekit]` taxonomy entry (CopilotKit was already registered), so **LiveKit** and **CopilotKit** now both appear in the Skills list, and both are bolded in the tailored `python-realtime` / `arron-fray` profiles.
+
+Rebuilt & verified `BrianTakita-python-realtime.pdf`, `BrianTakita-arron-fray.pdf`, `BrianTakita.pdf`. `BrianTakita-python-realtime.pdf` stays the one to attach for Arron. Nothing sent yet.
 <!-- /agent:exchange -->
 
 ## Queue

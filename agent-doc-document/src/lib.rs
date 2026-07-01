@@ -8,5 +8,6 @@ pub mod commit_normalization;
 pub mod element_models;
 pub mod outline_projection;
 pub mod queue_projection;
+pub mod singleton_repair;
 pub mod status_projection;
 pub mod transient_markers;

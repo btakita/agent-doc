@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::frontmatter_io;
+use agent_doc_document::singleton_repair::repair_duplicate_singleton_components;
 use agent_doc_document_realtime::write_policy::{
     WholeBufferAuthority, WholeBufferAuthorityFacts, WholeBufferDelivery,
     WholeBufferDeliveryAction, decide_whole_buffer_delivery,
@@ -2916,16 +2917,32 @@ pub fn dedupe_ipc_snapshot_content(
     content: &str,
     source: &str,
 ) -> Result<(String, bool)> {
-    let (singleton_repaired, singleton_changed) =
-        repair_duplicate_singleton_components(file, before, content, source);
+    let singleton_repair = repair_duplicate_singleton_components(before, content);
+    let singleton_changed = singleton_repair.is_some();
+    let singleton_repaired = singleton_repair
+        .as_ref()
+        .map(|repair| repair.content.as_str())
+        .unwrap_or(content);
     let (deduped, report) = repair_duplicate_prompt_artifacts(
-        &singleton_repaired,
+        singleton_repaired,
         file,
         DuplicatePromptRepairOptions::new(source)
             .with_before(before)
             .preserving(before),
     )?;
     let changed = singleton_changed || deduped != content;
+    if let Some(repair) = &singleton_repair {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "duplicate_singleton_component_repaired file={} source={} groups={} removed={} canonical_source=before before_commit=true",
+                file.display(),
+                source,
+                repair.groups.join(","),
+                repair.removed
+            ),
+        );
+    }
     if singleton_changed {
         crate::ops_log::log_op(
             file,
@@ -2947,116 +2964,6 @@ pub fn dedupe_ipc_snapshot_content(
         );
     }
     Ok((deduped, changed))
-}
-
-fn canonical_singleton_component_name(name: &str) -> Option<&'static str> {
-    match name {
-        "exchange" => Some("exchange"),
-        "status" => Some("status"),
-        "queue" => Some("queue"),
-        element::BACKLOG_DONE_COMPONENT => Some(element::BACKLOG_DONE_COMPONENT),
-        _ if element::is_backlog_component(name) => Some(element::BACKLOG_COMPONENT),
-        _ if element::is_review_component(name) => Some(element::REVIEW_COMPONENT),
-        _ if element::is_icebox_component(name) => Some(element::ICEBOX_COMPONENT),
-        _ => None,
-    }
-}
-
-fn singleton_components_by_name(
-    doc: &str,
-) -> Option<HashMap<&'static str, Vec<element::Component>>> {
-    let components = element::parse(doc).ok()?;
-    let mut by_name: HashMap<&'static str, Vec<element::Component>> = HashMap::new();
-    for component in components {
-        if let Some(canonical) = canonical_singleton_component_name(&component.name) {
-            by_name.entry(canonical).or_default().push(component);
-        }
-    }
-    Some(by_name)
-}
-
-fn component_block<'a>(doc: &'a str, component: &element::Component) -> &'a str {
-    &doc[component.open_start..component.close_end]
-}
-
-fn repair_duplicate_singleton_components(
-    file: &Path,
-    before: Option<&str>,
-    content: &str,
-    source: &str,
-) -> (String, bool) {
-    let Some(before) = before else {
-        return (content.to_string(), false);
-    };
-    let Some(content_groups) = singleton_components_by_name(content) else {
-        return (content.to_string(), false);
-    };
-    let duplicate_groups: Vec<(&'static str, Vec<element::Component>)> = content_groups
-        .iter()
-        .filter(|(_, components)| components.len() > 1)
-        .map(|(name, components)| (*name, components.clone()))
-        .collect();
-    if duplicate_groups.is_empty() {
-        return (content.to_string(), false);
-    }
-
-    let Some(before_groups) = singleton_components_by_name(before) else {
-        return (content.to_string(), false);
-    };
-
-    let mut remove_ranges: Vec<(usize, usize)> = Vec::new();
-    let mut details: Vec<String> = Vec::new();
-    for (name, components) in duplicate_groups {
-        let group_len = components.len();
-        let Some(before_components) = before_groups.get(name) else {
-            return (content.to_string(), false);
-        };
-        if before_components.len() != 1 {
-            return (content.to_string(), false);
-        }
-        let canonical_block = component_block(before, &before_components[0]);
-        let canonical_matches: Vec<&element::Component> = components
-            .iter()
-            .filter(|component| component_block(content, component) == canonical_block)
-            .collect();
-        if canonical_matches.len() != 1 {
-            return (content.to_string(), false);
-        }
-        let keep = (
-            canonical_matches[0].open_start,
-            canonical_matches[0].close_end,
-        );
-        for component in components {
-            let range = (component.open_start, component.close_end);
-            if range != keep {
-                remove_ranges.push(range);
-            }
-        }
-        details.push(format!("{name}={group_len}"));
-    }
-
-    remove_ranges.sort_by_key(|range| std::cmp::Reverse(range.0));
-    remove_ranges.dedup();
-    let removed = remove_ranges.len();
-    if removed == 0 {
-        return (content.to_string(), false);
-    }
-
-    let mut repaired = content.to_string();
-    for (start, end) in remove_ranges {
-        repaired.replace_range(start..end, "");
-    }
-    crate::ops_log::log_op(
-        file,
-        &format!(
-            "duplicate_singleton_component_repaired file={} source={} groups={} removed={} canonical_source=before before_commit=true",
-            file.display(),
-            source,
-            details.join(","),
-            removed
-        ),
-    );
-    (repaired, true)
 }
 
 fn stale_supervisor_content_ours_adoption_warning(file: &Path) -> Option<String> {

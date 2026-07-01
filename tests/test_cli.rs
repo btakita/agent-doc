@@ -12592,6 +12592,57 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
 }
 
 #[test]
+fn test_agent_doc_document_owns_singleton_component_repair_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let document_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/lib.rs")).unwrap();
+    assert!(
+        document_lib.contains("pub mod singleton_repair;"),
+        "agent-doc-document should expose singleton repair through its owning module"
+    );
+
+    let singleton_repair =
+        fs::read_to_string(manifest_dir.join("agent-doc-document/src/singleton_repair.rs"))
+            .unwrap();
+    for required in [
+        "pub struct DuplicateSingletonComponentRepair",
+        "pub fn repair_duplicate_singleton_components(",
+        "fn canonical_singleton_component_name(",
+        "fn singleton_components_by_name(",
+        "fn component_block",
+    ] {
+        assert!(
+            singleton_repair.contains(required),
+            "agent-doc-document must own duplicate singleton component repair policy: {required}"
+        );
+    }
+    assert!(
+        !singleton_repair.contains("agent_doc_orchestration::"),
+        "singleton repair policy must not reach back through orchestration"
+    );
+
+    let write_ipc =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+    for forbidden in [
+        "fn canonical_singleton_component_name(",
+        "fn singleton_components_by_name(",
+        "fn component_block(",
+        "fn repair_duplicate_singleton_components(",
+    ] {
+        assert!(
+            !write_ipc.contains(forbidden),
+            "write IPC must not re-own singleton component repair policy: {forbidden}"
+        );
+    }
+    assert!(
+        write_ipc.contains(
+            "use agent_doc_document::singleton_repair::repair_duplicate_singleton_components;"
+        ),
+        "write IPC should call focused singleton repair policy directly"
+    );
+}
+
+#[test]
 fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let exchange_lib =

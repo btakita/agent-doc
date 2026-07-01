@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -34,212 +34,13 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260630-235719.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260701-062338.md`*
 
 Compacted content:
-- Archived 3 response topic(s): continue; do [#qftlossproof]; do [#qftlossproof]
-- Prior summary/context: prior compacted content: Archived 20 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); IPC proof ...
-- `make install` — installed `agent-doc` and `libagent_doc.so`; installer marked 2 controllers to recycle at the next idle boundary.
-- `make check` — clippy, 6155 nextest tests, doctests, SimWorld medium seed, and Lean all passed.
-- `cargo test -p agent-doc-queue in_progress_marker_detection_allows_priority_prefix`
-- `cargo test -p agent-doc-orchestration abandoned`
-- Refactor: updated the cycle-state contract docs to distinguish abandoned stale preflight terminal state from a later real commit closeout that supersedes it.
-- Green: `cargo test -p agent-doc-orchestration abandoned` passes, including the new terminal-proof regression and the cycle-state unit regression.
-- Red: the new closeout regression failed before the fix with `terminal proof cannot record closeout ... is abandoned`.
-`/clear` prompt items are added to the agent without me running JB `Clear Session Context`. There seems to be a background or retry task doing this. Please continue to simplify.
-
-JB `Run Agent Doc` error
-```
-[route] target tmux session: 0
-Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md into pane %67 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Summarize recent commits"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782863907349-direct_pane_protected_prompt_input-codex-_67-3390d64c34ee.txt
-```
-
-#spec-test-build-install-commit-push
-
-### Re: preflight exchange precedence — gpt-5
-
-You were right. The bad selection had two separate causes: preflight let an active queue head stay effective while an exchange prompt was waiting, and the continuous backlog refill path treated `queue: start` as if it were an explicit `go` opt-in even when the `agent:queue` tag had no `go` attribute.
-
-I fixed both in `src/agent-doc` and pushed commit `05cc1380` (`fix: prioritize exchange prompt over queue preflight`). Preflight now captures an unresolved exchange prompt before its commit/boundary-reposition step can hide it, synthesizes that as the effective exchange diff, clears effective selected queue prompts for the turn, and drops `queue_continuation_required` while the exchange prompt is pending. Queue refill/same-cycle pending-add sync now require explicit `go` (`queue: go` or marker-side `go`); plain `queue: start` remains durable active state only.
-
-Verification: focused regressions passed, `make check` passed, `cargo install --path .` installed `agent-doc 0.34.65`, and the session supervisor is marked to recycle at the next idle boundary. The pushed CI run `28484451473` was still in progress at closeout. No JB plugin update is needed for this fix.
-❯ Fix
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/recruit/reitrades.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=8e43288335a8442441841ad3a6316187ead230a5a33f3c8b672314ac30f56d68 content_len=27112 content_hash=9d611d65347b8874f8d48343639874c4e6174037efa37f2e6f3dc8d6199fb467 doc=reitrades session=62d195b8-b029-42a5-9c6c-836cb1b5b103 turn=cycle-1782863860494
-```
-
-❯ Archived 3 response topic(s): continue; do [#qftlossproof]; do [#qftlossproof]
-### Session Summary
-
-
-- `make install` — installed `agent-doc` and `libagent_doc.so`; installer marked 2 controllers to recycle at the next idle boundary.
-- `make check` — clippy, 6155 nextest tests, doctests, SimWorld medium seed, and Lean all passed.
-- `cargo test -p agent-doc-queue in_progress_marker_detection_allows_priority_prefix`
-- `cargo test -p agent-doc-orchestration abandoned`
-- Refactor: updated the cycle-state contract docs to distinguish abandoned stale preflight terminal state from a later real commit closeout that supersedes it.
-- Green: `cargo test -p agent-doc-orchestration abandoned` passes, including the new terminal-proof regression and the cycle-state unit regression.
-- Red: the new closeout regression failed before the fix with `terminal proof cannot record closeout ... is abandoned`.
-
-```
-[route] target tmux session: 0
-Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md into pane %67 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Summarize recent commits"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782863907349-direct_pane_protected_prompt_input-codex-_67-3390d64c34ee.txt
-```
-
-
-### Re: preflight exchange precedence — gpt-5
-
-You were right. The bad selection had two separate causes: preflight let an active queue head stay effective while an exchange prompt was waiting, and the continuous backlog refill path treated `queue: start` as if it were an explicit `go` opt-in even when the `agent:queue` tag had no `go` attribute.
-
-I fixed both in `src/agent-doc` and pushed commit `05cc1380` (`fix: prioritize exchange prompt over queue preflight`). Preflight now captures an unresolved exchange prompt before its commit/boundary-reposition step can hide it, synthesizes that as the effective exchange diff, clears effective selected queue prompts for the turn, and drops `queue_continuation_required` while the exchange prompt is pending. Queue refill/same-cycle pending-add sync now require explicit `go` (`queue: go` or marker-side `go`); plain `queue: start` remains durable active state only.
-
-Verification: focused regressions passed, `make check` passed, `cargo install --path .` installed `agent-doc 0.34.65`, and the session supervisor is marked to recycle at the next idle boundary. The pushed CI run `28484451473` was still in progress at closeout. No JB plugin update is needed for this fix.
-
-### Re: terminal-proof abandoned preflight closeout — gpt-5
-
-Fixed and pushed in `src/agent-doc` as `fee78f7a` (`fix: close terminal proof after abandoned preflight`).
-
-The root cause was `cycle_state::mark_committed`: after the supervisor marked an interrupted/stale preflight as `abandoned`, a later successful closeout commit called `mark_committed`, but the transition table quite correctly refused `Abandoned -> Committed`. `mark_committed` then returned the stale abandoned state unchanged, so strict terminal proof failed later with `cycle ... is abandoned`.
-
-I kept terminal proof strict. The fix is that a real commit closeout now supersedes an abandoned stale preflight with a fresh synthetic `write_applied -> committed` cycle, while already-committed cycles stay idempotent and lower-rank abandoned bookkeeping still stays terminal.
-
-Red-green-refactor evidence:
-
-- Red: the new closeout regression failed before the fix with `terminal proof cannot record closeout ... is abandoned`.
-- Green: `cargo test -p agent-doc-orchestration abandoned` passes, including the new terminal-proof regression and the cycle-state unit regression.
-- Refactor: updated the cycle-state contract docs to distinguish abandoned stale preflight terminal state from a later real commit closeout that supersedes it.
-
-Verification completed:
-
-- `cargo test -p agent-doc-orchestration abandoned`
-- `cargo test -p agent-doc-queue in_progress_marker_detection_allows_priority_prefix`
-- `make check` — clippy, 6155 nextest tests, doctests, SimWorld medium seed, and Lean all passed.
-- `make install` — installed `agent-doc` and `libagent_doc.so`; installer marked 2 controllers to recycle at the next idle boundary.
-
-GitHub CI for `fee78f7a` is currently in progress: run `28485233701`.
-❯ Fix
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/recruit/reitrades.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=8e43288335a8442441841ad3a6316187ead230a5a33f3c8b672314ac30f56d68 content_len=27112 content_hash=9d611d65347b8874f8d48343639874c4e6174037efa37f2e6f3dc8d6199fb467 doc=reitrades session=62d195b8-b029-42a5-9c6c-836cb1b5b103 turn=cycle-1782863860494
-```
-
-❯ Archived 3 response topic(s): continue; do [#qftlossproof]; do [#qftlossproof]
-<!-- patch:exchange -->
-### Re: archived qftlossproof prompts — gpt-5
-
-Grouped response for `continue; do [#qftlossproof]; do [#qftlossproof]`: I’m treating this as a compaction/archive state signal, not a fresh request to re-run `#qftlossproof`.
-
-Both `#qftlossproof` queue entries are already struck, and the unresolved follow-up is represented by `#qftlossdelta` at the top of the backlog. No additional `#qftlossproof` dispatch is needed from this archived marker.
-
-<!-- /patch:exchange -->
-
-### Re: do [#provauth3bimpl] — gpt-5
-
-I audited the operator-origin authority invariant under the hard rule from `tasks/agent-doc/plan-operator-provenance-authority.md`.
-
-No source patch was needed in this cycle: the remaining unsafe `content_ours` / stale-editor resurrection class is already covered by the current operator-preserving and fail-closed guards. The existing regressions assert that operator-visible document text is authoritative, that fallback paths must preserve user edits through `agent-doc write --stream`, and that docs/instructions must not reintroduce `content_ours`, stale snapshots, or ACK-content as authority for dropping operator text.
-
-Changed paths for this queue item: none. I left the unrelated dirty `src/agent-doc` worktree changes untouched.
-
-Verification passed:
-- `cargo test -p agent-doc --test test_cli root_agents_instructions_preserve_operator_authority`
-- `cargo test -p agent-doc --test test_cli docs_do_not_reintroduce_content_ours_snapshot_authority`
-- `cargo test -p agent-doc-orchestration operator_text_authority`
-- `cargo test -p agent-doc-orchestration content_ours`
-- `cargo test -p agent-doc-orchestration live_buffer`
-- `cargo test -p agent-doc-orchestration visible_write`
-- `cargo test -p agent-doc-orchestration stale_supervisor_content_ours`
-- parent repo: `33b314d2d` (`Update agent-doc submodule for operator buffer preservation`)
-- `src/agent-doc`: `61566d04` (`Preserve live editor digests over write provenance`)
-- Latest GitHub Actions CI was `in_progress` for workflow `CI`, run `28493126754`, at 2026-07-01T04:16:45Z.
-- `make check` completed with exit code 0 via tsift digest runner; the digest runner misclassified two `PASS ... editor_route_error` lines as failures, but the command succeeded.
-- `cargo test -p agent-doc-debounce` passed: 50 tests.
-- `cargo fmt -p agent-doc-debounce --check`
-
-Confidence: high for the audit result and regression coverage. Escalation: none; I did not use `--force-disk`.
-
-### Re: :pushpin: do [#supstaledetectverify] — gpt-5
-
-> **Queue prompt:**
->
-> :pushpin: do [#supstaledetectverify]
-
-`agent-doc` is installed: `agent-doc 0.34.65`.
-
-I could not safely finalize `#supstaledetectverify`. The response is captured, but closeout is blocked by `editor_convergence_required`: the JetBrains live buffer for `tasks/agent-doc/agent-doc-bugs2.md` is unsaved/ahead of disk, and current plugin code intentionally disables `save_document` IPC. I retried `finalize`/`write --commit`, refreshed the live buffer, recycled the supervisor, and did not use `--force-disk`.
-
-Next safe operator action: save or resolve the live JetBrains buffer for `tasks/agent-doc/agent-doc-bugs2.md`, then rerun:
-
-```bash
-agent-doc write --commit tasks/agent-doc/agent-doc-bugs2.md
-```
-
-Only use `--force-disk` if you explicitly want to override the live-editor safety guard.
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=file_ipc patch_id=0c4fde76-ae00-4e2e-b9ec-ea2d2569924f invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0.json doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782881096099
-```
-
-### Re: :pushpin: do [#suptmuxstaleverify] — gpt-5
-
-> **Queue prompt:**
-> :pushpin: do [#suptmuxstaleverify]
-
-Completed the stale-supervisor pane-indicator verification pass.
-
-Evidence:
-- Focused tests passed: `cargo test -p agent-doc-turn turn_status`, `cargo test -p agent-doc-document stale_supervisor`, `cargo test -p agent-doc-orchestration supervisor_stale_marker`, `cargo test -p agent-doc-orchestration fresh_supervisor_clears_stale_status_marker`, and `cargo test -p agent-doc --test test_cli test_agent_doc_document_owns_status_projection_policy`.
-- `make install` completed successfully and installed `agent-doc 0.34.65`.
-- Live stale proof: supervisor PID `3121460` maps `/home/brian/.cargo/bin/agent-doc (deleted)` at inode `95814823`, mtime `1782880713`, size `39651008`, while the installed binary is inode `95814825`, mtime `1782882042`, size `39676744`.
-- With that actually-stale supervisor, `.agent-doc/supervisor-stale` is present and tmux pane `%69` has title `⚠ STALE SUPERVISOR`.
-- `agent-doc admin recycle tasks/agent-doc/agent-doc-bugs2.md` accepted restart receipt `5092` with `background_started=true`; the same stale PID remains only because this pane is still busy with an open turn, so the live fresh-transition must wait for the commit/idle boundary.
-- Fresh-side behavior is covered by the pure/maintenance tests: fresh title generation omits the warning, and preflight maintenance removes the stale status marker when the live supervisor is not stale.
-
-Changed source paths: none in this verification cycle; the pane-title marker implementation was already in the installed source tree.
-
-Confidence: high that the warning appears only for a genuinely stale supervisor. Escalation: none; I did not use `--force-disk` or manually kill the live supervisor.
-
-### Re: external termination recovery for :pushpin: do [#suptmuxstaleverify] — gpt-5
-
-> **Queue prompt:**
-> :pushpin: do [#suptmuxstaleverify]
-
-I investigated the externally terminated run and completed the interrupted `#suptmuxstaleverify` closeout.
-
-What happened:
-- The interrupted cycle was `cycle-1782882001811`. It repeatedly reached `response_captured` between 2026-07-01T05:02:15Z and 2026-07-01T05:06:06Z, but never reached `committed` because the convergence gate stayed unmet: `committed,editor_converged`.
-- The supervisor was stale and auto-install/recycle ran during that stuck cycle. At 2026-07-01T05:07:40Z the cycle was marked `abandoned` with `event=suprecyclespin_stalled_cycle_resolved`, then the stale supervisor hot-reloaded onto the freshly installed binary.
-- A later recovery cycle, `cycle-1782882659553`, successfully committed the `#suptmuxstaleverify` response as commit `fd24c070d`. That response records the stale-supervisor proof, focused test evidence, successful `make install`, and the fact that the live fresh transition waits for idle after commit.
-- A follow-up preflight found another stale `preflight_started` cycle, `cycle-1782882671249`, appended the IPC proof diagnostic for the already-applied socket response, and committed that repair as `2b93bd940`. The remaining issue was live-buffer exchange drift beyond the committed snapshot, which this finalize closes through the normal binary-owned path.
-
-No source files needed changes in this recovery pass. The prior verification evidence for `#suptmuxstaleverify` remains the authoritative completion proof, and this closeout preserves the diagnostic text instead of manually rewriting the session document.
-
-### Re: IPC queue binding recovery — gpt-5
-
-I fixed the queue/IP converger issue in `src/agent-doc`: continuation now requires an explicit `go`, route activation writes `go`, and marker/frontmatter control stays bound both ways. Removing `go` from `agent:queue` is treated as a stop and synchronizes frontmatter to `queue: stop`; frontmatter `queue: go/start/stop` also synchronizes back to the queue marker.
-
-The live interrupted closeout was recovered through preflight. It normalized this document to an inactive queue state with `queue_continuation_required=false`, converged the editor buffer over IPC, installed the rebuilt binary and cdylib with `make install`, and requested supervisor recycle/replacement so the stale process does not keep running pre-fix code.
-
-Verification: `make check` passed locally, including clippy, 6252 nextest tests, doctests, the ignored SimWorld budget test, and the Lean build. Latest GitHub CI run `28497705469` was still in progress when checked.
-<!-- agent:boundary:6fe4bccc -->
+- Archived 10 response topic(s): preflight exchange precedence; preflight exchange precedence; terminal-proof abandoned preflight closeout; 7 more
+- Prior summary/context: prior compacted content: Archived 3 response topic(s): continue; do [#qftlossproof]; do [#qftlossproof]
+JB `Compact Exchange` should not leave uncommitted changes. The compact exchange summary should be committed. #spec-test-build-install-commit-push
+<!-- agent:boundary:ad0223b4 -->
 <!-- /agent:exchange -->
 ## Queue
 

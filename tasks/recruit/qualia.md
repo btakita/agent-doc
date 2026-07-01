@@ -108,6 +108,22 @@ Short answer: **signal-space yes (selectively), MLP mostly no.** Match each to t
 **Bottom line:** For the win today, don't volunteer either — stay on payments/fraud + Node. In technical rounds, **lead with signal-space + agent-doc CRDT when realtime/collaboration/frontend architecture comes up** (best fit), and reach for ML only if they raise their AI stack, anchored on Presence AI and honest about the fraud distinction.
 
 Want me to draft a tight 30-second signal-space + CRDT talking point you can drop in when collaboration architecture comes up?
+yes
+
+### Re: Signal-space + CRDT talking point (30 sec) — opus-4-8
+
+**Say this when realtime / collaboration / frontend architecture comes up:**
+
+> "One thread through my open-source work is realtime multi-user consistency. I built **signal-space** — reactive signal and graph mirroring with snapshot/delta sync — and **agent-doc**, which uses CRDTs so a human and an AI agent can edit the same document at once without conflicts. That's the same hard problem a closing platform has: title, escrow, lender, and buyer all touching one live deal, everyone needing a consistent view without stepping on each other. I've spent real time in that conflict-resolution space, so your multi-party model feels like familiar territory."
+
+~35 seconds at a natural pace. Two ways to flex it:
+
+- **Even shorter (10 sec, if you just want to plant the flag):** *"I've built CRDT-based collaborative editing and reactive state-sync tooling in open source — conflict-free multi-user consistency is a problem I've gone deep on, and it's exactly what a shared closing workspace lives or dies on."*
+- **If they push for depth:** be ready to name the specifics — CRDTs for conflict-free merge, snapshot/delta for efficient sync, and the tradeoff you hit (e.g. per-cell vs whole-document merge granularity). Don't overreach into distributed-systems theory; keep it grounded in what you shipped.
+
+**Delivery notes:** lead with the *problem* (multi-party consistency), not the project names — the names are proof, not the point. Land it on "your multi-party model," so it's about Qualia, not a tour of your repos. And only deploy it once; it's a sharp differentiator, not a theme to repeat.
+
+Anything else you want prepped before the call — a comp-range talking point, or a tight "why Qualia" open?
 <!-- agent:boundary:87926286 -->
 <!-- /agent:exchange -->
 

@@ -94,7 +94,8 @@ use agent_doc_tmux_commands::{
 #[cfg(test)]
 use tmux_router::IsolatedTmux;
 use tmux_router::registry::{
-    entry_session_id, find_registry_key_by_session_id, normalize_registry,
+    canonical_registry_key_in, entry_session_id, find_registry_key_by_session_id,
+    normalize_registry,
 };
 use tmux_router::{
     PaneMoveOp, Registry as SessionRegistry, RegistryEntry as SessionEntry, RegistryLock, Tmux,
@@ -306,36 +307,6 @@ pub fn registry_path() -> PathBuf {
 /// Return the path to the sessions registry file under `base_dir`.
 pub fn registry_path_in(base_dir: &Path) -> PathBuf {
     base_dir.join(SESSIONS_FILE)
-}
-
-pub fn canonical_registry_key_in(base_dir: &Path, file: &str) -> String {
-    let path = Path::new(file);
-    let joined = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        base_dir.join(path)
-    };
-    canonicalize_or_normalize(&joined)
-        .to_string_lossy()
-        .to_string()
-}
-
-fn canonicalize_or_normalize(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| normalize_path(path))
-}
-
-fn normalize_path(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            std::path::Component::CurDir => {}
-            std::path::Component::ParentDir => {
-                normalized.pop();
-            }
-            other => normalized.push(other.as_os_str()),
-        }
-    }
-    normalized
 }
 
 // ---------------------------------------------------------------------------

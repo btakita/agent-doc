@@ -132,8 +132,8 @@ pub fn run(old_path: &Path, new_path: &Path) -> Result<()> {
     // Update sessions registry
     let old_path_str = old_path.to_string_lossy().to_string();
     let new_path_str = new_path.to_string_lossy().to_string();
-    let old_key = sessions::canonical_registry_key_in(&project_root, &old_path_str);
-    let new_key = sessions::canonical_registry_key_in(&project_root, &new_path_str);
+    let old_key = tmux_router::registry::canonical_registry_key_in(&project_root, &old_path_str);
+    let new_key = tmux_router::registry::canonical_registry_key_in(&project_root, &new_path_str);
 
     let _lock = tmux_router::RegistryLock::acquire(&sessions::registry_path())?;
     let mut registry = sessions::load()?;

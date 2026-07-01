@@ -7045,7 +7045,7 @@ mod tests {
         let child_pane = iso.split_window(&root_pane, &subroot, "-dh").unwrap();
 
         let mut child_registry = tmux_router::Registry::new();
-        let bad_key = sessions::canonical_registry_key_in(
+        let bad_key = tmux_router::registry::canonical_registry_key_in(
             &subroot,
             "src/session-share/tasks/claudescore-3.md",
         );
@@ -7087,7 +7087,7 @@ mod tests {
         );
 
         let root_registry = sessions::load_in(root).unwrap();
-        let root_key = sessions::canonical_registry_key_in(
+        let root_key = tmux_router::registry::canonical_registry_key_in(
             root,
             root_doc.canonicalize().unwrap().to_string_lossy().as_ref(),
         );
@@ -7099,7 +7099,7 @@ mod tests {
         assert_eq!(root_registry.len(), 1);
 
         let child_registry = sessions::load_in(&subroot).unwrap();
-        let child_key = sessions::canonical_registry_key_in(
+        let child_key = tmux_router::registry::canonical_registry_key_in(
             &subroot,
             child_doc.canonicalize().unwrap().to_string_lossy().as_ref(),
         );
@@ -7140,7 +7140,7 @@ mod tests {
         let window = iso.pane_window(&root_pane).unwrap();
         let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
 
-        let root_key = sessions::canonical_registry_key_in(
+        let root_key = tmux_router::registry::canonical_registry_key_in(
             root,
             root_doc.canonicalize().unwrap().to_string_lossy().as_ref(),
         );
@@ -7160,7 +7160,7 @@ mod tests {
         );
         sessions::save_in(root, &root_registry).unwrap();
 
-        let child_key = sessions::canonical_registry_key_in(
+        let child_key = tmux_router::registry::canonical_registry_key_in(
             &subroot,
             child_doc.canonicalize().unwrap().to_string_lossy().as_ref(),
         );
@@ -7254,7 +7254,7 @@ mod tests {
         let iso = IsolatedTmux::new("sync-fail-closed-geometry-binding");
         let child_pane = iso.new_session("test", &subroot).unwrap();
 
-        let child_key = sessions::canonical_registry_key_in(
+        let child_key = tmux_router::registry::canonical_registry_key_in(
             &subroot,
             child_doc.canonicalize().unwrap().to_string_lossy().as_ref(),
         );

@@ -1779,7 +1779,7 @@ fn registry_sweep_owner(
     registry: &tmux_router::Registry,
     doc_path: &Path,
 ) -> Option<SweepOwner> {
-    let key = sessions::canonical_registry_key_in(root, &doc_path.to_string_lossy());
+    let key = tmux_router::registry::canonical_registry_key_in(root, &doc_path.to_string_lossy());
     registry.get(&key).and_then(|entry| {
         (!entry.pane.trim().is_empty()).then(|| SweepOwner {
             pane: entry.pane.clone(),

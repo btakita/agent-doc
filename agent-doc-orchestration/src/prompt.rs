@@ -354,7 +354,7 @@ sleep 1
         );
 
         let mut registry = tmux_router::Registry::new();
-        let key = crate::sessions::canonical_registry_key_in(tmp.path(), "prompt.md");
+        let key = tmux_router::registry::canonical_registry_key_in(tmp.path(), "prompt.md");
         registry.insert(
             key,
             tmux_router::RegistryEntry {

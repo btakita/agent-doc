@@ -300,7 +300,10 @@ mod tests {
         )
         .unwrap();
         let mut registry = sessions::load_in(tmp.path()).unwrap();
-        let key = sessions::canonical_registry_key_in(tmp.path(), doc.to_string_lossy().as_ref());
+        let key = tmux_router::registry::canonical_registry_key_in(
+            tmp.path(),
+            doc.to_string_lossy().as_ref(),
+        );
         let entry = registry.get_mut(&key).expect("seeded entry should exist");
         entry.supervisor_instance_id = "instance-preserved".to_string();
         sessions::save_in(tmp.path(), &registry).unwrap();
@@ -600,8 +603,10 @@ mod tests {
 
         let mut registry = tmux_router::Registry::new();
         let canonical = doc.canonicalize().unwrap();
-        let key =
-            sessions::canonical_registry_key_in(&subroot, canonical.to_string_lossy().as_ref());
+        let key = tmux_router::registry::canonical_registry_key_in(
+            &subroot,
+            canonical.to_string_lossy().as_ref(),
+        );
         registry.insert(
             key,
             tmux_router::RegistryEntry {

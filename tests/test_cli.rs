@@ -12694,6 +12694,7 @@ fn test_tmux_router_owns_session_registry_normalization_policy() {
     .unwrap();
 
     for required in [
+        "pub fn canonical_registry_key_in(",
         "pub fn entry_session_id",
         "pub fn normalize_registry(",
         "pub fn find_registry_key_by_session_id(",
@@ -12707,6 +12708,10 @@ fn test_tmux_router_owns_session_registry_normalization_policy() {
     let sessions_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sessions.rs")).unwrap();
     for forbidden in [
+        "pub fn canonical_registry_key_in(",
+        "fn canonical_registry_key_in(",
+        "fn canonicalize_or_normalize(",
+        "fn normalize_path(",
         "fn entry_session_id",
         "fn choose_preferred_entry(",
         "fn normalize_registry(",
@@ -12719,11 +12724,33 @@ fn test_tmux_router_owns_session_registry_normalization_policy() {
     }
     assert!(
         sessions_source.contains("use tmux_router::registry::{")
+            && sessions_source.contains("canonical_registry_key_in")
             && sessions_source.contains("entry_session_id")
             && sessions_source.contains("find_registry_key_by_session_id")
             && sessions_source.contains("normalize_registry"),
         "sessions.rs should import focused tmux-router registry policy directly"
     );
+
+    let direct_call_sources = [
+        "src/rename.rs",
+        "agent-doc-orchestration/src/sync.rs",
+        "agent-doc-orchestration/src/startup_miss.rs",
+        "agent-doc-orchestration/src/session_actor.rs",
+        "agent-doc-orchestration/src/project_controller.rs",
+        "agent-doc-orchestration/src/sync/pane_repair.rs",
+        "agent-doc-orchestration/src/sync/registry.rs",
+        "agent-doc-orchestration/src/sync/layout.rs",
+        "agent-doc-orchestration/src/preflight.rs",
+        "agent-doc-orchestration/src/prompt.rs",
+    ];
+    for relative_path in direct_call_sources {
+        let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
+        assert!(
+            !source.contains("sessions::canonical_registry_key_in")
+                && !source.contains("crate::sessions::canonical_registry_key_in"),
+            "{relative_path} must call tmux-router registry policy directly"
+        );
+    }
 }
 
 #[test]

@@ -88,7 +88,7 @@ pub fn canonical_document_id_in(base_dir: &Path, file: &str) -> String {
     canonical_document_id(&document_path_from_base_dir(base_dir, file))
         .ok()
         .flatten()
-        .unwrap_or_else(|| crate::sessions::canonical_registry_key_in(base_dir, file))
+        .unwrap_or_else(|| tmux_router::registry::canonical_registry_key_in(base_dir, file))
 }
 
 fn load_store_in(base_dir: &Path) -> Result<ActorStore> {

@@ -1075,7 +1075,7 @@ mod tests {
         let child_pane = iso.split_window(&root_pane, &subroot, "-dh").unwrap();
 
         let mut root_registry = tmux_router::Registry::new();
-        let root_key = sessions::canonical_registry_key_in(
+        let root_key = tmux_router::registry::canonical_registry_key_in(
             root,
             root_doc.canonicalize().unwrap().to_string_lossy().as_ref(),
         );
@@ -1095,7 +1095,7 @@ mod tests {
         sessions::save_in(root, &root_registry).unwrap();
 
         let mut child_registry = tmux_router::Registry::new();
-        let child_key = sessions::canonical_registry_key_in(
+        let child_key = tmux_router::registry::canonical_registry_key_in(
             &subroot,
             child_doc.canonicalize().unwrap().to_string_lossy().as_ref(),
         );

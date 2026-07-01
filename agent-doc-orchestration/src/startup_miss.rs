@@ -199,7 +199,7 @@ pub fn superseded_by_newer_registered_start(
     };
     let registry = crate::sessions::load_in(&root)?;
     let registry_key =
-        crate::sessions::canonical_registry_key_in(&root, &file.display().to_string());
+        tmux_router::registry::canonical_registry_key_in(&root, &file.display().to_string());
     let Some(registered_entry) = registry.get(&registry_key) else {
         return Ok(None);
     };

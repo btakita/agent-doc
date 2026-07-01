@@ -41,8 +41,10 @@ pub(crate) fn canonicalize_sync_file(file: &Path) -> Option<PathBuf> {
 pub(crate) fn registry_location_for_file(file: &Path) -> Option<(PathBuf, PathBuf, String)> {
     let canonical = canonicalize_sync_file(file)?;
     let project_root = agent_doc_fs::find_project_root(&canonical)?;
-    let registry_key =
-        sessions::canonical_registry_key_in(&project_root, canonical.to_string_lossy().as_ref());
+    let registry_key = tmux_router::registry::canonical_registry_key_in(
+        &project_root,
+        canonical.to_string_lossy().as_ref(),
+    );
     Some((canonical, project_root, registry_key))
 }
 

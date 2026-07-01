@@ -2327,7 +2327,7 @@ fn emit_sessions_projection(
             continue;
         }
         let projected_hint = hint.filter(|hint| {
-            crate::sessions::canonical_registry_key_in(project_root, &hint.file)
+            tmux_router::registry::canonical_registry_key_in(project_root, &hint.file)
                 == record.document_id
         });
         let prior = registry.get(&record.document_id);

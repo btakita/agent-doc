@@ -66,7 +66,40 @@ Both profiles created and committed in the `mail` submodule (`183ae41`, local on
 Note: the iCIMS posting (`jobs/1736`) is JavaScript-gated, so role detail was assembled from LSAC's site + public listings rather than the live posting — treat comp/stack specifics as "verify before relying."
 
 Want me to draft a LinkedIn reply to Laura, or spin up a tailored resume for the Engineer Lead JD?
-<!-- agent:boundary:e103e52d -->
+
+### Re: LinkedIn reply drafted + tailored resume built — opus-4.8
+
+Both done and committed to their submodules (local, not pushed).
+
+**1. LinkedIn reply draft** → `mail/contacts/laura-s/20260701-linkedin-reply-draft.md` (`mail` `94eacbe`)
+
+Draft message (review before sending):
+
+> Hi Laura,
+>
+> Thanks for reaching out. The Engineer Lead role looks interesting — especially the move past Copilot into LLMs, RAG, and agentic workflows. That's squarely where I've been building: I've shipped an agentic document-editing system and a code-RAG engine (graph + BM25 over SQLite), and I led the real-time AI pipeline at Presence AI.
+>
+> A few things before we talk, so I can gauge fit:
+> - Is the role fully remote, or is there an onsite/hybrid expectation around Newtown?
+> - What's the compensation range at the Engineer Lead level?
+> - The JD leans Azure / Cosmos DB / Oracle; my recent work is Rust/TypeScript/Python on Postgres and SQLite. Happy to walk through how that transfers.
+>
+> I'm open to a conversation — what does your calendar look like next week?
+>
+> Best,
+> Brian
+
+Warm, no apology (cold inbound, nothing owed on timing), from mild scarcity. The three questions surface the two real unknowns (remote confirmation + comp) and pre-empt the stack mismatch honestly instead of hiding it.
+
+**2. Tailored resume** → `resume/profiles/law-school-admission-council.toml` + `BrianTakita-law-school-admission-council.pdf` (41.9K) (`resume` `0eaf924`)
+
+- **Summary retargeted** for an Engineer Lead: GenAI/agentic + RAG leadership, best-practices/enterprise-architecture ownership, full-stack, relational data at scale.
+- **Emphasis** (auto-bolded): MemGraphRAG / agentic / RAG, the Presence AI real-time pipeline (H100s, Ray), 20+ years technical leadership, Python/TypeScript/React/FastAPI, and PostgreSQL + D1 migrations (transfers to their Cosmos DB / SQL / Oracle).
+- **Honesty note:** I did **not** fabricate Azure/Cosmos/Oracle experience — the resume + draft both frame your Postgres/SQLite/D1 background as transferable relational-data-at-scale. Their stack skew is the one real gap; worth naming rather than papering over.
+- Built clean via `make PROFILE=law-school-admission-council` (no filter warnings).
+
+Want me to push these submodules, or refine either the draft tone or the resume emphasis first?
+<!-- agent:boundary:f79a8a5e -->
 <!-- /agent:exchange -->
 
 ## Queue

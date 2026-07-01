@@ -34,41 +34,11 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260701-081639.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260701-160421.md`*
 
 Compacted content:
-- Archived 2 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); "I was not typing"
-- Prior summary/context: prior compacted content: Archived 2 response topic(s): JB Compact Exchange should not leave uncommitted changes; agen...
-<!-- agent:boundary:a7267d23 -->
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=file_ipc patch_id=5f1613c1-930a-42ff-abbe-23d330f857c4 invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/5f1613c1-930a-42ff-abbe-23d330f857c4.json doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782893508520
-```
-I removed old queue items added queue items to reitrades.md but when I ran JB `Run Agent Doc`, some of the queue items were removed and the old queue items were restored.
-
-<!-- agent:boundary:qed17ace -->
-
-### Re: Pre-run queue edits partially reverted (only first added head kept) — opus-4-8
-
-Thanks for the correction — pre-run (not mid-turn) narrows this a lot. It's the concurrent-writer queue race tracked as #qeditrace (#0bmv, plan-queue-edit-race-consolidated.md), and the "only the first added head survived" signature points specifically at the preflight queue-maintenance reconcile, not the during-turn finalize path.
-
-**What happens on the run:** JB "Run Agent Doc" starts with `agent-doc preflight`, which runs a queue-maintenance pass over your already-edited queue. That pass journals the visible/live-buffer queue (#qftloss mode-6, meant to make pre-observation operator adds crash-durable), then runs the #mirrorall backlog→queue mirror, the #rz3a freshly-added hold-out, #7r2s manual-add pinning, and #qdedupsync dedup — all in `preflight/maintenance.rs`. My leading hypothesis is that this convergence keeps the first operator-added head (it matches the pin/anchor against the prior snapshot) but treats the remaining new lines as re-mirror/dedup churn and reverts them to the pre-edit snapshot: the journal *records* them, but the reconcile does not *replay* them back into the visible queue. That exactly matches "only the first item I added was kept."
-
-**Live evidence in this doc:** the queue already carries duplicate heads — `do [#tmuxsynccrashlog]` twice and `do [#60ev]` twice — the collision fingerprint of old-restored + new-added.
-
-The plan's core convergence already shipped on main, but this fresh pre-run repro shows the multi-line operator-add case still leaks, so I've filed it as an actionable focused-cycle item (#qeditrace) with the exact code path and a SimWorld requirement for multi-line pre-run add survival.
-
-I did **not** attempt the merge fix inline: root-causing + fixing the reconcile is a focused cycle (live-CRDT / two-writer, needs `make tmux-ci` across live panes) per the existing plan. And I deliberately did **not** hand-edit this doc's duplicate heads — a direct queue edit is precisely what re-triggers the churn, so that cleanup belongs to the fix, not a manual patch.
-
-Next step (the focused cycle): instrument the maintenance reconcile to log which operator-added heads it keeps vs reverts, confirm the exact drop point, then make the reconcile replay ALL journaled operator adds (not just the first) — or fail closed with a recoverable artifact instead of silently reverting.
+- Archived 2 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); Pre-run queue edits partially reverted (only first added head kept)
+<!-- agent:boundary:c463cfbe-057a-469c-84ca-474e224276cd -->
 <!-- /agent:exchange -->
 ## Queue
 

@@ -790,12 +790,13 @@ Two things:
 2. **If §5 still looks operator-facing on your end, you're likely viewing a stale PDF.** The JB IPC has been wedged all session, and the PDF viewer often holds the previously-opened file — so if you still see "(competitive bid)" in the §5 heading, that's the pre-rewrite copy. The current committed PDF (`REItrades V1.2 - Proposal & Estimate.pdf`, 12 pages) has the client-facing version. Close and reopen it to confirm.
 
 If there's a specific phrase in the *current* §5 that still reads wrong to you, point me at it and I'll fix that exact line — but as committed, §5 now addresses Artur throughout.
-<!-- agent:boundary:6bf7c675 -->
+<!-- agent:boundary:aacb5150 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue go -->
+- "5. Recommended phasing": Still says Recommended phrasing. I refresh & reopened the pdf. 
 <!-- /agent:queue -->
 
 ## Backlog

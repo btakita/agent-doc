@@ -734,6 +734,21 @@ should be deleted during extraction.
   effects while importing the focused classifier directly; the old
   `AGENT_PROCESSES` / `IDLE_SHELLS` arrays and local `PaneProcessKind` were
   deleted instead of preserved as wrappers.
+- `agent-doc-supervisor::input` now owns pure supervisor input byte policy:
+  filtering inherited Ctrl-D bytes before the first visible prompt, normalizing
+  injected supervisor input from LF/CRLF to carriage returns, and summarizing
+  operator prompt input for logs. `start.rs` keeps PTY reads/writes, prompt
+  visibility facts, and session logging while importing the focused byte
+  helpers directly instead of retaining local wrappers.
+- `agent-doc-hash` now also owns compact diagnostic SHA-256 prefixes through
+  `short_content_hash`. Route dispatch and pane-snapshot logging keep capture,
+  redaction, and file IO effects while calling the focused hash helper directly;
+  the old route-local short-hash helper was deleted.
+- `agent-doc-topic` now owns compact exchange summary policy: summarizing
+  archived response topics, prior compact summaries, trailing prompt context,
+  whitespace collapse, and truncation. `compact.rs` keeps archive construction,
+  component writes, and safety guards while calling the focused topic summarizer
+  directly; the old local summarizer helpers were removed rather than wrapped.
 - `agent-doc-session-accretion` now owns context-reset policy: resolving the
   default-off queue context-reset opt-in from frontmatter/project facts,
   resolving and clamping `/clear` context thresholds, and formatting recent

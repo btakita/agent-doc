@@ -725,7 +725,7 @@ Notes:
 - The cost bullet leads with the phased first tranche (the low-commitment number for a bootstrapped founder) and only mentions the full range so it's not a surprise later.
 - LinkedIn strips most formatting; if you paste into the message box the bullets render as plain lines — still scannable.
 - Say the word and I'll publish it via `corky`/LinkedIn (draft only — no auto-send), or tweak tone/length.
-"5. Recommended phasing (competitive bid)" seems to be written for the operator...not the client. Please rephrase it to be client-facing.
+❯   "5. Recommended phasing (competitive bid)" seems to be written for the operator...not the client. Please rephrase it to be client-facing.
 
 ### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
 
@@ -845,7 +845,7 @@ Notes:
 - No markdown left — `•` and the line breaks paste as-is into LinkedIn.
 - Blank line between each bullet so it stays scannable in the narrow message pane.
 - If you'd rather send it more compact (no blank lines between bullets), say so and I'll tighten it. Or I can publish it via `corky`/LinkedIn as a draft (no auto-send).
-❯ do [#reirengagenote]. I want to see if he is willing to engage with me as well. And to see what his budget is.
+  ❯ do [#reirengagenote]. I want to see if he is willing to engage with me as well. And to see what his budget is.
 ### Re: No-pressure re-engagement note for Artur — opus-4-8
 
 Here's a short, gracious note that does three things at once: accepts his Upwork decision without friction, offers to engage **alongside** the freelancer on the risky/live parts rather than competing to replace him, and opens two doors — a flexible cash+equity structure and a soft budget question — so you learn whether he'll engage and what he can actually spend.
@@ -894,13 +894,13 @@ Short answer: only under specific conditions, and never as a plain discount. The
 **For the Arthur re-approach specifically:** he hasn't even said yes to paid work yet, so leading with an equity ask is premature and can read as desperation. Keep the re-engagement note as drafted — signal *openness* to a blended structure as a door, not a discount you're pre-offering. Let him come back first; negotiate structure only once there's a real conversation. If it does progress, anchor on full rate and let *him* propose equity to bring the cash number down — then you're evaluating his offer, not giving away margin up front.
 
 Bottom line: be willing to *discuss* a blend, don't be willing to *cut your rate* for it. Equity is a bonus you accept on top of fair pay, not a reason to work cheap.
-<!-- agent:boundary:9abfcebc -->
+<!-- agent:boundary:5e6fd68a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue start -->
-/goal Implement backlog item(s): #eeee
+<!-- agent:queue start go -->
+- I like that reitrades is in real estate and using Rust. I'm willing to see what he can offer. Perhaps we can work something out. I could work limited hours perhaps. I am interested in this role.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 pending_done_guard: warn
 agent_doc_lint_dialect: off
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -433,7 +433,6 @@ Brian
 
 Should we consider multi-layer perceptrons in the proposal for more accurate AI output?
 
-❯ Should we propose using some deterministic software for the 100% accuracy?
 ### Re: Multi-layer perceptrons in the proposal? — opus-4-8
 
 No — I'd keep MLPs out of the proposal. They don't address the accuracy problem REItrades actually has, and naming them would weaken the bid, not strengthen it.
@@ -464,7 +463,36 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=tasks/recruit/reitrades.md source=ipc_visible_repair patch_id=670d9bd5-d507-4fe1-8198-e29b2ff26935 invariant=live_prompt_drift recovery=retry_without_disk_write redeliver_editor=true bad_len=38508 bad_hash=560bbc87896b72d1b16121dc0232aea3b1f301d60f6cb029906f231f1f4a9cab repaired_len=41112 repaired_hash=5ac6724512293d92142098f890fc57f9c0ca2250386818e9ba36fcad82185e2a doc=reitrades session=62d195b8-b029-42a5-9c6c-836cb1b5b103 turn=cycle-1782887191073
 ```
-<!-- agent:boundary:88022c28 -->
+Should we propose using some deterministic software for the 100% accuracy?
+
+### Re: Deterministic software for "100% accuracy"? — opus-4-8
+
+Yes — and it's the honest way to say "100% accurate" without overpromising on the AI. The move is to split the pipeline into a **deterministic layer** and a **generative layer**, and let deterministic code own everything it possibly can. That reframes the pitch from "our AI is 100% accurate" (not credible) to "the numbers and the structure are provably correct; the fuzzy parts are validated and reviewed."
+
+**What deterministic software genuinely gets to 100%:**
+
+- **Calculations** — cap rate, NOI, price/unit, price/SF, GRM, loan sizing. These are formulas, not predictions. Compute them in code from validated inputs; never let the model do arithmetic.
+- **Schema / field validation** — types, ranges, required fields, unit normalization, enum membership (asset class, state, zoning). A validator passes or fails; that's 100% by construction.
+- **Structured data retrieval** — reading a known field (year built, SF, ownership) from BatchData / rent rolls / authoritative records is deterministic. Only *locating* it inside messy source docs is fuzzy.
+- **Template / OM rendering** — Tera templates produce identical output for identical inputs. Document assembly is deterministic; only the prose inside is generated.
+
+**Where deterministic software can't reach 100% — and honesty matters:**
+
+- **Extraction from unstructured source** (old OM PDFs, flyers, scanned rent rolls) is inherently probabilistic. Deterministic parsers handle clean, consistent layouts; the long tail needs the model plus validation.
+- **Generated narrative** (listing copy, market/demographic write-ups) has no single correct output, so "100% accurate" isn't even well-defined for it.
+
+**How I'd propose it to Artur** — accuracy as a *deterministic core with an AI assist*, not "AI that's 100% accurate":
+
+1. Deterministic code owns every number, validation rule, and document assembly — provably correct and auditable.
+2. The model only *proposes* values for fuzzy extraction/generation.
+3. Every model output passes deterministic validators + confidence scoring + the A–D provenance rubric (§3a) before it's shown.
+4. Anything money-facing or buyer-facing gets admin review before it goes out.
+
+This is the same accuracy stack I described for the MLP question — the deterministic layer is just the part of it I'd lead with in the proposal, because it's the strongest trust argument and it's cheaper and more testable than trying to make the AI itself infallible (which fits the bootstrapped budget).
+
+**Recommendation:** yes, put the deterministic layer front and center. Just attach "100%" to the deterministic parts (math, validation, structured data, rendering), and describe the AI parts as *validated + reviewed*, not perfect. That's a claim you can actually stand behind on a call and in a contract.
+
+<!-- agent:boundary:e424afc7 -->
 <!-- /agent:exchange -->
 
 ## Queue

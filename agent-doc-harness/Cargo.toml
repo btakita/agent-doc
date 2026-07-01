@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-harness"
-version = "0.34.65"
+version = "0.34.66"
 edition = "2024"
 description = "Harness prompt and terminal chrome policy for agent-doc"
 license = "MIT"
@@ -10,8 +10,8 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_harness"
 
 [dependencies]
-agent-doc-config = { path = "../agent-doc-config", version = "0.34.65" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.65" }
-agent-doc-turn-executor = { path = "../agent-doc-turn-executor", version = "0.34.65" }
-agent-doc-turn-executor-tmux = { path = "../agent-doc-turn-executor-tmux", version = "0.34.65" }
+agent-doc-config = { path = "../agent-doc-config", version = "0.34.66" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.66" }
+agent-doc-turn-executor = { path = "../agent-doc-turn-executor", version = "0.34.66" }
+agent-doc-turn-executor-tmux = { path = "../agent-doc-turn-executor-tmux", version = "0.34.66" }
 anyhow = "1"

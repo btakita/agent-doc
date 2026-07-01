@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-boundary-io"
-version = "0.34.65"
+version = "0.34.66"
 edition = "2024"
 description = "Boundary marker file I/O for agent-doc"
 license = "MIT"
@@ -10,8 +10,8 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_boundary_io"
 
 [dependencies]
-agent-doc-element-boundary = { path = "../agent-doc-element-boundary", version = "0.34.65" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.65" }
+agent-doc-element-boundary = { path = "../agent-doc-element-boundary", version = "0.34.66" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.66" }
 anyhow = "1"
 
 [dev-dependencies]

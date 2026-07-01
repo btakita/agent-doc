@@ -4,6 +4,23 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.66
+
+- **JetBrains `Compact Exchange` no longer leaves an uncommitted summary
+  (`#jb-compact-editor-buffer-flush`).** The editor-IPC `op:replace` convergence
+  updates only the live editor's in-memory buffer; the plugin never saves it, so
+  the working-tree file stayed at the pre-compact content. The `--commit`
+  selective commit then compared that stale working tree against the compacted
+  snapshot, treated the snapshot as historical exchange drift, and repaired it
+  back to HEAD — leaving HEAD and disk pre-compact. `agent-doc compact --commit`
+  now asks the live editor to flush its buffer to disk (the same `save_document`
+  IPC preflight uses for `live_prompt_drift`) *before* the re-read and commit, so
+  the working tree holds the compacted content when the commit stages it. The
+  flush is fail-open — `commit_compacted_authoritative` still verifies HEAD
+  landed the compacted content and fails closed otherwise. No plugin change: the
+  `save_document` handler already ships. Regression test:
+  `compact_with_commit_flushes_editor_buffer_to_disk`.
+
 ## 0.34.65
 
 - **More orchestration helper seams moved to focused owners.** Snapshot exchange

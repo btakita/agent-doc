@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-prompt-lines"
-version = "0.34.65"
+version = "0.34.66"
 edition = "2024"
 description = "Pure prompt and response line classifiers for agent-doc"
 license = "MIT"
@@ -10,4 +10,4 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_prompt_lines"
 
 [dependencies]
-agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.65" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.66" }

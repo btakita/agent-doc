@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-sync"
-version = "0.34.65"
+version = "0.34.66"
 edition = "2024"
 description = "Pure sync scope and layout-state planning policy for agent-doc"
 license = "MIT"
@@ -10,7 +10,7 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_sync"
 
 [dependencies]
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.65" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.66" }
 anyhow = "1"
 serde_json = "1"
 

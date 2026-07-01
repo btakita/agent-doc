@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-config"
-version = "0.34.65"
+version = "0.34.66"
 edition = "2024"
 description = "Global user configuration types and file loading for agent-doc"
 license = "MIT"
@@ -10,8 +10,8 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_config"
 
 [dependencies]
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.65" }
-agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.34.65" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.66" }
+agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.34.66" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 toml = "1.1"

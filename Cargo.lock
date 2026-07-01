@@ -68,6 +68,7 @@ dependencies = [
  "agent-doc-turn",
  "agent-doc-turn-executor",
  "agent-doc-turn-executor-tmux",
+ "agent-doc-turn-scope-io",
  "agent-doc-turn-status-io",
  "agent-doc-work-graph",
  "agent-doc-workflow",
@@ -210,6 +211,7 @@ dependencies = [
  "agent-doc-merge",
  "agent-doc-prompt-lines",
  "agent-doc-queue",
+ "agent-doc-state-backbone",
  "agent-doc-template",
  "agent-doc-turn",
  "anyhow",
@@ -529,6 +531,7 @@ dependencies = [
  "agent-doc-turn",
  "agent-doc-turn-executor",
  "agent-doc-turn-executor-tmux",
+ "agent-doc-turn-scope-io",
  "agent-doc-turn-status-io",
  "agent-doc-watch-io",
  "agent-doc-work-graph",
@@ -883,6 +886,17 @@ dependencies = [
  "agent-doc-tmux",
  "agent-doc-turn-executor",
  "serde",
+]
+
+[[package]]
+name = "agent-doc-turn-scope-io"
+version = "0.34.66"
+dependencies = [
+ "agent-doc-fs",
+ "agent-doc-turn",
+ "anyhow",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

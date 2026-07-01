@@ -2273,6 +2273,7 @@ fn test_manifest_uses_publishable_dependency_contract() {
         "agent-doc-state-wire",
         "agent-doc-template",
         "agent-doc-turn",
+        "agent-doc-turn-scope-io",
         "agent-doc-workflow",
         "agent-doc-work-graph",
     ] {
@@ -2493,6 +2494,82 @@ fn test_state_wire_extraction_stays_first_class_and_facade_free() {
             && !ffi_source.contains("agent_doc_workflow::state_wire"),
         "FFI subscribe path must not use removed state-wire facades"
     );
+}
+
+#[test]
+fn test_turn_scope_io_extraction_stays_first_class_and_facade_free() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
+    let package_version = workspace["package"]["version"].as_str();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
+
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-turn-scope-io")),
+        "agent-doc-turn-scope-io must stay a first-class workspace crate"
+    );
+
+    let root_dependencies = workspace["dependencies"].as_table().unwrap();
+    let root_dependency = root_dependencies["agent-doc-turn-scope-io"]
+        .as_table()
+        .unwrap();
+    assert_eq!(
+        root_dependency.get("path").and_then(toml::Value::as_str),
+        Some("agent-doc-turn-scope-io")
+    );
+    assert_eq!(
+        root_dependency.get("version").and_then(toml::Value::as_str),
+        package_version
+    );
+
+    let turn_scope_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn-scope-io/Cargo.toml")).unwrap();
+    let turn_scope: toml::Value = toml::from_str(&turn_scope_manifest).unwrap();
+    let turn_scope_dependencies = turn_scope["dependencies"].as_table().unwrap();
+    assert!(
+        turn_scope_dependencies.contains_key("agent-doc-turn")
+            && turn_scope_dependencies.contains_key("agent-doc-fs"),
+        "turn-scope IO must depend only on turn models plus filesystem path helpers"
+    );
+    for forbidden_dependency in ["agent-doc-core", "agent-doc-orchestration"] {
+        assert!(
+            !turn_scope_dependencies.contains_key(forbidden_dependency),
+            "turn-scope IO must not depend on removed core/orchestration facades: {forbidden_dependency}"
+        );
+    }
+
+    assert!(
+        !manifest_dir
+            .join("agent-doc-orchestration/src/turn_scope_store.rs")
+            .exists(),
+        "orchestration must not keep a turn_scope_store facade module"
+    );
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod turn_scope_store"),
+        "orchestration must not export a turn_scope_store facade"
+    );
+    for relative_path in [
+        "agent-doc-orchestration/src/run.rs",
+        "agent-doc-orchestration/src/git.rs",
+        "agent-doc-orchestration/src/preflight/run.rs",
+        "agent-doc-orchestration/src/write/converge.rs",
+        "tests/run_integration.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
+        assert!(
+            source.contains("agent_doc_turn_scope_io::"),
+            "{relative_path} must call the focused turn-scope IO crate directly"
+        );
+        assert!(
+            !source.contains("crate::turn_scope_store")
+                && !source.contains("agent_doc_orchestration::turn_scope_store"),
+            "{relative_path} must not use the removed orchestration turn-scope facade"
+        );
+    }
 }
 
 #[test]
@@ -9006,8 +9083,7 @@ fn test_snapshot_state_paths_are_owned_by_agent_doc_fs() {
     }
 
     let turn_scope_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/turn_scope_store.rs"))
-            .unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-turn-scope-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
         "pub fn path_for(",
         "fn path_for(",
@@ -9016,12 +9092,12 @@ fn test_snapshot_state_paths_are_owned_by_agent_doc_fs() {
     ] {
         assert!(
             !turn_scope_source.contains(forbidden_snippet),
-            "turn_scope_store.rs must not keep a pure state path/hash wrapper or facade: {forbidden_snippet}"
+            "agent-doc-turn-scope-io must not keep a pure state path/hash wrapper or facade: {forbidden_snippet}"
         );
     }
     assert!(
         turn_scope_source.contains("agent_doc_fs::turn_scope_path_for("),
-        "turn_scope_store.rs should call focused agent-doc-fs turn-scope path helper directly"
+        "agent-doc-turn-scope-io should call focused agent-doc-fs turn-scope path helper directly"
     );
 
     let cycle_state_source =
@@ -16254,6 +16330,8 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         "pub enum CrdtAuthority",
         "pub fn authority_for(",
         "pub fn authority_from_liveness(",
+        "pub fn authority_for_projection(",
+        "pub fn authority_for_document(",
         "pub fn sync_under_authority(",
         "pub fn commit_barrier_under_authority(",
     ] {
@@ -16293,6 +16371,8 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         "pub enum CrdtAuthority",
         "pub fn authority_for(",
         "pub fn authority_from_liveness(",
+        "pub fn authority_for_projection(",
+        "pub fn authority_for_document(",
         "pub fn sync_under_authority(",
         "pub fn commit_barrier_under_authority(",
         "pub use agent_doc_document_realtime::crdt_authority",

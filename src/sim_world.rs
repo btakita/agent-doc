@@ -7499,7 +7499,7 @@ mod hosting_sim {
 /// editor / tmux required.
 mod crdt_authority_sim {
     use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
-    use agent_doc_orchestration::crdt_authority::authority_for_document;
+    use agent_doc_document_realtime::crdt_authority::authority_for_document;
     use agent_doc_state_backbone::{
         ActorLifecycleEvent, EventLedger, StateEvent, StateFact, StateOwner,
     };

@@ -977,7 +977,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // considers writing a new scope. A same-owner recursive preflight caused by
     // a sibling queue edit must compare against, and preserve, the active
     // owner's original turn scope (#cwsp).
-    let persisted_turn_scope = crate::turn_scope_store::load(file);
+    let persisted_turn_scope = agent_doc_turn_scope_io::load(file);
 
     // #op-scoped-drift-3: classify this cycle's node ops against the TurnScope so
     // independent / provenance-spoofed edits integrate without affecting the turn.
@@ -1034,12 +1034,12 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     if !options.probe && !prompt_edit_independent_of_active_turn {
         match turn_scope.as_ref() {
             Some(scope) => {
-                if let Err(err) = crate::turn_scope_store::save(file, scope) {
+                if let Err(err) = agent_doc_turn_scope_io::save(file, scope) {
                     eprintln!("[preflight] turn-scope persist skipped: {err}");
                 }
             }
             None => {
-                if let Err(err) = crate::turn_scope_store::delete(file) {
+                if let Err(err) = agent_doc_turn_scope_io::delete(file) {
                     eprintln!("[preflight] turn-scope clear skipped: {err}");
                 }
             }

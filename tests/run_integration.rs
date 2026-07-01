@@ -1,5 +1,5 @@
 use agent_doc_hash::content_hash;
-use agent_doc_orchestration::{cycle_state, project_controller, turn_scope_store};
+use agent_doc_orchestration::{cycle_state, project_controller};
 use agent_doc_state_backbone as state_backbone;
 use agent_doc_turn::turn_scope::{Address, TurnScope};
 use assert_cmd::Command;
@@ -1112,7 +1112,7 @@ fn save_active_queue_turn_scope(doc: &Path, id: &str, exchange_tail_floor: usize
         Some(Address::node("queue", 0, &format!("queue:0:{id}:0"))),
         Some(exchange_tail_floor),
     );
-    turn_scope_store::save(doc, &scope).unwrap();
+    agent_doc_turn_scope_io::save(doc, &scope).unwrap();
 }
 
 #[test]
@@ -1307,7 +1307,7 @@ fn preflight_suppresses_owned_pane_self_invocation_for_independent_queue_edit() 
         user_intent_empty,
         "independent queue edit must not count as user intent: {json}"
     );
-    let persisted_scope = turn_scope_store::load(&doc).expect("turn scope should remain");
+    let persisted_scope = agent_doc_turn_scope_io::load(&doc).expect("turn scope should remain");
     assert_eq!(
         persisted_scope
             .driver

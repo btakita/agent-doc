@@ -67,6 +67,7 @@ agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.34.66" }
 agent-doc-topic = { path = "../agent-doc-topic", version = "0.34.66" }
 agent-doc-turn-executor = { path = "../agent-doc-turn-executor", version = "0.34.66" }
 agent-doc-turn-executor-tmux = { path = "../agent-doc-turn-executor-tmux", version = "0.34.66" }
+agent-doc-turn-scope-io = { path = "../agent-doc-turn-scope-io", version = "0.34.66" }
 agent-doc-turn-status-io = { path = "../agent-doc-turn-status-io", version = "0.34.66" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.66" }
 agent-doc-watch-io = { path = "../agent-doc-watch-io", version = "0.34.66" }

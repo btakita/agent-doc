@@ -24,6 +24,7 @@
 use agent_doc_merge::ownership::{
     MergeOwnershipEvent, MergeOwnershipPhase, OwnershipLiveness, ownership_probe,
 };
+use agent_doc_state_backbone::{DocumentStateProjection, EventLedger, TransportPatchPhase};
 use serde::{Deserialize, Serialize};
 
 /// Which replica is the CRDT authority for a document, and the durability
@@ -128,6 +129,49 @@ pub fn authority_from_liveness(liveness: &OwnershipLiveness) -> CrdtAuthority {
     authority_for(phase)
 }
 
+/// Derive the CRDT authority for a single document from a backbone projection,
+/// riding the hosting-epoch substrate.
+///
+/// Authority follows the live editor. A document with a live editor transport
+/// (the `EditorIpcBridge` actor has an active generation, and the latest editor
+/// transport patch is not a terminal force-disk fallback) is
+/// [`CrdtAuthority::MultiReplica`]; otherwise the document is headless and
+/// [`CrdtAuthority::GitAuthoritative`].
+///
+/// This is per-document by construction: it consults only the passed document's
+/// own projection. A stale-overlay replay for a different document
+/// (rejected/dropped by the hosting-epoch reset) never reaches this projection,
+/// so it cannot flip this document's authority.
+pub fn authority_for_projection(projection: &DocumentStateProjection) -> CrdtAuthority {
+    if document_has_live_editor_transport(projection) {
+        CrdtAuthority::MultiReplica
+    } else {
+        CrdtAuthority::GitAuthoritative
+    }
+}
+
+/// Derive the CRDT authority for `document_hash` from the event ledger. Returns
+/// [`CrdtAuthority::GitAuthoritative`] for an unknown document (no projection
+/// yet): a document the supervisor has never hosted with an editor is headless
+/// until proven otherwise.
+pub fn authority_for_document(ledger: &EventLedger, document_hash: &str) -> CrdtAuthority {
+    match ledger.project_document(document_hash) {
+        Some(projection) => authority_for_projection(&projection),
+        None => CrdtAuthority::GitAuthoritative,
+    }
+}
+
+/// Whether a document's projection proves a live editor transport replica.
+fn document_has_live_editor_transport(projection: &DocumentStateProjection) -> bool {
+    if projection.transport.editor_generation.is_none() {
+        return false;
+    }
+    match projection.transport.patches.iter().next_back() {
+        Some((_, patch)) => !matches!(patch.phase, TransportPatchPhase::ForceDiskFallback),
+        None => true,
+    }
+}
+
 /// Run one incremental state-vector sync round between two replicas ONLY under a
 /// multi-replica authority (`#crdtauth1sv` seam).
 ///
@@ -178,6 +222,7 @@ mod tests {
     use super::*;
     use agent_doc_merge::crdt_sync::ReplicaState;
     use agent_doc_merge::ownership::OwnershipLiveness;
+    use agent_doc_state_backbone::{EventLedger, StateEvent, StateFact, StateOwner};
 
     const ALL_PHASES: [MergeOwnershipPhase; 6] = [
         MergeOwnershipPhase::Detached,
@@ -320,6 +365,56 @@ mod tests {
         assert!(
             !disk_write_permitted(MergeOwnershipPhase::Committed),
             "Committed is terminal — git-authoritative does not imply a live disk write"
+        );
+    }
+
+    #[test]
+    fn backbone_projection_authority_follows_live_editor_transport() {
+        let doc = "doc-authority";
+        let mut ledger = EventLedger::new();
+
+        assert_eq!(
+            authority_for_document(&ledger, doc),
+            CrdtAuthority::GitAuthoritative,
+            "unknown documents are headless until a live editor is proven"
+        );
+
+        ledger.append(StateEvent::new(
+            "editor-generation",
+            StateFact::OwnerGenerationChanged {
+                document_hash: doc.to_string(),
+                owner: StateOwner::EditorIpcBridge,
+                generation: 7,
+            },
+        ));
+        let projection = ledger.project_document(doc).expect("projection");
+        assert_eq!(
+            authority_for_projection(&projection),
+            CrdtAuthority::MultiReplica,
+            "an active editor generation proves a live replica"
+        );
+
+        ledger.append(StateEvent::new(
+            "patch-queued",
+            StateFact::EditorPatchQueued {
+                document_hash: doc.to_string(),
+                patch_id: "patch-1".to_string(),
+                actor_generation: 7,
+            },
+        ));
+        ledger.append(StateEvent::new(
+            "force-disk-fallback",
+            StateFact::ForceDiskFallbackRecorded {
+                document_hash: doc.to_string(),
+                patch_id: "patch-1".to_string(),
+                actor_generation: 7,
+                reason: "editor unreachable".to_string(),
+            },
+        ));
+        assert_eq!(
+            authority_for_document(&ledger, doc),
+            CrdtAuthority::GitAuthoritative,
+            "terminal force-disk fallback demotes the document to headless authority"
         );
     }
 

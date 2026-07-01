@@ -1405,7 +1405,7 @@ fn owner_pane_queue_edit_should_defer_until_closeout(
     if !open_cycle {
         return false;
     }
-    let Some(scope) = crate::turn_scope_store::load(file) else {
+    let Some(scope) = agent_doc_turn_scope_io::load(file) else {
         return false;
     };
     let prompt_bearing_changes = diff::classify_prompt_bearing_changes(diff_text);

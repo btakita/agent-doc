@@ -503,7 +503,7 @@ pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<
     // #nm1x: intersect the drift against the current turn scope so independent
     // out-of-scope edits (e.g. a queue item added beside the running one) do not
     // block the historical snapshot repair.
-    let turn_scope = crate::turn_scope_store::load(file);
+    let turn_scope = agent_doc_turn_scope_io::load(file);
     let non_exchange_component_drift =
         has_non_exchange_component_drift_scoped(&snapshot_doc, &head_doc, turn_scope.as_ref());
     let historical_response_marker =
@@ -740,7 +740,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     // #nm1x: intersect the snapshot↔HEAD drift against the current turn scope so
     // an independent out-of-scope edit is not misclassified as blocking
     // `typed_component_drift`.
-    let turn_scope = crate::turn_scope_store::load(file);
+    let turn_scope = agent_doc_turn_scope_io::load(file);
     let committed_historical_patchback =
         snapshot_content
             .as_deref()
@@ -7310,7 +7310,7 @@ Compacted content:\n\
         crate::snapshot::save(&doc, stale_snapshot).unwrap();
         let scope =
             agent_doc_turn::turn_scope::TurnScope::for_driver_with_exchange_tail(None, Some(0));
-        crate::turn_scope_store::save(&doc, &scope).unwrap();
+        agent_doc_turn_scope_io::save(&doc, &scope).unwrap();
 
         let repaired = repair_committed_historical_snapshot_drift(&doc)
             .expect("historical repair should not restore pre-compact HEAD");

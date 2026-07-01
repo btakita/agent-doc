@@ -1,6 +1,4 @@
-//! # Module: turn_scope_store
-//!
-//! Durable per-document sidecar for the current turn's [`TurnScope`] manifest
+//! Durable per-document sidecar I/O for the current turn's [`TurnScope`] manifest
 //! (`#nm1x`, `tasks/agent-doc/plan-operation-scoped-drift.md`).
 //!
 //! ## Spec

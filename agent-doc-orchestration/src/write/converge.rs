@@ -92,7 +92,7 @@ fn classify_stale_snapshot_visible_rebase(
     // does not depend on a live turn scope. Non-exchange component drift still needs
     // the scope to be classified as turn-independent, so that path fails closed
     // below when the scope is missing.
-    let scope = crate::turn_scope_store::load(file);
+    let scope = agent_doc_turn_scope_io::load(file);
     // Known binary-origin signal: the binary recorded that it compacted this
     // document's exchange within the recent window. That makes a snapshot→visible
     // exchange shrink authoritative binary state, not a "suspicious manual cleanup"
@@ -3885,7 +3885,7 @@ mod core_tests {
             )),
             Some(0),
         );
-        crate::turn_scope_store::save(&doc, &scope).unwrap();
+        agent_doc_turn_scope_io::save(&doc, &scope).unwrap();
 
         let rebased =
             guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), &current, "preflight")
@@ -3928,7 +3928,7 @@ mod core_tests {
         crate::snapshot::save(&doc, &snapshot).unwrap();
         let scope =
             agent_doc_turn::turn_scope::TurnScope::for_driver_with_exchange_tail(None, Some(0));
-        crate::turn_scope_store::save(&doc, &scope).unwrap();
+        agent_doc_turn_scope_io::save(&doc, &scope).unwrap();
 
         let rebased =
             guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), current, "stream write")
@@ -4108,7 +4108,7 @@ mod core_tests {
         crate::snapshot::save(&doc, &snapshot).unwrap();
         let scope =
             agent_doc_turn::turn_scope::TurnScope::for_driver_with_exchange_tail(None, Some(0));
-        crate::turn_scope_store::save(&doc, &scope).unwrap();
+        agent_doc_turn_scope_io::save(&doc, &scope).unwrap();
 
         let err =
             guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), current, "stream write")
@@ -4157,7 +4157,7 @@ mod core_tests {
             )),
             Some(0),
         );
-        crate::turn_scope_store::save(&doc, &scope).unwrap();
+        agent_doc_turn_scope_io::save(&doc, &scope).unwrap();
         let (_, snapshot_body) = agent_doc_frontmatter::frontmatter::parse(&snapshot).unwrap();
         let (_, current_body) = agent_doc_frontmatter::frontmatter::parse(&current).unwrap();
         let queue_events: Vec<_> =

@@ -985,8 +985,6 @@ What changed and why:
 - **Kept your substance intact:** real interest in the domain plus Rust, limited hours as the affordability answer, working alongside the freelancer on the risky parts, and the budget question. Rate and equity stay off the table, same as we landed last time.
 
 If you want it even more casual (or shorter), say so and I'll trim. Or I can drop it into `corky`/LinkedIn as a draft (no auto-send).
-<!-- agent:boundary:40606fa0 -->
-
 ### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
 
 ```text
@@ -998,6 +996,42 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/recruit/reitrades.md source=ipc_visible_repair patch_id=13ffea44-2bca-41f5-b000-98ac0ccbdf9e invariant=live_prompt_drift recovery=retry_without_disk_write redeliver_editor=true bad_len=91373 bad_hash=90593f611169aa4510c1d70bf26bfbcd2ddb3a3cbb5be1f9a26977098c62af77 repaired_len=93856 repaired_hash=361db1a89cfbde07f119cca06a2966386d02c825580cca0f4a9a9fc9bfc781e0 doc=reitrades session=62d195b8-b029-42a5-9c6c-836cb1b5b103 turn=cycle-1782945105834
 ```
+### Re: Why I led with cascade deletes, and why the AI is the better lead — opus-4-8
+
+> **Queue prompt:** Why are you emphasizing the cascade deletes? Why not emphasize the AI?
+
+Fair challenge. I led with the risky/data-safety stuff on purpose, but your instinct is right — the AI is the stronger lead. Here's the reasoning both ways so you can pick.
+
+**Why I originally emphasized cascade deletes (the defensive framing):**
+- **Complementary, not competitive.** Artur already hired cheap throughput. If you lead with "I'll build your AI," you're competing with the freelancer on the same turf, and that's the turf where he already won on price. The data-integrity/permissions layer is the part a cheap generalist is most likely to quietly break, so positioning there makes you the safety net rather than a redundant second builder.
+- **It justifies a tiny ask.** "I'll watch the parts that break a live marketplace" is a few affordable hours. It's easy to say yes to.
+- **Loss aversion sells.** A bootstrapped founder feels "don't corrupt real buyer/seller data" more sharply than "make the AI nicer."
+
+**Why the AI is actually the better lead (your instinct):**
+- **It's REItrades' whole pitch.** Their positioning is an AI-powered marketing engine and "100% accurate" listing/OM content. The AI isn't a nice-to-have for them, it's the headline, and it's their biggest credibility risk. Leading there means talking about the thing Artur actually cares about most.
+- **It's where you're *more* differentiated, not less.** A general overseas freelancer can wire up CRUD and cascade deletes. Getting an AI to be genuinely accurate in front of buyers — deterministic validation, confidence scoring, human review before anything ships — is a specialty, and it's exactly the take you already scoped in the proposal. That's a harder problem to fake.
+- **It's a positive frame.** "I'll make your headline feature trustworthy" lands better than "your cheap guy will break things," which can read as fear-selling or a subtle knock on the person he just hired.
+
+So: lead with the AI, and let data-safety be the quiet second reason rather than the opener. Here's that version, same voice:
+
+```
+Hi Artur,
+
+Totally get going with what fits the budget when you're bootstrapped. Hope the build's going well.
+
+I wanted to reach out anyway. REItrades is something I'd genuinely like to work on, and the part I'd be most useful on is the AI. Your whole pitch rests on the automated marketing and the "100% accurate" listing and OM content, and that's the hardest thing to get right and the easiest to lose trust on. Getting an AI to actually be accurate in front of buyers, not just plausible, is the specific problem I work on.
+
+The way I'd do it: deterministic code owns every number and validation, the AI only proposes, and anything low-confidence gets flagged for a human before it reaches a buyer. That's what makes "AI-generated" safe to put your name on. It's also the part a general freelancer is least likely to nail, so a few senior hours a week goes a long way there.
+
+I'm flexible on how we structure it. If you can give me a rough idea of your budget for this phase, I'll put together something that fits.
+
+Let me know if it's worth a quick call.
+
+Brian
+```
+
+I dropped the cascade-deletes list from the opener entirely and folded the risk angle into "safe to put your name on." If you'd rather keep one line acknowledging the broader production-safety work, I can add a short sentence at the end, but leading with the AI is the right call. Want me to make this the working draft?
+<!-- agent:boundary:40606fa0 -->
 <!-- /agent:exchange -->
 
 ## Queue

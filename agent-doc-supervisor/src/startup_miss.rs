@@ -262,6 +262,31 @@ pub fn latest_open_run_timestamp(status: &SessionLogStatus) -> Option<u64> {
     }
 }
 
+pub fn dispatch_only_requires_ready_probe(
+    status: Option<&SessionLogStatus>,
+    pane: &str,
+    harness_binary: &str,
+) -> bool {
+    let Some(status) = status else {
+        return false;
+    };
+    if !status.latest_session_open()
+        || status.latest_start_pane.as_deref() != Some(pane)
+        || status.saw_committed_cycle_after_latest_run
+    {
+        return false;
+    }
+
+    status
+        .latest_run_event
+        .as_deref()
+        .and_then(|event| event.split_whitespace().next())
+        .is_some_and(|token| {
+            token == format!("{harness_binary}_start")
+                || token == format!("{harness_binary}_restart")
+        })
+}
+
 pub fn latest_log_anchor(status: &SessionLogStatus) -> String {
     status
         .latest_run_event
@@ -558,6 +583,59 @@ mod tests {
             Some("codex_exit code=0 restart_count=0")
         );
         assert!(status.latest_session_closed());
+    }
+
+    #[test]
+    fn dispatch_only_ready_probe_requires_open_matching_harness_run() {
+        let status = session_log_status_from_content(
+            "[1] session_start file=test.md pane=%42 session=s generation=1\n\
+             [2] codex_start mode=fresh restart_count=0\n",
+        )
+        .expect("status");
+
+        assert!(dispatch_only_requires_ready_probe(
+            Some(&status),
+            "%42",
+            "codex"
+        ));
+        assert!(!dispatch_only_requires_ready_probe(
+            Some(&status),
+            "%43",
+            "codex"
+        ));
+        assert!(!dispatch_only_requires_ready_probe(
+            Some(&status),
+            "%42",
+            "claude"
+        ));
+        assert!(!dispatch_only_requires_ready_probe(None, "%42", "codex"));
+    }
+
+    #[test]
+    fn dispatch_only_ready_probe_ignores_committed_or_closed_runs() {
+        let committed = session_log_status_from_content(
+            "[1] session_start file=test.md pane=%42 session=s generation=1\n\
+             [2] codex_start mode=fresh restart_count=0\n\
+             [3] document_cycle phase=committed cycle=cycle-1 event=commit_success\n",
+        )
+        .expect("status");
+        assert!(!dispatch_only_requires_ready_probe(
+            Some(&committed),
+            "%42",
+            "codex"
+        ));
+
+        let closed = session_log_status_from_content(
+            "[1] session_start file=test.md pane=%42 session=s generation=1\n\
+             [2] codex_restart mode=continue restart_count=1\n\
+             [3] codex_exit code=0 restart_count=1\n",
+        )
+        .expect("status");
+        assert!(!dispatch_only_requires_ready_probe(
+            Some(&closed),
+            "%42",
+            "codex"
+        ));
     }
 
     #[test]

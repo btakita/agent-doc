@@ -9,8 +9,8 @@
 use agent_doc_document::queue_projection::strip_in_progress_marker;
 use agent_doc_memory::{
     CompletionCandidate, MemorySearchResult, QueueStrikeMatch, SemanticCompletionMatch,
-    count_insert_results, dedupe_events, parse_done_archive_items, queue_prompt_target_id,
-    rank_events, response_summary_events,
+    bump_component_count, count_insert_results, dedupe_events, display_path,
+    parse_done_archive_items, queue_prompt_target_id, rank_events, response_summary_events,
     semantic_completion_matches as match_semantic_completions,
     semantic_queue_strike_matches as match_semantic_queue_strikes, tracked_work_events,
 };
@@ -328,7 +328,7 @@ fn collect_session_events(file: &Path) -> Result<SessionEvents> {
             let (_, items, _) = backlog::parse_items(body);
             let new_events =
                 tracked_work_events(&session_ref, &doc_hash, &comp.name, items, state_override);
-            bump_count(&mut component_counts, &comp.name, new_events.len());
+            bump_component_count(&mut component_counts, &comp.name, new_events.len());
             events.extend(new_events);
         } else if element::is_backlog_done_component(&comp.name) {
             let (_, items, _) = backlog::parse_items(body);
@@ -339,7 +339,7 @@ fn collect_session_events(file: &Path) -> Result<SessionEvents> {
                 items,
                 Some(PendingState::Done),
             );
-            bump_count(&mut component_counts, &comp.name, new_events.len());
+            bump_component_count(&mut component_counts, &comp.name, new_events.len());
             events.extend(new_events);
             if let Some(archive) = comp.attrs.get("archive") {
                 match read_done_archive(file, archive) {
@@ -364,7 +364,7 @@ fn collect_session_events(file: &Path) -> Result<SessionEvents> {
                                 Some(PendingState::Done),
                             )
                         };
-                        bump_count(
+                        bump_component_count(
                             &mut component_counts,
                             &format!("{}:archive", comp.name),
                             archive_events.len(),
@@ -377,7 +377,7 @@ fn collect_session_events(file: &Path) -> Result<SessionEvents> {
             }
         } else if comp.name == "exchange" {
             let new_events = response_summary_events(&session_ref, &doc_hash, body);
-            bump_count(&mut component_counts, &comp.name, new_events.len());
+            bump_component_count(&mut component_counts, &comp.name, new_events.len());
             events.extend(new_events);
         }
     }
@@ -432,16 +432,6 @@ fn resolve_memory_db_path(file: &Path, db: Option<&Path>) -> Result<PathBuf> {
         .or_else(|| std::env::current_dir().ok())
         .with_context(|| format!("failed to resolve memory DB root for {}", file.display()))?;
     Ok(default_memory_db_path(&root))
-}
-
-fn bump_count(counts: &mut BTreeMap<String, usize>, key: &str, amount: usize) {
-    if amount > 0 {
-        *counts.entry(key.to_string()).or_insert(0) += amount;
-    }
-}
-
-fn display_path(path: &Path) -> String {
-    path.display().to_string()
 }
 
 #[cfg(test)]

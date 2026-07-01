@@ -211,7 +211,7 @@ use agent_doc_sync::{
 };
 use agent_doc_tmux::{
     AssociatedPaneCandidate, AssociatedPaneResolution, AssociatedPaneSource,
-    parse_pane_inventory_line, resolve_associated_panes,
+    associated_pane_candidates_detail, parse_pane_inventory_line, resolve_associated_panes,
 };
 use tmux_router::{PaneMoveOp, Tmux};
 
@@ -1984,13 +1984,14 @@ fn run_with_options_internal(
         // Per SPEC §8.5: empty files should be initialized as template documents.
         if path.extension() == Some(std::ffi::OsStr::new("md")) {
             let raw = std::fs::read_to_string(path).unwrap_or_default();
-            if raw.trim().is_empty() {
+            if agent_doc_document::claim_scaffold::should_scaffold_empty_markdown(
+                &raw,
+                path.extension().and_then(|extension| extension.to_str()),
+            ) {
                 eprintln!("[sync] auto-scaffolding empty file: {}", path.display());
-                let session_id = uuid::Uuid::new_v4();
-                let scaffold = format!(
-                    "---\nagent_doc_session: {}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\n## Backlog\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n\n## Icebox\n\n<!-- agent:icebox -->\n<!-- /agent:icebox -->\n",
-                    session_id
-                );
+                let session_id = uuid::Uuid::new_v4().to_string();
+                let scaffold =
+                    agent_doc_document::claim_scaffold::render_empty_template_scaffold(&session_id);
                 if let Err(e) = std::fs::write(path, &scaffold) {
                     eprintln!(
                         "[sync] warning: failed to scaffold {}: {}",
@@ -2510,19 +2511,9 @@ fn run_with_options_internal(
             );
             match resolve_associated_panes(associated_candidates.clone(), window) {
                 AssociatedPaneResolution::Selected { winner, redundant } => {
-                    let detail = std::iter::once(&winner)
-                        .chain(redundant.iter())
-                        .map(|candidate| {
-                            format!(
-                                "{}:{}:{}:{}",
-                                candidate.pane_id,
-                                candidate.window_name,
-                                candidate.window_id,
-                                candidate.source_summary()
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .join(", ");
+                    let detail = associated_pane_candidates_detail(
+                        std::iter::once(&winner).chain(redundant.iter()),
+                    );
                     eprintln!(
                         "[sync] found legacy associated pane evidence for {} but normal sync will not reclaim ownership from {} automatically; run an explicit claim/repair instead",
                         file_path.display(),
@@ -2542,19 +2533,7 @@ fn run_with_options_internal(
                     continue;
                 }
                 AssociatedPaneResolution::Ambiguous(candidates) => {
-                    let detail = candidates
-                        .iter()
-                        .map(|candidate| {
-                            format!(
-                                "{}:{}:{}:{}",
-                                candidate.pane_id,
-                                candidate.window_name,
-                                candidate.window_id,
-                                candidate.source_summary()
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .join(", ");
+                    let detail = associated_pane_candidates_detail(&candidates);
                     eprintln!(
                         "[sync] found multiple legacy associated panes for {}; normal sync will not re-elect ownership. Resolve with explicit claim/repair.",
                         file_path.display()
@@ -3643,19 +3622,7 @@ fn recover_existing_associated_pane(
             ExistingAssociatedPaneRecovery::Recovered(winner_pane)
         }
         AssociatedPaneResolution::Ambiguous(candidates) => {
-            let detail = candidates
-                .iter()
-                .map(|candidate| {
-                    format!(
-                        "{}:{}:{}:{}",
-                        candidate.pane_id,
-                        candidate.window_name,
-                        candidate.window_id,
-                        candidate.source_summary()
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
+            let detail = associated_pane_candidates_detail(&candidates);
             eprintln!(
                 "[sync] warning: multiple panes are still associated with {} — skipping auto-start until one is claimed explicitly",
                 file_path.display()
@@ -6055,14 +6022,18 @@ mod tests {
 
         // Simulate what resolve_file does for empty files:
         let content = std::fs::read_to_string(&doc).unwrap();
-        assert!(content.trim().is_empty(), "file should be empty");
+        assert!(
+            agent_doc_document::claim_scaffold::should_scaffold_empty_markdown(
+                &content,
+                Some("md")
+            ),
+            "file should be eligible for empty markdown scaffold"
+        );
 
         // Scaffold it
-        let session_id = uuid::Uuid::new_v4();
-        let scaffold = format!(
-            "---\nagent_doc_session: {}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\n## Backlog\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n\n## Icebox\n\n<!-- agent:icebox -->\n<!-- /agent:icebox -->\n",
-            session_id
-        );
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let scaffold =
+            agent_doc_document::claim_scaffold::render_empty_template_scaffold(&session_id);
         std::fs::write(&doc, &scaffold).unwrap();
 
         // Verify scaffolded content has frontmatter
@@ -6100,13 +6071,13 @@ mod tests {
 
         // Simulate scaffold (same code as resolve_file)
         let raw = std::fs::read_to_string(&doc).unwrap();
-        assert!(raw.trim().is_empty());
-
-        let session_id = uuid::Uuid::new_v4();
-        let scaffold = format!(
-            "---\nagent_doc_session: {}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\n## Backlog\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n\n## Icebox\n\n<!-- agent:icebox -->\n<!-- /agent:icebox -->\n",
-            session_id
+        assert!(
+            agent_doc_document::claim_scaffold::should_scaffold_empty_markdown(&raw, Some("md"))
         );
+
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let scaffold =
+            agent_doc_document::claim_scaffold::render_empty_template_scaffold(&session_id);
         std::fs::write(&doc, &scaffold).unwrap();
 
         let content = std::fs::read_to_string(&doc).unwrap();

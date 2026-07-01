@@ -1375,7 +1375,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                         session_id,
                         agent_name,
                         unresolved_prompt,
-                        crate::run::OwnedPaneSelfInvocationOptions {
+                        agent_doc_workflow::owner_pane_self_invocation::OwnedPaneSelfInvocationOptions {
                             suppress_active_queue_head,
                         },
                     )

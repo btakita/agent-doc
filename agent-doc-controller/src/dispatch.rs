@@ -2173,6 +2173,27 @@ pub fn direct_pane_acceptance_poll_status(
     }
 }
 
+/// `#run-agent-doc-latency`: true when an empty composer can be accepted as a
+/// PROVEN dispatch immediately, skipping the `DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR`
+/// (900ms) empty-stable confirmation window.
+///
+/// Holds only when all three are true: the trigger is no longer in the composer
+/// (`!trigger_visible`), we NEVER observed it drafted (`!saw_trigger_visible` — the
+/// submit fired faster than the first pane capture), and the pane shows an ACTIVE
+/// turn (`pane_busy`, e.g. a working spinner / `esc to interrupt`). A started turn
+/// is unambiguous proof that the trigger dispatched, so waiting out the empty-stable
+/// window only adds latency to every fast Run Agent Doc dispatch. The idle-empty
+/// case (`pane_busy == false`) is a possible no-op send into a not-ready pane and
+/// must still serve the empty-stable + non-dispatch path, so this returns false
+/// there.
+pub fn direct_pane_fast_accept_on_processing(
+    trigger_visible: bool,
+    saw_trigger_visible: bool,
+    pane_busy: bool,
+) -> bool {
+    !trigger_visible && !saw_trigger_visible && pane_busy
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DirectPaneNotDispatchedFacts {
     pub saw_trigger_visible: bool,
@@ -4167,6 +4188,14 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     }
 
     #[test]
+    fn direct_pane_fast_accept_requires_empty_unseen_busy_turn() {
+        assert!(direct_pane_fast_accept_on_processing(false, false, true));
+        assert!(!direct_pane_fast_accept_on_processing(true, false, true));
+        assert!(!direct_pane_fast_accept_on_processing(false, true, true));
+        assert!(!direct_pane_fast_accept_on_processing(false, false, false));
+    }
+
+    #[test]
     fn direct_pane_not_dispatched_requires_empty_idle_never_seen_trigger() {
         assert!(direct_pane_not_dispatched(DirectPaneNotDispatchedFacts {
             saw_trigger_visible: false,
@@ -4180,6 +4209,22 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
             saw_trigger_visible: false,
             pane_idle_dispatch_ready: false,
         }));
+    }
+
+    #[test]
+    fn direct_pane_fast_accept_only_when_empty_unseen_and_busy() {
+        // #run-agent-doc-latency: fast submit (never saw the trigger) landing on a
+        // pane that is now running a turn is a proven dispatch — accept without the
+        // 900ms empty-stable wait.
+        assert!(direct_pane_fast_accept_on_processing(false, false, true));
+        // Trigger still visible in the composer: not accepted (the resubmit path owns it).
+        assert!(!direct_pane_fast_accept_on_processing(true, false, true));
+        // We DID see the trigger drafted: the fast visible->gone transition path
+        // already accepts it; this fast path only covers the never-seen case.
+        assert!(!direct_pane_fast_accept_on_processing(false, true, true));
+        // Empty + idle (no busy cue): a possible no-op send — must NOT fast-accept;
+        // it still owes the empty-stable + non-dispatch detection.
+        assert!(!direct_pane_fast_accept_on_processing(false, false, false));
     }
 
     #[test]

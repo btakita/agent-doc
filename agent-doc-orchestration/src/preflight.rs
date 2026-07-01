@@ -287,7 +287,8 @@ pub struct PreflightOutput {
     /// owner turn rather than dispatched to a nested child. Codex guidance reads
     /// this to drive an in-pane response cycle.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub owned_pane_self_invocation: Option<crate::run::OwnedPaneSelfInvocation>,
+    pub owned_pane_self_invocation:
+        Option<agent_doc_workflow::owner_pane_self_invocation::OwnedPaneSelfInvocation>,
     /// Environment variables from frontmatter `env` field (unexpanded).
     /// Values may contain shell expressions like `$(passage ...)` or `$VAR`.
     /// A `null` value means "unset this key" — the skill should emit

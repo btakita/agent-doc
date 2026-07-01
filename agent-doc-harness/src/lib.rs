@@ -711,6 +711,27 @@ pub fn protected_prompt_draft_preview(harness: &HarnessConfig, content: &str) ->
     }
 }
 
+pub fn dispatch_only_blocker_reason(harness: &HarnessConfig, content: &str) -> Option<String> {
+    if let Some(reason) = harness.dispatch_blocker_reason(content) {
+        return Some(reason);
+    }
+    if harness.binary != "codex" {
+        return None;
+    }
+
+    let normalized = agent_doc_turn_executor_tmux::prompt::strip_ansi(content).to_ascii_lowercase();
+    if normalized.contains("reverse-i-search") {
+        Some("interactive shell reverse-i-search".to_string())
+    } else if normalized.contains("i-search")
+        && normalized.contains("accept")
+        && normalized.contains("cancel")
+    {
+        Some("interactive shell history search".to_string())
+    } else {
+        None
+    }
+}
+
 /// True when the pane's last prompt candidate is an idle, dispatch-ready harness
 /// prompt (composer empty and waiting for input), not an active turn.
 pub fn pane_idle_dispatch_ready(content: &str, harness: &HarnessConfig) -> bool {
@@ -2501,6 +2522,33 @@ reverse-i-search: bugs enter accept · esc cancel
 ";
         assert_eq!(
             h.dispatch_blocker_reason(output).as_deref(),
+            Some("interactive shell reverse-i-search")
+        );
+    }
+
+    #[test]
+    fn dispatch_only_blocker_reason_scans_full_codex_capture_for_shell_search() {
+        let h = HarnessConfig::codex();
+        let output = "\
+reverse-i-search: bugs enter accept · esc cancel
+pane row 1
+pane row 2
+pane row 3
+pane row 4
+pane row 5
+pane row 6
+pane row 7
+pane row 8
+pane row 9
+";
+
+        assert_eq!(
+            h.dispatch_blocker_reason(output),
+            None,
+            "the normal blocker classifier only inspects recent pane lines"
+        );
+        assert_eq!(
+            dispatch_only_blocker_reason(&h, output).as_deref(),
             Some("interactive shell reverse-i-search")
         );
     }

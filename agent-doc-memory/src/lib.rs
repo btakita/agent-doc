@@ -2,7 +2,8 @@
 
 use agent_doc_element_backlog::backlog::{self, PendingItem, PendingListMarker, PendingState};
 use serde::Serialize;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::path::Path;
 use tsift_memory::{MemoryEvent, MemoryEventKind, MemoryInsertResult};
 
 const TRACKED_WORK_IMPORT_SOURCE: &str = "agent-doc:tracked-work";
@@ -282,6 +283,16 @@ pub fn is_active_backlog_work_event(event: &MemoryEvent) -> bool {
 pub fn count_insert_results(results: &[MemoryInsertResult]) -> (usize, usize) {
     let inserted = results.iter().filter(|result| result.inserted).count();
     (inserted, results.len().saturating_sub(inserted))
+}
+
+pub fn bump_component_count(counts: &mut BTreeMap<String, usize>, component: &str, amount: usize) {
+    if amount > 0 {
+        *counts.entry(component.to_string()).or_insert(0) += amount;
+    }
+}
+
+pub fn display_path(path: &Path) -> String {
+    path.display().to_string()
 }
 
 pub fn rank_events(query: &str, events: &[MemoryEvent]) -> Vec<MemorySearchResult> {
@@ -665,6 +676,26 @@ mod tests {
         let deduped = dedupe_events(vec![first, duplicate, other]);
 
         assert_eq!(deduped.len(), 2);
+    }
+
+    #[test]
+    fn bump_component_count_skips_zero_and_accumulates_positive_counts() {
+        let mut counts = BTreeMap::new();
+
+        bump_component_count(&mut counts, "backlog", 0);
+        bump_component_count(&mut counts, "backlog", 2);
+        bump_component_count(&mut counts, "backlog", 3);
+
+        assert_eq!(counts.len(), 1);
+        assert_eq!(counts.get("backlog"), Some(&5));
+    }
+
+    #[test]
+    fn display_path_uses_standard_path_display() {
+        assert_eq!(
+            display_path(Path::new("tasks/session.md")),
+            "tasks/session.md"
+        );
     }
 
     #[test]

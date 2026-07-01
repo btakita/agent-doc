@@ -353,6 +353,24 @@ impl AssociatedPaneCandidate {
     }
 }
 
+pub fn associated_pane_candidates_detail<'a>(
+    candidates: impl IntoIterator<Item = &'a AssociatedPaneCandidate>,
+) -> String {
+    candidates
+        .into_iter()
+        .map(|candidate| {
+            format!(
+                "{}:{}:{}:{}",
+                candidate.pane_id,
+                candidate.window_name,
+                candidate.window_id,
+                candidate.source_summary()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AssociatedPaneResolution {
     None,
@@ -1195,6 +1213,26 @@ mod tests {
         assert_eq!(
             candidate.source_summary(),
             "registered,process-tree,supervisor-pid"
+        );
+    }
+
+    #[test]
+    fn associated_pane_candidates_detail_formats_log_fields() {
+        let active = associated_candidate(
+            "%419",
+            "@3",
+            "agent-doc",
+            &[
+                AssociatedPaneSource::Registered,
+                AssociatedPaneSource::SupervisorPid,
+            ],
+        );
+        let stashed =
+            associated_candidate("%417", "@9", "stash", &[AssociatedPaneSource::ProcessTree]);
+
+        assert_eq!(
+            associated_pane_candidates_detail([&active, &stashed]),
+            "%419:agent-doc:@3:registered,supervisor-pid, %417:stash:@9:process-tree"
         );
     }
 

@@ -5,8 +5,9 @@ use super::*;
 use agent_doc_controller::dispatch::{
     AutoStartDispatchBlock, AutoStartDispatchReadyFacts, DirectPaneFullResendFacts,
     DirectPaneNotDispatchedFacts, DispatchInjectLogFacts, classify_auto_start_dispatch_ready_block,
-    direct_pane_can_full_resend_not_landed, direct_pane_not_dispatched, dispatch_inject_log_line,
-    recent_lines_contain_trigger, route_trigger_visible_in_current_draft,
+    direct_pane_can_full_resend_not_landed, direct_pane_fast_accept_on_processing,
+    direct_pane_not_dispatched, dispatch_inject_log_line, recent_lines_contain_trigger,
+    route_trigger_visible_in_current_draft,
 };
 use agent_doc_harness::{pane_idle_dispatch_ready, protected_prompt_draft_preview};
 use agent_doc_supervisor::lifecycle::recycle_interrupted_resubmit_should_wait;
@@ -123,6 +124,50 @@ pub(crate) fn poll_direct_pane_acceptance(
                         elapsed,
                         trigger_visible: false,
                         not_dispatched,
+                        diagnostic_path: None,
+                    };
+                }
+
+                // `#run-agent-doc-latency`: fast-accept a proven dispatch. When the
+                // composer is already empty (the submit fired faster than our first
+                // capture, so we never saw the trigger drafted) AND the pane now
+                // shows an ACTIVE turn (busy cue: working spinner / `esc to
+                // interrupt`), the trigger unambiguously dispatched and started a
+                // turn. Accept immediately instead of paying the full
+                // `DIRECT_PANE_EMPTY_ACCEPTANCE_STABLE_FOR` (900ms) empty-stable
+                // confirmation, which otherwise dominates the latency of every fast
+                // Run Agent Doc dispatch (~1.2s floor). The idle-empty case (a
+                // possible no-op send into a not-ready pane) has no busy cue and
+                // still falls through to the empty-stable + `not_dispatched` path
+                // below, unchanged.
+                let pane_busy = last_capture
+                    .as_ref()
+                    .map(|(_, _, _, content)| harness.has_busy_cue(content))
+                    .unwrap_or(false);
+                if direct_pane_fast_accept_on_processing(
+                    cmd_still_in_input,
+                    poll_state.saw_trigger_visible(),
+                    pane_busy,
+                ) {
+                    let capture_hash = last_capture.as_ref().map(|(_, _, hash, _)| hash.as_str());
+                    log_route_submit_observation(RouteSubmitObservationLogFacts {
+                        file,
+                        pane,
+                        harness,
+                        phase,
+                        observation: RouteSubmitObservation::Accepted,
+                        trigger_visible: Some(false),
+                        elapsed,
+                        capture_len: Some(capture_len),
+                        capture_hash,
+                        proof: None,
+                    });
+                    return DirectPaneAcceptance {
+                        status: CommandDispatchStatus::Accepted,
+                        elapsed,
+                        trigger_visible: false,
+                        // A started turn proves dispatch — this is never a no-op.
+                        not_dispatched: false,
                         diagnostic_path: None,
                     };
                 }

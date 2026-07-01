@@ -2,31 +2,6 @@
 
 use super::*;
 
-pub(crate) fn dispatch_only_requires_ready_probe(
-    status: Option<&agent_doc_supervisor::startup_miss::SessionLogStatus>,
-    pane: &str,
-    harness: &HarnessConfig,
-) -> bool {
-    let Some(status) = status else {
-        return false;
-    };
-    if !status.latest_session_open()
-        || status.latest_start_pane.as_deref() != Some(pane)
-        || status.saw_committed_cycle_after_latest_run
-    {
-        return false;
-    }
-
-    status
-        .latest_run_event
-        .as_deref()
-        .and_then(|event| event.split_whitespace().next())
-        .is_some_and(|token| {
-            token == format!("{}_start", harness.binary)
-                || token == format!("{}_restart", harness.binary)
-        })
-}
-
 pub(crate) fn dispatch_only_starting_pane_not_ready_error(
     harness: &HarnessConfig,
     pane: &str,
@@ -213,7 +188,11 @@ pub(crate) fn dispatch_only_send_reopen(
         .flatten();
     let mut recovery_attempts = 0usize;
     let requires_ready_probe =
-        dispatch_only_requires_ready_probe(log_status.as_ref(), &dispatch_pane, harness);
+        agent_doc_supervisor::startup_miss::dispatch_only_requires_ready_probe(
+            log_status.as_ref(),
+            &dispatch_pane,
+            &harness.binary,
+        );
     let mut pre_dispatch_route_guard = Some(
         agent_doc_supervisor_io::route_submit_inflight::begin_route_submit_with_reason(
             file,
@@ -330,7 +309,7 @@ pub(crate) fn dispatch_only_send_reopen(
     }
 
     if let Ok(content) = sessions::capture_pane(tmux, &dispatch_pane)
-        && let Some(reason) = dispatch_only_blocker_reason(harness, &content)
+        && let Some(reason) = agent_doc_harness::dispatch_only_blocker_reason(harness, &content)
     {
         crate::ops_log::log_op(
             file,
@@ -603,7 +582,11 @@ pub(crate) fn dispatch_only_reopen_existing_pane(
     let log_status = crate::startup_miss::session_log_status(file, session_id)
         .ok()
         .flatten();
-    if dispatch_only_requires_ready_probe(log_status.as_ref(), &dispatch_pane, harness) {
+    if agent_doc_supervisor::startup_miss::dispatch_only_requires_ready_probe(
+        log_status.as_ref(),
+        &dispatch_pane,
+        &harness.binary,
+    ) {
         return dispatch_only_send_reopen(
             tmux,
             file,
@@ -882,30 +865,6 @@ pub(crate) fn retry_dispatch_only_after_busy_pane(
             auto_fix_attempted || allow_auto_fix_retry
         )
     );
-}
-
-pub(crate) fn dispatch_only_blocker_reason(
-    harness: &HarnessConfig,
-    content: &str,
-) -> Option<String> {
-    if let Some(reason) = harness.dispatch_blocker_reason(content) {
-        return Some(reason);
-    }
-    if harness.binary != "codex" {
-        return None;
-    }
-
-    let normalized = agent_doc_turn_executor_tmux::prompt::strip_ansi(content).to_ascii_lowercase();
-    if normalized.contains("reverse-i-search") {
-        Some("interactive shell reverse-i-search".to_string())
-    } else if normalized.contains("i-search")
-        && normalized.contains("accept")
-        && normalized.contains("cancel")
-    {
-        Some("interactive shell history search".to_string())
-    } else {
-        None
-    }
 }
 
 pub(crate) fn dispatch_blocker_recovery_hint(

@@ -10,6 +10,7 @@ pub mod doctor;
 pub mod doctor_json;
 pub mod invariants;
 pub mod orchestrate_tasks;
+pub mod owner_pane_self_invocation;
 pub mod pending_capture;
 pub mod preflight_policy;
 pub mod session_check;

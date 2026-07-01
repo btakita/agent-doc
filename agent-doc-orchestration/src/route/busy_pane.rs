@@ -166,8 +166,9 @@ pub(crate) fn busy_existing_pane_auto_fix_outcome(
 /// `blocker_reason` from the readiness wait; otherwise re-classify a fresh
 /// capture. The wait loop can report a timeout (`blocker_reason == None`) even
 /// while the pane is genuinely in reverse-i-search (its 2-poll blocker streak
-/// may not have latched), so we re-scan with [`dispatch_only_blocker_reason`],
-/// which matches the whole capture rather than only the last few lines —
+/// may not have latched), so we re-scan with
+/// [`agent_doc_harness::dispatch_only_blocker_reason`], which matches the whole
+/// capture rather than only the last few lines —
 /// critical here because the shell-search line sits above trailing blank pane
 /// rows, out of the window `HarnessConfig::dispatch_blocker_reason` inspects.
 pub(crate) fn codex_pane_in_shell_search_state(
@@ -185,7 +186,9 @@ pub(crate) fn codex_pane_in_shell_search_state(
     let Ok(captured) = crate::sessions::capture_pane(tmux, pane) else {
         return false;
     };
-    is_codex_shell_search_blocker(dispatch_only_blocker_reason(harness, &captured).as_deref())
+    is_codex_shell_search_blocker(
+        agent_doc_harness::dispatch_only_blocker_reason(harness, &captured).as_deref(),
+    )
 }
 
 pub(crate) fn attempt_busy_existing_pane_interrupt_recovery(

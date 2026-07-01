@@ -142,6 +142,10 @@ use agent_doc_turn::owner_pane_recursion::{
     queue_handoff_message, queue_wedge_halt_message, recursive_direct_invocation_message,
     recursive_start_invocation_message,
 };
+use agent_doc_workflow::owner_pane_self_invocation::{
+    OwnedPaneSelfInvocation, OwnedPaneSelfInvocationInput, OwnedPaneSelfInvocationKind,
+    OwnedPaneSelfInvocationOptions, build_owned_pane_self_invocation,
+};
 
 use crate::{agent, diff_io, frontmatter_io, git, merge, snapshot, template_io, write};
 
@@ -1273,43 +1277,6 @@ pub(crate) fn owned_pane_self_invocation_detail(
     ))
 }
 
-/// Structured owner-pane self-invocation contract
-/// (`#codex-owned-pane-prompt-miss-followups`, plan item 3 → preflight result).
-///
-/// Emitted by preflight when a Codex owner-pane re-invocation has unresolved
-/// exchange work — an unanswered exchange prompt or a ready active auto-queue
-/// head — that must be answered in THIS owner turn rather than dispatched to a
-/// nested child. Codex guidance reads this to drive an in-pane response cycle
-/// instead of only reading the run-time bail diagnostic.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct OwnedPaneSelfInvocation {
-    pub file: String,
-    pub current_pane: String,
-    pub session_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub actor_generation: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub actor_state: Option<String>,
-    /// `"unresolved_prompt"` or `"active_queue_head"`.
-    pub kind: String,
-    /// First non-empty line of the unresolved work, truncated.
-    pub work_excerpt: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub head_id: Option<String>,
-    /// The exact persistence command to run after composing the in-pane response.
-    pub persistence_command: String,
-}
-
-fn first_nonempty_excerpt(text: &str, max: usize) -> String {
-    text.lines()
-        .find(|line| !line.trim().is_empty())
-        .unwrap_or(text)
-        .trim()
-        .chars()
-        .take(max)
-        .collect()
-}
-
 /// Detect a structured owner-pane self-invocation contract. An unresolved
 /// exchange prompt takes precedence over an active auto-queue head
 /// (`#prompt-preempts-auto-queue`). Returns `None` when this is not a Codex
@@ -1336,11 +1303,6 @@ pub fn detect_owned_pane_self_invocation(
     )
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct OwnedPaneSelfInvocationOptions {
-    pub suppress_active_queue_head: bool,
-}
-
 pub(crate) fn detect_owned_pane_self_invocation_with_options(
     file: &Path,
     session_id: &str,
@@ -1357,38 +1319,36 @@ pub(crate) fn detect_owned_pane_self_invocation_with_options(
     let actor_state = actor
         .as_ref()
         .map(|record| record.state.as_str().to_string());
-    let persistence_command = format!(
-        "agent-doc finalize {} (or agent-doc write --commit {})",
-        file.display(),
-        file.display()
-    );
+    let file_display = file.display().to_string();
     if let Some(unresolved) = unresolved_prompt.filter(|p| !p.trim().is_empty()) {
-        return Ok(Some(OwnedPaneSelfInvocation {
-            file: file.display().to_string(),
-            current_pane,
-            session_id: session_id.to_string(),
-            actor_generation,
-            actor_state,
-            kind: "unresolved_prompt".to_string(),
-            work_excerpt: first_nonempty_excerpt(&unresolved, 200),
-            head_id: None,
-            persistence_command,
-        }));
+        return Ok(Some(build_owned_pane_self_invocation(
+            OwnedPaneSelfInvocationInput {
+                file: &file_display,
+                current_pane: &current_pane,
+                session_id,
+                actor_generation,
+                actor_state: actor_state.as_deref(),
+                kind: OwnedPaneSelfInvocationKind::UnresolvedPrompt,
+                work: &unresolved,
+                head_id: None,
+            },
+        )));
     }
     if !options.suppress_active_queue_head
         && let Some(continuation) = crate::queue_continuation::detect(file)?
     {
-        return Ok(Some(OwnedPaneSelfInvocation {
-            file: file.display().to_string(),
-            current_pane,
-            session_id: session_id.to_string(),
-            actor_generation,
-            actor_state,
-            kind: "active_queue_head".to_string(),
-            work_excerpt: first_nonempty_excerpt(&continuation.head_prompt, 200),
-            head_id: continuation.head_id,
-            persistence_command,
-        }));
+        return Ok(Some(build_owned_pane_self_invocation(
+            OwnedPaneSelfInvocationInput {
+                file: &file_display,
+                current_pane: &current_pane,
+                session_id,
+                actor_generation,
+                actor_state: actor_state.as_deref(),
+                kind: OwnedPaneSelfInvocationKind::ActiveQueueHead,
+                work: &continuation.head_prompt,
+                head_id: continuation.head_id.as_deref(),
+            },
+        )));
     }
     Ok(None)
 }

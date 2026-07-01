@@ -144,12 +144,35 @@ Three workstreams against a launched (post-beta, 10/14/2025) production platform
 
 | Task | Hours | Notes |
 |---|---:|---|
-| Improve AI-generated content (demographics, data accuracy) | 32-75 | Source-backed + validation/confidence/admin review. No pure "100% accurate" promise. |
+| Improve AI-generated content (demographics, data accuracy) | 32-75 | Source-backed + validation/confidence/admin review, **graded against the accuracy rubric below** (§3a) — replaces the unmeasurable "100% accurate" ask with a defined acceptance bar. |
 | Polish OM generator output | 20-50 | Depends on design expectations and PDF/rendering stack. |
 | Ensure additional attributes flow into generated OM | 6-14 | Small if listing-data→OM mapping is clean. |
 | Broker-only OM upload, NDA/email workflow compatible; principals use generator | 14-30 | Permission, file handling, NDA-triggered delivery, attachment/link rules. |
-| Old OM/flyer upload → extract → autofill listing + OM | 45-100 | **Largest AI item:** document ingestion, OCR/PDF parsing, schema extraction, confidence flags, review UI, sample-doc tests. |
+| Old OM/flyer upload → extract → autofill listing + OM | 45-100 | **Largest AI item:** document ingestion, OCR/PDF parsing, schema extraction, confidence flags, review UI, sample-doc tests scored on the **field-accuracy rubric** (§3a). |
+| **AI accuracy rubric + evaluation harness** | 14-28 | New line item (per "include rubrics in AI accuracy work"): per-field grading rubric, a labeled ground-truth sample set, and an automated scoring harness that gates release of extraction/generation changes. This is what makes "accurate" measurable and defensible to buyers. |
 | 3 listing tiers (Free / Premium $199 / Elite $499) as **new first step** before Location; Stripe links | 18-38 | The tier step is inserted ahead of the confirmed 5-step wizard, so it also shifts step-index/gating logic. Tier selection, state persistence, Stripe link flow, entitlement behavior, admin visibility. |
+
+### 3a. AI accuracy rubrics (acceptance criteria, not a "100% accurate" promise)
+
+Every AI-touched field — extracted from an uploaded OM/flyer, or generated (demographics, marketing copy) — is graded on a **provenance rubric** that decides whether it can auto-publish or must be reviewed:
+
+| Grade | Meaning | Handling |
+|---|---|---|
+| **A — Source-exact** | Value copied verbatim from an authoritative source (BatchData, uploaded rent roll/financials, structured listing field) | Auto-fill, no review |
+| **B — Derived-verified** | Computed from source fields by a deterministic rule (e.g. NOI = EGI − Opex) and reconciles within tolerance | Auto-fill, flagged for spot-check |
+| **C — AI-inferred** | Produced by the model without a directly citable source | **Blocked from external send** until an admin approves; shown with its confidence and rationale |
+| **D — Missing/low-confidence** | No source and confidence below threshold | Requires manual entry; never auto-published |
+
+**Acceptance thresholds (the "done" bar for an AI change, measured on the labeled sample set):**
+
+| Field class | Target precision | Notes |
+|---|---|---|
+| Financial (Asking Price, Cap Rate, NOI, Opex, LTV…) | **≥ 99%** on Grade A/B; zero silent Grade-C financials sent externally | Money fields are buyer-facing; wrong numbers are the worst failure mode |
+| Structured facts (address, sq ft, year built, keys/units) | **≥ 97%** | Mostly source-exact |
+| Demographics / market data | **≥ 95%**, every value carrying a cited source | "much better demographics" from the brief, made testable |
+| Narrative/marketing copy | Human-approved before external send | Graded for factual claims only, not style |
+
+The harness runs on a labeled ground-truth set (a handful of representative OMs per asset class), scores each release of the extraction/generation code, and **gates merge** on the thresholds above. That turns Artur's "100% accurate" request into a concrete, auditable acceptance test instead of an open-ended promise — and gives admin review a queue driven by grade, not guesswork.
 
 ---
 
@@ -160,12 +183,12 @@ Three workstreams against a launched (post-beta, 10/14/2025) production platform
 | Discovery / safety plan | 24-44 | $2.4k-$4.4k |
 | Admin DBMS workstream | 190-320 | $19k-$32k |
 | Broker segment workstream | 95-170 | $9.5k-$17k |
-| Listing creation + OM rebuild (first asset class) | 245-450 | $24.5k-$45k |
+| Listing creation + OM rebuild (first asset class) | 260-480 | $26k-$48k |
 | Cross-workstream QA / release hardening | 40-80 | $4k-$8k |
-| **Full V1.2 (every listed item, production-grade)** | **530-820** | **$53k-$82k** |
-| **First scoped post-launch tranche** | **265-390** | **$26.5k-$39k** |
+| **Full V1.2 (every listed item, production-grade)** | **545-850** | **$54.5k-$85k** |
+| **First scoped post-launch tranche** | **270-400** | **$27k-$40k** |
 
-*Adjustment after reviewing the PDF wizard screenshots: the listing-creation workstream rose ~15-20h (explicit Attachments/media step + confirmed asset-class field density), nudging the top line up by roughly one point. The prior $52k-$80k / $26k-$38k headline still holds as a round-number bid — the screenshots validated the estimate rather than expanding it.*
+*Adjustments: (1) after reviewing the PDF wizard screenshots the listing-creation workstream rose ~15-20h (explicit Attachments/media step + confirmed asset-class field density); (2) the AI accuracy rubric + evaluation harness (§3a) adds ~14-28h. The rubric harness is front-loaded — it belongs in the first tranche so the AI-accuracy bar is enforced from day one, not retrofitted. The round-number $52k-$80k / $26k-$38k headline still holds for the bid; these are refinements, not scope expansion.*
 
 ---
 

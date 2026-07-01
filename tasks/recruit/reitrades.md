@@ -808,13 +808,43 @@ The current committed §5 now opens:
 > The work is structured in phases so you're never committing to the whole list at once. That keeps your spend controlled and lets us validate the new code structure against your live data before you commit the full budget.
 
 Reopen the PDF once more — the §5 heading should read **"5. Phasing & engagement options."** If it still shows "Recommended phasing," the viewer is caching an old file (the committed PDF on disk has the new heading — verified). If a different phrase inside §5 reads wrong, quote it and I'll fix that exact line.
-<!-- agent:boundary:64f15a8d -->
+### Re: LinkedIn draft, plain-text for copy/paste — opus-4-8
+
+> **Queue prompt:** Format the linkedin draft so I can copy/paste into linkedin message.
+
+LinkedIn's message box strips markdown — `**bold**` shows literal asterisks and `-` bullets don't render — so here's a clean plain-text version with `•` bullets and line breaks that LinkedIn keeps. Select everything inside the block and paste straight in:
+
+```
+Hi Artur,
+
+Thanks again for the V1.2 brief. I've put together a full task-by-task proposal and estimate, attached.
+
+The short version:
+
+• Fit: yes. Rust backend, Vue/admin UI, Postgres modeling and migrations, permissions, document/OM workflows, and AI extraction are squarely what I do. Since REItrades is already live, I'd treat this as production hardening, not a greenfield rebuild.
+
+• Rate $100/hr, with an AI-native workflow, so the hours are already compressed.
+
+• Phased so you never commit to the whole list at once: a short paid discovery first, then a first production tranche around $27k–$40k, with the full V1.2 in the $54.5k–$85k range. Hourly with a weekly cap you control, or fixed-price per phase.
+
+• On "100% accurate" AI: I scope it honestly. Deterministic code owns every number and validation, the AI only proposes, and low-confidence values get human review before anything reaches buyers. The proposal lays out how.
+
+Full breakdown, phasing, and options are in the attached. Want to grab 20 minutes this week so I can walk you through it?
+
+Best,
+Brian
+```
+
+Notes:
+- No markdown left — `•` and the line breaks paste as-is into LinkedIn.
+- Blank line between each bullet so it stays scannable in the narrow message pane.
+- If you'd rather send it more compact (no blank lines between bullets), say so and I'll tighten it. Or I can publish it via `corky`/LinkedIn as a draft (no auto-send).
+<!-- agent:boundary:d0132fb3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue go -->
-- Format the linkedin draft so I can copy/paste into linkedin message.
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

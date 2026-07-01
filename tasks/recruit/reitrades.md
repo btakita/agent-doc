@@ -681,6 +681,50 @@ The callout spells out:
 - The dependency that makes it real: the flag is only trustworthy if confidence is **calibrated**, which the §3a eval harness measures and tunes.
 
 That gives Artur a named, buyer-facing "verified data with a human in the loop where the model is unsure" story he can point to, backed by the rubric and harness already in the doc.
+
+Draft a linkedin message for Arthur with the proposal. Be brief and to the point...highlight important parts. Let the proposal explain the details.
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/recruit/reitrades.md source=ipc_visible_repair patch_id=733ef66e-fd4b-4aac-9eb1-c860bf640dbe invariant=live_prompt_drift recovery=retry_without_disk_write redeliver_editor=true bad_len=67751 bad_hash=aa74fd5afeb29a9f87e40d1e0b639a6057d6942ec942fb375e41783d65a7f3c3 repaired_len=68968 repaired_hash=3d622a76c9ca1ef5cdd19f0c1be7d5c22eafdfebbad5eafe37081ad300a94fc7 doc=reitrades session=62d195b8-b029-42a5-9c6c-836cb1b5b103 turn=cycle-1782924403989
+```
+
+### Re: Brief LinkedIn message delivering the proposal — opus-4-8
+
+Here's a tight cover message to send with the proposal PDF. It highlights the four things Artur actually cares about — fit, rate, phased cost, and the accuracy approach — and lets the proposal carry the detail. (Using **Artur**, not Arthur, per his own spelling.)
+
+---
+
+Hi Artur,
+
+Thanks again for the V1.2 brief. I've put together a full task-by-task proposal and estimate — attached.
+
+The short version:
+
+- **Fit:** yes. Rust backend, Vue/admin UI, Postgres modeling + migrations, permissions, document/OM workflows, and AI extraction are squarely what I do. Since REItrades is already live, I'd treat this as production hardening, not a greenfield rebuild.
+- **Rate $100/hr**, AI-native workflow, so the hours are already compressed.
+- **Phased so you never commit to the whole list at once:** a short paid discovery first, then a ~$27k–$40k first production tranche, with the full V1.2 in the ~$54.5k–$85k range — hourly with weekly caps you control, or fixed-price per phase.
+- **On "100% accurate" AI:** I scope it honestly — deterministic code owns every number and validation, the AI only proposes, and low-confidence values get human review before anything reaches buyers. The proposal lays out the rubric.
+
+Full breakdown, phasing, and build-vs-buy options are in the attached. Want to grab 20 minutes this week so I can walk you through it?
+
+Best,
+Brian
+
+---
+
+Notes:
+- Kept it to four scannable bullets + a call CTA — everything else defers to the PDF, as you asked.
+- The cost bullet leads with the phased first tranche (the low-commitment number for a bootstrapped founder) and only mentions the full range so it's not a surprise later.
+- LinkedIn strips most formatting; if you paste into the message box the bullets render as plain lines — still scannable.
+- Say the word and I'll publish it via `corky`/LinkedIn (draft only — no auto-send), or tweak tone/length.
 <!-- agent:boundary:60ddffc8 -->
 <!-- /agent:exchange -->
 

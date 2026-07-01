@@ -901,6 +901,11 @@ should be deleted during extraction.
   with the regression tests; git orchestration only reads `HEAD^`/`HEAD` and
   decides whether to send the existing IPC signal. No compatibility wrapper was
   kept in `git.rs`.
+- The same local pass moved queue context-clear in-flight marker payload
+  construction into `agent-doc-queue`. The queue crate now owns the serializable
+  marker body and head hash/length derivation; orchestration only resolves the
+  project-scoped marker path, reads/writes JSON, and removes stale sidecar files.
+  Static guards reject moving the payload fields back into the storage adapter.
 
 ### Earlier closure finding
 

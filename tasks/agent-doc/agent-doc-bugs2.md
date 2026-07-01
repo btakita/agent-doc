@@ -26,7 +26,6 @@ queue: start
 
 <!-- agent:status patch=replace -->
 
-🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -57,7 +56,7 @@ You were right. The bad selection had two separate causes: preflight let an acti
 I fixed both in `src/agent-doc` and pushed commit `05cc1380` (`fix: prioritize exchange prompt over queue preflight`). Preflight now captures an unresolved exchange prompt before its commit/boundary-reposition step can hide it, synthesizes that as the effective exchange diff, clears effective selected queue prompts for the turn, and drops `queue_continuation_required` while the exchange prompt is pending. Queue refill/same-cycle pending-add sync now require explicit `go` (`queue: go` or marker-side `go`); plain `queue: start` remains durable active state only.
 
 Verification: focused regressions passed, `make check` passed, `cargo install --path .` installed `agent-doc 0.34.65`, and the session supervisor is marked to recycle at the next idle boundary. The pushed CI run `28484451473` was still in progress at closeout. No JB plugin update is needed for this fix.
-<!-- agent:boundary:a2f03c0c -->
+<!-- agent:boundary:4acb1322 -->
 <!-- /agent:exchange -->
 ## Queue
 

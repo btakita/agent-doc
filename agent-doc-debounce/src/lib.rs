@@ -897,8 +897,8 @@ fn file_mtime_ms(file: &str) -> Option<u128> {
 
 /// Return `Some(snapshot)` when the editor-visible buffer digest differs from
 /// the supplied content. Returns `None` when there is no editor-visible sidecar,
-/// when it matches the content, or when the sidecar is *stale* — i.e. the file
-/// on disk was modified after the editor last reported its buffer.
+/// when it matches the content, or when the sidecar is provably not from a live
+/// editor and is stale.
 ///
 /// Staleness check (#ipc-crdt-response-drift / visible-buffer false positives):
 /// the editor plugin stamps the sidecar (`agent_doc_document_changed_digest`)
@@ -908,10 +908,12 @@ fn file_mtime_ms(file: &str) -> Option<u128> {
 /// agent-doc's own machinery) changed disk *after* the editor last reported, so
 /// the editor digest merely *lags* a disk change it has not observed yet — that
 /// is not a user edit and must not block the write. Case (2) is the
-/// false-positive class the user hit ("I did not edit the document"). We
-/// distinguish them by timestamp: when the disk mtime is clearly newer than the
-/// sidecar's `timestamp_ms`, the editor digest describes superseded content and
-/// cannot represent unsaved edits against the *current* disk, so it is ignored.
+/// false-positive class the user hit ("I did not edit the document"). The hard
+/// operator-authority invariant is stricter than that heuristic: a live editor
+/// digest that differs from disk can be operator-origin text, so agent-doc must
+/// preserve/fail closed unless content or capability proof says otherwise.
+/// Timestamp/write-provenance stale suppression is reserved for sidecars whose
+/// editor owner is not live.
 pub fn live_buffer_diverges_from_content(file: &str, content: &str) -> Option<LiveBufferSnapshot> {
     live_buffer_snapshots(file)
         .into_iter()
@@ -1068,9 +1070,28 @@ fn live_buffer_snapshot_diverges_from_content(
         return true;
     }
 
+    if live_buffer_snapshot_editor_is_live(snapshot) {
+        log_live_buffer_decision_with_details(
+            file,
+            "diverges",
+            "live_editor_digest_differs_operator_preserved",
+            &format!(
+                " buffer_len={} buffer_hash={} expected_len={} expected_hash={} editor_id={} content_present=false authority_capability=false",
+                snapshot.len,
+                snapshot.hash,
+                expected_len,
+                expected_hash,
+                snapshot.editor_id.as_deref().unwrap_or("-")
+            ),
+        );
+        return true;
+    }
+
     // #pcp2 write-provenance positive attribution: if agent-doc recorded a disk
     // write to this document *after* the editor last reported its buffer, the
-    // editor digest lags agent-doc's own write — not a user edit — so suppress.
+    // non-live editor digest lags agent-doc's own write — not current operator
+    // text — so suppress. Live editor digests returned above because write
+    // provenance alone cannot prove there is no operator-visible text to reset.
     // This uses agent-doc's own recorded write time (same SystemTime clock domain
     // as the editor's `timestamp_ms`), a definitive signal preferred over the
     // filesystem-mtime heuristic below. A genuine unsaved edit reports *after*
@@ -1101,10 +1122,11 @@ fn live_buffer_snapshot_diverges_from_content(
         return false;
     }
 
-    // Stale-sidecar suppression (fallback): if disk changed after the editor last
-    // reported, the digest is lagging a disk write the editor has not seen — not a
-    // live unsaved buffer. Only suppress on a confident staleness margin so genuine
-    // unsaved edits (editor newer than disk) are still protected.
+    // Stale-sidecar suppression (fallback): if disk changed after a non-live
+    // editor last reported, the digest is lagging a disk write the editor has not
+    // seen — not a live unsaved buffer. Only suppress on a confident staleness
+    // margin so genuine unsaved edits (editor newer than disk) are still
+    // protected.
     if let Some(disk_mtime_ms) = file_mtime_ms(file)
         && disk_mtime_ms
             > snapshot
@@ -1674,23 +1696,20 @@ mod tests {
         let ops_log = tmp.path().join(".agent-doc").join("logs").join("ops.log");
         let log = std::fs::read_to_string(&ops_log).expect("ops.log written");
         assert!(
-            log.contains(
-                "live_buffer_classify decision=diverges reason=unsaved_buffer_ahead_of_disk"
-            ),
+            log.contains("reason=live_editor_digest_differs_operator_preserved"),
             "ops.log missing diverges marker, got: {log}"
         );
     }
 
-    /// Regression (#ipc-crdt-response-drift / visible-buffer false positives):
-    /// when the file on disk is modified *after* the editor last reported its
-    /// buffer (a concurrent foreign writer, or agent-doc's own machinery), the
-    /// sidecar is stale — it lags a disk change the editor never made — and must
-    /// NOT be reported as a divergence. The user did not edit the document.
+    /// #provauth3bimpl: an editor sidecar without explicit liveness identity is
+    /// still operator-capable. A later disk write may mean the sidecar is stale,
+    /// but write code must fail closed instead of resetting operator-visible
+    /// text from a content-free heuristic.
     #[test]
-    fn live_buffer_stale_sidecar_lagging_disk_write_is_not_divergence() {
+    fn live_buffer_maybe_live_sidecar_lagging_disk_write_still_diverges() {
         let tmp = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(tmp.path().join(".agent-doc").join("live-buffer")).unwrap();
-        let doc = tmp.path().join("stale-sidecar.md");
+        let doc = tmp.path().join("maybe-live-sidecar.md");
         std::fs::write(&doc, "original disk content").unwrap();
         let doc_str = doc.to_string_lossy().to_string();
 
@@ -1707,10 +1726,51 @@ mod tests {
         std::fs::write(&doc, foreign).unwrap();
 
         // The sidecar (len/hash of `reported`) differs from current disk
-        // (`foreign`), but it is stale — must be suppressed, not fired.
+        // (`foreign`). Without an explicit dead-editor proof, preserve/fail
+        // closed instead of suppressing it as stale.
+        assert!(
+            live_buffer_diverges_from_content(&doc_str, foreign).is_some(),
+            "operator-capable sidecar lagging a disk write must still be protected"
+        );
+        let log = std::fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log"))
+            .expect("ops.log written");
+        assert!(
+            log.contains("reason=live_editor_digest_differs_operator_preserved"),
+            "expected operator-preservation marker, got: {log}"
+        );
+    }
+
+    /// Regression (#ipc-crdt-response-drift / visible-buffer false positives):
+    /// when a sidecar is from a provably dead editor and disk was modified after
+    /// it last reported, the sidecar is stale — it lags a disk change no visible
+    /// editor can still own — and may be suppressed.
+    #[cfg(unix)]
+    #[test]
+    fn live_buffer_dead_editor_sidecar_lagging_disk_write_is_not_divergence() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc").join("live-buffer")).unwrap();
+        let doc = tmp.path().join("stale-dead-editor-sidecar.md");
+        std::fs::write(&doc, "original disk content").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        let reported = "original disk content";
+        record_live_buffer_digest_for_editor(
+            &doc_str,
+            reported.len(),
+            &content_hash(reported),
+            Some("jetbrains-999999999-test"),
+        )
+        .unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(
+            (LIVE_BUFFER_STALE_SKEW_MS as u64) + 100,
+        ));
+        let foreign = "original disk content\nappended by a foreign supervisor\n";
+        std::fs::write(&doc, foreign).unwrap();
+
         assert!(
             live_buffer_diverges_from_content(&doc_str, foreign).is_none(),
-            "stale sidecar lagging a foreign disk write was wrongly reported as a live divergence"
+            "dead-editor stale sidecar lagging a foreign disk write should be suppressed"
         );
     }
 
@@ -1755,12 +1815,13 @@ mod tests {
         assert_eq!(prov.actor, "agent");
     }
 
-    /// #pcp2: write-provenance positively attributes a stale editor digest to
-    /// agent-doc's own write even when the filesystem-mtime fallback would NOT
-    /// suppress it. The editor reported an old buffer; agent-doc then recorded a
-    /// disk write *after* that report. The disk file itself is not touched after
-    /// the editor report, so the mtime heuristic alone leaves the digest firing —
-    /// provenance is what makes it suppress.
+    /// #pcp2: write-provenance positively attributes a stale dead-editor digest
+    /// to agent-doc's own write even when the filesystem-mtime fallback would NOT
+    /// suppress it. The dead editor reported an old buffer; agent-doc then
+    /// recorded a disk write *after* that report. The disk file itself is not
+    /// touched after the editor report, so the mtime heuristic alone leaves the
+    /// digest firing — provenance is what makes it suppress.
+    #[cfg(unix)]
     #[test]
     fn write_provenance_suppresses_stale_digest_beyond_mtime_heuristic() {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -1769,11 +1830,18 @@ mod tests {
         std::fs::write(&doc, "agent-doc wrote this").unwrap();
         let doc_str = doc.to_string_lossy().to_string();
 
-        // Editor reports an old buffer (the disk write at creation predates this
-        // report, so the mtime fallback cannot suppress: disk is older, not newer).
+        // A dead editor reports an old buffer (the disk write at creation
+        // predates this report, so the mtime fallback cannot suppress: disk is
+        // older, not newer).
         std::thread::sleep(std::time::Duration::from_millis(5));
         let reported = "buffer the editor still shows";
-        document_changed_with_digest(&doc_str, reported.len(), &content_hash(reported));
+        record_live_buffer_digest_for_editor(
+            &doc_str,
+            reported.len(),
+            &content_hash(reported),
+            Some("jetbrains-999999999-test"),
+        )
+        .unwrap();
 
         // Without provenance, the digest fires (mtime fallback does not suppress).
         assert!(
@@ -1809,6 +1877,43 @@ mod tests {
         assert!(log.contains("stale_attempt=wid-stale"), "{log}");
         assert!(log.contains("buffer_timestamp_ms="), "{log}");
         assert!(log.contains("provenance_timestamp_ms="), "{log}");
+    }
+
+    #[test]
+    fn write_provenance_does_not_suppress_live_digest_only_operator_buffer() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc").join("live-buffer")).unwrap();
+        let doc = tmp.path().join("prov-live-digest-only-unsaved.md");
+        std::fs::write(&doc, "saved").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        let unsaved = "saved plus operator text";
+        let editor_id = format!("jetbrains-{}-test", std::process::id());
+        record_live_buffer_digest_for_editor(
+            &doc_str,
+            unsaved.len(),
+            &content_hash(unsaved),
+            Some(&editor_id),
+        )
+        .unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        record_write_provenance(&doc_str, 5, &content_hash("saved"), "wid-stale", "agent").unwrap();
+
+        assert!(
+            live_buffer_diverges_from_content(&doc_str, "saved").is_some(),
+            "live digest-only editor buffer must remain protected even when older than write provenance"
+        );
+        let log = std::fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log"))
+            .expect("ops.log written");
+        assert!(
+            log.contains("reason=live_editor_digest_differs_operator_preserved"),
+            "expected live editor operator-preservation marker, got: {log}"
+        );
+        assert!(
+            !log.contains("reason=write_provenance_newer_than_buffer"),
+            "write provenance must not suppress live editor text: {log}"
+        );
     }
 
     #[test]

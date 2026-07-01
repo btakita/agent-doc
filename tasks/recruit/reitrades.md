@@ -8,7 +8,6 @@ agent_doc_write: crdt
 
 <!-- agent:status patch=replace -->
 
-🔴 (restart/recycle your supervisor)
 <!-- /agent:status -->
 
 ## Exchange
@@ -297,7 +296,37 @@ At **$125/hr**, that means:
 - Full listed scope: **$65k-$100k**
 
 For Artur, I would not lead with the full upper bound unless asked for every item. I would say: “I can phase this so you are not committing to the whole list upfront. The first production tranche is probably 260-380 hours; the full V1.2 list is more like 520-800 hours once we include migrations, QA, OM/document extraction, and production safety.”
-<!-- agent:boundary:a9a3c502 -->
+My rate will be $100. Please create a report on the work that needs to be done. I don't want to underbid, but I also don't want to overbid. I want to be competitive. Please review the itemized estimates and provide a detailed breakdown of the tasks required for the project. Please understand that I will be using an agentic environment so estimate accordingly using my work as a baseline for the estimates.
+
+### Re: V1.2 work report at $100/hr — opus-4-8
+
+Done. I wrote a clean, shareable report at [`rei-trades/reitrades-v1.2-estimate-report.md`](rei-trades/reitrades-v1.2-estimate-report.md) (committed). It re-prices the full itemized breakdown at **$100/hr** and frames it as a competitive bid — not underbid, not overbid.
+
+**What changed from the $125/hr pass**
+
+Same agentic hours, re-priced at $100/hr:
+
+| Scope | Agentic hours | At $100/hr | (was $125/hr) |
+|---|---:|---:|---:|
+| First scoped tranche | 260-380h | **$26k-$38k** | $32.5k-$47.5k |
+| Full V1.2 | 520-800h | **$52k-$80k** | $65k-$100k |
+
+**How I kept it competitive without underbidding**
+
+The competitive lever is *not* cutting the hour ranges further — it is that your agentic tooling biases delivery toward the **low end of each range** at a rate ($100/hr) already at the lower-competitive end for senior Rust+Vue contract work ($100-175/hr market). I deliberately did **not** shrink the ranges below the prior pass, because the parts that protect you from underbidding — production migrations on a live marketplace, NDA/LOI/email regression QA, and AI-extraction validation — do not compress with agents. Underbidding those is where contract work bleeds.
+
+**The report contains**
+
+- Full itemized task table (every V1.2 bullet, hour range, note), grouped by workstream.
+- De-duped roll-up with $100/hr dollar columns — rows are incremental within shared admin/role/import primitives built once, so they don't sum naively.
+- A phasing recommendation: Phase 0 discovery ($2.4k-$4.4k, credited forward), Phase 1 first tranche ($26k-$38k), Phase 2+ balance.
+- Two engagement options to put in front of Artur: **hourly at $100 with a weekly cap** (lowest mutual risk) or **fixed price per phase** (Phase 1 in the ~$30k-$34k band against frozen scope).
+- The 7 open questions that should be answered before you lock any *fixed* number (asset-class count, physical vs. logical broker DB separation, integration credentials, delete policy, template/design scope, AI review gate, PDF listing-steps screens).
+
+**My recommendation for the bid:** lead with Phase 0 + Phase 1 as the headline number (**~$28k-$40k including discovery**), mention the full V1.2 envelope ($52k-$80k) as the phased total so Artur isn't surprised later, and offer the weekly-cap hourly structure as the default. That wins on price and de-risks the live-system work without leaving money on the table.
+
+One thing to verify before sending a fixed quote: the **PDF listing-creation-steps screenshots** (the markdown brief only has the heading). If those screens define extra fields/steps, the asset-class rebuild numbers move. I can extract them if you want a tighter Phase-1 fixed price — I queued that as a follow-up.
+<!-- agent:boundary:e71e4b7a -->
 <!-- /agent:exchange -->
 
 ## Queue

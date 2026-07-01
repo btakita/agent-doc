@@ -3,13 +3,13 @@
 **Prepared for:** Artur Muller, Founder & CEO, REItrades
 **Engineer:** Brian Takita — senior full-stack (Rust / Vue / Postgres)
 **Rate:** $100/hr
-**Basis:** Itemized from the V1.2 brief (`reitrades-v1.2.md` / V1.2 PDF), priced as **agentic-implementation hours** — one senior AI-native engineer using coding agents for search, scaffolding, migration/test drafts, and parallel review.
+**Basis:** Itemized from your V1.2 feature brief and the Listing Creation Steps PDF, priced as **agentic-implementation hours** — one senior AI-native engineer using coding agents for search, scaffolding, migration/test drafts, and parallel review.
 
 ---
 
 ## 1. How to read this estimate
 
-- **These are agentic hours, not conventional solo hours.** They already assume heavy use of coding agents. They still include human review, integration, targeted tests, and production QA on a **live** marketplace — the parts agents do not compress.
+- **These are agentic hours — compressed by an AI-native workflow.** They already assume heavy use of coding agents, so you get senior-quality delivery faster and at a lower total than a conventional solo build. They still include human review, integration, targeted tests, and production QA on a **live** marketplace — the parts agents do not compress.
 - **Ranges are real.** The low end is hit when existing patterns are clean and reusable; the high end when data models are inconsistent or production migration risk is high. With my tooling I bias toward the **low end of each range** — that is the competitive lever, not cutting scope.
 - **Rows are incremental within a shared implementation.** Admin grid columns/filters/inline-edit, bulk-action plumbing, audit logging, import/export, role gates, and listing-data mapping are built **once** and reused. Per-row numbers assume those primitives already exist, so they do not sum naively — see the de-duped roll-up.
 - **What agents compress vs. what they don't:**
@@ -28,7 +28,7 @@ Three workstreams against a launched (post-beta, 10/14/2025) production platform
 |---|---|
 | **1. Admin DBMS** | Listings/user/company management: columns, inline edit, filters, bulk actions, MailerLite status, import/export, audit trails, deletes, NDA/LOI visibility, activity analytics. |
 | **2. Broker segment** | New account type, application + approval workflow, separate broker admin views, role-gated pages/permissions, per-listing access codes, Broker/Principal tags. |
-| **3. Listing creation + OM rebuild** | Rust/Tera rebuild, step gating, asset-class schemas, teaser/OM data derivation + production migration, AI/BatchData marketing materials, OM polish, broker OM upload, old-OM extraction, Stripe listing tiers. |
+| **3. Listing creation + OM rebuild** | Rust/Tera rebuild, step gating, asset-class schemas, teaser/Offering Memorandum (OM) data derivation + production migration, AI/BatchData marketing materials, OM polish, broker OM upload, old-OM extraction, Stripe listing tiers. |
 
 ---
 
@@ -196,6 +196,30 @@ The strongest, most defensible version of the accuracy story is to split the pip
 
 **Why lead with this:** it is the strongest trust argument, it is cheaper and more testable than trying to make the AI itself infallible, and it fits a bootstrapped budget — deterministic checks are hours of code, not an open-ended model-tuning bill. If a *learned prediction* on tabular data is wanted later (valuation/cap-rate estimate, lead scoring, asset-class classification), that is a phase-2, data-dependent option requiring a labeled outcome set — and the right tool there is gradient-boosted trees (XGBoost/LightGBM), which beat plain neural nets on tabular data. It is out of scope for V1.2.
 
+### 3c. Build vs. buy — where vendors lower cost
+
+No document-extraction vendor is "100% accurate" on messy CRE source docs, so a vendor never replaces the deterministic core and the §3a/§3b verification path — it slots in as the *propose* layer that the validators and rubric then check. Within that frame, buying the right pieces meaningfully lowers build hours on the two most expensive, least agent-compressible items (old-OM extraction 45-100h; demographics/data accuracy 32-75h). The trade to weigh openly: every "buy" converts build hours into a recurring per-use fee — good for a bootstrapped budget upfront, but a standing cost to name.
+
+**Document extraction — three approaches** (pick on a bake-off against your real OMs, not on vendor accuracy claims):
+
+| Approach | What you buy | Best for | Trade-off |
+|---|---|---|---|
+| **Parser API → our schema** (e.g. Reducto, Azure Document Intelligence, Google Document AI, AWS Textract, Landing AI) | Best raw table/layout accuracy on financials + bounding-box **citations** that map directly to Grade-A "source-exact" provenance | Money-facing fields that need a cited source | You still own schema mapping + validators |
+| **LLM-native structured extraction** (Claude / Gemini with structured outputs) | One vendor for extraction *and* generation; adapts to new asset classes with no retraining | The long tail of odd layouts + fuzzy fields | Needs our validator/confidence layer; the model never does arithmetic (§3b) |
+| **Managed IDP with review queue** (e.g. Rossum, Docsumo, Nanonets) | Extraction **plus** a built-in human-review UI + confidence + correction loop | Cutting the most upfront build hours | Highest recurring cost, least control over schema/grading |
+
+**Recommended default:** chain **parser → LLM → deterministic validators** — accurate tables with citations for provenance, an LLM for the fuzzy fields, our validators and the A–D rubric gating what ships. Keep the managed-IDP option as the lever if lowering upfront hours matters more than control.
+
+**Where vendors also reduce cost elsewhere:**
+
+- **Demographics / market data (biggest win).** Buy source-backed data — US Census/ACS (free), Esri, Attom, Precisely, Regrid — instead of AI-*generating* it. That turns demographics from Grade-C "AI-inferred" into Grade-A "source-exact": cheaper *and* more accurate at once, directly shrinking the demographics-accuracy item.
+- **Address / geocode validation** (Smarty, Google, Mapbox) — deterministic normalization feeding the schema-validation layer as Grade-A.
+- **Payments/tiers** — Stripe Payment Links / hosted pricing table (already Stripe in the brief): mostly configuration, not a custom checkout build.
+- **Email status + engagement** — MailerLite's own API/webhooks already expose both; buy the tracking rather than build it.
+- **OM/PDF rendering** — template-PDF vendors exist, but Tera already renders deterministically for free; only worth it if the cost there is design polish, not logic. Recommend keeping Tera.
+
+**How to decide without guessing:** a short **extraction bake-off in Phase 0** — run 2-3 candidates against a small labeled set of your real OMs/rent rolls, score them on the §3a rubric thresholds, and pick on the numbers. That keeps the vendor choice evidence-based and folds into the discovery work already scoped below.
+
 ---
 
 ## 4. Roll-up (de-duped, shared primitives built once)
@@ -219,7 +243,7 @@ The strongest, most defensible version of the accuracy story is to split the pip
 I recommend leading with a scoped first tranche rather than a single fixed bid on the whole list — it controls Artur's spend and lets the team validate the new code structure on live data before committing the full budget.
 
 **Phase 0 — Discovery (1 week)**
-Repo/data-model audit + production-safety plan + tight milestone plan. **24-44h → $2.4k-$4.4k.** Credited toward Phase 1 if we proceed.
+Repo/data-model audit + production-safety plan + tight milestone plan, plus a short **document-extraction bake-off** — 2-3 vendors scored against a labeled sample of your real OMs on the §3a rubric, so the build-vs-buy call (§3c) is made on data, not vendor claims. **24-44h → $2.4k-$4.4k.** Credited toward Phase 1 if we proceed.
 
 **Phase 1 — First production tranche (260-380h → $26k-$38k)**
 Highest-value admin improvements + broker application/approval flow + one asset class of the listing/OM rebuild. Weekly demos and review points.
@@ -249,7 +273,7 @@ Additional asset classes, full document extraction, OM polish, remaining integra
 
 ## 7. Sources
 
-- Feature brief: `tasks/recruit/rei-trades/reitrades-v1.2.md` (and V1.2 PDF)
+- Feature brief: your V1.2 feature list + Listing Creation Steps PDF
 - Platform demo: https://www.youtube.com/watch?v=1Q8RdnQwYLw
 - Site: https://reitrades.com/ · Sellers: https://reitrades.com/sellers/ · Buyers: https://reitrades.com/buyers/
 - Artur Muller: https://www.linkedin.com/in/mullerartur/

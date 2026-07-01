@@ -1,0 +1,96 @@
+@page {
+  size: Letter;
+  margin: 0.75in 0.8in 0.8in 0.8in;
+  @bottom-center {
+    content: "REItrades V1.2 — Proposal & Estimate · Brian Takita · $100/hr";
+    font-size: 8pt;
+    color: #888;
+  }
+  @bottom-right {
+    content: "Page " counter(page) " of " counter(pages);
+    font-size: 8pt;
+    color: #888;
+  }
+}
+
+html {
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 10.5pt;
+  line-height: 1.45;
+  color: #1a1a1a;
+}
+
+body { margin: 0; }
+
+h1 {
+  font-size: 20pt;
+  color: #0b3d5c;
+  border-bottom: 3px solid #0b3d5c;
+  padding-bottom: 6px;
+  margin: 0 0 4px 0;
+}
+
+h2 {
+  font-size: 14pt;
+  color: #0b3d5c;
+  margin-top: 22px;
+  border-bottom: 1px solid #cbd5db;
+  padding-bottom: 3px;
+  break-after: avoid;
+}
+
+h3 {
+  font-size: 11.5pt;
+  color: #14507a;
+  margin-top: 16px;
+  break-after: avoid;
+}
+
+p, li { orphans: 3; widows: 3; }
+
+strong { color: #0b3d5c; }
+
+hr {
+  border: none;
+  border-top: 1px solid #dbe2e8;
+  margin: 20px 0;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 10px 0 16px 0;
+  font-size: 9.5pt;
+  break-inside: auto;
+}
+
+thead { display: table-header-group; }
+tr { break-inside: avoid; }
+
+th {
+  background: #0b3d5c;
+  color: #fff;
+  text-align: left;
+  padding: 6px 8px;
+  font-weight: 600;
+}
+
+td {
+  padding: 5px 8px;
+  border-bottom: 1px solid #e3e8ec;
+  vertical-align: top;
+}
+
+tbody tr:nth-child(even) td { background: #f4f7f9; }
+
+code {
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 9pt;
+  background: #eef2f5;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+a { color: #14507a; text-decoration: none; }
+
+del { color: #999; }

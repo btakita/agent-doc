@@ -849,6 +849,19 @@ should be deleted during extraction.
   favor of `generate_hash_n(..., 4)`. Static guards now reject these old Rust
   API names so the no-shim policy applies to cleanup work as well as new
   extractions.
+- A four-worker fan-out extracted another pure-helper layer with disjoint write
+  scopes. `agent-doc-template::todo_patch_guard` now owns destructive
+  `patch:todo` checklist-count guard policy while write orchestration imports it
+  directly. `agent-doc-turn::response_replay` now owns captured-response
+  materialization detection, including template response probes and transient
+  marker normalization; orchestration, git, repair, and closeout callers use the
+  focused turn API directly. `agent-doc-queue::document_queue` no longer
+  re-exports queue projection marker helpers; queue/orchestration/plan callers
+  import marker policy from `agent-doc-document::queue_projection` directly.
+  `agent-doc-markdown-ast` removed deprecated id-keyed mutation wrappers in
+  favor of node-key APIs, and watch tests now call the current discovery API
+  directly instead of a test-only compatibility helper. Static guards cover all
+  removed Rust API names.
 
 ### Earlier closure finding
 

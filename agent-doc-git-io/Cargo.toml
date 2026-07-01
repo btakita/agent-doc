@@ -1,0 +1,17 @@
+[package]
+name = "agent-doc-git-io"
+version = "0.34.65"
+edition = "2024"
+description = "Git command I/O adapters for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_git_io"
+
+[dependencies]
+agent-doc-git = { path = "../agent-doc-git", version = "0.34.65" }
+anyhow = "1"
+
+[dev-dependencies]
+tempfile = "3"

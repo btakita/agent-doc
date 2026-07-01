@@ -2400,7 +2400,7 @@ fn main() -> anyhow::Result<()> {
             file,
             restore,
             diff,
-        } => agent_doc_orchestration::checkpoint::run(&file, restore.as_deref(), diff.as_deref()),
+        } => agent_doc_git_io::checkpoint::run(&file, restore.as_deref(), diff.as_deref()),
         Commands::Gc { root, dry_run } => {
             let result = agent_doc_orchestration::gc::run(root.as_deref(), dry_run)?;
             if dry_run {

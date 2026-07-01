@@ -12449,24 +12449,83 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         "partial_staging should call the focused git porcelain parser directly"
     );
 
+    let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    assert!(
+        workspace_manifest.contains("\"agent-doc-git-io\""),
+        "agent-doc-git-io should be a workspace member"
+    );
+    assert!(
+        workspace_manifest.contains("agent-doc-git-io = { path = \"agent-doc-git-io\""),
+        "CLI shell should depend on git IO directly"
+    );
+
+    let orchestration_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
+    assert!(
+        orchestration_manifest.contains("agent-doc-git-io = { path = \"../agent-doc-git-io\""),
+        "orchestration should depend on git IO directly for sibling commits"
+    );
+
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    for forbidden in ["pub mod checkpoint;", "pub mod git_sibling;"] {
+        assert!(
+            !orchestration_lib.contains(forbidden),
+            "orchestration must not expose a git IO facade: {forbidden}"
+        );
+    }
+
     let checkpoint_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/checkpoint.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/checkpoint.rs")).unwrap();
     for forbidden in [
         "pub struct RecoveryTag",
         "fn doc_stem(",
         "fn parse_recovery_tags(",
         "pub use agent_doc_git::RecoveryTag",
         "pub(crate) use agent_doc_git::RecoveryTag",
+        "agent_doc_orchestration::",
     ] {
         assert!(
             !checkpoint_source.contains(forbidden),
-            "checkpoint.rs must stay a git command adapter, not re-own or facade recovery tag policy: {forbidden}"
+            "git IO checkpoint must stay a git command adapter, not re-own or facade recovery tag policy: {forbidden}"
         );
     }
     assert!(
         checkpoint_source
             .contains("use agent_doc_git::{RecoveryTag, doc_stem, parse_recovery_tags};"),
-        "checkpoint.rs should import focused recovery tag policy directly"
+        "git IO checkpoint should import focused recovery tag policy directly"
+    );
+
+    let sibling_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/sibling.rs")).unwrap();
+    assert!(
+        sibling_source.contains("pub fn commit_siblings_for_session_doc("),
+        "git IO should own sibling commit I/O"
+    );
+    assert!(
+        !sibling_source.contains("agent_doc_orchestration::"),
+        "git IO sibling commits must not reach back through orchestration"
+    );
+
+    let main = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
+    assert!(
+        main.contains("agent_doc_git_io::checkpoint::run("),
+        "checkpoint command should call git IO directly"
+    );
+    assert!(
+        !main.contains("agent_doc_orchestration::checkpoint::"),
+        "checkpoint command must not route through orchestration"
+    );
+
+    let write =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
+    assert!(
+        write.contains("agent_doc_git_io::sibling::commit_siblings_for_session_doc"),
+        "write commit flow should call git IO sibling commits directly"
+    );
+    assert!(
+        !write.contains("crate::git_sibling::"),
+        "write commit flow must not route sibling commits through orchestration"
     );
 
     for relative in [

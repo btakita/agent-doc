@@ -1732,7 +1732,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                 .cloned()
                 .zip(options.commit_sibling_message.iter().cloned())
                 .collect();
-            crate::git_sibling::commit_siblings_for_session_doc(file, &pairs)?;
+            agent_doc_git_io::sibling::commit_siblings_for_session_doc(file, &pairs)?;
         }
         primary
     } else {

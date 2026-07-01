@@ -16,6 +16,7 @@ members = [
     "agent-doc-topic",
     "agent-doc-fs",
     "agent-doc-git",
+    "agent-doc-git-io",
     "agent-doc-model-tier",
     "agent-doc-ipc-protocol",
     "agent-doc-plugin-owner",
@@ -106,6 +107,7 @@ agent-doc-ffi = { path = "agent-doc-ffi", version = "0.34.65" }
 agent-doc-frontmatter = { path = "agent-doc-frontmatter", version = "0.34.65" }
 agent-doc-fs = { path = "agent-doc-fs", version = "0.34.65" }
 agent-doc-hash = { path = "agent-doc-hash", version = "0.34.65" }
+agent-doc-git-io = { path = "agent-doc-git-io", version = "0.34.65" }
 agent-doc-harness = { path = "agent-doc-harness", version = "0.34.65" }
 agent-doc-ipc-protocol = { path = "agent-doc-ipc-protocol", version = "0.34.65" }
 agent-doc-markdown-ast = { path = "agent-doc-markdown-ast", version = "0.34.65" }

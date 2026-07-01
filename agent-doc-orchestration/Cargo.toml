@@ -32,6 +32,7 @@ agent-doc-element-review = { path = "../agent-doc-element-review", version = "0.
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.65" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.65" }
 agent-doc-git = { path = "../agent-doc-git", version = "0.34.65" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.34.65" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.65" }
 agent-doc-harness = { path = "../agent-doc-harness", version = "0.34.65" }
 agent-doc-ipc-protocol = { path = "../agent-doc-ipc-protocol", version = "0.34.65" }

@@ -1145,14 +1145,16 @@ pub(crate) fn retry_route_after_busy_pane_auto_fix(
                 );
                 if !restart_via_supervisor_with_mode(file, session_id, "fresh") {
                     emit_busy_route_diagnostic(tmux, busy_pane, file, harness);
-                    anyhow::bail!(format_busy_existing_pane_error(
-                        file,
-                        busy_pane,
-                        harness,
-                        provenance,
-                        fallback_detail.as_deref(),
-                        true
-                    ));
+                    anyhow::bail!(
+                        agent_doc_controller::dispatch::format_busy_existing_pane_error(
+                            file.display(),
+                            busy_pane,
+                            &harness.binary,
+                            provenance,
+                            fallback_detail.as_deref(),
+                            true
+                        )
+                    );
                 }
                 wait_for_busy_restart_handoff(tmux, file, file_path, session_id, busy_pane);
                 return resolve_or_create_pane_with_auto_fix_retry(
@@ -1213,14 +1215,16 @@ pub(crate) fn retry_route_after_busy_pane_auto_fix(
                         detail.as_str(),
                     );
                 }
-                anyhow::bail!(format_busy_existing_pane_error(
-                    file,
-                    busy_pane,
-                    harness,
-                    provenance,
-                    Some(detail.as_str()),
-                    auto_fix_attempted || allow_auto_fix_retry
-                ));
+                anyhow::bail!(
+                    agent_doc_controller::dispatch::format_busy_existing_pane_error(
+                        file.display(),
+                        busy_pane,
+                        &harness.binary,
+                        provenance,
+                        Some(detail.as_str()),
+                        auto_fix_attempted || allow_auto_fix_retry
+                    )
+                );
             }
             BusyPaneInterruptRecoveryOutcome::TimedOut => {
                 emit_busy_route_diagnostic(tmux, busy_pane, file, harness);
@@ -1237,14 +1241,16 @@ pub(crate) fn retry_route_after_busy_pane_auto_fix(
                         "bounded interrupt recovery never restored a dispatch-ready prompt",
                     );
                 }
-                anyhow::bail!(format_busy_existing_pane_error(
-                    file,
-                    busy_pane,
-                    harness,
-                    provenance,
-                    Some("bounded interrupt recovery never restored a dispatch-ready prompt"),
-                    auto_fix_attempted || allow_auto_fix_retry
-                ));
+                anyhow::bail!(
+                    agent_doc_controller::dispatch::format_busy_existing_pane_error(
+                        file.display(),
+                        busy_pane,
+                        &harness.binary,
+                        provenance,
+                        Some("bounded interrupt recovery never restored a dispatch-ready prompt"),
+                        auto_fix_attempted || allow_auto_fix_retry
+                    )
+                );
             }
             BusyPaneInterruptRecoveryOutcome::Skipped => {}
         }
@@ -1265,14 +1271,16 @@ pub(crate) fn retry_route_after_busy_pane_auto_fix(
                 .unwrap_or("still not showing an idle prompt"),
         );
     }
-    anyhow::bail!(format_busy_existing_pane_error(
-        file,
-        busy_pane,
-        harness,
-        provenance,
-        fallback_detail.as_deref(),
-        auto_fix_attempted || allow_auto_fix_retry
-    ));
+    anyhow::bail!(
+        agent_doc_controller::dispatch::format_busy_existing_pane_error(
+            file.display(),
+            busy_pane,
+            &harness.binary,
+            provenance,
+            fallback_detail.as_deref(),
+            auto_fix_attempted || allow_auto_fix_retry
+        )
+    );
 }
 
 #[allow(clippy::too_many_arguments)]

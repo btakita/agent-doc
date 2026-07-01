@@ -24,6 +24,10 @@ use agent_doc_supervisor::{
         ready_busy_conflict_reconcile_decision, reconcile_stale_busy_idle_queue_state,
         stale_busy_idle_reconcile_decision,
     },
+    idle_watch::{
+        SupervisorAutoInstallPhase, idle_queue_context_reset_ops_log_message,
+        paused_idle_watch_should_skip, supervisor_auto_install_pane_message,
+    },
     lifecycle::{
         MAX_CYCLE_OPEN_DEFER_TICKS, MAX_REEXEC_ESCALATIONS, SupervisorInstallAction,
         SupervisorRecycleAction, SupervisorRestartAction, cycle_open_defer_escalates,
@@ -184,38 +188,6 @@ fn record_convergence_gate_blocked(
     }
 }
 
-/// `#supinstallfeedback` — phases of the supervisor dogfood auto-install, used to
-/// build the user-visible owned-pane status. The rebuild is a ~1-minute blocking
-/// `cargo install` that previously produced NO visible pane feedback: the pane was
-/// left showing the post-`claude exited cleanly` `Press Enter to restart` keepalive
-/// while progress went only to the redirected supervisor stderr / session log, so the
-/// operator perceived a stall ("JB `Run Agent Doc` stalled without feedback").
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SupervisorAutoInstallPhase {
-    Started,
-    Succeeded,
-    Failed,
-}
-
-/// Build the owned-pane status message for an auto-install phase. Kept pure +
-/// separate so the wording is unit-testable. The `Started` line explicitly tells
-/// the operator NOT to press Enter (the visible keepalive prompt makes the stalled
-/// rebuild look like it is waiting on a keypress) and that the supervisor restarts
-/// itself when the build lands.
-fn supervisor_auto_install_pane_message(phase: SupervisorAutoInstallPhase) -> &'static str {
-    match phase {
-        SupervisorAutoInstallPhase::Started => {
-            "agent-doc: rebuilding the freshly-committed binary (~1 min) — do NOT press Enter; the supervisor auto-restarts when the build finishes"
-        }
-        SupervisorAutoInstallPhase::Succeeded => {
-            "agent-doc: rebuild complete — recycling onto the fresh binary"
-        }
-        SupervisorAutoInstallPhase::Failed => {
-            "agent-doc: auto-install failed — run the dogfood refresh to rebuild; staying on the current binary"
-        }
-    }
-}
-
 /// Surface the auto-install status on the owned tmux pane so the long blocking
 /// rebuild does not read as a stall (`#supinstallfeedback`). Best-effort: no owned
 /// pane (PTY-only) or a tmux failure falls back to stderr. The `Started` phase
@@ -284,54 +256,6 @@ fn idle_watch_active_queue_head(file: &Path) -> Option<String> {
     )
 }
 
-/// `#qstallguard` Layer C: should the supervisor idle-watch SKIP dispatch on a
-/// queue under an accepted `admin queue pause`?
-///
-/// An accepted pause is the `#rt83`/`#qflood` flood guard — it suppresses the
-/// *unattended re-injection flood*, NOT all draining (the sanctioned way to stop
-/// the loop entirely is `queue: stop` / a `--- stop` fence, never pause). Before
-/// this guard, pause unconditionally skipped, so a paused queue's ONLY drainer was
-/// the attended in-session `/loop`; when that loop stalled/abandoned the drain,
-/// the queue was stranded with no failsafe.
-///
-/// New rule: on a paused queue, skip ONLY when an in-session `/loop` owns the drain
-/// (a fresh drain-owner lease — defer to it) or there is no drainable head. With no
-/// loop owner AND a drainable head, the supervisor performs a SINGLE-OWNER failsafe
-/// drain (the caller falls through to the normal, fully-guarded
-/// [`idle_queue_drain_decision`], whose `turn_active` / route-in-flight / cooldown
-/// guards bound it to one dispatch per turn — never the 2/sec flood the pause
-/// guards against). Pure so it is unit-testable. `paused == false` is never a skip.
-pub fn paused_idle_watch_should_skip(
-    paused: bool,
-    has_drainable_head: bool,
-    loop_owner_lease_fresh: bool,
-) -> bool {
-    if !paused {
-        return false;
-    }
-    loop_owner_lease_fresh || !has_drainable_head
-}
-
-fn idle_queue_context_reset_ops_log_message(
-    file: &Path,
-    harness: &agent_doc_harness::HarnessConfig,
-    clear_cmd: &str,
-    target: &str,
-    active_head: &str,
-    reason: &str,
-) -> String {
-    format!(
-        "idle_queue_watch_context_reset file={} harness={} cmd={:?} target={} head_bytes={} head_sha256={} reason={:?}",
-        file.display(),
-        harness.binary,
-        clear_cmd,
-        target,
-        active_head.len(),
-        agent_doc_hash::content_hash(active_head),
-        reason,
-    )
-}
-
 fn log_idle_queue_context_reset_submit(
     file: &Path,
     shared: &SupervisorShared,
@@ -345,7 +269,7 @@ fn log_idle_queue_context_reset_submit(
         file,
         &idle_queue_context_reset_ops_log_message(
             file,
-            harness,
+            &harness.binary,
             clear_cmd,
             target,
             active_head,
@@ -2963,31 +2887,6 @@ mod tests {
     }
 
     #[test]
-    fn supervisor_auto_install_pane_message_started_warns_against_keypress() {
-        // #supinstallfeedback: the Started message must tell the operator the pane
-        // is rebuilding (not stalled) AND not to press Enter, since the visible
-        // `Press Enter to restart` keepalive otherwise reads as a stall waiting on
-        // a keypress.
-        let started = supervisor_auto_install_pane_message(SupervisorAutoInstallPhase::Started);
-        assert!(started.contains("rebuild"), "must mention the rebuild");
-        assert!(
-            started.contains("do NOT press Enter"),
-            "must warn against the misleading keepalive keypress"
-        );
-        assert!(
-            started.contains("auto-restart"),
-            "must promise the supervisor restarts itself"
-        );
-        // Terminal phases are distinct, non-empty, and name their outcome.
-        let ok = supervisor_auto_install_pane_message(SupervisorAutoInstallPhase::Succeeded);
-        let fail = supervisor_auto_install_pane_message(SupervisorAutoInstallPhase::Failed);
-        assert!(ok.contains("complete") && ok.contains("recycling"));
-        assert!(fail.contains("failed") && fail.contains("current binary"));
-        assert_ne!(started, ok);
-        assert_ne!(ok, fail);
-    }
-
-    #[test]
     fn open_agent_doc_cycle_defers_self_recycle_committed_cycle_allows_it() {
         // `#midturn-recycle-resume` regression: a recycle in the preflight→finalize
         // window must NOT fire (it would `execve` mid-cycle, sever the in-flight IPC
@@ -3073,29 +2972,6 @@ mod tests {
     fn cycle_open_expression_treats_inflight_ipc_as_open() {
         assert!(test_cycle_open_from_inflight(1));
         assert!(!test_cycle_open_from_inflight(0));
-    }
-
-    #[test]
-    fn paused_failsafe_drains_only_when_no_loop_owner_holds_a_drainable_head() {
-        // `#qstallguard` Layer C: pause defers to an in-session loop owner...
-        assert!(
-            paused_idle_watch_should_skip(true, true, true),
-            "loop owner present → defer (skip)"
-        );
-        // ...skips when there is nothing drainable...
-        assert!(
-            paused_idle_watch_should_skip(true, false, false),
-            "no drainable head → skip"
-        );
-        // ...but performs a single-owner failsafe drain when the loop abandoned the
-        // drain and a drainable head remains (this is the strand the pause caused).
-        assert!(
-            !paused_idle_watch_should_skip(true, true, false),
-            "paused + drainable + no loop owner → drain (do NOT skip)"
-        );
-        // An unpaused queue is never gated by this rule.
-        assert!(!paused_idle_watch_should_skip(false, true, false));
-        assert!(!paused_idle_watch_should_skip(false, false, true));
     }
 
     #[test]

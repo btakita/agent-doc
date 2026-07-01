@@ -195,6 +195,13 @@ pub fn resolve_absolute_file_path(file: &Path) -> PathBuf {
     }
 }
 
+/// Resolve `file` with [`resolve_absolute_file_path`] and canonicalize it when
+/// the resolved path exists.
+pub fn resolve_canonical_or_absolute_file_path(file: &Path) -> PathBuf {
+    let resolved = resolve_absolute_file_path(file);
+    resolved.canonicalize().unwrap_or(resolved)
+}
+
 /// Resolve a relative path against the git root (superproject root if in a submodule).
 /// Returns (git_root, resolved_file_path) so callers can run git commands in the correct repo.
 pub fn resolve_to_git_root(file: &Path) -> Result<(PathBuf, PathBuf)> {
@@ -550,6 +557,21 @@ mod tests {
             resolved, rel,
             "missing files should return the original path"
         );
+    }
+
+    #[test]
+    fn resolve_canonical_or_absolute_file_path_canonicalizes_existing_relative() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let tasks = root.join("tasks");
+        fs::create_dir_all(&tasks).unwrap();
+        let doc = tasks.join("plan.md");
+        fs::write(&doc, "# Plan\n").unwrap();
+
+        let _cwd = ScopedCurrentDir::set(&root);
+
+        let resolved = resolve_canonical_or_absolute_file_path(Path::new("tasks/../tasks/plan.md"));
+        assert_eq!(resolved, doc);
     }
 
     #[test]

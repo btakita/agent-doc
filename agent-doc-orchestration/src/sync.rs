@@ -225,7 +225,6 @@ mod pane_repair;
 pub(crate) use pane_repair::*;
 
 const RENAME_DEBOUNCE_TTL_SECS: u64 = 5;
-const SYNC_FRONTMATTER_STATUS_PREFIX: &str = "[agent-doc sync] malformed frontmatter";
 const SYNC_WINDOW_RESOLUTION_BUDGET: Duration = Duration::from_millis(250);
 const SYNC_PRUNE_BUDGET: Duration = Duration::from_millis(1_000);
 const SYNC_PRUNE_SUBPHASE_BUDGET: Duration = Duration::from_millis(250);
@@ -238,8 +237,6 @@ const SYNC_ROUTER_BUDGET: Duration = Duration::from_millis(1_000);
 const SYNC_SAFE_PASSIVE_TOTAL_BUDGET: Duration = Duration::from_millis(1_000);
 const SYNC_LOCK_WAIT_BUDGET: Duration = Duration::from_secs(3);
 const SYNC_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(50);
-const SAFE_PASSIVE_SYNC_LOCK_SKIPPED_MARKER: &str =
-    "[sync] safe_passive_sync_lock_contention_retry";
 const STALE_SYNC_LOCK_OWNER_AGE: Duration = Duration::from_secs(300);
 
 mod lock;
@@ -1712,8 +1709,10 @@ fn run_with_options_internal(
         auto_start_mode,
     );
     if matches!(auto_start_mode, AutoStartMode::SafePassive) && !lock_guard.is_acquired() {
-        let message =
-            safe_passive_lock_contention_message(sync_lock_elapsed, sync_lock_wait_budget);
+        let message = agent_doc_sync::safe_passive_lock_contention_message(
+            sync_lock_elapsed,
+            sync_lock_wait_budget,
+        );
         eprintln!("{}", message);
         sync_log(&message);
         return Ok(());
@@ -5228,11 +5227,11 @@ mod tests {
         surface_frontmatter_status(&doc, "auto-start", &err);
 
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains(SYNC_FRONTMATTER_STATUS_PREFIX));
+        assert!(updated.contains(agent_doc_sync::SYNC_FRONTMATTER_STATUS_PREFIX));
         assert!(updated.contains("sync auto-start frontmatter"));
 
         let snapshot = snapshot::load(&doc).unwrap().unwrap();
-        assert!(snapshot.contains(SYNC_FRONTMATTER_STATUS_PREFIX));
+        assert!(snapshot.contains(agent_doc_sync::SYNC_FRONTMATTER_STATUS_PREFIX));
 
         std::fs::write(
             &doc,
@@ -5249,12 +5248,12 @@ mod tests {
 
         let cleared = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            !cleared.contains(SYNC_FRONTMATTER_STATUS_PREFIX),
+            !cleared.contains(agent_doc_sync::SYNC_FRONTMATTER_STATUS_PREFIX),
             "managed sync warning should be removed once parsing succeeds"
         );
         let cleared_snapshot = snapshot::load(&doc).unwrap().unwrap();
         assert!(
-            !cleared_snapshot.contains(SYNC_FRONTMATTER_STATUS_PREFIX),
+            !cleared_snapshot.contains(agent_doc_sync::SYNC_FRONTMATTER_STATUS_PREFIX),
             "snapshot should track the cleared status too"
         );
     }

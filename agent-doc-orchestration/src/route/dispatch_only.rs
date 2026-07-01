@@ -771,14 +771,16 @@ pub(crate) fn retry_dispatch_only_after_busy_pane(
                 );
                 if !restart_via_supervisor_with_mode(file, session_id, "fresh") {
                     emit_busy_route_diagnostic(tmux, busy_pane, file, harness);
-                    anyhow::bail!(format_busy_existing_pane_error(
-                        file,
-                        busy_pane,
-                        harness,
-                        provenance,
-                        fallback_detail.as_deref(),
-                        true
-                    ));
+                    anyhow::bail!(
+                        agent_doc_controller::dispatch::format_busy_existing_pane_error(
+                            file.display(),
+                            busy_pane,
+                            &harness.binary,
+                            provenance,
+                            fallback_detail.as_deref(),
+                            true
+                        )
+                    );
                 }
                 wait_for_busy_restart_handoff(tmux, file, file_path, session_id, busy_pane);
                 return dispatch_only_reopen_existing_pane(
@@ -836,38 +838,44 @@ pub(crate) fn retry_dispatch_only_after_busy_pane(
             BusyPaneInterruptRecoveryOutcome::Blocked { reason } => {
                 emit_busy_route_diagnostic(tmux, busy_pane, file, harness);
                 let detail = format!("bounded interrupt recovery still shows {reason}");
-                anyhow::bail!(format_busy_existing_pane_error(
-                    file,
-                    busy_pane,
-                    harness,
-                    provenance,
-                    Some(detail.as_str()),
-                    auto_fix_attempted || allow_auto_fix_retry
-                ));
+                anyhow::bail!(
+                    agent_doc_controller::dispatch::format_busy_existing_pane_error(
+                        file.display(),
+                        busy_pane,
+                        &harness.binary,
+                        provenance,
+                        Some(detail.as_str()),
+                        auto_fix_attempted || allow_auto_fix_retry
+                    )
+                );
             }
             BusyPaneInterruptRecoveryOutcome::TimedOut => {
                 emit_busy_route_diagnostic(tmux, busy_pane, file, harness);
-                anyhow::bail!(format_busy_existing_pane_error(
-                    file,
-                    busy_pane,
-                    harness,
-                    provenance,
-                    Some("bounded interrupt recovery never restored a dispatch-ready prompt"),
-                    auto_fix_attempted || allow_auto_fix_retry
-                ));
+                anyhow::bail!(
+                    agent_doc_controller::dispatch::format_busy_existing_pane_error(
+                        file.display(),
+                        busy_pane,
+                        &harness.binary,
+                        provenance,
+                        Some("bounded interrupt recovery never restored a dispatch-ready prompt"),
+                        auto_fix_attempted || allow_auto_fix_retry
+                    )
+                );
             }
             BusyPaneInterruptRecoveryOutcome::Skipped => {}
         }
     }
     emit_busy_route_diagnostic(tmux, busy_pane, file, harness);
-    anyhow::bail!(format_busy_existing_pane_error(
-        file,
-        busy_pane,
-        harness,
-        provenance,
-        fallback_detail.as_deref(),
-        auto_fix_attempted || allow_auto_fix_retry
-    ));
+    anyhow::bail!(
+        agent_doc_controller::dispatch::format_busy_existing_pane_error(
+            file.display(),
+            busy_pane,
+            &harness.binary,
+            provenance,
+            fallback_detail.as_deref(),
+            auto_fix_attempted || allow_auto_fix_retry
+        )
+    );
 }
 
 pub(crate) fn dispatch_only_blocker_reason(

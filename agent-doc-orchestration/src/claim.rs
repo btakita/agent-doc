@@ -159,11 +159,6 @@ fn enforce_cross_session_claim(
     }
 }
 
-fn normalize_claim_path(path: &Path) -> std::path::PathBuf {
-    let resolved = agent_doc_git_io::dirs::resolve_absolute_file_path(path);
-    resolved.canonicalize().unwrap_or(resolved)
-}
-
 pub fn run(
     file: &Path,
     position: Option<&str>,
@@ -319,7 +314,7 @@ pub fn run(
                     cwd: &entry.cwd,
                     window: &entry.window,
                 },
-                normalize_claim_path,
+                agent_doc_git_io::dirs::resolve_canonical_or_absolute_file_path,
             );
             if entry.pane == pane_id
                 && !same_document
@@ -546,7 +541,7 @@ fn validate_file_claim(file: &Path) {
                     cwd: &entry.cwd,
                     window: &entry.window,
                 },
-                normalize_claim_path,
+                agent_doc_git_io::dirs::resolve_canonical_or_absolute_file_path,
             ) && !sessions::Multiplexer::pane_alive(&tmux, &entry.pane)
         })
         .map(|(k, e)| (k.clone(), e.pane.clone()))

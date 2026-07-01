@@ -9556,6 +9556,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn route_busy_diagnostic_message(",
         "pub struct RouteBusyQueuedDiagnosticFacts",
         "pub fn route_busy_queued_diagnostic_message(",
+        "pub fn format_busy_existing_pane_error(",
         "pub struct DuplicatePanePolicyErrorFacts",
         "pub fn duplicate_pane_policy_error_message(",
         "pub struct RouteDispatchBugReportItemFacts",
@@ -9906,6 +9907,14 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_busy_pane_source.contains("existing_pane_ready_timeout(cfg!(test))")
             && route_busy_pane_source.contains("fresh_route_start_ack_timeout(cfg!(test))"),
         "route/busy_pane.rs should pass route/test facts into focused controller timeout policy without wrappers"
+    );
+    assert!(
+        !route_busy_pane_source.contains("fn format_busy_existing_pane_error(")
+            && route_dispatch_only_source
+                .contains("agent_doc_controller::dispatch::format_busy_existing_pane_error(")
+            && route_pane_resolution_source
+                .contains("agent_doc_controller::dispatch::format_busy_existing_pane_error("),
+        "busy-pane user-facing error formatting should live in controller dispatch and route callers should use it directly"
     );
     assert!(
         route_pane_resolution_source.contains("startup_miss_route_facts(")
@@ -10755,6 +10764,12 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     );
     assert!(
         manifest_dir
+            .join("agent-doc-supervisor/src/idle_watch.rs")
+            .exists(),
+        "agent-doc-supervisor must own pure supervisor idle-watch policy"
+    );
+    assert!(
+        manifest_dir
             .join("agent-doc-supervisor/src/input.rs")
             .exists(),
         "agent-doc-supervisor must own pure supervisor input byte policy"
@@ -10818,6 +10833,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/reexec.rs")).unwrap();
     let supervisor_startup_miss =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/startup_miss.rs")).unwrap();
+    let supervisor_idle_watch =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/idle_watch.rs")).unwrap();
     let supervisor_io_startup_miss =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/startup_miss.rs"))
             .unwrap();
@@ -11200,6 +11217,17 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "agent-doc-supervisor lifecycle policy should own the write_wedged evidence classifier"
     );
     for required_snippet in [
+        "pub enum SupervisorAutoInstallPhase",
+        "pub fn supervisor_auto_install_pane_message(",
+        "pub fn paused_idle_watch_should_skip(",
+        "pub fn idle_queue_context_reset_ops_log_message(",
+    ] {
+        assert!(
+            supervisor_idle_watch.contains(required_snippet),
+            "agent-doc-supervisor idle_watch should own pure idle-watch policy/messages directly: {required_snippet}"
+        );
+    }
+    for required_snippet in [
         "pub fn start_session_retryable_during_recycle(",
         "pub fn recycle_interrupted_resubmit_should_wait(",
     ] {
@@ -11257,6 +11285,24 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         idle_watch.contains("agent_doc_supervisor::selfkill::supervisor_self_kill_action"),
         "idle_watch should call focused supervisor self-kill policy directly"
     );
+    assert!(
+        supervisor_lib.contains("pub mod idle_watch;")
+            && idle_watch.contains("agent_doc_supervisor::{")
+            && idle_watch.contains("idle_watch::{"),
+        "idle_watch should call focused supervisor idle-watch policy directly"
+    );
+    for forbidden_snippet in [
+        "enum SupervisorAutoInstallPhase",
+        "fn supervisor_auto_install_pane_message(",
+        "pub fn paused_idle_watch_should_skip(",
+        "fn paused_idle_watch_should_skip(",
+        "fn idle_queue_context_reset_ops_log_message(",
+    ] {
+        assert!(
+            !idle_watch.contains(forbidden_snippet),
+            "orchestration idle_watch must not re-own pure supervisor idle-watch policy: {forbidden_snippet}"
+        );
+    }
     assert!(
         supervisor_selfkill
             .contains("agent_doc_supervisor::selfkill::start_route_owned_doc_from_args"),
@@ -12339,10 +12385,17 @@ fn test_extracted_pure_layers_keep_focused_owners() {
     }
     let claim =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/claim.rs")).unwrap();
+    let git_io_dirs =
+        fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/dirs.rs")).unwrap();
+    assert!(
+        git_io_dirs.contains("pub fn resolve_canonical_or_absolute_file_path("),
+        "agent-doc-git-io should own claim path canonicalization helper"
+    );
     for forbidden in [
         "fn registry_entry_matches_claimed_document(",
         "fn claimed_session_label(",
         "fn find_alive_window_in_registry(",
+        "fn normalize_claim_path(",
     ] {
         assert!(
             !claim.contains(forbidden),
@@ -12352,7 +12405,8 @@ fn test_extracted_pure_layers_keep_focused_owners() {
     assert!(
         claim.contains("agent_doc_supervisor::claim_binding::{")
             && claim.contains("ClaimRegistryEntry")
-            && claim.contains("registry_entry_matches_claimed_document("),
+            && claim.contains("registry_entry_matches_claimed_document(")
+            && claim.contains("agent_doc_git_io::dirs::resolve_canonical_or_absolute_file_path"),
         "claim.rs should call focused claim-binding policy directly"
     );
 }
@@ -16902,6 +16956,10 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         "pub fn sync_prune_state_path",
         "pub fn latency_budget_status",
         "pub fn sync_latency_message",
+        "pub const SYNC_FRONTMATTER_STATUS_PREFIX",
+        "pub fn sync_frontmatter_status_message",
+        "pub const SAFE_PASSIVE_SYNC_LOCK_SKIPPED_MARKER",
+        "pub fn safe_passive_lock_contention_message",
         "pub fn sanitize_stamp_component",
         "pub fn sync_prune_fingerprint",
         "pub struct SyncPruneState",
@@ -16930,6 +16988,13 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
 
     let sync_orchestration =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync.rs")).unwrap();
+    let sync_frontmatter_status = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/sync/frontmatter_status.rs"),
+    )
+    .unwrap();
+    let sync_safe_passive =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/sync/safe_passive.rs"))
+            .unwrap();
     let route_session_resolution = fs::read_to_string(
         manifest_dir.join("agent-doc-orchestration/src/route/session_resolution.rs"),
     )
@@ -16951,6 +17016,10 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         "fn sync_prune_state_path_for_sync",
         "fn latency_budget_status",
         "fn sync_latency_message",
+        "const SYNC_FRONTMATTER_STATUS_PREFIX",
+        "fn sync_frontmatter_status_message",
+        "const SAFE_PASSIVE_SYNC_LOCK_SKIPPED_MARKER",
+        "fn safe_passive_lock_contention_message",
         "fn sanitize_stamp_component",
         "fn sync_prune_fingerprint",
         "struct SyncPruneState",
@@ -16972,8 +17041,10 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         "fn registry_file_for_target",
     ] {
         assert!(
-            !sync_orchestration.contains(forbidden_snippet),
-            "orchestration sync.rs must not re-own or facade sync scope policy: {forbidden_snippet}"
+            !sync_orchestration.contains(forbidden_snippet)
+                && !sync_frontmatter_status.contains(forbidden_snippet)
+                && !sync_safe_passive.contains(forbidden_snippet),
+            "orchestration sync modules must not re-own or facade sync scope policy: {forbidden_snippet}"
         );
     }
     for forbidden_snippet in [
@@ -16997,6 +17068,9 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
             && sync_orchestration.contains("is_file_rename")
             && sync_orchestration.contains("latency_budget_status")
             && sync_orchestration.contains("sync_latency_message")
+            && sync_orchestration.contains("agent_doc_sync::safe_passive_lock_contention_message")
+            && sync_frontmatter_status.contains("agent_doc_sync::sync_frontmatter_status_message")
+            && sync_frontmatter_status.contains("agent_doc_sync::SYNC_FRONTMATTER_STATUS_PREFIX")
             && sync_orchestration.contains("sync_prune_state_update")
             && sync_orchestration.contains("planned_stash_window_indices")
             && sync_orchestration.contains("AutoStartMode")

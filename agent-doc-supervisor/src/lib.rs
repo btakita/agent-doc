@@ -13,6 +13,7 @@ pub mod config;
 pub mod crash_policy;
 pub mod handoff;
 pub mod idle_reconcile;
+pub mod idle_watch;
 pub mod input;
 pub mod lifecycle;
 pub mod recycle_inflight;

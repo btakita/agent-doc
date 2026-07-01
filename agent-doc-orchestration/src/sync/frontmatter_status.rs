@@ -10,13 +10,6 @@ pub(crate) fn parse_frontmatter_for_sync<'a>(
         .map_err(|err| anyhow::anyhow!("sync {} frontmatter: {}", phase, err))
 }
 
-pub(crate) fn sync_frontmatter_status_message(phase: &str, err: &anyhow::Error) -> String {
-    format!(
-        "{} during {}.\n\n{}",
-        SYNC_FRONTMATTER_STATUS_PREFIX, phase, err
-    )
-}
-
 pub(crate) fn write_sync_status(file: &Path, text: &str) -> Result<bool> {
     let doc = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {} for sync status update", file.display()))?;
@@ -51,7 +44,7 @@ pub(crate) fn write_sync_status(file: &Path, text: &str) -> Result<bool> {
 }
 
 pub(crate) fn surface_frontmatter_status(file: &Path, phase: &str, err: &anyhow::Error) {
-    let text = sync_frontmatter_status_message(phase, err);
+    let text = agent_doc_sync::sync_frontmatter_status_message(phase, err);
     match write_sync_status(file, &text) {
         Ok(true) => {
             let log = format!(
@@ -93,7 +86,7 @@ pub(crate) fn clear_frontmatter_status(file: &Path) {
     if !status
         .content(&doc)
         .trim_start()
-        .starts_with(SYNC_FRONTMATTER_STATUS_PREFIX)
+        .starts_with(agent_doc_sync::SYNC_FRONTMATTER_STATUS_PREFIX)
     {
         return;
     }

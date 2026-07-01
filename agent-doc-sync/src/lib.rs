@@ -9,6 +9,10 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+pub const SYNC_FRONTMATTER_STATUS_PREFIX: &str = "[agent-doc sync] malformed frontmatter";
+pub const SAFE_PASSIVE_SYNC_LOCK_SKIPPED_MARKER: &str =
+    "[sync] safe_passive_sync_lock_contention_retry";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AutoStartMode {
     Full,
@@ -152,6 +156,22 @@ pub fn sync_latency_message(
         budget.as_millis(),
         latency_budget_status(elapsed, budget),
         mode_label
+    )
+}
+
+pub fn sync_frontmatter_status_message(phase: &str, err: &anyhow::Error) -> String {
+    format!(
+        "{} during {}.\n\n{}",
+        SYNC_FRONTMATTER_STATUS_PREFIX, phase, err
+    )
+}
+
+pub fn safe_passive_lock_contention_message(elapsed: Duration, budget: Duration) -> String {
+    format!(
+        "{} phase=sync_lock_wait elapsed_ms={} budget_ms={} status=over_budget coalesced=skipped_stale action=retry",
+        SAFE_PASSIVE_SYNC_LOCK_SKIPPED_MARKER,
+        elapsed.as_millis(),
+        budget.as_millis()
     )
 }
 
@@ -534,6 +554,40 @@ mod tests {
             controller.contains("phase=controller_actor_lookup"),
             "{controller}"
         );
+    }
+
+    #[test]
+    fn sync_frontmatter_status_message_includes_prefix_phase_and_error() {
+        let err = anyhow::anyhow!("invalid YAML frontmatter in tasks/bad.md");
+        let message = sync_frontmatter_status_message("auto-start", &err);
+
+        assert!(
+            message.starts_with(SYNC_FRONTMATTER_STATUS_PREFIX),
+            "{message}"
+        );
+        assert!(
+            message.contains("during auto-start.\n\ninvalid YAML frontmatter in tasks/bad.md"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn safe_passive_lock_contention_message_is_retryable_and_visible() {
+        let message = safe_passive_lock_contention_message(
+            Duration::from_millis(125),
+            Duration::from_millis(100),
+        );
+
+        assert!(
+            message.contains(SAFE_PASSIVE_SYNC_LOCK_SKIPPED_MARKER),
+            "{message}"
+        );
+        assert!(message.contains("phase=sync_lock_wait"), "{message}");
+        assert!(message.contains("elapsed_ms=125"), "{message}");
+        assert!(message.contains("budget_ms=100"), "{message}");
+        assert!(message.contains("status=over_budget"), "{message}");
+        assert!(message.contains("coalesced=skipped_stale"), "{message}");
+        assert!(message.contains("action=retry"), "{message}");
     }
 
     #[test]

@@ -1265,6 +1265,30 @@ pub fn route_busy_queued_diagnostic_message(facts: RouteBusyQueuedDiagnosticFact
     )
 }
 
+pub fn format_busy_existing_pane_error(
+    file_display: impl std::fmt::Display,
+    pane: &str,
+    harness_binary: &str,
+    provenance: &str,
+    detail: Option<&str>,
+    auto_fix_attempted: bool,
+) -> String {
+    let detail_clause = detail
+        .map(|detail| format!(" ({detail})"))
+        .unwrap_or_default();
+    if auto_fix_attempted {
+        format!(
+            "registered pane {} for {} is still not showing an idle {} prompt{} after automatically applying `agent-doc fix {}` once; refusing to inject a routed trigger into a busy session ({})",
+            pane, file_display, harness_binary, detail_clause, file_display, provenance
+        )
+    } else {
+        format!(
+            "registered pane {} for {} is not showing an idle {} prompt{}; refusing to inject a routed trigger into a busy session ({})",
+            pane, file_display, harness_binary, detail_clause, provenance
+        )
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DuplicatePanePolicyErrorFacts<'a> {
     pub session_name: &'a str,
@@ -2931,6 +2955,37 @@ gpt-5.4 high - ~/work/btakita/agent-loop/src/session-share - Context 31% used
         );
         assert!(message.contains("No need to rerun"), "{message}");
         assert!(!message.contains("rerun `Run Agent Doc`"), "{message}");
+    }
+
+    #[test]
+    fn busy_existing_pane_error_formats_plain_route_facts() {
+        let refused = format_busy_existing_pane_error(
+            "plan.md",
+            "%42",
+            "codex",
+            "dispatch_only",
+            Some("still shows active turn"),
+            false,
+        );
+        assert!(
+            refused.contains("registered pane %42 for plan.md is not showing an idle codex prompt (still shows active turn)"),
+            "{refused}"
+        );
+        assert!(
+            refused.contains("busy session (dispatch_only)"),
+            "{refused}"
+        );
+
+        let after_fix =
+            format_busy_existing_pane_error("plan.md", "%42", "codex", "existing_pane", None, true);
+        assert!(
+            after_fix.contains("after automatically applying `agent-doc fix plan.md` once"),
+            "{after_fix}"
+        );
+        assert!(
+            after_fix.contains("busy session (existing_pane)"),
+            "{after_fix}"
+        );
     }
 
     #[test]

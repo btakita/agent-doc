@@ -2,15 +2,6 @@
 
 use super::*;
 
-pub(crate) fn safe_passive_lock_contention_message(elapsed: Duration, budget: Duration) -> String {
-    format!(
-        "{} phase=sync_lock_wait elapsed_ms={} budget_ms={} status=over_budget coalesced=skipped_stale action=retry",
-        SAFE_PASSIVE_SYNC_LOCK_SKIPPED_MARKER,
-        elapsed.as_millis(),
-        budget.as_millis()
-    )
-}
-
 pub(crate) fn safe_passive_focus_path_and_session(
     focus: Option<&str>,
 ) -> Option<(PathBuf, String)> {
@@ -328,29 +319,4 @@ pub(crate) fn safe_passive_focus_actor_after_sync_lock(
         source
     ));
     Some(pane_id)
-}
-
-#[cfg(test)]
-mod tests {
-    #![allow(unused_imports)]
-    use super::*;
-    use std::process::Command as ProcessCommand;
-    use std::time::Duration;
-    use tmux_router::IsolatedTmux;
-    #[test]
-    fn safe_passive_lock_contention_message_is_retryable_and_visible() {
-        let message = safe_passive_lock_contention_message(
-            Duration::from_millis(125),
-            SYNC_LOCK_WAIT_LATENCY_BUDGET,
-        );
-
-        assert!(
-            message.contains(SAFE_PASSIVE_SYNC_LOCK_SKIPPED_MARKER),
-            "{message}"
-        );
-        assert!(message.contains("phase=sync_lock_wait"), "{message}");
-        assert!(message.contains("status=over_budget"), "{message}");
-        assert!(message.contains("coalesced=skipped_stale"), "{message}");
-        assert!(message.contains("action=retry"), "{message}");
-    }
 }

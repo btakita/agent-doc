@@ -3,39 +3,6 @@
 use super::*;
 use agent_doc_controller::dispatch::is_codex_shell_search_blocker;
 
-pub(crate) fn format_busy_existing_pane_error(
-    file: &Path,
-    pane: &str,
-    harness: &HarnessConfig,
-    provenance: &str,
-    detail: Option<&str>,
-    auto_fix_attempted: bool,
-) -> String {
-    let detail_clause = detail
-        .map(|detail| format!(" ({detail})"))
-        .unwrap_or_default();
-    if auto_fix_attempted {
-        format!(
-            "registered pane {} for {} is still not showing an idle {} prompt{} after automatically applying `agent-doc fix {}` once; refusing to inject a routed trigger into a busy session ({})",
-            pane,
-            file.display(),
-            harness.binary,
-            detail_clause,
-            file.display(),
-            provenance
-        )
-    } else {
-        format!(
-            "registered pane {} for {} is not showing an idle {} prompt{}; refusing to inject a routed trigger into a busy session ({})",
-            pane,
-            file.display(),
-            harness.binary,
-            detail_clause,
-            provenance
-        )
-    }
-}
-
 #[cfg(test)]
 pub(crate) fn maybe_run_test_busy_auto_fix_hook(
     tmux: &Tmux,

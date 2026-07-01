@@ -1485,7 +1485,7 @@ fn dedupe_snapshot_and_worktree_before_commit(
     let Some(snapshot) = snapshot_content.as_deref() else {
         return Ok(());
     };
-    let deduped_snapshot = crate::dedupe::dedupe_responses(snapshot);
+    let deduped_snapshot = agent_doc_turn::response_replay::dedupe_responses(snapshot);
     if deduped_snapshot != snapshot {
         eprintln!(
             "[commit] deduped consecutive duplicate response block(s) before staging {}",
@@ -1502,7 +1502,7 @@ fn dedupe_snapshot_and_worktree_before_commit(
         *snapshot_content = Some(deduped_snapshot);
     }
 
-    let deduped_file = crate::dedupe::dedupe_responses(file_content);
+    let deduped_file = agent_doc_turn::response_replay::dedupe_responses(file_content);
     if deduped_file != *file_content {
         crate::write::atomic_write_pub(file, &deduped_file).with_context(|| {
             format!(

@@ -1875,7 +1875,7 @@ impl SimWorld {
     }
 
     pub(crate) fn repair_visible_duplicate_response(&mut self) {
-        let repaired = agent_doc_orchestration::dedupe::dedupe_responses(&self.doc);
+        let repaired = agent_doc_turn::response_replay::dedupe_responses(&self.doc);
         if repaired != self.doc {
             self.doc = repaired;
             self.coverage.visible_duplicate_repairs += 1;

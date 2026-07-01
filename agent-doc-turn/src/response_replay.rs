@@ -278,6 +278,231 @@ pub fn response_materialized_in_content(response: &str, content: &str) -> bool {
             || response_already_applied_after_prefix_strip(&normalized_content, &probe))
 }
 
+/// Remove consecutive duplicate `### Re:` blocks from document content.
+pub fn dedupe_responses(content: &str) -> String {
+    dedupe_responses_with_report(content).0
+}
+
+pub fn first_duplicate_response_heading(content: &str) -> Option<String> {
+    dedupe_responses_with_report(content).1
+}
+
+/// Detect "late-IPC response over-application": the working tree (`current`)
+/// contains the committed `head` content plus one or more extra copies of
+/// already-committed response blocks, with identical surrounding scaffold and
+/// no new distinct response content.
+pub fn is_committed_response_overapplication(current: &str, head: &str) -> bool {
+    let (cur_scaffold, cur_responses) = split_scaffold_and_responses(current);
+    let (head_scaffold, head_responses) = split_scaffold_and_responses(head);
+
+    if cur_scaffold != head_scaffold || cur_responses == head_responses {
+        return false;
+    }
+    let cur_set: HashSet<&String> = cur_responses.iter().collect();
+    let head_set: HashSet<&String> = head_responses.iter().collect();
+    cur_set == head_set && cur_responses.len() > head_responses.len()
+}
+
+/// Heading-topic-tolerant superset of [`is_committed_response_overapplication`].
+pub fn is_committed_response_replay_including_stale(current: &str, head: &str) -> bool {
+    let (cur_scaffold, cur_responses) = split_scaffold_and_responses(current);
+    let (head_scaffold, head_responses) = split_scaffold_and_responses(head);
+
+    if cur_scaffold != head_scaffold || cur_responses.len() <= head_responses.len() {
+        return false;
+    }
+
+    let mut remaining: Vec<&String> = cur_responses.iter().collect();
+    for head_block in &head_responses {
+        if let Some(pos) = remaining.iter().position(|cur| *cur == head_block) {
+            remaining.remove(pos);
+        } else {
+            return false;
+        }
+    }
+
+    let head_topics: HashSet<&str> = head_responses
+        .iter()
+        .filter_map(|block| block.lines().next())
+        .collect();
+    if remaining.is_empty()
+        || !remaining.iter().all(|surplus| {
+            surplus
+                .lines()
+                .next()
+                .is_some_and(|heading| head_topics.contains(heading))
+        })
+    {
+        return false;
+    }
+
+    let head_lines: HashSet<&str> = head.lines().map(str::trim).collect();
+    !current
+        .lines()
+        .map(str::trim)
+        .any(|line| line_carries_user_directive(line) && !head_lines.contains(line))
+}
+
+fn line_carries_user_directive(line: &str) -> bool {
+    let t = line.trim();
+    if t.starts_with('❯') || t.starts_with("preset ") || t.starts_with("dispatch ") {
+        return true;
+    }
+    for kw in ["do ", "re "] {
+        if let Some(rest) = t.strip_prefix(kw) {
+            let rest = rest.trim_start();
+            if rest.starts_with("[#") || rest.starts_with('#') {
+                return true;
+            }
+        }
+    }
+    let bare = t.strip_prefix("- ").unwrap_or(t).trim_start();
+    bare.starts_with("[#")
+}
+
+fn is_response_heading(trimmed: &str) -> bool {
+    trimmed.starts_with("### Re:")
+        || trimmed.starts_with("#### Re:")
+        || trimmed.starts_with("##### Re:")
+        || trimmed.starts_with("###### Re:")
+        || trimmed == "## Assistant"
+}
+
+fn split_scaffold_and_responses(content: &str) -> (Vec<String>, Vec<String>) {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut scaffold = Vec::new();
+    let mut responses = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let trimmed = lines[i].trim();
+        if is_response_heading(trimmed) {
+            let start = i;
+            i += 1;
+            while i < lines.len()
+                && !is_response_heading(lines[i].trim())
+                && !lines[i].trim().starts_with("<!-- /agent:")
+            {
+                i += 1;
+            }
+            let block = lines[start..i]
+                .iter()
+                .filter_map(|line| normalize_response_block_line(line))
+                .collect::<Vec<_>>()
+                .join("\n");
+            responses.push(block);
+        } else {
+            if !trimmed.is_empty() && !trimmed.starts_with("<!-- agent:boundary:") {
+                scaffold.push(trimmed.to_string());
+            }
+            i += 1;
+        }
+    }
+    (scaffold, responses)
+}
+
+fn dedupe_responses_with_report(content: &str) -> (String, Option<String>) {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut result_lines: Vec<&str> = Vec::new();
+
+    let mut blocks: Vec<(usize, usize)> = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        if lines[i].starts_with("### Re:") {
+            let start = i;
+            i += 1;
+            while i < lines.len()
+                && !lines[i].starts_with("### Re:")
+                && !lines[i].starts_with("<!-- /agent:")
+            {
+                i += 1;
+            }
+            blocks.push((start, i));
+        } else {
+            i += 1;
+        }
+    }
+
+    if blocks.len() < 2 {
+        return (content.to_string(), None);
+    }
+
+    let mut skip_ranges = Vec::new();
+    let mut first_duplicate = None;
+    for pair in blocks.windows(2) {
+        let (s1, e1) = pair[0];
+        let (s2, e2) = pair[1];
+        let block1 = lines[s1..e1]
+            .iter()
+            .filter_map(|line| normalize_response_block_line(line))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let block2 = lines[s2..e2]
+            .iter()
+            .filter_map(|line| normalize_response_block_line(line))
+            .collect::<Vec<_>>()
+            .join("\n");
+        if block1 == block2 {
+            let b1_corrupt = block_has_prompt_prefixed_body(&lines[s1..e1]);
+            let b2_corrupt = block_has_prompt_prefixed_body(&lines[s2..e2]);
+            let (skip_s, skip_e) = if b1_corrupt && !b2_corrupt {
+                (s1, e1)
+            } else {
+                (s2, e2)
+            };
+            if first_duplicate.is_none() {
+                first_duplicate = Some(lines[skip_s].trim().to_string());
+            }
+            skip_ranges.push((skip_s, skip_e));
+        }
+    }
+
+    if skip_ranges.is_empty() {
+        return (content.to_string(), None);
+    }
+
+    for (i, line) in lines.iter().enumerate() {
+        let in_skip = skip_ranges.iter().any(|(s, e)| i >= *s && i < *e);
+        if !in_skip {
+            result_lines.push(line);
+        }
+    }
+
+    let mut result = result_lines.join("\n");
+    if content.ends_with('\n') && !result.ends_with('\n') {
+        result.push('\n');
+    }
+    (result, first_duplicate)
+}
+
+fn normalize_response_block_line(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if trimmed.starts_with("<!-- agent:boundary:") {
+        return None;
+    }
+    if trimmed.starts_with("### Re:") {
+        return Some(
+            trimmed
+                .strip_suffix(" (HEAD)")
+                .unwrap_or(trimmed)
+                .to_string(),
+        );
+    }
+    let unprefixed = trimmed
+        .strip_prefix('❯')
+        .map(str::trim_start)
+        .unwrap_or(trimmed);
+    Some(unprefixed.to_string())
+}
+
+fn block_has_prompt_prefixed_body(block_lines: &[&str]) -> bool {
+    block_lines.iter().any(|line| {
+        let trimmed = line.trim();
+        !trimmed.starts_with("### Re:")
+            && !trimmed.starts_with("<!-- agent:boundary:")
+            && trimmed.starts_with('❯')
+    })
+}
+
 fn normalized_response_lines(content: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut lines = content.lines().peekable();
@@ -474,5 +699,170 @@ mod tests {
                 .to_string()
             )
         );
+    }
+
+    #[test]
+    fn dedupe_removes_consecutive_duplicate() {
+        let content = "### Re: Foo\nContent A.\n### Re: Foo\nContent A.\n### Re: Bar\nContent B.\n";
+
+        assert_eq!(
+            dedupe_responses(content),
+            "### Re: Foo\nContent A.\n### Re: Bar\nContent B.\n"
+        );
+        assert_eq!(
+            first_duplicate_response_heading(content).as_deref(),
+            Some("### Re: Foo")
+        );
+    }
+
+    #[test]
+    fn dedupe_preserves_non_consecutive_duplicates() {
+        let content = "### Re: Foo\nContent.\n### Re: Bar\nOther.\n### Re: Foo\nContent.\n";
+
+        assert_eq!(dedupe_responses(content), content);
+    }
+
+    #[test]
+    fn dedupe_treats_head_marker_as_transient() {
+        let content = "\
+### Re: Foo — gpt-5
+Content.
+<!-- agent:boundary:old -->
+### Re: Foo — gpt-5 (HEAD)
+Content.
+<!-- agent:boundary:new -->
+";
+
+        assert_eq!(
+            dedupe_responses(content),
+            "### Re: Foo — gpt-5\nContent.\n<!-- agent:boundary:old -->\n"
+        );
+        assert_eq!(
+            first_duplicate_response_heading(content).as_deref(),
+            Some("### Re: Foo — gpt-5 (HEAD)")
+        );
+    }
+
+    const HEAD_DOC: &str = "\
+<!-- agent:exchange -->
+do [#fix-thing]
+### Re: fix thing — opus-4-8
+Fixed it.
+<!-- agent:boundary:88409761 -->
+<!-- /agent:exchange -->
+";
+
+    #[test]
+    fn overapplication_detects_boundary_wrapped_duplicate() {
+        let current = "\
+<!-- agent:exchange -->
+do [#fix-thing]
+### Re: fix thing — opus-4-8
+Fixed it.
+<!-- agent:boundary:88409761 -->
+### Re: fix thing — opus-4-8
+Fixed it.
+<!-- agent:boundary:88409761 -->
+<!-- /agent:exchange -->
+";
+
+        assert!(is_committed_response_overapplication(current, HEAD_DOC));
+    }
+
+    #[test]
+    fn overapplication_rejects_new_response_content() {
+        let current = "\
+<!-- agent:exchange -->
+do [#fix-thing]
+### Re: fix thing — opus-4-8
+Fixed it.
+<!-- agent:boundary:88409761 -->
+### Re: a different answer — opus-4-8
+New content.
+<!-- agent:boundary:newone -->
+<!-- /agent:exchange -->
+";
+
+        assert!(!is_committed_response_overapplication(current, HEAD_DOC));
+    }
+
+    #[test]
+    fn stale_replay_detects_drifted_body_duplicate_of_committed_topic() {
+        let current = "\
+<!-- agent:exchange -->
+do [#fix-thing]
+### Re: fix thing — opus-4-8
+Fixed it.
+<!-- agent:boundary:88409761 -->
+### Re: fix thing — opus-4-8 (HEAD)
+Fixed it.
+Note: stale draft paragraph the committed copy dropped.
+<!-- agent:boundary:stale -->
+<!-- /agent:exchange -->
+";
+
+        assert!(!is_committed_response_overapplication(current, HEAD_DOC));
+        assert!(is_committed_response_replay_including_stale(
+            current, HEAD_DOC
+        ));
+    }
+
+    #[test]
+    fn stale_replay_rejects_new_topic() {
+        let current = "\
+<!-- agent:exchange -->
+do [#fix-thing]
+### Re: fix thing — opus-4-8
+Fixed it.
+<!-- agent:boundary:88409761 -->
+### Re: a brand new topic — opus-4-8
+Genuinely new answer.
+<!-- agent:boundary:newone -->
+<!-- /agent:exchange -->
+";
+
+        assert!(!is_committed_response_replay_including_stale(
+            current, HEAD_DOC
+        ));
+    }
+
+    #[test]
+    fn dedupe_collapses_prompt_prefixed_corrupted_duplicate() {
+        let content = "\
+### Re: fix thing — opus-4-8
+❯ **Scope:** narrow.
+❯ **Commits:** abc123.
+### Re: fix thing — opus-4-8 (HEAD)
+**Scope:** narrow.
+**Commits:** abc123.
+";
+
+        let result = dedupe_responses(content);
+
+        assert_eq!(result.matches("### Re: fix thing").count(), 1);
+        assert!(!result.contains('❯'));
+        assert_eq!(dedupe_responses(&result), result);
+    }
+
+    #[test]
+    fn overapplication_rejects_lost_response() {
+        let head = "\
+<!-- agent:exchange -->
+### Re: one — opus-4-8
+First.
+### Re: two — opus-4-8
+Second.
+<!-- agent:boundary:x -->
+<!-- /agent:exchange -->
+";
+        let current = "\
+<!-- agent:exchange -->
+### Re: one — opus-4-8
+First.
+<!-- agent:boundary:x -->
+<!-- /agent:exchange -->
+";
+
+        assert!(!is_committed_response_overapplication(current, head));
     }
 }

@@ -1179,7 +1179,7 @@ fn blocked_closeout_editor_authority_note(
 fn detect_duplicate_response_patchback(file: &Path) -> Result<Option<String>> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    Ok(crate::dedupe::first_duplicate_response_heading(&content))
+    Ok(agent_doc_turn::response_replay::first_duplicate_response_heading(&content))
 }
 
 mod pending_guards;

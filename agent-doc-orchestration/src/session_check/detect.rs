@@ -29,10 +29,11 @@ pub fn detect_jb_cache_conflict_accept_duplicate_replay_with_context(
 ) -> Result<Option<JbCacheConflictAcceptDuplicateReplay>> {
     let current = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    let Some(heading) = crate::dedupe::first_duplicate_response_heading(&current) else {
+    let Some(heading) = agent_doc_turn::response_replay::first_duplicate_response_heading(&current)
+    else {
         return Ok(None);
     };
-    let deduped = crate::dedupe::dedupe_responses(&current);
+    let deduped = agent_doc_turn::response_replay::dedupe_responses(&current);
     if deduped == current {
         return Ok(None);
     }
@@ -96,8 +97,10 @@ pub fn detect_late_ipc_response_overapplication_with_context(
     // Cache Conflict accepted late replayed an *earlier draft* of the same
     // response, so the surplus block shares a committed heading topic but its
     // body drifted — `cur_set != head_set`. Both restore the committed HEAD.
-    if crate::dedupe::is_committed_response_overapplication(&current, &head)
-        || crate::dedupe::is_committed_response_replay_including_stale(&current, &head)
+    if agent_doc_turn::response_replay::is_committed_response_overapplication(&current, &head)
+        || agent_doc_turn::response_replay::is_committed_response_replay_including_stale(
+            &current, &head,
+        )
     {
         return Ok(Some(LateIpcResponseOverapplication {
             remediated_content: head.to_string(),

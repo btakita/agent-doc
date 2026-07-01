@@ -247,7 +247,7 @@ use agent_doc_template as template;
 
 use crate::{merge, repair, sessions, snapshot};
 use agent_doc_template::stale_baseline::{is_append_mode_component, is_stale_baseline};
-use agent_doc_turn::response_replay::response_materialized_in_content;
+use agent_doc_turn::response_replay::{dedupe_responses, response_materialized_in_content};
 
 thread_local! {
     static RESPONSE_STDIN_OVERRIDE: RefCell<Option<String>> = const { RefCell::new(None) };
@@ -1983,7 +1983,7 @@ fn recover_dedupe_only_drift(file: &Path) -> Result<bool> {
     if current == head_content {
         return Ok(false);
     }
-    let dedupe_of_head = crate::dedupe::dedupe_responses(&head_content);
+    let dedupe_of_head = dedupe_responses(&head_content);
     if dedupe_of_head == head_content {
         // HEAD has no duplicates — drift is something else, not a dedupe outcome.
         return Ok(false);
@@ -2144,7 +2144,7 @@ pub fn lift_pending_from_exchange_safe(content: &str, file: &std::path::Path) ->
 }
 
 fn dedupe_consecutive_response_blocks(content: &str, file: &Path) -> String {
-    let deduped = crate::dedupe::dedupe_responses(content);
+    let deduped = dedupe_responses(content);
     if deduped != content {
         eprintln!(
             "[write] dedup: removed consecutive duplicate response block(s) from {} before closeout",

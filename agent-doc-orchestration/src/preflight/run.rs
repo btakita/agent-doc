@@ -3016,7 +3016,9 @@ mod tests {
         std::fs::write(&doc, &replayed).unwrap();
 
         assert!(
-            !crate::dedupe::is_committed_response_overapplication(&replayed, committed),
+            !agent_doc_turn::response_replay::is_committed_response_overapplication(
+                &replayed, committed
+            ),
             "preconditions: strict over-application must NOT match a drifted-body replay"
         );
         assert!(

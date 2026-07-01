@@ -5392,7 +5392,7 @@ Implemented.
 
         // Simulate what `agent-doc dedupe` produced: file + snapshot both equal
         // the deduped form, HEAD still holds the duplicate.
-        let deduped = crate::dedupe::dedupe_responses(duplicated);
+        let deduped = agent_doc_turn::response_replay::dedupe_responses(duplicated);
         assert_ne!(
             deduped, duplicated,
             "test setup: duplicated content must actually dedupe"
@@ -5525,7 +5525,7 @@ Implemented.
         git_commit_file(root, "session.md", duplicated, "add duplicate");
         let doc = root.join("session.md");
 
-        let deduped = crate::dedupe::dedupe_responses(duplicated);
+        let deduped = agent_doc_turn::response_replay::dedupe_responses(duplicated);
         fs::write(&doc, &deduped).unwrap();
         crate::snapshot::save(&doc, &deduped).unwrap();
 
@@ -5578,7 +5578,7 @@ Implemented.
 ";
         git_commit_file(root, "session.md", duplicated, "add duplicate");
         let doc = root.join("session.md");
-        let deduped = crate::dedupe::dedupe_responses(duplicated);
+        let deduped = agent_doc_turn::response_replay::dedupe_responses(duplicated);
         fs::write(&doc, &deduped).unwrap();
         crate::snapshot::save(&doc, &deduped).unwrap();
 

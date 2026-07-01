@@ -4235,6 +4235,10 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub fn has_matching_orphan_prompt_for_committed_capture",
         "pub fn extract_visible_response_patch_between",
         "pub fn prompt_change_is_known_response",
+        "pub fn dedupe_responses",
+        "pub fn first_duplicate_response_heading",
+        "pub fn is_committed_response_overapplication",
+        "pub fn is_committed_response_replay_including_stale",
         "fn normalized_response_lines",
     ] {
         assert!(
@@ -4261,9 +4265,29 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "orchestration write should call focused response replay policy directly"
     );
     assert!(
-        write_source
-            .contains("use agent_doc_turn::response_replay::response_materialized_in_content;"),
-        "orchestration write should import focused response materialization policy directly"
+        write_source.contains("use agent_doc_turn::response_replay::{")
+            && write_source.contains("dedupe_responses")
+            && write_source.contains("response_materialized_in_content"),
+        "orchestration write should import focused response replay policy directly"
+    );
+    let dedupe_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/dedupe.rs")).unwrap();
+    for forbidden in [
+        "pub fn dedupe_responses",
+        "pub fn first_duplicate_response_heading",
+        "pub fn is_committed_response_overapplication",
+        "pub fn is_committed_response_replay_including_stale",
+        "fn split_scaffold_and_responses",
+        "fn normalize_response_block_line",
+    ] {
+        assert!(
+            !dedupe_source.contains(forbidden),
+            "orchestration dedupe must stay a file I/O adapter, not re-own response replay policy: {forbidden}"
+        );
+    }
+    assert!(
+        dedupe_source.contains("use agent_doc_turn::response_replay::dedupe_responses;"),
+        "orchestration dedupe adapter should call focused response replay policy directly"
     );
     let write_materialize =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/materialize.rs"))

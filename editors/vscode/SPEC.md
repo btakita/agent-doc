@@ -30,7 +30,8 @@ Extends `editors/SPEC.md` with VS Code-specific behavior.
 ## Patch Application Safety
 
 - VS Code must preserve the same no-replay safety boundary as JetBrains for stale visible editor state. Active-typing debounce timeouts may leave a file-watch patch queued for another idle attempt, but once an apply-proof check observes that the editor generation or text changed after patch planning, the extension must fail the payload back to binary retry accounting without scheduling a delayed replay of that same patch file.
+- VS Code consumes `.agent-doc/patches/save-document.signal` as the file-IPC equivalent of JetBrains `save_document` socket messages. The handler must require an already-open markdown document, wait for typing idle, call `TextDocument.save()`, and write ack-content for the supplied `patch_id`. It must not open a closed document as proof of a live buffer and must not use this path for full-document replacement or reconnect reread repair.
 
 ## Verification Requirements
 
-- Unit tests cover the per-document Run/Clear state machine, exact session-status display, `session clear` command wiring, interrupt-clear command wiring, busy/protected clear refusal parsing, restart refusal parsing, popup-menu parity, and persistent route-failure presentation. Static guards pin the JetBrains-compatible Run route flags and VS Code command contribution surface.
+- Unit tests cover the per-document Run/Clear state machine, exact session-status display, `session clear` command wiring, interrupt-clear command wiring, busy/protected clear refusal parsing, restart refusal parsing, popup-menu parity, persistent route-failure presentation, typed save-document signal handling, and the disabled full-content/reconnect repair guards. Static guards pin the JetBrains-compatible Run route flags and VS Code command contribution surface.

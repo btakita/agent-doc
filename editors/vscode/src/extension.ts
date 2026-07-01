@@ -1984,9 +1984,10 @@ class PatchWatcher implements vscode.Disposable {
     }
 
     /**
-     * Handle a legacy `save-document.signal` file written by the binary. Realtime
-     * cutover disables plugin-driven saves; the signal is consumed and logged so
-     * a stale repair surface cannot flush a visible buffer behind the controller.
+     * Handle `save-document.signal` from the binary. This is the VS Code file
+     * signal equivalent of the JetBrains socket `save_document` message: flush
+     * the already-open editor buffer through VS Code's save API, then publish the
+     * saved text as ack-content for the binary to verify.
      */
     private async processSaveDocumentSignal(patchesDir: string): Promise<void> {
         const signalFile = path.join(patchesDir, 'save-document.signal');
@@ -2009,7 +2010,26 @@ class PatchWatcher implements vscode.Disposable {
             this.outputChannel.appendLine('save_document: malformed or empty signal payload, ignoring');
             return;
         }
-        this.outputChannel.appendLine(`save_document IPC is disabled for ${signal.file}`);
+        const projectRoot = path.dirname(path.dirname(patchesDir));
+        const document = vscode.workspace.textDocuments.find((doc) => doc.uri.fsPath === signal.file);
+        if (!document || !this.targetsProjectMarkdown(document, projectRoot)) {
+            this.outputChannel.appendLine(`save_document: no open markdown document for ${signal.file}`);
+            return;
+        }
+        if (!this.awaitIdleBeforeDocumentMutation(signal.file, 'save_document')) {
+            return;
+        }
+        const saved = await document.save();
+        if (!saved) {
+            this.outputChannel.appendLine(`save_document: save failed for ${signal.file}`);
+            return;
+        }
+        const content = document.getText();
+        if (!this.writeAckContent(signal.patchId, content, patchesDir)) {
+            return;
+        }
+        this.publishLiveBufferNow(document, projectRoot);
+        this.outputChannel.appendLine(`save_document: flushed ${content.length} chars for ${signal.file}`);
     }
 
     /**

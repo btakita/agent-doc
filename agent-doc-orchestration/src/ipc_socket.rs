@@ -31,7 +31,9 @@
 //!
 //! VS Code does not run the socket listener. For read-only live-buffer proof
 //! refreshes it consumes `.agent-doc/patches/publish-live-buffer.signal` with the
-//! same `{type,file}` payload.
+//! same `{type,file}` payload; for editor-owned save recovery it consumes
+//! `.agent-doc/patches/save-document.signal` with the same
+//! `{type,file,patch_id}` payload as the socket `save_document` message.
 
 use agent_doc_ipc_protocol::{
     AckClassification, classify_ack, early_ack_line, early_ack_ops_marker,
@@ -478,6 +480,41 @@ pub fn send_publish_live_buffer_file_signal(project_root: &Path, file: &str) -> 
     }
 }
 
+/// Write a VS Code-style file IPC signal asking the editor to save the current
+/// visible buffer for `file` and publish ack-content for `patch_id`.
+pub fn send_save_document_file_signal(
+    project_root: &Path,
+    file: &str,
+    patch_id: &str,
+) -> Result<bool> {
+    let patches_dir = project_root.join(".agent-doc").join("patches");
+    std::fs::create_dir_all(&patches_dir)
+        .with_context(|| format!("failed to create {}", patches_dir.display()))?;
+    let signal_file = patches_dir.join("save-document.signal");
+    let tmp_file = patches_dir.join(format!("save-document.signal.{}.tmp", std::process::id()));
+    let payload = serde_json::json!({
+        "type": "save_document",
+        "file": file,
+        "patch_id": patch_id,
+    });
+    std::fs::write(&tmp_file, serde_json::to_vec(&payload)?)
+        .with_context(|| format!("failed to write {}", tmp_file.display()))?;
+    match std::fs::rename(&tmp_file, &signal_file) {
+        Ok(()) => Ok(true),
+        Err(first_err) => {
+            let _ = std::fs::remove_file(&signal_file);
+            std::fs::rename(&tmp_file, &signal_file).with_context(|| {
+                format!(
+                    "failed to replace {} after initial rename error: {}",
+                    signal_file.display(),
+                    first_err
+                )
+            })?;
+            Ok(true)
+        }
+    }
+}
+
 /// Send a VCS refresh signal.
 pub fn send_vcs_refresh(project_root: &Path) -> Result<bool> {
     let message = serde_json::json!({
@@ -797,6 +834,29 @@ mod tests {
         assert!(
             msg.get("content").is_none() && msg.get("patches").is_none(),
             "publish-live-buffer signal must not carry document mutation payload: {msg}"
+        );
+    }
+
+    #[test]
+    fn send_save_document_file_signal_writes_typed_payload_with_patch_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+
+        let ok = send_save_document_file_signal(&root, "/tmp/plan.md", "save-signal-123").unwrap();
+        assert!(ok, "save-document file signal should be written");
+
+        let signal = root
+            .join(".agent-doc")
+            .join("patches")
+            .join("save-document.signal");
+        let msg: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(signal).unwrap()).unwrap();
+        assert_eq!(msg["type"], "save_document");
+        assert_eq!(msg["file"], "/tmp/plan.md");
+        assert_eq!(msg["patch_id"], "save-signal-123");
+        assert!(
+            msg.get("content").is_none() && msg.get("patches").is_none(),
+            "save-document signal must not carry document replacement payload: {msg}"
         );
     }
 

@@ -607,20 +607,61 @@ class PatchWatcher(private val project: Project) : Disposable {
                 APPLY_APPLIED
             }
             "save_document" -> {
-                // Realtime cutover: plugin-driven save_document is disabled. A
-                // live editor buffer must be reconciled through CRDT/editor ACKs
-                // or an explicit operator action, never by a socket repair save.
                 val file = extractStringField(json, "file") ?: return APPLY_FAILED
                 val patchId = extractStringField(json, "patch_id")
-                LOG.warn("[socket] save_document IPC is disabled for $file")
-                recordEditorSurfaceOps(file, "vcs_refresh_save", "save_document", "save_document", patchId, "disabled")
-                APPLY_FAILED
+                if (saveDocumentViaDocument(file, patchId)) {
+                    APPLY_APPLIED
+                } else {
+                    APPLY_FAILED
+                }
             }
             else -> {
                 LOG.warn("[socket] Unknown message type: $type")
                 APPLY_FAILED
             }
         }
+    }
+
+    /**
+     * Flush the editor-owned markdown buffer to disk and publish the exact saved
+     * content as ack-content. This is intentionally not a full-content apply:
+     * the plugin does not replace the buffer, it only asks the editor platform to
+     * save the open document that already owns the user's visible text.
+     */
+    private fun saveDocumentViaDocument(filePath: String, patchId: String?): Boolean {
+        if (!awaitIdleBeforeDocumentMutation(filePath, "save_document")) {
+            return false
+        }
+
+        var savedContent: String? = null
+        ApplicationManager.getApplication().invokeAndWait {
+            val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath)
+            if (targetFile == null) {
+                LOG.warn("[socket] save_document rejected: target file not found for $filePath")
+                recordEditorSurfaceOps(filePath, "vcs_refresh_save", "save_document", "save_document", patchId, "missing_file")
+                return@invokeAndWait
+            }
+            val fdm = FileDocumentManager.getInstance()
+            val document = fdm.getDocument(targetFile)
+            if (document == null) {
+                LOG.warn("[socket] save_document rejected: no document for $filePath")
+                recordEditorSurfaceOps(filePath, "vcs_refresh_save", "save_document", "save_document", patchId, "missing_document")
+                return@invokeAndWait
+            }
+
+            try {
+                fdm.saveDocument(document)
+                savedContent = document.text
+                LOG.info("[socket] save_document flushed ${savedContent?.length ?: 0} chars for $filePath")
+                recordEditorSurfaceOps(filePath, "vcs_refresh_save", "save_document", "save_document", patchId, "saved")
+            } catch (e: Exception) {
+                LOG.warn("[socket] save_document failed for $filePath", e)
+                recordEditorSurfaceOps(filePath, "vcs_refresh_save", "save_document", "save_document", patchId, "failed")
+            }
+        }
+
+        val content = savedContent ?: return false
+        return writeAckContent(patchId, content, filePath)
     }
 
     /**

@@ -150,9 +150,11 @@ describe('patchGuard', () => {
         const killEnd = source.indexOf('function resolveCleanupCwd()', killStart);
         const interruptClearStart = source.indexOf('async function interruptClearSessionContextAction()');
         const interruptClearEnd = source.indexOf('// ---------------------------------------------------------------------------\n// Feature 2: Claim', interruptClearStart);
+        const saveSignalStart = source.indexOf('private async processSaveDocumentSignal(');
+        const saveSignalEnd = source.indexOf('/**', saveSignalStart + 1);
+        const saveSignalBody = source.slice(saveSignalStart, saveSignalEnd);
 
-        assert.strictEqual(source.includes('document.save()'), false);
-        assert.strictEqual(/\.save\(/.test(source), false);
+        assert.ok(saveSignalBody.includes('await document.save()'), 'typed save signal is the only editor save path');
         assert.ok(source.includes('async function ensureDocumentCleanForCommand('));
         assert.ok(source.includes("ensureDocumentCleanForCommand(filePath, 'Run')"));
         assert.ok(source.includes("ensureDocumentCleanForCommand(editor.document.uri.fsPath, 'Fix document')"));
@@ -167,15 +169,19 @@ describe('patchGuard', () => {
         assert.strictEqual(source.slice(interruptClearStart, interruptClearEnd).includes('document.save()'), false);
     });
 
-    it('keeps legacy save and reconnect repair paths disabled', () => {
+    it('keeps full-content and reconnect repair paths disabled while allowing typed save signal', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
+        const saveSignalStart = source.indexOf('private async processSaveDocumentSignal(');
+        const saveSignalEnd = source.indexOf('/**', saveSignalStart + 1);
+        const saveSignalBody = source.slice(saveSignalStart, saveSignalEnd);
 
-        assert.ok(source.includes('save_document IPC is disabled'));
         assert.ok(source.includes('reread_disk repair is disabled'));
+        assert.ok(saveSignalBody.includes("this.awaitIdleBeforeDocumentMutation(signal.file, 'save_document')"));
+        assert.ok(saveSignalBody.includes('await document.save()'));
+        assert.ok(saveSignalBody.includes('this.writeAckContent(signal.patchId, content, patchesDir)'));
         assert.strictEqual(source.includes('saveDocumentToDisk'), false);
         assert.strictEqual(source.includes('applyReconnectReread'), false);
         assert.strictEqual(source.includes('reread disk into stale buffer'), false);
-        assert.strictEqual(/\.save\(/.test(source), false);
     });
 
     it('does not ship prompt polling in the VS Code extension', () => {

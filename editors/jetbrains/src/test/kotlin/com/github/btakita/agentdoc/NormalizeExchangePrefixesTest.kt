@@ -254,20 +254,28 @@ One.
     }
 
     @Test
-    fun `plugin rejects full content patch application paths`() {
+    fun `plugin rejects full content and reconnect repair paths`() {
         val sourcePath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
             Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
         ).first { Files.exists(it) }
         val source = Files.readString(sourcePath)
+        val saveStart = source.indexOf("private fun saveDocumentViaDocument(")
+        assertTrue(saveStart >= 0)
+        val saveEnd = source.indexOf("/**", saveStart + 1)
+        assertTrue(saveEnd > saveStart)
+        val saveBody = source.substring(saveStart, saveEnd)
+        val sourceOutsideSave = source.substring(0, saveStart) + source.substring(saveEnd)
 
         assertTrue(source.contains("full-content IPC is disabled"))
-        assertTrue(source.contains("save_document IPC is disabled"))
         assertTrue(source.contains("reread_disk repair is disabled"))
+        assertTrue(saveBody.contains("awaitIdleBeforeDocumentMutation(filePath, \"save_document\")"))
+        assertTrue(saveBody.contains("fdm.saveDocument(document)"))
+        assertTrue(saveBody.contains("writeAckContent(patchId, content, filePath)"))
         assertFalse(source.contains("document.setText(patch.fullContent)"))
         assertFalse(source.contains("setBinaryContent(patch.fullContent"))
         assertFalse(source.contains("setBinaryContent("))
-        assertFalse(source.contains("saveDocument("))
+        assertFalse(sourceOutsideSave.contains("saveDocument("))
         assertFalse(source.contains("applyReconnectReread("))
         assertFalse(source.contains("Agent Doc Reconnect Reread"))
         assertFalse(source.contains("re-read disk/HEAD into stale buffer"))

@@ -1530,7 +1530,7 @@ fn enforce_no_uncommitted_closeout_drift(file: &Path, rc: &crate::graph::RunCont
 /// disk, verified it preserved HEAD's committed `exchange`, and reset the snapshot to
 /// HEAD). Returns `Ok(false)` — letting the caller fall through to the standard
 /// bail+hint — whenever recovery is not safely possible: not the truncation shape, an
-/// unstarted prompt-bearing diff (its own path owns it), no live IPC listener, an
+/// unstarted prompt-bearing diff (its own path owns it), no live editor IPC surface, an
 /// un-acked flush, or a flushed buffer that lost committed response content. Fail-open
 /// by construction: it never blocks and never commits a response-less document.
 fn recover_ipc_truncated_worktree_from_editor_buffer(
@@ -1556,10 +1556,6 @@ fn recover_ipc_truncated_worktree_from_editor_buffer(
         return Ok(false);
     };
     let project_root = crate::write::resolve_ipc_project_root_pub(&canonical);
-    // The editor buffer is only authoritative when a live editor is attached.
-    if !crate::ipc_socket::is_listener_active(&project_root) {
-        return Ok(false);
-    }
 
     // Flush the live editor buffer to disk (editor = source of truth). Fail-open: an
     // error or absent ack means we cannot trust disk == buffer, so fall through.
@@ -1582,9 +1578,29 @@ fn recover_ipc_truncated_worktree_from_editor_buffer(
             barrier.typing_recent
         ),
     );
-    match crate::ipc_socket::send_save_document(&project_root, &path_str, &patch_id) {
-        Ok(true) => {}
-        Ok(false) | Err(_) => return Ok(false),
+    let socket_active = crate::ipc_socket::is_listener_active(&project_root);
+    if socket_active {
+        match crate::ipc_socket::send_save_document(&project_root, &path_str, &patch_id) {
+            Ok(true) => {}
+            Ok(false) | Err(_) => return Ok(false),
+        }
+    } else {
+        match crate::ipc_socket::send_save_document_file_signal(&project_root, &path_str, &patch_id)
+        {
+            Ok(true) => {}
+            Ok(false) | Err(_) => return Ok(false),
+        }
+        if poll_save_document_ack_content(&project_root, &patch_id)?.is_none() {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "ipc_truncation_recover_rejected file={} save_document_file_signal=unacked patch_id={}",
+                    file.display(),
+                    patch_id
+                ),
+            );
+            return Ok(false);
+        }
     }
 
     // Re-read disk (now the flushed editor buffer) and refuse to trust a buffer that
@@ -1628,6 +1644,28 @@ fn recover_ipc_truncated_worktree_from_editor_buffer(
         file.display()
     );
     Ok(true)
+}
+
+fn poll_save_document_ack_content(project_root: &Path, patch_id: &str) -> Result<Option<String>> {
+    let sidecar = project_root
+        .join(".agent-doc")
+        .join("ack-content")
+        .join(format!("{patch_id}.md"));
+    let start = std::time::Instant::now();
+    let timeout = std::time::Duration::from_secs(6);
+    let poll_interval = std::time::Duration::from_millis(100);
+    loop {
+        if sidecar.exists() {
+            let content = std::fs::read_to_string(&sidecar)
+                .with_context(|| format!("failed to read ack-content sidecar {sidecar:?}"))?;
+            let _ = std::fs::remove_file(&sidecar);
+            return Ok(Some(content));
+        }
+        if start.elapsed() >= timeout {
+            return Ok(None);
+        }
+        std::thread::sleep(poll_interval);
+    }
 }
 
 fn recover_route_queue_snapshot_commit_boundary(

@@ -69,6 +69,7 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
 **ACK protocol:**
 - On successful application: delete the patch JSON file. This signals to the CLI that the patch was consumed.
 - On failure: leave the file in place and log a warning. The CLI will time out and exit with code 75 (`EX_TEMPFAIL`).
+- For typed `save_document` recovery, the editor-side ACK is `.agent-doc/ack-content/<patch_id>.md` containing the exact buffer text after the native save returns. This operation is allowed to call the editor save API, but must not replace the document buffer or replay `fullContent`.
 
 **File-not-found retry:**
 - If the target file is not found in the editor's VFS, wait 200ms, refresh VFS, and try once more.
@@ -233,7 +234,15 @@ Three states must be reconciled:
 - `fullContent` (optional): Disabled legacy/foreign complete document replacement. First-party CLI paths no longer emit this field, and plugins must not apply it when present.
 - `expected_content_hash` / `expected_content_len` (optional): historical source-buffer proof fields for legacy `fullContent` payloads. They are no longer authorization to replace the document.
 
-### 4.2 Future: CRDT State Exchange
+### 4.2 Typed Editor-Owned Save
+
+- Socket-capable editors accept `{"type":"save_document","file":"<absolute path>","patch_id":"<uuid>"}` on the IPC socket.
+- VS Code accepts the same payload from `.agent-doc/patches/save-document.signal`; the binary uses that file signal when no socket listener is active.
+- The receiver must locate an already-open markdown document for `file`, wait for typing idle, save through the native editor API, then write `.agent-doc/ack-content/<patch_id>.md` with the saved text.
+- The receiver must reject missing documents, non-markdown targets, active-typing timeout, and failed saves without writing ack-content. The binary treats absent ack-content as an unproven flush.
+- This protocol never carries replacement content and never authorizes `Document.setText`, `WorkspaceEdit`, VFS binary writes, reconnect reread repair, or legacy `fullContent` redelivery.
+
+### 4.3 Future: CRDT State Exchange
 
 - **Path:** `.agent-doc/crdt/<sha256_hash>.yrs`
 - **Format:** Binary Yrs state vector encoding.

@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 pending_done_guard: warn
 agent_doc_lint_dialect: off
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -585,14 +585,7 @@ Yes — keep both; they're differentiators, not filler. "Agentic hours" explains
 
 ## Queue
 
-<!-- agent:queue go -->
-- [#reibuyvsbuild]
-- create build script for pdf from a source file
-- What is OM?
-- Header "REItrades V1.2 — Work Breakdown & Estimate" is repeated twice.
-- Remove `( reitrades-v1.2.md / V1.2 PDF)`.
-- Is "These are agentic hours, not conventional solo hours." and "With my tooling I bias toward the low end of each range — that is the competitive lever, not cutting scope." valuable to put into the proposal?
-- Why is "0. Setup / technical audit" scheduled to be so long?
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

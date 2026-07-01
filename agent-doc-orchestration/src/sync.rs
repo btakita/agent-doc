@@ -203,11 +203,16 @@ use agent_doc_supervisor::ipc_protocol::IpcMethod;
 use agent_doc_supervisor::ipc_protocol::IpcResponse;
 use agent_doc_supervisor::startup_miss::unresolved_startup_miss_blocks_autostart;
 use agent_doc_sync::{
-    AutoStartMode, WindowIndexNormalizationPlan, auto_started_panes_summary,
-    effective_sync_columns, epoch_millis_now, is_file_rename, last_visible_excerpt,
-    latency_budget_status, plan_window_index_normalization, planned_stash_window_indices,
-    registry_relative_file_path, rename_debounce_expired, safe_passive_prune_cleanup_throttle,
-    sanitize_excerpt, sync_latency_message, sync_prune_state_update, sync_repair_stamp_path,
+    AutoStartMode, RENAME_DEBOUNCE_TTL_SECS, STALE_SYNC_LOCK_OWNER_AGE,
+    SYNC_CONTROLLER_ACTOR_LOOKUP_BUDGET, SYNC_LOCK_POLL_INTERVAL, SYNC_LOCK_WAIT_BUDGET,
+    SYNC_LOCK_WAIT_LATENCY_BUDGET, SYNC_OWNERSHIP_PROOF_BUDGET, SYNC_PRELOCK_ACTOR_FOCUS_BUDGET,
+    SYNC_PROJECTION_REFRESH_BUDGET, SYNC_PRUNE_BUDGET, SYNC_PRUNE_SUBPHASE_BUDGET,
+    SYNC_ROUTER_BUDGET, SYNC_SAFE_PASSIVE_TOTAL_BUDGET, SYNC_WINDOW_RESOLUTION_BUDGET,
+    WindowIndexNormalizationPlan, auto_started_panes_summary, effective_sync_columns,
+    epoch_millis_now, is_file_rename, last_visible_excerpt, latency_budget_status,
+    plan_window_index_normalization, planned_stash_window_indices, registry_relative_file_path,
+    rename_debounce_expired, safe_passive_prune_cleanup_throttle, sanitize_excerpt,
+    sync_latency_message, sync_prune_state_update, sync_repair_stamp_path,
 };
 use agent_doc_tmux::{
     AssociatedPaneCandidate, AssociatedPaneResolution, AssociatedPaneSource,
@@ -227,21 +232,6 @@ mod layout;
 pub(crate) use layout::*;
 mod pane_repair;
 pub(crate) use pane_repair::*;
-
-const RENAME_DEBOUNCE_TTL_SECS: u64 = 5;
-const SYNC_WINDOW_RESOLUTION_BUDGET: Duration = Duration::from_millis(250);
-const SYNC_PRUNE_BUDGET: Duration = Duration::from_millis(1_000);
-const SYNC_PRUNE_SUBPHASE_BUDGET: Duration = Duration::from_millis(250);
-const SYNC_LOCK_WAIT_LATENCY_BUDGET: Duration = Duration::from_millis(100);
-const SYNC_PRELOCK_ACTOR_FOCUS_BUDGET: Duration = Duration::from_millis(300);
-const SYNC_CONTROLLER_ACTOR_LOOKUP_BUDGET: Duration = Duration::from_millis(250);
-const SYNC_PROJECTION_REFRESH_BUDGET: Duration = Duration::from_millis(250);
-const SYNC_OWNERSHIP_PROOF_BUDGET: Duration = Duration::from_millis(750);
-const SYNC_ROUTER_BUDGET: Duration = Duration::from_millis(1_000);
-const SYNC_SAFE_PASSIVE_TOTAL_BUDGET: Duration = Duration::from_millis(1_000);
-const SYNC_LOCK_WAIT_BUDGET: Duration = Duration::from_secs(3);
-const SYNC_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(50);
-const STALE_SYNC_LOCK_OWNER_AGE: Duration = Duration::from_secs(300);
 
 mod lock;
 pub(crate) use lock::*;

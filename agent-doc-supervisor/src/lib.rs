@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod agent_change;
 pub mod auto_install_stdio;
+pub mod auto_trigger;
 pub mod claim_binding;
 pub mod config;
 pub mod crash_policy;

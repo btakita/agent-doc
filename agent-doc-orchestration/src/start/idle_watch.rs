@@ -2625,8 +2625,9 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             }
                         }
                         let head = active_head.expect("dispatch implies an active head");
-                        let drain_payload = idle_queue_drain_payload(&file, &harness, &head);
-                        let payload_kind = idle_queue_drain_payload_kind(&harness, &head);
+                        let trigger_command = harness.trigger_command(&file);
+                        let drain_payload = idle_queue_drain_payload(&head, trigger_command);
+                        let payload_kind = idle_queue_drain_payload_kind(&head);
                         let slash_command = idle_queue_head_slash_command(&head);
                         // `#qflood2`: never stack a trigger already pending in the
                         // composer. For Enter-key profiles, a proven-pending

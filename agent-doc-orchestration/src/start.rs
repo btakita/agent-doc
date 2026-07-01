@@ -133,10 +133,17 @@ use crate::supervisor::{
     pty::PtySpawnConfig,
 };
 use agent_doc_frontmatter::frontmatter;
+use agent_doc_queue::idle_drain::{
+    idle_queue_drain_payload, idle_queue_drain_payload_kind, idle_queue_head_slash_command,
+};
 #[cfg(test)]
 use agent_doc_queue::queue::{
     IdleQueueContextResetDecision, IdleQueueDrainDecision, clean_session_head_forces_context_reset,
     idle_queue_context_reset_decision, idle_queue_drain_decision,
+};
+use agent_doc_supervisor::auto_trigger::{
+    AutoTriggerCooldownAction, AutoTriggerMonitor, AutoTriggerNoPromptAction,
+    AutoTriggerStopOutcome, auto_trigger_clear_cooldown_action, auto_trigger_no_prompt_action,
 };
 use agent_doc_supervisor::config::AgentLaunchArgsSources;
 use agent_doc_supervisor::crash_policy::{
@@ -160,10 +167,6 @@ use agent_doc_supervisor_io::cwd;
 #[cfg(unix)]
 use agent_doc_supervisor_process::ReexecState;
 use agent_doc_supervisor_process::screen::OwnedPtyScreen;
-use agent_doc_turn_executor::auto_trigger::{
-    AutoTriggerCooldownAction, AutoTriggerMonitor, AutoTriggerNoPromptAction,
-    AutoTriggerStopOutcome, auto_trigger_clear_cooldown_action, auto_trigger_no_prompt_action,
-};
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
 use agent_doc_turn_executor::capability_proof::managed_capability_proof_status_message;
 
@@ -382,10 +385,6 @@ fn record_session_startup_miss(
 
 mod idle_watch;
 
-fn idle_queue_head_slash_command(active_head: &str) -> Option<String> {
-    agent_doc_queue::queue_command::slash_command_text(active_head)
-}
-
 fn turn_active_for_owned_pane(file: &Path, shared: &SupervisorShared) -> bool {
     let Some(root) = agent_doc_fs::find_project_root(file) else {
         return false;
@@ -475,28 +474,6 @@ fn complete_idle_queue_slash_command_head(
             );
             false
         }
-    }
-}
-
-fn idle_queue_drain_payload(
-    file: &str,
-    harness: &agent_doc_harness::HarnessConfig,
-    active_head: &str,
-) -> String {
-    if let Some(command) = idle_queue_head_slash_command(active_head) {
-        return command;
-    }
-    harness.trigger_command(file)
-}
-
-fn idle_queue_drain_payload_kind(
-    _harness: &agent_doc_harness::HarnessConfig,
-    active_head: &str,
-) -> &'static str {
-    if idle_queue_head_slash_command(active_head).is_some() {
-        "slash_command"
-    } else {
-        "trigger"
     }
 }
 
@@ -2817,26 +2794,17 @@ mod tests {
     }
     #[test]
     fn idle_queue_drain_payload_keeps_trigger_for_non_codex_harnesses() {
+        let claude = agent_doc_harness::HarnessConfig::claude();
+        let opencode = agent_doc_harness::HarnessConfig::opencode();
         assert_eq!(
-            idle_queue_drain_payload(
-                "tasks/sampleorders.md",
-                &agent_doc_harness::HarnessConfig::claude(),
-                "ignored",
-            ),
+            idle_queue_drain_payload("ignored", claude.trigger_command("tasks/sampleorders.md"),),
             "/agent-doc tasks/sampleorders.md"
         );
         assert_eq!(
-            idle_queue_drain_payload(
-                "tasks/sampleorders.md",
-                &agent_doc_harness::HarnessConfig::opencode(),
-                "ignored",
-            ),
+            idle_queue_drain_payload("ignored", opencode.trigger_command("tasks/sampleorders.md"),),
             "/agent-doc tasks/sampleorders.md"
         );
-        assert_eq!(
-            idle_queue_drain_payload_kind(&agent_doc_harness::HarnessConfig::claude(), "ignored"),
-            "trigger"
-        );
+        assert_eq!(idle_queue_drain_payload_kind("ignored"), "trigger");
     }
     #[test]
     fn idle_queue_restart_drain_does_not_clear_ordinary_sampleorders_head() {
@@ -2853,10 +2821,10 @@ mod tests {
             IdleQueueDrainDecision::Dispatch
         );
         assert_eq!(
-            idle_queue_drain_payload("tasks/sampleorders.md", &harness, head),
+            idle_queue_drain_payload(head, harness.trigger_command("tasks/sampleorders.md")),
             "agent-doc tasks/sampleorders.md"
         );
-        assert_eq!(idle_queue_drain_payload_kind(&harness, head), "trigger");
+        assert_eq!(idle_queue_drain_payload_kind(head), "trigger");
     }
     #[test]
     fn idle_queue_drain_payload_submits_literal_clear_command() {
@@ -2866,24 +2834,27 @@ mod tests {
             agent_doc_harness::HarnessConfig::opencode(),
         ] {
             assert_eq!(
-                idle_queue_drain_payload("tasks/sampleorders.md", &harness, "  /clear  "),
+                idle_queue_drain_payload(
+                    "  /clear  ",
+                    harness.trigger_command("tasks/sampleorders.md")
+                ),
                 "/clear"
             );
-            assert_eq!(
-                idle_queue_drain_payload_kind(&harness, "/clear"),
-                "slash_command"
-            );
+            assert_eq!(idle_queue_drain_payload_kind("/clear"), "slash_command");
         }
     }
     #[test]
     fn idle_queue_drain_payload_submits_any_literal_slash_command() {
         let harness = agent_doc_harness::HarnessConfig::codex();
         assert_eq!(
-            idle_queue_drain_payload("tasks/sampleorders.md", &harness, "/model sonnet"),
+            idle_queue_drain_payload(
+                "/model sonnet",
+                harness.trigger_command("tasks/sampleorders.md")
+            ),
             "/model sonnet"
         );
         assert_eq!(
-            idle_queue_drain_payload_kind(&harness, "/model sonnet"),
+            idle_queue_drain_payload_kind("/model sonnet"),
             "slash_command"
         );
     }

@@ -12,6 +12,20 @@ use serde::{Deserialize, Serialize};
 pub const SYNC_FRONTMATTER_STATUS_PREFIX: &str = "[agent-doc sync] malformed frontmatter";
 pub const SAFE_PASSIVE_SYNC_LOCK_SKIPPED_MARKER: &str =
     "[sync] safe_passive_sync_lock_contention_retry";
+pub const RENAME_DEBOUNCE_TTL_SECS: u64 = 5;
+pub const SYNC_WINDOW_RESOLUTION_BUDGET: Duration = Duration::from_millis(250);
+pub const SYNC_PRUNE_BUDGET: Duration = Duration::from_millis(1_000);
+pub const SYNC_PRUNE_SUBPHASE_BUDGET: Duration = Duration::from_millis(250);
+pub const SYNC_LOCK_WAIT_LATENCY_BUDGET: Duration = Duration::from_millis(100);
+pub const SYNC_PRELOCK_ACTOR_FOCUS_BUDGET: Duration = Duration::from_millis(300);
+pub const SYNC_CONTROLLER_ACTOR_LOOKUP_BUDGET: Duration = Duration::from_millis(250);
+pub const SYNC_PROJECTION_REFRESH_BUDGET: Duration = Duration::from_millis(250);
+pub const SYNC_OWNERSHIP_PROOF_BUDGET: Duration = Duration::from_millis(750);
+pub const SYNC_ROUTER_BUDGET: Duration = Duration::from_millis(1_000);
+pub const SYNC_SAFE_PASSIVE_TOTAL_BUDGET: Duration = Duration::from_millis(1_000);
+pub const SYNC_LOCK_WAIT_BUDGET: Duration = Duration::from_secs(3);
+pub const SYNC_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(50);
+pub const STALE_SYNC_LOCK_OWNER_AGE: Duration = Duration::from_secs(300);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AutoStartMode {

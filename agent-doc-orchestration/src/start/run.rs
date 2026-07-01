@@ -2308,20 +2308,17 @@ mod tests {
     }
     #[test]
     fn idle_queue_drain_payload_uses_trigger_for_codex() {
+        let harness = agent_doc_harness::HarnessConfig::codex();
         let payload = idle_queue_drain_payload(
-            "tasks/sampleorders.md",
-            &agent_doc_harness::HarnessConfig::codex(),
             "JB Run Agent Doc on sampleorders.md stalled.",
+            harness.trigger_command("tasks/sampleorders.md"),
         );
 
         assert_eq!(payload, "agent-doc tasks/sampleorders.md");
         assert!(!payload.contains("Agent-doc active queue continuation"));
         assert!(!payload.contains("JB Run Agent Doc on sampleorders.md stalled."));
         assert_eq!(
-            idle_queue_drain_payload_kind(
-                &agent_doc_harness::HarnessConfig::codex(),
-                "JB Run Agent Doc on sampleorders.md stalled."
-            ),
+            idle_queue_drain_payload_kind("JB Run Agent Doc on sampleorders.md stalled."),
             "trigger"
         );
     }

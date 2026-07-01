@@ -1451,20 +1451,10 @@ pub(crate) fn is_same_project_controller_pid(project_root: &Path, pid: u32) -> b
         .filter(|arg| !arg.is_empty())
         .map(|arg| String::from_utf8_lossy(arg).to_string())
         .collect();
-    args_match_same_project_controller(&args, project_root)
-}
-
-pub(crate) fn args_match_same_project_controller(args: &[String], project_root: &Path) -> bool {
-    let Some(raw_root) =
-        agent_doc_controller::command_line::controller_serve_project_root_from_args(args)
-    else {
-        return false;
-    };
-    canonical_path_for_compare(&raw_root) == canonical_path_for_compare(project_root)
-}
-
-pub(crate) fn canonical_path_for_compare(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+    agent_doc_controller::command_line::same_project_controller_args_match_project_root(
+        &args,
+        project_root,
+    )
 }
 
 pub(crate) fn process_is_alive(pid: u32) -> bool {
@@ -1597,7 +1587,9 @@ pub fn recycle_controllers_all_projects_force(force: bool) -> Result<(usize, usi
             continue;
         }
         if let Some(root) = controller_serve_project_root(pid) {
-            roots.insert(canonical_path_for_compare(&root));
+            roots.insert(
+                agent_doc_controller::command_line::canonical_path_for_command_line_compare(&root),
+            );
         }
     }
     let mut recycled = 0;
@@ -1668,7 +1660,9 @@ pub fn recycle_supervisors_all_projects_force(force: bool) -> Result<(usize, usi
             continue;
         }
         if let Some(doc) = route_owned_supervisor_document(pid) {
-            docs.insert(canonical_path_for_compare(&doc));
+            docs.insert(
+                agent_doc_controller::command_line::canonical_path_for_command_line_compare(&doc),
+            );
         }
     }
     let reason = if force {
@@ -4697,6 +4691,8 @@ mod tests {
 
     #[test]
     fn duplicate_scan_only_matches_same_project_controller_args() {
+        use agent_doc_controller::command_line::same_project_controller_args_match_project_root;
+
         let dir = tempfile::TempDir::new().unwrap();
         let args = vec![
             "/home/user/.cargo/bin/agent-doc".to_string(),
@@ -4705,7 +4701,10 @@ mod tests {
             "--project-root".to_string(),
             dir.path().display().to_string(),
         ];
-        assert!(args_match_same_project_controller(&args, dir.path()));
+        assert!(same_project_controller_args_match_project_root(
+            &args,
+            dir.path()
+        ));
 
         let shell_sentinel = vec![
             "sh".to_string(),
@@ -4717,20 +4716,23 @@ mod tests {
             "--project-root".to_string(),
             dir.path().display().to_string(),
         ];
-        assert!(args_match_same_project_controller(
+        assert!(same_project_controller_args_match_project_root(
             &shell_sentinel,
             dir.path()
         ));
 
         let other_dir = tempfile::TempDir::new().unwrap();
-        assert!(!args_match_same_project_controller(&args, other_dir.path()));
+        assert!(!same_project_controller_args_match_project_root(
+            &args,
+            other_dir.path()
+        ));
 
         let non_controller = vec![
             "agent-doc".to_string(),
             "preflight".to_string(),
             dir.path().join("task.md").display().to_string(),
         ];
-        assert!(!args_match_same_project_controller(
+        assert!(!same_project_controller_args_match_project_root(
             &non_controller,
             dir.path()
         ));
@@ -4744,7 +4746,7 @@ mod tests {
             "--project-root".to_string(),
             dir.path().display().to_string(),
         ];
-        assert!(!args_match_same_project_controller(
+        assert!(!same_project_controller_args_match_project_root(
             &tmux_launcher,
             dir.path()
         ));

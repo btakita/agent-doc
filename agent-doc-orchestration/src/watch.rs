@@ -75,6 +75,7 @@ use agent_doc_document::watch_projection::{
     document_node_events_payload, project_watch_node_events, watch_content_hash,
 };
 use agent_doc_document_realtime::watch_authority::{RawWatchEvent, WatchDelivery};
+use agent_doc_turn::cycle_phase_freshly_in_flight;
 use notify::{EventKind, RecursiveMode, Watcher};
 
 use agent_doc_config::Config;
@@ -812,15 +813,12 @@ pub fn status() -> Result<()> {
 /// takes longer — so without this check a zero-debounce reactive watch would
 /// re-trigger on a mid-turn editor edit and churn the queue (`#queediturn`).
 /// `cycle_state` is the durable, whole-turn source of truth. Bound by
-/// freshness (`WATCH_CYCLE_IN_FLIGHT_MAX_SECS`) so a crashed/stuck cycle still
-/// lets the watch proceed to preflight, which repairs stale cycles.
-pub(crate) const WATCH_CYCLE_IN_FLIGHT_MAX_SECS: u64 = 600;
-
+/// freshness (`agent_doc_turn::WATCH_CYCLE_IN_FLIGHT_MAX_SECS`) so a
+/// crashed/stuck cycle still lets the watch proceed to preflight, which repairs
+/// stale cycles.
 pub(crate) fn cycle_freshly_in_flight(path: &std::path::Path, now_secs: u64) -> bool {
     match crate::cycle_state::load(path) {
-        Ok(Some(cs)) if cs.is_open() => {
-            now_secs.saturating_sub(cs.updated_at) < WATCH_CYCLE_IN_FLIGHT_MAX_SECS
-        }
+        Ok(Some(cs)) => cycle_phase_freshly_in_flight(cs.phase, cs.updated_at, now_secs),
         _ => false,
     }
 }
@@ -858,7 +856,7 @@ mod tests {
         // preflight can repair the stuck cycle.
         assert!(!cycle_freshly_in_flight(
             &doc,
-            now + WATCH_CYCLE_IN_FLIGHT_MAX_SECS + 1
+            now + agent_doc_turn::WATCH_CYCLE_IN_FLIGHT_MAX_SECS + 1
         ));
     }
 

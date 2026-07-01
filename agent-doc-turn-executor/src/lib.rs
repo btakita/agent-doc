@@ -6,7 +6,6 @@
 //! vocabulary; concrete IO ports live in executor-specific adapter crates.
 
 pub mod agent_stream;
-pub mod auto_trigger;
 pub mod binary;
 pub mod capability_proof;
 pub mod capture;

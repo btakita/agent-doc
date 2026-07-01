@@ -57,6 +57,23 @@ pub fn controller_serve_project_root_from_args(args: &[String]) -> Option<PathBu
         .find_map(|window| (window[0] == "--project-root").then(|| PathBuf::from(&window[1])))
 }
 
+/// Canonicalize a command-line path for identity comparisons, falling back to
+/// the raw path when it does not currently resolve.
+pub fn canonical_path_for_command_line_compare(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+pub fn same_project_controller_args_match_project_root(
+    args: &[String],
+    project_root: &Path,
+) -> bool {
+    let Some(raw_root) = controller_serve_project_root_from_args(args) else {
+        return false;
+    };
+    canonical_path_for_command_line_compare(&raw_root)
+        == canonical_path_for_command_line_compare(project_root)
+}
+
 /// Index of the `agent-doc start` invocation in `args` (direct or under a
 /// `sh -c` sentinel), mirroring [`agent_doc_controller_serve_arg_index`].
 pub fn agent_doc_start_arg_index(args: &[String]) -> Option<usize> {
@@ -345,6 +362,67 @@ mod tests {
             ]),
             None
         );
+    }
+
+    #[test]
+    fn same_project_controller_args_match_project_root_matches_only_same_controller_root() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let args = vec![
+            "/home/user/.cargo/bin/agent-doc".to_string(),
+            "controller".to_string(),
+            "serve".to_string(),
+            "--project-root".to_string(),
+            dir.path().display().to_string(),
+        ];
+        assert!(same_project_controller_args_match_project_root(
+            &args,
+            dir.path()
+        ));
+
+        let shell_sentinel = vec![
+            "sh".to_string(),
+            "-c".to_string(),
+            "sleep 30; :".to_string(),
+            dir.path().join("agent-doc").display().to_string(),
+            "controller".to_string(),
+            "serve".to_string(),
+            "--project-root".to_string(),
+            dir.path().display().to_string(),
+        ];
+        assert!(same_project_controller_args_match_project_root(
+            &shell_sentinel,
+            dir.path()
+        ));
+
+        let other_dir = tempfile::TempDir::new().unwrap();
+        assert!(!same_project_controller_args_match_project_root(
+            &args,
+            other_dir.path()
+        ));
+
+        let non_controller = vec![
+            "agent-doc".to_string(),
+            "preflight".to_string(),
+            dir.path().join("task.md").display().to_string(),
+        ];
+        assert!(!same_project_controller_args_match_project_root(
+            &non_controller,
+            dir.path()
+        ));
+
+        let tmux_launcher = vec![
+            "tmux".to_string(),
+            "new-session".to_string(),
+            "agent-doc".to_string(),
+            "controller".to_string(),
+            "serve".to_string(),
+            "--project-root".to_string(),
+            dir.path().display().to_string(),
+        ];
+        assert!(!same_project_controller_args_match_project_root(
+            &tmux_launcher,
+            dir.path()
+        ));
     }
 
     #[test]

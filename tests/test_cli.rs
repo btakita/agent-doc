@@ -5794,6 +5794,35 @@ fn test_agent_doc_turn_cycle_phase_has_no_cycle_state_facade() {
         turn_source.contains("pub const fn as_str(self) -> &'static str"),
         "agent-doc-turn must own canonical cycle phase labels"
     );
+    for required in [
+        "pub const fn is_open(self) -> bool",
+        "pub const WATCH_CYCLE_IN_FLIGHT_MAX_SECS",
+        "pub fn cycle_phase_freshly_in_flight(",
+    ] {
+        assert!(
+            turn_source.contains(required),
+            "agent-doc-turn must own pure cycle phase/freshness policy: {required}"
+        );
+    }
+    let watch_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/watch.rs")).unwrap();
+    for forbidden in [
+        "pub(crate) const WATCH_CYCLE_IN_FLIGHT_MAX_SECS",
+        "const WATCH_CYCLE_IN_FLIGHT_MAX_SECS",
+        "cs.is_open() =>",
+        "cs.is_open() &&",
+    ] {
+        assert!(
+            !watch_source.contains(forbidden),
+            "watch.rs must stay a cycle-state IO adapter and not re-own phase freshness policy: {forbidden}"
+        );
+    }
+    assert!(
+        watch_source.contains("use agent_doc_turn::cycle_phase_freshly_in_flight;")
+            && watch_source
+                .contains("cycle_phase_freshly_in_flight(cs.phase, cs.updated_at, now_secs)"),
+        "watch.rs should delegate open-cycle freshness policy to agent-doc-turn directly"
+    );
     assert!(
         turn_source.contains("pub mod cycle_policy;"),
         "agent-doc-turn should expose pure cycle-state policy through its owning module"
@@ -7549,6 +7578,94 @@ fn test_agent_doc_supervisor_owns_route_runtime_policy() {
             && route.contains("effective_authoritative_actor_state")
             && route.contains("supervisor_authoritative_actor_dispatch_target_eligible"),
         "route.rs should call focused supervisor route runtime policy directly"
+    );
+}
+
+#[test]
+fn test_agent_doc_supervisor_owns_auto_trigger_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let supervisor_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/lib.rs")).unwrap();
+    assert!(
+        supervisor_lib.contains("pub mod auto_trigger;"),
+        "agent-doc-supervisor should expose auto-trigger readiness policy through its owning module"
+    );
+
+    let supervisor_auto_trigger =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/auto_trigger.rs")).unwrap();
+    for required in [
+        "pub struct AutoTriggerMonitor",
+        "pub enum AutoTriggerStopOutcome",
+        "pub enum AutoTriggerCooldownAction",
+        "pub enum AutoTriggerNoPromptAction",
+        "pub fn auto_trigger_clear_cooldown_action(",
+        "pub fn auto_trigger_no_prompt_action(",
+    ] {
+        assert!(
+            supervisor_auto_trigger.contains(required),
+            "agent-doc-supervisor must own auto-trigger readiness policy: {required}"
+        );
+    }
+
+    let start =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
+    assert!(
+        start.contains("use agent_doc_supervisor::auto_trigger::{")
+            && start.contains("auto_trigger_clear_cooldown_action")
+            && start.contains("auto_trigger_no_prompt_action"),
+        "start.rs should call focused supervisor auto-trigger policy directly"
+    );
+    assert!(
+        !start.contains("agent_doc_turn_executor::auto_trigger::{"),
+        "start.rs must not route auto-trigger readiness policy through turn-executor"
+    );
+}
+
+#[test]
+fn test_agent_doc_queue_owns_idle_drain_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+
+    let queue_lib = fs::read_to_string(manifest_dir.join("agent-doc-queue/src/lib.rs")).unwrap();
+    assert!(
+        queue_lib.contains("pub mod idle_drain;"),
+        "agent-doc-queue should expose idle-drain queue policy"
+    );
+
+    let idle_drain =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue/src/idle_drain.rs")).unwrap();
+    for required in [
+        "pub fn idle_queue_head_slash_command(",
+        "pub fn idle_queue_drain_payload(",
+        "pub fn idle_queue_drain_payload_kind(",
+    ] {
+        assert!(
+            idle_drain.contains(required),
+            "agent-doc-queue must own idle-drain payload policy: {required}"
+        );
+    }
+
+    let start =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start.rs")).unwrap();
+    let idle_watch =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
+            .unwrap();
+    for forbidden in [
+        "fn idle_queue_head_slash_command(",
+        "fn idle_queue_drain_payload(",
+        "fn idle_queue_drain_payload_kind(",
+    ] {
+        assert!(
+            !start.contains(forbidden) && !idle_watch.contains(forbidden),
+            "start adapters must not re-own idle-drain payload policy: {forbidden}"
+        );
+    }
+    assert!(
+        start.contains("use agent_doc_queue::idle_drain::{")
+            && idle_watch.contains("harness.trigger_command(&file)")
+            && idle_watch.contains("idle_queue_drain_payload(&head, trigger_command)")
+            && idle_watch.contains("idle_queue_drain_payload_kind(&head)")
+            && idle_watch.contains("idle_queue_head_slash_command(&head)"),
+        "start adapters should render trigger text and call focused queue idle-drain policy directly"
     );
 }
 
@@ -10336,6 +10453,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn agent_doc_cmdline_is_owner(",
         "pub fn cmdline_owns_other_document(",
         "pub fn args_have_preparing_handoff(",
+        "pub fn canonical_path_for_command_line_compare(",
+        "pub fn same_project_controller_args_match_project_root(",
     ] {
         assert!(
             command_line_source.contains(required_snippet),
@@ -10409,6 +10528,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn dispatch_blocked_proof_fields(",
         "fn supervisor_stale_warning_message(",
         "fn host_supervisor_stale_warning_message(",
+        "fn args_match_same_project_controller(",
+        "fn canonical_path_for_compare(",
     ] {
         assert!(
             !rpc_source.contains(forbidden_snippet),
@@ -10468,6 +10589,14 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     assert!(
         rpc_source.contains("status::process_binary_is_stale("),
         "project_controller::rpc should call focused controller binary staleness policy directly"
+    );
+    assert!(
+        rpc_source.contains(
+            "agent_doc_controller::command_line::same_project_controller_args_match_project_root",
+        ) && rpc_source.contains(
+            "agent_doc_controller::command_line::canonical_path_for_command_line_compare",
+        ),
+        "project_controller::rpc should call focused controller command-line comparison policy directly"
     );
     for forbidden_snippet in [
         "fn agent_doc_controller_serve_arg_index(args:",
@@ -11366,9 +11495,6 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
     let executor_policy =
         fs::read_to_string(manifest_dir.join("agent-doc-turn-executor/src/capability_proof.rs"))
             .unwrap();
-    let executor_auto_trigger =
-        fs::read_to_string(manifest_dir.join("agent-doc-turn-executor/src/auto_trigger.rs"))
-            .unwrap();
     let executor_codex_launch =
         fs::read_to_string(manifest_dir.join("agent-doc-turn-executor/src/codex_launch.rs"))
             .unwrap();
@@ -11390,19 +11516,6 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         assert!(
             executor_policy.contains(required_snippet),
             "agent-doc-turn-executor should own capability-proof policy directly: {required_snippet}"
-        );
-    }
-    for required_snippet in [
-        "pub struct AutoTriggerMonitor",
-        "pub enum AutoTriggerStopOutcome",
-        "pub enum AutoTriggerCooldownAction",
-        "pub enum AutoTriggerNoPromptAction",
-        "pub fn auto_trigger_clear_cooldown_action(",
-        "pub fn auto_trigger_no_prompt_action(",
-    ] {
-        assert!(
-            executor_auto_trigger.contains(required_snippet),
-            "agent-doc-turn-executor should own auto-trigger readiness policy directly: {required_snippet}"
         );
     }
     for required_snippet in [
@@ -11541,14 +11654,22 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
             "start.rs must not re-own pure auto-trigger readiness policy: {forbidden_snippet}"
         );
     }
+    let executor_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn-executor/src/lib.rs")).unwrap();
+    assert!(
+        !executor_lib.contains("pub mod auto_trigger;")
+            && !manifest_dir
+                .join("agent-doc-turn-executor/src/auto_trigger.rs")
+                .exists(),
+        "agent-doc-turn-executor must not keep an auto-trigger facade after supervisor extraction"
+    );
     assert!(
         start.contains("agent_doc_turn_executor::capability_proof::resolve_managed_proof_policy")
             && start.contains("agent_doc_turn_executor::capability_proof::proof_retry_decision")
             && start.contains(
                 "use agent_doc_turn_executor::capability_proof::managed_capability_proof_status_message;"
-            )
-            && start.contains("agent_doc_turn_executor::auto_trigger::{"),
-        "start should call focused turn-executor policy directly"
+            ),
+        "start should call focused turn-executor capability-proof policy directly"
     );
     let harness_crate =
         fs::read_to_string(manifest_dir.join("agent-doc-harness/src/lib.rs")).unwrap();
@@ -18942,6 +19063,20 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         "pub fn sync_candidate_files",
         "pub fn canonical_sync_candidate_files",
         "pub fn common_ancestor_dir",
+        "pub const RENAME_DEBOUNCE_TTL_SECS",
+        "pub const SYNC_WINDOW_RESOLUTION_BUDGET",
+        "pub const SYNC_PRUNE_BUDGET",
+        "pub const SYNC_PRUNE_SUBPHASE_BUDGET",
+        "pub const SYNC_LOCK_WAIT_LATENCY_BUDGET",
+        "pub const SYNC_PRELOCK_ACTOR_FOCUS_BUDGET",
+        "pub const SYNC_CONTROLLER_ACTOR_LOOKUP_BUDGET",
+        "pub const SYNC_PROJECTION_REFRESH_BUDGET",
+        "pub const SYNC_OWNERSHIP_PROOF_BUDGET",
+        "pub const SYNC_ROUTER_BUDGET",
+        "pub const SYNC_SAFE_PASSIVE_TOTAL_BUDGET",
+        "pub const SYNC_LOCK_WAIT_BUDGET",
+        "pub const SYNC_LOCK_POLL_INTERVAL",
+        "pub const STALE_SYNC_LOCK_OWNER_AGE",
         "pub fn shared_sync_scope_root",
         "pub fn sync_scope_root",
         "pub fn layout_state_scope_root",
@@ -19006,6 +19141,20 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         "fn sync_candidate_files(",
         "fn canonical_sync_candidate_files",
         "fn common_ancestor_dir",
+        "const RENAME_DEBOUNCE_TTL_SECS",
+        "const SYNC_WINDOW_RESOLUTION_BUDGET",
+        "const SYNC_PRUNE_BUDGET",
+        "const SYNC_PRUNE_SUBPHASE_BUDGET",
+        "const SYNC_LOCK_WAIT_LATENCY_BUDGET",
+        "const SYNC_PRELOCK_ACTOR_FOCUS_BUDGET",
+        "const SYNC_CONTROLLER_ACTOR_LOOKUP_BUDGET",
+        "const SYNC_PROJECTION_REFRESH_BUDGET",
+        "const SYNC_OWNERSHIP_PROOF_BUDGET",
+        "const SYNC_ROUTER_BUDGET",
+        "const SYNC_SAFE_PASSIVE_TOTAL_BUDGET",
+        "const SYNC_LOCK_WAIT_BUDGET",
+        "const SYNC_LOCK_POLL_INTERVAL",
+        "const STALE_SYNC_LOCK_OWNER_AGE",
         "pub fn shared_sync_scope_root",
         "fn sync_scope_root",
         "fn layout_state_scope_root_for_sync",

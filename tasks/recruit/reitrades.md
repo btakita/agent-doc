@@ -1,7 +1,14 @@
 ---
 agent_doc_session: 62d195b8-b029-42a5-9c6c-836cb1b5b103
+agent: claude
+claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
+claude_args: --dangerously-skip-permissions
+codex_args: -s danger-full-access
+pending_done_guard: warn
+agent_doc_lint_dialect: off
+queue: start
 ---
 
 ## Status
@@ -423,12 +430,35 @@ Brian
 - "Limited budget" is the signal to lead with discovery + weekly-cap hourly. That's the lowest-commitment on-ramp for a bootstrapped founder and lets you both de-risk before he spends real money.
 - If you'd rather not put dollar figures in a first LinkedIn message at all, cut the "about $27k-$40k" clause and let the call surface it — but since he explicitly asked what you'd cost, I'd keep it.
 - Tone matches your prior drafts (first-person, no hype, honest about the AI-accuracy caveat).
-<!-- agent:boundary:b49eda43 -->
+
+Should we consider multi-layer perceptrons in the proposal for more accurate AI output?
+
+### Re: Multi-layer perceptrons in the proposal? — opus-4-8
+
+No — I'd keep MLPs out of the proposal. They don't address the accuracy problem REItrades actually has, and naming them would weaken the bid, not strengthen it.
+
+**Why they don't fit the problem.** The AI work here is *document extraction* (old OM/flyer → structured listing fields) and *text generation* (listings, OMs, demographics). A multi-layer perceptron is a plain feedforward net for fixed-size numeric/tabular inputs. It has no mechanism for reading a PDF, pulling "year built" out of a rent roll, or writing an OM paragraph. The tools that move accuracy on this problem are:
+
+1. **Grounding / retrieval** to source-of-truth data (BatchData, rent rolls, structured fields) so the model isn't inventing money-facing numbers.
+2. **Constrained / structured extraction** against the asset-class schema (the model fills a typed form, not free text).
+3. **Validators + confidence + the A–D provenance rubric** already in §3a — deterministic checks that gate what ships.
+4. **Human-in-the-loop review** driven by grade, and the **eval harness** gating merges on the thresholds.
+
+That stack is what turns "100% accurate" into something testable. An MLP sits nowhere in it.
+
+**Where a trained model *could* enter — and it still isn't an MLP.** If REItrades later wants a *learned prediction* on tabular data — price/valuation estimate, cap-rate, lead scoring, asset-class classification — that's a real ML task. But (a) it needs a labeled outcome dataset REItrades doesn't obviously have yet, so it's a data-collection project, not an MVP line item; and (b) on tabular data, gradient-boosted trees (XGBoost/LightGBM) beat MLPs almost every time. So even in the one place a custom model makes sense, "multi-layer perceptron" is the wrong default answer.
+
+**The sales angle.** Artur is bootstrapped, "limited budget," and asked plainly about cost. Dropping "multi-layer perceptrons" into a first-contact proposal reads as over-engineering and adds a cost/complexity story that doesn't map to the accuracy bar you already framed (provenance grading + validation + review). It makes the bid *harder* to say yes to.
+
+**Recommendation:** leave it out. Keep the accuracy story as the rubric + source-backed extraction + confidence + admin review + eval harness — that's the honest, measurable, and defensible version. If Artur specifically pushes for "learned models," handle it on the call as a phase-2, data-dependent option, and note GBDTs (not MLPs) would be the likely tool once there's labeled data. No proposal edit needed.
+
+<!-- agent:boundary:e4a9f7d2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue -->
+/goal Implement backlog item(s): #22tg
 <!-- /agent:queue -->
 
 ## Backlog

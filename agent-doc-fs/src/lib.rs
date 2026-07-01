@@ -20,6 +20,25 @@ pub fn find_project_root_canonical(path: &Path) -> Option<PathBuf> {
     find_project_root(&canonical)
 }
 
+/// Rewrite `file_path` to be relative to `cwd` so a spawned command resolves
+/// correctly when its working directory is narrowed to a submodule root.
+///
+/// When pane cwd resolution narrows to a submodule, a caller's super-root
+/// relative path does not resolve inside that cwd. On any filesystem miss or
+/// non-descendant path, the original string is returned unchanged.
+pub fn rewrite_start_path(file: &Path, cwd: &Path, original: &str) -> String {
+    let Ok(abs_file) = std::fs::canonicalize(file) else {
+        return original.to_string();
+    };
+    let Ok(abs_cwd) = std::fs::canonicalize(cwd) else {
+        return original.to_string();
+    };
+    match abs_file.strip_prefix(&abs_cwd) {
+        Ok(rel) => rel.to_string_lossy().into_owned(),
+        Err(_) => original.to_string(),
+    }
+}
+
 pub fn referenced_markdown_path(current_file: &Path, text: &str) -> Option<PathBuf> {
     referenced_markdown_path_checked(current_file, text)
         .ok()
@@ -189,7 +208,10 @@ fn project_roots_for(path: &Path) -> Vec<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{read_optional, referenced_markdown_path, referenced_markdown_path_checked};
+    use super::{
+        read_optional, referenced_markdown_path, referenced_markdown_path_checked,
+        rewrite_start_path,
+    };
     use std::path::Path;
 
     #[test]
@@ -211,6 +233,58 @@ mod tests {
         assert!(
             message.contains("permission denied"),
             "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn rewrite_start_path_narrows_to_submodule_relative() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let super_root = tmp.path();
+        let sub_root = super_root.join("src").join("sub");
+        let tasks_dir = sub_root.join("tasks");
+        std::fs::create_dir_all(&tasks_dir).unwrap();
+        let doc = tasks_dir.join("foo.md");
+        std::fs::write(&doc, "# foo\n").unwrap();
+
+        let rewritten = rewrite_start_path(&doc, &sub_root, "src/sub/tasks/foo.md");
+
+        assert_eq!(
+            rewritten,
+            format!("tasks{}foo.md", std::path::MAIN_SEPARATOR)
+        );
+    }
+
+    #[test]
+    fn rewrite_start_path_noops_when_file_path_is_already_cwd_relative() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let doc = root.join("plan.md");
+        std::fs::write(&doc, "# plan\n").unwrap();
+
+        assert_eq!(rewrite_start_path(&doc, root, "plan.md"), "plan.md");
+    }
+
+    #[test]
+    fn rewrite_start_path_falls_back_when_canonicalize_fails() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let ghost = tmp.path().join("does-not-exist.md");
+
+        assert_eq!(
+            rewrite_start_path(&ghost, tmp.path(), "does-not-exist.md"),
+            "does-not-exist.md"
+        );
+    }
+
+    #[test]
+    fn rewrite_start_path_falls_back_when_file_not_under_cwd() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let outside = tmp.path().join("outside.md");
+        std::fs::write(&outside, "# outside\n").unwrap();
+        let unrelated_cwd = tempfile::TempDir::new().unwrap();
+
+        assert_eq!(
+            rewrite_start_path(&outside, unrelated_cwd.path(), "outside.md"),
+            "outside.md"
         );
     }
 

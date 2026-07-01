@@ -32,7 +32,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   `agent-doc-queue`, while orchestration keeps marker path resolution,
   read/write/remove effects, and idle-watch delivery. Editor column split
   classification now lives in `agent-doc-tmux`; route orchestration only passes
-  file/column facts into the focused tmux layout policy.
+  file/column facts into the focused tmux layout policy. Startup path rewriting
+  for narrowed pane working directories now lives in `agent-doc-fs`; route
+  startup only supplies the document path, resolved cwd, and original CLI path.
+  Supervisor reexec candidate ordering now lives in `agent-doc-supervisor`;
+  orchestration only gathers current-exe/install-path facts before attempting
+  the platform `execve`.
 
 - **Pure helper layer extracted from orchestration.** Exchange shrink/ack retry
   and prompt-dedupe helpers now live in `agent-doc-element-exchange`; preflight

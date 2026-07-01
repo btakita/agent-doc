@@ -1393,48 +1393,10 @@ fn clear_cooldown_blocks_auto_dispatch(
     }
 }
 
-/// Long-lived idle-queue watch thread for the supervisor
-/// (`#jb-run-agent-doc-busy-queue-dispatch-deadlock`).
-///
-/// Unlike [`spawn_auto_trigger_thread`] (a one-shot restart continuation), this
-/// watch runs for the whole child lifetime. On every busy→idle transition it
-/// drains a live `agent:queue auto` head — including one a busy-pane
-/// `Run Agent Doc` route appended via `enqueue_route_dispatch_prompt` — by
-/// injecting a harness-specific drain payload. Claude/OpenCode keep their
-/// normal harness trigger, while Codex receives an in-owner-pane continuation
-/// prompt so it answers the head instead of recursively running `agent-doc
-/// <FILE>` in the pane that already owns the document. It is the
-/// supervisor-owned drain guarantee the route busy path lacked: route enqueues +
-/// returns `Ok`, this thread fires the dispatch once the pane goes idle so the
-/// queued prompt is never stranded.
-///
-/// Invariants:
-/// - Never injects while the pane is mid-turn (no-inject-into-active-turn).
-/// - Dedups on the head text so a stuck/undrained head cannot hot-loop.
-/// - Respects the managed capability-proof gate, same as the auto-trigger.
-///
-/// `#ctlrecycle` R3 — replace this stale supervisor's process image with the
-/// freshly-installed binary IN PLACE (`execve`), preserving the live harness child
-/// and the tmux pane (`#ctlrecycle` R3, opt-in via `AGENT_DOC_SUPERVISOR_AUTO_RECYCLE`).
-///
-/// The child (a separate PID) survives the image swap untouched; we dup the live pty
-/// master fd, clear its CLOEXEC so it survives `exec`, and hand the new image the
-/// child PID + inherited fd through the environment. The new image re-enters
-/// `run_with_reap_policy`, re-runs all supervisor setup (IPC, sessions, controller,
-/// watchers) for free, and calls [`PtySession::adopt`] instead of spawning.
-///
-/// Returns `Err` if it could not even begin the exec (no live child/master fd, or
-/// `exec` itself failed). On success it never returns. The caller falls back to a
-/// clean `process::exit(0)` so a recycle still happens (the child restarts) rather
-/// than wedging on the stale binary.
-/// Ordered, de-duplicated candidate binary paths the supervisor self-`execve` may
-/// target, each tagged with a short diagnostic note. `exec` tries them in order and
-/// the first one it accepts wins; the rest exist so a single unresolvable path (an
-/// old pre-fix launch path, a `(deleted)` `current_exe`, a `PATH`-only install)
-/// cannot doom the whole recycle. The notes are surfaced in the failure log so a
-/// recurring ENOENT is diagnosable instead of a bare "os error 2".
 #[cfg(unix)]
 fn supervisor_reexec_candidates() -> Vec<(PathBuf, &'static str)> {
+    // Gather the effectful environment facts here, then hand candidate ordering
+    // to `agent-doc-supervisor`.
     // 2. `current_exe()` is only a usable candidate when it is still a launchable
     //    file. macOS keeps a launchable `current_exe()` path after the binary is
     //    replaced (no `(deleted)` suffix); Linux reports a deleted inode that
@@ -1451,36 +1413,27 @@ fn supervisor_reexec_candidates() -> Vec<(PathBuf, &'static str)> {
     // 1. The freshly-installed launchable binary (skips a `(deleted)` current_exe,
     //    follows argv0 + `PATH` to the on-disk build).
     let resolved_fresh = crate::project_controller::current_agent_doc_binary().ok();
-    build_reexec_candidates(resolved_fresh, current_exe, current_exe_launchable)
+    agent_doc_supervisor::reexec::build_reexec_candidates(
+        resolved_fresh,
+        current_exe,
+        current_exe_launchable,
+    )
 }
 
-/// Pure candidate-ladder builder (env gathered by [`supervisor_reexec_candidates`]).
-/// Ordered, de-duplicated, always ending with the bare-name `PATH` fallback so the
-/// list is never empty.
-#[cfg(unix)]
-fn build_reexec_candidates(
-    resolved_fresh: Option<PathBuf>,
-    current_exe: Option<PathBuf>,
-    current_exe_launchable: bool,
-) -> Vec<(PathBuf, &'static str)> {
-    let mut out: Vec<(PathBuf, &'static str)> = Vec::new();
-    let mut push = |path: PathBuf, note: &'static str| {
-        if !out.iter().any(|(existing, _)| existing == &path) {
-            out.push((path, note));
-        }
-    };
-    if let Some(path) = resolved_fresh {
-        push(path, "resolved_fresh_binary");
-    }
-    if current_exe_launchable && let Some(path) = current_exe {
-        push(path, "current_exe");
-    }
-    // Bare `agent-doc` → OS `PATH` lookup at exec time. Last-resort fallback so a
-    // `PATH`-only install still recycles even if argv0/`current_exe` are gone.
-    push(PathBuf::from("agent-doc"), "path_lookup_agent_doc");
-    out
-}
-
+/// `#ctlrecycle` R3 — replace this stale supervisor's process image with the
+/// freshly-installed binary IN PLACE (`execve`), preserving the live harness child
+/// and the tmux pane (`#ctlrecycle` R3, opt-in via `AGENT_DOC_SUPERVISOR_AUTO_RECYCLE`).
+///
+/// The child (a separate PID) survives the image swap untouched; we dup the live pty
+/// master fd, clear its CLOEXEC so it survives `exec`, and hand the new image the
+/// child PID + inherited fd through the environment. The new image re-enters
+/// `run_with_reap_policy`, re-runs all supervisor setup (IPC, sessions, controller,
+/// watchers) for free, and calls [`PtySession::adopt`] instead of spawning.
+///
+/// Returns `Err` if it could not even begin the exec (no live child/master fd, or
+/// `exec` itself failed). On success it never returns. The caller falls back to a
+/// clean `process::exit(0)` so a recycle still happens (the child restarts) rather
+/// than wedging on the stale binary.
 #[cfg(unix)]
 fn supervisor_perform_reexec(
     shared: &SupervisorShared,
@@ -2541,63 +2494,6 @@ mod tests {
     use std::collections::HashMap;
     use tempfile::TempDir;
     use tmux_router::IsolatedTmux;
-    #[cfg(unix)]
-    #[test]
-    fn reexec_candidates_prefer_fresh_then_current_exe_then_path() {
-        let fresh = PathBuf::from("/fresh/agent-doc");
-        let current = PathBuf::from("/proc/self/exe-current");
-        let candidates = build_reexec_candidates(Some(fresh.clone()), Some(current.clone()), true);
-        let paths: Vec<_> = candidates.iter().map(|(p, _)| p.clone()).collect();
-        assert_eq!(
-            paths,
-            vec![fresh, current, PathBuf::from("agent-doc")],
-            "ordered: resolved fresh, launchable current_exe, then PATH fallback"
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn reexec_candidates_drop_deleted_current_exe_but_keep_path_fallback() {
-        // The Linux post-`cargo install` shape: `current_exe()` is a `(deleted)` inode
-        // (not launchable) and the fresh resolver succeeded. The deleted path must not
-        // appear; the PATH fallback always does so the ladder is never empty.
-        let fresh = PathBuf::from("/home/u/.cargo/bin/agent-doc");
-        let deleted = PathBuf::from("/home/u/.cargo/bin/agent-doc (deleted)");
-        let candidates = build_reexec_candidates(Some(fresh.clone()), Some(deleted.clone()), false);
-        let notes: Vec<_> = candidates.iter().map(|(_, n)| *n).collect();
-        assert_eq!(
-            notes,
-            vec!["resolved_fresh_binary", "path_lookup_agent_doc"]
-        );
-        assert!(
-            !candidates.iter().any(|(p, _)| p == &deleted),
-            "a non-launchable (deleted) current_exe must be excluded"
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn reexec_candidates_dedup_and_never_empty() {
-        // When the resolver and current_exe both point at the same path, it appears
-        // once; with neither resolvable the PATH fallback alone keeps the list usable.
-        let same = PathBuf::from("/usr/local/bin/agent-doc");
-        let deduped = build_reexec_candidates(Some(same.clone()), Some(same.clone()), true);
-        assert_eq!(
-            deduped,
-            vec![
-                (same, "resolved_fresh_binary"),
-                (PathBuf::from("agent-doc"), "path_lookup_agent_doc"),
-            ]
-        );
-
-        let empty = build_reexec_candidates(None, None, false);
-        assert_eq!(
-            empty,
-            vec![(PathBuf::from("agent-doc"), "path_lookup_agent_doc")],
-            "ladder always ends with a PATH fallback so reexec can still try"
-        );
-    }
-
     #[test]
     fn model_injected_from_claude_model_frontmatter() {
         let fm = Frontmatter {

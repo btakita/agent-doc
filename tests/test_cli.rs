@@ -5606,6 +5606,33 @@ fn test_agent_doc_fs_owns_markdown_reference_resolution() {
 }
 
 #[test]
+fn test_agent_doc_fs_owns_start_path_rewrite_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fs_source = fs::read_to_string(manifest_dir.join("agent-doc-fs/src/lib.rs")).unwrap();
+    assert!(
+        fs_source.contains("pub fn rewrite_start_path("),
+        "agent-doc-fs must own route start path rewriting"
+    );
+    assert!(
+        fs_source.contains("strip_prefix(&abs_cwd)"),
+        "agent-doc-fs must keep the cwd-relative strip policy"
+    );
+
+    let startup_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/startup.rs"))
+            .unwrap();
+    assert!(
+        startup_source.contains("agent_doc_fs::rewrite_start_path("),
+        "route startup should call agent-doc-fs directly for start path rewriting"
+    );
+    assert!(
+        !startup_source.contains("pub fn rewrite_start_path(")
+            && !startup_source.contains("fn rewrite_start_path("),
+        "route startup must not re-own the start path rewrite helper"
+    );
+}
+
+#[test]
 fn test_agent_doc_lease_is_freshness_boundary() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
@@ -9081,6 +9108,12 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "agent-doc-supervisor must own pure supervisor input byte policy"
     );
     assert!(
+        manifest_dir
+            .join("agent-doc-supervisor/src/reexec.rs")
+            .exists(),
+        "agent-doc-supervisor must own pure supervisor reexec candidate policy"
+    );
+    assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/start/decisions.rs")
             .exists(),
@@ -9114,6 +9147,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/run_loop.rs")).unwrap();
     let supervisor_input_policy =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/input.rs")).unwrap();
+    let supervisor_reexec_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/reexec.rs")).unwrap();
     for required_snippet in [
         "pub struct OwnershipGeneration",
         "pub struct OwnershipTransitionEvent",
@@ -9302,6 +9337,23 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             && start_source.contains("normalize_supervisor_inject_bytes")
             && start_source.contains("prompt_input_summary"),
         "start.rs should call focused supervisor input byte policy directly"
+    );
+    for required_snippet in ["pub fn build_reexec_candidates("] {
+        assert!(
+            supervisor_reexec_policy.contains(required_snippet),
+            "agent-doc-supervisor reexec should own supervisor reexec candidate policy directly: {required_snippet}"
+        );
+    }
+    for forbidden_snippet in ["fn build_reexec_candidates("] {
+        assert!(
+            !start_source.contains(forbidden_snippet),
+            "start.rs must not re-own pure supervisor reexec candidate policy: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        supervisor_lib.contains("pub mod reexec;")
+            && start_source.contains("agent_doc_supervisor::reexec::build_reexec_candidates("),
+        "start.rs should project reexec facts and call focused supervisor reexec policy directly"
     );
     let supervisor_route_owned =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/route_owned.rs")).unwrap();

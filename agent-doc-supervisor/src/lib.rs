@@ -15,6 +15,7 @@ pub mod input;
 pub mod lifecycle;
 pub mod recycle_inflight;
 pub mod recycle_yield;
+pub mod reexec;
 pub mod route_owned;
 pub mod route_submit_inflight;
 pub mod run_loop;

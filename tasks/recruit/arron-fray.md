@@ -127,6 +127,10 @@ Done, committed in `resume/`, all PDFs rebuilt.
 - **Rebuilt:** `BrianTakita-python-realtime.pdf`, `BrianTakita-arron-fray.pdf`, `BrianTakita.pdf` — verified NumPy/PyTorch/msgspec render (Presence AI + Skills).
 
 `BrianTakita-python-realtime.pdf` remains the one to attach for Arron. Still nothing sent — say the word to send the message or adjust it.
+
+Add Livekit to my experience with Presence AI and the Stealth Startup. Recreate the resume.
+
+I'm going to edit the message with my resume. Please draft a followup to ensure arron-fray uses my updated resume in case he already downloaded my old resume.
 <!-- /agent:exchange -->
 
 ## Queue

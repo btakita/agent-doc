@@ -895,6 +895,12 @@ should be deleted during extraction.
   `agent-doc-supervisor`. Orchestration imports those focused APIs directly and
   keeps only the surrounding snapshot, process, registry, pane, git-command, and
   actor-store effects.
+- The follow-up local seam moved exchange-only post-commit IPC reposition safety
+  from git orchestration into `agent-doc-element-exchange`. The focused crate
+  now owns exchange-component redaction and the "only exchange changed" predicate
+  with the regression tests; git orchestration only reads `HEAD^`/`HEAD` and
+  decides whether to send the existing IPC signal. No compatibility wrapper was
+  kept in `git.rs`.
 
 ### Earlier closure finding
 

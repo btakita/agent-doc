@@ -10,10 +10,12 @@ pub(crate) fn prune_dead_entries_for_target_in_registry<F>(
 where
     F: FnMut(&str) -> bool,
 {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let matcher = ResyncTargetMatcher::new(target, cwd);
     let removed: Vec<(String, tmux_router::RegistryEntry)> = registry
         .iter()
         .filter(|(key, entry)| {
-            (same_document_path(target, &entry.file) || same_document_path(target, key))
+            (matcher.same_document_path(&entry.file) || matcher.same_document_path(key))
                 && !pane_alive(&entry.pane)
         })
         .map(|(key, entry)| (key.clone(), entry.clone()))

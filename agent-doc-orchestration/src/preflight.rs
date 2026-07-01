@@ -633,7 +633,7 @@ fn post_exchange_comment_prompt_preset_warning(
 }
 
 fn preset_item_id_collision_warning(content: &str) -> Option<PreflightWarning> {
-    let collisions = agent_doc_document::active_identity::detect_identity_collisions(content);
+    let collisions = agent_doc_element_backlog::backlog::detect_identity_collisions(content);
     if collisions.is_empty() {
         return None;
     }

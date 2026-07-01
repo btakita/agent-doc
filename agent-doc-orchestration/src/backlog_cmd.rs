@@ -137,31 +137,9 @@ fn log_symptom_dedupe(file: &Path, surface: &str, id: &str, key: &backlog::Sympt
 /// or `[/]`) at the beginning of the list. Supports canonical `id=<custom> `
 /// syntax and compatibility `[#custom] ` input to preserve a custom id. Prints
 /// the assigned hash id to stdout.
-/// `#preset-item-id-collision-enforce`: reject a `--pending-add` whose explicit
-/// custom id (`id=<id>` / `[#id]`) collides with a frontmatter `prompt_presets`
-/// key or an existing active `agent:backlog` / `agent:review` / `agent:icebox`
-/// item id, before the add is written. This fails closed at the mutation
-/// boundary so a new ambiguous identity is never created. Auto-id adds (no
-/// explicit prefix) are unaffected, so ordinary `--pending-add "text"` is never
-/// blocked.
-fn reject_colliding_explicit_id(full_content: &str, item: &str) -> Result<()> {
-    let Some(candidate) = backlog::explicit_custom_id(item) else {
-        return Ok(());
-    };
-    if let Some(sources) =
-        agent_doc_document::active_identity::identity_collision_for_new_id(full_content, &candidate)
-    {
-        anyhow::bail!(
-            "pending add: refusing to add item with explicit id `#{candidate}` — that identity is already active under {sources}. Each #id must have exactly one active meaning per document so `do #id`, queue generation, and \"top backlog item\" stay unambiguous (#preset-item-id-collision-enforce). Choose a different id, or rename the existing {sources} entry first.",
-            sources = sources.join(" + ")
-        );
-    }
-    Ok(())
-}
-
 pub fn add(file: &Path, item: &str, gated: bool) -> Result<()> {
     let (full_content, comp) = find_pending_component(file)?;
-    reject_colliding_explicit_id(&full_content, item)?;
+    backlog::ensure_new_item_explicit_id_available(&full_content, item)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = agent_doc_hash::document_id_for_path(file);
     let outcome = backlog::op_add_with_outcome(existing, item, &doc_id, gated)?;
@@ -198,7 +176,7 @@ fn add_many_to_list(
     }
     let (full_content, comp) = find_tracked_list_component(file, list)?;
     for item in items {
-        reject_colliding_explicit_id(&full_content, item)?;
+        backlog::ensure_new_item_explicit_id_available(&full_content, item)?;
     }
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = agent_doc_hash::document_id_for_path(file);
@@ -235,7 +213,7 @@ fn add_at_to_list(
     list: backlog::TrackedWorkList,
 ) -> Result<String> {
     let (full_content, comp) = find_tracked_list_component(file, list)?;
-    reject_colliding_explicit_id(&full_content, item)?;
+    backlog::ensure_new_item_explicit_id_available(&full_content, item)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = agent_doc_hash::document_id_for_path(file);
     let outcome = backlog::op_add_at_with_outcome(existing, item, &doc_id, false, position)?;

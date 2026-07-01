@@ -1043,6 +1043,110 @@ pub fn find_tracked_work_component_in_content(
         .with_context(|| format!("document has no {} component", list.label()))
 }
 
+/// Build the active document identity registry for tracked-work lookup.
+///
+/// Each normalized `#id` maps to the active sources that define it: frontmatter
+/// `prompt_presets`, active backlog/review/icebox items, or both. Done items
+/// and `agent:done` archives are intentionally excluded because they are not
+/// active dispatch targets.
+pub fn document_active_identities(content: &str) -> BTreeMap<String, Vec<String>> {
+    let mut sources: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    if let Ok((frontmatter, _)) = agent_doc_frontmatter::frontmatter::parse(content) {
+        for key in frontmatter.prompt_presets.keys() {
+            let id = normalize_pending_id(key);
+            if !id.is_empty() {
+                sources
+                    .entry(id)
+                    .or_default()
+                    .push("prompt_presets".to_string());
+            }
+        }
+    }
+    if let Ok(components) = element::parse(content) {
+        for component in components {
+            let label = if element::is_backlog_component(&component.name) {
+                "agent:backlog"
+            } else if element::is_review_component(&component.name) {
+                "agent:review"
+            } else if element::is_icebox_component(&component.name) {
+                "agent:icebox"
+            } else {
+                continue;
+            };
+            let (_, items, _) = parse_items(component.content(content));
+            for item in items.into_iter().filter(|item| !item.is_done()) {
+                let id = normalize_pending_id(&item.id);
+                if !id.is_empty() {
+                    sources.entry(id).or_default().push(label.to_string());
+                }
+            }
+        }
+    }
+    sources
+}
+
+/// Collect identities that resolve under more than one active source.
+///
+/// When the same `#id` exists in two active sources, `do #id`, queue generation,
+/// and "top backlog item: #id" are ambiguous between preset expansion and item
+/// execution.
+pub fn detect_identity_collisions(content: &str) -> Vec<String> {
+    document_active_identities(content)
+        .into_iter()
+        .filter(|(_, srcs)| srcs.len() > 1)
+        .map(|(id, srcs)| format!("#{id} ({})", srcs.join(" + ")))
+        .collect()
+}
+
+/// Return existing active sources that a new explicit id would collide with.
+pub fn identity_collision_for_new_id(content: &str, candidate_id: &str) -> Option<Vec<String>> {
+    let candidate_id = normalize_pending_id(candidate_id);
+    if candidate_id.is_empty() {
+        return None;
+    }
+    document_active_identities(content)
+        .get(&candidate_id)
+        .filter(|sources| !sources.is_empty())
+        .cloned()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExplicitIdCollision {
+    pub candidate_id: String,
+    pub sources: Vec<String>,
+}
+
+/// Return existing active sources that a new explicit item id would collide
+/// with. Auto-id adds (no `id=<custom>` / `[#custom]` prefix) never collide.
+pub fn explicit_new_item_id_collision(
+    full_content: &str,
+    item: &str,
+) -> Option<ExplicitIdCollision> {
+    let candidate_id = explicit_custom_id(item)?;
+    let candidate_id = normalize_pending_id(&candidate_id);
+    if candidate_id.is_empty() {
+        return None;
+    }
+    let sources = identity_collision_for_new_id(full_content, &candidate_id)?;
+    Some(ExplicitIdCollision {
+        candidate_id,
+        sources,
+    })
+}
+
+/// Enforce that an explicit new tracked-work id has exactly one active meaning
+/// in the document after insertion.
+pub fn ensure_new_item_explicit_id_available(full_content: &str, item: &str) -> Result<()> {
+    let Some(collision) = explicit_new_item_id_collision(full_content, item) else {
+        return Ok(());
+    };
+    let candidate = collision.candidate_id;
+    let sources = collision.sources.join(" + ");
+    bail!(
+        "pending add: refusing to add item with explicit id `#{candidate}` — that identity is already active under {sources}. Each #id must have exactly one active meaning per document so `do #id`, queue generation, and \"top backlog item\" stay unambiguous (#preset-item-id-collision-enforce). Choose a different id, or rename the existing {sources} entry first."
+    );
+}
+
 pub fn find_open_tracked_work_component_in_content(
     content: &str,
     id: &str,
@@ -6075,6 +6179,140 @@ mod tests {
         let component = open_tracked_work_component_name_in_content(content, "same1").unwrap();
 
         assert_eq!(component.as_deref(), Some("icebox"));
+    }
+
+    #[test]
+    fn active_identities_include_prompt_presets_and_active_tracked_items() {
+        let content = concat!(
+            "---\n",
+            "prompt_presets:\n",
+            "  '#Next-Steps': Any follow-up items?\n",
+            "---\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#alpha] Active backlog item\n",
+            "- [x] [#done1] Finished backlog item\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:review -->\n",
+            "- [/] [#review1] Active review item\n",
+            "<!-- /agent:review -->\n\n",
+            "<!-- agent:icebox -->\n",
+            "- [ ] [#cold1] Parked item\n",
+            "<!-- /agent:icebox -->\n\n",
+            "<!-- agent:done -->\n",
+            "- 2026-06-30 [#arch1] Archived\n",
+            "<!-- /agent:done -->\n"
+        );
+
+        let sources = document_active_identities(content);
+
+        assert_eq!(sources.get("next-steps").unwrap(), &vec!["prompt_presets"]);
+        assert_eq!(sources.get("alpha").unwrap(), &vec!["agent:backlog"]);
+        assert_eq!(sources.get("review1").unwrap(), &vec!["agent:review"]);
+        assert_eq!(sources.get("cold1").unwrap(), &vec!["agent:icebox"]);
+        assert!(!sources.contains_key("done1"), "{sources:?}");
+        assert!(!sources.contains_key("arch1"), "{sources:?}");
+    }
+
+    #[test]
+    fn detect_identity_collisions_flags_preset_and_tracked_item_ambiguity() {
+        let content = concat!(
+            "---\n",
+            "prompt_presets:\n",
+            "  '#next-steps': Any follow-up items?\n",
+            "---\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#next-steps] Active backlog item\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:review -->\n",
+            "- [/] [#dup7] Active review item\n",
+            "<!-- /agent:review -->\n\n",
+            "<!-- agent:icebox -->\n",
+            "- [ ] [#dup7] Parked item\n",
+            "<!-- /agent:icebox -->\n"
+        );
+
+        let collisions = detect_identity_collisions(content);
+
+        assert_eq!(collisions.len(), 2, "{collisions:?}");
+        assert!(
+            collisions
+                .iter()
+                .any(|collision| collision.contains("#dup7")
+                    && collision.contains("agent:review + agent:icebox")),
+            "{collisions:?}"
+        );
+        assert!(
+            collisions
+                .iter()
+                .any(|collision| collision.contains("#next-steps")
+                    && collision.contains("prompt_presets + agent:backlog")),
+            "{collisions:?}"
+        );
+    }
+
+    #[test]
+    fn identity_collision_for_new_id_reports_existing_sources() {
+        let content = concat!(
+            "---\nprompt_presets:\n  '#next-steps': x\n---\n\n",
+            "<!-- agent:backlog -->\n- [ ] [#alpha] active\n<!-- /agent:backlog -->\n"
+        );
+
+        assert_eq!(
+            identity_collision_for_new_id(content, "next-steps"),
+            Some(vec!["prompt_presets".to_string()])
+        );
+        assert_eq!(
+            identity_collision_for_new_id(content, "#ALPHA"),
+            Some(vec!["agent:backlog".to_string()])
+        );
+        assert_eq!(identity_collision_for_new_id(content, "fresh01"), None);
+        assert_eq!(identity_collision_for_new_id(content, ""), None);
+    }
+
+    #[test]
+    fn explicit_new_item_id_collision_reports_existing_active_sources() {
+        let content = concat!(
+            "---\nprompt_presets:\n  '#next-steps': x\n---\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#alpha] Active backlog item\n",
+            "<!-- /agent:backlog -->\n"
+        );
+
+        assert_eq!(
+            explicit_new_item_id_collision(content, "id=NEXT-STEPS add follow-up"),
+            Some(ExplicitIdCollision {
+                candidate_id: "next-steps".to_string(),
+                sources: vec!["prompt_presets".to_string()],
+            })
+        );
+        assert_eq!(
+            explicit_new_item_id_collision(content, "[#ALPHA] duplicate"),
+            Some(ExplicitIdCollision {
+                candidate_id: "alpha".to_string(),
+                sources: vec!["agent:backlog".to_string()],
+            })
+        );
+        assert_eq!(
+            explicit_new_item_id_collision(content, "mention #alpha without explicit prefix"),
+            None
+        );
+    }
+
+    #[test]
+    fn ensure_new_item_explicit_id_available_rejects_ambiguous_insert() {
+        let content = concat!(
+            "---\nprompt_presets:\n  '#deploy': x\n---\n\n",
+            "<!-- agent:icebox -->\n",
+            "- [ ] [#deploy] Already active in icebox\n",
+            "<!-- /agent:icebox -->\n"
+        );
+
+        let err =
+            ensure_new_item_explicit_id_available(content, "id=deploy add duplicate").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("#deploy"), "{msg}");
+        assert!(msg.contains("prompt_presets + agent:icebox"), "{msg}");
+        assert!(msg.contains("#preset-item-id-collision-enforce"), "{msg}");
     }
 
     #[test]

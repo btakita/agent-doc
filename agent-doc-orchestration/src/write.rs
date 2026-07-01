@@ -244,8 +244,9 @@ use agent_doc_queue::queue_prompt_drift::{
     dropped_queue_prompt_lines_after_content_ours, preserve_content_ours_over_live_queue_deletions,
 };
 use agent_doc_workflow::session_cycle::{
-    compact_command_hint, parse_tracked_work_edits, pending_kept_open_ids_from_mutations,
-    shell_quote_cli_arg,
+    FinalizeRerunCommand, compact_command_hint, finalize_rerun_command_base,
+    group_pending_add_targets, parse_id_order, parse_tracked_work_edits,
+    pending_kept_open_ids_from_mutations,
 };
 
 use crate::{
@@ -408,149 +409,6 @@ fn log_splice_pending_component_warning(warning: &SplicePendingComponentWarning)
             );
         }
     }
-}
-
-fn build_rerun_command_base(options: &CommandOptions, commit_mode: CommitMode) -> Option<String> {
-    if commit_mode != CommitMode::Required {
-        return None;
-    }
-
-    let mut args = vec!["agent-doc".to_string(), "finalize".to_string()];
-    args.push(options.file.display().to_string());
-    if let Some(path) = &options.baseline_file {
-        args.push("--baseline-file".to_string());
-        args.push(path.display().to_string());
-    }
-    if options.is_template {
-        args.push("--template".to_string());
-    }
-    if options.is_stream {
-        args.push("--stream".to_string());
-    }
-    if options.is_ipc {
-        args.push("--ipc".to_string());
-    }
-    if options.force_disk {
-        args.push("--force-disk".to_string());
-    }
-    if let Some(origin) = &options.origin {
-        args.push("--origin".to_string());
-        args.push(origin.clone());
-    }
-    for value in &options.pending_add {
-        args.push("--backlog-add".to_string());
-        args.push(value.clone());
-    }
-    for pair in options.pending_add_to.chunks(2) {
-        if let [target, value] = pair {
-            args.push("--backlog-add-to".to_string());
-            args.push(target.clone());
-            args.push(value.clone());
-        }
-    }
-    for value in &options.pending_add_gated {
-        args.push("--backlog-add-gated".to_string());
-        args.push(value.clone());
-    }
-    for pair in options.pending_add_after.chunks(2) {
-        if let [anchor, value] = pair {
-            args.push("--backlog-add-after".to_string());
-            args.push(anchor.clone());
-            args.push(value.clone());
-        }
-    }
-    for pair in options.pending_add_before.chunks(2) {
-        if let [anchor, value] = pair {
-            args.push("--backlog-add-before".to_string());
-            args.push(anchor.clone());
-            args.push(value.clone());
-        }
-    }
-    for value in &options.pending_add_back {
-        args.push("--backlog-add-back".to_string());
-        args.push(value.clone());
-    }
-    for value in &options.icebox_add {
-        args.push("--icebox-add".to_string());
-        args.push(value.clone());
-    }
-    for pair in options.icebox_add_after.chunks(2) {
-        if let [anchor, value] = pair {
-            args.push("--icebox-add-after".to_string());
-            args.push(anchor.clone());
-            args.push(value.clone());
-        }
-    }
-    for pair in options.icebox_add_before.chunks(2) {
-        if let [anchor, value] = pair {
-            args.push("--icebox-add-before".to_string());
-            args.push(anchor.clone());
-            args.push(value.clone());
-        }
-    }
-    for value in &options.icebox_add_back {
-        args.push("--icebox-add-back".to_string());
-        args.push(value.clone());
-    }
-    for value in &options.pending_done {
-        args.push("--done".to_string());
-        args.push(value.clone());
-    }
-    for value in &options.pending_edit {
-        args.push("--backlog-edit".to_string());
-        args.push(value.clone());
-    }
-    if options.pending_clear {
-        args.push("--backlog-clear".to_string());
-    }
-    if let Some(value) = &options.pending_reorder {
-        args.push("--backlog-reorder".to_string());
-        args.push(value.clone());
-    }
-    for value in &options.pending_gate {
-        args.push("--backlog-gate".to_string());
-        args.push(value.clone());
-    }
-    for value in &options.pending_ungate {
-        args.push("--backlog-ungate".to_string());
-        args.push(value.clone());
-    }
-    for value in &options.pending_resolve_gate {
-        args.push("--backlog-resolve-gate".to_string());
-        args.push(value.clone());
-    }
-    for value in &options.pending_set_gate_type {
-        args.push("--backlog-set-gate-type".to_string());
-        args.push(value.clone());
-    }
-    for value in &options.pending_set_verify {
-        args.push("--backlog-set-verify".to_string());
-        args.push(value.clone());
-    }
-    for value in &options.review_add {
-        args.push("--review-add".to_string());
-        args.push(value.clone());
-    }
-    for value in &options.review_edit {
-        args.push("--review-edit".to_string());
-        args.push(value.clone());
-    }
-    if options.allow_replace_pending {
-        args.push("--allow-replace-pending".to_string());
-    }
-    if options.pending_only {
-        args.push("--backlog-only".to_string());
-    }
-    if let Some(status) = &options.status {
-        args.push("--status".to_string());
-        args.push(status.clone());
-    }
-    Some(
-        args.into_iter()
-            .map(|arg| shell_quote_cli_arg(&arg))
-            .collect::<Vec<_>>()
-            .join(" "),
-    )
 }
 
 /// Resolve the merge baseline (the common ancestor handed to the finalize merge).
@@ -747,24 +605,6 @@ fn guard_no_explicit_baseline_replay_after_committed_cycle(
         cycle_id
     );
     Ok(Some(head))
-}
-
-fn grouped_pending_add_to(raw: &[String]) -> Result<Vec<(PathBuf, Vec<String>)>> {
-    if !raw.len().is_multiple_of(2) {
-        anyhow::bail!("--backlog-add-to expects repeated FILE TEXT pairs");
-    }
-
-    let mut grouped: Vec<(PathBuf, Vec<String>)> = Vec::new();
-    for pair in raw.chunks(2) {
-        let target = PathBuf::from(&pair[0]);
-        let text = pair[1].clone();
-        if let Some((_, items)) = grouped.iter_mut().find(|(existing, _)| existing == &target) {
-            items.push(text);
-        } else {
-            grouped.push((target, vec![text]));
-        }
-    }
-    Ok(grouped)
 }
 
 fn ensure_pending_add_target(target: &Path) -> Result<()> {
@@ -1080,7 +920,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             // ops-proof auto-completion never reaps a brand-new same-cycle add.
             let mut same_cycle_added_ids: Vec<String> =
                 crate::backlog_cmd::add_many(file, &options.pending_add, false)?;
-            let pending_add_targets = grouped_pending_add_to(&options.pending_add_to)?;
+            let pending_add_targets = group_pending_add_targets(&options.pending_add_to)?;
             for (target, items) in &pending_add_targets {
                 ensure_pending_add_target(target)?;
                 crate::backlog_cmd::add_many(target, items, false).with_context(|| {
@@ -1229,19 +1069,11 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                 crate::cycle_state::mark_pending_mutations(file)?;
             }
             if let Some(ref order) = options.pending_reorder {
-                let ids: Vec<String> = order
-                    .split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
+                let ids = parse_id_order(order);
                 crate::backlog_cmd::reorder(file, &ids)?;
             }
             if let Some(ref order) = options.icebox_reorder {
-                let ids: Vec<String> = order
-                    .split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
+                let ids = parse_id_order(order);
                 crate::backlog_cmd::icebox_reorder(file, &ids)?;
             }
             if !pending_kept_open_ids.is_empty() {
@@ -1284,7 +1116,40 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         pending_kept_open_ids: pending_kept_open_ids.clone(),
         strict_closeout: commit_mode == CommitMode::Required,
         force_disk: options.force_disk,
-        rerun_command_base: build_rerun_command_base(&options, commit_mode),
+        rerun_command_base: finalize_rerun_command_base(FinalizeRerunCommand {
+            required_commit: commit_mode == CommitMode::Required,
+            file,
+            baseline_file: options.baseline_file.as_deref(),
+            is_template: options.is_template,
+            is_stream: options.is_stream,
+            is_ipc: options.is_ipc,
+            force_disk: options.force_disk,
+            origin: options.origin.as_deref(),
+            pending_add: &options.pending_add,
+            pending_add_to: &options.pending_add_to,
+            pending_add_gated: &options.pending_add_gated,
+            pending_add_after: &options.pending_add_after,
+            pending_add_before: &options.pending_add_before,
+            pending_add_back: &options.pending_add_back,
+            icebox_add: &options.icebox_add,
+            icebox_add_after: &options.icebox_add_after,
+            icebox_add_before: &options.icebox_add_before,
+            icebox_add_back: &options.icebox_add_back,
+            pending_done: &options.pending_done,
+            pending_edit: &options.pending_edit,
+            pending_clear: options.pending_clear,
+            pending_reorder: options.pending_reorder.as_deref(),
+            pending_gate: &options.pending_gate,
+            pending_ungate: &options.pending_ungate,
+            pending_resolve_gate: &options.pending_resolve_gate,
+            pending_set_gate_type: &options.pending_set_gate_type,
+            pending_set_verify: &options.pending_set_verify,
+            review_add: &options.review_add,
+            review_edit: &options.review_edit,
+            allow_replace_pending: options.allow_replace_pending,
+            pending_only: options.pending_only,
+            status: options.status.as_deref(),
+        }),
     };
 
     let baseline = match guard_no_explicit_baseline_replay_after_committed_cycle(

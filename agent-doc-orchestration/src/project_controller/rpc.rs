@@ -1288,10 +1288,8 @@ pub(crate) fn run_supervisor_auto_install(crate_root: &Path) -> Result<()> {
 const AUTO_INSTALL_MAX_ATTEMPTS: u32 = 3;
 const AUTO_INSTALL_RETRY_BACKOFF_SECS: u64 = 20;
 
-/// `#restartstderrbleed` — stdio wiring for an auto-install child process,
-/// duplicating `target_fd` for both the child's stdout and stderr and denying it
-/// stdin. Returns `(stdin, stdout, stderr)` ready to hand to
-/// [`std::process::Command`].
+/// `#restartstderrbleed` — materialize the supervisor-owned auto-install stdio
+/// policy into [`std::process::Stdio`] values for a child process.
 ///
 /// Why this exists: the route-owned supervisor renders the agent TUI into its own
 /// tmux pane via **fd1 (stdout)**, while only **fd2 (stderr)** is process-wide
@@ -1304,49 +1302,45 @@ const AUTO_INSTALL_RETRY_BACKOFF_SECS: u64 = 20;
 /// build diagnostics already use (the redirected log when route-owned), and never
 /// on fd1. Nulling stdin stops a build sub-process from consuming forwarded
 /// operator keystrokes.
-#[cfg(unix)]
-fn auto_install_child_stdio_to_fd(
-    target_fd: std::os::fd::RawFd,
+fn auto_install_child_stdio_from_plan(
+    plan: agent_doc_supervisor::auto_install_stdio::AutoInstallChildStdioPlan,
 ) -> (
     std::process::Stdio,
     std::process::Stdio,
     std::process::Stdio,
 ) {
+    (
+        auto_install_stream_from_plan(plan.stdin),
+        auto_install_stream_from_plan(plan.stdout),
+        auto_install_stream_from_plan(plan.stderr),
+    )
+}
+
+fn auto_install_stream_from_plan(
+    stream: agent_doc_supervisor::auto_install_stdio::AutoInstallStdioStream,
+) -> std::process::Stdio {
+    use agent_doc_supervisor::auto_install_stdio::AutoInstallStdioStream;
+
+    match stream {
+        AutoInstallStdioStream::Null => std::process::Stdio::null(),
+        AutoInstallStdioStream::Inherit => std::process::Stdio::inherit(),
+        #[cfg(unix)]
+        AutoInstallStdioStream::DuplicateFd(target_fd) => auto_install_stream_dup_fd(target_fd),
+    }
+}
+
+#[cfg(unix)]
+fn auto_install_stream_dup_fd(target_fd: std::os::fd::RawFd) -> std::process::Stdio {
     use std::os::fd::FromRawFd;
     use std::process::Stdio;
+
     // NEVER inherit: a failed dup falls back to a discard sink, not fd1.
-    let dup_target = || -> Stdio {
-        let fd = unsafe { libc::dup(target_fd) };
-        if fd < 0 {
-            Stdio::null()
-        } else {
-            unsafe { Stdio::from_raw_fd(fd) }
-        }
-    };
-    (Stdio::null(), dup_target(), dup_target())
-}
-
-/// Default auto-install child stdio: route stdout+stderr to a dup of the current
-/// process stderr (the redirected supervisor log when route-owned) and deny stdin.
-#[cfg(unix)]
-fn auto_install_child_stdio() -> (
-    std::process::Stdio,
-    std::process::Stdio,
-    std::process::Stdio,
-) {
-    auto_install_child_stdio_to_fd(libc::STDERR_FILENO)
-}
-
-/// Non-unix has no route-owned pane fd-multiplexing model; still keep build stdout
-/// off the parent stdout and deny stdin, while letting stderr through for logs.
-#[cfg(not(unix))]
-fn auto_install_child_stdio() -> (
-    std::process::Stdio,
-    std::process::Stdio,
-    std::process::Stdio,
-) {
-    use std::process::Stdio;
-    (Stdio::null(), Stdio::null(), Stdio::inherit())
+    let fd = unsafe { libc::dup(target_fd) };
+    if fd < 0 {
+        Stdio::null()
+    } else {
+        unsafe { Stdio::from_raw_fd(fd) }
+    }
 }
 
 /// Run the auto-install sequence ONCE through `make install`. The Makefile owns
@@ -1356,7 +1350,9 @@ fn run_auto_install_steps_once(crate_root: &Path) -> Result<()> {
     let steps: [(&str, &[&str]); 1] = [("make", &["install"])];
     for (program, args) in steps {
         // `#restartstderrbleed` — never inherit stdio: fd1 is the agent pane.
-        let (stdin, stdout, stderr) = auto_install_child_stdio();
+        let (stdin, stdout, stderr) = auto_install_child_stdio_from_plan(
+            agent_doc_supervisor::auto_install_stdio::auto_install_child_stdio_plan(),
+        );
         let status = std::process::Command::new(program)
             .args(args)
             .current_dir(crate_root)
@@ -4791,7 +4787,11 @@ mod tests {
         // Wire the probe child exactly as the auto-install path does, but at a
         // caller-controlled target fd (a temp file standing in for the redirected
         // supervisor-stderr.log) so the test never perturbs the harness fds.
-        let (stdin, stdout, stderr) = auto_install_child_stdio_to_fd(log.as_raw_fd());
+        let (stdin, stdout, stderr) = auto_install_child_stdio_from_plan(
+            agent_doc_supervisor::auto_install_stdio::auto_install_child_stdio_plan_to_fd(
+                log.as_raw_fd(),
+            ),
+        );
         let status = std::process::Command::new("sh")
             .args(["-c", "echo BLEED_STDOUT; echo BLEED_STDERR 1>&2"])
             .stdin(stdin)

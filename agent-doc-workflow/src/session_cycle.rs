@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use indexmap::IndexMap;
 use std::collections::{HashSet, VecDeque};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionExecutionScope {
@@ -20,6 +20,42 @@ pub struct FinalizePendingMutation<'a> {
     pub kind: FinalizePendingMutationKind,
     pub id: &'a str,
     pub target_files: &'a [String],
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct FinalizeRerunCommand<'a> {
+    pub required_commit: bool,
+    pub file: &'a Path,
+    pub baseline_file: Option<&'a Path>,
+    pub is_template: bool,
+    pub is_stream: bool,
+    pub is_ipc: bool,
+    pub force_disk: bool,
+    pub origin: Option<&'a str>,
+    pub pending_add: &'a [String],
+    pub pending_add_to: &'a [String],
+    pub pending_add_gated: &'a [String],
+    pub pending_add_after: &'a [String],
+    pub pending_add_before: &'a [String],
+    pub pending_add_back: &'a [String],
+    pub icebox_add: &'a [String],
+    pub icebox_add_after: &'a [String],
+    pub icebox_add_before: &'a [String],
+    pub icebox_add_back: &'a [String],
+    pub pending_done: &'a [String],
+    pub pending_edit: &'a [String],
+    pub pending_clear: bool,
+    pub pending_reorder: Option<&'a str>,
+    pub pending_gate: &'a [String],
+    pub pending_ungate: &'a [String],
+    pub pending_resolve_gate: &'a [String],
+    pub pending_set_gate_type: &'a [String],
+    pub pending_set_verify: &'a [String],
+    pub review_add: &'a [String],
+    pub review_edit: &'a [String],
+    pub allow_replace_pending: bool,
+    pub pending_only: bool,
+    pub status: Option<&'a str>,
 }
 
 pub fn prompt_targets_from_changes(changes: &[agent_doc_diff::PromptBearingChange]) -> Vec<String> {
@@ -231,6 +267,84 @@ pub fn shell_quote_cli_arg(arg: &str) -> String {
     format!("'{}'", arg.replace('\'', "'\"'\"'"))
 }
 
+pub fn finalize_rerun_command_base(command: FinalizeRerunCommand<'_>) -> Option<String> {
+    if !command.required_commit {
+        return None;
+    }
+
+    let mut args = vec!["agent-doc".to_string(), "finalize".to_string()];
+    args.push(command.file.display().to_string());
+    if let Some(path) = command.baseline_file {
+        push_owned_arg(&mut args, "--baseline-file", path.display().to_string());
+    }
+    if command.is_template {
+        args.push("--template".to_string());
+    }
+    if command.is_stream {
+        args.push("--stream".to_string());
+    }
+    if command.is_ipc {
+        args.push("--ipc".to_string());
+    }
+    if command.force_disk {
+        args.push("--force-disk".to_string());
+    }
+    if let Some(origin) = command.origin {
+        push_arg(&mut args, "--origin", origin);
+    }
+    push_repeated_args(&mut args, "--backlog-add", command.pending_add);
+    push_repeated_pair_args(&mut args, "--backlog-add-to", command.pending_add_to);
+    push_repeated_args(&mut args, "--backlog-add-gated", command.pending_add_gated);
+    push_repeated_pair_args(&mut args, "--backlog-add-after", command.pending_add_after);
+    push_repeated_pair_args(
+        &mut args,
+        "--backlog-add-before",
+        command.pending_add_before,
+    );
+    push_repeated_args(&mut args, "--backlog-add-back", command.pending_add_back);
+    push_repeated_args(&mut args, "--icebox-add", command.icebox_add);
+    push_repeated_pair_args(&mut args, "--icebox-add-after", command.icebox_add_after);
+    push_repeated_pair_args(&mut args, "--icebox-add-before", command.icebox_add_before);
+    push_repeated_args(&mut args, "--icebox-add-back", command.icebox_add_back);
+    push_repeated_args(&mut args, "--done", command.pending_done);
+    push_repeated_args(&mut args, "--backlog-edit", command.pending_edit);
+    if command.pending_clear {
+        args.push("--backlog-clear".to_string());
+    }
+    if let Some(value) = command.pending_reorder {
+        push_arg(&mut args, "--backlog-reorder", value);
+    }
+    push_repeated_args(&mut args, "--backlog-gate", command.pending_gate);
+    push_repeated_args(&mut args, "--backlog-ungate", command.pending_ungate);
+    push_repeated_args(
+        &mut args,
+        "--backlog-resolve-gate",
+        command.pending_resolve_gate,
+    );
+    push_repeated_args(
+        &mut args,
+        "--backlog-set-gate-type",
+        command.pending_set_gate_type,
+    );
+    push_repeated_args(
+        &mut args,
+        "--backlog-set-verify",
+        command.pending_set_verify,
+    );
+    push_repeated_args(&mut args, "--review-add", command.review_add);
+    push_repeated_args(&mut args, "--review-edit", command.review_edit);
+    if command.allow_replace_pending {
+        args.push("--allow-replace-pending".to_string());
+    }
+    if command.pending_only {
+        args.push("--backlog-only".to_string());
+    }
+    if let Some(status) = command.status {
+        push_arg(&mut args, "--status", status);
+    }
+    Some(render_cli_command(args))
+}
+
 pub fn compact_command_hint(file: &Path) -> String {
     format!("agent-doc compact {} --commit", file.display())
 }
@@ -261,15 +375,36 @@ pub fn pending_kept_open_ids_from_mutations(
         push_assignment_id(&mut ids, pair);
     }
     if let Some(order) = pending_reorder {
-        ids.extend(
-            order
-                .split(',')
-                .map(|id| id.trim().to_string())
-                .filter(|id| !id.is_empty()),
-        );
+        ids.extend(parse_id_order(order));
     }
 
     ids
+}
+
+pub fn group_pending_add_targets(raw: &[String]) -> Result<Vec<(PathBuf, Vec<String>)>> {
+    if !raw.len().is_multiple_of(2) {
+        anyhow::bail!("--backlog-add-to expects repeated FILE TEXT pairs");
+    }
+
+    let mut grouped: Vec<(PathBuf, Vec<String>)> = Vec::new();
+    for pair in raw.chunks(2) {
+        let target = PathBuf::from(&pair[0]);
+        let text = pair[1].clone();
+        if let Some((_, items)) = grouped.iter_mut().find(|(existing, _)| existing == &target) {
+            items.push(text);
+        } else {
+            grouped.push((target, vec![text]));
+        }
+    }
+    Ok(grouped)
+}
+
+pub fn parse_id_order(order: &str) -> Vec<String> {
+    order
+        .split(',')
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty())
+        .collect()
 }
 
 pub fn parse_tracked_work_edits(raw: &[String], flag: &str) -> Result<Vec<(String, String)>> {
@@ -287,6 +422,39 @@ fn push_assignment_id(ids: &mut Vec<String>, pair: &str) {
     if let Some((id, _)) = pair.split_once('=') {
         ids.push(id.to_string());
     }
+}
+
+fn push_arg(args: &mut Vec<String>, flag: &str, value: &str) {
+    args.push(flag.to_string());
+    args.push(value.to_string());
+}
+
+fn push_owned_arg(args: &mut Vec<String>, flag: &str, value: String) {
+    args.push(flag.to_string());
+    args.push(value);
+}
+
+fn push_repeated_args(args: &mut Vec<String>, flag: &str, values: &[String]) {
+    for value in values {
+        push_arg(args, flag, value);
+    }
+}
+
+fn push_repeated_pair_args(args: &mut Vec<String>, flag: &str, values: &[String]) {
+    for pair in values.chunks(2) {
+        if let [first, second] = pair {
+            args.push(flag.to_string());
+            args.push(first.clone());
+            args.push(second.clone());
+        }
+    }
+}
+
+fn render_cli_command(args: Vec<String>) -> String {
+    args.into_iter()
+        .map(|arg| shell_quote_cli_arg(&arg))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn prompt_targets_reference_preset(
@@ -706,6 +874,135 @@ mod tests {
     }
 
     #[test]
+    fn finalize_rerun_command_base_is_only_for_required_commit_closeout() {
+        let empty = Vec::new();
+        let command = FinalizeRerunCommand {
+            required_commit: false,
+            file: Path::new("tasks/doc.md"),
+            baseline_file: None,
+            is_template: false,
+            is_stream: false,
+            is_ipc: false,
+            force_disk: false,
+            origin: None,
+            pending_add: &empty,
+            pending_add_to: &empty,
+            pending_add_gated: &empty,
+            pending_add_after: &empty,
+            pending_add_before: &empty,
+            pending_add_back: &empty,
+            icebox_add: &empty,
+            icebox_add_after: &empty,
+            icebox_add_before: &empty,
+            icebox_add_back: &empty,
+            pending_done: &empty,
+            pending_edit: &empty,
+            pending_clear: false,
+            pending_reorder: None,
+            pending_gate: &empty,
+            pending_ungate: &empty,
+            pending_resolve_gate: &empty,
+            pending_set_gate_type: &empty,
+            pending_set_verify: &empty,
+            review_add: &empty,
+            review_edit: &empty,
+            allow_replace_pending: false,
+            pending_only: false,
+            status: None,
+        };
+
+        assert_eq!(finalize_rerun_command_base(command), None);
+    }
+
+    #[test]
+    fn finalize_rerun_command_base_renders_flags_and_quotes_values() {
+        let pending_add = vec!["item with spaces".to_string()];
+        let pending_add_to = vec!["tasks/other.md".to_string(), "target item".to_string()];
+        let pending_add_gated = vec!["gated".to_string()];
+        let pending_add_after = vec!["anchor".to_string(), "after item".to_string()];
+        let pending_add_before = vec!["anchor".to_string(), "before item".to_string()];
+        let pending_add_back = vec!["tail item".to_string()];
+        let icebox_add = vec!["ice item".to_string()];
+        let icebox_add_after = vec!["ice-anchor".to_string(), "ice after".to_string()];
+        let icebox_add_before = vec!["ice-anchor".to_string(), "ice before".to_string()];
+        let icebox_add_back = vec!["ice tail".to_string()];
+        let pending_done = vec!["done1".to_string()];
+        let pending_edit = vec!["edit1=new text".to_string()];
+        let pending_gate = vec!["gate1".to_string()];
+        let pending_ungate = vec!["ungate1".to_string()];
+        let pending_resolve_gate = vec!["manual".to_string()];
+        let pending_set_gate_type = vec!["gate1=blocked".to_string()];
+        let pending_set_verify = vec!["gate1=test".to_string()];
+        let review_add = vec!["review me".to_string()];
+        let review_edit = vec!["review1=fix it".to_string()];
+        let command = FinalizeRerunCommand {
+            required_commit: true,
+            file: Path::new("tasks/doc.md"),
+            baseline_file: Some(Path::new(".agent-doc/baseline.md")),
+            is_template: true,
+            is_stream: true,
+            is_ipc: true,
+            force_disk: true,
+            origin: Some("skill"),
+            pending_add: &pending_add,
+            pending_add_to: &pending_add_to,
+            pending_add_gated: &pending_add_gated,
+            pending_add_after: &pending_add_after,
+            pending_add_before: &pending_add_before,
+            pending_add_back: &pending_add_back,
+            icebox_add: &icebox_add,
+            icebox_add_after: &icebox_add_after,
+            icebox_add_before: &icebox_add_before,
+            icebox_add_back: &icebox_add_back,
+            pending_done: &pending_done,
+            pending_edit: &pending_edit,
+            pending_clear: true,
+            pending_reorder: Some("done1,gate1"),
+            pending_gate: &pending_gate,
+            pending_ungate: &pending_ungate,
+            pending_resolve_gate: &pending_resolve_gate,
+            pending_set_gate_type: &pending_set_gate_type,
+            pending_set_verify: &pending_set_verify,
+            review_add: &review_add,
+            review_edit: &review_edit,
+            allow_replace_pending: true,
+            pending_only: true,
+            status: Some("working hard"),
+        };
+
+        let rendered = finalize_rerun_command_base(command).unwrap();
+
+        assert!(rendered.starts_with("agent-doc finalize tasks/doc.md"));
+        assert!(rendered.contains("--baseline-file .agent-doc/baseline.md"));
+        assert!(rendered.contains("--template --stream --ipc --force-disk"));
+        assert!(rendered.contains("--origin skill"));
+        assert!(rendered.contains("--backlog-add 'item with spaces'"));
+        assert!(rendered.contains("--backlog-add-to tasks/other.md 'target item'"));
+        assert!(rendered.contains("--backlog-add-gated gated"));
+        assert!(rendered.contains("--backlog-add-after anchor 'after item'"));
+        assert!(rendered.contains("--backlog-add-before anchor 'before item'"));
+        assert!(rendered.contains("--backlog-add-back 'tail item'"));
+        assert!(rendered.contains("--icebox-add 'ice item'"));
+        assert!(rendered.contains("--icebox-add-after ice-anchor 'ice after'"));
+        assert!(rendered.contains("--icebox-add-before ice-anchor 'ice before'"));
+        assert!(rendered.contains("--icebox-add-back 'ice tail'"));
+        assert!(rendered.contains("--done done1"));
+        assert!(rendered.contains("--backlog-edit 'edit1=new text'"));
+        assert!(rendered.contains("--backlog-clear"));
+        assert!(rendered.contains("--backlog-reorder 'done1,gate1'"));
+        assert!(rendered.contains("--backlog-gate gate1"));
+        assert!(rendered.contains("--backlog-ungate ungate1"));
+        assert!(rendered.contains("--backlog-resolve-gate manual"));
+        assert!(rendered.contains("--backlog-set-gate-type gate1=blocked"));
+        assert!(rendered.contains("--backlog-set-verify gate1=test"));
+        assert!(rendered.contains("--review-add 'review me'"));
+        assert!(rendered.contains("--review-edit 'review1=fix it'"));
+        assert!(rendered.contains("--allow-replace-pending"));
+        assert!(rendered.contains("--backlog-only"));
+        assert!(rendered.contains("--status 'working hard'"));
+    }
+
+    #[test]
     fn compact_command_hint_renders_binary_owned_closeout_command() {
         assert_eq!(
             compact_command_hint(Path::new("tasks/doc.md")),
@@ -741,6 +1038,53 @@ mod tests {
                 "review1".to_string(),
                 "ordered1".to_string(),
                 "ordered2".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn group_pending_add_targets_groups_repeated_file_pairs() {
+        let grouped = group_pending_add_targets(&[
+            "tasks/a.md".to_string(),
+            "first".to_string(),
+            "tasks/b.md".to_string(),
+            "other".to_string(),
+            "tasks/a.md".to_string(),
+            "second".to_string(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            grouped,
+            vec![
+                (
+                    PathBuf::from("tasks/a.md"),
+                    vec!["first".to_string(), "second".to_string()]
+                ),
+                (PathBuf::from("tasks/b.md"), vec!["other".to_string()]),
+            ]
+        );
+    }
+
+    #[test]
+    fn group_pending_add_targets_rejects_odd_input() {
+        let err = group_pending_add_targets(&["tasks/a.md".to_string()]).unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("--backlog-add-to expects repeated FILE TEXT pairs"),
+            "{err:#}"
+        );
+    }
+
+    #[test]
+    fn parse_id_order_trims_and_drops_empty_entries() {
+        assert_eq!(
+            parse_id_order(" first,second ,, third "),
+            vec![
+                "first".to_string(),
+                "second".to_string(),
+                "third".to_string()
             ]
         );
     }

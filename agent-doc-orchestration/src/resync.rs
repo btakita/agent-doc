@@ -99,6 +99,7 @@ use std::time::{Duration, Instant};
 use crate::sessions;
 use agent_doc_controller::dispatch::is_stash_window_name;
 use agent_doc_frontmatter::frontmatter;
+use agent_doc_sync::ResyncTargetMatcher;
 use agent_doc_tmux::{
     PruneCleanupMode, StashTtlCandidate, TmuxPaneProcessKind,
     pane_process_kind_from_current_command, pane_process_kind_from_current_command_samples,
@@ -235,47 +236,16 @@ fn resolve_registry_root(target: &Path) -> PathBuf {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
-fn same_document_path(target: &Path, candidate: &str) -> bool {
-    if candidate.is_empty() {
-        return false;
-    }
-    let resolved = crate::git::resolve_absolute_file_path(Path::new(candidate));
-    let canonical = resolved.canonicalize().unwrap_or(resolved);
-    canonical == target
-}
-
-fn candidate_matches_target(target: &Path, base_dir: &Path, candidate: &str) -> bool {
-    if same_document_path(target, candidate) {
-        return true;
-    }
-    if candidate.is_empty() {
-        return false;
-    }
-    let path = Path::new(candidate);
-    if path.is_absolute() {
-        return false;
-    }
-    let resolved = base_dir.join(path);
-    let canonical = resolved.canonicalize().unwrap_or(resolved);
-    canonical == target
-}
-
-fn registry_file_for_target(target: &Path, base_dir: &Path) -> String {
-    target
-        .strip_prefix(base_dir)
-        .unwrap_or(target)
-        .to_string_lossy()
-        .to_string()
-}
-
 fn filter_registry_for_target(
     registry: &tmux_router::Registry,
     target: &Path,
 ) -> tmux_router::Registry {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let matcher = ResyncTargetMatcher::new(target, cwd);
     registry
         .iter()
         .filter(|(key, entry)| {
-            same_document_path(target, &entry.file) || same_document_path(target, key)
+            matcher.same_document_path(&entry.file) || matcher.same_document_path(key)
         })
         .map(|(key, entry)| (key.clone(), entry.clone()))
         .collect()
@@ -1010,9 +980,8 @@ fn refresh_target_no_live_owner_registry_entry(
     file: &str,
     pane: &str,
 ) -> bool {
-    if !candidate_matches_target(scope.target, scope.base_dir, file)
-        && !candidate_matches_target(scope.target, scope.base_dir, key)
-    {
+    let matcher = ResyncTargetMatcher::new(scope.target, scope.base_dir);
+    if !matcher.candidate_matches_target(file) && !matcher.candidate_matches_target(key) {
         return false;
     }
     if !tmux.pane_alive(pane) {
@@ -1027,7 +996,7 @@ fn refresh_target_no_live_owner_registry_entry(
     entry.window = sessions::pane_window_with_mux(tmux, pane).unwrap_or_default();
     entry.cwd = scope.base_dir.to_string_lossy().to_string();
     if entry.file.is_empty() {
-        entry.file = registry_file_for_target(scope.target, scope.base_dir);
+        entry.file = matcher.registry_file_for_target();
     }
     if entry.session_id.is_empty()
         && let Some(session_id) = frontmatter_io::read_session_id(scope.target)
@@ -2045,20 +2014,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn target_candidate_matches_relative_base_dir_path() {
-        let dir = tempfile::tempdir().unwrap();
-        let doc = dir.path().join("tasks").join("test.md");
-        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
-        std::fs::write(&doc, "# Test\n").unwrap();
-        let target = doc.canonicalize().unwrap();
-
-        assert!(candidate_matches_target(
-            &target,
-            dir.path(),
-            "tasks/test.md"
-        ));
-    }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn detect_wrong_session_pane() {

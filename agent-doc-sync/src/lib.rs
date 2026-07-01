@@ -243,6 +243,67 @@ pub fn is_file_rename(registered_path: &str, current_path: &str) -> bool {
     registered_path != current_path && !Path::new(registered_path).exists()
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResyncTargetMatcher {
+    target: PathBuf,
+    base_dir: PathBuf,
+}
+
+impl ResyncTargetMatcher {
+    pub fn new(target: impl AsRef<Path>, base_dir: impl AsRef<Path>) -> Self {
+        Self {
+            target: target.as_ref().to_path_buf(),
+            base_dir: base_dir.as_ref().to_path_buf(),
+        }
+    }
+
+    pub fn same_document_path(&self, candidate: &str) -> bool {
+        if candidate.is_empty() {
+            return false;
+        }
+        let resolved = resolve_absolute_file_path(Path::new(candidate));
+        let canonical = resolved.canonicalize().unwrap_or(resolved);
+        canonical == self.target
+    }
+
+    pub fn candidate_matches_target(&self, candidate: &str) -> bool {
+        if self.same_document_path(candidate) {
+            return true;
+        }
+        if candidate.is_empty() {
+            return false;
+        }
+        let path = Path::new(candidate);
+        if path.is_absolute() {
+            return false;
+        }
+        let resolved = self.base_dir.join(path);
+        let canonical = resolved.canonicalize().unwrap_or(resolved);
+        canonical == self.target
+    }
+
+    pub fn registry_file_for_target(&self) -> String {
+        self.target
+            .strip_prefix(&self.base_dir)
+            .unwrap_or(&self.target)
+            .to_string_lossy()
+            .to_string()
+    }
+}
+
+fn resolve_absolute_file_path(file: &Path) -> PathBuf {
+    if file.is_absolute() {
+        return file.to_path_buf();
+    }
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let candidate = cwd.join(file);
+    if candidate.exists() {
+        candidate.canonicalize().unwrap_or(candidate)
+    } else {
+        file.to_path_buf()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -418,5 +479,55 @@ mod tests {
         let old = old_path.to_string_lossy();
         assert!(!is_file_rename(&old, &old));
         assert!(!is_file_rename(&old, &new_path.to_string_lossy()));
+    }
+
+    #[test]
+    fn resync_target_matcher_matches_absolute_candidate_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("test.md");
+        std::fs::write(&doc, "# Test\n").unwrap();
+        let target = doc.canonicalize().unwrap();
+        let matcher = ResyncTargetMatcher::new(&target, dir.path());
+
+        assert!(matcher.same_document_path(&doc.to_string_lossy()));
+    }
+
+    #[test]
+    fn resync_target_matcher_matches_relative_base_dir_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("tasks").join("test.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "# Test\n").unwrap();
+        let target = doc.canonicalize().unwrap();
+        let matcher = ResyncTargetMatcher::new(&target, dir.path());
+
+        assert!(matcher.candidate_matches_target("tasks/test.md"));
+    }
+
+    #[test]
+    fn resync_target_matcher_rejects_empty_and_foreign_candidates() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("target.md");
+        let other = dir.path().join("other.md");
+        std::fs::write(&doc, "# Target\n").unwrap();
+        std::fs::write(&other, "# Other\n").unwrap();
+        let target = doc.canonicalize().unwrap();
+        let matcher = ResyncTargetMatcher::new(&target, dir.path());
+
+        assert!(!matcher.candidate_matches_target(""));
+        assert!(!matcher.candidate_matches_target("other.md"));
+        assert!(!matcher.same_document_path(&other.to_string_lossy()));
+    }
+
+    #[test]
+    fn resync_target_matcher_formats_registry_file_relative_to_base() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("tasks").join("test.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "# Test\n").unwrap();
+        let target = doc.canonicalize().unwrap();
+        let matcher = ResyncTargetMatcher::new(&target, dir.path());
+
+        assert_eq!(matcher.registry_file_for_target(), "tasks/test.md");
     }
 }

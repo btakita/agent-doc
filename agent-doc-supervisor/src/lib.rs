@@ -7,6 +7,7 @@ use lazily::{ThreadSafeContext, ThreadSafeStateMachine};
 use serde::{Deserialize, Serialize};
 
 pub mod agent_change;
+pub mod auto_install_stdio;
 pub mod config;
 pub mod crash_policy;
 pub mod handoff;

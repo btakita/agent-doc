@@ -222,6 +222,7 @@ name = "agent-doc-element-backlog"
 version = "0.34.66"
 dependencies = [
  "agent-doc-element",
+ "agent-doc-frontmatter",
  "agent-doc-log-time",
  "anyhow",
  "serde",

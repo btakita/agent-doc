@@ -6632,9 +6632,13 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         "pub fn component_occurrence_from_node_key",
         "pub fn classify_execution_scope",
         "pub fn finalize_command",
+        "pub struct FinalizeRerunCommand",
+        "pub fn finalize_rerun_command_base",
         "pub fn shell_quote_cli_arg",
         "pub fn compact_command_hint",
         "pub fn pending_kept_open_ids_from_mutations",
+        "pub fn group_pending_add_targets",
+        "pub fn parse_id_order",
         "pub fn parse_tracked_work_edits",
     ] {
         assert!(
@@ -6646,16 +6650,22 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
     assert!(
         write_source.contains("use agent_doc_workflow::session_cycle::{")
+            && write_source.contains("FinalizeRerunCommand")
             && write_source.contains("compact_command_hint")
+            && write_source.contains("finalize_rerun_command_base")
+            && write_source.contains("group_pending_add_targets")
+            && write_source.contains("parse_id_order")
             && write_source.contains("parse_tracked_work_edits")
-            && write_source.contains("pending_kept_open_ids_from_mutations")
-            && write_source.contains("shell_quote_cli_arg"),
+            && write_source.contains("pending_kept_open_ids_from_mutations"),
         "write.rs should call focused session-cycle command/tracked-work policy directly"
     );
     for forbidden in [
+        "fn build_rerun_command_base(",
         "fn shell_quote_cli_arg(",
         "fn compact_command_hint(",
         "fn pending_kept_open_ids_from_options(",
+        "fn grouped_pending_add_to(",
+        "fn parse_id_order(",
         "fn parse_tracked_work_edits(",
     ] {
         assert!(
@@ -9737,6 +9747,12 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "agent-doc-supervisor must own pure supervisor reexec candidate policy"
     );
     assert!(
+        manifest_dir
+            .join("agent-doc-supervisor/src/auto_install_stdio.rs")
+            .exists(),
+        "agent-doc-supervisor must own auto-install stdio planning policy"
+    );
+    assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/start/decisions.rs")
             .exists(),
@@ -9764,6 +9780,9 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     .unwrap();
     let supervisor_config =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/config.rs")).unwrap();
+    let supervisor_auto_install_stdio =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/auto_install_stdio.rs"))
+            .unwrap();
     let supervisor_crash_policy =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/crash_policy.rs")).unwrap();
     let supervisor_run_loop =
@@ -9814,6 +9833,17 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             "agent-doc-supervisor config should own stale-install policy directly: {required_snippet}"
         );
     }
+    for required_snippet in [
+        "pub enum AutoInstallStdioStream",
+        "pub struct AutoInstallChildStdioPlan",
+        "pub fn auto_install_child_stdio_plan_to_fd",
+        "pub fn auto_install_child_stdio_plan",
+    ] {
+        assert!(
+            supervisor_auto_install_stdio.contains(required_snippet),
+            "agent-doc-supervisor should own auto-install stdio planning directly: {required_snippet}"
+        );
+    }
     for forbidden_snippet in [
         "pub(crate) fn resolve_supervisor_auto_recycle",
         "pub(crate) fn resolve_agent_change_restart",
@@ -9822,6 +9852,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub(crate) fn auto_install_should_retry",
         "pub(crate) fn host_supervisor_is_stale",
         "fn is_agent_doc_dogfood_session",
+        "fn auto_install_child_stdio_to_fd(",
+        "fn auto_install_child_stdio()",
     ] {
         assert!(
             !rpc_source.contains(forbidden_snippet),
@@ -9832,6 +9864,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "agent_doc_supervisor::config::auto_install_should_retry",
         "agent_doc_supervisor::config::host_supervisor_is_stale",
         "agent_doc_supervisor::config::is_agent_doc_dogfood_session",
+        "agent_doc_supervisor::auto_install_stdio::auto_install_child_stdio_plan",
     ] {
         assert!(
             rpc_source.contains(required_snippet),
@@ -13130,26 +13163,33 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
 }
 
 #[test]
-fn test_agent_doc_document_owns_active_identity_projection_policy() {
+fn test_agent_doc_element_backlog_owns_active_identity_projection_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let active_identity =
-        fs::read_to_string(manifest_dir.join("agent-doc-document/src/active_identity.rs")).unwrap();
+    let backlog_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-element-backlog/src/backlog.rs")).unwrap();
     for required in [
         "pub fn document_active_identities",
         "pub fn detect_identity_collisions",
         "pub fn identity_collision_for_new_id",
+        "pub fn ensure_new_item_explicit_id_available",
     ] {
         assert!(
-            active_identity.contains(required),
-            "agent-doc-document must own active identity projection policy: {required}"
+            backlog_source.contains(required),
+            "agent-doc-element-backlog must own active tracked-work identity policy: {required}"
         );
     }
 
     let document_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-document/src/lib.rs")).unwrap();
     assert!(
-        document_lib.contains("pub mod active_identity;"),
-        "agent-doc-document should expose active identity projection through its owning module"
+        !document_lib.contains("active_identity"),
+        "agent-doc-document must not keep an active_identity facade after tracked-work identity policy moves"
+    );
+    assert!(
+        !manifest_dir
+            .join("agent-doc-document/src/active_identity.rs")
+            .exists(),
+        "agent-doc-document must not keep the old active_identity module as a facade"
     );
 
     let preflight =
@@ -13168,7 +13208,7 @@ fn test_agent_doc_document_owns_active_identity_projection_policy() {
         );
     }
     assert!(
-        preflight.contains("agent_doc_document::active_identity::detect_identity_collisions"),
+        preflight.contains("agent_doc_element_backlog::backlog::detect_identity_collisions"),
         "preflight should call focused active identity collision detection directly"
     );
 
@@ -13176,8 +13216,13 @@ fn test_agent_doc_document_owns_active_identity_projection_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/backlog_cmd.rs"))
             .unwrap();
     assert!(
-        backlog_cmd.contains("agent_doc_document::active_identity::identity_collision_for_new_id"),
+        backlog_cmd.contains("backlog::ensure_new_item_explicit_id_available"),
         "backlog_cmd should call focused active identity collision enforcement directly"
+    );
+    assert!(
+        !preflight.contains("agent_doc_document::active_identity")
+            && !backlog_cmd.contains("agent_doc_document::active_identity"),
+        "orchestration must not call the old document active_identity facade"
     );
     assert!(
         !backlog_cmd.contains("crate::preflight::identity_collision_for_new_id"),
@@ -14833,6 +14878,10 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         "pub fn planned_stash_window_indices",
         "pub fn effective_sync_columns",
         "pub fn is_file_rename",
+        "pub struct ResyncTargetMatcher",
+        "pub fn same_document_path",
+        "pub fn candidate_matches_target",
+        "pub fn registry_file_for_target",
     ] {
         assert!(
             sync_source.contains(required_snippet),
@@ -14846,6 +14895,11 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         manifest_dir.join("agent-doc-orchestration/src/route/session_resolution.rs"),
     )
     .unwrap();
+    let resync_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/resync.rs")).unwrap();
+    let resync_prune =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/resync/prune.rs"))
+            .unwrap();
     for forbidden_snippet in [
         "fn normalize_scope_arg",
         "fn sync_candidate_files(",
@@ -14866,10 +14920,23 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         "serde_json::from_str::<SyncPruneState>",
         "fn effective_sync_columns",
         "pub fn is_file_rename",
+        "fn same_document_path",
+        "fn candidate_matches_target",
+        "fn registry_file_for_target",
     ] {
         assert!(
             !sync_orchestration.contains(forbidden_snippet),
             "orchestration sync.rs must not re-own or facade sync scope policy: {forbidden_snippet}"
+        );
+    }
+    for forbidden_snippet in [
+        "fn same_document_path",
+        "fn candidate_matches_target",
+        "fn registry_file_for_target",
+    ] {
+        assert!(
+            !resync_source.contains(forbidden_snippet) && !resync_prune.contains(forbidden_snippet),
+            "orchestration resync must not re-own or facade target matching policy: {forbidden_snippet}"
         );
     }
     assert!(
@@ -14888,6 +14955,12 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
             && sync_orchestration.contains("planned_stash_window_indices")
             && route_session_resolution.contains("agent_doc_sync::shared_sync_scope_root"),
         "orchestration should call sync scope policy through agent-doc-sync directly"
+    );
+    assert!(
+        resync_source.contains("use agent_doc_sync::ResyncTargetMatcher")
+            && resync_source.contains("ResyncTargetMatcher::new")
+            && resync_prune.contains("ResyncTargetMatcher::new"),
+        "orchestration resync should call focused target matching policy directly"
     );
 }
 

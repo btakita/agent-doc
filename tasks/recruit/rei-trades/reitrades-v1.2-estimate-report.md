@@ -122,11 +122,20 @@ Three workstreams against a launched (post-beta, 10/14/2025) production platform
 
 ### 3. Listing Creation & OM Rebuild (first asset class)
 
+**Confirmed wizard scope (from the V1.2 PDF "Listing Creation Steps" screenshots).** The current flow is a **5-step wizard** with a **separate 5-state listing lifecycle** running alongside it:
+
+- **Wizard steps:** (1) **Location** — asset class, address, city, state/province, postal code, entrance-location details; (2) **Property Overview** — building name, asset-class sub-category, main use, submarket, brand/flag, year built/renovated, total square footage, and asset-class-specific fields (the hotel example shows Number of Keys, Room size, Parking, Amenities); (3) **Financials** — an "Investment Snapshot" with ~16 fields (Asking Price, Cap Rate, Historical Occupancy, ADR, RevPAR, Gross Income, Vacancy, Effective Gross Income, Opex, NOI, LTV, Interest Rate, Amortization Period, Annual Debt Service); (4) **Attachments** — categorized document upload (Expenses Breakdown, CapEx, Rent Roll, Property Video) plus additional documents and a property-photo gallery, all drag-and-drop; (5) **Marketing Materials** — generated teaser/OM output.
+- **Lifecycle status machine:** Draft → Under Review → Active → Pending → Closed, with the seller only able to submit to **Under Review** until REItrades approves (matches the brief's gating rule).
+- **Per-step custom attributes:** every step exposes an "+ Add Attribute" control.
+
+**What this confirms for the estimate:** the field density is real and asset-class-driven (the hotel example alone carries ~12 property-overview + ~16 financial fields, several hotel-specific), so the per-asset-class schema work sits at the **mid-to-high end** of the ranges below rather than the low end. It also surfaces one item the markdown-only pass under-counted — the categorized **Attachments/media step** — now broken out explicitly. The screenshots **validate** the prior ranges; they do not blow up the top line.
+
 | Task | Hours | Notes |
 |---|---:|---|
-| Reimplement listing create/edit in Rust/Tera, match current UI, consolidate modules | 36-70 | Core rebuild before feature bullets; visual parity + backend structure need review. |
-| Step locking + Under-Review submission gating | 20-38 | State machine, validation, locked UI states, status permissions. |
-| Asset-class required/optional + custom attributes (first class) | 28-55 | **+12-24 per additional asset class** by field complexity. |
+| Reimplement 5-step listing create/edit wizard in Rust/Tera, match current UI, consolidate modules | 40-72 | Core rebuild before feature bullets; 5 steps (Location, Property Overview, Financials, Attachments, Marketing Materials), visual parity + backend structure need review. |
+| Step locking + 5-state lifecycle (Draft→Under Review→Active→Pending→Closed) + Under-Review submission gating | 22-40 | Two coupled state machines: per-step unlock gating and permission-gated listing status transitions. |
+| Asset-class required/optional + custom attributes (first class) | 30-58 | Field-dense per screenshots (~28 fields for the hotel example). **+12-24 per additional asset class** by field complexity. |
+| Attachments step: categorized doc upload (Expenses/CapEx/Rent Roll/Video) + additional docs + photo gallery, drag-and-drop | 14-24 | Newly broken out from the PDF; upload categories, validation, gallery ordering, storage wiring. |
 | Teaser/OM data derivation + **production migration** | 30-65 | Major production-data risk; migration script + regression checks vs. existing listings. |
 | Marketing Materials from BatchData + AI fallback; generate-once / regenerate | 26-55 | Idempotency, source tracking, failure states, manual regeneration. |
 | Modular one-asset-class-at-a-time PR structure | 8-14 | Process/architecture overhead that lowers later review risk. |
@@ -140,8 +149,7 @@ Three workstreams against a launched (post-beta, 10/14/2025) production platform
 | Ensure additional attributes flow into generated OM | 6-14 | Small if listing-data→OM mapping is clean. |
 | Broker-only OM upload, NDA/email workflow compatible; principals use generator | 14-30 | Permission, file handling, NDA-triggered delivery, attachment/link rules. |
 | Old OM/flyer upload → extract → autofill listing + OM | 45-100 | **Largest AI item:** document ingestion, OCR/PDF parsing, schema extraction, confidence flags, review UI, sample-doc tests. |
-| 3 listing tiers (Free / Premium $199 / Elite $499) as first step; Stripe links | 18-38 | Tier selection, state persistence, Stripe link flow, entitlement behavior, admin visibility. |
-| Listing-creation-steps screens (PDF only) | TBD | Markdown has heading only; estimate after inspecting PDF screenshots for extra fields/steps. |
+| 3 listing tiers (Free / Premium $199 / Elite $499) as **new first step** before Location; Stripe links | 18-38 | The tier step is inserted ahead of the confirmed 5-step wizard, so it also shifts step-index/gating logic. Tier selection, state persistence, Stripe link flow, entitlement behavior, admin visibility. |
 
 ---
 
@@ -152,10 +160,12 @@ Three workstreams against a launched (post-beta, 10/14/2025) production platform
 | Discovery / safety plan | 24-44 | $2.4k-$4.4k |
 | Admin DBMS workstream | 190-320 | $19k-$32k |
 | Broker segment workstream | 95-170 | $9.5k-$17k |
-| Listing creation + OM rebuild (first asset class) | 230-430 | $23k-$43k |
+| Listing creation + OM rebuild (first asset class) | 245-450 | $24.5k-$45k |
 | Cross-workstream QA / release hardening | 40-80 | $4k-$8k |
-| **Full V1.2 (every listed item, production-grade)** | **520-800** | **$52k-$80k** |
-| **First scoped post-launch tranche** | **260-380** | **$26k-$38k** |
+| **Full V1.2 (every listed item, production-grade)** | **530-820** | **$53k-$82k** |
+| **First scoped post-launch tranche** | **265-390** | **$26.5k-$39k** |
+
+*Adjustment after reviewing the PDF wizard screenshots: the listing-creation workstream rose ~15-20h (explicit Attachments/media step + confirmed asset-class field density), nudging the top line up by roughly one point. The prior $52k-$80k / $26k-$38k headline still holds as a round-number bid — the screenshots validated the estimate rather than expanding it.*
 
 ---
 
@@ -188,7 +198,7 @@ Additional asset classes, full document extraction, OM polish, remaining integra
 4. Hard deletes or soft deletes with audit retention? I default to soft delete for transaction records unless told otherwise.
 5. Are approved OM/teaser templates per asset class already designed, or is template/design work in scope?
 6. What review is expected on AI-generated fields before emails/OMs are sent externally?
-7. Do the PDF "Listing Creation Steps" screenshots define fields/steps beyond the markdown brief?
+7. ~~Do the PDF "Listing Creation Steps" screenshots define fields/steps beyond the markdown brief?~~ **Resolved** — the PDF confirms a 5-step wizard (Location / Property Overview / Financials / Attachments / Marketing Materials) plus a 5-state lifecycle (Draft→Under Review→Active→Pending→Closed) and dense asset-class fields; folded into §3. Remaining sub-question: **which single asset class ships first** (the screenshots show a hospitality/hotel example — is hotel the pilot, or another class?).
 
 ---
 

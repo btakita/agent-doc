@@ -144,6 +144,11 @@ pub fn normalize_for_replay_hash(content: &str) -> String {
     ))
 }
 
+/// Hash of the replay-normalized document form used by cycle/recovery matching.
+pub fn replay_content_hash(content: &str) -> String {
+    agent_doc_hash::content_hash(&normalize_for_replay_hash(content))
+}
+
 pub fn strip_re_heading_attribution(content: &str) -> String {
     let code_ranges = code_block_byte_ranges(content);
     let mut result_lines: Vec<String> = Vec::new();
@@ -481,6 +486,12 @@ mod tests {
             normalize_for_replay_hash(with_active_queue),
             normalize_for_replay_hash(&with_changed_response),
             "a real response-body change must still change the replay normalization"
+        );
+
+        assert_eq!(
+            replay_content_hash(with_active_queue),
+            replay_content_hash(with_drained_queue),
+            "replay content hash must use the same queue-neutralized normalization"
         );
     }
 

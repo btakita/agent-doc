@@ -6,6 +6,122 @@
 
 use crate::CyclePhase;
 
+/// Return true when a repair mutation would leave a new, unanswered prompt-bearing
+/// diff between the previous snapshot and the repaired document.
+pub fn repair_leaves_unanswered_prompt_diff(
+    snapshot_content: &str,
+    repaired: &str,
+    known_response: Option<&str>,
+) -> bool {
+    let norm_snapshot =
+        agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(
+            snapshot_content,
+        );
+    let norm_repaired =
+        agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(repaired);
+    let Some(diff_text) =
+        agent_doc_diff::unified_diff_from_contents(&norm_snapshot, &norm_repaired)
+    else {
+        return false;
+    };
+    let changes = agent_doc_diff::classify_prompt_bearing_changes(&diff_text);
+    let mut skip_answered_response_run = false;
+    for (idx, change) in changes.iter().enumerate() {
+        if change.kind != agent_doc_diff::PromptBearingChangeKind::PromptTarget {
+            continue;
+        }
+        if skip_answered_response_run {
+            let preview = change
+                .text
+                .lines()
+                .find(|line| !line.trim().is_empty())
+                .unwrap_or(change.text.as_str())
+                .trim();
+            if !repair_line_looks_like_fresh_prompt_after_response(preview) {
+                continue;
+            }
+        }
+        if agent_doc_diff::prompt_change_is_already_answered(&change.text)
+            || agent_doc_diff::prompt_change_is_answered_by_later_response(&changes, idx)
+            || repair_prompt_target_immediately_before_existing_response(repaired, &change.text)
+            || known_response
+                .map(|response| {
+                    crate::response_replay::prompt_change_is_known_response(&change.text, response)
+                })
+                .unwrap_or(false)
+        {
+            skip_answered_response_run = true;
+            continue;
+        }
+        return true;
+    }
+    false
+}
+
+fn repair_line_looks_like_fresh_prompt_after_response(trimmed: &str) -> bool {
+    let lower = trimmed.trim_start_matches('❯').trim().to_ascii_lowercase();
+    trimmed.ends_with('?')
+        || lower == "go"
+        || lower == "continue"
+        || lower.starts_with("do #")
+        || lower.starts_with("do [#")
+        || lower.starts_with("fix #")
+        || lower.starts_with("run ")
+        || lower.starts_with("rerun ")
+        || lower.starts_with("build ")
+        || lower.starts_with("test ")
+        || lower.starts_with("commit ")
+        || lower.starts_with("push ")
+        || lower.starts_with("verify ")
+        || lower.starts_with("investigate ")
+}
+
+fn repair_prompt_target_immediately_before_existing_response(
+    current_doc: &str,
+    change_text: &str,
+) -> bool {
+    let target = change_text
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .map(|line| line.trim().trim_start_matches('❯').trim().to_string());
+    let Some(target) = target else {
+        return false;
+    };
+    if target.is_empty() {
+        return false;
+    }
+
+    let body = agent_doc_frontmatter::frontmatter::parse(current_doc)
+        .map(|(_, body)| body.to_string())
+        .unwrap_or_else(|_| current_doc.to_string());
+    let Ok(components) = agent_doc_element::element::parse(&body) else {
+        return false;
+    };
+    let Some(exchange) = components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return false;
+    };
+
+    let lines: Vec<&str> = exchange.content(&body).lines().collect();
+    for (idx, line) in lines.iter().enumerate() {
+        let normalized = line.trim().trim_start_matches('❯').trim();
+        if normalized != target {
+            continue;
+        }
+        for next in lines.iter().skip(idx + 1) {
+            let trimmed = next.trim();
+            if trimmed.is_empty() || trimmed.starts_with("<!--") {
+                continue;
+            }
+            let normalized = trimmed.strip_prefix("❯ ").unwrap_or(trimmed).trim();
+            return crate::closeout_signal::is_exchange_response_heading(normalized);
+        }
+    }
+    false
+}
+
 /// Which side of a metadata-only drift is authoritative for closeout recovery.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MetadataDriftAuthority {
@@ -614,6 +730,50 @@ pub fn metadata_drift_authority(local: &str, head: &str) -> MetadataDriftAuthori
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repair_unanswered_prompt_diff_detects_new_prompt() {
+        let snapshot = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: done\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let repaired = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: done\n",
+            "Done.\n",
+            "What next?\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert!(repair_leaves_unanswered_prompt_diff(
+            snapshot, repaired, None
+        ));
+    }
+
+    #[test]
+    fn repair_unanswered_prompt_diff_ignores_prompt_immediately_answered_in_repaired_doc() {
+        let snapshot = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: done\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let repaired = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: done\n",
+            "Done.\n",
+            "do #follow-up\n",
+            "### Re: follow-up\n",
+            "Already answered.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert!(!repair_leaves_unanswered_prompt_diff(
+            snapshot, repaired, None
+        ));
+    }
 
     #[test]
     fn metadata_drift_authority_head_when_local_drops_live_continuation() {

@@ -3635,6 +3635,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub const fn capture_refresh_event",
         "pub const fn capture_refresh_message",
         "pub fn metadata_drift_authority",
+        "pub fn repair_leaves_unanswered_prompt_diff",
     ] {
         assert!(
             recovery_source.contains(required),
@@ -3746,6 +3747,22 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         assert!(
             !source.contains("crate::flow::closeout::CloseoutRecoveryMutationReason"),
             "{relative} must not route focused closeout recovery reason through orchestration"
+        );
+    }
+    let repair_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/repair.rs")).unwrap();
+    assert!(
+        repair_source.contains("repair_leaves_unanswered_prompt_diff"),
+        "repair.rs should call focused unanswered-prompt recovery policy directly"
+    );
+    for forbidden in [
+        "fn repair_leaves_unanswered_prompt_diff(",
+        "fn repair_line_looks_like_fresh_prompt_after_response(",
+        "fn repair_prompt_target_immediately_before_existing_response(",
+    ] {
+        assert!(
+            !repair_source.contains(forbidden),
+            "repair.rs must not re-own pure unanswered-prompt recovery policy: {forbidden}"
         );
     }
     for required in [
@@ -12309,6 +12326,7 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
         "pub fn neutralize_queue_component",
         "pub fn strip_queue_active_frontmatter",
         "pub fn normalize_for_replay_hash",
+        "pub fn replay_content_hash",
         "pub fn strip_re_heading_attribution(",
         "pub fn normalize_post_commit_re_heading_drift(",
         "pub fn strip_exchange_prompt_prefixes_for_compare",
@@ -12362,6 +12380,20 @@ fn test_agent_doc_document_owns_transient_marker_policy() {
                 && !source.contains("git::strip_guard_markers")
                 && !source.contains("git::normalize_for_replay_hash"),
             "{relative} must call focused transient marker policy directly, not through git"
+        );
+    }
+    for relative in [
+        "agent-doc-orchestration/src/repair.rs",
+        "agent-doc-orchestration/src/cycle_state.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            source.contains("replay_content_hash"),
+            "{relative} should call focused replay-normalized content hashing directly"
+        );
+        assert!(
+            !source.contains("fn normalized_content_hash("),
+            "{relative} must not re-own replay-normalized content hashing"
         );
     }
 

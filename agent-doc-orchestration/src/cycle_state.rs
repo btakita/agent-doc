@@ -43,6 +43,7 @@
 //! - `mark_committed_closes_cycle`
 //! - `mark_write_applied_creates_synthetic_cycle_when_missing`
 
+use agent_doc_document::transient_markers::replay_content_hash;
 use agent_doc_element_backlog::backlog::normalize_pending_id;
 use agent_doc_turn::{CycleEvent, CyclePhase, CyclePhaseMachine};
 use anyhow::Result;
@@ -345,8 +346,8 @@ pub fn start_preflight_with_task(
         updated_at: now,
         snapshot_hash: snapshot_content.map(agent_doc_hash::content_hash),
         file_hash: file_content.map(agent_doc_hash::content_hash),
-        normalized_snapshot_hash: snapshot_content.map(normalized_content_hash),
-        normalized_file_hash: file_content.map(normalized_content_hash),
+        normalized_snapshot_hash: snapshot_content.map(replay_content_hash),
+        normalized_file_hash: file_content.map(replay_content_hash),
         capture_id: None,
         response_sha256: None,
         had_pending_mutations: false,
@@ -533,8 +534,8 @@ pub fn mark_write_applied(
     state.updated_at = now_secs();
     state.snapshot_hash = snapshot_content.map(agent_doc_hash::content_hash);
     state.file_hash = file_content.map(agent_doc_hash::content_hash);
-    state.normalized_snapshot_hash = snapshot_content.map(normalized_content_hash);
-    state.normalized_file_hash = file_content.map(normalized_content_hash);
+    state.normalized_snapshot_hash = snapshot_content.map(replay_content_hash);
+    state.normalized_file_hash = file_content.map(replay_content_hash);
     save(file, &state)?;
     append_phase_event_to_session_log(file, &state);
     Ok(state)
@@ -560,8 +561,8 @@ pub fn mark_response_captured(
     state.updated_at = now_secs();
     state.snapshot_hash = snapshot_content.map(agent_doc_hash::content_hash);
     state.file_hash = file_content.map(agent_doc_hash::content_hash);
-    state.normalized_snapshot_hash = snapshot_content.map(normalized_content_hash);
-    state.normalized_file_hash = file_content.map(normalized_content_hash);
+    state.normalized_snapshot_hash = snapshot_content.map(replay_content_hash);
+    state.normalized_file_hash = file_content.map(replay_content_hash);
     state.capture_id = Some(state.cycle_id.clone());
     state.response_sha256 = Some(response_sha256.to_string());
     save(file, &state)?;
@@ -1089,11 +1090,11 @@ pub fn mark_committed(
     state.blocked_closeout = None;
     if let Some(snapshot) = snapshot_content {
         state.snapshot_hash = Some(agent_doc_hash::content_hash(snapshot));
-        state.normalized_snapshot_hash = Some(normalized_content_hash(snapshot));
+        state.normalized_snapshot_hash = Some(replay_content_hash(snapshot));
     }
     if let Some(content) = file_content {
         state.file_hash = Some(agent_doc_hash::content_hash(content));
-        state.normalized_file_hash = Some(normalized_content_hash(content));
+        state.normalized_file_hash = Some(replay_content_hash(content));
     }
     save(file, &state)?;
     append_phase_event_to_session_log(file, &state);
@@ -1186,11 +1187,11 @@ pub fn mark_abandoned(
     state.updated_at = now_secs();
     if let Some(snapshot) = snapshot_content {
         state.snapshot_hash = Some(agent_doc_hash::content_hash(snapshot));
-        state.normalized_snapshot_hash = Some(normalized_content_hash(snapshot));
+        state.normalized_snapshot_hash = Some(replay_content_hash(snapshot));
     }
     if let Some(content) = file_content {
         state.file_hash = Some(agent_doc_hash::content_hash(content));
-        state.normalized_file_hash = Some(normalized_content_hash(content));
+        state.normalized_file_hash = Some(replay_content_hash(content));
     }
     save(file, &state)?;
     append_phase_event_to_session_log(file, &state);
@@ -1354,16 +1355,6 @@ fn is_zero(value: &usize) -> bool {
 
 fn is_false(value: &bool) -> bool {
     !*value
-}
-
-fn normalized_content_hash(content: &str) -> String {
-    // Neutralizes transient markers AND the independently-maintained agent:queue
-    // component so response-replay / stale-lock recovery stays stable across
-    // queue-maintenance churn (#adoc-queue-ipc-buffer-divergence #4). Must match
-    // repair.rs's compare-side normalization exactly.
-    agent_doc_hash::content_hash(
-        &agent_doc_document::transient_markers::normalize_for_replay_hash(content),
-    )
 }
 
 fn normalize_checkpoint_task_id(id: &str) -> String {

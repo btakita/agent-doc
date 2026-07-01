@@ -62,7 +62,10 @@
 //! - recover_fails_closed_on_capture_hash_mismatch: durable capture baseline mismatch → run returns Err
 
 use agent_doc_element_exchange::strip_prompt_prefix_from_response_body_first_lines;
-use agent_doc_turn::{closeout_recovery::CloseoutRecoveryMutationReason, response_replay};
+use agent_doc_turn::{
+    closeout_recovery::{CloseoutRecoveryMutationReason, repair_leaves_unanswered_prompt_diff},
+    response_replay,
+};
 use anyhow::{Context, Result};
 use serde::Serialize;
 use std::collections::HashSet;
@@ -244,17 +247,6 @@ fn head_already_matches_current_doc(file: &Path, doc_content: &str) -> Result<bo
     }))
 }
 
-fn normalized_content_hash(content: &str) -> String {
-    // Compare-side normalization for stale-cycle replay matching. Neutralizes
-    // transient markers AND the agent:queue component so queue-maintenance churn
-    // alone does not block recovery of an already-materialized response
-    // (#adoc-queue-ipc-buffer-divergence #4). Must match cycle_state.rs's
-    // store-side normalization exactly.
-    agent_doc_hash::content_hash(
-        &agent_doc_document::transient_markers::normalize_for_replay_hash(content),
-    )
-}
-
 fn preflight_cycle_age_secs(state: &crate::cycle_state::CycleState) -> u64 {
     now_secs().saturating_sub(state.updated_at.max(state.started_at))
 }
@@ -306,8 +298,11 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
     let current_snapshot_hash = snapshot_content
         .as_deref()
         .map(agent_doc_hash::content_hash);
-    let current_normalized_file_hash = normalized_content_hash(&file_content);
-    let current_normalized_snapshot_hash = snapshot_content.as_deref().map(normalized_content_hash);
+    let current_normalized_file_hash =
+        agent_doc_document::transient_markers::replay_content_hash(&file_content);
+    let current_normalized_snapshot_hash = snapshot_content
+        .as_deref()
+        .map(agent_doc_document::transient_markers::replay_content_hash);
 
     let raw_hashes_match = state.file_hash.as_deref() == Some(current_file_hash.as_str())
         && state.snapshot_hash == current_snapshot_hash;
@@ -908,120 +903,6 @@ fn repair_duplicate_exchange_scaffold_if_needed(file: &Path, doc_content: &str) 
         file.display()
     );
     Ok(repaired)
-}
-
-fn repair_leaves_unanswered_prompt_diff(
-    snapshot_content: &str,
-    repaired: &str,
-    known_response: Option<&str>,
-) -> bool {
-    let norm_snapshot =
-        agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(
-            snapshot_content,
-        );
-    let norm_repaired =
-        agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(repaired);
-    let Some(diff_text) =
-        agent_doc_diff::unified_diff_from_contents(&norm_snapshot, &norm_repaired)
-    else {
-        return false;
-    };
-    let changes = agent_doc_diff::classify_prompt_bearing_changes(&diff_text);
-    let mut skip_answered_response_run = false;
-    for (idx, change) in changes.iter().enumerate() {
-        if change.kind != agent_doc_diff::PromptBearingChangeKind::PromptTarget {
-            continue;
-        }
-        if skip_answered_response_run {
-            let preview = change
-                .text
-                .lines()
-                .find(|line| !line.trim().is_empty())
-                .unwrap_or(change.text.as_str())
-                .trim();
-            if !repair_line_looks_like_fresh_prompt_after_response(preview) {
-                continue;
-            }
-        }
-        if agent_doc_diff::prompt_change_is_already_answered(&change.text)
-            || agent_doc_diff::prompt_change_is_answered_by_later_response(&changes, idx)
-            || repair_prompt_target_immediately_before_existing_response(repaired, &change.text)
-            || known_response
-                .map(|response| {
-                    response_replay::prompt_change_is_known_response(&change.text, response)
-                })
-                .unwrap_or(false)
-        {
-            skip_answered_response_run = true;
-            continue;
-        }
-        return true;
-    }
-    false
-}
-
-fn repair_line_looks_like_fresh_prompt_after_response(trimmed: &str) -> bool {
-    let lower = trimmed.trim_start_matches('❯').trim().to_ascii_lowercase();
-    trimmed.ends_with('?')
-        || lower == "go"
-        || lower == "continue"
-        || lower.starts_with("do #")
-        || lower.starts_with("do [#")
-        || lower.starts_with("fix #")
-        || lower.starts_with("run ")
-        || lower.starts_with("rerun ")
-        || lower.starts_with("build ")
-        || lower.starts_with("test ")
-        || lower.starts_with("commit ")
-        || lower.starts_with("push ")
-        || lower.starts_with("verify ")
-        || lower.starts_with("investigate ")
-}
-
-fn repair_prompt_target_immediately_before_existing_response(
-    current_doc: &str,
-    change_text: &str,
-) -> bool {
-    let target = change_text
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .map(|line| line.trim().trim_start_matches('❯').trim().to_string());
-    let Some(target) = target else {
-        return false;
-    };
-    if target.is_empty() {
-        return false;
-    }
-
-    let body = agent_doc_frontmatter::frontmatter::parse(current_doc)
-        .map(|(_, body)| body.to_string())
-        .unwrap_or_else(|_| current_doc.to_string());
-    let Ok(components) = agent_doc_element::element::parse(&body) else {
-        return false;
-    };
-    let Some(exchange) = components
-        .iter()
-        .find(|component| component.name == "exchange")
-    else {
-        return false;
-    };
-
-    let lines: Vec<&str> = exchange.content(&body).lines().collect();
-    for (idx, line) in lines.iter().enumerate() {
-        let normalized = line.trim().trim_start_matches('❯').trim();
-        if normalized != target {
-            continue;
-        }
-        for next in lines.iter().skip(idx + 1) {
-            let trimmed = next.trim();
-            if trimmed.is_empty() || trimmed.starts_with("<!--") {
-                continue;
-            }
-            let normalized = trimmed.strip_prefix("❯ ").unwrap_or(trimmed).trim();
-            return agent_doc_turn::closeout_signal::is_exchange_response_heading(normalized);
-        }
-    }
-    false
 }
 
 fn repair_answered_stale_boundary_if_safe(

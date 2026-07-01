@@ -160,7 +160,6 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::flow::routed_reopen::{log_dispatch_proof_failed, log_prompt_ready_barrier_failed};
-use crate::harness::HarnessConfig;
 use crate::supervisor::ipc::IpcMethod;
 use agent_doc_controller::dispatch::{
     ActorDispatchState, ActorLifecycleState, AuthoritativeActorDispatchAction,
@@ -218,6 +217,7 @@ use agent_doc_controller::dispatch::{
     startup_miss_superseded_by_later_open_start,
 };
 use agent_doc_frontmatter::frontmatter;
+use agent_doc_harness::HarnessConfig;
 use agent_doc_hash::short_content_hash;
 use agent_doc_turn::closeout_recovery::{
     CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput,
@@ -7499,7 +7499,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
     }
     #[test]
     fn route_starting_actor_not_ready_log_line_includes_typed_lifecycle_facts() {
-        let h = crate::harness::HarnessConfig::codex();
+        let h = agent_doc_harness::HarnessConfig::codex();
         let facts = AuthoritativeActorReadyFacts {
             pane_id: "%7".to_string(),
             generation: 42,
@@ -7724,7 +7724,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
     fn dispatch_only_starting_pane_ready_timeout_honors_override_then_default() {
         use std::time::Duration;
 
-        let codex = crate::harness::HarnessConfig::codex();
+        let codex = agent_doc_harness::HarnessConfig::codex();
         assert_eq!(
             dispatch_only_starting_pane_ready_timeout(&codex),
             Duration::from_millis(250)
@@ -7744,7 +7744,7 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
     }
     #[test]
     fn failclosed_wait_context_distinguishes_busy_turn_from_cold_startup() {
-        let claude = crate::harness::HarnessConfig::claude();
+        let claude = agent_doc_harness::HarnessConfig::claude();
         // No busy cue → cold-startup timeout wording (unchanged behavior).
         assert_eq!(
             failclosed_wait_context(&claude, None, 12),

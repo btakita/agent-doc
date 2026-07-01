@@ -2015,7 +2015,7 @@ impl SimWorld {
 
     pub(crate) fn dispatch_operator_prompt_with_protected_draft(&mut self) -> Result<()> {
         let pane_id = self.current_dispatch_pane()?;
-        let harness = agent_doc_orchestration::harness::HarnessConfig::codex();
+        let harness = agent_doc_harness::HarnessConfig::codex();
         let pane_content = "› Implement {feature}\n";
         let Some(reason) = harness.protected_prompt_input_reason(pane_content) else {
             bail!("protected draft fixture no longer blocks route dispatch");

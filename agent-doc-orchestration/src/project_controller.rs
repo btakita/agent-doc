@@ -4571,7 +4571,7 @@ mod tests {
         let error = envelope.error.as_deref().unwrap_or_default().to_string();
         let expected_head = "do [#jbrunlogproof]";
         let expected_trigger =
-            crate::harness::HarnessConfig::codex().trigger_command(&doc.to_string_lossy());
+            agent_doc_harness::HarnessConfig::codex().trigger_command(&doc.to_string_lossy());
         assert!(
             error.contains("failed_stage=queue_paused"),
             "dispatch error must include queue paused stage: {error}"

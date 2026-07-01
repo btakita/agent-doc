@@ -2596,7 +2596,7 @@ fn dispatch_blocked_proof_fields(
         ));
     }
     if let Some(harness) = dispatch_diagnostic_field(diagnostic_payload, "harness") {
-        let trigger = crate::harness::HarnessConfig::from_agent_name(harness)
+        let trigger = agent_doc_harness::HarnessConfig::from_agent_name(harness)
             .trigger_command(&file.to_string_lossy());
         fields.push(format!("trigger_bytes={}", trigger.len()));
         fields.push(format!(

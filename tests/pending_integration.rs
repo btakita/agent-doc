@@ -5,7 +5,6 @@
 //! - `agent-doc icebox <file> add/backfill/done/edit/reorder/clear/reap`
 //! - `agent-doc write --backlog-add/--icebox-edit/--done/...`
 //! - `replace:pending` block rejection (and `--allow-replace-pending` escape hatch)
-//! - `patch:pending` dual-accept with deprecation warning (#25ag migration)
 
 use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
@@ -825,8 +824,6 @@ fn write_rejects_replace_pending_block() {
 
 #[test]
 fn write_rejects_legacy_patch_pending_block() {
-    // Dual-accept window (#25ag): `patch:pending` still parses, still rejected
-    // by default, and emits a deprecation warning on stderr.
     let (_tmp, doc) = setup_doc("- [ ] [#aaaa] existing");
     let payload = "<!-- patch:pending -->\n- [ ] [#zzzz] new\n<!-- /patch:pending -->\n";
     let assert_result = agent_doc()
@@ -836,15 +833,18 @@ fn write_rejects_legacy_patch_pending_block() {
         .failure();
     let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
     assert!(
-        stderr.contains("no patch blocks or content found in response"),
+        stderr.contains("legacy pending patch block is no longer supported"),
         "stderr was: {}",
         stderr
     );
     assert!(
-        stderr.contains("deprecated"),
-        "expected deprecation warning in stderr, got: {}",
+        !stderr.contains("deprecated"),
+        "legacy syntax should be rejected without migration warning, got: {}",
         stderr
     );
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("- [ ] [#aaaa] existing"));
+    assert!(!content.contains("zzzz"));
 }
 
 #[test]
@@ -925,9 +925,7 @@ fn write_applies_replace_icebox_block_without_exchange_fallback() {
 }
 
 #[test]
-fn write_allows_legacy_patch_pending_with_legacy_flag() {
-    // Dual-accept: `patch:pending` + `--allow-patch-pending` still works one
-    // more release. Clap alias routes the legacy flag to `allow_replace_pending`.
+fn write_rejects_removed_allow_patch_pending_flag() {
     let (_tmp, doc) = setup_doc("- [ ] [#aaaa] existing");
     let payload = "<!-- patch:pending -->\n- [ ] [#zzzz] replaced\n<!-- /patch:pending -->\n";
     let assert_result = agent_doc()
@@ -939,31 +937,34 @@ fn write_allows_legacy_patch_pending_with_legacy_flag() {
         ])
         .write_stdin(payload)
         .assert()
-        .success();
-    let content = fs::read_to_string(&doc).unwrap();
-    assert!(content.contains("zzzz"));
+        .failure();
     let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
     assert!(
-        stderr.contains("deprecated"),
-        "expected deprecation warning in stderr, got: {}",
+        stderr.contains("unexpected argument") && stderr.contains("--allow-patch-pending"),
+        "expected removed legacy flag rejection, got: {}",
         stderr
     );
 }
 
 #[test]
-fn write_allows_replace_pending_with_legacy_env_var() {
-    // Dual-accept: legacy env var `AGENT_DOC_ALLOW_PATCH_PENDING=1` still
-    // authorizes replace:pending blocks (library-layer compat path).
+fn write_rejects_replace_pending_with_removed_legacy_env_var() {
     let (_tmp, doc) = setup_doc("- [ ] [#aaaa] existing");
-    let payload = "<!-- replace:pending -->\n- [ ] [#zzzz] replaced\n<!-- /replace:pending -->\n";
-    agent_doc()
+    let payload = "<!-- replace:pending -->\nnot a backlog list\n<!-- /replace:pending -->\n";
+    let assert_result = agent_doc()
         .args(["write", doc.to_str().unwrap(), "--force-disk"])
         .env("AGENT_DOC_ALLOW_PATCH_PENDING", "1")
         .write_stdin(payload)
         .assert()
-        .success();
+        .failure();
+    let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
+    assert!(
+        stderr.contains("pending/backlog patch"),
+        "legacy env var must not authorize replacement, got: {}",
+        stderr
+    );
     let content = fs::read_to_string(&doc).unwrap();
-    assert!(content.contains("zzzz"));
+    assert!(content.contains("- [ ] [#aaaa] existing"));
+    assert!(!content.contains("not a backlog list"));
 }
 
 #[test]
@@ -1003,45 +1004,35 @@ fn write_pending_done_accepts_hash_prefixed_id() {
 }
 
 #[test]
-fn write_done_accepts_deprecated_pending_done_alias_with_warning() {
-    let (_tmp, doc) = setup_doc("- [ ] [#abcd] task");
-    let assert_result = agent_doc()
-        .args([
-            "write",
-            doc.to_str().unwrap(),
-            "--force-disk",
-            "--pending-done",
-            "abcd",
-        ])
-        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
-        .assert()
-        .success();
-    let content = fs::read_to_string(&doc).unwrap();
-    assert!(content.contains("- [x] [#abcd]"));
-    let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
-    assert!(stderr.contains("deprecated"), "got stderr: {}", stderr);
-    assert!(stderr.contains("--done"), "got stderr: {}", stderr);
-}
-
-#[test]
-fn write_done_accepts_deprecated_backlog_done_alias_with_warning() {
-    let (_tmp, doc) = setup_doc("- [ ] [#abcd] task");
-    let assert_result = agent_doc()
-        .args([
-            "write",
-            doc.to_str().unwrap(),
-            "--force-disk",
-            "--backlog-done",
-            "abcd",
-        ])
-        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
-        .assert()
-        .success();
-    let content = fs::read_to_string(&doc).unwrap();
-    assert!(content.contains("- [x] [#abcd]"));
-    let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
-    assert!(stderr.contains("deprecated"), "got stderr: {}", stderr);
-    assert!(stderr.contains("--done"), "got stderr: {}", stderr);
+fn write_done_rejects_removed_done_aliases() {
+    for removed_alias in ["--pending-done", "--backlog-done"] {
+        let (_tmp, doc) = setup_doc("- [ ] [#abcd] task");
+        let assert_result = agent_doc()
+            .args([
+                "write",
+                doc.to_str().unwrap(),
+                "--force-disk",
+                removed_alias,
+                "abcd",
+            ])
+            .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+            .assert()
+            .failure();
+        let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
+        assert!(
+            stderr.contains(removed_alias),
+            "expected stderr to name {removed_alias}, got: {stderr}"
+        );
+        assert!(
+            stderr.contains("unexpected argument"),
+            "expected {removed_alias} to be rejected by clap, got: {stderr}"
+        );
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(
+            content.contains("- [ ] [#abcd] task"),
+            "{removed_alias} must not mutate tracked work:\n{content}"
+        );
+    }
 }
 
 // ---- Phase 2: gate / ungate ----
@@ -1414,13 +1405,11 @@ fn preflight_omits_backlog_gated_count_when_zero() {
 
 #[test]
 fn write_rejects_replace_pending_via_library_default() {
-    // Phase 3 inversion: library-level callers must default to reject. The
-    // inversion is checked across both env vars (canonical + legacy alias).
+    // Phase 3 inversion: library-level callers must default to reject.
     let (_tmp, doc) = setup_doc("- [ ] [#aaaa] existing");
     let payload = "<!-- replace:pending -->\n- [ ] [#zzzz] new\n<!-- /replace:pending -->\n";
     let assert_result = agent_doc()
         .args(["write", doc.to_str().unwrap(), "--force-disk"])
-        .env_remove("AGENT_DOC_ALLOW_PATCH_PENDING")
         .env_remove("AGENT_DOC_ALLOW_REPLACE_PENDING")
         .write_stdin(payload)
         .assert()

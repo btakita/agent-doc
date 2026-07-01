@@ -1923,33 +1923,46 @@ fn finalize_accepts_hash_prefixed_pending_done_id() {
 }
 
 #[test]
-fn finalize_accepts_deprecated_pending_done_alias_with_warning() {
-    let (tmp, doc) = setup_session_template_doc();
-    insert_pending_item(&doc, "- [ ] [#done1] Close the loop\n");
-    init_git_repo(tmp.path(), &doc);
+fn finalize_rejects_removed_done_aliases() {
+    for removed_alias in ["--pending-done", "--backlog-done"] {
+        let (tmp, doc) = setup_session_template_doc();
+        insert_pending_item(&doc, "- [ ] [#done1] Close the loop\n");
+        init_git_repo(tmp.path(), &doc);
 
-    let assert_result = agent_doc()
-        .current_dir(tmp.path())
-        .args([
-            "finalize",
-            doc.to_str().unwrap(),
-            "--force-disk",
-            "--pending-done",
-            "done1",
-        ])
-        .write_stdin(
-            "<!-- patch:exchange -->\n### Re: #done1 close the loop — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n",
-        )
-        .assert()
-        .success();
+        let assert_result = agent_doc()
+            .current_dir(tmp.path())
+            .args([
+                "finalize",
+                doc.to_str().unwrap(),
+                "--force-disk",
+                removed_alias,
+                "done1",
+            ])
+            .write_stdin(
+                "<!-- patch:exchange -->\n### Re: #done1 close the loop — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n",
+            )
+            .assert()
+            .failure();
 
-    let content = fs::read_to_string(&doc).unwrap();
-    assert!(content.contains("### Re: #done1 close the loop — gpt-5"));
-    assert!(content.contains("<!-- agent:done -->"));
-    assert!(content.contains("[#done1] Close the loop"));
-    let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
-    assert!(stderr.contains("deprecated"), "got stderr: {}", stderr);
-    assert!(stderr.contains("--done"), "got stderr: {}", stderr);
+        let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
+        assert!(
+            stderr.contains(removed_alias),
+            "expected stderr to name {removed_alias}, got: {stderr}"
+        );
+        assert!(
+            stderr.contains("unexpected argument"),
+            "expected {removed_alias} to be rejected by clap, got: {stderr}"
+        );
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(
+            content.contains("- [ ] [#done1] Close the loop"),
+            "{removed_alias} must not reap tracked work:\n{content}"
+        );
+        assert!(
+            !content.contains("### Re: #done1 close the loop"),
+            "{removed_alias} must fail before writing the response:\n{content}"
+        );
+    }
 }
 
 #[test]

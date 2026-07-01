@@ -171,7 +171,7 @@ struct RouteOwnedCompletionConfig {
     file: PathBuf,
     baseline: Option<crate::cycle_state::CycleState>,
     reap_policy: RouteOwnedReapPolicy,
-    harness: crate::harness::HarnessConfig,
+    harness: agent_doc_harness::HarnessConfig,
 }
 
 /// Open (or create) the session log file at `.agent-doc/logs/<session-uuid>.log`.
@@ -338,7 +338,7 @@ impl CapabilityProofGate {
 fn record_session_startup_miss(
     path: &Path,
     shared: &SupervisorShared,
-    harness: &crate::harness::HarnessConfig,
+    harness: &agent_doc_harness::HarnessConfig,
     session_log: &mut Option<std::fs::File>,
     reason: &str,
 ) {
@@ -477,7 +477,7 @@ fn complete_idle_queue_slash_command_head(
 
 fn idle_queue_drain_payload(
     file: &str,
-    harness: &crate::harness::HarnessConfig,
+    harness: &agent_doc_harness::HarnessConfig,
     active_head: &str,
 ) -> String {
     if let Some(command) = idle_queue_head_slash_command(active_head) {
@@ -487,7 +487,7 @@ fn idle_queue_drain_payload(
 }
 
 fn idle_queue_drain_payload_kind(
-    _harness: &crate::harness::HarnessConfig,
+    _harness: &agent_doc_harness::HarnessConfig,
     active_head: &str,
 ) -> &'static str {
     if idle_queue_head_slash_command(active_head).is_some() {
@@ -499,7 +499,7 @@ fn idle_queue_drain_payload_kind(
 
 fn idle_queue_submit_mode(
     shared: &SupervisorShared,
-    harness: &crate::harness::HarnessConfig,
+    harness: &agent_doc_harness::HarnessConfig,
 ) -> &'static str {
     if shared.inject_pane.is_some() {
         agent_doc_tmux_commands::tmux_submit_mode_for_harness(&harness.binary)
@@ -511,7 +511,7 @@ fn idle_queue_submit_mode(
 fn log_idle_queue_drain_submit(
     file: &Path,
     shared: &SupervisorShared,
-    harness: &crate::harness::HarnessConfig,
+    harness: &agent_doc_harness::HarnessConfig,
     payload_kind: &str,
     active_head: &str,
     drain_payload: &str,
@@ -652,7 +652,7 @@ fn route_owned_liveness_reason_for_file(
 
 fn route_owned_live_pane_busy_reason(
     shared: &SupervisorShared,
-    harness: &crate::harness::HarnessConfig,
+    harness: &agent_doc_harness::HarnessConfig,
 ) -> Option<String> {
     if !shared.running.load(Ordering::Relaxed) {
         return None;
@@ -1182,7 +1182,7 @@ fn spawn_auto_trigger_thread(
     shared: Arc<SupervisorShared>,
     stop: Arc<AtomicBool>,
     file: String,
-    harness: crate::harness::HarnessConfig,
+    harness: agent_doc_harness::HarnessConfig,
     mut session_log: Option<std::fs::File>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
@@ -1343,7 +1343,7 @@ fn spawn_auto_trigger_thread(
 
 fn clear_cooldown_blocks_auto_dispatch(
     path: &Path,
-    harness: &crate::harness::HarnessConfig,
+    harness: &agent_doc_harness::HarnessConfig,
     source: &str,
     session_log: &mut Option<std::fs::File>,
     logged: &mut bool,
@@ -2423,7 +2423,7 @@ mod th {
     /// model injection without spawning a real process.
     pub(crate) fn build_base_args_for_test(
         fm: &Frontmatter,
-        harness: &crate::harness::HarnessConfig,
+        harness: &agent_doc_harness::HarnessConfig,
     ) -> Vec<String> {
         let cfg = Config::default();
         let resolved_agent_args = agent_doc_supervisor::config::resolve_agent_launch_args(
@@ -2605,7 +2605,7 @@ mod tests {
             claude_model: Some("opus".into()),
             ..Default::default()
         };
-        let harness = crate::harness::HarnessConfig::claude();
+        let harness = agent_doc_harness::HarnessConfig::claude();
         let args = build_base_args_for_test(&fm, &harness);
         assert!(args.contains(&"--model".to_string()));
         // The `opus` alias is deferred — agent-doc passes it through so Claude
@@ -2621,7 +2621,7 @@ mod tests {
             claude_model: Some("claude-opus-4-6".into()),
             ..Default::default()
         };
-        let harness = crate::harness::HarnessConfig::claude();
+        let harness = agent_doc_harness::HarnessConfig::claude();
         let args = build_base_args_for_test(&fm, &harness);
         // Should use the explicit --model from claude_args, not inject from claude_model
         assert!(args.contains(&"sonnet".to_string()));
@@ -2635,7 +2635,7 @@ mod tests {
             codex_model: Some("o3-pro".into()),
             ..Default::default()
         };
-        let harness = crate::harness::HarnessConfig::codex();
+        let harness = agent_doc_harness::HarnessConfig::codex();
         let args = build_base_args_for_test(&fm, &harness);
         assert!(args.contains(&"--model".to_string()));
         assert!(args.contains(&"o3-pro".to_string()));
@@ -2647,7 +2647,7 @@ mod tests {
             opencode_model: Some("zai/glm-5".into()),
             ..Default::default()
         };
-        let harness = crate::harness::HarnessConfig::opencode();
+        let harness = agent_doc_harness::HarnessConfig::opencode();
         let args = build_base_args_for_test(&fm, &harness);
         assert!(args.contains(&"--model".to_string()));
         assert!(args.contains(&"zai/glm-5".to_string()));
@@ -2659,7 +2659,7 @@ mod tests {
             model: Some("gpt-5".into()),
             ..Default::default()
         };
-        let harness = crate::harness::HarnessConfig::claude();
+        let harness = agent_doc_harness::HarnessConfig::claude();
         let args = build_base_args_for_test(&fm, &harness);
         assert!(args.contains(&"--model".to_string()));
         assert!(args.contains(&"gpt-5".to_string()));
@@ -2670,7 +2670,7 @@ mod tests {
             claude_args: Some("--dangerously-skip-permissions".into()),
             ..Default::default()
         };
-        let harness = crate::harness::HarnessConfig::claude();
+        let harness = agent_doc_harness::HarnessConfig::claude();
         let args = build_base_args_for_test(&fm, &harness);
         assert!(!args.contains(&"--model".to_string()));
     }
@@ -2902,7 +2902,7 @@ mod tests {
         );
 
         assert_eq!(
-            idle_queue_submit_mode(&shared, &crate::harness::HarnessConfig::codex()),
+            idle_queue_submit_mode(&shared, &agent_doc_harness::HarnessConfig::codex()),
             "tmux_text_enter"
         );
     }
@@ -2918,7 +2918,7 @@ mod tests {
         );
 
         assert_eq!(
-            idle_queue_submit_mode(&shared, &crate::harness::HarnessConfig::codex()),
+            idle_queue_submit_mode(&shared, &agent_doc_harness::HarnessConfig::codex()),
             "pty_cr"
         );
     }
@@ -2927,7 +2927,7 @@ mod tests {
         assert_eq!(
             idle_queue_drain_payload(
                 "tasks/sampleorders.md",
-                &crate::harness::HarnessConfig::claude(),
+                &agent_doc_harness::HarnessConfig::claude(),
                 "ignored",
             ),
             "/agent-doc tasks/sampleorders.md"
@@ -2935,19 +2935,19 @@ mod tests {
         assert_eq!(
             idle_queue_drain_payload(
                 "tasks/sampleorders.md",
-                &crate::harness::HarnessConfig::opencode(),
+                &agent_doc_harness::HarnessConfig::opencode(),
                 "ignored",
             ),
             "/agent-doc tasks/sampleorders.md"
         );
         assert_eq!(
-            idle_queue_drain_payload_kind(&crate::harness::HarnessConfig::claude(), "ignored"),
+            idle_queue_drain_payload_kind(&agent_doc_harness::HarnessConfig::claude(), "ignored"),
             "trigger"
         );
     }
     #[test]
     fn idle_queue_restart_drain_does_not_clear_ordinary_sampleorders_head() {
-        let harness = crate::harness::HarnessConfig::codex();
+        let harness = agent_doc_harness::HarnessConfig::codex();
         let head = "JB Run Agent Doc on sampleorders.md stalled after a restart with /clear.";
 
         assert!(!clean_session_head_forces_context_reset(false, false,));
@@ -2968,9 +2968,9 @@ mod tests {
     #[test]
     fn idle_queue_drain_payload_submits_literal_clear_command() {
         for harness in [
-            crate::harness::HarnessConfig::claude(),
-            crate::harness::HarnessConfig::codex(),
-            crate::harness::HarnessConfig::opencode(),
+            agent_doc_harness::HarnessConfig::claude(),
+            agent_doc_harness::HarnessConfig::codex(),
+            agent_doc_harness::HarnessConfig::opencode(),
         ] {
             assert_eq!(
                 idle_queue_drain_payload("tasks/sampleorders.md", &harness, "  /clear  "),
@@ -2984,7 +2984,7 @@ mod tests {
     }
     #[test]
     fn idle_queue_drain_payload_submits_any_literal_slash_command() {
-        let harness = crate::harness::HarnessConfig::codex();
+        let harness = agent_doc_harness::HarnessConfig::codex();
         assert_eq!(
             idle_queue_drain_payload("tasks/sampleorders.md", &harness, "/model sonnet"),
             "/model sonnet"
@@ -3124,7 +3124,7 @@ mod tests {
             shared.clone(),
             stop,
             "tasks/software/tsift.md".to_string(),
-            crate::harness::HarnessConfig::codex(),
+            agent_doc_harness::HarnessConfig::codex(),
             None,
         );
         handle.join().unwrap();

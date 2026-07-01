@@ -6654,6 +6654,36 @@ fn test_agent_doc_diff_uses_current_prompt_bearing_api_names() {
 }
 
 #[test]
+fn test_preflight_output_uses_user_intent_prompt_changes_json_surface() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let preflight_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let preflight_run_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
+
+    assert!(
+        preflight_source
+            .contains("pub user_intent_prompt_changes: Vec<agent_doc_diff::PromptBearingChange>"),
+        "PreflightOutput must expose user_intent_prompt_changes as the prompt JSON surface"
+    );
+    for forbidden in [
+        "pub prompt_bearing_changes: Vec<agent_doc_diff::PromptBearingChange>",
+        "rename = \"prompt_bearing_changes\"",
+        "alias = \"prompt_bearing_changes\"",
+    ] {
+        assert!(
+            !preflight_source.contains(forbidden),
+            "PreflightOutput must not expose the removed prompt_bearing_changes JSON field: {forbidden}"
+        );
+    }
+    assert!(
+        !preflight_run_source.contains("\n        prompt_bearing_changes,\n"),
+        "preflight run must not populate the removed prompt_bearing_changes JSON field"
+    );
+}
+
+#[test]
 fn test_agent_doc_diff_owns_post_exchange_comment_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let diff_source = fs::read_to_string(manifest_dir.join("agent-doc-diff/src/lib.rs")).unwrap();
@@ -6995,7 +7025,7 @@ fn test_global_config_has_no_orchestration_facade() {
         "agent-doc-orchestration/src/agent/mod.rs",
         "agent-doc-orchestration/src/agent/codex.rs",
         "agent-doc-orchestration/src/graph.rs",
-        "agent-doc-orchestration/src/harness.rs",
+        "agent-doc-harness/src/lib.rs",
         "agent-doc-orchestration/src/run.rs",
         "agent-doc-orchestration/src/start.rs",
         "agent-doc-orchestration/src/start/run.rs",
@@ -8552,6 +8582,7 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
     let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
     let package_version = workspace["package"]["version"].as_str();
+    let members = workspace["workspace"]["members"].as_array().unwrap();
 
     let executor_policy =
         fs::read_to_string(manifest_dir.join("agent-doc-turn-executor/src/capability_proof.rs"))
@@ -8710,8 +8741,82 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
             && start.contains("agent_doc_turn_executor::auto_trigger::{"),
         "start should call focused turn-executor policy directly"
     );
-    let harness =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/harness.rs")).unwrap();
+    let harness_crate =
+        fs::read_to_string(manifest_dir.join("agent-doc-harness/src/lib.rs")).unwrap();
+    assert!(
+        members
+            .iter()
+            .any(|member| member.as_str() == Some("agent-doc-harness")),
+        "agent-doc-harness must stay a first-class workspace crate"
+    );
+    let harness_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-harness/Cargo.toml")).unwrap();
+    let harness_manifest: toml::Value = toml::from_str(&harness_manifest).unwrap();
+    assert_eq!(
+        harness_manifest["package"]["version"].as_str(),
+        package_version
+    );
+
+    let dependency = orchestration_dependencies["agent-doc-harness"]
+        .as_table()
+        .unwrap();
+    assert_eq!(
+        dependency.get("path").and_then(toml::Value::as_str),
+        Some("../agent-doc-harness")
+    );
+    assert_eq!(
+        dependency.get("version").and_then(toml::Value::as_str),
+        package_version
+    );
+
+    let orchestration_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
+    assert!(
+        !orchestration_lib.contains("pub mod harness;"),
+        "orchestration must not expose agent-doc-harness through a harness facade module"
+    );
+    fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                collect_rs_files(&path, out);
+            } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+                out.push(path);
+            }
+        }
+    }
+    let mut orchestration_sources = Vec::new();
+    collect_rs_files(
+        &manifest_dir.join("agent-doc-orchestration/src"),
+        &mut orchestration_sources,
+    );
+    for forbidden_snippet in [
+        "pub struct HarnessConfig",
+        "pub enum RestartBehavior",
+        "pub enum CleanExitBehavior",
+    ] {
+        for source_path in &orchestration_sources {
+            let source = fs::read_to_string(source_path).unwrap();
+            assert!(
+                !source.contains(forbidden_snippet),
+                "{} must not re-own harness prompt/chrome policy: {forbidden_snippet}",
+                source_path.display()
+            );
+        }
+    }
+    for required_snippet in [
+        "pub struct HarnessConfig",
+        "pub enum RestartBehavior",
+        "pub enum CleanExitBehavior",
+        "pub fn from_context(",
+        "pub fn dispatch_blocker_reason(",
+        "pub fn protected_prompt_input_reason(",
+    ] {
+        assert!(
+            harness_crate.contains(required_snippet),
+            "agent-doc-harness should own harness prompt/chrome policy directly: {required_snippet}"
+        );
+    }
     for forbidden_snippet in [
         "fn parse_sandbox_mode_config(",
         "fn record_codex_resume_sandbox_mode(",
@@ -8719,13 +8824,14 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
         "fn codex_resume_restart_args(",
     ] {
         assert!(
-            !harness.contains(forbidden_snippet),
-            "harness.rs must not re-own pure Codex resume launch policy: {forbidden_snippet}"
+            !harness_crate.contains(forbidden_snippet),
+            "agent-doc-harness must not re-own pure Codex resume launch policy: {forbidden_snippet}"
         );
     }
     assert!(
-        harness.contains("use agent_doc_turn_executor::codex_launch::codex_resume_restart_args;"),
-        "harness.rs should call focused Codex resume launch policy directly"
+        harness_crate
+            .contains("use agent_doc_turn_executor::codex_launch::codex_resume_restart_args;"),
+        "agent-doc-harness should call focused Codex resume launch policy directly"
     );
     let codex = fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/agent/codex.rs"))
         .unwrap();
@@ -9147,7 +9253,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "agent-doc-orchestration/src/supervisor/in_process.rs",
         "agent-doc-orchestration/src/start/idle_watch.rs",
         "agent-doc-orchestration/src/start/run.rs",
-        "agent-doc-orchestration/src/harness.rs",
+        "agent-doc-harness/src/lib.rs",
         "agent-doc-orchestration/src/project_controller/rpc.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -10537,7 +10643,7 @@ fn test_agent_doc_turn_executor_tmux_owns_prompt_parser_policy() {
     );
 
     let harness_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/harness.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-harness/src/lib.rs")).unwrap();
     for forbidden in [
         "fn codex_idle_placeholder_prompt(",
         "fn codex_idle_placeholder_candidate(",
@@ -10548,14 +10654,14 @@ fn test_agent_doc_turn_executor_tmux_owns_prompt_parser_policy() {
     ] {
         assert!(
             !harness_source.contains(forbidden),
-            "harness.rs must not re-own Codex prompt placeholder parsing policy: {forbidden}"
+            "agent-doc-harness must not re-own Codex prompt placeholder parsing policy: {forbidden}"
         );
     }
     assert!(
         harness_source.contains("codex_idle_placeholder_candidate")
             && harness_source.contains("codex_prompt_candidate_is_dim_placeholder")
             && harness_source.contains("is_codex_idle_placeholder_prompt"),
-        "harness.rs should call focused Codex prompt placeholder policy directly"
+        "agent-doc-harness should call focused Codex prompt placeholder policy directly"
     );
     let start_detection_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/detection.rs"))
@@ -12427,6 +12533,38 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
 }
 
 #[test]
+fn test_patch_pending_compatibility_strings_do_not_remain_in_production_code() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let production_files = [
+        "src/main.rs",
+        "agent-doc-template/src/template.rs",
+        "agent-doc-orchestration/src/write.rs",
+        "agent-doc-orchestration/src/write/run_entry.rs",
+        "agent-doc-orchestration/src/write/materialize.rs",
+    ];
+    let forbidden_snippets = [
+        "--allow-patch-pending",
+        "allow-patch-pending",
+        "AGENT_DOC_ALLOW_PATCH_PENDING",
+        "Dual-accept",
+        "dual-accept",
+        "deprecated aliases",
+        "deprecation warning",
+        "`patch:pending` is deprecated",
+    ];
+
+    for relative in production_files {
+        let content = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        for forbidden in forbidden_snippets.iter().copied() {
+            assert!(
+                !content.contains(forbidden),
+                "{relative} must not retain deprecated patch:pending compatibility string: {forbidden}"
+            );
+        }
+    }
+}
+
+#[test]
 fn test_agent_doc_template_owns_patchback_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let template_patchback =
@@ -13542,14 +13680,9 @@ fn test_preflight_active_auto_queue_head_is_not_user_intent() {
         "synthetic auto-queue head must NOT count as user intent (would stall the auto-loop): {}",
         parsed["user_intent_prompt_changes"]
     );
-    // The head is still surfaced through prompt_bearing_changes for compatibility.
     assert!(
-        !parsed["prompt_bearing_changes"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default()
-            .is_empty(),
-        "queue head should remain in prompt_bearing_changes: {parsed}"
+        parsed.get("prompt_bearing_changes").is_none(),
+        "preflight JSON must not expose removed prompt_bearing_changes field: {parsed}"
     );
 }
 
@@ -13711,11 +13844,8 @@ fn test_preflight_exchange_slash_command_is_command_only() {
     assert_eq!(parsed["no_changes"], false);
     assert_eq!(parsed["builtin_commands"][0], "/clear");
     assert!(
-        parsed
-            .get("prompt_bearing_changes")
-            .and_then(|value| value.as_array())
-            .is_none_or(|changes| changes.is_empty()),
-        "slash-only exchange diff must not be answered as a prompt target: {parsed}"
+        parsed.get("prompt_bearing_changes").is_none(),
+        "preflight JSON must not expose removed prompt_bearing_changes field: {parsed}"
     );
     assert!(
         parsed
@@ -13919,10 +14049,8 @@ fn test_preflight_warns_but_does_not_target_inactive_queue_edit() {
         serde_json::from_str(&stdout).expect("preflight output should be JSON");
     assert_eq!(json["warnings"][0]["code"], "inactive_queue_residue");
     assert!(
-        json.get("prompt_bearing_changes")
-            .and_then(|value| value.as_array())
-            .is_none_or(|changes| changes.is_empty()),
-        "inactive queue edit should not produce prompt-bearing changes: {json}"
+        json.get("prompt_bearing_changes").is_none(),
+        "preflight JSON must not expose removed prompt_bearing_changes field: {json}"
     );
     assert_eq!(json["queue_active"], serde_json::Value::Null);
 }
@@ -13965,6 +14093,28 @@ fn test_cli_bare_file_path_aliases_to_run() {
             ))
             .and(predicate::str::contains("agent-doc run <FILE>")),
     );
+}
+
+#[test]
+fn test_cli_done_flag_has_no_removed_aliases() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cli = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
+    assert!(
+        cli.contains(r#"#[arg(long = "done")]"#),
+        "tracked-work completion should expose canonical --done"
+    );
+    for forbidden in [
+        r#"alias = "pending-done""#,
+        r#"alias = "backlog-done""#,
+        "deprecated_done_flag_used",
+        "--pending-done",
+        "--backlog-done",
+    ] {
+        assert!(
+            !cli.contains(forbidden),
+            "removed tracked-work completion alias must not remain in the CLI: {forbidden}"
+        );
+    }
 }
 
 #[test]

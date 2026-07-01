@@ -222,7 +222,7 @@ pub fn run_template(
     let patches = normalized.patches;
     let unmatched = normalized.unmatched;
 
-    // Enforcement: reject replace:pending (and deprecated patch:pending) blocks unless allowed.
+    // Enforcement: reject tracked-work full-replacement blocks unless allowed.
     enforce_no_replace_pending(&patches, flags.allow_replace_pending)?;
     enforce_no_destructive_todo_patch(&current_content, &patches)?;
     if let Err(reason) = agent_doc_template::patchback::enforce_orchestrate_patchback_contract(
@@ -532,7 +532,7 @@ pub fn run_stream(
     let patches = normalized.patches;
     let unmatched = normalized.unmatched;
 
-    // Enforcement: reject replace:pending (and deprecated patch:pending) blocks unless allowed.
+    // Enforcement: reject tracked-work full-replacement blocks unless allowed.
     enforce_no_replace_pending(&patches, flags.allow_replace_pending)?;
     enforce_no_destructive_todo_patch(&current_content, &patches)?;
     if let Err(reason) = agent_doc_template::patchback::enforce_orchestrate_patchback_contract(
@@ -1187,7 +1187,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     // Save response to pending store (survives context compaction)
     repair::save_pending(file, &response)?;
 
-    // Enforcement: reject replace:pending (and deprecated patch:pending) blocks unless allowed.
+    // Enforcement: reject tracked-work full-replacement blocks unless allowed.
     enforce_no_replace_pending(&patches, flags.allow_replace_pending)?;
     enforce_no_destructive_todo_patch(&current_content, &patches)?;
 
@@ -1565,7 +1565,7 @@ pub fn apply_template_from_string_with_options(
     let patches = normalized.patches;
     let unmatched = normalized.unmatched;
 
-    // Enforcement: reject replace:pending (and deprecated patch:pending) blocks unless allowed.
+    // Enforcement: reject tracked-work full-replacement blocks unless allowed.
     enforce_no_replace_pending(&patches, false)?;
     enforce_no_destructive_todo_patch(&content, &patches)?;
 

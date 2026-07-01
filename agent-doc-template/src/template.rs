@@ -138,11 +138,9 @@ pub fn is_template_mode(mode: Option<&str>) -> bool {
 /// Content outside patch blocks is collected as "unmatched" and returned separately.
 /// Markers inside fenced code blocks (``` or ~~~) and inline code spans are ignored.
 ///
-/// Also accepts the canonical `<!-- replace:pending -->...<!-- /replace:pending -->`
-/// form as a synonym for `<!-- patch:pending -->...<!-- /patch:pending -->`. The
-/// `replace:` prefix signals full-replacement semantics and is the canonical name
-/// for pending mutations going forward. `patch:pending` is still parsed for one
-/// release with a deprecation warning emitted to stderr. See #25ag.
+/// Also accepts `<!-- replace:pending -->...<!-- /replace:pending -->`.
+/// The `replace:` prefix signals full-replacement semantics for tracked-work
+/// lists; the legacy `patch:` pending alias is rejected.
 ///
 /// `<!-- replace:icebox -->...<!-- /replace:icebox -->` is also accepted so the
 /// skill has a binary-owned path to rewrite `agent:icebox` without dumping the
@@ -186,9 +184,8 @@ pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
         let trimmed = inner.trim();
 
         // Recognize two prefix forms:
-        //   - `patch:<name>`     — original form (deprecated for pending component)
-        //   - `replace:pending`  — canonical form for the pending component (#25ag)
-        //   - `replace:icebox`   — canonical full-rewrite form for the icebox component
+        //   - `patch:<name>`     — original component patch form
+        //   - `replace:<name>`   — full-rewrite form for tracked-work components
         let parsed_prefix: Option<(&str, &str)> = if let Some(rest) = trimmed.strip_prefix("patch:")
         {
             Some(("patch", rest))
@@ -229,12 +226,9 @@ pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
                 (rest, std::collections::HashMap::new())
             };
 
-            // Deprecation warning: `patch:pending` is deprecated in favor of
-            // `replace:pending`. Warn once per parse call on first occurrence.
-            if prefix_kind == "patch" && is_backlog_component(name) {
-                eprintln!(
-                    "warning: `<!-- patch:{} -->` is deprecated — use `<!-- replace:{} -->` instead (see #25ag)",
-                    name, name
+            if prefix_kind == "patch" && name == element::BACKLOG_ALIAS {
+                anyhow::bail!(
+                    "legacy pending patch block is no longer supported; use `<!-- replace:pending -->` instead"
                 );
             }
 
@@ -2234,6 +2228,20 @@ All systems go.
         assert_eq!(patches[0].name, "icebox");
         assert_eq!(patches[0].content, "- [ ] [#park1] Parked follow-up\n");
         assert!(unmatched.is_empty());
+    }
+    #[test]
+    fn parse_patches_rejects_legacy_patch_pending() {
+        let response = "\
+<!-- patch:pending -->
+- [ ] [#task] Follow-up
+<!-- /patch:pending -->
+";
+        let err = parse_patches(response).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("legacy pending patch block is no longer supported"),
+            "unexpected error: {err}"
+        );
     }
     #[test]
     fn parse_patches_orphaned_opener_does_not_leak_into_unmatched() {

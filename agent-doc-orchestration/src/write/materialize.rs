@@ -17,9 +17,6 @@ pub(crate) fn pending_replace_escape_hatch_enabled() -> bool {
     std::env::var("AGENT_DOC_ALLOW_REPLACE_PENDING")
         .map(|v| v == "1")
         .unwrap_or(false)
-        || std::env::var("AGENT_DOC_ALLOW_PATCH_PENDING")
-            .map(|v| v == "1")
-            .unwrap_or(false)
 }
 
 pub(crate) fn ipc_response_materialized_or_fallback(
@@ -176,10 +173,7 @@ pub fn normalize_backlog_patch_response(
     let allow_canonical = std::env::var("AGENT_DOC_ALLOW_REPLACE_PENDING")
         .map(|v| v == "1")
         .unwrap_or(false);
-    let allow_legacy = std::env::var("AGENT_DOC_ALLOW_PATCH_PENDING")
-        .map(|v| v == "1")
-        .unwrap_or(false);
-    if allow_canonical || allow_legacy {
+    if allow_canonical {
         return Ok(NormalizedTemplateResponse {
             response_for_capture: None,
             patches,

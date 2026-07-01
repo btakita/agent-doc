@@ -245,11 +245,6 @@ fn deprecated_pending_alias_used(args: &[OsString]) -> bool {
     matches!(args.get(1).and_then(|arg| arg.to_str()), Some("pending"))
 }
 
-fn deprecated_done_flag_used(args: &[OsString]) -> bool {
-    args.iter()
-        .any(|arg| matches!(arg.to_str(), Some("--pending-done" | "--backlog-done")))
-}
-
 #[derive(Args, Clone)]
 struct WriteArgs {
     /// Path to the session document
@@ -342,8 +337,7 @@ struct WriteArgs {
     #[arg(long = "icebox-reorder")]
     icebox_reorder: Option<String>,
     /// Mark a backlog or icebox item `[x]` by hash id (repeatable).
-    /// `--pending-done` and `--backlog-done` are deprecated aliases.
-    #[arg(long = "done", alias = "pending-done", alias = "backlog-done")]
+    #[arg(long = "done")]
     pending_done: Vec<String>,
     /// Edit a backlog item: `id=new text` (repeatable).
     #[arg(long = "backlog-edit", alias = "pending-edit")]
@@ -389,12 +383,7 @@ struct WriteArgs {
     #[arg(long = "review-resolve")]
     review_resolve: Vec<String>,
     /// Allow `replace:pending` blocks in stdin (escape hatch, hidden).
-    /// `--allow-patch-pending` is accepted as a deprecated alias (#25ag).
-    #[arg(
-        long = "allow-replace-pending",
-        alias = "allow-patch-pending",
-        hide = true
-    )]
+    #[arg(long = "allow-replace-pending", hide = true)]
     allow_replace_pending: bool,
     /// Only mutate tracked-work components — skip stdin reading and exchange synthesis.
     /// Requires at least one backlog/icebox/review mutation flag; incompatible with --template/--stream/--ipc.
@@ -2295,7 +2284,6 @@ fn main() -> anyhow::Result<()> {
 
     let raw_args: Vec<OsString> = std::env::args_os().collect();
     let pending_alias_used = deprecated_pending_alias_used(&raw_args);
-    let done_flag_alias_used = deprecated_done_flag_used(&raw_args);
     reject_plain_shell_bare_file_invocation(&raw_args)?;
     let cli = Cli::parse_from(rewrite_bare_file_invocation(raw_args));
 
@@ -2307,16 +2295,6 @@ fn main() -> anyhow::Result<()> {
     if pending_alias_used && matches!(cli.command, Commands::Backlog { .. }) {
         eprintln!(
             "[deprecation] `agent-doc pending` is deprecated — use `agent-doc backlog` instead"
-        );
-    }
-    if done_flag_alias_used
-        && matches!(
-            cli.command,
-            Commands::Write { .. } | Commands::Finalize { .. }
-        )
-    {
-        eprintln!(
-            "[deprecation] `--pending-done` and `--backlog-done` are deprecated — use `--done` instead"
         );
     }
 

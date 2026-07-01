@@ -704,7 +704,7 @@ impl PtyFilter {
         }
     }
 
-    pub fn for_harness(harness: &crate::harness::HarnessConfig) -> Self {
+    pub fn for_harness(harness: &agent_doc_harness::HarnessConfig) -> Self {
         Self {
             carryover: Vec::new(),
             preserve_kitty_keyboard: harness.binary == "opencode",
@@ -1266,7 +1266,7 @@ mod tests {
 
     #[test]
     fn filter_preserves_kitty_keyboard_for_opencode() {
-        let mut filter = PtyFilter::for_harness(&crate::harness::HarnessConfig::opencode());
+        let mut filter = PtyFilter::for_harness(&agent_doc_harness::HarnessConfig::opencode());
         let input = b"\x1b[>1u\x1b[>4;2mkeys\x1b[<u";
         let mut out = Vec::new();
         filter.filter(input, &mut out);
@@ -1278,7 +1278,7 @@ mod tests {
 
     #[test]
     fn opencode_filter_still_strips_terminal_queries() {
-        let mut filter = PtyFilter::for_harness(&crate::harness::HarnessConfig::opencode());
+        let mut filter = PtyFilter::for_harness(&agent_doc_harness::HarnessConfig::opencode());
         let input = b"\x1b[?997;1n\x1b[>q\x1bP>|tmux 3.6a\x1b\\\x1b[>1u";
         let mut out = Vec::new();
         filter.filter(input, &mut out);

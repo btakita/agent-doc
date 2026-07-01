@@ -54,7 +54,7 @@ fn start_console_status(
 /// restart path is unaffected — only a real harness change exercises the new
 /// fresh-spawn branch.
 struct HarnessLaunchSpec {
-    harness: crate::harness::HarnessConfig,
+    harness: agent_doc_harness::HarnessConfig,
     base_args: Vec<String>,
     resolved_env: std::collections::HashMap<String, String>,
     capability_proof_required: bool,
@@ -77,7 +77,7 @@ fn build_harness_launch_spec(
     route_owned: bool,
 ) -> Result<HarnessLaunchSpec> {
     // Resolve harness config from frontmatter agent > config default_agent > claude
-    let harness = crate::harness::HarnessConfig::from_context(fm, global_config);
+    let harness = agent_doc_harness::HarnessConfig::from_context(fm, global_config);
     let resolved_agent_args = agent_doc_supervisor::config::resolve_agent_launch_args(
         &harness.binary,
         agent_launch_args_sources(fm, global_config),
@@ -320,7 +320,7 @@ pub fn run_with_reap_policy(
     }
 
     // Resolve harness config from frontmatter agent > config default_agent > claude
-    let harness = crate::harness::HarnessConfig::from_context(&fm, &global_config);
+    let harness = agent_doc_harness::HarnessConfig::from_context(&fm, &global_config);
     {
         let (source, _resolved_name) = if fm.agent.is_some() {
             ("frontmatter", fm.agent.as_deref().unwrap_or("?"))
@@ -1577,7 +1577,7 @@ pub fn run_with_reap_policy(
                 match supervisor_clean_exit_resolution(
                     matches!(
                         harness.clean_exit_behavior,
-                        crate::harness::CleanExitBehavior::RestartContinue
+                        agent_doc_harness::CleanExitBehavior::RestartContinue
                     ),
                     route_owned,
                 ) {
@@ -2175,7 +2175,7 @@ mod tests {
     fn idle_queue_drain_payload_uses_trigger_for_codex() {
         let payload = idle_queue_drain_payload(
             "tasks/sampleorders.md",
-            &crate::harness::HarnessConfig::codex(),
+            &agent_doc_harness::HarnessConfig::codex(),
             "JB Run Agent Doc on sampleorders.md stalled.",
         );
 
@@ -2184,7 +2184,7 @@ mod tests {
         assert!(!payload.contains("JB Run Agent Doc on sampleorders.md stalled."));
         assert_eq!(
             idle_queue_drain_payload_kind(
-                &crate::harness::HarnessConfig::codex(),
+                &agent_doc_harness::HarnessConfig::codex(),
                 "JB Run Agent Doc on sampleorders.md stalled."
             ),
             "trigger"

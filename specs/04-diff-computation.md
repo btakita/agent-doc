@@ -17,7 +17,7 @@ Prompt-prefix normalization targets are narrower than prompt-target blocks: bare
 
 `flow::session_cycle` consumes the ordered prompt-bearing changes and owns the prompt-target list used by both `preflight` and `plan`. Command modules may still compute the underlying diff, but they must not derive a separate prompt-target order or pending-mutation closeout contract.
 
-`preflight.semantic_diff` is an additive structured view over the same snapshot/current pair as the unified diff. It must not replace `diff`, `annotated_diff`, or `prompt_bearing_changes`; those raw/debug surfaces remain authoritative escape hatches. The semantic view includes:
+`preflight.semantic_diff` is an additive structured view over the same snapshot/current pair as the unified diff. It must not replace `diff`, `annotated_diff`, or `user_intent_prompt_changes`; those raw/debug surfaces remain authoritative escape hatches. The semantic view includes:
 
 - `changed_components` in stable sorted order, including agent components and the `frontmatter` pseudo-component
 - `component_changes` with before/after bounded navigation handles (`component:<before|after>:<name>:<occurrence>`) and line/byte spans

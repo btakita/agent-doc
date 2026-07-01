@@ -1032,23 +1032,13 @@ mod tests {
             resolved_turn_n_plus_1.binary, "codex",
             "next dispatch must resolve the NEW agent from current frontmatter"
         );
-
-        // And the change forces a FRESH spawn of the new harness — the supervisor
-        // must not adopt the old (claude) child for the codex turn.
-        assert!(
-            agent_doc_supervisor::agent_change::harness_change_forces_fresh_spawn(
-                &resolved_turn_n.binary,
-                &resolved_turn_n_plus_1.binary,
-            ),
-            "a real agent change must force a fresh spawn of the new harness"
-        );
     }
 
     #[test]
     fn from_context_unchanged_agent_is_inert_across_turns() {
         // INERTNESS guard: an unchanged `agent:` re-resolves to the SAME harness
-        // across turns and never forces a fresh spawn (the same-harness restart
-        // path stays byte-identical).
+        // across turns (the same-harness restart path keeps seeing byte-identical
+        // harness identity).
         let config = Config::default();
         let fm = Frontmatter {
             agent: Some("claude".into()),
@@ -1057,13 +1047,6 @@ mod tests {
         let turn_n = HarnessConfig::from_context(&fm, &config);
         let turn_n_plus_1 = HarnessConfig::from_context(&fm, &config);
         assert_eq!(turn_n.binary, turn_n_plus_1.binary);
-        assert!(
-            !agent_doc_supervisor::agent_change::harness_change_forces_fresh_spawn(
-                &turn_n.binary,
-                &turn_n_plus_1.binary,
-            ),
-            "an unchanged agent must NOT force a fresh spawn"
-        );
     }
 
     #[test]

@@ -232,7 +232,7 @@ fn surface_supervisor_auto_install_status(
 fn record_context_clear_prompt_for_hooks(
     shared: &SupervisorShared,
     path: &Path,
-    harness: &crate::harness::HarnessConfig,
+    harness: &agent_doc_harness::HarnessConfig,
     clear_cmd: &str,
 ) {
     if !matches!(harness.binary.as_str(), "codex" | "opencode") {
@@ -298,7 +298,7 @@ pub fn paused_idle_watch_should_skip(
 
 fn idle_queue_context_reset_ops_log_message(
     file: &Path,
-    harness: &crate::harness::HarnessConfig,
+    harness: &agent_doc_harness::HarnessConfig,
     clear_cmd: &str,
     target: &str,
     active_head: &str,
@@ -319,7 +319,7 @@ fn idle_queue_context_reset_ops_log_message(
 fn log_idle_queue_context_reset_submit(
     file: &Path,
     shared: &SupervisorShared,
-    harness: &crate::harness::HarnessConfig,
+    harness: &agent_doc_harness::HarnessConfig,
     clear_cmd: &str,
     active_head: &str,
     reason: &str,
@@ -352,7 +352,7 @@ fn forced_context_reset_reason_for_head(file: &Path, head: &str) -> Option<&'sta
 fn record_context_clear_in_flight_marker(
     file: &Path,
     shared: &SupervisorShared,
-    harness: &crate::harness::HarnessConfig,
+    harness: &agent_doc_harness::HarnessConfig,
     clear_cmd: &str,
     active_head: Option<&str>,
 ) {
@@ -427,7 +427,7 @@ fn context_reset_dedupe_head<'a>(
 fn idle_queue_resubmit_pending_payload(
     file: &Path,
     shared: &SupervisorShared,
-    harness: &crate::harness::HarnessConfig,
+    harness: &agent_doc_harness::HarnessConfig,
     payload_kind: &str,
     active_head: &str,
     payload: &str,
@@ -496,7 +496,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
     shared: Arc<SupervisorShared>,
     stop: Arc<AtomicBool>,
     file: String,
-    harness: crate::harness::HarnessConfig,
+    harness: agent_doc_harness::HarnessConfig,
     mut session_log: Option<std::fs::File>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
@@ -761,7 +761,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     && let Ok((fm, _)) = agent_doc_frontmatter::frontmatter::parse(&content)
                 {
                     let global = agent_doc_config::load().unwrap_or_default();
-                    let resolved = crate::harness::HarnessConfig::from_context(&fm, &global);
+                    let resolved = agent_doc_harness::HarnessConfig::from_context(&fm, &global);
                     let harness_changed = resolved.binary != launch_harness_binary;
                     if harness_changed {
                         let decision = agent_change_restart_decision(
@@ -3109,7 +3109,7 @@ mod tests {
             IdleQueueContextResetDecision::Reset
         );
 
-        let harness = crate::harness::HarnessConfig::codex();
+        let harness = agent_doc_harness::HarnessConfig::codex();
         let shared = SupervisorShared::with_actor_runtime(
             "test",
             "test-instance".to_string(),
@@ -3137,7 +3137,7 @@ mod tests {
         std::fs::write(&doc, "doc\n").unwrap();
 
         let head = "do [#cleandrainsup-agent]";
-        let harness = crate::harness::HarnessConfig::codex();
+        let harness = agent_doc_harness::HarnessConfig::codex();
         let shared = SupervisorShared::with_actor_runtime(
             "test",
             "test-instance".to_string(),
@@ -3227,7 +3227,7 @@ mod tests {
             forced_context_reset_reason_for_head(&doc, head).expect("focused-cycle reason");
         assert_eq!(reason, FOCUSED_CYCLE_CONTEXT_RESET_REASON);
 
-        let harness = crate::harness::HarnessConfig::codex();
+        let harness = agent_doc_harness::HarnessConfig::codex();
         let shared = SupervisorShared::with_actor_runtime(
             "test",
             "test-instance".to_string(),

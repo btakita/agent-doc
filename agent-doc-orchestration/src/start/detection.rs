@@ -54,14 +54,14 @@ pub(crate) fn prompt_visible_requires_ready_transition(shared: &SupervisorShared
 
 pub(crate) fn current_child_prompt_visible(
     shared: &SupervisorShared,
-    harness: &crate::harness::HarnessConfig,
+    harness: &agent_doc_harness::HarnessConfig,
 ) -> bool {
     let output = child_output_for_detection(shared);
     child_output_prompt_visible(harness, &output)
 }
 
 pub(crate) fn child_output_prompt_visible(
-    harness: &crate::harness::HarnessConfig,
+    harness: &agent_doc_harness::HarnessConfig,
     output: &str,
 ) -> bool {
     // #opencode-idle-detection-post-turn: for OpenCode, check only the bottom
@@ -86,7 +86,7 @@ pub(crate) fn child_output_prompt_visible(
 
 pub(crate) fn idle_queue_prompt_visible(
     shared: &SupervisorShared,
-    harness: &crate::harness::HarnessConfig,
+    harness: &agent_doc_harness::HarnessConfig,
 ) -> bool {
     let output = child_output_for_detection(shared);
     if harness.dispatch_blocker_reason(&output).is_some() {
@@ -135,7 +135,7 @@ pub(crate) fn actor_state_is_ready(shared: &SupervisorShared) -> bool {
 
 pub(crate) fn ready_busy_blocker_reason(
     shared: &SupervisorShared,
-    harness: &crate::harness::HarnessConfig,
+    harness: &agent_doc_harness::HarnessConfig,
 ) -> Option<String> {
     let output = child_output_for_detection(shared);
     harness
@@ -156,7 +156,7 @@ pub(crate) fn ready_busy_blocker_reason(
 /// the caller must never let unreadable evidence suppress a legitimate drain.
 pub(crate) fn supervisor_pane_dispatch_ready(
     shared: &SupervisorShared,
-    harness: &crate::harness::HarnessConfig,
+    harness: &agent_doc_harness::HarnessConfig,
 ) -> Option<bool> {
     let pane = shared
         .inject_pane
@@ -190,7 +190,7 @@ pub(crate) fn actor_state_is_busy_or_starting(shared: &SupervisorShared) -> bool
 /// missed the composer redraw and left the actor wedged.
 pub(crate) fn supervisor_pane_has_busy_cue(
     shared: &SupervisorShared,
-    harness: &crate::harness::HarnessConfig,
+    harness: &agent_doc_harness::HarnessConfig,
 ) -> Option<bool> {
     let pane = shared
         .inject_pane
@@ -216,7 +216,7 @@ pub(crate) fn supervisor_pane_has_busy_cue(
 pub(crate) fn supervisor_pane_payload_pending_in_content(
     content: &str,
     payload: &str,
-    harness: &crate::harness::HarnessConfig,
+    harness: &agent_doc_harness::HarnessConfig,
 ) -> bool {
     if agent_doc_queue::queue_command::is_context_clear_command(payload) {
         return context_clear_command_visible_in_active_input(content, payload, |line| {
@@ -232,7 +232,7 @@ pub(crate) fn supervisor_pane_payload_pending_in_content(
 pub(crate) fn supervisor_pane_payload_already_pending(
     shared: &SupervisorShared,
     payload: &str,
-    harness: &crate::harness::HarnessConfig,
+    harness: &agent_doc_harness::HarnessConfig,
 ) -> Option<bool> {
     let pane = shared
         .inject_pane
@@ -321,7 +321,7 @@ pub(crate) fn translate_opencode_permission_arrow_keys(data: &[u8]) -> Option<Ve
 
 pub(crate) fn normalize_stdin_for_harness_permission_prompt(
     shared: &SupervisorShared,
-    harness: &crate::harness::HarnessConfig,
+    harness: &agent_doc_harness::HarnessConfig,
     data: &[u8],
 ) -> Option<Vec<u8>> {
     if harness.binary != "opencode" || !opencode_permission_prompt_active(shared) {
@@ -332,7 +332,7 @@ pub(crate) fn normalize_stdin_for_harness_permission_prompt(
 
 pub(crate) fn is_help_screen_visible(
     shared: &SupervisorShared,
-    harness: &crate::harness::HarnessConfig,
+    harness: &agent_doc_harness::HarnessConfig,
 ) -> bool {
     harness.is_help_screen_output(&child_output_for_detection(shared))
 }
@@ -373,7 +373,7 @@ mod tests {
     }
     #[test]
     fn supervisor_pending_payload_matches_relative_codex_agent_doc_draft() {
-        let harness = crate::harness::HarnessConfig::codex();
+        let harness = agent_doc_harness::HarnessConfig::codex();
         let payload =
             "agent-doc /home/brian/work/btakita/agent-loop/src/sample-app/tasks/sampleorders.md";
         let content = "\
@@ -392,7 +392,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
 
     #[test]
     fn supervisor_pending_payload_detects_codex_context_clear_draft() {
-        let harness = crate::harness::HarnessConfig::codex();
+        let harness = agent_doc_harness::HarnessConfig::codex();
         let content = concat!(
             "older output\n",
             "› /clear\n",
@@ -407,7 +407,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
 
     #[test]
     fn supervisor_pending_payload_ignores_submitted_context_clear_scrollback() {
-        let harness = crate::harness::HarnessConfig::claude();
+        let harness = agent_doc_harness::HarnessConfig::claude();
         let content = concat!(
             "✶ Generating... (3s · esc to interrupt)\n",
             "  ❯ /clear\n",
@@ -425,7 +425,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
 
     #[test]
     fn supervisor_pending_payload_detects_opencode_new_palette_row() {
-        let harness = crate::harness::HarnessConfig::opencode();
+        let harness = agent_doc_harness::HarnessConfig::opencode();
         let content = concat!(
             "older output\n",
             "/new        New session\n",
@@ -440,7 +440,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
 
     #[test]
     fn supervisor_pending_payload_detects_opencode_selected_new_session_command() {
-        let harness = crate::harness::HarnessConfig::opencode();
+        let harness = agent_doc_harness::HarnessConfig::opencode();
         let content = concat!(
             "older output\n",
             "> New session\n",
@@ -466,7 +466,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     #[test]
     fn opencode_permission_prompt_translates_legacy_arrows_to_tab_controls() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = crate::harness::HarnessConfig::opencode();
+        let harness = agent_doc_harness::HarnessConfig::opencode();
         record_recent_output(
         &shared,
         b"\x1b[48;2;245;167;66mAllow once\x1b[0m Allow always Reject ctrl+f fullscreen \xe2\x87\x86 select enter confirm\n",
@@ -484,7 +484,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     #[test]
     fn opencode_permission_prompt_translation_is_gated_to_permission_dialog() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = crate::harness::HarnessConfig::opencode();
+        let harness = agent_doc_harness::HarnessConfig::opencode();
         record_recent_output(&shared, b"Ask anything...\n");
 
         assert!(
@@ -492,7 +492,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
             "normal OpenCode prompt editing must keep arrow keys unchanged"
         );
 
-        let codex = crate::harness::HarnessConfig::codex();
+        let codex = agent_doc_harness::HarnessConfig::codex();
         record_recent_output(
         &shared,
         b"\x1b[48;2;245;167;66mAllow once\x1b[0m Allow always Reject ctrl+f fullscreen \xe2\x87\x86 select enter confirm\n",
@@ -505,7 +505,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     #[test]
     fn opencode_permission_prompt_fallback_detects_orange_highlight_without_footer() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = crate::harness::HarnessConfig::opencode();
+        let harness = agent_doc_harness::HarnessConfig::opencode();
         // Simulate a newer OpenCode version where the footer text changed but the
         // orange selection highlight (48;2;245;167;66) is still present.
         record_recent_output(
@@ -521,7 +521,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     #[test]
     fn opencode_permission_prompt_fallback_requires_allow_or_reject_label() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = crate::harness::HarnessConfig::opencode();
+        let harness = agent_doc_harness::HarnessConfig::opencode();
         // Orange highlight alone (no permission labels) must not trigger translation.
         record_recent_output(
             &shared,
@@ -535,7 +535,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     #[test]
     fn current_child_prompt_visible_uses_latest_nonempty_line() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = crate::harness::HarnessConfig::codex();
+        let harness = agent_doc_harness::HarnessConfig::codex();
         record_recent_output(&shared, b"old output\n");
         record_recent_output(&shared, "❯\n".as_bytes());
         record_recent_output(&shared, b"resumed child still printing\n");
@@ -547,7 +547,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     #[test]
     fn current_child_prompt_visible_accepts_prompt_from_current_child_output() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = crate::harness::HarnessConfig::codex();
+        let harness = agent_doc_harness::HarnessConfig::codex();
         record_recent_output(&shared, b"resumed child ready\n");
         record_recent_output(&shared, "❯\n".as_bytes());
         assert!(current_child_prompt_visible(&shared, &harness));
@@ -555,14 +555,14 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     #[test]
     fn current_child_prompt_visible_handles_suffix_prompt_line() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = crate::harness::HarnessConfig::codex();
+        let harness = agent_doc_harness::HarnessConfig::codex();
         record_recent_output(&shared, "/tmp/project ❯\n".as_bytes());
         assert!(current_child_prompt_visible(&shared, &harness));
     }
     #[test]
     fn current_child_prompt_visible_skips_codex_footer_line() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = crate::harness::HarnessConfig::codex();
+        let harness = agent_doc_harness::HarnessConfig::codex();
         record_recent_output(&shared, "›\n".as_bytes());
         record_recent_output(
             &shared,
@@ -573,7 +573,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     #[test]
     fn current_child_prompt_visible_rejects_busy_output_above_codex_footer() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = crate::harness::HarnessConfig::codex();
+        let harness = agent_doc_harness::HarnessConfig::codex();
         record_recent_output(&shared, "›\n".as_bytes());
         record_recent_output(&shared, b"resumed child still printing\n");
         record_recent_output(
@@ -585,7 +585,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     #[test]
     fn current_child_prompt_visible_accepts_opencode_status_chrome_without_proof_output() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = crate::harness::HarnessConfig::opencode();
+        let harness = agent_doc_harness::HarnessConfig::opencode();
         record_recent_output(
             &shared,
             "zai/glm-5 · ~/work/btakita/agent-loop · context 0% used\n".as_bytes(),
@@ -595,7 +595,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     #[test]
     fn current_child_prompt_visible_accepts_opencode_idle_splash_without_prompt_glyph() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = crate::harness::HarnessConfig::opencode();
+        let harness = agent_doc_harness::HarnessConfig::opencode();
         record_recent_output(
         &shared,
         "\
@@ -614,7 +614,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     #[test]
     fn current_child_prompt_visible_detects_opencode_post_turn_idle() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = crate::harness::HarnessConfig::opencode();
+        let harness = agent_doc_harness::HarnessConfig::opencode();
         record_recent_output(
         &shared,
         "\
@@ -652,7 +652,7 @@ cargo install — installed agent-doc 0.34.0
     #[test]
     fn idle_queue_prompt_visible_trusts_ready_actor_over_stale_renderer_tail() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = crate::harness::HarnessConfig::claude();
+        let harness = agent_doc_harness::HarnessConfig::claude();
         *shared.actor_state.lock().unwrap() =
             Some(agent_doc_sqlite::state_store::ActorState::Ready);
         record_recent_output(&shared, b"turn committed, renderer tail has no composer\n");
@@ -669,7 +669,7 @@ cargo install — installed agent-doc 0.34.0
     #[test]
     fn idle_queue_prompt_visible_keeps_blocker_over_ready_actor() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = crate::harness::HarnessConfig::claude();
+        let harness = agent_doc_harness::HarnessConfig::claude();
         *shared.actor_state.lock().unwrap() =
             Some(agent_doc_sqlite::state_store::ActorState::Ready);
         record_recent_output(
@@ -691,7 +691,7 @@ cargo install — installed agent-doc 0.34.0
     #[test]
     fn route_owned_live_pane_busy_requires_idle_prompt_before_reap() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = crate::harness::HarnessConfig::codex();
+        let harness = agent_doc_harness::HarnessConfig::codex();
         shared.running.store(true, Ordering::Relaxed);
         record_recent_output(&shared, b"exploring repository\n");
 
@@ -704,7 +704,7 @@ cargo install — installed agent-doc 0.34.0
     #[test]
     fn route_owned_live_pane_busy_trusts_ready_actor_over_stale_renderer_tail() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = crate::harness::HarnessConfig::codex();
+        let harness = agent_doc_harness::HarnessConfig::codex();
         shared.running.store(true, Ordering::Relaxed);
         *shared.actor_state.lock().unwrap() =
             Some(agent_doc_sqlite::state_store::ActorState::Ready);
@@ -720,7 +720,7 @@ cargo install — installed agent-doc 0.34.0
     #[test]
     fn route_owned_live_pane_busy_keeps_ready_actor_for_blocking_prompt_state() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = crate::harness::HarnessConfig::codex();
+        let harness = agent_doc_harness::HarnessConfig::codex();
         shared.running.store(true, Ordering::Relaxed);
         *shared.actor_state.lock().unwrap() =
             Some(agent_doc_sqlite::state_store::ActorState::Ready);
@@ -740,7 +740,7 @@ cargo install — installed agent-doc 0.34.0
     #[test]
     fn ready_busy_blocker_reason_filters_to_recoverable_queue_draft() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = crate::harness::HarnessConfig::codex();
+        let harness = agent_doc_harness::HarnessConfig::codex();
         record_recent_output(&shared, "›\n".as_bytes());
         record_recent_output(&shared, b"tab to queue message\n");
         record_recent_output(
@@ -767,7 +767,7 @@ cargo install — installed agent-doc 0.34.0
     #[test]
     fn route_owned_live_pane_busy_allows_idle_prompt_reap() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = crate::harness::HarnessConfig::codex();
+        let harness = agent_doc_harness::HarnessConfig::codex();
         shared.running.store(true, Ordering::Relaxed);
         record_recent_output(&shared, b"done\n");
         record_recent_output(&shared, "›\n".as_bytes());
@@ -777,7 +777,7 @@ cargo install — installed agent-doc 0.34.0
     #[test]
     fn is_help_screen_visible_detects_opencode_help() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = crate::harness::HarnessConfig::opencode();
+        let harness = agent_doc_harness::HarnessConfig::opencode();
         record_recent_output(
             &shared,
             b"opencode [project]           start opencode tui\n",
@@ -795,7 +795,7 @@ cargo install — installed agent-doc 0.34.0
     #[test]
     fn is_help_screen_visible_rejects_normal_opencode_output() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
-        let harness = crate::harness::HarnessConfig::opencode();
+        let harness = agent_doc_harness::HarnessConfig::opencode();
         record_recent_output(&shared, b"some normal output\n");
         record_recent_output(&shared, b">\n");
         assert!(!is_help_screen_visible(&shared, &harness));

@@ -105,7 +105,6 @@ These are read by `detect_harness()` to identify the active agent harness:
 | `AGENT_DOC_DEBUG_FILTER` | Debug filter for supervisor start |
 | `AGENT_DOC_DEBUG_STDIN` | Debug stdin for supervisor start |
 | `AGENT_DOC_ALLOW_REPLACE_PENDING` | Allow replacing pending items |
-| `AGENT_DOC_ALLOW_PATCH_PENDING` | Legacy alias for above (deprecated) |
 | `AGENT_DOC_HARNESS_PROMPT` | Override harness prompt detection |
 
 ### Probe Markers

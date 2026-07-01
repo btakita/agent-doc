@@ -6,6 +6,16 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.34.65
 
+- **Harness policy extracted and legacy API surfaces removed.** Harness config,
+  prompt/chrome classification, busy/idle blockers, and restart argument policy
+  now live in the focused `agent-doc-harness` crate. Orchestration imports that
+  crate directly and no longer exposes a `harness` facade module. The same cleanup
+  removes compatibility surfaces that had no greenfield consumers: preflight JSON
+  now emits `user_intent_prompt_changes` only, `patch:pending` and its
+  `--allow-patch-pending` / `AGENT_DOC_ALLOW_PATCH_PENDING` escape hatches are
+  rejected, and tracked-work completion accepts only `--done` rather than the old
+  `--pending-done` / `--backlog-done` spellings.
+
 - **Deprecated tracked-work aliases removed from active APIs.** The `backlog` and
   `icebox` CLI surfaces now expose `reap` as the only completed-item removal
   command; the old `prune` subcommand is rejected. Preflight JSON now emits only

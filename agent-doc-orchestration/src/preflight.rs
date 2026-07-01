@@ -303,27 +303,23 @@ pub struct PreflightOutput {
     /// `[x]` this cycle. Empty (and omitted) in the common no-predicate case.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gate_verify: Vec<GateVerifyResult>,
-    /// Canonical ordered list of user-authored changes that need prompt-aware handling.
-    /// `prompt_target` items require a response, `content_edit` items are corrections
-    /// the agent must incorporate, and `recovery_artifact` / `boundary_artifact`
-    /// items indicate document-state cleanup rather than ordinary conversation.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub prompt_bearing_changes: Vec<agent_doc_diff::PromptBearingChange>,
-    /// `prompt_bearing_changes` with managed-component state edits filtered
-    /// out (queue activity toggle, queue items, backlog/review/done items,
-    /// `queue_active:` frontmatter toggle), AND with edits the affectedness
-    /// classifier scoped as independent of the current turn dropped when
-    /// `op_affectedness.turn_affected` is `false` (`#queue-no-stop-unrelated-edit`).
-    /// The Claude Code auto-loop guard uses this field instead of
-    /// `prompt_bearing_changes` so neither routine session bookkeeping nor an
-    /// edit unrelated to the current turn blocks the auto-loop — only a real
-    /// user prompt (which edits the in-scope `exchange` tail and classifies as
-    /// turn-affecting) preempts. Plan: `#ccloopguard`, `#queue-no-stop-unrelated-edit`.
+    /// Canonical serialized list of user-authored changes that should preempt
+    /// or guide the current response cycle. Raw prompt-bearing diff changes are
+    /// filtered to drop managed-component state edits (queue activity toggle,
+    /// queue items, backlog/review/done items, `queue_active:` frontmatter
+    /// toggle), AND edits the affectedness classifier scoped as independent of
+    /// the current turn when `op_affectedness.turn_affected` is `false`
+    /// (`#queue-no-stop-unrelated-edit`). The Claude Code auto-loop guard uses
+    /// this field so neither routine session bookkeeping nor an edit unrelated
+    /// to the current turn blocks the auto-loop — only a real user prompt
+    /// (which edits the in-scope `exchange` tail and classifies as
+    /// turn-affecting) preempts. Plan: `#ccloopguard`,
+    /// `#queue-no-stop-unrelated-edit`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub user_intent_prompt_changes: Vec<agent_doc_diff::PromptBearingChange>,
     /// Legacy compatibility field: inline user edits inside prior agent responses.
-    /// Derived from `prompt_bearing_changes` by keeping only `prompt_target` and
-    /// `content_edit` items.
+    /// Derived from the raw prompt-bearing change classification by keeping only
+    /// `prompt_target` and `content_edit` items.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inline_annotations: Vec<String>,
     /// Short model name for attribution in `### Re:` response headers.
@@ -4434,9 +4430,9 @@ mod tests {
         );
     }
     #[test]
-    fn preflight_output_includes_prompt_bearing_changes() {
+    fn preflight_output_includes_user_intent_prompt_changes() {
         let output = PreflightOutput {
-            prompt_bearing_changes: vec![
+            user_intent_prompt_changes: vec![
                 agent_doc_diff::PromptBearingChange {
                     kind: agent_doc_diff::PromptBearingChangeKind::PromptTarget,
                     text: "❯ Why was this missed?".to_string(),
@@ -4450,23 +4446,23 @@ mod tests {
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-        let changes = parsed["prompt_bearing_changes"].as_array().unwrap();
+        let changes = parsed["user_intent_prompt_changes"].as_array().unwrap();
         assert_eq!(changes.len(), 2);
         assert_eq!(changes[0]["kind"], "prompt_target");
         assert_eq!(changes[0]["text"], "❯ Why was this missed?");
         assert_eq!(changes[1]["kind"], "content_edit");
     }
     #[test]
-    fn preflight_output_omits_prompt_bearing_changes_when_empty() {
+    fn preflight_output_omits_user_intent_prompt_changes_when_empty() {
         let output = PreflightOutput {
-            prompt_bearing_changes: vec![],
+            user_intent_prompt_changes: vec![],
             ..Default::default()
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(
-            parsed.get("prompt_bearing_changes").is_none(),
-            "prompt_bearing_changes should be omitted when empty"
+            parsed.get("user_intent_prompt_changes").is_none(),
+            "user_intent_prompt_changes should be omitted when empty"
         );
     }
     #[test]

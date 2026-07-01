@@ -53,13 +53,13 @@ pub(crate) struct OpenCycleProtectedPaneState {
     pub(crate) phase: &'static str,
 }
 
-pub(crate) fn resolve_harness_for_sync(file: &Path) -> crate::harness::HarnessConfig {
+pub(crate) fn resolve_harness_for_sync(file: &Path) -> agent_doc_harness::HarnessConfig {
     let content = std::fs::read_to_string(file).unwrap_or_default();
     let rc = crate::graph::RunContext::new(file.to_path_buf());
     rc.set_doc_content(content);
     let fm = rc.frontmatter();
     let global_config = rc.global_config();
-    crate::harness::HarnessConfig::from_context(&fm, &global_config)
+    agent_doc_harness::HarnessConfig::from_context(&fm, &global_config)
 }
 
 pub(crate) fn protected_registered_pane_state(

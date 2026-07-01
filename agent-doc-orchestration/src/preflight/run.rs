@@ -948,7 +948,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         );
     }
 
-    // Legacy compatibility surface for older skill consumers.
+    // Surface inline annotations separately from prompt-intent routing.
     let inline_annotations = annotated_diff
         .as_ref()
         .map(|a| diff::extract_inline_annotations(a))
@@ -1474,7 +1474,6 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         turn_scope,
         op_affectedness,
         user_intent_prompt_changes,
-        prompt_bearing_changes,
         inline_annotations,
         slash_commands,
         builtin_commands,

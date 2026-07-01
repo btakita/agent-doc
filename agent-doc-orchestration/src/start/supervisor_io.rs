@@ -367,7 +367,7 @@ fn handle_replica_awareness(file: &str, identity: &str, awareness_b64: &str) -> 
 /// Spawn the master→stdout forwarding thread with escape sequence filtering.
 pub(crate) fn spawn_reader_thread(
     shared: Arc<SupervisorShared>,
-    harness: crate::harness::HarnessConfig,
+    harness: agent_doc_harness::HarnessConfig,
     mut reader: Box<dyn std::io::Read + Send>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
@@ -452,7 +452,7 @@ pub(crate) fn spawn_reader_thread(
 #[cfg(unix)]
 pub(crate) fn spawn_writer_thread(
     shared: Arc<SupervisorShared>,
-    harness: crate::harness::HarnessConfig,
+    harness: agent_doc_harness::HarnessConfig,
     writer: Arc<Mutex<SharedPtyWriter>>,
     stop_fd: std::os::unix::io::RawFd,
     stop: Arc<AtomicBool>,
@@ -623,7 +623,7 @@ pub(crate) fn spawn_writer_thread(
 #[cfg(not(unix))]
 pub(crate) fn spawn_writer_thread(
     _shared: Arc<SupervisorShared>,
-    _harness: crate::harness::HarnessConfig,
+    _harness: agent_doc_harness::HarnessConfig,
     writer: Arc<Mutex<SharedPtyWriter>>,
     _stop_fd: (),
     stop: Arc<AtomicBool>,
@@ -1141,7 +1141,7 @@ mod tests {
         let shared = Arc::new(SupervisorShared::new("test", "writer-stop".to_string()));
         let handle = spawn_writer_thread(
             shared,
-            crate::harness::HarnessConfig::codex(),
+            agent_doc_harness::HarnessConfig::codex(),
             writer_arc,
             stop.read_fd(),
             stop_flag.clone(),
@@ -1202,7 +1202,7 @@ mod tests {
         let shared = Arc::new(SupervisorShared::new("test", "writer-epipe".to_string()));
         let handle = spawn_writer_thread(
             shared,
-            crate::harness::HarnessConfig::codex(),
+            agent_doc_harness::HarnessConfig::codex(),
             writer_arc,
             stop_fd,
             stop_flag.clone(),
@@ -1248,7 +1248,7 @@ mod tests {
 
         let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
         let reader: Box<dyn std::io::Read + Send> = Box::new(FdReader(fds[0]));
-        let handle = spawn_reader_thread(shared, crate::harness::HarnessConfig::codex(), reader);
+        let handle = spawn_reader_thread(shared, agent_doc_harness::HarnessConfig::codex(), reader);
 
         // Close the write end → reader sees EOF → thread exits
         unsafe { libc::close(fds[1]) };

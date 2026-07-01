@@ -2021,11 +2021,6 @@ pub use queue_consume::*;
 /// Canonical form: `<!-- replace:pending -->...<!-- /replace:pending -->` with
 /// `--allow-replace-pending` (or `AGENT_DOC_ALLOW_REPLACE_PENDING=1`).
 ///
-/// Deprecated form (`#25ag` migration — one release of dual-accept):
-/// `<!-- patch:pending -->...<!-- /patch:pending -->` with `--allow-patch-pending`
-/// (or `AGENT_DOC_ALLOW_PATCH_PENDING=1`). Parser emits a deprecation warning
-/// when the deprecated form is used.
-///
 /// The pending system requires mutations via granular flags
 /// (`--pending-add/done/edit/clear/reorder`); a full-replace block on a list the
 /// user concurrently edits enables silent-data-loss via concurrent-edit clobber
@@ -2040,10 +2035,7 @@ pub fn enforce_no_replace_pending(patches: &[template::PatchBlock], allow: bool)
     let allow_canonical = std::env::var("AGENT_DOC_ALLOW_REPLACE_PENDING")
         .map(|v| v == "1")
         .unwrap_or(false);
-    let allow_legacy = std::env::var("AGENT_DOC_ALLOW_PATCH_PENDING")
-        .map(|v| v == "1")
-        .unwrap_or(false);
-    if allow_canonical || allow_legacy {
+    if allow_canonical {
         return Ok(());
     }
     if patches.iter().any(|p| {

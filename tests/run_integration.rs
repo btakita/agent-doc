@@ -1277,10 +1277,9 @@ fn preflight_emits_owned_pane_self_invocation_for_active_queue_head() {
 
 #[test]
 fn preflight_suppresses_owned_pane_self_invocation_for_independent_queue_edit() {
-    // #cwsp: preflight still reports the raw prompt-bearing queue edit for
-    // compatibility, but the turn-scoped user-intent surface and owner-pane
-    // self-invocation contract must not treat an independent sibling queue edit
-    // as work for the busy owner pane.
+    // #cwsp: the turn-scoped user-intent surface and owner-pane self-invocation
+    // contract must not treat an independent sibling queue edit as work for the
+    // busy owner pane.
     let tmp = TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");
     let committed = "---\nagent_doc_session: session-recursive\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nAnswered.\n<!-- agent:boundary:committed -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto -->\n- do [#active]\n<!-- /agent:queue -->\n";
@@ -1321,12 +1320,8 @@ fn preflight_suppresses_owned_pane_self_invocation_for_independent_queue_edit() 
         "independent queue edit must not emit owner-pane self-invocation: {json}"
     );
     assert!(
-        !json["prompt_bearing_changes"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default()
-            .is_empty(),
-        "raw prompt-bearing compatibility surface should still report the queue edit: {json}"
+        json.get("prompt_bearing_changes").is_none(),
+        "preflight JSON must not expose removed prompt_bearing_changes field: {json}"
     );
     let user_intent_empty = json["user_intent_prompt_changes"]
         .as_array()

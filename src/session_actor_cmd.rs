@@ -1198,14 +1198,12 @@ fn operator_clear_busy_reason(
 fn harness_for_evidence(
     ctx: &SessionContext,
     evidence: &LivePaneEvidence,
-) -> agent_doc_orchestration::harness::HarnessConfig {
+) -> agent_doc_harness::HarnessConfig {
     evidence
         .current_command
         .as_deref()
-        .and_then(agent_doc_orchestration::harness::HarnessConfig::from_pane_command)
-        .unwrap_or_else(|| {
-            agent_doc_orchestration::harness::HarnessConfig::from_agent_name(&ctx.harness)
-        })
+        .and_then(agent_doc_harness::HarnessConfig::from_pane_command)
+        .unwrap_or_else(|| agent_doc_harness::HarnessConfig::from_agent_name(&ctx.harness))
 }
 
 fn protected_clear_refusal_message(
@@ -1845,8 +1843,7 @@ fn terminal_editor_command(command: &str) -> bool {
 /// (#opencode-clear-uses-new). Keep this aligned with the harness slash-command
 /// surfaces in `harness.rs` and the session/tmux command spec.
 fn harness_clear_command(harness: &str) -> &'static str {
-    agent_doc_orchestration::harness::HarnessConfig::from_agent_name(harness)
-        .context_clear_command()
+    agent_doc_harness::HarnessConfig::from_agent_name(harness).context_clear_command()
 }
 
 fn send_clear_to_pane(tmux: &Tmux, pane: &str, file: &Path, harness: &str) -> Result<()> {
@@ -1951,7 +1948,7 @@ fn poll_context_clear_submit_acceptance(
     command: &str,
     phase: &str,
 ) -> ContextClearSubmitObservation {
-    let harness_config = agent_doc_orchestration::harness::HarnessConfig::from_agent_name(harness);
+    let harness_config = agent_doc_harness::HarnessConfig::from_agent_name(harness);
     let start = Instant::now();
     let mut last_capture: Option<(bool, usize, String)> = None;
     let mut capture_failed = false;
@@ -3190,7 +3187,7 @@ fn live_pane_evidence_for_pane(
         };
     }
 
-    let harness = agent_doc_orchestration::harness::HarnessConfig::from_agent_name(&ctx.harness);
+    let harness = agent_doc_harness::HarnessConfig::from_agent_name(&ctx.harness);
     let captured =
         agent_doc_orchestration::sessions::capture_pane(tmux, &pane_id).unwrap_or_default();
     let prompt_ready = live_pane_prompt_ready(&harness, &captured);
@@ -3229,10 +3226,7 @@ fn live_evidence_target(ctx: &SessionContext) -> (Option<String>, &'static str) 
     (None, "none")
 }
 
-fn live_pane_prompt_ready(
-    harness: &agent_doc_orchestration::harness::HarnessConfig,
-    captured: &str,
-) -> bool {
+fn live_pane_prompt_ready(harness: &agent_doc_harness::HarnessConfig, captured: &str) -> bool {
     let latest_dispatch_ready_prompt = harness
         .last_prompt_candidate(captured)
         .is_some_and(|line| harness.is_dispatch_ready_prompt_line(&line));
@@ -3260,7 +3254,7 @@ fn live_pane_prompt_ready(
 }
 
 fn live_pane_bottom_status_is_idle(
-    harness: &agent_doc_orchestration::harness::HarnessConfig,
+    harness: &agent_doc_harness::HarnessConfig,
     captured: &str,
 ) -> bool {
     if harness.binary != "codex" {
@@ -4047,14 +4041,14 @@ mod tests {
 
     #[test]
     fn live_pane_prompt_ready_detects_idle_opencode_prompt() {
-        let harness = agent_doc_orchestration::harness::HarnessConfig::opencode();
+        let harness = agent_doc_harness::HarnessConfig::opencode();
 
         assert!(live_pane_prompt_ready(&harness, "work complete\n>\n"));
     }
 
     #[test]
     fn live_pane_prompt_ready_accepts_opencode_status_chrome_without_proof_output() {
-        let harness = agent_doc_orchestration::harness::HarnessConfig::opencode();
+        let harness = agent_doc_harness::HarnessConfig::opencode();
 
         assert!(live_pane_prompt_ready(
             &harness,
@@ -4064,7 +4058,7 @@ mod tests {
 
     #[test]
     fn live_pane_prompt_ready_accepts_opencode_idle_splash_without_prompt_glyph() {
-        let harness = agent_doc_orchestration::harness::HarnessConfig::opencode();
+        let harness = agent_doc_harness::HarnessConfig::opencode();
 
         assert!(live_pane_prompt_ready(
             &harness,
@@ -4082,7 +4076,7 @@ mod tests {
 
     #[test]
     fn live_pane_prompt_ready_accepts_codex_status_chrome_only_output() {
-        let harness = agent_doc_orchestration::harness::HarnessConfig::codex();
+        let harness = agent_doc_harness::HarnessConfig::codex();
 
         assert!(live_pane_prompt_ready(
             &harness,
@@ -4092,7 +4086,7 @@ mod tests {
 
     #[test]
     fn live_pane_prompt_ready_accepts_codex_xhigh_status_chrome_only_output() {
-        let harness = agent_doc_orchestration::harness::HarnessConfig::codex();
+        let harness = agent_doc_harness::HarnessConfig::codex();
 
         assert!(live_pane_prompt_ready(
             &harness,
@@ -4102,7 +4096,7 @@ mod tests {
 
     #[test]
     fn live_pane_prompt_ready_accepts_codex_footer_below_prior_output() {
-        let harness = agent_doc_orchestration::harness::HarnessConfig::codex();
+        let harness = agent_doc_harness::HarnessConfig::codex();
 
         assert!(live_pane_prompt_ready(
             &harness,
@@ -4116,7 +4110,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 69% used
 
     #[test]
     fn live_pane_prompt_ready_rejects_codex_drafted_input_above_footer() {
-        let harness = agent_doc_orchestration::harness::HarnessConfig::codex();
+        let harness = agent_doc_harness::HarnessConfig::codex();
 
         assert!(!live_pane_prompt_ready(
             &harness,
@@ -4129,7 +4123,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 69% used
 
     #[test]
     fn live_pane_prompt_ready_accepts_codex_default_placeholder() {
-        let harness = agent_doc_orchestration::harness::HarnessConfig::codex();
+        let harness = agent_doc_harness::HarnessConfig::codex();
 
         assert!(live_pane_prompt_ready(
             &harness,
@@ -4142,7 +4136,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 55% used
 
     #[test]
     fn live_pane_prompt_ready_accepts_codex_write_tests_placeholder() {
-        let harness = agent_doc_orchestration::harness::HarnessConfig::codex();
+        let harness = agent_doc_harness::HarnessConfig::codex();
 
         assert!(live_pane_prompt_ready(
             &harness,
@@ -4155,7 +4149,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
 
     #[test]
     fn live_pane_prompt_ready_rejects_codex_working_status_above_placeholder() {
-        let harness = agent_doc_orchestration::harness::HarnessConfig::codex();
+        let harness = agent_doc_harness::HarnessConfig::codex();
 
         assert!(!live_pane_prompt_ready(
             &harness,
@@ -4170,7 +4164,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
 
     #[test]
     fn live_pane_prompt_ready_rejects_active_output_after_prompt() {
-        let harness = agent_doc_orchestration::harness::HarnessConfig::codex();
+        let harness = agent_doc_harness::HarnessConfig::codex();
 
         assert!(!live_pane_prompt_ready(
             &harness,
@@ -4182,7 +4176,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
     // + permissions) must project ready, while a mid-turn pane (spinner) must not.
     #[test]
     fn live_pane_prompt_ready_accepts_idle_claude_composer() {
-        let harness = agent_doc_orchestration::harness::HarnessConfig::claude();
+        let harness = agent_doc_harness::HarnessConfig::claude();
         let idle = concat!(
             "────────────────────\n",
             "❯\n",
@@ -4195,7 +4189,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
 
     #[test]
     fn live_pane_prompt_ready_rejects_busy_claude_turn() {
-        let harness = agent_doc_orchestration::harness::HarnessConfig::claude();
+        let harness = agent_doc_harness::HarnessConfig::claude();
         // Mid-turn: spinner above an otherwise-idle-looking composer. The busy cue
         // must win so the live turn is never clobbered by dispatch/clear.
         let busy = concat!(
@@ -4211,7 +4205,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
 
     #[test]
     fn live_pane_prompt_ready_accepts_claude_idle_footer_after_stale_busy_scrollback() {
-        let harness = agent_doc_orchestration::harness::HarnessConfig::claude();
+        let harness = agent_doc_harness::HarnessConfig::claude();
         let idle_after_clear = concat!(
             "✶ Generating… (3s · esc to interrupt)\n",
             "  ❯ /clear\n",
@@ -4227,7 +4221,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
 
     #[test]
     fn live_pane_prompt_ready_rejects_claude_active_spinner_footer() {
-        let harness = agent_doc_orchestration::harness::HarnessConfig::claude();
+        let harness = agent_doc_harness::HarnessConfig::claude();
         let active = concat!(
             "✶ Generating… (3s · esc to interrupt)\n",
             "❯\n",
@@ -4243,7 +4237,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         // The plan's question-1 state: no trailing `⏵⏵` line, status line last.
         // With the status line ignorable and no busy cue, the `⏵⏵` composer above
         // it becomes the candidate → ready.
-        let harness = agent_doc_orchestration::harness::HarnessConfig::claude();
+        let harness = agent_doc_harness::HarnessConfig::claude();
         let idle = concat!(
             "❯\n",
             "  ⏵⏵ bypass permissions on (shift+tab to cycle)\n",
@@ -4254,14 +4248,14 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
 
     #[test]
     fn live_pane_prompt_ready_opencode_context_bar_idle_hint() {
-        let harness = agent_doc_orchestration::harness::HarnessConfig::opencode();
+        let harness = agent_doc_harness::HarnessConfig::opencode();
         let idle = "⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt  ctrl+p commands  OpenCode 1.15.13\n";
         assert!(live_pane_prompt_ready(&harness, idle));
     }
 
     #[test]
     fn live_pane_prompt_ready_opencode_context_bar_with_scrollback() {
-        let harness = agent_doc_orchestration::harness::HarnessConfig::opencode();
+        let harness = agent_doc_harness::HarnessConfig::opencode();
         let idle = concat!(
             "Thought: I need to check the files\n",
             "Click to expand\n",
@@ -4273,7 +4267,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
 
     #[test]
     fn live_pane_prompt_ready_rejects_opencode_active_turn_with_context_bar() {
-        let harness = agent_doc_orchestration::harness::HarnessConfig::opencode();
+        let harness = agent_doc_harness::HarnessConfig::opencode();
         let busy = concat!(
             "Working (14s - esc to interrupt)\n",
             "⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt  ctrl+p commands  OpenCode 1.15.13\n",

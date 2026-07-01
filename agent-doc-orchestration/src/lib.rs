@@ -80,7 +80,6 @@ pub mod gc;
 pub mod git;
 pub mod git_sibling;
 pub mod graph;
-pub mod harness;
 pub mod harness_prompt;
 pub mod hooks;
 pub mod lint_gate;

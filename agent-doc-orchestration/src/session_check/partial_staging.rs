@@ -1,4 +1,5 @@
 use super::*;
+use agent_doc_git::parse_porcelain_path;
 
 pub(crate) fn check_partial_closeout_state_guard(file: &Path) -> Result<GuardResult> {
     let Some(state) = crate::cycle_state::load(file)? else {
@@ -248,22 +249,6 @@ pub(crate) fn git_stdout(repo: &Path, args: &[&str]) -> Result<Option<String>> {
         return Ok(None);
     }
     Ok(Some(String::from_utf8_lossy(&output.stdout).to_string()))
-}
-
-pub(crate) fn parse_porcelain_path(line: &str) -> Option<String> {
-    if line.len() < 4 {
-        return None;
-    }
-    let status = &line[..2];
-    if status == "??" {
-        return None;
-    }
-    let raw = line[3..].trim();
-    if raw.is_empty() {
-        return None;
-    }
-    let path = raw.rsplit(" -> ").next().unwrap_or(raw).trim();
-    Some(path.trim_matches('"').to_string())
 }
 
 pub(crate) fn preview_items(items: &[String], limit: usize) -> String {

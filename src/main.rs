@@ -2670,7 +2670,7 @@ fn main() -> anyhow::Result<()> {
             let lint_override = match args.lint.as_deref() {
                 None => None,
                 Some(s) => Some(
-                    agent_doc_orchestration::lint_gate::LintCliMode::parse(s)
+                    agent_doc_frontmatter::lint::LintCliMode::parse(s)
                         .map_err(|e| anyhow::anyhow!(e))?,
                 ),
             };
@@ -2728,7 +2728,7 @@ fn main() -> anyhow::Result<()> {
             let lint_override = match args.lint.as_deref() {
                 None => None,
                 Some(s) => Some(
-                    agent_doc_orchestration::lint_gate::LintCliMode::parse(s)
+                    agent_doc_frontmatter::lint::LintCliMode::parse(s)
                         .map_err(|e| anyhow::anyhow!(e))?,
                 ),
             };
@@ -2788,7 +2788,7 @@ fn main() -> anyhow::Result<()> {
         } => {
             let lint_override = match lint.as_deref() {
                 Some(s) => Some(
-                    agent_doc_orchestration::lint_gate::LintCliMode::parse(s)
+                    agent_doc_frontmatter::lint::LintCliMode::parse(s)
                         .map_err(|e| anyhow::anyhow!(e))?,
                 ),
                 None => None,

@@ -41,63 +41,15 @@
 use anyhow::Result;
 use std::path::Path;
 
-use agent_doc_frontmatter::frontmatter::{self, LintDialectMode};
+use agent_doc_frontmatter::{
+    frontmatter::LintDialectMode,
+    lint::{LintCliMode, LintModeSource, dialect_label, resolve_lint_mode},
+};
 use agent_doc_project_config_io as project_config_io;
 
 use tagpath::lint::agent_doc::{
     AgentDocOptions, LintFinding, LintSeverity, format_findings_text, lint_agent_doc,
 };
-
-/// CLI surface for the `--lint=...` flag on `agent-doc write` /
-/// `agent-doc finalize`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LintCliMode {
-    Off,
-    Warn,
-    Strict,
-}
-
-impl LintCliMode {
-    pub fn parse(s: &str) -> std::result::Result<Self, String> {
-        match s.to_ascii_lowercase().as_str() {
-            "off" => Ok(LintCliMode::Off),
-            "warn" => Ok(LintCliMode::Warn),
-            "strict" | "error" => Ok(LintCliMode::Strict),
-            other => Err(format!(
-                "invalid --lint value `{}` (expected off|warn|strict)",
-                other
-            )),
-        }
-    }
-
-    fn to_dialect(self) -> LintDialectMode {
-        match self {
-            LintCliMode::Off => LintDialectMode::Off,
-            LintCliMode::Warn => LintDialectMode::Warn,
-            LintCliMode::Strict => LintDialectMode::Strict,
-        }
-    }
-}
-
-/// Source that won the resolution chain. Used for logging.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LintModeSource {
-    Cli,
-    Frontmatter,
-    ProjectConfig,
-    Default,
-}
-
-impl LintModeSource {
-    fn as_str(self) -> &'static str {
-        match self {
-            LintModeSource::Cli => "cli",
-            LintModeSource::Frontmatter => "frontmatter",
-            LintModeSource::ProjectConfig => "project_config",
-            LintModeSource::Default => "default",
-        }
-    }
-}
 
 /// Resolve the effective lint mode given the optional CLI override, the
 /// session document text (for frontmatter), and the workspace config.
@@ -108,19 +60,8 @@ pub fn resolve_mode(
     content: &str,
     cli: Option<LintCliMode>,
 ) -> (LintDialectMode, LintModeSource) {
-    if let Some(cli) = cli {
-        return (cli.to_dialect(), LintModeSource::Cli);
-    }
-    if let Ok((fm, _)) = frontmatter::parse(content)
-        && let Some(mode) = fm.agent_doc_lint_dialect
-    {
-        return (mode, LintModeSource::Frontmatter);
-    }
     let project = project_config_io::load_project_for_doc(file);
-    if let Some(mode) = project.lint.dialect {
-        return (mode, LintModeSource::ProjectConfig);
-    }
-    (LintDialectMode::default(), LintModeSource::Default)
+    resolve_lint_mode(content, cli, project.lint.dialect)
 }
 
 /// Resolve the effective lint mode using a cached [`RunContext`] for the
@@ -131,19 +72,8 @@ pub fn resolve_mode_with_context(
     content: &str,
     cli: Option<LintCliMode>,
 ) -> (LintDialectMode, LintModeSource) {
-    if let Some(cli) = cli {
-        return (cli.to_dialect(), LintModeSource::Cli);
-    }
-    if let Ok((fm, _)) = frontmatter::parse(content)
-        && let Some(mode) = fm.agent_doc_lint_dialect
-    {
-        return (mode, LintModeSource::Frontmatter);
-    }
     let config = rc.project_config();
-    if let Some(mode) = config.lint.dialect {
-        return (mode, LintModeSource::ProjectConfig);
-    }
-    (LintDialectMode::default(), LintModeSource::Default)
+    resolve_lint_mode(content, cli, config.lint.dialect)
 }
 
 /// Run the finalize lint gate for `file`, with an optional CLI override.
@@ -256,14 +186,6 @@ fn classify_and_emit(
     Err(anyhow::anyhow!("{}\n{}", header, body))
 }
 
-fn dialect_label(mode: LintDialectMode) -> &'static str {
-    match mode {
-        LintDialectMode::Off => "off",
-        LintDialectMode::Warn => "warn",
-        LintDialectMode::Strict => "strict",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,15 +210,6 @@ mod tests {
         <!-- /agent:exchange -->\n\
         <!-- agent:done archive tasks/x.done.md -->\n\
         <!-- /agent:done -->\n";
-
-    #[test]
-    fn parse_cli_mode() {
-        assert_eq!(LintCliMode::parse("off").unwrap(), LintCliMode::Off);
-        assert_eq!(LintCliMode::parse("warn").unwrap(), LintCliMode::Warn);
-        assert_eq!(LintCliMode::parse("strict").unwrap(), LintCliMode::Strict);
-        assert_eq!(LintCliMode::parse("error").unwrap(), LintCliMode::Strict);
-        assert!(LintCliMode::parse("loud").is_err());
-    }
 
     #[test]
     fn clean_document_passes() {
@@ -370,38 +283,6 @@ mod tests {
             msg.contains("unknown-patch-marker") || msg.contains("INTERRUPTED"),
             "expected blocked finding under strict, got: {msg}"
         );
-    }
-
-    #[test]
-    fn resolve_default_when_no_overrides() {
-        let dir = TempDir::new().unwrap();
-        let file = write_doc(&dir, "default.md", CLEAN_DOC);
-        let content = std::fs::read_to_string(&file).unwrap();
-        let (mode, source) = resolve_mode(&file, &content, None);
-        assert_eq!(mode, LintDialectMode::Warn);
-        assert_eq!(source, LintModeSource::Default);
-    }
-
-    #[test]
-    fn resolve_frontmatter_when_set() {
-        let dir = TempDir::new().unwrap();
-        let doc = "---\nagent_doc_session: test\nagent_doc_lint_dialect: strict\n---\n\nbody\n";
-        let file = write_doc(&dir, "fm.md", doc);
-        let content = std::fs::read_to_string(&file).unwrap();
-        let (mode, source) = resolve_mode(&file, &content, None);
-        assert_eq!(mode, LintDialectMode::Strict);
-        assert_eq!(source, LintModeSource::Frontmatter);
-    }
-
-    #[test]
-    fn resolve_cli_when_set() {
-        let dir = TempDir::new().unwrap();
-        let doc = "---\nagent_doc_session: test\nagent_doc_lint_dialect: strict\n---\n\nbody\n";
-        let file = write_doc(&dir, "cli.md", doc);
-        let content = std::fs::read_to_string(&file).unwrap();
-        let (mode, source) = resolve_mode(&file, &content, Some(LintCliMode::Off));
-        assert_eq!(mode, LintDialectMode::Off);
-        assert_eq!(source, LintModeSource::Cli);
     }
 
     #[test]

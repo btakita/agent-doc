@@ -26,6 +26,23 @@ pub fn render_git_process_output(output: &Output) -> String {
     render_git_streams(&output.stderr, &output.stdout)
 }
 
+/// Parse the path field from non-`-z` `git status --porcelain=v1` output.
+pub fn parse_porcelain_path(line: &str) -> Option<String> {
+    if line.len() < 4 {
+        return None;
+    }
+    let status = line.get(..2)?;
+    if status == "??" {
+        return None;
+    }
+    let raw = line.get(3..)?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let path = raw.rsplit(" -> ").next().unwrap_or(raw).trim();
+    Some(path.trim_matches('"').to_string())
+}
+
 fn render_git_streams(stderr: &[u8], stdout: &[u8]) -> String {
     let stderr = String::from_utf8_lossy(stderr).trim().to_string();
     let stdout = String::from_utf8_lossy(stdout).trim().to_string();
@@ -39,7 +56,9 @@ fn render_git_streams(stderr: &[u8], stdout: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_index_lock_contention_text, relative_to_root, render_git_streams};
+    use super::{
+        is_index_lock_contention_text, parse_porcelain_path, relative_to_root, render_git_streams,
+    };
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -97,5 +116,48 @@ mod tests {
         assert_eq!(render_git_streams(b"", b"ok\n"), "ok");
         assert_eq!(render_git_streams(b"fatal\n", b"hint\n"), "fatal | hint");
         assert_eq!(render_git_streams(b" \n", b"\n"), "no git output");
+    }
+
+    #[test]
+    fn porcelain_path_parses_tracked_status_path() {
+        assert_eq!(
+            parse_porcelain_path(" M src/lib.rs"),
+            Some("src/lib.rs".to_string())
+        );
+        assert_eq!(
+            parse_porcelain_path("M  src/main.rs"),
+            Some("src/main.rs".to_string())
+        );
+    }
+
+    #[test]
+    fn porcelain_path_ignores_untracked_and_empty_paths() {
+        assert_eq!(parse_porcelain_path("?? scratch.md"), None);
+        assert_eq!(parse_porcelain_path(" M   "), None);
+        assert_eq!(parse_porcelain_path("M"), None);
+    }
+
+    #[test]
+    fn porcelain_path_uses_destination_for_rename_or_copy() {
+        assert_eq!(
+            parse_porcelain_path("R  old/name.rs -> new/name.rs"),
+            Some("new/name.rs".to_string())
+        );
+        assert_eq!(
+            parse_porcelain_path("C  old/name.rs -> new/name.rs"),
+            Some("new/name.rs".to_string())
+        );
+    }
+
+    #[test]
+    fn porcelain_path_trims_surrounding_quotes() {
+        assert_eq!(
+            parse_porcelain_path(" M \"src/lib.rs\""),
+            Some("src/lib.rs".to_string())
+        );
+        assert_eq!(
+            parse_porcelain_path("R  \"old name.rs\" -> \"new name.rs\""),
+            Some("new name.rs".to_string())
+        );
     }
 }

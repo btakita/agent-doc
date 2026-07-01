@@ -104,7 +104,7 @@ pub fn run(
     model: Option<&str>,
     no_git: bool,
     config: &Config,
-    lint_override: Option<crate::lint_gate::LintCliMode>,
+    lint_override: Option<agent_doc_frontmatter::lint::LintCliMode>,
 ) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
@@ -1357,7 +1357,7 @@ user prompt here
             <!-- /agent:done -->\n";
         std::fs::write(&doc, post_flush).unwrap();
 
-        crate::lint_gate::run(&doc, Some(crate::lint_gate::LintCliMode::Off))
+        crate::lint_gate::run(&doc, Some(agent_doc_frontmatter::lint::LintCliMode::Off))
             .expect("--lint=off must bypass the stream lint gate even with malformed directive");
     }
 
@@ -1384,7 +1384,7 @@ user prompt here
             None,
             true,
             &config,
-            Some(crate::lint_gate::LintCliMode::Strict),
+            Some(agent_doc_frontmatter::lint::LintCliMode::Strict),
         )
         .unwrap_err();
         assert!(err.to_string().contains("expected crdt"), "error: {}", err);

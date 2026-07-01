@@ -7297,6 +7297,87 @@ fn test_agent_doc_frontmatter_owns_cross_document_security_review_policy() {
 }
 
 #[test]
+fn test_agent_doc_frontmatter_owns_lint_mode_policy() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let frontmatter_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-frontmatter/src/lib.rs")).unwrap();
+    let lint_policy =
+        fs::read_to_string(manifest_dir.join("agent-doc-frontmatter/src/lint.rs")).unwrap();
+
+    assert!(
+        frontmatter_lib.contains("pub mod lint;"),
+        "agent-doc-frontmatter should expose focused lint mode policy"
+    );
+    for required in [
+        "pub enum LintCliMode",
+        "pub enum LintModeSource",
+        "pub const fn dialect_label",
+        "pub fn resolve_lint_mode(",
+        "\"strict\" | \"error\"",
+        "LintModeSource::ProjectConfig",
+    ] {
+        assert!(
+            lint_policy.contains(required),
+            "agent-doc-frontmatter must own lint mode policy: {required}"
+        );
+    }
+
+    let frontmatter_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-frontmatter/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&frontmatter_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    for forbidden in [
+        "agent-doc-core",
+        "agent-doc-orchestration",
+        "git2",
+        "interprocess",
+        "notify",
+        "rusqlite",
+        "tmux-router",
+    ] {
+        assert!(
+            !dependencies.contains_key(forbidden),
+            "agent-doc-frontmatter lint mode policy must stay free of core, orchestration, git, editor IPC, sqlite, or tmux crates"
+        );
+    }
+
+    let lint_gate =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lint_gate.rs")).unwrap();
+    for forbidden in [
+        "pub enum LintCliMode",
+        "pub enum LintModeSource",
+        "fn dialect_label(",
+        "pub fn resolve_lint_mode(",
+        "pub use agent_doc_frontmatter::lint",
+        "pub(crate) use agent_doc_frontmatter::lint",
+    ] {
+        assert!(
+            !lint_gate.contains(forbidden),
+            "lint_gate must adapt IO/tagpath only, not re-own or facade frontmatter lint policy: {forbidden}"
+        );
+    }
+    assert!(
+        lint_gate.contains("lint::{LintCliMode, LintModeSource, dialect_label, resolve_lint_mode}")
+            && lint_gate.contains("resolve_lint_mode(content, cli, project.lint.dialect)")
+            && lint_gate.contains("resolve_lint_mode(content, cli, config.lint.dialect)"),
+        "lint_gate should call focused frontmatter lint policy directly"
+    );
+
+    for relative_path in [
+        "src/main.rs",
+        "agent-doc-orchestration/src/write.rs",
+        "agent-doc-orchestration/src/stream.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
+        assert!(
+            source.contains("agent_doc_frontmatter::lint::LintCliMode")
+                && !source.contains("lint_gate::LintCliMode"),
+            "{relative_path} should use the frontmatter-owned LintCliMode directly"
+        );
+    }
+}
+
+#[test]
 fn test_snapshot_has_no_find_project_root_facade() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let snapshot_source =
@@ -11955,6 +12036,7 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         "pub fn relative_to_root(",
         "pub fn is_index_lock_contention_text(",
         "pub fn render_git_process_output(",
+        "pub fn parse_porcelain_path(",
     ] {
         assert!(
             git_policy_source.contains(required),
@@ -11984,6 +12066,22 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
     assert!(
         git_source.contains("use agent_doc_git::{"),
         "git.rs should import focused git command/path policy directly"
+    );
+
+    let partial_staging = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/session_check/partial_staging.rs"),
+    )
+    .unwrap();
+    assert!(
+        !partial_staging.contains("fn parse_porcelain_path(")
+            && !partial_staging.contains("pub(crate) fn parse_porcelain_path(")
+            && !partial_staging.contains("pub use agent_doc_git::parse_porcelain_path")
+            && !partial_staging.contains("pub(crate) use agent_doc_git::parse_porcelain_path"),
+        "partial_staging must import the focused git porcelain parser privately, not re-own or facade it"
+    );
+    assert!(
+        partial_staging.contains("use agent_doc_git::parse_porcelain_path;"),
+        "partial_staging should call the focused git porcelain parser directly"
     );
 
     for relative in [

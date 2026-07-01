@@ -308,7 +308,7 @@ pub struct CommandOptions {
     pub status: Option<String>,
     /// Optional CLI override for the agent-doc lint gate. `None` means
     /// "no CLI override; use frontmatter/config/default precedence".
-    pub lint_override: Option<crate::lint_gate::LintCliMode>,
+    pub lint_override: Option<agent_doc_frontmatter::lint::LintCliMode>,
     /// Cross-repo sibling commits to run after a successful session-doc commit.
     /// Must align positionally with `commit_sibling_message`. Empty vector means
     /// "no sibling commits".

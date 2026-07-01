@@ -150,15 +150,24 @@ Done. The master already carries LiveKit on the Confidential ("Stealth") client 
 Done — spaced em-dashes removed (verified 0 remain), sentences restructured into your natural voice (`mail` `de0856b`).
 
 Everything is committed locally, nothing pushed. Resume: `3cd6954`. Mail draft: `de0856b`. Want me to push the `mail` + `resume` submodules now?
-<!-- agent:boundary:f7495b76 -->
+
+### Re: Strike final CopilotKit queue head — opus-4.8
+
+Draining the last completed head (echoed exactly to trigger the strike):
+
+> **Queue prompt:** They use MS Copilot. https://careers-lsac.icims.com/jobs/1736/engineer-lead---assessments-applications/job?mobile=false&width=1455&height=500&bga=true&needsRedirect=false&jan1offset=-300&jun1offset=-240 mentions CopilotKit experience with the Stealth Company. Add CopilotKit.
+
+Already complete: CopilotKit is in the master resume (Confidential/Stealth client entry + Skills) and bolded in the LSAC profile (`resume` `b9572f8` → `3cd6954`). No further action — the queue is now fully drained.
+<!-- agent:boundary:d8ed6d4b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- ~~DRaft a linkedin reply. Build a resume for this role.~~ — auto-struck: answered this cycle (#ftstrike)
-- They use MS Copilot. https://careers-lsac.icims.com/jobs/1736/engineer-lead---assessments-applications/job?mobile=false&width=1455&height=500&bga=true&needsRedirect=false&jan1offset=-300&jun1offset=-240 mentions CopilotKit experience with the Stealth Company. Add CopilotKit.
-- ~~In the draft, remove the AI tells such as ` — `. Use my natural professional voice.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~DRaft a linkedin reply. Build a resume for this role.~~
+- ~~They use MS Copilot. https://careers-lsac.icims.com/jobs/1736/engineer-lead---assessments-applications/job?mobile=false&width=1455&height=500&bga=true&needsRedirect=false&jan1offset=-300&jun1offset=-240 mentions CopilotKit experience with the Stealth Company. Add CopilotKit.~~
+- Ensure Livekit is in the resume. I integrated Livekit with Copilotkit in the Stealth Company.
+- ~~In the draft, remove the AI tells such as ` — `. Use my natural professional voice.~~
 <!-- /agent:queue -->
 
 ## Backlog

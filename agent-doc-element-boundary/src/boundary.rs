@@ -4,28 +4,21 @@
 //! - Manages `<!-- agent:boundary:UUID -->` markers that anchor IPC patch insertion points
 //!   inside append-mode components (especially `exchange`).
 //! - `insert` removes all stale boundary markers first, then appends a fresh UUID marker
-//!   just before the component close tag; stale marker count is logged to stderr.
+//!   just before the component close tag.
 //! - `remove` / `remove_all` strip markers from a document string without touching other content.
 //! - `find_in_component` locates a specific boundary marker's byte range within a component,
 //!   returning `(line_start, line_end)` for surgical replacement.
 //! - `find_boundary_id_in_component` scans a component for any boundary marker, skipping matches
 //!   inside fenced code blocks.
-//! - `run` (CLI entry point) atomically writes the updated document without refreshing the
-//!   saved snapshot, then signals the IDE plugin via a VCS refresh signal file; prints the UUID
-//!   to stdout.
-//! - `signal_editor_refresh` writes `.agent-doc/patches/vcs-refresh.signal` so the PatchWatcher
-//!   triggers a VFS refresh before the next IPC patch write.
+//! - CLI/file-IO adapters live outside this pure element crate.
 //!
 //! ## Agentic Contracts
 //! - `new_id() -> String` — delegates to `new_boundary_id()`; guaranteed unique UUID.
 //! - `format_marker(id) -> String` — produces `<!-- agent:boundary:ID -->`.
 //! - `extract_id(marker) -> Option<&str>` — inverse of `format_marker`; returns trimmed ID.
-//! - `insert(doc, component_name) -> Result<(String, String)>` — returns `(uuid, updated_doc)`;
-//!   errors if the named component is not found.
+//! - `insert(doc, component_name) -> Result<(String, String)>` — pure transform returning
+//!   `(uuid, updated_doc)`; errors if the named component is not found.
 //! - `remove_all(doc) -> String` — pure function; original trailing-newline behaviour preserved.
-//! - `run(file, component) -> Result<()>` — atomic transient write + IDE signal; prints UUID to
-//!   stdout on success. Marker-only boundary setup must not advance the saved snapshot because the
-//!   next preflight commit would otherwise be allowed to create a boundary-only git commit.
 //!
 //! ## Evals
 //! - format_and_extract: `format_marker("abc-123")` → `"<!-- agent:boundary:abc-123 -->"`;
@@ -39,39 +32,9 @@
 //!   inside code ranges
 //! - no_component: `insert` with unknown component name → `Err` containing component name
 
-use anyhow::{Context, Result};
-use std::path::{Path, PathBuf};
+use anyhow::Result;
 
 use agent_doc_element::element;
-
-/// Signal the IDE plugin to refresh the file from disk.
-/// Uses the file-based signal because the boundary element crate does not own
-/// orchestration socket IPC.
-fn signal_editor_refresh(file: &Path) {
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    if let Some(root) = find_project_root(&canonical) {
-        let signal = root.join(".agent-doc/patches/vcs-refresh.signal");
-        if signal.parent().is_some_and(|p| p.exists()) {
-            let _ = std::fs::write(&signal, "boundary-refresh");
-        }
-    }
-}
-
-fn find_project_root(file: &Path) -> Option<PathBuf> {
-    let mut dir = if file.is_dir() {
-        file.to_path_buf()
-    } else {
-        file.parent()?.to_path_buf()
-    };
-    loop {
-        if dir.join(".agent-doc").is_dir() {
-            return Some(dir);
-        }
-        if !dir.pop() {
-            return None;
-        }
-    }
-}
 
 /// Boundary marker prefix used to identify insertion points in append-mode components.
 pub const BOUNDARY_PREFIX: &str = "<!-- agent:boundary:";
@@ -79,7 +42,7 @@ pub const BOUNDARY_SUFFIX: &str = " -->";
 
 /// Generate a new boundary ID (delegates to lib).
 pub fn new_id() -> String {
-    crate::new_boundary_id()
+    agent_doc_element::id::new_boundary_id()
 }
 
 /// Format a boundary marker comment.
@@ -183,13 +146,6 @@ pub fn find_boundary_id(doc: &str, component_name: &str) -> Option<String> {
 pub fn insert(doc: &str, component_name: &str) -> Result<(String, String)> {
     // First, remove any stale boundary markers from the document
     let cleaned = remove_all(doc);
-    let stale_count = doc.matches(BOUNDARY_PREFIX).count();
-    if stale_count > 0 {
-        eprintln!(
-            "[boundary] removed {} stale boundary marker(s) before inserting new one",
-            stale_count
-        );
-    }
 
     let components = element::parse(&cleaned)?;
     let comp = components
@@ -237,31 +193,6 @@ pub fn remove_all(doc: &str) -> String {
         result.pop();
     }
     result
-}
-
-/// CLI entry point: insert a boundary marker and print the UUID.
-pub fn run(file: &Path, component: Option<&str>) -> Result<()> {
-    let component_name = component.unwrap_or("exchange");
-
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
-
-    let (id, updated) = insert(&content, component_name)?;
-
-    // Atomic write
-    let tmp = file.with_extension("boundary.tmp");
-    std::fs::write(&tmp, &updated)
-        .with_context(|| format!("failed to write temp file {}", tmp.display()))?;
-    std::fs::rename(&tmp, file)
-        .with_context(|| format!("failed to rename {} to {}", tmp.display(), file.display()))?;
-
-    // Signal IDE plugin to refresh the file so it sees the new boundary
-    // before the next IPC patch write. Without this, the plugin's in-memory
-    // document won't have the boundary, causing fallback to plain append.
-    signal_editor_refresh(file);
-
-    println!("{}", id);
-    Ok(())
 }
 
 #[cfg(test)]
@@ -373,32 +304,5 @@ mod tests {
         // Only one boundary marker should remain
         let marker_count = result.matches(BOUNDARY_PREFIX).count();
         assert_eq!(marker_count, 1, "should have exactly one boundary marker");
-    }
-
-    #[test]
-    fn run_writes_marker_without_rewriting_non_boundary_content() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let file = dir.path().join("doc.md");
-        let original = "<!-- agent:exchange -->\ncontent\n<!-- /agent:exchange -->\n";
-        std::fs::write(&file, original).unwrap();
-
-        run(&file, Some("exchange")).unwrap();
-
-        let current = std::fs::read_to_string(&file).unwrap();
-        assert!(
-            current.contains(BOUNDARY_PREFIX),
-            "boundary command should still prepare the working document"
-        );
-        let marker_line = current
-            .lines()
-            .find(|line| line.contains(BOUNDARY_PREFIX))
-            .expect("boundary marker line");
-        let without_marker = current
-            .replace(marker_line, "")
-            .replace("\n\n<!-- /agent:exchange -->", "\n<!-- /agent:exchange -->");
-        assert_eq!(
-            without_marker, original,
-            "marker-only boundary setup must not rewrite non-boundary content"
-        );
     }
 }

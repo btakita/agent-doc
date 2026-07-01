@@ -1,11 +1,6 @@
 //! Boundary marker element descriptor.
 
 pub mod boundary;
-pub mod id;
-pub use id::{
-    BOUNDARY_ID_LEN, boundary_id_from_seed_with_summary, format_boundary_marker, new_boundary_id,
-    new_boundary_id_with_summary,
-};
 
 use agent_doc_element::{
     ElementAuthority, ElementCompositionRole, ElementDescriptor, ElementRealtimeModel,

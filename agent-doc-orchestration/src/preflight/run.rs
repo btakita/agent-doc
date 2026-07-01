@@ -985,7 +985,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     let op_affectedness = match (semantic_diff.as_ref(), turn_scope.as_ref()) {
         (Some(summary), Some(scope)) => {
             let document_path = file.to_string_lossy().to_string();
-            let ops = build_ops_from_semantic_diff(
+            let ops = agent_doc_turn::op_log::build_ops_from_semantic_diff(
                 &document_path,
                 initial_frontmatter.session.as_deref(),
                 "",
@@ -1006,7 +1006,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     ) {
         (true, Some(summary), Some(scope)) => {
             let document_path = file.to_string_lossy().to_string();
-            let ops = build_ops_from_semantic_diff(
+            let ops = agent_doc_turn::op_log::build_ops_from_semantic_diff(
                 &document_path,
                 initial_frontmatter.session.as_deref(),
                 "",
@@ -1531,6 +1531,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
 mod tests {
     #![allow(unused_imports)]
     use super::*;
+    use agent_doc_document_realtime::write_policy::ipc_snapshot_would_absorb_live_prompt_drift_after_preflight;
     use std::io::Write;
     use std::process::Command;
     use tempfile::TempDir;
@@ -2196,7 +2197,7 @@ mod tests {
 
         // The bug: with the pre-maintenance baseline, the converged queue reads as drift.
         assert!(
-            crate::write::ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
+            ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
                 pre,
                 &candidate,
                 &content_ours_pre,
@@ -2217,7 +2218,7 @@ mod tests {
         );
         let content_ours_aligned = with_response(&realigned);
         assert!(
-            !crate::write::ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
+            !ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
                 &realigned,
                 &candidate,
                 &content_ours_aligned,
@@ -2231,7 +2232,7 @@ mod tests {
             "❯ a brand new user prompt typed mid-turn\n<!-- /agent:exchange -->",
         );
         assert!(
-            crate::write::ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
+            ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
                 &realigned,
                 &user_edited,
                 &content_ours_aligned,

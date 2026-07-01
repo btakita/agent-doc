@@ -11,15 +11,15 @@ pub mod cell_doc;
 pub mod crdt;
 pub mod crdt_sync;
 pub mod frontmatter_crdt;
+pub mod semantic_merge;
 
-pub use agent_doc_markdown_ast::semantic_merge::{
-    AckReason, AckRequest, NodeOutcome, OutcomeKind, SemanticMerge, semantic_merge,
-};
 pub use cell_doc::{
     CellConflict, CellMergeOutcome, ConflictKind, ConflictPolicy, component_conflict_policy,
     merge_3way as cell_merge_3way,
 };
 pub use frontmatter_crdt::merge_contents_crdt;
+
+use semantic_merge::AckRequest;
 
 /// Merge implementation to use for a pure three-way merge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,7 +83,8 @@ pub struct MergePlan {
 pub fn merge(request: MergeRequest<'_>) -> MergePlan {
     match request.engine {
         MergeEngine::Semantic => {
-            let outcome = semantic_merge(request.base, request.agent, request.operator);
+            let outcome =
+                semantic_merge::semantic_merge(request.base, request.agent, request.operator);
             MergePlan {
                 merged_doc: outcome.merged_doc,
                 acknowledgements: outcome.requires_ack,
@@ -108,6 +109,7 @@ pub fn merge(request: MergeRequest<'_>) -> MergePlan {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::semantic_merge::AckReason;
 
     const BASE: &str = r#"<!-- agent:queue -->
 - [ ] [#task] old text

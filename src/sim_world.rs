@@ -5075,7 +5075,7 @@ fn semmerge_sim_operator_deleted_agent_edited_node_keeps_deletion_and_acks() {
     );
     assert!(
         sm.requires_ack.iter().any(|a| a.reason
-            == agent_doc_markdown_ast::semantic_merge::AckReason::OperatorDeletedAgentEditedNode),
+            == agent_doc_merge::semantic_merge::AckReason::OperatorDeletedAgentEditedNode),
         "ack reason must be operator-deleted-agent-edited-node"
     );
     assert!(

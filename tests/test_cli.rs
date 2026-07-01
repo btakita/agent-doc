@@ -4254,6 +4254,7 @@ fn test_agent_doc_turn_owns_session_check_ops_log_event_policy() {
         "pub fn strip_timestamp_prefix(",
         "pub fn is_write_completed_commit_missing_event(",
         "pub fn event_name(",
+        "pub fn build_ops_from_semantic_diff(",
     ] {
         assert!(
             turn_op_log.contains(required),
@@ -4286,6 +4287,7 @@ fn test_agent_doc_turn_owns_session_check_ops_log_event_policy() {
         "pub(crate) fn strip_timestamp_prefix(",
         "pub(crate) fn is_write_completed_commit_missing_event(",
         "pub(crate) fn event_name(",
+        "fn build_ops_from_semantic_diff(",
     ] {
         assert!(
             !session_check.contains(forbidden) && !closeout_guards.contains(forbidden),
@@ -6398,6 +6400,10 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         manifest_dir.join("agent-doc-orchestration/src/preflight/semantic_diff.rs"),
     )
     .unwrap();
+    assert!(
+        preflight_semantic_diff.contains("agent_doc_turn::op_log::build_ops_from_semantic_diff"),
+        "preflight semantic diff should build durable op-log records through agent-doc-turn directly"
+    );
     let preflight_mod =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
     for forbidden in [
@@ -7393,6 +7399,33 @@ fn test_agent_doc_merge_is_pure_workspace_boundary() {
     assert!(dependencies.contains_key("agent-doc-element-queue"));
     assert!(dependencies.contains_key("agent-doc-frontmatter"));
     assert!(dependencies.contains_key("agent-doc-markdown-ast"));
+    let merge_lib = fs::read_to_string(manifest_dir.join("agent-doc-merge/src/lib.rs")).unwrap();
+    let markdown_ast_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-markdown-ast/src/lib.rs")).unwrap();
+    assert!(
+        merge_lib.contains("pub mod semantic_merge;")
+            && !merge_lib.contains("pub use agent_doc_markdown_ast::semantic_merge"),
+        "agent-doc-merge should own semantic_merge directly, not re-export markdown-ast"
+    );
+    assert!(
+        !markdown_ast_lib.contains("pub mod semantic_merge;")
+            && !manifest_dir
+                .join("agent-doc-markdown-ast/src/semantic_merge.rs")
+                .exists(),
+        "agent-doc-markdown-ast must not keep semantic_merge as a compatibility module"
+    );
+    for relative in [
+        "agent-doc-orchestration/src/cycle_state.rs",
+        "agent-doc-orchestration/src/write/ipc.rs",
+        "src/sim_world.rs",
+        "src/sim_world/engine.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            !source.contains("agent_doc_markdown_ast::semantic_merge"),
+            "{relative} should call semantic merge through agent-doc-merge directly"
+        );
+    }
     let orchestration_merge =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/merge.rs")).unwrap();
     for forbidden_snippet in ["pub fn merge_contents_crdt(", "fn merge_frontmatter_aware"] {
@@ -9735,7 +9768,7 @@ fn test_agent_doc_element_review_owns_review_projection_and_ungate_planning() {
 }
 
 #[test]
-fn test_agent_doc_element_backlog_owns_tracked_line_remove_and_prune_policy() {
+fn test_agent_doc_element_backlog_owns_tracked_line_remove_and_reap_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let backlog_model =
         fs::read_to_string(manifest_dir.join("agent-doc-element-backlog/src/backlog.rs")).unwrap();
@@ -9761,15 +9794,23 @@ fn test_agent_doc_element_backlog_owns_tracked_line_remove_and_prune_policy() {
         "pub fn tracked_item_refs",
         "pub fn ensure_no_completed_tracked_items",
         "pub fn trim_tracked_parent_prefix",
-        "pub fn line_is_legacy_done_item",
         "pub fn op_remove_matching_tracked_line",
-        "pub fn op_prune_legacy_done_lines",
+        "pub fn reap_with_items",
         "pub struct PendingAddBatchOutcome",
         "pub fn op_prepend_many_with_outcomes",
     ] {
         assert!(
             backlog_model.contains(required),
             "agent-doc-element-backlog must own tracked line remove/prune policy"
+        );
+    }
+    for forbidden in [
+        "pub fn line_is_legacy_done_item",
+        "pub fn op_prune_legacy_done_lines",
+    ] {
+        assert!(
+            !backlog_model.contains(forbidden),
+            "agent-doc-element-backlog must not keep deprecated tracked-line prune names: {forbidden}"
         );
     }
 
@@ -9784,6 +9825,7 @@ fn test_agent_doc_element_backlog_owns_tracked_line_remove_and_prune_policy() {
         "is_backlog_done_component",
         "fn trim_tracked_parent_prefix",
         "fn line_is_legacy_done_item",
+        "op_prune_legacy_done_lines",
         "let lines: Vec<&str> = existing.lines().collect();",
         ".filter(|line| !line_is_legacy_done_item(line))",
         "for item in items.iter().rev()",
@@ -9804,8 +9846,8 @@ fn test_agent_doc_element_backlog_owns_tracked_line_remove_and_prune_policy() {
     );
     assert!(
         backlog_cmd.contains("backlog::op_remove_matching_tracked_line")
-            && backlog_cmd.contains("backlog::op_prune_legacy_done_lines"),
-        "backlog_cmd should call tracked line remove/prune policy from agent-doc-element-backlog"
+            && backlog_cmd.contains("backlog::reap_with_items"),
+        "backlog_cmd should call tracked line remove/reap policy from agent-doc-element-backlog"
     );
     assert!(
         backlog_cmd.contains("backlog::op_prepend_many_with_outcomes"),
@@ -12053,34 +12095,70 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
         "fn dropped_prompt_lines_after_content_ours(",
         "fn prompt_bearing_user_changes_between(",
         "fn exchange_component_text(",
+        "pub use agent_doc_document_realtime::write_policy::{",
     ] {
         assert!(
             !write_source.contains(forbidden_snippet),
             "write.rs must not re-own realtime snapshot/live-drift policy: {forbidden_snippet}"
         );
     }
+
+    let write_run_entry =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/run_entry.rs"))
+            .unwrap();
+    let write_ipc =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/ipc.rs")).unwrap();
+    let preflight_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
     assert!(
-        write_source.contains("agent_doc_document_realtime::write_policy::{")
-            && write_source.contains("snapshot_persist_mode_with_current")
-            && write_source.contains("ipc_snapshot_would_absorb_live_prompt_drift_after_preflight"),
-        "write.rs should call focused realtime snapshot/live-drift policy directly"
+        write_run_entry.contains("agent_doc_document_realtime::write_policy::{")
+            && write_run_entry.contains("snapshot_persist_mode_with_current")
+            && write_run_entry.contains("snapshot_content_to_persist"),
+        "write/run_entry.rs should import focused realtime snapshot persistence policy directly"
+    );
+    assert!(
+        write_ipc.contains("agent_doc_document_realtime::write_policy::{")
+            && write_ipc.contains("ipc_snapshot_would_absorb_live_prompt_drift_after_preflight")
+            && write_ipc.contains("response_target_disjoint_from_user_edit")
+            && write_ipc.contains("dropped_prompt_lines_after_content_ours"),
+        "write/ipc.rs should import focused realtime snapshot/live-drift policy directly"
+    );
+    assert!(
+        preflight_run.contains(
+            "agent_doc_document_realtime::write_policy::ipc_snapshot_would_absorb_live_prompt_drift_after_preflight"
+        ),
+        "preflight/run.rs should import focused realtime live-drift policy directly"
     );
 
     let sim_world = fs::read_to_string(manifest_dir.join("src/sim_world.rs")).unwrap();
     let sim_engine = fs::read_to_string(manifest_dir.join("src/sim_world/engine.rs")).unwrap();
-    for source in [sim_world, sim_engine] {
-        assert!(
-            !source.contains(
-                "agent_doc_orchestration::write::ipc_snapshot_would_absorb_live_prompt_drift_after_preflight"
-            ),
-            "root simulation should not use the old orchestration write policy path"
-        );
-        assert!(
-            !source.contains(
-                "agent_doc_orchestration::write::response_target_disjoint_from_user_edit"
-            ),
-            "root simulation should not use the old orchestration forward-merge path"
-        );
+    let old_write_policy_helpers = [
+        "dropped_prompt_lines_after_content_ours",
+        "ipc_snapshot_would_absorb_live_prompt_drift_after_preflight",
+        "response_target_disjoint_from_user_edit",
+        "snapshot_content_to_persist",
+        "snapshot_persist_mode",
+        "snapshot_persist_mode_with_current",
+    ];
+    for source in [
+        sim_world.as_str(),
+        sim_engine.as_str(),
+        write_source.as_str(),
+        write_run_entry.as_str(),
+        write_ipc.as_str(),
+        preflight_run.as_str(),
+    ] {
+        for helper in old_write_policy_helpers {
+            assert!(
+                !source.contains(&format!("agent_doc_orchestration::write::{helper}")),
+                "callers should not use the old orchestration write-policy facade: {helper}"
+            );
+            assert!(
+                !source.contains(&format!("crate::write::{helper}")),
+                "orchestration callers should not use the old crate::write policy facade: {helper}"
+            );
+        }
     }
 }
 

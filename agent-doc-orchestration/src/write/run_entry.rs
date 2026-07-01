@@ -2,6 +2,9 @@
 
 use super::*;
 use crate::{frontmatter_io, template_io};
+use agent_doc_document_realtime::write_policy::{
+    snapshot_content_to_persist, snapshot_persist_mode, snapshot_persist_mode_with_current,
+};
 use agent_doc_element_exchange::extract_normalization_targets;
 use agent_doc_template::response_materialization::sanitize_template_patchback_response;
 use agent_doc_template::todo_patch_guard::enforce_no_destructive_todo_patch;

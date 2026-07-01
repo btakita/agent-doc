@@ -67,8 +67,8 @@ pub struct BacklogTargetRequirement {
 /// The agent's content is never silently discarded: the next cycle surfaces these
 /// so the agent emits an exchange turn acknowledging the non-applied change.
 ///
-/// `reason` is the stable [`agent_doc_markdown_ast::semantic_merge::AckReason`]
-/// token (see [`AckReason::token`](agent_doc_markdown_ast::semantic_merge::AckReason::token)).
+/// `reason` is the stable [`agent_doc_merge::semantic_merge::AckReason`]
+/// token (see [`AckReason::token`](agent_doc_merge::semantic_merge::AckReason::token)).
 /// `recorded_cycle_id` is the cycle whose convergence recorded the ack (forensic
 /// info). `surfaced` drives the one-cycle lifecycle: [`start_preflight_with_task`]
 /// carries forward only un-surfaced acks and marks them surfaced, so each ack
@@ -985,7 +985,7 @@ pub fn record_dropped_queue_prompts(file: &Path, prompts: &[String]) -> Result<O
 /// Appends only previously-unseen `(component, id, reason)` triples.
 pub fn record_semantic_merge_acks(
     file: &Path,
-    acks: &[agent_doc_markdown_ast::semantic_merge::AckRequest],
+    acks: &[agent_doc_merge::semantic_merge::AckRequest],
 ) -> Result<Option<CycleState>> {
     let Some(mut state) = load(file)? else {
         return Ok(None);
@@ -1485,9 +1485,9 @@ mod tests {
     fn ack(
         component: &str,
         id: &str,
-        reason: agent_doc_markdown_ast::semantic_merge::AckReason,
-    ) -> agent_doc_markdown_ast::semantic_merge::AckRequest {
-        agent_doc_markdown_ast::semantic_merge::AckRequest {
+        reason: agent_doc_merge::semantic_merge::AckReason,
+    ) -> agent_doc_merge::semantic_merge::AckRequest {
+        agent_doc_merge::semantic_merge::AckRequest {
             component: component.to_string(),
             id: id.to_string(),
             reason,
@@ -1497,7 +1497,7 @@ mod tests {
 
     #[test]
     fn record_semantic_merge_acks_tags_current_cycle_and_dedupes() {
-        use agent_doc_markdown_ast::semantic_merge::AckReason;
+        use agent_doc_merge::semantic_merge::AckReason;
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         fs::write(&doc, "body").unwrap();
@@ -1533,7 +1533,7 @@ mod tests {
 
     #[test]
     fn start_preflight_carries_prior_cycle_acks_forward_exactly_once() {
-        use agent_doc_markdown_ast::semantic_merge::AckReason;
+        use agent_doc_merge::semantic_merge::AckReason;
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         fs::write(&doc, "body").unwrap();
@@ -1573,7 +1573,7 @@ mod tests {
 
     #[test]
     fn semantic_merge_ack_recorded_after_carry_chains_to_next_cycle() {
-        use agent_doc_markdown_ast::semantic_merge::AckReason;
+        use agent_doc_merge::semantic_merge::AckReason;
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         fs::write(&doc, "body").unwrap();

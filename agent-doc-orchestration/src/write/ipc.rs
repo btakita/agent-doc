@@ -4,8 +4,10 @@ use super::*;
 use crate::frontmatter_io;
 use agent_doc_document_realtime::write_policy::{
     WholeBufferAuthority, WholeBufferAuthorityFacts, WholeBufferDelivery,
-    WholeBufferDeliveryAction, decide_whole_buffer_delivery, exchange_component_text,
-    response_already_in_current,
+    WholeBufferDeliveryAction, decide_whole_buffer_delivery,
+    dropped_prompt_lines_after_content_ours, exchange_component_text,
+    ipc_snapshot_would_absorb_live_prompt_drift_after_preflight, response_already_in_current,
+    response_target_disjoint_from_user_edit,
 };
 #[cfg(test)]
 use agent_doc_element_exchange::extract_post_commit_normalization_targets;
@@ -799,7 +801,7 @@ fn try_semantic_merge_convergence(
     base: &str,
     candidate: &str,
     content_ours: &str,
-) -> Option<agent_doc_markdown_ast::semantic_merge::SemanticMerge> {
+) -> Option<agent_doc_merge::semantic_merge::SemanticMerge> {
     // Gate 3 first (cheapest, no allocation of the merged doc): the AST model
     // must apply to all three sides for a node-keyed merge to be meaningful.
     if agent_doc_markdown_ast::overlay::components(base).is_empty()
@@ -817,9 +819,8 @@ fn try_semantic_merge_convergence(
     // exchange-area collision raises an AckRequest. The merged document is
     // identical to the unscoped merge (operator always wins), so this only
     // narrows ack noise, never content.
-    let active =
-        agent_doc_markdown_ast::semantic_merge::ActiveNodes::new().active_component("exchange");
-    let sm = agent_doc_markdown_ast::semantic_merge::semantic_merge_scoped(
+    let active = agent_doc_merge::semantic_merge::ActiveNodes::new().active_component("exchange");
+    let sm = agent_doc_merge::semantic_merge::semantic_merge_scoped(
         base,
         candidate,
         content_ours,

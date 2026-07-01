@@ -731,25 +731,6 @@ pub fn icebox_remove(file: &Path, target: &str, contains: bool) -> Result<()> {
     remove_from_list(file, backlog::TrackedWorkList::Icebox, target, contains)
 }
 
-/// Remove completed items (lines with [x], [done], or starting with ✅).
-/// Legacy helper retained for back-compat tests; new callers should use `reap`.
-#[allow(dead_code)]
-pub fn prune(file: &Path) -> Result<()> {
-    let (full_content, comp) = find_pending_component(file)?;
-    let existing = &full_content[comp.open_end..comp.close_start];
-    let (new_content, removed) = backlog::op_prune_legacy_done_lines(existing);
-
-    if removed == 0 {
-        eprintln!("[pending] no completed items to prune");
-        return Ok(());
-    }
-
-    let new_doc = comp.replace_content(&full_content, &new_content);
-    persist_pending_write(file, &full_content, &new_doc)?;
-    eprintln!("[pending] pruned {} completed items", removed);
-    Ok(())
-}
-
 /// Resolve all items with a matching typed gate (e.g., `[/release]` → `[x]`).
 /// Prints resolved ids to stdout.
 pub fn resolve_gate(file: &Path, gate_type: &str) -> Result<()> {
@@ -950,6 +931,14 @@ mod tests {
         (tmp, doc)
     }
 
+    fn pending_body(content: &str) -> &str {
+        content
+            .split("<!-- agent:pending -->\n")
+            .nth(1)
+            .and_then(|rest| rest.split("\n<!-- /agent:pending -->").next())
+            .unwrap()
+    }
+
     fn doc_with_preset_and_pending(preset_key: &str, items: &str) -> (TempDir, PathBuf) {
         let content = format!(
             "---\nagent_doc_session: test\nprompt_presets:\n  '#{preset_key}': do the thing\n---\n\n<!-- agent:pending -->\n{items}\n<!-- /agent:pending -->\n"
@@ -1103,34 +1092,38 @@ mod tests {
     }
 
     #[test]
-    fn prune_removes_checked_items() {
+    fn reap_removes_checked_items() {
         let (_tmp, doc) = doc_with_pending("- [ ] active\n- [x] done\n✅ finished");
-        force_pending(|| prune(&doc));
+        force_pending(|| reap(&doc));
 
         let content = fs::read_to_string(&doc).unwrap();
-        assert!(content.contains("- [ ] active"));
-        assert!(!content.contains("- [x] done"));
-        assert!(!content.contains("finished"));
+        let pending = pending_body(&content);
+        assert!(pending.contains("active"), "{content}");
+        assert!(!pending.contains("done"), "{content}");
+        assert!(!pending.contains("finished"), "{content}");
+        assert!(content.contains("## Completed / Reaped"), "{content}");
     }
 
     #[test]
-    fn prune_removes_checked_ordered_items() {
+    fn reap_removes_checked_ordered_items() {
         let (_tmp, doc) = doc_with_pending("1. [ ] active\n2. [x] done");
-        force_pending(|| prune(&doc));
+        force_pending(|| reap(&doc));
 
         let content = fs::read_to_string(&doc).unwrap();
-        assert!(content.contains("1. [ ] active"));
-        assert!(!content.contains("2. [x] done"));
+        let pending = pending_body(&content);
+        assert!(pending.contains("active"), "{content}");
+        assert!(!pending.contains("done"), "{content}");
     }
 
     #[test]
-    fn prune_noop_for_no_checked() {
+    fn reap_noop_for_no_checked() {
         let (_tmp, doc) = doc_with_pending("- [ ] active\n- [ ] another");
-        force_pending(|| prune(&doc));
+        force_pending(|| reap(&doc));
 
         let content = fs::read_to_string(&doc).unwrap();
-        assert!(content.contains("- [ ] active"));
-        assert!(content.contains("- [ ] another"));
+        let pending = pending_body(&content);
+        assert!(pending.contains("active"), "{content}");
+        assert!(pending.contains("another"), "{content}");
     }
 
     #[test]

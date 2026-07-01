@@ -3187,7 +3187,7 @@ fn main() -> anyhow::Result<()> {
             no_create_pending,
         ),
         Commands::Boundary { file, component } => {
-            agent_doc_element_boundary::boundary::run(&file, component.as_deref())
+            agent_doc_orchestration::boundary_io::run(&file, component.as_deref())
         }
         Commands::Terminal { file, session } => terminal::run(&file, session.as_deref()),
         Commands::Autoclaim => autoclaim::run(),

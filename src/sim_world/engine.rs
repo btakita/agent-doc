@@ -1787,8 +1787,8 @@ impl SimWorld {
         agent_ours: &str,
         operator_theirs: &str,
         active_component: Option<&str>,
-    ) -> agent_doc_markdown_ast::semantic_merge::SemanticMerge {
-        use agent_doc_markdown_ast::semantic_merge::{
+    ) -> agent_doc_merge::semantic_merge::SemanticMerge {
+        use agent_doc_merge::semantic_merge::{
             AckReason, ActiveNodes, OutcomeKind, semantic_merge_scoped,
         };
         let active = match active_component {

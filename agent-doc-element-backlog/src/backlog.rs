@@ -1134,15 +1134,6 @@ pub fn trim_tracked_parent_prefix(line: &str) -> &str {
     tail.trim_start()
 }
 
-pub fn line_is_legacy_done_item(line: &str) -> bool {
-    let trimmed = line.trim();
-    let after_marker = trim_tracked_parent_prefix(line);
-    trimmed.starts_with("\u{2705}")
-        || after_marker.starts_with("[x]")
-        || after_marker.starts_with("[X]")
-        || after_marker.starts_with("[done]")
-}
-
 pub fn op_remove_matching_tracked_line(body: &str, target: &str, contains: bool) -> (String, bool) {
     let lines: Vec<&str> = body.lines().collect();
     let new_lines: Vec<String> = if contains {
@@ -1159,17 +1150,6 @@ pub fn op_remove_matching_tracked_line(body: &str, target: &str, contains: bool)
             .collect()
     };
     let removed = new_lines.len() != lines.len();
-    (new_lines.join("\n"), removed)
-}
-
-pub fn op_prune_legacy_done_lines(body: &str) -> (String, usize) {
-    let lines: Vec<&str> = body.lines().collect();
-    let new_lines: Vec<String> = lines
-        .iter()
-        .filter(|line| !line_is_legacy_done_item(line))
-        .map(|line| line.to_string())
-        .collect();
-    let removed = lines.len().saturating_sub(new_lines.len());
     (new_lines.join("\n"), removed)
 }
 
@@ -6061,16 +6041,6 @@ mod tests {
 
         assert!(removed);
         assert_eq!(updated, "- [ ] [#one] First");
-    }
-
-    #[test]
-    fn prune_legacy_done_lines_removes_old_done_shapes() {
-        let body = "- [ ] [#open] Open\n1. [x] [#done] Done\n✅ legacy done\n- [done] named done";
-
-        let (updated, removed) = op_prune_legacy_done_lines(body);
-
-        assert_eq!(removed, 3);
-        assert_eq!(updated, "- [ ] [#open] Open");
     }
 
     #[test]

@@ -1,0 +1,80 @@
+use anyhow::{Context, Result};
+use std::path::Path;
+
+use agent_doc_element_boundary::boundary::{BOUNDARY_PREFIX, insert};
+
+/// CLI entry point: insert a boundary marker and print the UUID.
+pub fn run(file: &Path, component: Option<&str>) -> Result<()> {
+    let component_name = component.unwrap_or("exchange");
+
+    let content = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+    let stale_count = content.matches(BOUNDARY_PREFIX).count();
+
+    let (id, updated) = insert(&content, component_name)?;
+
+    if stale_count > 0 {
+        eprintln!(
+            "[boundary] removed {} stale boundary marker(s) before inserting new one",
+            stale_count
+        );
+    }
+
+    let tmp = file.with_extension("boundary.tmp");
+    std::fs::write(&tmp, &updated)
+        .with_context(|| format!("failed to write temp file {}", tmp.display()))?;
+    std::fs::rename(&tmp, file)
+        .with_context(|| format!("failed to rename {} to {}", tmp.display(), file.display()))?;
+
+    signal_editor_refresh(file);
+
+    println!("{}", id);
+    Ok(())
+}
+
+/// Signal the IDE plugin to refresh the file from disk.
+/// Uses the file-based signal because this CLI path does not own orchestration
+/// socket IPC.
+fn signal_editor_refresh(file: &Path) {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    if let Some(root) = agent_doc_fs::find_project_root(&canonical) {
+        let signal = root.join(".agent-doc/patches/vcs-refresh.signal");
+        if signal.parent().is_some_and(|p| p.exists()) {
+            let _ = std::fs::write(&signal, "boundary-refresh");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use agent_doc_element_boundary::boundary::BOUNDARY_PREFIX;
+
+    use super::*;
+
+    #[test]
+    fn run_writes_marker_without_rewriting_non_boundary_content() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("doc.md");
+        let original = "<!-- agent:exchange -->\ncontent\n<!-- /agent:exchange -->\n";
+        std::fs::write(&file, original).unwrap();
+
+        run(&file, Some("exchange")).unwrap();
+
+        let current = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            current.contains(BOUNDARY_PREFIX),
+            "boundary command should still prepare the working document"
+        );
+        let marker_line = current
+            .lines()
+            .find(|line| line.contains(BOUNDARY_PREFIX))
+            .expect("boundary marker line");
+        let without_marker = current
+            .replace(marker_line, "")
+            .replace("\n\n<!-- /agent:exchange -->", "\n<!-- /agent:exchange -->");
+        assert_eq!(
+            without_marker, original,
+            "marker-only boundary setup must not rewrite non-boundary content"
+        );
+    }
+}

@@ -4,12 +4,12 @@
 //! a **pure** decision function that merges a base snapshot, the agent result
 //! (`ours`), and the operator editor buffer (`theirs`) by *node identity* rather
 //! than by text lines. It is the merge-**policy** layer on top of the Phase 2
-//! [`crate::overlay`] node-keyed substrate — not a second CRDT, and with **no
+//! [`agent_doc_markdown_ast::overlay`] node-keyed substrate — not a second CRDT, and with **no
 //! agent-doc coupling** (no IPC, no commit path, no git).
 //!
 //! The classic line-based merge sees two concurrent edits to *different* items as
 //! a text conflict and fail-closes (dropping the agent's work). This function
-//! instead keys every change on a stable [`crate::overlay::Item::id`] within its
+//! instead keys every change on a stable [`agent_doc_markdown_ast::overlay::Item::id`] within its
 //! component (component identity = `name`) so node-disjoint change-sets — the
 //! common case — merge cleanly, and only true same-node conflicts surface, each
 //! with a deterministic outcome.
@@ -69,7 +69,7 @@
 //! scalars) — the core of the data-loss bug this fixes — is complete and exact.
 //! See the `prose_skeleton_is_operator` test.
 
-use crate::overlay::{Component, Item, components};
+use agent_doc_markdown_ast::overlay::{Component, Item, components};
 
 /// The classification of a single node's merge outcome.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1110,7 +1110,7 @@ fn record(outcomes: &mut Vec<NodeOutcome>, comp: &str, id: &str, kind: OutcomeKi
 }
 
 /// Recognize an `<!-- agent:name attrs -->` open marker line → name.
-/// Mirrors [`crate::overlay`] marker grammar without depending on its byte spans
+/// Mirrors [`agent_doc_markdown_ast::overlay`] marker grammar without depending on its byte spans
 /// (the overlay's `Component::end_byte` is only reliable for the `agent:/name`
 /// close spelling, so this merge does its own line scan).
 fn open_marker_name(trimmed: &str) -> Option<String> {
@@ -1132,6 +1132,22 @@ fn close_marker_name(trimmed: &str) -> Option<String> {
         .or_else(|| inner.strip_prefix("agent:/"))?;
     let name = rest.trim();
     (!name.is_empty()).then(|| name.to_string())
+}
+
+/// Strip a leading list bullet (`- `, `* `, `N. `), returning the item content.
+fn strip_bullet(line: &str) -> Option<&str> {
+    let t = line.trim_start();
+    if let Some(rest) = t.strip_prefix("- ").or_else(|| t.strip_prefix("* ")) {
+        return Some(rest);
+    }
+    let digits: String = t.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if !digits.is_empty() {
+        let after = &t[digits.len()..];
+        if let Some(rest) = after.strip_prefix(". ") {
+            return Some(rest);
+        }
+    }
+    None
 }
 
 /// Reconstruct a non-`exchange` component's inner body from its buffered operator
@@ -1161,9 +1177,8 @@ fn merge_nonexchange_inner(inner: &[String], merged_items: &[String]) -> String 
     for raw in inner {
         let trimmed = raw.trim_start();
         let is_fence_marker = trimmed.starts_with("```") || trimmed.starts_with("~~~");
-        let is_bullet = !in_fence
-            && !is_fence_marker
-            && crate::overlay::strip_bullet(raw.trim_end_matches('\n')).is_some();
+        let is_bullet =
+            !in_fence && !is_fence_marker && strip_bullet(raw.trim_end_matches('\n')).is_some();
         if is_fence_marker {
             in_fence = !in_fence;
         }

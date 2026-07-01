@@ -41,6 +41,7 @@ pub mod ipc_socket;
 pub mod ops_log;
 
 // I/O wrappers around focused pure crates.
+pub mod boundary_io;
 pub mod frontmatter_io;
 pub mod template_io;
 

@@ -120,6 +120,44 @@ pub fn classify_actor(source: OpSource) -> OpActor {
     }
 }
 
+/// Build durable op-log records from semantic node events.
+///
+/// Preflight observes a snapshot-to-document diff, so every node op is
+/// classified as a `user` edit: the agent's committed output already lives in
+/// the snapshot. The durable store owns Lamport assignment; this builder leaves
+/// the placeholder clock at `0`.
+pub fn build_ops_from_semantic_diff(
+    document_path: &str,
+    origin_session: Option<&str>,
+    recorded_at: &str,
+    summary: &agent_doc_diff::semantic::SemanticDiffSummary,
+) -> Vec<DocumentOp> {
+    let actor = classify_actor(OpSource::SnapshotDiff);
+    summary
+        .node_events
+        .iter()
+        .map(|event| DocumentOp {
+            document_path: document_path.to_string(),
+            component: event.component.clone(),
+            node_key: event.node_key.clone(),
+            // Within-component node index: after-index for inserts/replaces,
+            // before-index for removes. This feeds the exchange-tail
+            // affectedness classifier.
+            node_index: event.after_index.or(event.before_index),
+            item_id: event.item_id.clone(),
+            op_kind: event.op.clone(),
+            actor,
+            clock: CausalClock {
+                lamport: 0,
+                origin_session: origin_session.map(str::to_string),
+            },
+            before_preview: event.before_preview.clone(),
+            after_preview: event.after_preview.clone(),
+            recorded_at: Some(recorded_at.to_string()),
+        })
+        .collect()
+}
+
 /// Lamport logical clock plus the originating session id.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct CausalClock {
@@ -187,6 +225,8 @@ impl DocumentOp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::turn_scope::{Address, AffectednessClass, TurnScope, classify_cycle};
+    use agent_doc_diff::semantic::semantic_diff_summary;
 
     #[test]
     fn ops_log_line_event_helpers_are_stable() {
@@ -291,5 +331,107 @@ mod tests {
         let mut different = base.clone();
         different.after_preview = Some("- do [#gamma]".to_string());
         assert!(!base.same_mutation(&different));
+    }
+
+    #[test]
+    fn build_ops_from_semantic_diff_tags_user_actor_and_session() {
+        let before = "<!-- agent:queue -->\n- do [#alpha]\n<!-- /agent:queue -->\n";
+        let after = "<!-- agent:queue -->\n- do [#alpha]\n- do [#beta]\n<!-- /agent:queue -->\n";
+        let summary = semantic_diff_summary(before, after, &[]).unwrap();
+        let ops = build_ops_from_semantic_diff("plan.md", Some("sess-1"), "100", &summary);
+        assert!(!ops.is_empty());
+        let beta = ops
+            .iter()
+            .find(|op| op.node_key == "queue:0:beta:0")
+            .expect("beta op present");
+        assert_eq!(beta.actor, OpActor::User);
+        assert_eq!(beta.op_kind, "insert");
+        assert_eq!(beta.component, "queue");
+        assert_eq!(beta.clock.origin_session.as_deref(), Some("sess-1"));
+        // Lamport assignment is owned by the durable store; the builder leaves 0.
+        assert_eq!(beta.clock.lamport, 0);
+    }
+
+    #[test]
+    fn sibling_queue_insert_beside_driver_is_independent() {
+        // The motivating case: the turn answers queue item A while the user
+        // inserts queue item B beside it. B must classify Independent and the
+        // turn must not be affected (#op-scoped-drift-3).
+        let before = "<!-- agent:queue -->\n- do [#driver-a]\n<!-- /agent:queue -->\n";
+        let after =
+            "<!-- agent:queue -->\n- do [#driver-a]\n- do [#sibling-b]\n<!-- /agent:queue -->\n";
+        let summary = semantic_diff_summary(before, after, &[]).unwrap();
+        let ops = build_ops_from_semantic_diff("plan.md", Some("sess-1"), "", &summary);
+        let scope = TurnScope::for_driver(Some(Address::node("queue", 0, "queue:0:driver-a:0")));
+        let affectedness = classify_cycle(&ops, &scope);
+        assert!(
+            !affectedness.turn_affected,
+            "a sibling queue insert must not affect the turn"
+        );
+        assert!(
+            affectedness
+                .classified
+                .iter()
+                .all(|op| op.class == AffectednessClass::Independent)
+        );
+    }
+
+    #[test]
+    fn exchange_old_block_edit_is_independent_but_tail_append_affects() {
+        // #loop-guard-exchange-node-granularity end-to-end: while the turn
+        // answers a queue driver, an edit to an OLD bulleted exchange block must
+        // classify Independent (must not preempt the auto-loop drain), while a
+        // genuine new bulleted prompt appended at the exchange tail must still
+        // affect the turn.
+        let base = "\
+<!-- agent:exchange -->
+### Re: prior topic
+
+- old context bullet one
+- old context bullet two
+<!-- agent:boundary:b1 -->
+<!-- /agent:exchange -->
+
+<!-- agent:queue go -->
+- do [#driver]
+<!-- /agent:queue -->
+";
+        let scope = TurnScope::for_driver_with_exchange_tail(
+            Some(Address::node("queue", 0, "queue:0:driver:0")),
+            Some(2),
+        );
+        assert_eq!(
+            scope.exchange_tail_floor,
+            Some(2),
+            "two committed exchange bullets => tail floor 2"
+        );
+
+        // Old-block edit: change the FIRST (index 0) exchange bullet.
+        let old_edit = base.replace(
+            "- old context bullet one",
+            "- old context bullet one EDITED",
+        );
+        let summary = semantic_diff_summary(base, &old_edit, &[]).unwrap();
+        let ops = build_ops_from_semantic_diff("plan.md", Some("sess-1"), "", &summary);
+        let affectedness = classify_cycle(&ops, &scope);
+        assert!(
+            !affectedness.turn_affected,
+            "editing an old exchange block must not affect the turn: {:?}",
+            affectedness.classified
+        );
+
+        // Tail append: a new bulleted prompt after the last committed bullet.
+        let tail_append = base.replace(
+            "- old context bullet two\n",
+            "- old context bullet two\n- please also cover the retry path\n",
+        );
+        let summary2 = semantic_diff_summary(base, &tail_append, &[]).unwrap();
+        let ops2 = build_ops_from_semantic_diff("plan.md", Some("sess-1"), "", &summary2);
+        let affectedness2 = classify_cycle(&ops2, &scope);
+        assert!(
+            affectedness2.turn_affected,
+            "a new tail-appended exchange prompt must still affect the turn: {:?}",
+            affectedness2.classified
+        );
     }
 }

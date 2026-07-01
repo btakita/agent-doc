@@ -16,7 +16,6 @@ pub mod crdt;
 pub mod events;
 pub mod mutations;
 pub mod overlay;
-pub mod semantic_merge;
 
 use std::hash::{Hash, Hasher};
 

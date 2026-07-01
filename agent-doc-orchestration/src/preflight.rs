@@ -441,8 +441,7 @@ pub struct PreflightOutput {
 
 mod semantic_diff;
 pub(crate) use semantic_diff::{
-    build_ops_from_semantic_diff, is_zero_usize, persist_op_log,
-    push_unique_prompt_bearing_changes, push_unique_strings,
+    is_zero_usize, persist_op_log, push_unique_prompt_bearing_changes, push_unique_strings,
 };
 
 fn relocate_out_of_exchange_prompt_before_diff(

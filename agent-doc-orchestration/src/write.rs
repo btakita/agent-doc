@@ -227,12 +227,6 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use agent_doc_document_realtime::write_policy::response_already_in_current;
-pub use agent_doc_document_realtime::write_policy::{
-    dropped_prompt_lines_after_content_ours,
-    ipc_snapshot_would_absorb_live_prompt_drift_after_preflight,
-    response_target_disjoint_from_user_edit, snapshot_content_to_persist, snapshot_persist_mode,
-    snapshot_persist_mode_with_current,
-};
 use agent_doc_element::element::{self, is_backlog_component};
 use agent_doc_element_exchange::{
     exchange_has_live_user_edit, exchange_prompt_prefix_count, exchange_prompt_text_duplicated,

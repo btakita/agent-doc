@@ -63,7 +63,11 @@
 
 use agent_doc_element_exchange::strip_prompt_prefix_from_response_body_first_lines;
 use agent_doc_turn::{
-    closeout_recovery::{CloseoutRecoveryMutationReason, repair_leaves_unanswered_prompt_diff},
+    closeout_recovery::{
+        CloseoutRecoveryMutationReason, content_matches_ignoring_trailing_newlines,
+        prompt_change_is_orchestration_handoff_marker, repair_leaves_unanswered_prompt_diff,
+        stale_preflight_cycle_age_secs, visible_response_recovery_is_adoptable,
+    },
     response_replay,
 };
 use anyhow::{Context, Result};
@@ -223,21 +227,6 @@ pub fn cancel_preflight_cycle(file: &Path) -> Result<CancelOutcome> {
     Ok(CancelOutcome::Abandoned)
 }
 
-fn agent_owned_visible_response_is_adoptable(
-    file: &Path,
-    state: Option<&crate::cycle_state::CycleState>,
-) -> bool {
-    matches!(
-        state.map(|state| state.phase),
-        Some(
-            agent_doc_turn::CyclePhase::ResponseCaptured | agent_doc_turn::CyclePhase::WriteApplied
-        ) | None
-    ) || crate::codex_hook::load_active_session_for_current_file(file)
-        .ok()
-        .flatten()
-        .is_some()
-}
-
 fn head_already_matches_current_doc(file: &Path, doc_content: &str) -> Result<bool> {
     Ok(crate::git::show_head(file)?.as_deref().is_some_and(|head| {
         agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(head)
@@ -245,38 +234,6 @@ fn head_already_matches_current_doc(file: &Path, doc_content: &str) -> Result<bo
                 doc_content,
             )
     }))
-}
-
-fn preflight_cycle_age_secs(state: &crate::cycle_state::CycleState) -> u64 {
-    now_secs().saturating_sub(state.updated_at.max(state.started_at))
-}
-
-fn prompt_change_is_orchestration_handoff_marker(text: &str) -> bool {
-    let mut meaningful = text
-        .lines()
-        .map(|line| line.trim().trim_start_matches('❯').trim())
-        .filter(|line| !line.is_empty() && !line.starts_with("<!--"));
-    let Some(line) = meaningful.next() else {
-        return false;
-    };
-    if meaningful.next().is_some() {
-        return false;
-    }
-    let normalized = line
-        .trim_end_matches(':')
-        .trim_end_matches('.')
-        .trim()
-        .to_ascii_lowercase();
-    matches!(
-        normalized.as_str(),
-        "synchronous orchestra"
-            | "synchronous orcestra"
-            | "orchestra"
-            | "orchestrate"
-            | "sequential"
-            | "sequentially"
-            | "run these sequentially"
-    )
 }
 
 pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome> {
@@ -405,7 +362,7 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
     }
 
     let cycle_capture_exists = crate::capture::load_by_id(file, &state.cycle_id)?.is_some();
-    let age_secs = preflight_cycle_age_secs(&state);
+    let age_secs = stale_preflight_cycle_age_secs(state.started_at, state.updated_at, now_secs());
     if !cycle_capture_exists
         && let Some(change) = crate::session_check::first_unstarted_prompt_bearing_change(file)?
         && !prompt_change_is_orchestration_handoff_marker(&change.text)
@@ -956,10 +913,6 @@ fn repair_answered_stale_boundary_if_safe(
     Ok(Some(repaired))
 }
 
-fn same_content_ignoring_trailing_newlines(left: &str, right: &str) -> bool {
-    left.trim_end_matches('\n') == right.trim_end_matches('\n')
-}
-
 #[derive(Debug, Serialize)]
 struct BlockedRepairPayloadRecord<'a> {
     captured_at: u64,
@@ -1235,7 +1188,7 @@ fn respect_manual_exchange_tail_removal_if_safe(
     else {
         return Ok(false);
     };
-    if !same_content_ignoring_trailing_newlines(&stripped_snapshot, doc_content) {
+    if !content_matches_ignoring_trailing_newlines(&stripped_snapshot, doc_content) {
         return Ok(false);
     }
 
@@ -1270,7 +1223,13 @@ pub(crate) fn run_with_queue_completion_ids(
     let visible_response_recovery = if !pending_path.exists()
         && capture.is_none()
         && historical_capture.is_none()
-        && agent_owned_visible_response_is_adoptable(file, cycle_state.as_ref())
+        && visible_response_recovery_is_adoptable(
+            cycle_state.as_ref().map(|state| state.phase),
+            crate::codex_hook::load_active_session_for_current_file(file)
+                .ok()
+                .flatten()
+                .is_some(),
+        )
         && crate::git::is_in_git_repo(file)
         && !head_already_matches_current_doc(file, &doc_content)?
     {

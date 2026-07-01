@@ -3636,6 +3636,10 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "pub const fn capture_refresh_message",
         "pub fn metadata_drift_authority",
         "pub fn repair_leaves_unanswered_prompt_diff",
+        "pub fn visible_response_recovery_is_adoptable",
+        "pub fn stale_preflight_cycle_age_secs",
+        "pub fn prompt_change_is_orchestration_handoff_marker",
+        "pub fn content_matches_ignoring_trailing_newlines",
     ] {
         assert!(
             recovery_source.contains(required),
@@ -3759,6 +3763,10 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "fn repair_leaves_unanswered_prompt_diff(",
         "fn repair_line_looks_like_fresh_prompt_after_response(",
         "fn repair_prompt_target_immediately_before_existing_response(",
+        "fn agent_owned_visible_response_is_adoptable(",
+        "fn preflight_cycle_age_secs(",
+        "fn prompt_change_is_orchestration_handoff_marker(",
+        "fn same_content_ignoring_trailing_newlines(",
     ] {
         assert!(
             !repair_source.contains(forbidden),

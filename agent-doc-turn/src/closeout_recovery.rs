@@ -58,6 +58,52 @@ pub fn repair_leaves_unanswered_prompt_diff(
     false
 }
 
+pub fn visible_response_recovery_is_adoptable(
+    phase: Option<CyclePhase>,
+    active_session_for_current_file: bool,
+) -> bool {
+    matches!(
+        phase,
+        Some(CyclePhase::ResponseCaptured | CyclePhase::WriteApplied) | None
+    ) || active_session_for_current_file
+}
+
+pub fn stale_preflight_cycle_age_secs(started_at: u64, updated_at: u64, now_secs: u64) -> u64 {
+    now_secs.saturating_sub(updated_at.max(started_at))
+}
+
+pub fn prompt_change_is_orchestration_handoff_marker(text: &str) -> bool {
+    let mut meaningful = text
+        .lines()
+        .map(|line| line.trim().trim_start_matches('❯').trim())
+        .filter(|line| !line.is_empty() && !line.starts_with("<!--"));
+    let Some(line) = meaningful.next() else {
+        return false;
+    };
+    if meaningful.next().is_some() {
+        return false;
+    }
+    let normalized = line
+        .trim_end_matches(':')
+        .trim_end_matches('.')
+        .trim()
+        .to_ascii_lowercase();
+    matches!(
+        normalized.as_str(),
+        "synchronous orchestra"
+            | "synchronous orcestra"
+            | "orchestra"
+            | "orchestrate"
+            | "sequential"
+            | "sequentially"
+            | "run these sequentially"
+    )
+}
+
+pub fn content_matches_ignoring_trailing_newlines(left: &str, right: &str) -> bool {
+    left.trim_end_matches('\n') == right.trim_end_matches('\n')
+}
+
 fn repair_line_looks_like_fresh_prompt_after_response(trimmed: &str) -> bool {
     let lower = trimmed.trim_start_matches('❯').trim().to_ascii_lowercase();
     trimmed.ends_with('?')
@@ -772,6 +818,56 @@ mod tests {
 
         assert!(!repair_leaves_unanswered_prompt_diff(
             snapshot, repaired, None
+        ));
+    }
+
+    #[test]
+    fn visible_response_recovery_is_adoptable_only_for_agent_owned_phases_or_active_session() {
+        assert!(visible_response_recovery_is_adoptable(None, false));
+        assert!(visible_response_recovery_is_adoptable(
+            Some(CyclePhase::ResponseCaptured),
+            false
+        ));
+        assert!(visible_response_recovery_is_adoptable(
+            Some(CyclePhase::WriteApplied),
+            false
+        ));
+        assert!(!visible_response_recovery_is_adoptable(
+            Some(CyclePhase::PreflightStarted),
+            false
+        ));
+        assert!(visible_response_recovery_is_adoptable(
+            Some(CyclePhase::PreflightStarted),
+            true
+        ));
+    }
+
+    #[test]
+    fn stale_preflight_cycle_age_uses_newer_cycle_timestamp() {
+        assert_eq!(stale_preflight_cycle_age_secs(10, 15, 20), 5);
+        assert_eq!(stale_preflight_cycle_age_secs(15, 10, 20), 5);
+        assert_eq!(stale_preflight_cycle_age_secs(15, 25, 20), 0);
+    }
+
+    #[test]
+    fn orchestration_handoff_marker_accepts_single_handoff_line_only() {
+        assert!(prompt_change_is_orchestration_handoff_marker(
+            "❯ Orchestrate."
+        ));
+        assert!(prompt_change_is_orchestration_handoff_marker(
+            "<!-- comment -->\nrun these sequentially:"
+        ));
+        assert!(!prompt_change_is_orchestration_handoff_marker(
+            "orchestrate\nand then do more"
+        ));
+        assert!(!prompt_change_is_orchestration_handoff_marker("continue"));
+    }
+
+    #[test]
+    fn content_match_ignores_only_trailing_newlines() {
+        assert!(content_matches_ignoring_trailing_newlines("a\n", "a\n\n"));
+        assert!(!content_matches_ignoring_trailing_newlines(
+            "a\nb", "a\nb\nc"
         ));
     }
 

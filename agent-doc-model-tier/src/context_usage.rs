@@ -194,6 +194,29 @@ pub fn parse_codex_jsonl_context_pct(content: &str) -> Option<f64> {
     context_pct_for_window(used, window)
 }
 
+/// Parse the `payload.cwd` from a Codex TUI `session_meta` record.
+///
+/// Codex writes this near the start of each session transcript. Only the first
+/// 20 JSONL records are scanned so callers can cheaply test candidate transcript
+/// files during recursive filesystem discovery.
+pub fn parse_codex_jsonl_session_meta_cwd(content: &str) -> Option<PathBuf> {
+    for line in content.lines().take(20) {
+        let value: serde_json::Value = match serde_json::from_str(line.trim()) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        if value.get("type").and_then(serde_json::Value::as_str) != Some("session_meta") {
+            continue;
+        }
+        let cwd = value
+            .get("payload")
+            .and_then(|p| p.get("cwd"))
+            .and_then(serde_json::Value::as_str)?;
+        return Some(PathBuf::from(cwd));
+    }
+    None
+}
+
 /// Outcome of the dispatch-time pre-emptive clear gate.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClearDecision {
@@ -346,6 +369,28 @@ mod tests {
 "#;
         let pct = parse_codex_jsonl_context_pct(content).expect("codex pct");
         assert_eq!(pct, 100.0);
+    }
+
+    #[test]
+    fn parse_codex_jsonl_session_meta_cwd_scans_early_records_only() {
+        let content = r#"not json
+{"type":"event_msg","payload":{"type":"token_count"}}
+{"type":"session_meta","payload":{"cwd":"/tmp/project"}}
+"#;
+
+        assert_eq!(
+            parse_codex_jsonl_session_meta_cwd(content),
+            Some(PathBuf::from("/tmp/project"))
+        );
+
+        let late = (0..20)
+            .map(|idx| format!(r#"{{"type":"event_msg","payload":{{"idx":{idx}}}}}"#))
+            .chain(std::iter::once(
+                r#"{"type":"session_meta","payload":{"cwd":"/tmp/late"}}"#.to_string(),
+            ))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(parse_codex_jsonl_session_meta_cwd(&late).is_none());
     }
 
     #[test]

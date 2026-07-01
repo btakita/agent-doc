@@ -35,7 +35,8 @@
 //! - `latest_codex_transcript_picks_newest_matching_project`
 
 use agent_doc_model_tier::context_usage::{
-    Harness, UsedTokens, context_pct, parse_claude_jsonl_used_tokens, parse_codex_jsonl_context_pct,
+    Harness, UsedTokens, context_pct, parse_claude_jsonl_used_tokens,
+    parse_codex_jsonl_context_pct, parse_codex_jsonl_session_meta_cwd,
 };
 use std::path::{Path, PathBuf};
 
@@ -111,25 +112,9 @@ pub fn latest_claude_transcript(projects_subdir: &Path) -> Option<PathBuf> {
     newest.map(|(_, path)| path)
 }
 
-fn codex_session_meta_cwd(path: &Path) -> Option<PathBuf> {
-    let file = std::fs::File::open(path).ok()?;
-    let reader = std::io::BufReader::new(file);
-    use std::io::BufRead;
-    for line in reader.lines().map_while(Result::ok).take(20) {
-        let value: serde_json::Value = match serde_json::from_str(line.trim()) {
-            Ok(value) => value,
-            Err(_) => continue,
-        };
-        if value.get("type").and_then(serde_json::Value::as_str) != Some("session_meta") {
-            continue;
-        }
-        let cwd = value
-            .get("payload")
-            .and_then(|p| p.get("cwd"))
-            .and_then(serde_json::Value::as_str)?;
-        return Some(PathBuf::from(cwd));
-    }
-    None
+fn codex_session_meta_cwd_from_file(path: &Path) -> Option<PathBuf> {
+    let content = std::fs::read_to_string(path).ok()?;
+    parse_codex_jsonl_session_meta_cwd(&content)
 }
 
 fn path_matches_project_dir(path: &Path, project_dir: &Path) -> bool {
@@ -178,7 +163,7 @@ pub fn latest_codex_transcript(home: &Path, project_dir: &Path) -> Option<PathBu
             if newest.as_ref().is_some_and(|(best, _)| modified <= *best) {
                 continue;
             }
-            let Some(cwd) = codex_session_meta_cwd(&path) else {
+            let Some(cwd) = codex_session_meta_cwd_from_file(&path) else {
                 continue;
             };
             if path_matches_project_dir(&cwd, project_dir) {

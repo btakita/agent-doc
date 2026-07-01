@@ -2378,6 +2378,7 @@ fn test_agent_doc_model_tier_owns_context_usage_policy() {
         "pub fn context_window_for_model(",
         "pub fn context_pct(",
         "pub fn parse_codex_jsonl_context_pct(",
+        "pub fn parse_codex_jsonl_session_meta_cwd(",
         "pub struct ClearDecision",
         "pub fn clear_decision(",
     ] {
@@ -2423,6 +2424,7 @@ fn test_agent_doc_model_tier_owns_context_usage_policy() {
         "pub fn context_window_for_model(",
         "pub fn context_pct(",
         "pub fn parse_codex_jsonl_context_pct(",
+        "pub fn parse_codex_jsonl_session_meta_cwd(",
         "pub struct ClearDecision",
         "pub fn clear_decision(",
     ] {

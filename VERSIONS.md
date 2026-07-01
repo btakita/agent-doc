@@ -17,7 +17,9 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   `agent-doc-element-exchange`, leaving git orchestration to provide only the
   HEAD document inputs and signal decision. Queue context-clear in-flight marker
   payload construction now lives in `agent-doc-queue`, leaving orchestration to
-  provide marker storage and stale-file cleanup.
+  provide marker storage and stale-file cleanup. Codex transcript
+  `session_meta.cwd` parsing now lives in `agent-doc-model-tier`, leaving
+  orchestration to handle only transcript file discovery and reads.
 
 - **Pure helper layer extracted from orchestration.** Exchange shrink/ack retry
   and prompt-dedupe helpers now live in `agent-doc-element-exchange`; preflight

@@ -11,7 +11,8 @@ use agent_doc_controller::paths::{
 use agent_doc_controller::status::{
     ControlPlaneStoreCounts as ControllerControlPlaneStoreCounts, ControllerBinaryIdentity,
     ControllerBootstrapStatusFacts, ControllerFreshnessFacts, ControllerFreshnessStatus,
-    ControllerHandoffState, ControllerStatus, LaunchMode, preparing_controller_is_stale,
+    ControllerHandoffState, ControllerStatus, LaunchMode, controller_restart_recovery_needed,
+    default_controller_generation, preparing_controller_is_stale,
 };
 use agent_doc_sqlite::state_store;
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
@@ -202,7 +203,10 @@ pub(crate) struct ControllerRuntime {
 
 impl ControllerRuntime {
     fn new(bootstrap: ControllerBootstrap) -> Result<Self> {
-        if controller_restart_recovery_needed(&bootstrap) {
+        if controller_restart_recovery_needed(
+            bootstrap.controller_generation,
+            bootstrap.previous_controller_pid,
+        ) {
             recover_controller_after_restart(&bootstrap)?;
         }
         let memory = ControllerMemoryState::load(&bootstrap.project_root)?;
@@ -281,10 +285,6 @@ impl ControllerRuntime {
             ("write_through_sqlite", 1),
         ]))
     }
-}
-
-fn controller_restart_recovery_needed(bootstrap: &ControllerBootstrap) -> bool {
-    bootstrap.controller_generation > 1 || bootstrap.previous_controller_pid.is_some()
 }
 
 #[derive(Debug, Default)]
@@ -505,10 +505,6 @@ fn preserve_open_closeout_cycles_after_restart(
         )?;
     }
     Ok(())
-}
-
-fn default_controller_generation() -> u64 {
-    1
 }
 
 pub(crate) fn controller_bootstrap_status_facts(

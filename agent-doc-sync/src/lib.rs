@@ -198,6 +198,22 @@ pub fn sync_repair_stamp_filename(server_socket: Option<&str>, session_name: &st
     format!("sync-repair-{socket}-{session}.stamp")
 }
 
+/// Resolve the destructive repair throttle stamp path for a server+session.
+///
+/// Missing `.agent-doc/` means there is no durable sync state directory for this
+/// process root, so callers should skip throttling instead of inventing a path.
+pub fn sync_repair_stamp_path(
+    cwd: &Path,
+    server_socket: Option<&str>,
+    session_name: &str,
+) -> Option<PathBuf> {
+    let dir = cwd.join(".agent-doc");
+    if !dir.is_dir() {
+        return None;
+    }
+    Some(dir.join(sync_repair_stamp_filename(server_socket, session_name)))
+}
+
 pub fn rename_debounce_expired(age: Duration, ttl: Duration) -> bool {
     age >= ttl
 }
@@ -609,6 +625,43 @@ mod tests {
             sync_repair_stamp_filename(None, "agent-doc"),
             "sync-repair-default-agent-doc.stamp"
         );
+    }
+
+    #[test]
+    fn sync_repair_stamp_path_uses_default_socket_under_agent_doc_dir() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(temp.path().join(".agent-doc")).unwrap();
+
+        assert_eq!(
+            sync_repair_stamp_path(temp.path(), None, "agent-doc"),
+            Some(
+                temp.path()
+                    .join(".agent-doc")
+                    .join("sync-repair-default-agent-doc.stamp")
+            )
+        );
+    }
+
+    #[test]
+    fn sync_repair_stamp_path_sanitizes_custom_socket_and_session() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(temp.path().join(".agent-doc")).unwrap();
+
+        assert_eq!(
+            sync_repair_stamp_path(temp.path(), Some("/tmp/socket:name"), "agent doc/session"),
+            Some(
+                temp.path()
+                    .join(".agent-doc")
+                    .join("sync-repair-_tmp_socket_name-agent_doc_session.stamp")
+            )
+        );
+    }
+
+    #[test]
+    fn sync_repair_stamp_path_returns_none_without_agent_doc_dir() {
+        let temp = tempfile::tempdir().unwrap();
+
+        assert_eq!(sync_repair_stamp_path(temp.path(), None, "agent-doc"), None);
     }
 
     #[test]

@@ -77,6 +77,13 @@ pub fn dispatch_should_coalesce_in_flight(
     in_flight_same_cycle && !operator_driven
 }
 
+pub const fn queue_pause_predates_boot(updated_at: u64, boot_timestamp: Option<u64>) -> bool {
+    match boot_timestamp {
+        Some(boot_timestamp) => updated_at < boot_timestamp,
+        None => false,
+    }
+}
+
 /// Seconds to report in dispatch-only busy / not-ready refusal messages.
 /// Prefer the caller's explicit ready-wait override when one was used; otherwise
 /// report the harness recovery-timeout default.
@@ -4527,6 +4534,14 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% used
             stale_queue_pause_pid_from_dispatch_error("failed_stage=queue_paused reason=operator"),
             None
         );
+    }
+
+    #[test]
+    fn queue_pause_predates_boot_requires_known_later_boot() {
+        assert!(queue_pause_predates_boot(99, Some(100)));
+        assert!(!queue_pause_predates_boot(100, Some(100)));
+        assert!(!queue_pause_predates_boot(101, Some(100)));
+        assert!(!queue_pause_predates_boot(99, None));
     }
 
     #[test]

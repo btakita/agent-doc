@@ -6,8 +6,8 @@ use agent_doc_document_realtime::write_policy::live_prompt_drift_auto_recovery_s
 use agent_doc_document_realtime::write_policy::{
     AckMismatchRecovery, classify_ack_mismatch_recovery,
     exchange_change_is_safe_historical_reduction, live_prompt_drift_recovery_target,
-    prompt_bearing_user_changes_between, snapshot_contains_dropped_prompt,
-    stale_snapshot_reset_drift,
+    normalize_visible_recovery_compare, prompt_bearing_user_changes_between,
+    snapshot_contains_dropped_prompt, stale_snapshot_reset_drift,
 };
 use std::collections::HashSet;
 
@@ -112,7 +112,10 @@ fn classify_stale_snapshot_visible_rebase(
         agent_doc_frontmatter::frontmatter::parse(snapshot_doc).ok()?;
     let (current_frontmatter, current_body) =
         agent_doc_frontmatter::frontmatter::parse(current_doc).ok()?;
-    if !frontmatter_agent_only_equivalent(&snapshot_frontmatter, &current_frontmatter) {
+    if !agent_doc_frontmatter::frontmatter::frontmatter_agent_only_equivalent(
+        &snapshot_frontmatter,
+        &current_frontmatter,
+    ) {
         return None;
     }
 
@@ -211,25 +214,6 @@ fn active_capture_response_removed(file: &Path, snapshot_doc: &str, current_doc:
         && !response_materialized_in_content(&capture.response_body, current_doc)
 }
 
-fn frontmatter_agent_only_equivalent(
-    snapshot: &agent_doc_frontmatter::frontmatter::Frontmatter,
-    current: &agent_doc_frontmatter::frontmatter::Frontmatter,
-) -> bool {
-    normalized_frontmatter_without_agent(snapshot)
-        .zip(normalized_frontmatter_without_agent(current))
-        .is_some_and(|(snapshot, current)| snapshot == current)
-}
-
-fn normalized_frontmatter_without_agent(
-    frontmatter: &agent_doc_frontmatter::frontmatter::Frontmatter,
-) -> Option<serde_yaml::Value> {
-    let mut value = serde_yaml::to_value(frontmatter).ok()?;
-    if let serde_yaml::Value::Mapping(map) = &mut value {
-        map.remove(serde_yaml::Value::String("agent".to_string()));
-    }
-    Some(value)
-}
-
 fn component_change_is_turn_independent(
     snap_body: &str,
     current_body: &str,
@@ -259,12 +243,6 @@ fn component_change_is_turn_independent(
         )
         .affects_turn()
     })
-}
-
-fn normalize_visible_recovery_compare(content: &str) -> String {
-    agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
-        &strip_boundary_for_dedup(content),
-    )
 }
 
 /// `#exch-intermix`: auto-recover the `live_prompt_drift_after_preflight`

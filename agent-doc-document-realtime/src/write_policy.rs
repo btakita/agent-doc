@@ -1257,6 +1257,12 @@ pub fn live_prompt_drift_auto_recovery_safe(
         .is_some()
 }
 
+pub fn normalize_visible_recovery_compare(content: &str) -> String {
+    agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+        &strip_boundary_for_dedup(content),
+    )
+}
+
 pub fn live_prompt_drift_recovery_target(
     snapshot: &str,
     file_content: &str,
@@ -2549,6 +2555,28 @@ Working.
             &fragmented,
             identity_normalize
         ));
+    }
+
+    #[test]
+    fn visible_recovery_compare_normalizes_boundary_and_transient_markers() {
+        let left = "<!-- agent:boundary:HEAD -->\n### Re: do #fix\nbody\n";
+        let right = "<!-- agent:boundary:OURS -->\n### Re: do #fix\nbody\n";
+
+        assert_eq!(
+            normalize_visible_recovery_compare(left),
+            normalize_visible_recovery_compare(right)
+        );
+    }
+
+    #[test]
+    fn visible_recovery_compare_preserves_response_text_difference() {
+        let left = "<!-- agent:boundary:HEAD -->\n### Re: do #fix\nbody\n";
+        let right = "<!-- agent:boundary:HEAD -->\n### Re: do #fix\nchanged\n";
+
+        assert_ne!(
+            normalize_visible_recovery_compare(left),
+            normalize_visible_recovery_compare(right)
+        );
     }
 
     #[test]

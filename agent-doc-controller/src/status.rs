@@ -75,6 +75,17 @@ pub fn process_binary_is_stale(
     matches!((recorded, current), (Some(recorded), Some(current)) if recorded != current)
 }
 
+pub const fn default_controller_generation() -> u64 {
+    1
+}
+
+pub const fn controller_restart_recovery_needed(
+    controller_generation: u64,
+    previous_controller_pid: Option<u32>,
+) -> bool {
+    controller_generation > default_controller_generation() || previous_controller_pid.is_some()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ControllerProcessFreshness {
     pub role: String,
@@ -669,6 +680,28 @@ mod tests {
         assert!(!process_binary_is_stale(Some(&current), None));
         assert!(!process_binary_is_stale(Some(&current), Some(&current)));
         assert!(process_binary_is_stale(Some(&stale), Some(&current)));
+    }
+
+    #[test]
+    fn default_controller_generation_is_initial_generation() {
+        assert_eq!(default_controller_generation(), 1);
+    }
+
+    #[test]
+    fn controller_restart_recovery_needed_requires_generation_or_previous_pid() {
+        assert!(!controller_restart_recovery_needed(0, None));
+        assert!(!controller_restart_recovery_needed(
+            default_controller_generation(),
+            None
+        ));
+        assert!(controller_restart_recovery_needed(
+            default_controller_generation() + 1,
+            None
+        ));
+        assert!(controller_restart_recovery_needed(
+            default_controller_generation(),
+            Some(42)
+        ));
     }
 
     #[test]

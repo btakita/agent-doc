@@ -888,6 +888,24 @@ pub fn normalize_queue_control(fm: &mut Frontmatter) {
     }
 }
 
+/// Compare frontmatter values while allowing only the runtime `agent` field to differ.
+pub fn frontmatter_agent_only_equivalent(snapshot: &Frontmatter, current: &Frontmatter) -> bool {
+    normalized_frontmatter_without_agent(snapshot)
+        .zip(normalized_frontmatter_without_agent(current))
+        .is_some_and(|(snapshot, current)| snapshot == current)
+}
+
+/// Serialize frontmatter into a YAML value with the runtime `agent` key removed.
+pub fn normalized_frontmatter_without_agent(
+    frontmatter: &Frontmatter,
+) -> Option<serde_yaml::Value> {
+    let mut value = serde_yaml::to_value(frontmatter).ok()?;
+    if let serde_yaml::Value::Mapping(map) = &mut value {
+        map.remove(serde_yaml::Value::String("agent".to_string()));
+    }
+    Some(value)
+}
+
 /// Return the raw YAML bytes from a document's leading frontmatter block.
 ///
 /// This intentionally preserves the legacy byte-level behavior used by
@@ -1770,6 +1788,69 @@ mod tests {
         let m = yaml_of(&merged);
         assert_eq!(m["resume"].as_str(), Some("conv-1"));
         assert_eq!(m["claude_model"].as_str(), Some("sonnet"));
+    }
+
+    #[test]
+    fn frontmatter_agent_only_equivalent_allows_agent_difference() {
+        let mut snapshot = Frontmatter {
+            agent: Some("claude-code".to_string()),
+            session: Some("sid".to_string()),
+            model: Some("opus".to_string()),
+            ..Frontmatter::default()
+        };
+        let mut current = snapshot.clone();
+        current.agent = Some("codex".to_string());
+
+        assert!(frontmatter_agent_only_equivalent(&snapshot, &current));
+
+        snapshot.agent = None;
+        current.agent = Some("opencode".to_string());
+        assert!(frontmatter_agent_only_equivalent(&snapshot, &current));
+    }
+
+    #[test]
+    fn frontmatter_agent_only_equivalent_rejects_non_agent_difference() {
+        let snapshot = Frontmatter {
+            agent: Some("claude-code".to_string()),
+            session: Some("sid".to_string()),
+            model: Some("opus".to_string()),
+            ..Frontmatter::default()
+        };
+        let current = Frontmatter {
+            agent: Some("codex".to_string()),
+            session: Some("sid".to_string()),
+            model: Some("sonnet".to_string()),
+            ..Frontmatter::default()
+        };
+
+        assert!(!frontmatter_agent_only_equivalent(&snapshot, &current));
+    }
+
+    #[test]
+    fn agent_only_normalized_frontmatter_without_agent_removes_only_agent_key() {
+        let frontmatter = Frontmatter {
+            agent: Some("claude-code".to_string()),
+            session: Some("sid".to_string()),
+            model: Some("opus".to_string()),
+            ..Frontmatter::default()
+        };
+
+        let normalized = normalized_frontmatter_without_agent(&frontmatter).unwrap();
+        let serde_yaml::Value::Mapping(map) = normalized else {
+            panic!("frontmatter should serialize as a mapping");
+        };
+
+        assert!(!map.contains_key(&serde_yaml::Value::String("agent".to_string())));
+        assert_eq!(
+            map.get(&serde_yaml::Value::String("agent_doc_session".to_string()))
+                .and_then(serde_yaml::Value::as_str),
+            Some("sid")
+        );
+        assert_eq!(
+            map.get(&serde_yaml::Value::String("model".to_string()))
+                .and_then(serde_yaml::Value::as_str),
+            Some("opus")
+        );
     }
 
     #[test]

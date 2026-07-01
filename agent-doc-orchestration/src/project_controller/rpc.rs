@@ -7,8 +7,8 @@ use agent_doc_controller::dispatch::{
     StaleQueuePauseRecovery, append_dispatch_proof_payload, dispatch_blocked_proof_fields,
     dispatch_command_kind_is_operator_reopen, dispatch_diagnostic_field,
     dispatch_error_stale_generation_redirect_target, dispatch_should_coalesce_in_flight,
-    pause_reason_is_stale_supervisor_churn_stop, spent_preset_id_from_pause_reason,
-    stale_supervisor_pid_from_pause_reason,
+    pause_reason_is_stale_supervisor_churn_stop, queue_pause_predates_boot,
+    spent_preset_id_from_pause_reason, stale_supervisor_pid_from_pause_reason,
 };
 use agent_doc_controller::status;
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
@@ -1356,8 +1356,8 @@ fn clear_superseded_stale_supervisor_pause(
     let stale_pid = stale_supervisor_pid_from_pause_reason(reason);
     let current_pid = lease.as_ref().and_then(|lease| lease.supervisor_pid);
     let stale_pid_dead = stale_pid.is_some_and(|pid| !process_is_alive(pid));
-    let stale_pid_dead_after_reboot =
-        stale_pid_dead && queue_pause_predates_current_boot(control.updated_at);
+    let stale_pid_dead_after_reboot = stale_pid_dead
+        && queue_pause_predates_boot(control.updated_at, system_boot_timestamp_secs());
     let superseded_by_actor_transition = record.last_transition.prior_generation
         < record.generation
         && record.last_transition.new_generation == record.generation
@@ -1394,10 +1394,6 @@ fn clear_superseded_stale_supervisor_pause(
         ),
     )?;
     Ok(true)
-}
-
-fn queue_pause_predates_current_boot(updated_at: u64) -> bool {
-    system_boot_timestamp_secs().is_some_and(|boot| updated_at < boot)
 }
 
 fn repair_spent_preset_pause_before_dispatch(

@@ -10265,6 +10265,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn dispatch_blocked_user_facing_outcome_fields(",
         "pub struct DispatchBlockedProofFacts",
         "pub fn dispatch_blocked_proof_fields(",
+        "pub const fn queue_pause_predates_boot(",
     ] {
         assert!(
             controller_dispatch.contains(required_snippet),
@@ -10287,6 +10288,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn parse_handoff_state(",
         "pub fn controller_binary_identity_matches(",
         "pub fn process_binary_is_stale(",
+        "pub const fn default_controller_generation(",
+        "pub const fn controller_restart_recovery_needed(",
         "pub fn supervisor_stale_warning_message(",
         "pub fn host_supervisor_stale_warning_message(",
     ] {
@@ -10306,6 +10309,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub(crate) fn spent_preset_id_from_pause_reason",
         "pub(crate) struct StaleQueuePauseRecovery",
         "pub(crate) fn dispatch_error_stale_queue_pause_recovery",
+        "fn queue_pause_predates_current_boot(",
         "pub(crate) struct CloseoutBlockDispatchFacts",
         "pub(crate) enum CloseoutBlockDispatchDecision",
         "pub(crate) fn classify_closeout_block_dispatch",
@@ -10339,6 +10343,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "fn parse_handoff_state(",
         "fn controller_binary_identity_matches(",
         "fn process_binary_is_stale(",
+        "fn default_controller_generation(",
+        "fn controller_restart_recovery_needed(",
         "fn supervisor_stale_warning_message(",
         "fn host_supervisor_stale_warning_message(",
         "fn controller_binary_is_stale(",
@@ -18462,6 +18468,7 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         "pub enum AutoStartMode",
         "pub fn safe_passive_prune_cleanup_throttle",
         "pub fn sync_repair_stamp_filename",
+        "pub fn sync_repair_stamp_path",
         "pub fn rename_debounce_expired",
         "pub fn auto_started_panes_summary",
         "pub enum WindowIndexNormalizationPlan",
@@ -18521,6 +18528,7 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         "enum AutoStartMode",
         "fn safe_passive_prune_cleanup_throttle",
         "fn sync_repair_stamp_filename",
+        "fn destructive_repair_stamp_path",
         "fn rename_debounce_expired",
         "fn auto_started_panes_summary",
         "enum WindowIndexNormalizationPlan",
@@ -18568,7 +18576,7 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
             && sync_orchestration.contains("planned_stash_window_indices")
             && sync_orchestration.contains("AutoStartMode")
             && sync_orchestration.contains("safe_passive_prune_cleanup_throttle")
-            && sync_orchestration.contains("sync_repair_stamp_filename")
+            && sync_orchestration.contains("sync_repair_stamp_path")
             && sync_orchestration.contains("rename_debounce_expired")
             && sync_orchestration.contains("auto_started_panes_summary")
             && sync_orchestration.contains("WindowIndexNormalizationPlan")

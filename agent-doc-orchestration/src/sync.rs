@@ -203,7 +203,7 @@ use agent_doc_sync::{
     effective_sync_columns, is_file_rename, last_visible_excerpt, latency_budget_status,
     plan_window_index_normalization, planned_stash_window_indices, registry_relative_file_path,
     rename_debounce_expired, safe_passive_prune_cleanup_throttle, sanitize_excerpt,
-    sync_latency_message, sync_prune_state_update, sync_repair_stamp_filename,
+    sync_latency_message, sync_prune_state_update, sync_repair_stamp_path,
 };
 use agent_doc_tmux::{
     AssociatedPaneCandidate, AssociatedPaneResolution, AssociatedPaneSource,
@@ -1208,27 +1208,14 @@ fn destructive_repair_now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// Stamp path keyed by BOTH the tmux server socket and the session name. The
-/// socket key keeps isolated test servers (each a unique socket) from sharing a
-/// stamp with each other or with the default production server, so the rate
-/// limit is per real server+session.
-fn destructive_repair_stamp_path(
-    server_socket: Option<&str>,
-    session_name: &str,
-) -> Option<PathBuf> {
-    let dir = std::env::current_dir().ok()?.join(".agent-doc");
-    if !dir.is_dir() {
-        return None;
-    }
-    Some(dir.join(sync_repair_stamp_filename(server_socket, session_name)))
-}
-
 /// Check the per-server-per-session destructive-repair stamp. Returns `true`
 /// when a destructive repair ran within `DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS` (so
 /// this pass should skip it); otherwise records a fresh stamp and returns
 /// `false`. Failing to resolve the stamp path (no `.agent-doc/`) never throttles.
 fn throttle_destructive_repair(tmux: &Tmux, session_name: &str) -> bool {
-    let Some(path) = destructive_repair_stamp_path(tmux.server_socket.as_deref(), session_name)
+    let Some(path) = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| sync_repair_stamp_path(&cwd, tmux.server_socket.as_deref(), session_name))
     else {
         return false;
     };

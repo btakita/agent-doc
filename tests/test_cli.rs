@@ -8876,7 +8876,7 @@ fn test_project_config_io_tmux_helpers_have_no_config_facade() {
         "agent-doc-orchestration/src/sync.rs",
         "agent-doc-orchestration/src/session_accretion.rs",
         "agent-doc-orchestration/src/session_check/pending_guards.rs",
-        "agent-doc-orchestration/src/project_controller/rpc.rs",
+        "agent-doc-supervisor-io/src/config.rs",
         "agent-doc-orchestration/src/start.rs",
         "agent-doc-orchestration/src/start/run.rs",
         "agent-doc-orchestration/src/start/detection.rs",
@@ -11932,6 +11932,12 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "agent-doc-supervisor-io must own supervisor CWD resolution IO"
     );
     assert!(
+        manifest_dir
+            .join("agent-doc-supervisor-io/src/config.rs")
+            .exists(),
+        "agent-doc-supervisor-io must own file/env-backed supervisor config IO"
+    );
+    assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/start/decisions.rs")
             .exists(),
@@ -11969,6 +11975,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     .unwrap();
     let supervisor_config =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/config.rs")).unwrap();
+    let supervisor_io_config =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/config.rs")).unwrap();
     let fs_lib = fs::read_to_string(manifest_dir.join("agent-doc-fs/src/lib.rs")).unwrap();
     let fs_install_freshness =
         fs::read_to_string(manifest_dir.join("agent-doc-fs/src/install_freshness.rs")).unwrap();
@@ -12222,7 +12230,29 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             "agent-doc-supervisor should own auto-install stdio planning directly: {required_snippet}"
         );
     }
+    for required_snippet in [
+        "pub const SUPERVISOR_AUTO_RECYCLE_ENV",
+        "pub const AGENT_CHANGE_RESTART_ENV",
+        "pub const SUPERVISOR_AUTO_INSTALL_ENV",
+        "pub fn supervisor_auto_recycle_enabled(",
+        "pub fn agent_change_restart_enabled(",
+        "pub fn supervisor_auto_install_enabled(",
+        "agent_doc_supervisor::config::resolve_supervisor_auto_recycle",
+        "agent_doc_supervisor::config::resolve_agent_change_restart",
+        "agent_doc_supervisor::config::resolve_supervisor_auto_install",
+    ] {
+        assert!(
+            supervisor_io_config.contains(required_snippet),
+            "agent-doc-supervisor-io config should own file/env-backed supervisor config reads: {required_snippet}"
+        );
+    }
     for forbidden_snippet in [
+        "pub(crate) fn supervisor_auto_recycle_enabled",
+        "pub(crate) fn agent_change_restart_enabled",
+        "pub(crate) fn supervisor_auto_install_enabled",
+        "std::env::var(SUPERVISOR_AUTO_RECYCLE_ENV)",
+        "std::env::var(AGENT_CHANGE_RESTART_ENV)",
+        "std::env::var(SUPERVISOR_AUTO_INSTALL_ENV)",
         "pub(crate) fn resolve_supervisor_auto_recycle",
         "pub(crate) fn resolve_agent_change_restart",
         "pub(crate) fn source_newer_than_installed_binary",
@@ -12253,6 +12283,13 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
     let start_idle_watch_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/start/idle_watch.rs"))
+            .unwrap();
+    let route_authoritative_actor = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/route/authoritative_actor.rs"),
+    )
+    .unwrap();
+    let write_converge =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write/converge.rs"))
             .unwrap();
     assert!(
         fs_lib.contains("pub mod install_freshness;"),
@@ -12303,6 +12340,19 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         start_idle_watch_source
             .contains("agent_doc_fs::install_freshness::newest_crate_source_mtime_secs"),
         "idle_watch should call install freshness source mtime scanning through agent-doc-fs directly"
+    );
+    assert!(
+        start_idle_watch_source
+            .contains("agent_doc_supervisor_io::config::supervisor_auto_recycle_enabled")
+            && start_idle_watch_source
+                .contains("agent_doc_supervisor_io::config::agent_change_restart_enabled")
+            && start_idle_watch_source
+                .contains("agent_doc_supervisor_io::config::supervisor_auto_install_enabled")
+            && route_authoritative_actor
+                .contains("agent_doc_supervisor_io::config::agent_change_restart_enabled")
+            && write_converge
+                .contains("agent_doc_supervisor_io::config::supervisor_auto_recycle_enabled"),
+        "orchestration should call file/env-backed supervisor config readers through agent-doc-supervisor-io directly"
     );
     for required_snippet in [
         "pub enum SupervisorPromptDecision",

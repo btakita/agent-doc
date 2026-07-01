@@ -85,32 +85,6 @@ const STALE_PREPARING_CONTROLLER_SECS_ENV: &str = "AGENT_DOC_STALE_PREPARING_CON
 /// short gap between queue items never triggers a recycle.
 const DEFAULT_RECYCLE_IDLE_GRACE_SECS: u64 = 5;
 const RECYCLE_IDLE_GRACE_SECS_ENV: &str = "AGENT_DOC_RECYCLE_IDLE_GRACE_SECS";
-/// `#ctlrecycle` R3 — opt-out flag for the `start --route-owned` supervisor to
-/// hot-reload onto a fresh binary when idle via an in-place `execve` that PRESERVES
-/// the live harness child + tmux pane (`start.rs::supervisor_perform_reexec` +
-/// `PtySession::adopt`). Default ON: a stale supervisor self-recycles at the next
-/// idle / inter-queue-item boundary so a fresh install takes effect without manual
-/// `admin recycle`; when explicitly off, the supervisor only logs
-/// `supervisor_binary_stale_detected` and the operator restarts the session to pick
-/// up the new build.
-const SUPERVISOR_AUTO_RECYCLE_ENV: &str = "AGENT_DOC_SUPERVISOR_AUTO_RECYCLE";
-/// `#agentreloadrestart` — env override for the agent-change-restart knob
-/// (truthy enables, `0`/`false`/`off` force-disables). Default ON.
-const AGENT_CHANGE_RESTART_ENV: &str = "AGENT_DOC_AGENT_CHANGE_RESTART";
-/// `#supautoinstall` — opt-in flag for the DOGFOODING `start --route-owned` supervisor
-/// (an agent-doc session editing agent-doc's OWN source) to build+install that source at
-/// an idle boundary after a finalize edits it, so the installed binary catches up and the
-/// `#ctlrecycle` recycle path then hot-reloads onto it. This replaces the manual
-/// dogfood supervisor refresh bootstrap and root-fixes the "don't `cargo install`
-/// mid-session against a live supervisor" drift (`#no-mid-session-install`): the build
-/// runs in the supervisor at idle, never in the finalize client. Default ON — safe because
-/// the build only fires for an agent-doc dogfood session document (for example
-/// `tasks/agent-doc/...` or a document inside the agent-doc source checkout); an ordinary
-/// project document never triggers it. Opt out with a falsey
-/// env/frontmatter/project knob; when off, a dogfood source-ahead-of-binary state only logs
-/// `supervisor_source_newer_detected`.
-const SUPERVISOR_AUTO_INSTALL_ENV: &str = "AGENT_DOC_SUPERVISOR_AUTO_INSTALL";
-
 #[derive(Clone, Debug)]
 pub struct SessionsProjectionHint {
     pub session_id: String,

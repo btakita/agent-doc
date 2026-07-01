@@ -1051,61 +1051,6 @@ pub(crate) fn recycle_idle_grace() -> Duration {
     Duration::from_secs(secs)
 }
 
-/// `#ctlrecycle` R3 / `#suprecyclequeue` — is supervisor auto-recycle enabled for the
-/// supervisor hosting `doc`? Reads the env override, the document's frontmatter, and
-/// its project config, then resolves via `agent_doc_supervisor::config`. Default ON
-/// (`#supselfheal`); opt out with a falsey env/frontmatter/project knob.
-pub(crate) fn supervisor_auto_recycle_enabled(doc: &std::path::Path) -> bool {
-    let env = std::env::var(SUPERVISOR_AUTO_RECYCLE_ENV).ok();
-    let frontmatter = std::fs::read_to_string(doc).ok().and_then(|content| {
-        agent_doc_frontmatter::frontmatter::parse(&content)
-            .ok()
-            .and_then(|(fm, _)| fm.supervisor_auto_recycle)
-    });
-    let project =
-        agent_doc_project_config_io::load_project_for_doc(doc).agent_doc_supervisor_auto_recycle;
-    agent_doc_supervisor::config::resolve_supervisor_auto_recycle(
-        env.as_deref(),
-        frontmatter,
-        project,
-    )
-}
-
-/// `#agentreloadrestart` — is agent-change-restart enabled for the supervisor
-/// hosting `doc`? Reads env `AGENT_DOC_AGENT_CHANGE_RESTART`, the document's
-/// frontmatter, and its project config. Default ON.
-pub(crate) fn agent_change_restart_enabled(doc: &std::path::Path) -> bool {
-    let env = std::env::var(AGENT_CHANGE_RESTART_ENV).ok();
-    let frontmatter = std::fs::read_to_string(doc).ok().and_then(|content| {
-        agent_doc_frontmatter::frontmatter::parse(&content)
-            .ok()
-            .and_then(|(fm, _)| fm.agent_change_restart)
-    });
-    let project =
-        agent_doc_project_config_io::load_project_for_doc(doc).agent_doc_agent_change_restart;
-    agent_doc_supervisor::config::resolve_agent_change_restart(env.as_deref(), frontmatter, project)
-}
-
-/// `#supautoinstall` — is supervisor auto-install enabled for the supervisor hosting `doc`?
-/// Reads the env override, the document's frontmatter, and its project config, then resolves
-/// via `agent_doc_supervisor::config`. Default ON; opt out with a falsey
-/// env/frontmatter/project knob. (Never fires for a non-dogfooding document regardless.)
-pub(crate) fn supervisor_auto_install_enabled(doc: &std::path::Path) -> bool {
-    let env = std::env::var(SUPERVISOR_AUTO_INSTALL_ENV).ok();
-    let frontmatter = std::fs::read_to_string(doc).ok().and_then(|content| {
-        agent_doc_frontmatter::frontmatter::parse(&content)
-            .ok()
-            .and_then(|(fm, _)| fm.supervisor_auto_install)
-    });
-    let project =
-        agent_doc_project_config_io::load_project_for_doc(doc).agent_doc_supervisor_auto_install;
-    agent_doc_supervisor::config::resolve_supervisor_auto_install(
-        env.as_deref(),
-        frontmatter,
-        project,
-    )
-}
-
 /// `#supautoinstall` — resolve the agent-doc crate source root for a DOGFOODING session
 /// (an agent-doc session editing agent-doc's own source). A superproject may contain
 /// `src/agent-doc` while also hosting unrelated project documents; those documents must not

@@ -490,7 +490,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // `current_binary_identity()` differ, marking this supervisor stale.
             let recycle_launch_identity = crate::project_controller::current_binary_identity().ok();
             let recycle_auto_enabled =
-                crate::project_controller::supervisor_auto_recycle_enabled(&path);
+                agent_doc_supervisor_io::config::supervisor_auto_recycle_enabled(&path);
             let recycle_grace = crate::project_controller::recycle_idle_grace();
             let mut recycle_stale_since: Option<std::time::Instant> = None;
             let mut recycle_detected_logged = false;
@@ -514,7 +514,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // `agent_restart_boundary_gate`) so the operator can prove detection
             // live. Executing the restart (Phase 1b) is the focused-cycle wiring.
             let agent_change_restart_enabled =
-                crate::project_controller::agent_change_restart_enabled(&path);
+                agent_doc_supervisor_io::config::agent_change_restart_enabled(&path);
             let launch_harness_binary = harness.binary.clone();
             let mut agent_change_logged_for: Option<String> = None;
             // `#agentreloadrestart` Phase 1b — dedup the actual restart TRIGGER
@@ -524,7 +524,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // suppressed by the logging dedup.
             let mut agent_change_restart_requested_for: Option<String> = None;
             let auto_install_enabled =
-                crate::project_controller::supervisor_auto_install_enabled(&path);
+                agent_doc_supervisor_io::config::supervisor_auto_install_enabled(&path);
             let install_crate_root = if auto_install_enabled {
                 crate::project_controller::dogfood_agent_doc_crate_root(&path)
             } else {

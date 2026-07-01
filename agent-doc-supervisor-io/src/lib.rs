@@ -1,5 +1,6 @@
 //! Supervisor marker storage I/O for agent-doc.
 
+pub mod config;
 pub mod cwd;
 pub mod env;
 pub mod recycle_inflight;

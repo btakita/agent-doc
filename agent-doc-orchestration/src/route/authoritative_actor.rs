@@ -82,7 +82,7 @@ pub(crate) fn load_authoritative_actor_binding(
             // will not switch harnesses. Reverting `agent:` or re-enabling the knob are
             // the only recovery paths in that state.
             let agent_change_restart_enabled =
-                crate::project_controller::agent_change_restart_enabled(file);
+                agent_doc_supervisor_io::config::agent_change_restart_enabled(file);
             if !agent_change_restart_enabled {
                 crate::ops_log::log_op(
                     file,

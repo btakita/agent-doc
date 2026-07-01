@@ -491,7 +491,7 @@ pub(crate) fn schedule_stale_supervisor_pcp_recycle(file: &Path, source: &str) -
     if crate::project_controller::stale_supervisor_warning_for_doc(file).is_none() {
         return false;
     }
-    let auto_recycle = crate::project_controller::supervisor_auto_recycle_enabled(file);
+    let auto_recycle = agent_doc_supervisor_io::config::supervisor_auto_recycle_enabled(file);
     if !stale_ipc_drift_forces_pcp_recycle(true, auto_recycle) {
         // Auto-recycle opted out → SurfaceStale: record advisory guidance, do not
         // force. The existing stale-supervisor warning already surfaces the manual

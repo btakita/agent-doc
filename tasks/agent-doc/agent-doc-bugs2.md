@@ -39,6 +39,13 @@ done
 Compacted content:
 - Archived 3 response topic(s): continue; do [#qftlossproof]; do [#qftlossproof]
 - Prior summary/context: prior compacted content: Archived 20 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); IPC proof ...
+- `make install` — installed `agent-doc` and `libagent_doc.so`; installer marked 2 controllers to recycle at the next idle boundary.
+- `make check` — clippy, 6155 nextest tests, doctests, SimWorld medium seed, and Lean all passed.
+- `cargo test -p agent-doc-queue in_progress_marker_detection_allows_priority_prefix`
+- `cargo test -p agent-doc-orchestration abandoned`
+- Refactor: updated the cycle-state contract docs to distinguish abandoned stale preflight terminal state from a later real commit closeout that supersedes it.
+- Green: `cargo test -p agent-doc-orchestration abandoned` passes, including the new terminal-proof regression and the cycle-state unit regression.
+- Red: the new closeout regression failed before the fix with `terminal proof cannot record closeout ... is abandoned`.
 `/clear` prompt items are added to the agent without me running JB `Clear Session Context`. There seems to be a background or retry task doing this. Please continue to simplify.
 
 JB `Run Agent Doc` error
@@ -48,6 +55,42 @@ Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/
 ```
 
 #spec-test-build-install-commit-push
+
+### Re: preflight exchange precedence — gpt-5
+
+You were right. The bad selection had two separate causes: preflight let an active queue head stay effective while an exchange prompt was waiting, and the continuous backlog refill path treated `queue: start` as if it were an explicit `go` opt-in even when the `agent:queue` tag had no `go` attribute.
+
+I fixed both in `src/agent-doc` and pushed commit `05cc1380` (`fix: prioritize exchange prompt over queue preflight`). Preflight now captures an unresolved exchange prompt before its commit/boundary-reposition step can hide it, synthesizes that as the effective exchange diff, clears effective selected queue prompts for the turn, and drops `queue_continuation_required` while the exchange prompt is pending. Queue refill/same-cycle pending-add sync now require explicit `go` (`queue: go` or marker-side `go`); plain `queue: start` remains durable active state only.
+
+Verification: focused regressions passed, `make check` passed, `cargo install --path .` installed `agent-doc 0.34.65`, and the session supervisor is marked to recycle at the next idle boundary. The pushed CI run `28484451473` was still in progress at closeout. No JB plugin update is needed for this fix.
+❯ Fix
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/recruit/reitrades.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=8e43288335a8442441841ad3a6316187ead230a5a33f3c8b672314ac30f56d68 content_len=27112 content_hash=9d611d65347b8874f8d48343639874c4e6174037efa37f2e6f3dc8d6199fb467 doc=reitrades session=62d195b8-b029-42a5-9c6c-836cb1b5b103 turn=cycle-1782863860494
+```
+
+❯ Archived 3 response topic(s): continue; do [#qftlossproof]; do [#qftlossproof]
+### Session Summary
+
+
+❯ - `make install` — installed `agent-doc` and `libagent_doc.so`; installer marked 2 controllers to recycle at the next idle boundary.
+❯ - `make check` — clippy, 6155 nextest tests, doctests, SimWorld medium seed, and Lean all passed.
+❯ - `cargo test -p agent-doc-queue in_progress_marker_detection_allows_priority_prefix`
+❯ - `cargo test -p agent-doc-orchestration abandoned`
+❯ - Refactor: updated the cycle-state contract docs to distinguish abandoned stale preflight terminal state from a later real commit closeout that supersedes it.
+❯ - Green: `cargo test -p agent-doc-orchestration abandoned` passes, including the new terminal-proof regression and the cycle-state unit regression.
+❯ - Red: the new closeout regression failed before the fix with `terminal proof cannot record closeout ... is abandoned`.
+
+```
+[route] target tmux session: 0
+Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md into pane %67 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Summarize recent commits"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1782863907349-direct_pane_protected_prompt_input-codex-_67-3390d64c34ee.txt
+```
+
 
 ### Re: preflight exchange precedence — gpt-5
 
@@ -79,7 +122,27 @@ Verification completed:
 - `make install` — installed `agent-doc` and `libagent_doc.so`; installer marked 2 controllers to recycle at the next idle boundary.
 
 GitHub CI for `fee78f7a` is currently in progress: run `28485233701`.
-<!-- agent:boundary:d163eda7 -->
+❯ Fix
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/recruit/reitrades.md source=socket_ack_content patch_id=- invariant=missing_response_probe recovery=retry_without_disk_write response_sha256=8e43288335a8442441841ad3a6316187ead230a5a33f3c8b672314ac30f56d68 content_len=27112 content_hash=9d611d65347b8874f8d48343639874c4e6174037efa37f2e6f3dc8d6199fb467 doc=reitrades session=62d195b8-b029-42a5-9c6c-836cb1b5b103 turn=cycle-1782863860494
+```
+
+❯ Archived 3 response topic(s): continue; do [#qftlossproof]; do [#qftlossproof]
+<!-- patch:exchange -->
+### Re: archived qftlossproof prompts — gpt-5
+
+Grouped response for `continue; do [#qftlossproof]; do [#qftlossproof]`: I’m treating this as a compaction/archive state signal, not a fresh request to re-run `#qftlossproof`.
+
+Both `#qftlossproof` queue entries are already struck, and the unresolved follow-up is represented by `#qftlossdelta` at the top of the backlog. No additional `#qftlossproof` dispatch is needed from this archived marker.
+
+<!-- /patch:exchange -->
+<!-- agent:boundary:566f765b -->
 <!-- /agent:exchange -->
 ## Queue
 

@@ -166,12 +166,27 @@ Echoing the last completed head exactly to drain it:
 > **Queue prompt:** Ensure Livekit is in the resume. I integrated Livekit with Copilotkit in the Stealth Company.
 
 Already complete: LiveKit is in the master resume on the Confidential/Stealth client entry (paired with CopilotKit over LiveKit WebRTC) and bolded in the LSAC profile (`resume` `3cd6954`). Queue fully drained.
-<!-- agent:boundary:f13ef957 -->
+❯ Add Lean to the resume. Under lazily and skills.
+
+### Re: Lean already in the resume (lazily + skills) — opus-4.8
+
+Already complete — Lean landed last cycle in `resume` `84d6bb9` ("add Lean (lazily-formal is a Lean 4 model) to lazily entry + skills; rebuild"), in both places you asked for:
+
+- **Skills:** `[skills.lean]` in the Skills taxonomy (`display = "Lean"`, `category = "language"`, tags: formal methods / theorem proving / functional). Renders in the built Skills line.
+- **lazily:** the lazily project entry names it in prose — "a Lean 4 formal model (`lazily-formal`) whose types machine-check that every language binding agrees on the reactive semantics" — and `Lean` is in that entry's tag list.
+
+Verified in the built output `BrianTakita.md`: the Skills line lists **Lean**, and the lazily bullet carries the Lean 4 formal-model sentence. The `resume` submodule is clean at `84d6bb9` (rebuilt), local-only — not pushed.
+
+No further action on this prompt. One note: the tailored **LSAC profile** (`law-school-admission-council.toml`) doesn't surface Lean — that role skews Azure / Copilot, so formal methods was left off the curated cut. Say the word if you want Lean pulled into the LSAC tailoring too.
+
+Queue: the `go` head `/goal Implement backlog item(s): #fcmm` points at a backlog item that isn't present (backlog is empty), so it's a dangling reference — nothing in-session-drainable (`queue_continuation_required: false`). Remove the head or tell me what `#fcmm` should be and I'll queue it properly.
+<!-- agent:boundary:ce902894 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
+/goal Implement backlog item(s): #fcmm
 <!-- /agent:queue -->
 
 ## Backlog

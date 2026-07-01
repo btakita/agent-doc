@@ -8,7 +8,7 @@ claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 pending_done_guard: warn
 agent_doc_lint_dialect: off
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -580,12 +580,25 @@ Yes — keep both; they're differentiators, not filler. "Agentic hours" explains
 > **Queue prompt:** Why is "0. Setup / technical audit" scheduled to be so long?
 
 24-44h is the cheapest insurance in the bid, not padding. REItrades is a **live** marketplace with real seller/buyer data, and every expensive downstream item — the teaser/OM production migration (30-65h), cascade deletes, the listing rebuild — depends on mapping an unfamiliar codebase + data model *before* touching it. The hours buy two things: (1) a repo/route/data-model map so the rest of the estimate firms up and agents work against real structure, and (2) a production-safety plan (migrations, rollback, delete policy) that prevents a live-data incident. It's ~4-5% of the full 545-850h engagement, it's **credited forward** into Phase 1, and it compresses toward the 16h low end if the codebase is clean. If you want a leaner headline, I can split it so only the ~16h audit is upfront and the safety plan rolls into Phase 1 — say the word.
-<!-- agent:boundary:48c6f1cb -->
+
+### Re: Phase-1 credit noted in §0 Setup — opus-4-8
+
+> **Queue prompt:** In "0. Setup / technical audit", mention again that this work is credited to Phase 1.
+
+Done. Added a note directly under the §0 Setup / technical audit table:
+
+> *This Phase-0 discovery work is **credited toward Phase 1** if we proceed — it is not an extra charge on top of the build, and it firms up every downstream estimate before any production code is written.*
+
+So the credit-forward now appears both at the line item (§0) and in the phasing section (§5 Phase 0) — a reader who lands on either one sees that the 24-44h isn't additive to the build. Report + regenerated PDF committed (`2e7f9521a`).
+
+<!-- agent:boundary:163f2fe7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue go -->
+- ~~In "0. Setup / technical audit", mention again that this work is credited to Phase 1.~~
+- Why is "Delete listing from action dropdown; cascade related data" estimated 16-28 hours? This seems more like 4-8 hours. The time estimates seem high overall.
 <!-- /agent:queue -->
 
 ## Backlog
@@ -597,3 +610,9 @@ Yes — keep both; they're differentiators, not filler. "Agentic hours" explains
 
 <!-- agent:icebox -->
 <!-- /agent:icebox -->
+
+## Completed / Reaped
+
+<!-- agent:done -->
+- 2026-07-01 [#reibuyvsbuild] [recommended] Fold a "Build vs. Buy / vendor options" §3c into rei-trades/reitrades-v1.2-estimate-report.md (extraction: parser API vs LLM-native vs managed IDP; source-backed demographics; Stripe/MailerLite/geocode buys) + add a Phase-0 extraction bake-off line item, then regenerate the PDF.
+<!-- /agent:done -->

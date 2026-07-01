@@ -25,6 +25,7 @@ use agent_doc_turn_executor_tmux::prompt::{
     is_codex_idle_placeholder_prompt,
 };
 use anyhow::Result;
+use std::path::{Path, PathBuf};
 
 /// How the supervisor builds args on restart after a crash.
 #[derive(Debug, Clone, PartialEq)]
@@ -949,6 +950,41 @@ fn is_managed_capability_proof_line(trimmed: &str) -> bool {
     trimmed.contains("_capability_proof status=")
 }
 
+/// Return true when an OpenCode project/config root exposes an agent-doc
+/// compatible `/goal` command extension.
+pub fn opencode_goal_extension_available(file: &Path, project_root: Option<&Path>) -> bool {
+    opencode_goal_extension_roots(file, project_root)
+        .into_iter()
+        .any(|root| {
+            [
+                root.join(".opencode/commands/goal.md"),
+                root.join(".opencode/plugin/goal.js"),
+                root.join(".opencode/plugin/agent-doc-goal.js"),
+                root.join("commands/goal.md"),
+                root.join("plugin/goal.js"),
+                root.join("plugin/agent-doc-goal.js"),
+            ]
+            .into_iter()
+            .any(|path| path.is_file())
+        })
+}
+
+fn opencode_goal_extension_roots(file: &Path, project_root: Option<&Path>) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(root) = project_root {
+        roots.push(root.to_path_buf());
+    }
+    if let Some(parent) = file.parent() {
+        roots.push(parent.to_path_buf());
+    }
+    if let Some(config_home) = std::env::var_os("XDG_CONFIG_HOME") {
+        roots.push(PathBuf::from(config_home).join("opencode"));
+    } else if let Some(home) = std::env::var_os("HOME") {
+        roots.push(PathBuf::from(home).join(".config/opencode"));
+    }
+    roots
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1033,6 +1069,44 @@ mod tests {
         assert!(HarnessConfig::codex().supports_goal_command(false));
         assert!(!HarnessConfig::opencode().supports_goal_command(false));
         assert!(HarnessConfig::opencode().supports_goal_command(true));
+    }
+
+    #[test]
+    fn opencode_goal_extension_detects_project_command() {
+        let root = unique_temp_dir("agent-doc-harness-goal-project");
+        std::fs::create_dir_all(root.join(".opencode/commands")).unwrap();
+        std::fs::write(root.join(".opencode/commands/goal.md"), "# goal").unwrap();
+        let file = root.join("session.md");
+
+        assert!(opencode_goal_extension_available(&file, Some(&root)));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn opencode_goal_extension_detects_document_parent_plugin() {
+        let root = unique_temp_dir("agent-doc-harness-goal-parent");
+        std::fs::create_dir_all(root.join("plugin")).unwrap();
+        std::fs::write(root.join("plugin/agent-doc-goal.js"), "// goal").unwrap();
+        let file = root.join("session.md");
+
+        assert!(opencode_goal_extension_available(&file, None));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    fn unique_temp_dir(name: &str) -> std::path::PathBuf {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!(
+            "{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
     }
 
     #[test]

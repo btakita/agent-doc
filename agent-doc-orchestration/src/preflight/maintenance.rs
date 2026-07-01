@@ -3296,8 +3296,9 @@ fn resolve_free_text_execution(
         .or(global_config.agent_doc_free_text_execution)
         .unwrap_or_default();
     let harness = agent_doc_harness::HarnessConfig::from_context(&fm, &global_config);
-    let goal_available =
-        harness.supports_goal_command(opencode_goal_extension_available(file, project_root));
+    let goal_available = harness.supports_goal_command(
+        agent_doc_harness::opencode_goal_extension_available(file, project_root),
+    );
     let mut warnings = Vec::new();
     let execution = match requested {
         agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Queue => {
@@ -3331,34 +3332,6 @@ fn resolve_free_text_execution(
         }
     };
     Ok((execution, warnings))
-}
-
-fn opencode_goal_extension_available(file: &Path, project_root: Option<&Path>) -> bool {
-    let mut roots = Vec::new();
-    if let Some(root) = project_root {
-        roots.push(root.to_path_buf());
-    }
-    if let Some(parent) = file.parent() {
-        roots.push(parent.to_path_buf());
-    }
-    if let Some(config_home) = std::env::var_os("XDG_CONFIG_HOME") {
-        roots.push(std::path::PathBuf::from(config_home).join("opencode"));
-    } else if let Some(home) = std::env::var_os("HOME") {
-        roots.push(std::path::PathBuf::from(home).join(".config/opencode"));
-    }
-
-    roots.into_iter().any(|root| {
-        [
-            root.join(".opencode/commands/goal.md"),
-            root.join(".opencode/plugin/goal.js"),
-            root.join(".opencode/plugin/agent-doc-goal.js"),
-            root.join("commands/goal.md"),
-            root.join("plugin/goal.js"),
-            root.join("plugin/agent-doc-goal.js"),
-        ]
-        .into_iter()
-        .any(|path| path.is_file())
-    })
 }
 
 /// `#fccqueue`: persist a queue-maintenance document mutation without provoking

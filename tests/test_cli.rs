@@ -3412,6 +3412,25 @@ fn test_agent_doc_queue_owns_queue_control_binding_policy() {
 }
 
 #[test]
+fn test_agent_doc_harness_owns_opencode_goal_extension_detection() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let harness = fs::read_to_string(manifest_dir.join("agent-doc-harness/src/lib.rs")).unwrap();
+    assert!(
+        harness.contains("pub fn opencode_goal_extension_available"),
+        "agent-doc-harness must own OpenCode goal extension detection"
+    );
+
+    let maintenance = fs::read_to_string(
+        manifest_dir.join("agent-doc-orchestration/src/preflight/maintenance.rs"),
+    )
+    .unwrap();
+    assert!(
+        !maintenance.contains("fn opencode_goal_extension_available"),
+        "preflight maintenance must not own OpenCode goal extension detection"
+    );
+}
+
+#[test]
 fn test_agent_doc_queue_owns_dispatch_item_classification_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let queue_lib = fs::read_to_string(manifest_dir.join("agent-doc-queue/src/lib.rs")).unwrap();

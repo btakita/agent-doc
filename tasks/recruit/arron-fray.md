@@ -131,6 +131,19 @@ Done, committed in `resume/`, all PDFs rebuilt.
 Add Livekit to my experience with Presence AI and the Stealth Startup. Recreate the resume.
 
 I'm going to edit the message with my resume. Please draft a followup to ensure arron-fray uses my updated resume in case he already downloaded my old resume.
+
+### Re: LiveKit done + follow-up so Arron uses the updated resume — opus-4.8
+
+**LiveKit — done** (committed in `resume/`, resumes recreated). Added to `data.toml` (it was missing there) and kept `BrianTakita.md` in sync: Presence AI WebRTC accomplishment now "…live avatar sessions **using LiveKit**"; the Stealth/Confidential AI startup role now "…streaming input **over LiveKit WebRTC**"; LiveKit added to both roles' skills and bolded via the profile highlights. `BrianTakita-python-realtime.pdf`, `BrianTakita-arron-fray.pdf`, and default `BrianTakita.pdf` rebuilt.
+
+**Follow-up message to Arron** — short, no-friction nudge to use the latest copy (send after your updated-resume message, or as a reply if he already has the old one):
+
+> Hi Arron — one quick follow-up: I've just refreshed my resume with a few relevant details (real-time/LiveKit pipeline work and the lazily reactive stack). If you happened to grab an earlier copy, please use this latest version instead — attaching it here. Thanks again, and looking forward to hearing which client it's for.
+>
+> Best,
+> Brian
+
+If you'd rather it be even terser (one line), say so. Still nothing sent — your call to send both.
 <!-- /agent:exchange -->
 
 ## Queue

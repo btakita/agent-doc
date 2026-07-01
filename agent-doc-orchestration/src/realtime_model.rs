@@ -354,7 +354,8 @@ fn broadcast_component_delta_for_peer(
         return Ok(None);
     }
     let node_patches = crate::write::build_ipc_node_patches_json(Some(&peer.content), Some(merged));
-    let patches = broadcast_convergence_patches(&peer.content, merged)?;
+    let patches =
+        agent_doc_document::component_patches::component_replace_patches(&peer.content, merged)?;
     let frontmatter = agent_doc_frontmatter::frontmatter::raw_frontmatter_yaml(merged)
         .filter(|merged_fm| {
             agent_doc_frontmatter::frontmatter::raw_frontmatter_yaml(&peer.content)
@@ -377,40 +378,6 @@ fn broadcast_component_delta_for_peer(
         node_patches,
         frontmatter,
     }))
-}
-
-fn broadcast_convergence_patches(
-    before: &str,
-    after: &str,
-) -> anyhow::Result<Vec<serde_json::Value>> {
-    let before_components = agent_doc_element::element::parse(before)?;
-    let after_components = agent_doc_element::element::parse(after)?;
-    let before_by_name: std::collections::HashMap<&str, &agent_doc_element::element::Component> =
-        before_components
-            .iter()
-            .map(|component| (component.name.as_str(), component))
-            .collect();
-    let mut patches = Vec::new();
-    for after_component in &after_components {
-        let Some(before_component) = before_by_name.get(after_component.name.as_str()) else {
-            continue;
-        };
-        let before_body = before_component.content(before);
-        let after_body = after_component.content(after);
-        if agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(before_body)
-            == agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
-                after_body,
-            )
-        {
-            continue;
-        }
-        patches.push(serde_json::json!({
-            "component": after_component.name,
-            "content": after_body,
-            "op": "replace",
-        }));
-    }
-    Ok(patches)
 }
 
 #[cfg(test)]

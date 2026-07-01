@@ -29,28 +29,6 @@ pub(crate) fn repair_outcome_label(outcome: crate::repair::RepairOutcome) -> &'s
     }
 }
 
-pub(crate) fn sanitize_excerpt(text: &str) -> Option<String> {
-    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if collapsed.is_empty() {
-        return None;
-    }
-    let mut excerpt = collapsed;
-    if excerpt.len() > 200 {
-        excerpt.truncate(200);
-        excerpt.push_str("...");
-    }
-    Some(excerpt)
-}
-
-pub(crate) fn last_visible_excerpt(capture: &str) -> Option<String> {
-    capture
-        .lines()
-        .rev()
-        .map(str::trim)
-        .find(|line| !line.is_empty() && !line.starts_with("Pane is dead"))
-        .and_then(sanitize_excerpt)
-}
-
 pub(crate) fn canonicalize_sync_file(file: &Path) -> Option<PathBuf> {
     let candidate = if file.is_absolute() {
         file.to_path_buf()
@@ -66,13 +44,6 @@ pub(crate) fn registry_location_for_file(file: &Path) -> Option<(PathBuf, PathBu
     let registry_key =
         sessions::canonical_registry_key_in(&project_root, canonical.to_string_lossy().as_ref());
     Some((canonical, project_root, registry_key))
-}
-
-pub(crate) fn registry_relative_file_path(project_root: &Path, canonical_file: &Path) -> String {
-    canonical_file
-        .strip_prefix(project_root)
-        .map(|path| path.to_string_lossy().to_string())
-        .unwrap_or_else(|_| canonical_file.to_string_lossy().to_string())
 }
 
 pub(crate) fn first_agent_doc_in_col(col: &str) -> Option<String> {

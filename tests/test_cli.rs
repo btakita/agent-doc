@@ -6393,10 +6393,18 @@ fn test_agent_doc_memory_owns_semantic_memory_ranking_policy() {
         "pub fn rank_events(",
         "pub fn dedupe_events(",
         "pub fn trim_chars(",
+        "pub fn tracked_work_events(",
+        "pub fn tracked_work_event(",
+        "pub fn response_summary_events(",
+        "pub fn response_sections(",
+        "pub fn parse_done_archive_items(",
+        "pub fn parse_done_archive_line(",
+        "pub fn looks_like_iso_date_prefix(",
+        "pub fn pending_state_str(",
     ] {
         assert!(
             memory_source.contains(required),
-            "agent-doc-memory must own semantic memory ranking/result policy: {required}"
+            "agent-doc-memory must own semantic memory ranking/result/event-shaping policy: {required}"
         );
     }
 
@@ -6412,6 +6420,15 @@ fn test_agent_doc_memory_owns_semantic_memory_ranking_policy() {
         "fn push_token(",
         "fn dedupe_events(",
         "fn trim_chars(",
+        "fn tracked_work_events(",
+        "fn done_archive_events(",
+        "fn parse_done_archive_items(",
+        "fn parse_done_archive_line(",
+        "fn looks_like_iso_date_prefix(",
+        "fn tracked_work_event(",
+        "fn response_summary_events(",
+        "fn response_sections(",
+        "fn pending_state_str(",
         "pub struct SemanticCompletionMatch",
         "pub enum QueueStrikeMatchKind",
         "pub struct QueueStrikeMatch",
@@ -6429,6 +6446,9 @@ fn test_agent_doc_memory_owns_semantic_memory_ranking_policy() {
             && orchestration_memory.contains("rank_events")
             && orchestration_memory.contains("dedupe_events")
             && orchestration_memory.contains("queue_prompt_target_id")
+            && orchestration_memory.contains("tracked_work_events")
+            && orchestration_memory.contains("parse_done_archive_items")
+            && orchestration_memory.contains("response_summary_events")
             && orchestration_memory.contains("SemanticCompletionMatch")
             && orchestration_memory.contains("QueueStrikeMatch"),
         "memory_cmd should call focused semantic memory policy directly"

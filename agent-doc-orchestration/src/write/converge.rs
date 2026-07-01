@@ -1023,7 +1023,8 @@ fn live_prompt_drift_response_patches(
     file_content: &str,
     snapshot: &str,
 ) -> Result<Vec<serde_json::Value>> {
-    let mut patches = live_prompt_drift_convergence_patches(file_content, snapshot)?;
+    let mut patches =
+        agent_doc_document::component_patches::component_replace_patches(file_content, snapshot)?;
     // `live_prompt_drift` recovery is only authorized to materialize the agent's
     // response node. Non-response components and frontmatter belong to the live
     // editor/operator in this recovery path; if they differ, the containment gate
@@ -1792,7 +1793,8 @@ pub(crate) fn editor_convergence_payload(
     source: &str,
     patch_id: &str,
 ) -> Result<Option<serde_json::Value>> {
-    let mut patches = live_prompt_drift_convergence_patches(current_content, target)?;
+    let mut patches =
+        agent_doc_document::component_patches::component_replace_patches(current_content, target)?;
     let frontmatter = live_prompt_drift_convergence_frontmatter(current_content, target);
     let node_patches = queue_consume_node_patches(current_content, target, source);
 
@@ -1895,41 +1897,6 @@ pub fn converge_or_disk_write(
         "{source}: refused direct disk write for {} because editor convergence did not complete",
         file.display()
     )
-}
-
-pub(crate) fn live_prompt_drift_convergence_patches(
-    file_content: &str,
-    target: &str,
-) -> Result<Vec<serde_json::Value>> {
-    let current_components = element::parse(file_content)
-        .with_context(|| "failed to parse current document for editor convergence")?;
-    let target_components = element::parse(target)
-        .with_context(|| "failed to parse target document for editor convergence")?;
-    let current_by_name: HashMap<&str, &element::Component> = current_components
-        .iter()
-        .map(|component| (component.name.as_str(), component))
-        .collect();
-    let mut patches = Vec::new();
-    for target_component in &target_components {
-        let Some(current_component) = current_by_name.get(target_component.name.as_str()) else {
-            continue;
-        };
-        let current_body = current_component.content(file_content);
-        let target_body = target_component.content(target);
-        if agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
-            current_body,
-        ) == agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
-            target_body,
-        ) {
-            continue;
-        }
-        patches.push(serde_json::json!({
-            "component": target_component.name,
-            "content": target_body,
-            "op": "replace",
-        }));
-    }
-    Ok(patches)
 }
 
 pub(crate) fn live_prompt_drift_convergence_frontmatter(
@@ -2248,25 +2215,6 @@ mod core_tests {
         );
     }
     #[test]
-    fn live_prompt_drift_convergence_patches_builds_replace_patch_for_exchange() {
-        let snapshot = crate::test_support::drift_content_ours();
-        let fragmented = crate::test_support::drift_baseline();
-
-        let patches = live_prompt_drift_convergence_patches(&fragmented, &snapshot).unwrap();
-
-        assert_eq!(patches.len(), 1, "only exchange should need convergence");
-        assert_eq!(patches[0]["component"], "exchange");
-        assert_eq!(patches[0]["op"], "replace");
-        assert!(
-            patches[0]["content"]
-                .as_str()
-                .unwrap()
-                .contains("### Re: do #fix"),
-            "replace payload should carry the recovered response body: {patches:?}"
-        );
-    }
-
-    #[test]
     fn live_prompt_drift_response_patches_ignore_operator_owned_components() {
         let snapshot = format!(
             "{}\n<!-- agent:backlog -->\n- existing backlog text\n<!-- /agent:backlog -->\n",
@@ -2277,7 +2225,11 @@ mod core_tests {
             crate::test_support::drift_baseline()
         );
 
-        let generic = live_prompt_drift_convergence_patches(&fragmented, &snapshot).unwrap();
+        let generic = agent_doc_document::component_patches::component_replace_patches(
+            &fragmented,
+            &snapshot,
+        )
+        .unwrap();
         let generic_components: Vec<&str> = generic
             .iter()
             .filter_map(|patch| patch.get("component").and_then(|value| value.as_str()))
@@ -2325,42 +2277,6 @@ mod core_tests {
         assert!(
             !log.contains("transport=disk_fallback"),
             "no-listener compact must not advertise disk fallback:\n{log}"
-        );
-    }
-    /// Pre-compact document with a multi-item `queue` an operator could be
-    /// concurrently editing while compaction archives the exchange tail.
-    /// Post-compact document: the `exchange` collapses to a summary marker while
-    /// the `queue` is byte-identical to the source (compaction never touches it).
-    #[test]
-    fn compact_convergence_is_exchange_scoped_preserving_concurrent_queue_edits() {
-        // `#jbcompactcrdt`/`#w42v`: compaction only rewrites `exchange`, so the
-        // editor-IPC convergence patch must be component-scoped to `exchange` and
-        // never carry a `queue` replace. That scoping is exactly what lets an
-        // operator concurrently typing queue items survive compaction without a
-        // JB `File Cache Conflict` — the editor applies the exchange `op:replace`
-        // via the Document API and leaves the live queue buffer untouched.
-        let source = crate::test_support::compact_convergence_source();
-        let compacted = crate::test_support::compact_convergence_compacted();
-
-        let patches = live_prompt_drift_convergence_patches(&source, &compacted).unwrap();
-
-        assert_eq!(
-            patches.len(),
-            1,
-            "only exchange changed during compaction; queue must not be patched: {patches:?}"
-        );
-        assert_eq!(patches[0]["component"], "exchange");
-        assert_eq!(patches[0]["op"], "replace");
-        assert!(
-            patches[0]["content"]
-                .as_str()
-                .unwrap()
-                .contains("*Compacted. Content archived"),
-            "the exchange replace must carry the compacted summary body: {patches:?}"
-        );
-        assert!(
-            !patches.iter().any(|patch| patch["component"] == "queue"),
-            "a queue replace would clobber the operator's concurrent edits: {patches:?}"
         );
     }
     #[test]

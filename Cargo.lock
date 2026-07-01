@@ -430,6 +430,8 @@ dependencies = [
 name = "agent-doc-memory"
 version = "0.34.66"
 dependencies = [
+ "agent-doc-element-backlog",
+ "agent-doc-hash",
  "serde",
  "tsift-memory",
 ]

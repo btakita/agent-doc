@@ -1,8 +1,13 @@
 //! Pure semantic memory ranking and result-shaping helpers for agent-doc.
 
+use agent_doc_element_backlog::backlog::{PendingItem, PendingListMarker, PendingState};
 use serde::Serialize;
 use std::collections::{BTreeSet, HashMap};
-use tsift_memory::{MemoryEvent, MemoryInsertResult};
+use tsift_memory::{MemoryEvent, MemoryEventKind, MemoryInsertResult};
+
+const TRACKED_WORK_IMPORT_SOURCE: &str = "agent-doc:tracked-work";
+const EXCHANGE_IMPORT_SOURCE: &str = "agent-doc:exchange";
+const MAX_RESPONSE_BODY_CHARS: usize = 2_000;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct MemorySearchResult {
@@ -142,6 +147,169 @@ pub fn trim_chars(text: &str, max_chars: usize) -> String {
         out.push(ch);
     }
     out
+}
+
+pub fn tracked_work_events(
+    session_ref: &str,
+    doc_hash: &str,
+    component: &str,
+    items: impl IntoIterator<Item = PendingItem>,
+    state_override: Option<PendingState>,
+) -> Vec<MemoryEvent> {
+    items
+        .into_iter()
+        .filter(|item| !item.id.is_empty() || !item.text.trim().is_empty())
+        .map(|item| tracked_work_event(session_ref, doc_hash, component, item, state_override))
+        .collect()
+}
+
+pub fn tracked_work_event(
+    session_ref: &str,
+    doc_hash: &str,
+    component: &str,
+    item: PendingItem,
+    state_override: Option<PendingState>,
+) -> MemoryEvent {
+    let state = state_override.unwrap_or(item.state);
+    let state_str = pending_state_str(state);
+    let mut text = format!("#{} {}", item.id, item.text.trim());
+    if !item.continuation.trim().is_empty() {
+        text.push('\n');
+        text.push_str(item.continuation.trim());
+    }
+    let item_id = if item.id.is_empty() {
+        format!("anon:{}", agent_doc_hash::content_hash(&text))
+    } else {
+        item.id.clone()
+    };
+    let text_hash = agent_doc_hash::content_hash(&text);
+    let source_ref = format!("{session_ref}#{component}:{item_id}");
+    MemoryEvent::new(MemoryEventKind::ImportedObservation, source_ref, text)
+        .with_session_id(session_ref.to_string())
+        .with_metadata("agent_doc_surface", "tracked_work")
+        .with_metadata("component", component)
+        .with_metadata("item_id", item_id.clone())
+        .with_metadata("state", state_str)
+        .with_import(
+            TRACKED_WORK_IMPORT_SOURCE,
+            format!("{doc_hash}:{component}:{item_id}:{text_hash}"),
+        )
+}
+
+pub fn response_summary_events(session_ref: &str, doc_hash: &str, body: &str) -> Vec<MemoryEvent> {
+    response_sections(body)
+        .into_iter()
+        .map(|(index, heading, text)| {
+            let event_text = trim_chars(&format!("{heading}\n{text}"), MAX_RESPONSE_BODY_CHARS);
+            let text_hash = agent_doc_hash::content_hash(&event_text);
+            MemoryEvent::new(
+                MemoryEventKind::ResponseSummary,
+                format!("{session_ref}#exchange:{index}"),
+                event_text,
+            )
+            .with_session_id(session_ref.to_string())
+            .with_metadata("agent_doc_surface", "exchange")
+            .with_metadata("component", "exchange")
+            .with_metadata("heading", heading)
+            .with_import(
+                EXCHANGE_IMPORT_SOURCE,
+                format!("{doc_hash}:exchange:{index}:{text_hash}"),
+            )
+        })
+        .collect()
+}
+
+pub fn response_sections(body: &str) -> Vec<(usize, String, String)> {
+    let mut sections = Vec::new();
+    let mut current_heading: Option<String> = None;
+    let mut current_body = String::new();
+
+    for line in body.lines() {
+        if line.starts_with("### Re:") {
+            if let Some(heading) = current_heading.take() {
+                let index = sections.len() + 1;
+                sections.push((index, heading, current_body.trim().to_string()));
+                current_body.clear();
+            }
+            current_heading = Some(line.trim_start_matches('#').trim().to_string());
+        } else if current_heading.is_some() && !line.starts_with("<!-- agent:boundary:") {
+            current_body.push_str(line);
+            current_body.push('\n');
+        }
+    }
+    if let Some(heading) = current_heading {
+        let index = sections.len() + 1;
+        sections.push((index, heading, current_body.trim().to_string()));
+    }
+    sections
+}
+
+pub fn parse_done_archive_items(body: &str) -> Vec<PendingItem> {
+    let mut items = Vec::new();
+    let mut current: Option<PendingItem> = None;
+
+    for line in body.lines() {
+        if let Some((date, id, text)) = parse_done_archive_line(line) {
+            if let Some(item) = current.take() {
+                items.push(item);
+            }
+            current = Some(PendingItem {
+                marker: PendingListMarker::Bullet,
+                id,
+                state: PendingState::Done,
+                gate_type: None,
+                in_progress: false,
+                text: format!("{date} {text}"),
+                continuation: String::new(),
+            });
+        } else if let Some(item) = current.as_mut()
+            && (line.starts_with(' ') || line.starts_with('\t'))
+        {
+            item.continuation.push_str(line);
+            item.continuation.push('\n');
+        }
+    }
+
+    if let Some(item) = current {
+        items.push(item);
+    }
+    items
+}
+
+pub fn parse_done_archive_line(line: &str) -> Option<(String, String, String)> {
+    let rest = line.strip_prefix("- ")?;
+    if !looks_like_iso_date_prefix(rest) {
+        return None;
+    }
+    let date = rest[..10].to_string();
+    let after_date = &rest[11..];
+    let after_id = after_date.strip_prefix("[#")?;
+    let end = after_id.find(']')?;
+    let id = after_id[..end].trim();
+    if id.is_empty() {
+        return None;
+    }
+    let text = after_id[end + 1..].trim_start();
+    Some((date, id.to_string(), text.to_string()))
+}
+
+pub fn looks_like_iso_date_prefix(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    bytes.len() > 11
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes[10] == b' '
+        && bytes[..4].iter().all(u8::is_ascii_digit)
+        && bytes[5..7].iter().all(u8::is_ascii_digit)
+        && bytes[8..10].iter().all(u8::is_ascii_digit)
+}
+
+pub fn pending_state_str(state: PendingState) -> &'static str {
+    match state {
+        PendingState::Open => "open",
+        PendingState::Gated => "gated",
+        PendingState::Done => "done",
+    }
 }
 
 fn score_event(query_tokens: &BTreeSet<String>, query_lower: &str, event: &MemoryEvent) -> f64 {
@@ -307,6 +475,69 @@ mod tests {
             queue_prompt_target_id("#ABC_Def-12").as_deref(),
             Some("abc_def-12")
         );
+    }
+
+    #[test]
+    fn parse_done_archive_items_reads_archive_lines_and_continuations() {
+        let items = parse_done_archive_items(
+            "- 2026-06-07 [#cachefix] Repair cache duplication\n  proof: shipped\n",
+        );
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, "cachefix");
+        assert_eq!(items[0].state, PendingState::Done);
+        assert_eq!(items[0].text, "2026-06-07 Repair cache duplication");
+        assert_eq!(items[0].continuation, "  proof: shipped\n");
+    }
+
+    #[test]
+    fn tracked_work_event_shapes_stable_import_metadata() {
+        let event = tracked_work_event(
+            "tasks/doc.md",
+            "doc-hash",
+            "backlog",
+            PendingItem {
+                marker: PendingListMarker::Bullet,
+                id: "cachefix".to_string(),
+                state: PendingState::Gated,
+                gate_type: None,
+                in_progress: false,
+                text: "Repair cache duplication".to_string(),
+                continuation: "  proof: pending\n".to_string(),
+            },
+            None,
+        );
+
+        assert_eq!(event.kind, MemoryEventKind::ImportedObservation);
+        assert_eq!(event.source_ref, "tasks/doc.md#backlog:cachefix");
+        assert_eq!(
+            event.metadata.get("state").map(String::as_str),
+            Some("gated")
+        );
+        assert_eq!(
+            event.metadata.get("component").map(String::as_str),
+            Some("backlog")
+        );
+        assert!(event.text.contains("proof: pending"));
+    }
+
+    #[test]
+    fn response_summary_events_split_replies_and_skip_boundaries() {
+        let events = response_summary_events(
+            "tasks/doc.md",
+            "doc-hash",
+            "### Re: first\nbody\n<!-- agent:boundary:x -->\n### Re: second\nnext\n",
+        );
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].kind, MemoryEventKind::ResponseSummary);
+        assert_eq!(events[0].source_ref, "tasks/doc.md#exchange:1");
+        assert_eq!(
+            events[0].metadata.get("heading").map(String::as_str),
+            Some("Re: first")
+        );
+        assert_eq!(events[0].text, "Re: first\nbody");
+        assert_eq!(events[1].source_ref, "tasks/doc.md#exchange:2");
     }
 
     #[test]

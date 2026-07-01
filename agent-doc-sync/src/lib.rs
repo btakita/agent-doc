@@ -198,6 +198,35 @@ pub fn auto_started_panes_summary(auto_started_panes: &[(String, String)]) -> Op
     ))
 }
 
+pub fn sanitize_excerpt(text: &str) -> Option<String> {
+    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.is_empty() {
+        return None;
+    }
+    let mut excerpt = collapsed;
+    if excerpt.len() > 200 {
+        excerpt.truncate(200);
+        excerpt.push_str("...");
+    }
+    Some(excerpt)
+}
+
+pub fn last_visible_excerpt(capture: &str) -> Option<String> {
+    capture
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && !line.starts_with("Pane is dead"))
+        .and_then(sanitize_excerpt)
+}
+
+pub fn registry_relative_file_path(project_root: &Path, canonical_file: &Path) -> String {
+    canonical_file
+        .strip_prefix(project_root)
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_else(|_| canonical_file.to_string_lossy().to_string())
+}
+
 pub fn sync_prune_fingerprint(col_args: &[String], window: Option<&str>) -> String {
     serde_json::json!({
         "window": window.unwrap_or(""),
@@ -555,6 +584,44 @@ mod tests {
     fn auto_started_panes_summary_skips_single_pane() {
         let auto_started_panes = vec![("%84".to_string(), "tasks/file.md".to_string())];
         assert_eq!(auto_started_panes_summary(&auto_started_panes), None);
+    }
+
+    #[test]
+    fn sanitize_excerpt_collapses_whitespace_and_skips_empty() {
+        assert_eq!(sanitize_excerpt(" \n\t "), None);
+        assert_eq!(
+            sanitize_excerpt(" first\n\nsecond\tthird "),
+            Some("first second third".to_string())
+        );
+    }
+
+    #[test]
+    fn sanitize_excerpt_truncates_long_text() {
+        let input = "x".repeat(205);
+        let excerpt = sanitize_excerpt(&input).unwrap();
+        assert_eq!(excerpt.len(), 203);
+        assert!(excerpt.ends_with("..."));
+    }
+
+    #[test]
+    fn last_visible_excerpt_ignores_dead_pane_marker() {
+        let capture = "\nPane is dead\n  visible line  \nPane is dead";
+        assert_eq!(
+            last_visible_excerpt(capture),
+            Some("visible line".to_string())
+        );
+    }
+
+    #[test]
+    fn registry_relative_file_path_prefers_project_relative_path() {
+        assert_eq!(
+            registry_relative_file_path(Path::new("/repo"), Path::new("/repo/tasks/doc.md")),
+            "tasks/doc.md"
+        );
+        assert_eq!(
+            registry_relative_file_path(Path::new("/repo"), Path::new("/other/doc.md")),
+            "/other/doc.md"
+        );
     }
 
     #[test]

@@ -81,6 +81,27 @@ pub struct ControllerFreshnessStatus {
     pub guidance: String,
 }
 
+pub fn controller_process_freshness_label(process: &ControllerProcessFreshness) -> &'static str {
+    match process.matches_installed {
+        Some(true) => "fresh",
+        Some(false) => "stale",
+        None => "unknown",
+    }
+}
+
+pub fn controller_freshness_summary(freshness: Option<&ControllerFreshnessStatus>) -> String {
+    let Some(freshness) = freshness else {
+        return "unknown".to_string();
+    };
+    let controller = controller_process_freshness_label(&freshness.controller);
+    let supervisor = freshness
+        .route_owned_supervisor
+        .as_ref()
+        .map(controller_process_freshness_label)
+        .unwrap_or("n/a");
+    format!("controller:{controller},supervisor:{supervisor}")
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ControllerFreshnessFacts {
     pub installed_binary: Option<ControllerBinaryIdentity>,

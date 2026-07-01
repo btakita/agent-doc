@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 
 use crate::sessions;
 use agent_doc_controller::fleet::{AdminActor, AdminFinding};
-use agent_doc_controller::status::{ControllerFreshnessStatus, ControllerProcessFreshness};
+use agent_doc_controller::status::controller_freshness_summary;
 use agent_doc_sqlite::state_store::ActorState;
 use tmux_router::{Registry as SessionRegistry, Tmux};
 
@@ -63,27 +63,6 @@ fn resolve_root_for_target(
         return Ok(root);
     }
     resolve_root(None)
-}
-
-fn freshness_label(process: &ControllerProcessFreshness) -> &'static str {
-    match process.matches_installed {
-        Some(true) => "fresh",
-        Some(false) => "stale",
-        None => "unknown",
-    }
-}
-
-fn freshness_summary(freshness: Option<&ControllerFreshnessStatus>) -> String {
-    let Some(freshness) = freshness else {
-        return "unknown".to_string();
-    };
-    let controller = freshness_label(&freshness.controller);
-    let supervisor = freshness
-        .route_owned_supervisor
-        .as_ref()
-        .map(freshness_label)
-        .unwrap_or("n/a");
-    format!("controller:{controller},supervisor:{supervisor}")
 }
 
 fn print_receipt(
@@ -308,7 +287,7 @@ pub fn inspect(
                 .map(|control| control.state.as_str())
                 .unwrap_or("none"),
             inspection.projection_lag,
-            freshness_summary(inspection.freshness.as_ref())
+            controller_freshness_summary(inspection.freshness.as_ref())
         );
     } else {
         println!("No actor found for {}", inspection.target);

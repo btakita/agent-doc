@@ -200,8 +200,9 @@ use agent_doc_controller::dispatch::is_stash_window_name;
 use agent_doc_element::element;
 use agent_doc_sync::{
     AutoStartMode, WindowIndexNormalizationPlan, auto_started_panes_summary,
-    effective_sync_columns, is_file_rename, latency_budget_status, plan_window_index_normalization,
-    planned_stash_window_indices, rename_debounce_expired, safe_passive_prune_cleanup_throttle,
+    effective_sync_columns, is_file_rename, last_visible_excerpt, latency_budget_status,
+    plan_window_index_normalization, planned_stash_window_indices, registry_relative_file_path,
+    rename_debounce_expired, safe_passive_prune_cleanup_throttle, sanitize_excerpt,
     sync_latency_message, sync_prune_state_update, sync_repair_stamp_filename,
 };
 use agent_doc_tmux::{
